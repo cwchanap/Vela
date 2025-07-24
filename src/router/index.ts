@@ -6,6 +6,7 @@ import {
   createWebHistory,
 } from 'vue-router';
 import routes from './routes';
+import { useAuthStore } from '../stores/auth';
 
 /*
  * If not building with SSR mode, you can
@@ -34,18 +35,29 @@ export default defineRouter(function (/* { store, ssrContext } */) {
   });
 
   // Navigation guards for authentication
-  Router.beforeEach((to, from, next) => {
-    // This will be implemented when authentication service is ready
-    // For now, we'll just allow all routes
-    const requiresAuth = to.matched.some((record) => record.meta.requiresAuth);
+  Router.beforeEach(async (to, from, next) => {
+    const authStore = useAuthStore();
 
-    if (requiresAuth) {
-      // TODO: Check authentication status from store
-      // For now, allow all routes during development
-      console.log('Route requires authentication:', to.path);
+    // Initialize auth store if not already done
+    if (!authStore.isInitialized) {
+      await authStore.initialize();
     }
 
-    next();
+    const requiresAuth = to.matched.some((record) => record.meta.requiresAuth);
+    const requiresGuest = to.matched.some((record) => record.meta.requiresGuest);
+
+    if (requiresAuth && !authStore.isAuthenticated) {
+      // Redirect to login with return URL
+      next({
+        name: 'login',
+        query: { redirect: to.fullPath },
+      });
+    } else if (requiresGuest && authStore.isAuthenticated) {
+      // Redirect authenticated users away from guest-only pages
+      next({ name: 'dashboard' });
+    } else {
+      next();
+    }
   });
 
   return Router;

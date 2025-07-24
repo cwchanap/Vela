@@ -13,24 +13,40 @@ const routes: RouteRecordRaw[] = [
     ],
   },
 
-  // Authentication routes (will be implemented in future tasks)
-  // {
-  //   path: '/auth',
-  //   component: () => import('layouts/AuthLayout.vue'),
-  //   children: [
-  //     {
-  //       path: 'login',
-  //       name: 'login',
-  //       component: () => import('pages/auth/LoginPage.vue'),
-  //     },
-  //     {
-  //       path: 'profile',
-  //       name: 'profile',
-  //       component: () => import('pages/auth/ProfilePage.vue'),
-  //       meta: { requiresAuth: true },
-  //     },
-  //   ],
-  // },
+  // Authentication routes
+  {
+    path: '/auth',
+    children: [
+      {
+        path: 'login',
+        name: 'login',
+        component: () => import('pages/auth/LoginPage.vue'),
+        meta: { requiresGuest: true },
+      },
+      {
+        path: 'signup',
+        name: 'signup',
+        component: () => import('pages/auth/LoginPage.vue'),
+        meta: { requiresGuest: true },
+      },
+      {
+        path: 'profile',
+        name: 'profile',
+        component: () => import('pages/auth/ProfilePage.vue'),
+        meta: { requiresAuth: true },
+      },
+      {
+        path: 'callback',
+        name: 'auth-callback',
+        component: () => import('pages/auth/LoginPage.vue'),
+      },
+      {
+        path: 'reset-password',
+        name: 'reset-password',
+        component: () => import('pages/auth/LoginPage.vue'),
+      },
+    ],
+  },
 
   // Game routes with lazy loading (will be implemented in future tasks)
   // {
@@ -84,19 +100,19 @@ const routes: RouteRecordRaw[] = [
   //   ],
   // },
 
-  // Dashboard route (will be implemented in future tasks)
-  // {
-  //   path: '/dashboard',
-  //   name: 'dashboard',
-  //   component: () => import('layouts/MainLayout.vue'),
-  //   meta: { requiresAuth: true },
-  //   children: [
-  //     {
-  //       path: '',
-  //       component: () => import('pages/DashboardPage.vue'),
-  //     },
-  //   ],
-  // },
+  // Dashboard route
+  {
+    path: '/dashboard',
+    name: 'dashboard',
+    component: () => import('layouts/MainLayout.vue'),
+    meta: { requiresAuth: true },
+    children: [
+      {
+        path: '',
+        component: () => import('pages/IndexPage.vue'),
+      },
+    ],
+  },
 
   // Always leave this as last one,
   // but you can also remove it
