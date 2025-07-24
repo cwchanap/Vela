@@ -11,7 +11,7 @@ export default defineConfig((/* ctx */) => {
     // app boot file (/src/boot)
     // --> boot files are part of "main.js"
     // https://v2.quasar.dev/quasar-cli-vite/boot-files
-    boot: [],
+    boot: ['pinia'],
 
     // https://v2.quasar.dev/quasar-cli-vite/quasar-config-file#css
     css: ['app.scss'],
@@ -43,23 +43,49 @@ export default defineConfig((/* ctx */) => {
         // extendTsConfig (tsConfig) {}
       },
 
-      vueRouterMode: 'hash', // available values: 'hash', 'history'
+      vueRouterMode: 'history', // Use history mode for better SEO and UX
       // vueRouterBase,
-      // vueDevtools,
+      vueDevtools: true, // Enable Vue devtools in development
       // vueOptionsAPI: false,
 
       // rebuildCache: true, // rebuilds Vite/linter/etc cache on startup
 
-      // publicPath: '/',
-      // analyze: true,
-      // env: {},
+      publicPath: '/',
+      // analyze: true, // Enable bundle analyzer when needed
+      env: {
+        // Make environment variables available to the app
+        VITE_SUPABASE_URL: process.env.VITE_SUPABASE_URL,
+        VITE_SUPABASE_ANON_KEY: process.env.VITE_SUPABASE_ANON_KEY,
+        VITE_OPENAI_API_KEY: process.env.VITE_OPENAI_API_KEY,
+        VITE_APP_NAME: process.env.VITE_APP_NAME,
+        VITE_APP_VERSION: process.env.VITE_APP_VERSION,
+        VITE_DEV_MODE: process.env.VITE_DEV_MODE,
+      },
       // rawDefine: {}
       // ignorePublicFolder: true,
-      // minify: false,
+      minify: true, // Enable minification for production
       // polyfillModulePreload: true,
       // distDir
 
-      // extendViteConf (viteConf) {},
+      extendViteConf(viteConf) {
+        // Optimize build performance
+        viteConf.build = viteConf.build || {};
+        viteConf.build.rollupOptions = viteConf.build.rollupOptions || {};
+
+        // Configure chunk splitting for better caching
+        if (
+          viteConf.build.rollupOptions.output &&
+          !Array.isArray(viteConf.build.rollupOptions.output)
+        ) {
+          viteConf.build.rollupOptions.output.manualChunks = {
+            vendor: ['vue', 'vue-router', 'pinia'],
+            quasar: ['quasar'],
+          };
+        }
+
+        // Optimize chunk size
+        viteConf.build.chunkSizeWarningLimit = 1000;
+      },
       // viteVuePluginOptions: {},
 
       vitePlugins: [
@@ -98,12 +124,23 @@ export default defineConfig((/* ctx */) => {
       // directives: [],
 
       // Quasar plugins
-      plugins: [],
+      plugins: ['Notify', 'Loading', 'LoadingBar', 'Dialog', 'LocalStorage', 'SessionStorage'],
     },
 
     // animations: 'all', // --- includes all animations
     // https://v2.quasar.dev/options/animations
-    animations: [],
+    animations: [
+      'fadeIn',
+      'fadeOut',
+      'slideInUp',
+      'slideOutDown',
+      'slideInLeft',
+      'slideOutRight',
+      'bounceIn',
+      'bounceOut',
+      'zoomIn',
+      'zoomOut',
+    ],
 
     // https://v2.quasar.dev/quasar-cli-vite/quasar-config-file#sourcefiles
     // sourceFiles: {

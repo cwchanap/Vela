@@ -33,5 +33,20 @@ export default defineRouter(function (/* { store, ssrContext } */) {
     history: createHistory(process.env.VUE_ROUTER_BASE),
   });
 
+  // Navigation guards for authentication
+  Router.beforeEach((to, from, next) => {
+    // This will be implemented when authentication service is ready
+    // For now, we'll just allow all routes
+    const requiresAuth = to.matched.some((record) => record.meta.requiresAuth);
+
+    if (requiresAuth) {
+      // TODO: Check authentication status from store
+      // For now, allow all routes during development
+      console.log('Route requires authentication:', to.path);
+    }
+
+    next();
+  });
+
   return Router;
 });
