@@ -55,30 +55,29 @@ const routes: RouteRecordRaw[] = [
     ],
   },
 
-  // Game routes with lazy loading (will be implemented in future tasks)
-  // {
-  //   path: '/games',
-  //   name: 'games',
-  //   component: () => import('layouts/MainLayout.vue'),
-  //   meta: { requiresAuth: true },
-  //   children: [
-  //     {
-  //       path: 'vocabulary',
-  //       name: 'vocabulary-game',
-  //       component: () => import('pages/games/VocabularyGame.vue'),
-  //     },
-  //     {
-  //       path: 'sentence',
-  //       name: 'sentence-game',
-  //       component: () => import('pages/games/SentenceGame.vue'),
-  //     },
-  //     {
-  //       path: 'results',
-  //       name: 'game-results',
-  //       component: () => import('pages/games/GameResults.vue'),
-  //     },
-  //   ],
-  // },
+  // Game routes
+  {
+    path: '/games',
+    component: () => import('layouts/MainLayout.vue'),
+    meta: { requiresAuth: true },
+    children: [
+      {
+        path: 'vocabulary',
+        name: 'vocabulary-game',
+        component: () => import('pages/games/VocabularyGame.vue'),
+      },
+      // {
+      //   path: 'sentence',
+      //   name: 'sentence-game',
+      //   component: () => import('pages/games/SentenceGame.vue'),
+      // },
+      // {
+      //   path: 'results',
+      //   name: 'game-results',
+      //   component: () => import('pages/games/GameResults.vue'),
+      // },
+    ],
+  },
 
   // Chat route (will be implemented in future tasks)
   // {
