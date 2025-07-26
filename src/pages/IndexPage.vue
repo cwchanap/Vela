@@ -1,217 +1,277 @@
 <template>
-  <q-page class="dashboard-page">
-    <div class="container">
-      <!-- Welcome Header -->
-      <div class="welcome-header q-mb-lg">
-        <div class="text-h4 text-primary">Welcome back, {{ authStore.userName }}! 👋</div>
-        <div class="text-subtitle1 text-grey-7">
-          Ready to continue your Japanese learning journey?
+  <q-page class="modern-dashboard-page">
+    <div class="dashboard-container">
+      <!-- Modern Welcome Header with Animations -->
+      <div class="modern-welcome-header q-mb-xl">
+        <div class="welcome-content glass-card">
+          <div class="welcome-text">
+            <h1 class="welcome-title gradient-text">
+              Welcome back, {{ authStore.userName }}!
+              <span class="wave-emoji floating">👋</span>
+            </h1>
+            <p class="welcome-subtitle">Ready to continue your Japanese learning journey?</p>
+          </div>
+          <div class="welcome-decoration">
+            <div class="floating-circle circle-1"></div>
+            <div class="floating-circle circle-2"></div>
+            <div class="floating-circle circle-3"></div>
+          </div>
         </div>
       </div>
 
-      <!-- Quick Stats -->
-      <div class="row q-gutter-md q-mb-lg">
-        <div class="col-12 col-sm-6 col-md-3">
-          <q-card class="stat-card">
-            <q-card-section class="text-center">
-              <q-icon name="trending_up" size="2rem" color="positive" />
-              <div class="text-h5 q-mt-sm">{{ authStore.userLevel }}</div>
-              <div class="text-caption text-grey-6">Current Level</div>
-            </q-card-section>
-          </q-card>
+      <!-- Modern Stats Grid with Glassmorphism -->
+      <div class="stats-grid q-mb-xl">
+        <div class="stat-card modern-card glass-card" data-aos="fade-up" data-aos-delay="100">
+          <div class="stat-content">
+            <div class="stat-icon-wrapper level-gradient">
+              <q-icon name="trending_up" size="2.5rem" class="text-white" />
+            </div>
+            <div class="stat-info">
+              <div class="stat-number gradient-text">{{ authStore.userLevel }}</div>
+              <div class="stat-label">Current Level</div>
+            </div>
+          </div>
         </div>
 
-        <div class="col-12 col-sm-6 col-md-3">
-          <q-card class="stat-card">
-            <q-card-section class="text-center">
-              <q-icon name="stars" size="2rem" color="warning" />
-              <div class="text-h5 q-mt-sm">{{ authStore.userExperience }}</div>
-              <div class="text-caption text-grey-6">Total XP</div>
-            </q-card-section>
-          </q-card>
+        <div class="stat-card modern-card glass-card" data-aos="fade-up" data-aos-delay="200">
+          <div class="stat-content">
+            <div class="stat-icon-wrapper xp-gradient">
+              <q-icon name="stars" size="2.5rem" class="text-white" />
+            </div>
+            <div class="stat-info">
+              <div class="stat-number gradient-text">{{ authStore.userExperience }}</div>
+              <div class="stat-label">Total XP</div>
+            </div>
+          </div>
         </div>
 
-        <div class="col-12 col-sm-6 col-md-3">
-          <q-card class="stat-card">
-            <q-card-section class="text-center">
-              <q-icon name="local_fire_department" size="2rem" color="deep-orange" />
-              <div class="text-h5 q-mt-sm">{{ authStore.userStreak }}</div>
-              <div class="text-caption text-grey-6">Day Streak</div>
-            </q-card-section>
-          </q-card>
+        <div class="stat-card modern-card glass-card" data-aos="fade-up" data-aos-delay="300">
+          <div class="stat-content">
+            <div class="stat-icon-wrapper streak-gradient">
+              <q-icon name="local_fire_department" size="2.5rem" class="text-white" />
+            </div>
+            <div class="stat-info">
+              <div class="stat-number gradient-text">{{ authStore.userStreak }}</div>
+              <div class="stat-label">Day Streak</div>
+            </div>
+          </div>
         </div>
 
-        <div class="col-12 col-sm-6 col-md-3">
-          <q-card class="stat-card">
-            <q-card-section class="text-center">
-              <q-icon name="schedule" size="2rem" color="info" />
-              <div class="text-h5 q-mt-sm">{{ todayStudyTime }}</div>
-              <div class="text-caption text-grey-6">Minutes Today</div>
-            </q-card-section>
-          </q-card>
+        <div class="stat-card modern-card glass-card" data-aos="fade-up" data-aos-delay="400">
+          <div class="stat-content">
+            <div class="stat-icon-wrapper time-gradient">
+              <q-icon name="schedule" size="2.5rem" class="text-white" />
+            </div>
+            <div class="stat-info">
+              <div class="stat-number gradient-text">{{ todayStudyTime }}</div>
+              <div class="stat-label">Minutes Today</div>
+            </div>
+          </div>
         </div>
       </div>
 
-      <!-- Quick Actions -->
-      <div class="row q-gutter-lg">
-        <div class="col-12 col-md-8">
-          <q-card>
-            <q-card-section>
-              <div class="text-h6 q-mb-md">Quick Start</div>
-              <div class="text-subtitle2 text-grey-6 q-mb-md">
-                Choose an activity to continue learning
-              </div>
+      <!-- Modern Quick Actions Section -->
+      <div class="main-content-grid">
+        <div class="quick-start-section">
+          <div class="modern-card glass-card section-card">
+            <div class="section-header q-mb-lg">
+              <h2 class="section-title gradient-text">Quick Start</h2>
+              <p class="section-subtitle">
+                Choose an activity to continue your Japanese learning journey
+              </p>
+            </div>
 
-              <div class="row q-gutter-md">
-                <div class="col-12 col-sm-6">
-                  <q-card
-                    class="action-card cursor-pointer"
-                    @click="handleComingSoon('Vocabulary Game')"
-                  >
-                    <q-card-section class="text-center">
-                      <q-icon name="quiz" size="3rem" color="primary" />
-                      <div class="text-h6 q-mt-sm">Vocabulary Game</div>
-                      <div class="text-caption text-grey-6">
-                        Learn new Japanese words with interactive flashcards
-                      </div>
-                      <q-chip
-                        size="sm"
-                        color="grey-4"
-                        text-color="grey-7"
-                        label="Coming Soon"
-                        class="q-mt-sm"
-                      />
-                    </q-card-section>
-                  </q-card>
-                </div>
-
-                <div class="col-12 col-sm-6">
-                  <q-card
-                    class="action-card cursor-pointer"
-                    @click="handleComingSoon('Sentence Game')"
-                  >
-                    <q-card-section class="text-center">
-                      <q-icon name="reorder" size="3rem" color="secondary" />
-                      <div class="text-h6 q-mt-sm">Sentence Game</div>
-                      <div class="text-caption text-grey-6">
-                        Practice grammar with sentence building exercises
-                      </div>
-                      <q-chip
-                        size="sm"
-                        color="grey-4"
-                        text-color="grey-7"
-                        label="Coming Soon"
-                        class="q-mt-sm"
-                      />
-                    </q-card-section>
-                  </q-card>
-                </div>
-
-                <div class="col-12 col-sm-6">
-                  <q-card class="action-card cursor-pointer" @click="handleComingSoon('AI Tutor')">
-                    <q-card-section class="text-center">
-                      <q-icon name="psychology" size="3rem" color="positive" />
-                      <div class="text-h6 q-mt-sm">AI Tutor</div>
-                      <div class="text-caption text-grey-6">
-                        Get personalized help from your AI learning assistant
-                      </div>
-                      <q-chip
-                        size="sm"
-                        color="grey-4"
-                        text-color="grey-7"
-                        label="Coming Soon"
-                        class="q-mt-sm"
-                      />
-                    </q-card-section>
-                  </q-card>
-                </div>
-
-                <div class="col-12 col-sm-6">
-                  <q-card
-                    class="action-card cursor-pointer"
-                    @click="handleComingSoon('Drawing Practice')"
-                  >
-                    <q-card-section class="text-center">
-                      <q-icon name="draw" size="3rem" color="warning" />
-                      <div class="text-h6 q-mt-sm">Drawing Practice</div>
-                      <div class="text-caption text-grey-6">
-                        Practice writing Japanese characters with stroke order
-                      </div>
-                      <q-chip
-                        size="sm"
-                        color="grey-4"
-                        text-color="grey-7"
-                        label="Coming Soon"
-                        class="q-mt-sm"
-                      />
-                    </q-card-section>
-                  </q-card>
+            <div class="action-cards-grid">
+              <div
+                class="action-card modern-card glass-card"
+                @click="handleComingSoon('Vocabulary Game')"
+                data-aos="zoom-in"
+                data-aos-delay="100"
+              >
+                <div class="action-content">
+                  <div class="action-icon-wrapper vocab-gradient">
+                    <q-icon name="quiz" size="3rem" class="text-white" />
+                  </div>
+                  <div class="action-info">
+                    <h3 class="action-title">Vocabulary Game</h3>
+                    <p class="action-description">
+                      Learn new Japanese words with interactive flashcards
+                    </p>
+                    <div class="coming-soon-badge glass-card">
+                      <q-icon name="schedule" size="sm" class="q-mr-xs" />
+                      Coming Soon
+                    </div>
+                  </div>
                 </div>
               </div>
-            </q-card-section>
-          </q-card>
+
+              <div
+                class="action-card modern-card glass-card"
+                @click="handleComingSoon('Sentence Game')"
+                data-aos="zoom-in"
+                data-aos-delay="200"
+              >
+                <div class="action-content">
+                  <div class="action-icon-wrapper grammar-gradient">
+                    <q-icon name="reorder" size="3rem" class="text-white" />
+                  </div>
+                  <div class="action-info">
+                    <h3 class="action-title">Sentence Game</h3>
+                    <p class="action-description">
+                      Practice grammar with sentence building exercises
+                    </p>
+                    <div class="coming-soon-badge glass-card">
+                      <q-icon name="schedule" size="sm" class="q-mr-xs" />
+                      Coming Soon
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div
+                class="action-card modern-card glass-card"
+                @click="handleComingSoon('AI Tutor')"
+                data-aos="zoom-in"
+                data-aos-delay="300"
+              >
+                <div class="action-content">
+                  <div class="action-icon-wrapper ai-gradient">
+                    <q-icon name="psychology" size="3rem" class="text-white" />
+                  </div>
+                  <div class="action-info">
+                    <h3 class="action-title">AI Tutor</h3>
+                    <p class="action-description">
+                      Get personalized help from your AI learning assistant
+                    </p>
+                    <div class="coming-soon-badge glass-card">
+                      <q-icon name="schedule" size="sm" class="q-mr-xs" />
+                      Coming Soon
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div
+                class="action-card modern-card glass-card"
+                @click="handleComingSoon('Drawing Practice')"
+                data-aos="zoom-in"
+                data-aos-delay="400"
+              >
+                <div class="action-content">
+                  <div class="action-icon-wrapper writing-gradient">
+                    <q-icon name="draw" size="3rem" class="text-white" />
+                  </div>
+                  <div class="action-info">
+                    <h3 class="action-title">Writing Practice</h3>
+                    <p class="action-description">
+                      Practice writing Japanese characters with stroke order
+                    </p>
+                    <div class="coming-soon-badge glass-card">
+                      <q-icon name="schedule" size="sm" class="q-mr-xs" />
+                      Coming Soon
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
 
-        <div class="col-12 col-md-4">
-          <q-card>
-            <q-card-section>
-              <div class="text-h6 q-mb-md">Daily Goal</div>
+        <!-- Modern Sidebar -->
+        <div class="sidebar-section">
+          <!-- Daily Goal Card -->
+          <div
+            class="modern-card glass-card section-card"
+            data-aos="fade-left"
+            data-aos-delay="200"
+          >
+            <div class="section-header q-mb-lg">
+              <h3 class="section-title gradient-text">Daily Goal</h3>
+              <p class="section-subtitle">Track your learning progress</p>
+            </div>
 
-              <div class="text-center q-mb-md">
+            <div class="progress-circle-container">
+              <div class="progress-wrapper">
                 <q-circular-progress
                   :value="dailyProgress"
-                  size="120px"
-                  :thickness="0.15"
+                  size="140px"
+                  :thickness="0.12"
                   color="primary"
-                  track-color="grey-3"
-                  class="q-ma-md"
+                  track-color="rgba(255,255,255,0.2)"
+                  class="modern-progress"
+                  show-value
                 >
-                  <div class="text-h6">{{ Math.round(dailyProgress) }}%</div>
+                  <div class="progress-text">
+                    <div class="progress-percentage gradient-text">
+                      {{ Math.round(dailyProgress) }}%
+                    </div>
+                    <div class="progress-label">Complete</div>
+                  </div>
                 </q-circular-progress>
               </div>
 
-              <div class="text-center">
-                <div class="text-subtitle2">{{ todayStudyTime }} / {{ dailyGoal }} minutes</div>
-                <div class="text-caption text-grey-6">
-                  {{ dailyGoal - todayStudyTime }} minutes to go!
+              <div class="progress-stats q-mt-lg">
+                <div class="stat-row">
+                  <span class="stat-label">Today:</span>
+                  <span class="stat-value">{{ todayStudyTime }} min</span>
+                </div>
+                <div class="stat-row">
+                  <span class="stat-label">Goal:</span>
+                  <span class="stat-value">{{ dailyGoal }} min</span>
+                </div>
+                <div class="stat-row">
+                  <span class="stat-label">Remaining:</span>
+                  <span class="stat-value">{{ Math.max(0, dailyGoal - todayStudyTime) }} min</span>
                 </div>
               </div>
 
               <q-btn
-                color="primary"
+                unelevated
+                no-caps
                 label="Start Learning"
-                class="full-width q-mt-md"
+                class="modern-btn start-btn q-mt-lg"
                 @click="handleComingSoon('Learning Session')"
-              />
-            </q-card-section>
-          </q-card>
+              >
+                <q-icon name="play_arrow" size="sm" class="q-ml-xs" />
+              </q-btn>
+            </div>
+          </div>
 
-          <!-- Recent Achievements -->
-          <q-card class="q-mt-md">
-            <q-card-section>
-              <div class="text-h6 q-mb-md">Recent Achievements</div>
+          <!-- Modern Achievements Card -->
+          <div
+            class="modern-card glass-card section-card q-mt-lg"
+            data-aos="fade-left"
+            data-aos-delay="300"
+          >
+            <div class="section-header q-mb-lg">
+              <h3 class="section-title gradient-text">Achievements</h3>
+              <p class="section-subtitle">Your learning milestones</p>
+            </div>
 
-              <div v-if="achievements.length === 0" class="text-center q-py-md">
-                <q-icon name="emoji_events" size="2rem" color="grey-5" />
-                <div class="text-subtitle2 text-grey-6 q-mt-sm">No achievements yet</div>
-                <div class="text-caption text-grey-5">
-                  Start learning to earn your first achievement!
+            <div v-if="achievements.length === 0" class="empty-achievements">
+              <div class="empty-icon-wrapper">
+                <q-icon name="emoji_events" size="3rem" class="empty-icon floating" />
+              </div>
+              <h4 class="empty-title">No achievements yet</h4>
+              <p class="empty-subtitle">Start learning to earn your first achievement!</p>
+            </div>
+
+            <div v-else class="achievements-list">
+              <div
+                v-for="achievement in achievements"
+                :key="achievement.id"
+                class="achievement-item glass-card"
+              >
+                <div class="achievement-icon-wrapper">
+                  <q-icon :name="achievement.icon" size="lg" :class="`text-${achievement.color}`" />
+                </div>
+                <div class="achievement-content">
+                  <div class="achievement-title">{{ achievement.title }}</div>
+                  <div class="achievement-description">{{ achievement.description }}</div>
                 </div>
               </div>
-
-              <q-list v-else separator>
-                <q-item v-for="achievement in achievements" :key="achievement.id">
-                  <q-item-section avatar>
-                    <q-icon :name="achievement.icon" :color="achievement.color" />
-                  </q-item-section>
-                  <q-item-section>
-                    <q-item-label>{{ achievement.title }}</q-item-label>
-                    <q-item-label caption>{{ achievement.description }}</q-item-label>
-                  </q-item-section>
-                </q-item>
-              </q-list>
-            </q-card-section>
-          </q-card>
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -281,51 +341,455 @@ onMounted(async () => {
 </script>
 
 <style scoped>
-.dashboard-page {
-  padding: 1rem;
-  max-width: 1200px;
+/* Modern Dashboard Styles */
+.modern-dashboard-page {
+  min-height: 100vh;
+  padding: 2rem;
+  background: transparent;
+}
+
+.dashboard-container {
+  max-width: 1400px;
   margin: 0 auto;
 }
 
-.container {
-  width: 100%;
+/* Modern Welcome Header */
+.modern-welcome-header {
+  position: relative;
+  margin-bottom: 3rem;
 }
 
-.welcome-header {
+.welcome-content {
+  position: relative;
+  padding: 3rem 2rem;
   text-align: center;
-  padding: 2rem 0;
+  overflow: hidden;
+  border: 1px solid var(--glass-border);
+}
+
+.welcome-title {
+  font-size: 3rem;
+  font-weight: 800;
+  margin: 0 0 1rem 0;
+  letter-spacing: -1px;
+}
+
+.wave-emoji {
+  display: inline-block;
+  animation-delay: 1s;
+}
+
+.welcome-subtitle {
+  font-size: 1.2rem;
+  color: rgba(255, 255, 255, 0.8);
+  margin: 0;
+  font-weight: 300;
+}
+
+/* Floating decorative circles */
+.welcome-decoration {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.floating-circle {
+  position: absolute;
+  border-radius: 50%;
+  background: var(--gradient-warm);
+  opacity: 0.1;
+  animation: float 6s ease-in-out infinite;
+}
+
+.circle-1 {
+  width: 80px;
+  height: 80px;
+  top: 20%;
+  left: 10%;
+  animation-delay: 0s;
+}
+
+.circle-2 {
+  width: 120px;
+  height: 120px;
+  top: 60%;
+  right: 15%;
+  animation-delay: 2s;
+}
+
+.circle-3 {
+  width: 60px;
+  height: 60px;
+  bottom: 20%;
+  left: 80%;
+  animation-delay: 4s;
+}
+
+/* Stats Grid */
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  gap: 1.5rem;
+  margin-bottom: 3rem;
 }
 
 .stat-card {
-  transition: transform 0.2s ease;
+  border: 1px solid var(--glass-border);
+  cursor: default;
 }
 
-.stat-card:hover {
-  transform: translateY(-2px);
+.stat-content {
+  padding: 1.5rem;
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.stat-icon-wrapper {
+  width: 80px;
+  height: 80px;
+  border-radius: var(--border-radius-md);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: var(--shadow-soft);
+}
+
+.level-gradient {
+  background: var(--gradient-success);
+}
+.xp-gradient {
+  background: var(--gradient-warm);
+}
+.streak-gradient {
+  background: linear-gradient(135deg, #ff6b6b 0%, #ffa500 100%);
+}
+.time-gradient {
+  background: var(--gradient-primary);
+}
+
+.stat-info {
+  flex: 1;
+}
+
+.stat-number {
+  font-size: 2.5rem;
+  font-weight: 800;
+  line-height: 1;
+  margin-bottom: 0.25rem;
+}
+
+.stat-label {
+  font-size: 0.9rem;
+  color: rgba(255, 255, 255, 0.7);
+  font-weight: 500;
+}
+
+/* Main Content Grid */
+.main-content-grid {
+  display: grid;
+  grid-template-columns: 1fr 350px;
+  gap: 2rem;
+  align-items: start;
+}
+
+/* Section Cards */
+.section-card {
+  padding: 2rem;
+  border: 1px solid var(--glass-border);
+}
+
+.section-header {
+  text-align: center;
+}
+
+.section-title {
+  font-size: 1.8rem;
+  font-weight: 700;
+  margin: 0 0 0.5rem 0;
+}
+
+.section-subtitle {
+  color: rgba(255, 255, 255, 0.7);
+  margin: 0;
+  font-size: 1rem;
+}
+
+/* Action Cards Grid */
+.action-cards-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 1.5rem;
 }
 
 .action-card {
-  transition: all 0.2s ease;
-  border: 2px solid transparent;
+  border: 1px solid var(--glass-border);
+  cursor: pointer;
+  position: relative;
+  overflow: hidden;
 }
 
-.action-card:hover {
-  transform: translateY(-2px);
-  border-color: var(--q-primary);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+.action-card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.1), transparent);
+  transition: left 0.5s;
 }
 
-@media (max-width: 600px) {
-  .dashboard-page {
-    padding: 0.5rem;
+.action-card:hover::before {
+  left: 100%;
+}
+
+.action-content {
+  padding: 2rem;
+  text-align: center;
+}
+
+.action-icon-wrapper {
+  width: 80px;
+  height: 80px;
+  margin: 0 auto 1.5rem;
+  border-radius: var(--border-radius-md);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: var(--shadow-medium);
+}
+
+.vocab-gradient {
+  background: var(--gradient-primary);
+}
+.grammar-gradient {
+  background: var(--gradient-secondary);
+}
+.ai-gradient {
+  background: var(--gradient-success);
+}
+.writing-gradient {
+  background: var(--gradient-warm);
+}
+
+.action-title {
+  font-size: 1.3rem;
+  font-weight: 600;
+  margin: 0 0 0.75rem 0;
+  color: white;
+}
+
+.action-description {
+  color: rgba(255, 255, 255, 0.8);
+  font-size: 0.9rem;
+  line-height: 1.5;
+  margin: 0 0 1.5rem 0;
+}
+
+.coming-soon-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.5rem 1rem;
+  border-radius: var(--border-radius-xl);
+  font-size: 0.8rem;
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.8);
+  border: 1px solid var(--glass-border);
+}
+
+/* Sidebar Styles */
+.sidebar-section {
+  display: flex;
+  flex-direction: column;
+}
+
+/* Progress Circle */
+.progress-circle-container {
+  text-align: center;
+}
+
+.progress-wrapper {
+  position: relative;
+  display: inline-block;
+}
+
+.progress-text {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+}
+
+.progress-percentage {
+  font-size: 1.5rem;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.progress-label {
+  font-size: 0.8rem;
+  color: rgba(255, 255, 255, 0.7);
+  margin-top: 0.25rem;
+}
+
+.progress-stats {
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: var(--border-radius-sm);
+  padding: 1rem;
+  border: 1px solid var(--glass-border);
+}
+
+.stat-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.5rem;
+}
+
+.stat-row:last-child {
+  margin-bottom: 0;
+}
+
+.stat-label {
+  color: rgba(255, 255, 255, 0.7);
+  font-size: 0.9rem;
+}
+
+.stat-value {
+  font-weight: 600;
+  color: white;
+}
+
+.start-btn {
+  width: 100%;
+  background: var(--gradient-primary);
+  color: white;
+  font-weight: 600;
+  padding: 0.75rem 1.5rem;
+  border-radius: var(--border-radius-md);
+}
+
+/* Empty Achievements */
+.empty-achievements {
+  text-align: center;
+  padding: 2rem 1rem;
+}
+
+.empty-icon-wrapper {
+  margin-bottom: 1rem;
+}
+
+.empty-icon {
+  color: rgba(255, 255, 255, 0.3);
+}
+
+.empty-title {
+  color: white;
+  font-size: 1.1rem;
+  font-weight: 600;
+  margin: 0 0 0.5rem 0;
+}
+
+.empty-subtitle {
+  color: rgba(255, 255, 255, 0.6);
+  font-size: 0.9rem;
+  margin: 0;
+}
+
+/* Achievement Items */
+.achievements-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.achievement-item {
+  display: flex;
+  align-items: center;
+  padding: 1rem;
+  border: 1px solid var(--glass-border);
+  border-radius: var(--border-radius-sm);
+}
+
+.achievement-icon-wrapper {
+  margin-right: 1rem;
+}
+
+.achievement-content {
+  flex: 1;
+}
+
+.achievement-title {
+  font-weight: 600;
+  color: white;
+  margin-bottom: 0.25rem;
+}
+
+.achievement-description {
+  font-size: 0.8rem;
+  color: rgba(255, 255, 255, 0.7);
+}
+
+/* Responsive Design */
+@media (max-width: 1200px) {
+  .main-content-grid {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto auto;
   }
 
-  .welcome-header {
-    padding: 1rem 0;
+  .sidebar-section {
+    grid-row: 1;
+  }
+}
+
+@media (max-width: 768px) {
+  .modern-dashboard-page {
+    padding: 1rem;
   }
 
-  .text-h4 {
+  .welcome-content {
+    padding: 2rem 1rem;
+  }
+
+  .welcome-title {
+    font-size: 2rem;
+  }
+
+  .stats-grid {
+    grid-template-columns: 1fr;
+    gap: 1rem;
+  }
+
+  .action-cards-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .section-card {
+    padding: 1.5rem;
+  }
+}
+
+@media (max-width: 480px) {
+  .welcome-title {
     font-size: 1.5rem;
+  }
+
+  .stat-content {
+    padding: 1rem;
+  }
+
+  .stat-icon-wrapper {
+    width: 60px;
+    height: 60px;
+  }
+
+  .action-content {
+    padding: 1.5rem;
   }
 }
 </style>

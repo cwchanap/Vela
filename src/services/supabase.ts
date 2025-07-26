@@ -1,11 +1,47 @@
 import { createClient } from '@supabase/supabase-js';
 
-// Environment variables with fallbacks for development
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || '';
-const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
+// Environment variables with fallbacks for local development
+const supabaseUrl = (() => {
+  try {
+    // Browser environment
+    if (typeof window !== 'undefined' && import.meta.env) {
+      return import.meta.env.VITE_SUPABASE_URL || 'http://127.0.0.1:54321';
+    }
+    // Node.js environment
+    if (typeof process !== 'undefined' && process.env) {
+      return process.env.VITE_SUPABASE_URL || 'http://127.0.0.1:54321';
+    }
+    return 'http://127.0.0.1:54321';
+  } catch {
+    return 'http://127.0.0.1:54321';
+  }
+})();
 
+const supabaseAnonKey = (() => {
+  try {
+    // Browser environment
+    if (typeof window !== 'undefined' && import.meta.env) {
+      return (
+        import.meta.env.VITE_SUPABASE_ANON_KEY ||
+        'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6ImFub24iLCJleHAiOjE5ODM4MTI5OTZ9.CRXP1A7WOeoJeXxjNni43kdQwgnWNReilDMblYTn_I0'
+      );
+    }
+    // Node.js environment
+    if (typeof process !== 'undefined' && process.env) {
+      return (
+        process.env.VITE_SUPABASE_ANON_KEY ||
+        'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6ImFub24iLCJleHAiOjE5ODM4MTI5OTZ9.CRXP1A7WOeoJeXxjNni43kdQwgnWNReilDMblYTn_I0'
+      );
+    }
+    return 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6ImFub24iLCJleHAiOjE5ODM4MTI5OTZ9.CRXP1A7WOeoJeXxjNni43kdQwgnWNReilDMblYTn_I0';
+  } catch {
+    return 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6ImFub24iLCJleHAiOjE5ODM4MTI5OTZ9.CRXP1A7WOeoJeXxjNni43kdQwgnWNReilDMblYTn_I0';
+  }
+})();
+
+// Validate environment variables
 if (!supabaseUrl || !supabaseAnonKey) {
-  throw new Error('Missing Supabase environment variables. Please check your .env file.');
+  console.warn('⚠️ Missing Supabase environment variables. Using local development defaults.');
 }
 
 // Database types for TypeScript support

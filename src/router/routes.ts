@@ -13,9 +13,25 @@ const routes: RouteRecordRaw[] = [
     ],
   },
 
+  // Dashboard route
+  {
+    path: '/dashboard',
+    name: 'dashboard',
+    component: () => import('layouts/MainLayout.vue'),
+    meta: { requiresAuth: true },
+    children: [
+      {
+        path: '',
+        name: 'dashboard-home',
+        component: () => import('pages/IndexPage.vue'),
+      },
+    ],
+  },
+
   // Authentication routes
   {
     path: '/auth',
+    component: () => import('layouts/MainLayout.vue'),
     children: [
       {
         path: 'login',
@@ -51,6 +67,7 @@ const routes: RouteRecordRaw[] = [
   // Game routes with lazy loading (will be implemented in future tasks)
   // {
   //   path: '/games',
+  //   name: 'games',
   //   component: () => import('layouts/MainLayout.vue'),
   //   meta: { requiresAuth: true },
   //   children: [

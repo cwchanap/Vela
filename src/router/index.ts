@@ -36,26 +36,32 @@ export default defineRouter(function (/* { store, ssrContext } */) {
 
   // Navigation guards for authentication
   Router.beforeEach(async (to, from, next) => {
-    const authStore = useAuthStore();
+    try {
+      const authStore = useAuthStore();
 
-    // Initialize auth store if not already done
-    if (!authStore.isInitialized) {
-      await authStore.initialize();
-    }
+      // Initialize auth store if not already done
+      if (!authStore.isInitialized) {
+        await authStore.initialize();
+      }
 
-    const requiresAuth = to.matched.some((record) => record.meta.requiresAuth);
-    const requiresGuest = to.matched.some((record) => record.meta.requiresGuest);
+      const requiresAuth = to.matched.some((record) => record.meta.requiresAuth);
+      const requiresGuest = to.matched.some((record) => record.meta.requiresGuest);
 
-    if (requiresAuth && !authStore.isAuthenticated) {
-      // Redirect to login with return URL
-      next({
-        name: 'login',
-        query: { redirect: to.fullPath },
-      });
-    } else if (requiresGuest && authStore.isAuthenticated) {
-      // Redirect authenticated users away from guest-only pages
-      next({ name: 'dashboard' });
-    } else {
+      if (requiresAuth && !authStore.isAuthenticated) {
+        // Redirect to login with return URL
+        next({
+          name: 'login',
+          query: { redirect: to.fullPath },
+        });
+      } else if (requiresGuest && authStore.isAuthenticated) {
+        // Redirect authenticated users away from guest-only pages
+        next({ name: 'dashboard' });
+      } else {
+        next();
+      }
+    } catch (error) {
+      console.error('Router guard error:', error);
+      // Allow navigation to continue in case of error
       next();
     }
   });

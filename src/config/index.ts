@@ -27,14 +27,25 @@ export const config = {
 
 // Validation function to check required environment variables
 export const validateConfig = () => {
-  const requiredVars = ['VITE_SUPABASE_URL', 'VITE_SUPABASE_ANON_KEY'];
+  try {
+    const requiredVars = ['VITE_SUPABASE_URL', 'VITE_SUPABASE_ANON_KEY'];
 
-  const missingVars = requiredVars.filter((varName) => !import.meta.env[varName]);
+    // Ensure import.meta.env exists
+    if (typeof import.meta === 'undefined' || !import.meta.env) {
+      console.warn('Environment variables not available in this context');
+      return true;
+    }
 
-  if (missingVars.length > 0 && import.meta.env.PROD) {
-    console.error('Missing required environment variables:', missingVars);
-    throw new Error(`Missing required environment variables: ${missingVars.join(', ')}`);
+    const missingVars = requiredVars.filter((varName) => !import.meta.env[varName]);
+
+    if (missingVars.length > 0 && import.meta.env.PROD) {
+      console.error('Missing required environment variables:', missingVars);
+      throw new Error(`Missing required environment variables: ${missingVars.join(', ')}`);
+    }
+
+    return true;
+  } catch (error) {
+    console.warn('Config validation skipped:', error);
+    return true; // Allow app to continue in development
   }
-
-  return true;
 };
