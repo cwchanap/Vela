@@ -1,4 +1,17 @@
--- Seed data for Vela Japanese Learning App
+-- Seed data for the vocabulary table
+
+INSERT INTO vocabulary (japanese_word, hiragana, romaji, english_translation, difficulty_level, category, example_sentence_jp, example_sentence_en)
+VALUES
+  ('猫', 'ねこ', 'neko', 'cat', 1, 'animals', '猫はかわいいです。', 'Cats are cute.'),
+  ('犬', 'いぬ', 'inu', 'dog', 1, 'animals', '犬は忠実です。', 'Dogs are loyal.'),
+  ('こんにちは', 'こんにちは', 'konnichiwa', 'hello', 1, 'greetings', 'こんにちは、田中さん。', 'Hello, Mr. Tanaka.'),
+  ('ありがとう', 'ありがとう', 'arigatou', 'thank you', 1, 'phrases', 'ありがとう、助かります。', 'Thank you, that helps.'),
+  ('日本', 'にほん', 'nihon', 'Japan', 2, 'places', '私は日本から来ました。', 'I am from Japan.'),
+  ('食べる', 'たべる', 'taberu', 'to eat', 2, 'verbs', '寿司を食べます。', 'I eat sushi.'),
+  ('飲む', 'のむ', 'nomu', 'to drink', 2, 'verbs', 'お茶を飲みます。', 'I drink tea.'),
+  ('学生', 'がくせい', 'gakusei', 'student', 2, 'people', '彼は学生です。', 'He is a student.'),
+  ('先生', 'せんせい', 'sensei', 'teacher', 2, 'people', '彼女は先生です。', 'She is a teacher.'),
+  ('本', 'ほん', 'hon', 'book', 1, 'objects', '本を読みます。', 'I read a book.');
 -- This file initializes the database with basic schema and sample data
 
 -- Enable UUID extension
