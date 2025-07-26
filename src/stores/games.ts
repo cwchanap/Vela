@@ -1,5 +1,11 @@
 import { defineStore } from 'pinia';
-import type { Vocabulary } from 'src/types/database';
+import type { Vocabulary, Sentence } from 'src/types/database';
+
+export interface SentenceQuestion {
+  sentence: Sentence;
+  scrambled: string[];
+  correctAnswer: string;
+}
 
 export interface Question {
   word: Vocabulary;
@@ -12,6 +18,9 @@ export interface GameState {
   questions: Question[];
   currentQuestionIndex: number;
   gameActive: boolean;
+  sentenceQuestions: SentenceQuestion[];
+  currentSentenceQuestionIndex: number;
+  sentenceGameActive: boolean;
 }
 
 export const useGameStore = defineStore('game', {
@@ -20,8 +29,29 @@ export const useGameStore = defineStore('game', {
     questions: [],
     currentQuestionIndex: 0,
     gameActive: false,
+    sentenceQuestions: [],
+    currentSentenceQuestionIndex: 0,
+    sentenceGameActive: false,
   }),
   actions: {
+    startSentenceGame(questions: SentenceQuestion[]) {
+      this.score = 0;
+      this.sentenceQuestions = questions;
+      this.currentSentenceQuestionIndex = 0;
+      this.sentenceGameActive = true;
+    },
+    answerSentenceQuestion(isCorrect: boolean) {
+      if (isCorrect) {
+        this.score++;
+      }
+      this.currentSentenceQuestionIndex++;
+      if (this.currentSentenceQuestionIndex >= this.sentenceQuestions.length) {
+        this.endSentenceGame();
+      }
+    },
+    endSentenceGame() {
+      this.sentenceGameActive = false;
+    },
     startGame(questions: Question[]) {
       this.score = 0;
       this.questions = questions;

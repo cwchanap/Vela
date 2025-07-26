@@ -1,3 +1,12 @@
+export interface Sentence {
+  id: string;
+  japanese_sentence: string;
+  english_translation: string;
+  difficulty_level?: number;
+  category?: string;
+  created_at: string;
+}
+
 export interface Vocabulary {
   id: string;
   japanese_word: string;

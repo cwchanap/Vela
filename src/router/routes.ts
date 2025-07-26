@@ -66,11 +66,11 @@ const routes: RouteRecordRaw[] = [
         name: 'vocabulary-game',
         component: () => import('pages/games/VocabularyGame.vue'),
       },
-      // {
-      //   path: 'sentence',
-      //   name: 'sentence-game',
-      //   component: () => import('pages/games/SentenceGame.vue'),
-      // },
+      {
+        path: 'sentence',
+        name: 'sentence-game',
+        component: () => import('pages/games/SentenceGame.vue'),
+      },
       // {
       //   path: 'results',
       //   name: 'game-results',

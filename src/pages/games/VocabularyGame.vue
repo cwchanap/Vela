@@ -5,12 +5,9 @@
       <p>Your score: {{ gameStore.score }}</p>
       <q-btn @click="startGame" label="Play Again" color="primary" />
     </div>
-    <div v-else-if="gameStore.gameActive">
+    <div v-else-if="gameStore.gameActive && currentQuestion">
       <game-timer />
-      <vocabulary-card
-        :question="gameStore.questions[gameStore.currentQuestionIndex]"
-        @answer="handleAnswer"
-      />
+      <vocabulary-card :question="currentQuestion" @answer="handleAnswer" />
       <score-display :score="gameStore.score" />
     </div>
     <div v-else>
@@ -20,13 +17,18 @@
 </template>
 
 <script setup lang="ts">
-import { useGameStore } from 'src/stores/games.ts';
-import { gameService } from 'src/services/gameService.ts';
+import { computed } from 'vue';
+import { useGameStore } from 'src/stores/games';
+import { gameService } from '../../services/gameService';
 import VocabularyCard from 'src/components/games/VocabularyCard.vue';
 import ScoreDisplay from 'src/components/games/ScoreDisplay.vue';
 import GameTimer from 'src/components/games/GameTimer.vue';
 
 const gameStore = useGameStore();
+
+const currentQuestion = computed(() => {
+  return gameStore.questions[gameStore.currentQuestionIndex];
+});
 
 async function startGame() {
   const questions = await gameService.getVocabularyQuestions();
@@ -34,10 +36,9 @@ async function startGame() {
 }
 
 function handleAnswer(selectedAnswer: string) {
-  const currentQuestion = gameStore.questions[gameStore.currentQuestionIndex];
-  if (!currentQuestion) return;
+  if (!currentQuestion.value) return;
 
-  const isCorrect = selectedAnswer === currentQuestion.correctAnswer;
+  const isCorrect = selectedAnswer === currentQuestion.value.correctAnswer;
   gameStore.answerQuestion(isCorrect);
 }
 </script>

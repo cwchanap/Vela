@@ -1,6 +1,42 @@
 import { supabase } from './supabase';
-import type { Question } from 'src/stores/games';
-import type { Vocabulary } from 'src/types/database';
+import type { Question, SentenceQuestion } from 'src/stores/games';
+import type { Vocabulary, Sentence } from 'src/types/database';
+
+function shuffle<T>(array: T[]): T[] {
+  let currentIndex = array.length,
+    randomIndex;
+
+  while (currentIndex !== 0) {
+    randomIndex = Math.floor(Math.random() * currentIndex);
+    currentIndex--;
+    [array[currentIndex], array[randomIndex]] = [array[randomIndex]!, array[currentIndex]!];
+  }
+
+  return array;
+}
+
+async function getSentenceQuestions(count = 5): Promise<SentenceQuestion[]> {
+  const { data: sentences, error } = await supabase
+    .from('sentences')
+    .select('*')
+    .limit(count)
+    .returns<Sentence[]>();
+
+  if (error) {
+    console.error('Error fetching sentences:', error);
+    return [];
+  }
+
+  if (!sentences) {
+    return [];
+  }
+
+  return sentences.map((sentence) => ({
+    sentence,
+    scrambled: shuffle(sentence.japanese_sentence.split(' ')),
+    correctAnswer: sentence.japanese_sentence,
+  }));
+}
 
 async function getVocabularyQuestions(count = 10): Promise<Question[]> {
   const { data: vocabulary, error } = await supabase
@@ -39,4 +75,5 @@ async function getVocabularyQuestions(count = 10): Promise<Question[]> {
 
 export const gameService = {
   getVocabularyQuestions,
+  getSentenceQuestions,
 };
