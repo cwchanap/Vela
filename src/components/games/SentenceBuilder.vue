@@ -61,17 +61,22 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue';
+import { ref, computed, onMounted, watch } from 'vue';
 import draggable from 'vuedraggable';
 import { useGameStore } from 'src/stores/games';
+import { useProgressStore } from 'src/stores/progress';
 import { gameService } from '../../services/gameService';
 import { useQuasar } from 'quasar';
 
 const gameStore = useGameStore();
+const progressStore = useProgressStore();
 const $q = useQuasar();
 
 const userAnswer = ref<string[]>([]);
 const scrambledWords = ref<string[]>([]);
+const gameStartTime = ref<Date | null>(null);
+const correctAnswers = ref(0);
+const totalQuestions = ref(0);
 
 const currentQuestion = computed(() => {
   if (gameStore.sentenceGameActive) {
@@ -92,6 +97,9 @@ onMounted(async () => {
     const questions = await gameService.getSentenceQuestions(5);
     if (questions.length > 0) {
       gameStore.startSentenceGame(questions);
+      gameStartTime.value = new Date();
+      correctAnswers.value = 0;
+      totalQuestions.value = questions.length;
       initializeQuestion();
     }
   }
@@ -108,6 +116,11 @@ const checkAnswer = () => {
   if (!currentQuestion.value) return;
 
   const isCorrect = userAnswer.value.join(' ') === currentQuestion.value.correctAnswer;
+
+  if (isCorrect) {
+    correctAnswers.value++;
+  }
+
   gameStore.answerSentenceQuestion(isCorrect);
 
   $q.notify({
@@ -128,6 +141,30 @@ const checkAnswer = () => {
     });
   }
 };
+
+// Watch for game end to record session
+watch(
+  () => gameStore.sentenceGameActive,
+  async (isActive, wasActive) => {
+    if (wasActive && !isActive && gameStartTime.value) {
+      // Game just ended
+      const durationSeconds = Math.round((Date.now() - gameStartTime.value.getTime()) / 1000);
+
+      await progressStore.recordGameSession(
+        'sentence',
+        gameStore.score,
+        durationSeconds,
+        totalQuestions.value,
+        correctAnswers.value,
+      );
+
+      // Reset tracking variables
+      gameStartTime.value = null;
+      correctAnswers.value = 0;
+      totalQuestions.value = 0;
+    }
+  },
+);
 </script>
 
 <style scoped>

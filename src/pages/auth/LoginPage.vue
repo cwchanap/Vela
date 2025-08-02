@@ -111,6 +111,9 @@ const handleAuthSuccess = (type: 'signin' | 'signup' | 'magic-link') => {
       message: 'Please check your email to verify your account before signing in.',
       timeout: 5000,
     });
+  } else if (type === 'signin') {
+    // Redirect to dashboard after successful sign in
+    void router.push(redirectTo.value);
   }
 };
 

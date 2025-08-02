@@ -20,6 +20,7 @@ trigger: always_on
 ### Testing
 
 - `npm test` - Currently no tests configured (exits with 0)
+- For future testing setup: Consider Vitest for unit tests, @vue/test-utils for component testing
 
 ## Project Architecture
 
@@ -31,6 +32,7 @@ trigger: always_on
 - **Authentication**: Supabase Auth with email/password and magic links
 - **Build Tool**: Vite
 - **Routing**: Vue Router with history mode
+- **UI Interactions**: vuedraggable for drag-and-drop functionality
 
 ### Core Application Structure
 
@@ -50,7 +52,8 @@ trigger: always_on
 
 - `src/services/supabase.ts` - Supabase client configuration with comprehensive TypeScript types for database schema
 - `src/services/authService.ts` - Authentication business logic and API calls
-- Database schema includes: profiles, vocabulary, user_progress, game_sessions, chat_history
+- `src/services/gameService.ts` - Game logic for vocabulary and sentence games
+- Database schema includes: profiles, vocabulary, user_progress, game_sessions, chat_history, sentences
 
 #### Configuration
 
@@ -63,6 +66,7 @@ trigger: always_on
 - Protected routes use `requiresAuth: true` meta property
 - Guest-only routes use `requiresGuest: true` meta property
 - Main layouts: `MainLayout.vue`, `AuthLayout.vue`
+- Game pages: `/games/vocabulary`, `/games/sentence` with interactive learning components
 
 ### Database Schema (Supabase)
 
@@ -70,6 +74,7 @@ The application uses a comprehensive database schema for a Japanese learning app
 
 - **profiles** - User profiles with preferences, level, experience, streak
 - **vocabulary** - Japanese vocabulary with hiragana/katakana/romaji/translations
+- **sentences** - Japanese sentences for anagram games with translations
 - **user_progress** - Individual word mastery tracking with spaced repetition
 - **game_sessions** - Game completion records with scores and experience
 - **chat_history** - AI chat conversation storage
@@ -108,3 +113,45 @@ The application uses a comprehensive database schema for a Japanese learning app
 - Prettier for code formatting
 - Husky pre-commit hooks with lint-staged
 - Vue TypeScript checking enabled in development
+
+### Game System
+
+#### Implemented Games
+
+1. **Vocabulary Game** (`/games/vocabulary`)
+   - Multiple choice format with 4 options
+   - Fetches random vocabulary from database
+   - Real-time scoring and timer
+   - Components: `VocabularyCard`, `GameTimer`, `ScoreDisplay`
+
+2. **Sentence Anagram Game** (`/games/sentence`)
+   - Drag-and-drop interface using vuedraggable
+   - Scrambled Japanese sentence reconstruction
+   - Component: `SentenceBuilder`
+
+#### Game Components
+
+- `src/components/games/GameTimer.vue` - Timer display
+- `src/components/games/ScoreDisplay.vue` - Score tracking
+- `src/components/games/VocabularyCard.vue` - Multiple choice questions
+- `src/components/games/SentenceBuilder.vue` - Drag-and-drop sentence building
+
+#### Game Service
+
+- `src/services/gameService.ts` - Fetches questions from Supabase
+- Vocabulary questions with multiple choice options
+- Sentence questions with scrambled word arrays
+
+### Japanese Language Utilities
+
+#### Character Detection (`src/utils/japanese.ts`)
+
+- `isHiragana()`, `isKatakana()`, `isKanji()` - Character type detection
+- `analyzeText()` - Text composition analysis
+- `assessDifficulty()` - Automatic difficulty scoring based on character types and length
+
+#### Text Processing
+
+- `hiraganaToRomaji()` - Basic romanization mapping
+- `parseFurigana()` - Furigana segment parsing (simplified implementation)
+- Text analysis for learning progression

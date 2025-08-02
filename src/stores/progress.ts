@@ -1,5 +1,11 @@
 import { defineStore } from 'pinia';
 import { ref, computed } from 'vue';
+import {
+  progressService,
+  type ProgressAnalytics,
+  type Achievement,
+  type SkillCategory,
+} from '../services/progressService';
 
 export interface UserProgress {
   vocabulary_id: string;
@@ -32,7 +38,11 @@ export const useProgressStore = defineStore('progress', () => {
     experience: 0,
     experienceToNextLevel: 100,
   });
+  const analytics = ref<ProgressAnalytics | null>(null);
+  const achievements = ref<Achievement[]>([]);
+  const skillCategories = ref<SkillCategory[]>([]);
   const isLoading = ref(false);
+  const newAchievements = ref<Achievement[]>([]);
 
   // Getters
   const masteredWords = computed(
@@ -56,6 +66,57 @@ export const useProgressStore = defineStore('progress', () => {
       (learningStats.value.weeklyProgress / learningStats.value.weeklyGoal) * 100,
       100,
     );
+  });
+
+  const currentLevelProgress = computed(() => {
+    if (!analytics.value) return 0;
+    const currentExp = analytics.value.totalExperience;
+    const expForCurrentLevel = (analytics.value.currentLevel - 1) * 100;
+    const expForNextLevel = analytics.value.currentLevel * 100;
+    return ((currentExp - expForCurrentLevel) / (expForNextLevel - expForCurrentLevel)) * 100;
+  });
+
+  const dailyProgressChart = computed(() => {
+    if (!analytics.value) return [];
+    return analytics.value.dailyProgress
+      .slice(0, 7)
+      .reverse()
+      .map((day) => ({
+        date: new Date(day.date).toLocaleDateString('en-US', { weekday: 'short' }),
+        experience: day.experience_gained,
+        vocabulary: day.vocabulary_studied,
+        sentences: day.sentences_completed,
+        accuracy: day.accuracy_percentage,
+      }));
+  });
+
+  const weeklyProgressChart = computed(() => {
+    if (!analytics.value) return [];
+    return analytics.value.weeklyProgress.map((day) => ({
+      date: new Date(day.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+      experience: day.experience_gained,
+      vocabulary: day.vocabulary_studied,
+      sentences: day.sentences_completed,
+      accuracy: day.accuracy_percentage,
+    }));
+  });
+
+  const monthlyProgressChart = computed(() => {
+    if (!analytics.value) return [];
+    return analytics.value.monthlyProgress.map((day) => ({
+      date: new Date(day.date).toLocaleDateString('en-US', { month: 'short', year: '2-digit' }),
+      experience: day.experience_gained,
+      vocabulary: day.vocabulary_studied,
+      sentences: day.sentences_completed,
+      accuracy: day.accuracy_percentage,
+    }));
+  });
+
+  const recentAchievements = computed(() => {
+    return achievements.value
+      .filter((a) => a.earned_at)
+      .sort((a, b) => new Date(b.earned_at!).getTime() - new Date(a.earned_at!).getTime())
+      .slice(0, 5);
   });
 
   // Actions
@@ -115,16 +176,103 @@ export const useProgressStore = defineStore('progress', () => {
     isLoading.value = loading;
   };
 
+  const loadProgressAnalytics = async () => {
+    try {
+      setLoading(true);
+      const data = await progressService.getProgressAnalytics();
+      analytics.value = data;
+      achievements.value = data.achievements || [];
+      skillCategories.value = data.skillCategories;
+
+      // Update learning stats for backward compatibility
+      setLearningStats({
+        totalWordsLearned: data.wordsLearned || 0,
+        currentStreak: data.learningStreak?.current_streak || 0,
+        level: data.currentLevel || 1,
+        experience: data.totalExperience,
+        experienceToNextLevel: data.experienceToNextLevel,
+      });
+    } catch (error) {
+      console.error('Failed to load progress analytics:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const recordGameSession = async (
+    gameType: string,
+    score: number,
+    durationSeconds: number,
+    questionsAnswered: number,
+    correctAnswers: number,
+  ) => {
+    try {
+      const experienceGained = calculateExperienceGained(score, correctAnswers, questionsAnswered);
+
+      await progressService.recordGameSession(
+        gameType,
+        score,
+        durationSeconds,
+        questionsAnswered,
+        correctAnswers,
+        experienceGained,
+      );
+
+      // Check for new achievements
+      await progressService.checkAndAwardAchievements();
+
+      // Reload analytics to get updated data
+      await loadProgressAnalytics();
+    } catch (error) {
+      console.error('Failed to record game session:', error);
+    }
+  };
+
+  const calculateExperienceGained = (
+    score: number,
+    correctAnswers: number,
+    totalQuestions: number,
+  ): number => {
+    const baseExp = correctAnswers * 10;
+    const accuracyBonus =
+      totalQuestions > 0 ? Math.floor((correctAnswers / totalQuestions) * 50) : 0;
+    const perfectBonus = correctAnswers === totalQuestions && totalQuestions > 0 ? 25 : 0;
+    return baseExp + accuracyBonus + perfectBonus;
+  };
+
+  const dismissNewAchievements = () => {
+    newAchievements.value = [];
+  };
+
+  const getSkillCategoryProgress = (categoryName: string) => {
+    return skillCategories.value.find((sc) => sc.name === categoryName) || null;
+  };
+
+  const getTodayProgress = () => {
+    if (!analytics.value?.dailyProgress.length) return null;
+    const today = new Date().toISOString().split('T')[0];
+    return analytics.value.dailyProgress.find((d) => d.date === today) || null;
+  };
+
   return {
     // State
     userProgress,
     learningStats,
+    analytics,
+    achievements,
+    skillCategories,
+    newAchievements,
     isLoading,
     // Getters
     masteredWords,
     wordsInProgress,
     averageAccuracy,
     weeklyGoalProgress,
+    currentLevelProgress,
+    dailyProgressChart,
+    weeklyProgressChart,
+    monthlyProgressChart,
+    recentAchievements,
     // Actions
     updateProgress,
     addExperience,
@@ -132,5 +280,11 @@ export const useProgressStore = defineStore('progress', () => {
     setLearningStats,
     setUserProgress,
     setLoading,
+    loadProgressAnalytics,
+    recordGameSession,
+    calculateExperienceGained,
+    dismissNewAchievements,
+    getSkillCategoryProgress,
+    getTodayProgress,
   };
 });
