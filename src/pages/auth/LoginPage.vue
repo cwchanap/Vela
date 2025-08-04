@@ -96,7 +96,7 @@ const authMode = ref<'signin' | 'signup'>('signin');
 const redirectTo = ref('/dashboard');
 
 // Methods
-const handleAuthSuccess = (type: 'signin' | 'signup' | 'magic-link') => {
+const handleAuthSuccess = async (type: 'signin' | 'signup' | 'magic-link') => {
   console.log('Auth success:', type);
 
   if (type === 'magic-link') {
@@ -107,13 +107,23 @@ const handleAuthSuccess = (type: 'signin' | 'signup' | 'magic-link') => {
     });
   } else if (type === 'signup') {
     $q.notify({
-      type: 'info',
-      message: 'Please check your email to verify your account before signing in.',
+      type: 'positive',
+      message: 'Account created successfully! Welcome to Japanese Learning App.',
       timeout: 5000,
     });
+    // Redirect immediately after signup without email verification
+    await router.push(redirectTo.value);
   } else if (type === 'signin') {
-    // Redirect to dashboard after successful sign in
-    void router.push(redirectTo.value);
+    $q.notify({
+      type: 'positive',
+      message: 'Welcome back!',
+      timeout: 3000,
+    });
+    // Small delay to allow notification to show before redirect
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+    // Explicitly redirect to dashboard after successful signin
+    // This ensures redirect happens even if router guard timing is off
+    await router.push({ name: 'dashboard' });
   }
 };
 

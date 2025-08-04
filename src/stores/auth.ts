@@ -89,11 +89,12 @@ export const useAuthStore = defineStore('auth', () => {
         await loadUserProfile(currentSession.user.id);
       }
 
-      // Listen for auth state changes
+      // Listen for auth state changes - bypass email confirmation checks
       authService.onAuthStateChange((event, session) => {
         void (async () => {
           console.log('Auth state changed:', event, session);
 
+          // Allow login regardless of email confirmation status
           if (session?.user) {
             setSession(session);
             await loadUserProfile(session.user.id);

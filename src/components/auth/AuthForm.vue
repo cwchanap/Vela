@@ -166,7 +166,6 @@
 
 <script setup lang="ts">
 import { ref, computed, reactive } from 'vue';
-import { useRouter } from 'vue-router';
 import { useQuasar } from 'quasar';
 import { useAuthStore } from '../../stores/auth';
 
@@ -186,7 +185,6 @@ const emit = defineEmits<{
 }>();
 
 // Composables
-const router = useRouter();
 const $q = useQuasar();
 const authStore = useAuthStore();
 
@@ -265,7 +263,6 @@ const handleSubmit = async () => {
         message: 'Welcome back!',
       });
       emit('success', 'signin');
-      void router.push(props.redirectTo);
     }
   }
 
