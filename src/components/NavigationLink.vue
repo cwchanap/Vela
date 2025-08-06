@@ -12,7 +12,7 @@
     </q-item-section>
 
     <q-item-section>
-      <q-item-label :class="{ 'text-grey-5': disabled }">
+      <q-item-label :class="{ 'text-grey-8': disabled }">
         {{ title }}
         <q-chip
           v-if="disabled"
@@ -23,7 +23,7 @@
           class="q-ml-sm"
         />
       </q-item-label>
-      <q-item-label caption :class="{ 'text-grey-4': disabled }">
+      <q-item-label caption :class="{ 'text-grey-7': disabled }">
         {{ caption }}
       </q-item-label>
     </q-item-section>

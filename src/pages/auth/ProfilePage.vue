@@ -6,7 +6,7 @@
         <q-btn flat round icon="arrow_back" @click="$router.back()" class="q-mr-md" />
         <div>
           <div class="text-h5">Profile Settings</div>
-          <div class="text-subtitle2 text-grey-6">Manage your account and learning preferences</div>
+          <div class="text-subtitle2 text-dark">Manage your account and learning preferences</div>
         </div>
       </div>
 
@@ -20,7 +20,7 @@
       <div v-else-if="!authStore.isAuthenticated" class="text-center q-py-xl">
         <q-icon name="person_off" size="4rem" color="grey-5" />
         <div class="text-h6 q-mt-md">Not Signed In</div>
-        <div class="text-subtitle2 text-grey-6 q-mb-md">Please sign in to view your profile</div>
+        <div class="text-subtitle2 text-dark q-mb-md">Please sign in to view your profile</div>
         <q-btn color="primary" label="Sign In" @click="$router.push('/auth/login')" />
       </div>
 
@@ -60,11 +60,11 @@
 
                 <!-- Progress Bar -->
                 <div class="q-mt-md">
-                  <div class="text-caption text-grey-6 q-mb-xs">
+                  <div class="text-caption text-dark q-mb-xs">
                     Level {{ authStore.userLevel }} Progress
                   </div>
                   <q-linear-progress :value="levelProgress" color="primary" size="8px" rounded />
-                  <div class="text-caption text-grey-6 q-mt-xs">
+                  <div class="text-caption text-dark q-mt-xs">
                     {{ currentLevelXP }} / {{ xpPerLevel }} XP
                   </div>
                 </div>
@@ -80,7 +80,7 @@
 
                 <div v-if="recentActivity.length === 0" class="text-center q-py-md">
                   <q-icon name="history" size="2rem" color="grey-5" />
-                  <div class="text-subtitle2 text-grey-6 q-mt-sm">No recent activity</div>
+                  <div class="text-subtitle2 text-dark q-mt-sm">No recent activity</div>
                   <div class="text-caption text-grey-5">
                     Start learning to see your progress here
                   </div>

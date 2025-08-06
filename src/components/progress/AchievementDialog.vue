@@ -145,7 +145,7 @@ watch(isOpen, (newValue) => {
 
   .achievement-description {
     font-size: 0.9rem;
-    color: var(--q-text-grey-7);
+    color: #666;
     margin-top: 4px;
     line-height: 1.4;
   }

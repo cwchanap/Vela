@@ -244,7 +244,7 @@
             data-aos-delay="300"
           >
             <div class="section-header q-mb-lg">
-              <h3 class="section-title gradient-text">Achievements</h3>
+              <h3 class="section-title text-dark">Achievements</h3>
               <p class="section-subtitle">Your learning milestones</p>
             </div>
 
@@ -381,7 +381,7 @@ onMounted(async () => {
 
 .welcome-subtitle {
   font-size: 1.2rem;
-  color: rgba(255, 255, 255, 0.8);
+  color: #333;
   margin: 0;
   font-weight: 300;
 }
@@ -485,7 +485,7 @@ onMounted(async () => {
 
 .stat-label {
   font-size: 0.9rem;
-  color: rgba(255, 255, 255, 0.7);
+  color: #666;
   font-weight: 500;
 }
 
@@ -514,7 +514,7 @@ onMounted(async () => {
 }
 
 .section-subtitle {
-  color: rgba(255, 255, 255, 0.7);
+  color: #666;
   margin: 0;
   font-size: 1rem;
 }
@@ -585,7 +585,7 @@ onMounted(async () => {
 }
 
 .action-description {
-  color: rgba(255, 255, 255, 0.8);
+  color: #666;
   font-size: 0.9rem;
   line-height: 1.5;
   margin: 0 0 1.5rem 0;
@@ -598,7 +598,7 @@ onMounted(async () => {
   border-radius: var(--border-radius-xl);
   font-size: 0.8rem;
   font-weight: 500;
-  color: rgba(255, 255, 255, 0.8);
+  color: #666;
   border: 1px solid var(--glass-border);
 }
 
@@ -633,7 +633,7 @@ onMounted(async () => {
 
 .progress-label {
   font-size: 0.8rem;
-  color: rgba(255, 255, 255, 0.7);
+  color: #666;
   margin-top: 0.25rem;
 }
 
@@ -656,7 +656,7 @@ onMounted(async () => {
 }
 
 .stat-label {
-  color: rgba(255, 255, 255, 0.7);
+  color: #666;
   font-size: 0.9rem;
 }
 
@@ -668,7 +668,7 @@ onMounted(async () => {
 .start-btn {
   width: 100%;
   background: var(--gradient-primary);
-  color: white;
+  color: #333;
   font-weight: 600;
   padding: 0.75rem 1.5rem;
   border-radius: var(--border-radius-md);
@@ -685,18 +685,18 @@ onMounted(async () => {
 }
 
 .empty-icon {
-  color: rgba(255, 255, 255, 0.3);
+  color: #999;
 }
 
 .empty-title {
-  color: white;
+  color: #333;
   font-size: 1.1rem;
   font-weight: 600;
   margin: 0 0 0.5rem 0;
 }
 
 .empty-subtitle {
-  color: rgba(255, 255, 255, 0.6);
+  color: #666;
   font-size: 0.9rem;
   margin: 0;
 }
@@ -732,7 +732,7 @@ onMounted(async () => {
 
 .achievement-description {
   font-size: 0.8rem;
-  color: rgba(255, 255, 255, 0.7);
+  color: #666;
 }
 
 /* Responsive Design */

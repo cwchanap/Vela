@@ -11,7 +11,7 @@
     </q-card-section>
 
     <q-card-section>
-      <div class="skill-description text-caption text-grey-6 q-mb-md">
+      <div class="skill-description text-caption text-dark q-mb-md">
         {{ skill.description }}
       </div>
 
@@ -32,7 +32,7 @@
 
       <div class="skill-stats q-mt-md">
         <div class="stat-row">
-          <q-icon name="trending_up" size="16px" class="text-grey-6" />
+          <q-icon name="trending_up" size="16px" class="text-dark" />
           <span class="text-caption">Next level in {{ experienceNeeded }} XP</span>
         </div>
       </div>
@@ -105,7 +105,7 @@ const experienceNeeded = computed(() => {
 
 .skill-level {
   font-size: 0.875rem;
-  color: var(--q-text-grey-6);
+  color: #666;
   margin-top: 2px;
 }
 

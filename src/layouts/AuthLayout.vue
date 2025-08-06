@@ -20,7 +20,7 @@
           </div>
 
           <div class="auth-footer">
-            <p class="text-caption text-grey-6">Version {{ config.app.version }}</p>
+            <p class="text-caption text-dark">Version {{ config.app.version }}</p>
           </div>
         </div>
       </div>

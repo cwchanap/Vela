@@ -1,11 +1,11 @@
 <template>
-  <q-page class="q-pa-md">
+  <q-page class="q-pa-md dashboard-page">
     <div class="row items-center q-mb-lg">
       <q-avatar size="100px" class="q-mr-md">
         <img :src="user?.avatar_url || 'https://cdn.quasar.dev/img/boy-avatar.png'" />
       </q-avatar>
       <div class="flex-1">
-        <h4 class="text-h4 q-ma-none">Welcome back, {{ userName }}!</h4>
+        <h4 class="text-h4 q-ma-none text-dark">Welcome back, {{ userName }}!</h4>
         <p class="text-subtitle1 text-grey-7">Let's continue your Japanese learning journey.</p>
         <div class="user-level-info q-mt-sm">
           <q-chip
@@ -35,7 +35,7 @@
         <q-card-section class="text-center">
           <q-icon name="book" color="primary" size="48px" />
           <div class="text-h6 q-mt-sm">Vocabulary</div>
-          <div class="text-caption text-grey-6">Practice Japanese words</div>
+          <div class="text-caption text-dark">Practice Japanese words</div>
         </q-card-section>
       </q-card>
 
@@ -47,7 +47,7 @@
         <q-card-section class="text-center">
           <q-icon name="school" color="secondary" size="48px" />
           <div class="text-h6 q-mt-sm">Grammar</div>
-          <div class="text-caption text-grey-6">Build sentences</div>
+          <div class="text-caption text-dark">Build sentences</div>
         </q-card-section>
       </q-card>
 
@@ -59,7 +59,7 @@
         <q-card-section class="text-center">
           <q-icon name="analytics" color="accent" size="48px" />
           <div class="text-h6 q-mt-sm">Progress</div>
-          <div class="text-caption text-grey-6">View detailed stats</div>
+          <div class="text-caption text-dark">View detailed stats</div>
         </q-card-section>
       </q-card>
 
@@ -67,7 +67,7 @@
         <q-card-section class="text-center">
           <q-icon name="chat" color="info" size="48px" />
           <div class="text-h6 q-mt-sm">AI Tutor</div>
-          <div class="text-caption text-grey-6">Get help & practice</div>
+          <div class="text-caption text-dark">Get help & practice</div>
         </q-card-section>
       </q-card>
     </div>
@@ -152,5 +152,24 @@ onMounted(async () => {
 
 .flex-1 {
   flex: 1;
+}
+
+// Ensure proper text contrast on dashboard
+.dashboard-page {
+  color: #333;
+
+  .text-h4,
+  .text-h5,
+  .text-h6 {
+    color: #333;
+  }
+
+  .text-caption {
+    color: #666;
+  }
+
+  .progress-stat {
+    color: #333;
+  }
 }
 </style>

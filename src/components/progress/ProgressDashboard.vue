@@ -4,11 +4,11 @@
     <div class="row q-gutter-md q-mb-lg">
       <q-card class="col-12 col-md-4">
         <q-card-section>
-          <div class="text-h6 q-mb-md">Current Level</div>
+          <div class="text-h6 q-mb-md text-dark">Current Level</div>
           <div class="text-center">
             <div class="level-circle">
               <div class="text-h3 text-primary">{{ progressStore.learningStats.level }}</div>
-              <div class="text-caption text-grey-6">Level</div>
+              <div class="text-caption text-dark">Level</div>
             </div>
             <q-linear-progress
               :value="progressStore.currentLevelProgress / 100"
@@ -16,7 +16,7 @@
               size="8px"
               class="q-mt-md"
             />
-            <div class="text-caption q-mt-xs">
+            <div class="text-caption q-mt-xs text-dark">
               {{ progressStore.learningStats.experience }} /
               {{ progressStore.learningStats.experienceToNextLevel }} XP
             </div>
@@ -26,7 +26,7 @@
 
       <q-card class="col-12 col-md-4">
         <q-card-section>
-          <div class="text-h6 q-mb-md">Learning Streak</div>
+          <div class="text-h6 q-mb-md text-dark">Learning Streak</div>
           <div class="text-center">
             <q-icon
               name="whatshot"
@@ -40,7 +40,7 @@
             <div class="text-h4 q-mt-sm">
               {{ progressStore.analytics?.learningStreak.current_streak || 0 }} days
             </div>
-            <div class="text-caption text-grey-6">
+            <div class="text-caption text-dark">
               Best: {{ progressStore.analytics?.learningStreak.longest_streak || 0 }} days
             </div>
           </div>
@@ -49,7 +49,7 @@
 
       <q-card class="col-12 col-md-4">
         <q-card-section>
-          <div class="text-h6 q-mb-md">Today's Progress</div>
+          <div class="text-h6 q-mb-md text-dark">Today's Progress</div>
           <div v-if="todayProgress">
             <div class="progress-stat">
               <q-icon name="book" color="primary" />
@@ -68,7 +68,7 @@
               <span>{{ todayProgress.experience_gained }} XP earned</span>
             </div>
           </div>
-          <div v-else class="text-center text-grey-6">
+          <div v-else class="text-center text-dark">
             <q-icon name="schedule" size="48px" />
             <div class="q-mt-sm">Start learning today!</div>
           </div>
@@ -80,7 +80,7 @@
     <div class="row q-gutter-md q-mb-lg">
       <q-card class="col-12 col-md-6">
         <q-card-section>
-          <div class="text-h6 q-mb-md">Weekly Progress</div>
+          <div class="text-h6 q-mb-md text-dark">Weekly Progress</div>
           <ProgressChart
             :data="progressStore.weeklyProgressChart"
             type="line"
@@ -93,7 +93,7 @@
 
       <q-card class="col-12 col-md-6">
         <q-card-section>
-          <div class="text-h6 q-mb-md">Monthly Overview</div>
+          <div class="text-h6 q-mb-md text-dark">Monthly Overview</div>
           <ProgressChart
             :data="progressStore.monthlyProgressChart"
             type="bar"
@@ -109,7 +109,7 @@
     <div class="row q-gutter-md q-mb-lg">
       <q-card class="col-12">
         <q-card-section>
-          <div class="text-h6 q-mb-md">Skill Progress</div>
+          <div class="text-h6 q-mb-md text-dark">Skill Progress</div>
           <div class="row q-gutter-md">
             <div
               v-for="skill in progressStore.skillCategories"
@@ -127,7 +127,7 @@
     <div class="row q-gutter-md">
       <q-card class="col-12 col-md-6">
         <q-card-section>
-          <div class="text-h6 q-mb-md">Recent Achievements</div>
+          <div class="text-h6 q-mb-md text-dark">Recent Achievements</div>
           <div v-if="progressStore.recentAchievements.length > 0">
             <AchievementItem
               v-for="achievement in progressStore.recentAchievements"
@@ -136,17 +136,17 @@
               class="q-mb-sm"
             />
           </div>
-          <div v-else class="text-center text-grey-6 q-py-lg">
+          <div v-else class="text-center text-dark q-py-lg">
             <q-icon name="emoji_events" size="48px" />
-            <div class="q-mt-sm">No achievements yet</div>
-            <div class="text-caption">Keep learning to earn your first achievement!</div>
+            <div class="q-mt-sm text-dark">No achievements yet</div>
+            <div class="text-caption text-dark">Keep learning to earn your first achievement!</div>
           </div>
         </q-card-section>
       </q-card>
 
       <q-card class="col-12 col-md-6">
         <q-card-section>
-          <div class="text-h6 q-mb-md">Learning Statistics</div>
+          <div class="text-h6 q-mb-md text-dark">Learning Statistics</div>
           <div class="stats-grid">
             <div class="stat-item">
               <div class="stat-value text-primary">
@@ -218,6 +218,27 @@ onMounted(async () => {
 <style scoped lang="scss">
 .progress-dashboard {
   padding: 16px;
+  color: #333;
+
+  .text-h6 {
+    color: #333;
+  }
+
+  .text-caption {
+    color: #666;
+  }
+
+  .text-h4 {
+    color: #333;
+  }
+
+  .progress-stat span {
+    color: #333;
+  }
+
+  .text-center {
+    color: #333;
+  }
 }
 
 .level-circle {
@@ -230,6 +251,13 @@ onMounted(async () => {
   border: 3px solid var(--q-primary);
   border-radius: 50%;
   margin: 0 auto;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+
+  .text-h3 {
+    font-weight: bold;
+    margin-bottom: 4px;
+  }
 }
 
 .progress-stat {
@@ -237,9 +265,11 @@ onMounted(async () => {
   align-items: center;
   gap: 8px;
   margin-bottom: 8px;
+  color: #333;
 
   .q-icon {
     font-size: 20px;
+    margin-right: 8px;
   }
 }
 
@@ -264,7 +294,7 @@ onMounted(async () => {
 
 .stat-label {
   font-size: 0.875rem;
-  color: var(--q-text-grey-6);
+  color: #666;
   margin-top: 4px;
 }
 </style>

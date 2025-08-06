@@ -4,7 +4,7 @@
       <div class="text-h5 q-mb-md">
         {{ isSignUp ? 'Create Account' : 'Welcome Back' }}
       </div>
-      <div class="text-subtitle2 text-grey-6">
+      <div class="text-subtitle2 text-dark">
         {{ isSignUp ? 'Join us to start learning Japanese' : 'Sign in to continue your journey' }}
       </div>
     </q-card-section>
@@ -86,7 +86,7 @@
           <div class="col">
             <q-separator />
           </div>
-          <div class="col-auto q-px-md text-grey-6">or</div>
+          <div class="col-auto q-px-md text-dark">or</div>
           <div class="col">
             <q-separator />
           </div>
@@ -111,7 +111,7 @@
 
         <!-- Toggle mode -->
         <div class="text-center q-mt-md">
-          <span class="text-grey-6">
+          <span class="text-dark">
             {{ isSignUp ? 'Already have an account?' : "Don't have an account?" }}
           </span>
           <q-btn
