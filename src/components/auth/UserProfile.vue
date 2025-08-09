@@ -36,7 +36,7 @@
       <div class="q-gutter-md">
         <!-- Profile Information -->
         <div class="row items-center">
-          <div class="col-4 text-weight-medium">Username:</div>
+          <div class="col-4 text-weight-medium">Display Name:</div>
           <div class="col">{{ authStore.user?.username || 'Not set' }}</div>
         </div>
 
@@ -88,11 +88,30 @@
     <!-- Edit Mode -->
     <q-card-section v-else>
       <q-form @submit="handleSave" class="q-gutter-md">
+        <!-- Avatar Selection -->
+        <div>
+          <div class="text-subtitle1 text-weight-medium q-mb-sm">Avatar</div>
+          <div class="row q-col-gutter-sm">
+            <div v-for="url in avatarOptions" :key="url" class="col-auto">
+              <q-avatar
+                size="56px"
+                class="avatar-option"
+                :class="{ selected: editForm.avatar_url === url }"
+                @click="editForm.avatar_url = url"
+              >
+                <img :src="url" alt="avatar option" />
+              </q-avatar>
+            </div>
+          </div>
+        </div>
+
         <q-input
           v-model="editForm.username"
-          label="Username"
+          label="Display Name"
           outlined
-          :rules="[(val) => !val || val.length >= 2 || 'Username must be at least 2 characters']"
+          :rules="[
+            (val) => !val || val.length >= 2 || 'Display name must be at least 2 characters',
+          ]"
         />
 
         <q-select
@@ -162,10 +181,29 @@
 
         <q-card-section class="q-pt-none">
           <q-form @submit="handlePasswordChange" class="q-gutter-md">
+            <!-- Hidden username field for password managers and accessibility -->
+            <q-input
+              :model-value="authStore.user?.email || authStore.user?.username || ''"
+              autocomplete="username"
+              readonly
+              dense
+              aria-hidden="true"
+              tabindex="-1"
+              style="
+                position: absolute;
+                left: -10000px;
+                top: auto;
+                width: 1px;
+                height: 1px;
+                overflow: hidden;
+                opacity: 0;
+              "
+            />
             <q-input
               v-model="passwordForm.newPassword"
               label="New Password"
               type="password"
+              autocomplete="new-password"
               outlined
               :rules="[(val) => val.length >= 6 || 'Password must be at least 6 characters']"
             />
@@ -174,6 +212,7 @@
               v-model="passwordForm.confirmPassword"
               label="Confirm Password"
               type="password"
+              autocomplete="new-password"
               outlined
               :rules="[(val) => val === passwordForm.newPassword || 'Passwords do not match']"
             />
@@ -221,6 +260,7 @@ const editForm = reactive({
   dailyGoal: 30,
   difficulty: 'Beginner',
   notifications: true,
+  avatar_url: '',
 });
 
 const passwordForm = reactive({
@@ -251,6 +291,18 @@ const languageOptions = [
 
 const difficultyOptions = ['Beginner', 'Intermediate', 'Advanced'];
 
+// Hardcoded avatar options (restricted selection)
+const avatarOptions = [
+  'https://api.dicebear.com/7.x/adventurer/svg?seed=Ada',
+  'https://api.dicebear.com/7.x/adventurer/svg?seed=Lin',
+  'https://api.dicebear.com/7.x/adventurer/svg?seed=Kai',
+  'https://api.dicebear.com/7.x/adventurer/svg?seed=Hana',
+  'https://api.dicebear.com/7.x/adventurer/svg?seed=Ren',
+  'https://api.dicebear.com/7.x/adventurer/svg?seed=Yuki',
+  'https://api.dicebear.com/7.x/adventurer/svg?seed=Sora',
+  'https://api.dicebear.com/7.x/adventurer/svg?seed=Riku',
+];
+
 // Methods
 const getNativeLanguageName = (code?: string): string => {
   const language = languageOptions.find((lang) => lang.value === code);
@@ -278,6 +330,9 @@ const startEdit = () => {
   editForm.dailyGoal = preferences.value.dailyGoal || 30;
   editForm.difficulty = preferences.value.difficulty || 'Beginner';
   editForm.notifications = preferences.value.notifications !== false;
+  const fallbackAvatar: string = avatarOptions[0] ?? '';
+  const selectedAvatar: string = authStore.user?.avatar_url || fallbackAvatar;
+  editForm.avatar_url = selectedAvatar;
 
   editMode.value = true;
 };
@@ -288,9 +343,15 @@ const cancelEdit = () => {
 };
 
 const handleSave = async () => {
+  // Enforce avatar selection to hardcoded options only
+  const avatarToSave = avatarOptions.includes(editForm.avatar_url)
+    ? editForm.avatar_url
+    : avatarOptions[0];
+
   const success = await authStore.updateProfile({
     username: editForm.username || undefined,
     native_language: editForm.native_language,
+    avatar_url: avatarToSave,
     preferences: {
       dailyGoal: editForm.dailyGoal,
       difficulty: editForm.difficulty,
@@ -384,5 +445,18 @@ onMounted(() => {
     box-shadow: none;
     border-radius: 0;
   }
+}
+
+.avatar-option {
+  cursor: pointer;
+  transition:
+    transform 0.1s ease,
+    box-shadow 0.1s ease;
+  box-shadow: 0 0 0 2px transparent;
+}
+
+.avatar-option.selected {
+  box-shadow: 0 0 0 2px var(--q-primary);
+  transform: translateY(-1px);
 }
 </style>

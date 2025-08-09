@@ -91,7 +91,7 @@ const toggleLeftDrawer = () => {
 
 const handleLogout = async () => {
   await authStore.signOut();
-  void router.push('/login');
+  void router.push('/auth/login');
 };
 </script>
 
