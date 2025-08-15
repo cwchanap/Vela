@@ -155,3 +155,12 @@ The application uses a comprehensive database schema for a Japanese learning app
 - `hiraganaToRomaji()` - Basic romanization mapping
 - `parseFurigana()` - Furigana segment parsing (simplified implementation)
 - Text analysis for learning progression
+
+# IMPORTANT!!
+
+Use Playwright MCP to interact with browser for testing. DON't USE windsurf built browser! Also don't run `npm run dev` to start the server as it may already started, check if it is running first: http://localhost:9000/
+
+# Test account:
+
+Email: testuser.vela@gmail.com
+Password: TestPass123!
