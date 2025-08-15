@@ -252,7 +252,7 @@ onMounted(async () => {
   border-radius: 50%;
   margin: 0 auto;
   background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  color: white;
+  color: black;
 
   .text-h3 {
     font-weight: bold;

@@ -5,6 +5,7 @@ export interface Sentence {
   difficulty_level?: number;
   category?: string;
   created_at: string;
+  words_array: string[];
 }
 
 export interface Vocabulary {

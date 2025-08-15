@@ -90,7 +90,7 @@
               >
                 <div class="action-content">
                   <div class="action-icon-wrapper vocab-gradient">
-                    <q-icon name="quiz" size="3rem" class="text-white" />
+                    <q-icon name="quiz" size="3rem" class="text-black" />
                   </div>
                   <div class="action-info">
                     <h3 class="action-title">Vocabulary Game</h3>
@@ -113,7 +113,7 @@
               >
                 <div class="action-content">
                   <div class="action-icon-wrapper grammar-gradient">
-                    <q-icon name="reorder" size="3rem" class="text-white" />
+                    <q-icon name="reorder" size="3rem" class="text-black" />
                   </div>
                   <div class="action-info">
                     <h3 class="action-title">Sentence Game</h3>
@@ -136,7 +136,7 @@
               >
                 <div class="action-content">
                   <div class="action-icon-wrapper ai-gradient">
-                    <q-icon name="psychology" size="3rem" class="text-white" />
+                    <q-icon name="psychology" size="3rem" class="text-black" />
                   </div>
                   <div class="action-info">
                     <h3 class="action-title">AI Tutor</h3>
@@ -159,7 +159,7 @@
               >
                 <div class="action-content">
                   <div class="action-icon-wrapper writing-gradient">
-                    <q-icon name="draw" size="3rem" class="text-white" />
+                    <q-icon name="draw" size="3rem" class="text-black" />
                   </div>
                   <div class="action-info">
                     <h3 class="action-title">Writing Practice</h3>
@@ -581,7 +581,7 @@ onMounted(async () => {
   font-size: 1.3rem;
   font-weight: 600;
   margin: 0 0 0.75rem 0;
-  color: white;
+  color: #000;
 }
 
 .action-description {
@@ -662,7 +662,7 @@ onMounted(async () => {
 
 .stat-value {
   font-weight: 600;
-  color: white;
+  color: #000;
 }
 
 .start-btn {

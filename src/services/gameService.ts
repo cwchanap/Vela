@@ -31,11 +31,17 @@ async function getSentenceQuestions(count = 5): Promise<SentenceQuestion[]> {
     return [];
   }
 
-  return sentences.map((sentence) => ({
-    sentence,
-    scrambled: shuffle(sentence.japanese_sentence.split(' ')),
-    correctAnswer: sentence.japanese_sentence,
-  }));
+  return sentences.map((sentence) => {
+    const tokens =
+      Array.isArray(sentence.words_array) && sentence.words_array.length > 0
+        ? [...sentence.words_array]
+        : sentence.japanese_sentence.split('');
+    return {
+      sentence,
+      scrambled: shuffle([...tokens]),
+      correctAnswer: tokens.join(' '),
+    };
+  });
 }
 
 async function getVocabularyQuestions(count = 10): Promise<Question[]> {

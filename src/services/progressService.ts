@@ -177,17 +177,48 @@ class ProgressService {
       };
     }
 
-    const { data: userProgress } = await supabase
+    // Total experience from profile
+    const { data: profile } = await supabase
+      .from('profiles')
+      .select('total_experience')
+      .eq('id', userId)
+      .maybeSingle();
+
+    // Words learned = count of vocabulary with mastery_level >= 1
+    const { count: wordsLearnedCount } = await supabase
       .from('user_progress')
-      .select('total_experience, words_learned, sentences_completed, average_accuracy')
+      .select('id', { count: 'exact', head: true })
       .eq('user_id', userId)
-      .single();
+      .gte('mastery_level', 1);
+
+    // Sentence games completed = count of sessions of type 'sentence'
+    const { count: sentenceGameCount } = await supabase
+      .from('game_sessions')
+      .select('id', { count: 'exact', head: true })
+      .eq('user_id', userId)
+      .eq('game_type', 'sentence');
+
+    // Average accuracy across all game sessions
+    const { data: sessions } = await supabase
+      .from('game_sessions')
+      .select('correct_answers, questions_answered')
+      .eq('user_id', userId);
+
+    let totalCorrect = 0;
+    let totalQuestions = 0;
+    if (sessions) {
+      for (const s of sessions) {
+        totalCorrect += s.correct_answers || 0;
+        totalQuestions += s.questions_answered || 0;
+      }
+    }
+    const avgAccuracy = totalQuestions > 0 ? (totalCorrect / totalQuestions) * 100 : 0;
 
     const { data: streakData } = await supabase
       .from('learning_streaks')
-      .select('current_streak, longest_streak, start_date, is_active')
+      .select('*')
       .eq('user_id', userId)
-      .single();
+      .maybeSingle();
 
     const { data: achievements } = await supabase
       .from('user_achievements')
@@ -218,7 +249,7 @@ class ProgressService {
       }
     }
 
-    const totalExperience = userProgress?.total_experience || 0;
+    const totalExperience = profile?.total_experience || 0;
     let currentLevel = 1;
     let experienceNeeded = 100;
     let accumulatedExperience = 0;
@@ -230,9 +261,9 @@ class ProgressService {
     }
 
     return {
-      wordsLearned: userProgress?.words_learned || 0,
-      sentencesCompleted: userProgress?.sentences_completed || 0,
-      averageAccuracy: userProgress?.average_accuracy || 0,
+      wordsLearned: wordsLearnedCount || 0,
+      sentencesCompleted: sentenceGameCount || 0,
+      averageAccuracy: avgAccuracy,
       currentLevel,
       totalExperience,
       learningStreak: streakData || {
@@ -249,18 +280,18 @@ class ProgressService {
     const userId = this.getCurrentUserId();
     if (!userId) return;
 
-    const { data: currentProgress } = await supabase
-      .from('user_progress')
+    const { data: profile } = await supabase
+      .from('profiles')
       .select('total_experience')
-      .eq('user_id', userId)
-      .single();
+      .eq('id', userId)
+      .maybeSingle();
 
-    const newTotalExperience = (currentProgress?.total_experience || 0) + amount;
+    const newTotalExperience = (profile?.total_experience || 0) + amount;
 
     await supabase
-      .from('user_progress')
+      .from('profiles')
       .update({ total_experience: newTotalExperience })
-      .eq('user_id', userId);
+      .eq('id', userId);
 
     await this.checkAndAwardAchievements();
   }
@@ -281,26 +312,63 @@ class ProgressService {
     const earnedAchievementIds = userAchievements?.map((ua) => ua.achievement_id) || [];
     const userStats = await this.getUserStats();
 
+    // Precompute metrics for achievement checks
+    const { count: wordsLearnedCount } = await supabase
+      .from('user_progress')
+      .select('id', { count: 'exact', head: true })
+      .eq('user_id', userId)
+      .gte('mastery_level', 1);
+
+    const { count: sentenceGameCount } = await supabase
+      .from('game_sessions')
+      .select('id', { count: 'exact', head: true })
+      .eq('user_id', userId)
+      .eq('game_type', 'sentence');
+
+    const { data: lastSessions } = await supabase
+      .from('game_sessions')
+      .select('game_type, correct_answers, questions_answered, completed_at')
+      .eq('user_id', userId)
+      .order('completed_at', { ascending: false })
+      .limit(1);
+    const lastSession = lastSessions && lastSessions.length > 0 ? lastSessions[0] : null;
+
     for (const achievement of allAchievements) {
       if (earnedAchievementIds.includes(achievement.id)) continue;
 
       let shouldAward = false;
 
       switch (achievement.requirement_type) {
-        case 'total_experience':
-          shouldAward = userStats.totalExperience >= achievement.requirement_value;
+        case 'count':
+          if (achievement.category === 'vocabulary') {
+            shouldAward = (wordsLearnedCount || 0) >= achievement.requirement_value;
+          } else if (achievement.category === 'grammar') {
+            shouldAward = (sentenceGameCount || 0) >= achievement.requirement_value;
+          }
           break;
-        case 'words_learned':
-          shouldAward = userStats.wordsLearned >= achievement.requirement_value;
-          break;
-        case 'sentences_completed':
-          shouldAward = userStats.sentencesCompleted >= achievement.requirement_value;
-          break;
-        case 'current_streak':
+        case 'streak':
           shouldAward = userStats.learningStreak.current_streak >= achievement.requirement_value;
           break;
-        case 'longest_streak':
-          shouldAward = userStats.learningStreak.longest_streak >= achievement.requirement_value;
+        case 'accuracy': {
+          if (lastSession) {
+            const lastAccuracy =
+              lastSession.questions_answered > 0
+                ? Math.round((lastSession.correct_answers / lastSession.questions_answered) * 100)
+                : 0;
+            if (achievement.category === 'vocabulary') {
+              shouldAward =
+                lastSession.game_type === 'vocabulary' &&
+                lastAccuracy >= achievement.requirement_value;
+            } else {
+              shouldAward = lastAccuracy >= achievement.requirement_value;
+            }
+          }
+          break;
+        }
+        case 'level':
+          shouldAward = userStats.currentLevel >= achievement.requirement_value;
+          break;
+        default:
           break;
       }
 
@@ -327,42 +395,44 @@ class ProgressService {
     const userId = this.getCurrentUserId();
     if (!userId) return;
 
-    const { data: existingProgress } = await supabase
-      .from('daily_progress')
-      .select('*')
-      .eq('user_id', userId)
-      .eq('date', new Date().toISOString().split('T')[0])
-      .single();
-
-    if (existingProgress) {
-      await supabase
+    try {
+      const { data: existingProgress } = await supabase
         .from('daily_progress')
-        .update({
-          vocabulary_studied: existingProgress.vocabulary_studied + vocabularyStudied,
-          sentences_completed: existingProgress.sentences_completed + sentencesCompleted,
-          time_spent_minutes: existingProgress.time_spent_minutes + timeSpentMinutes,
-          experience_gained: existingProgress.experience_gained + experienceGained,
-          games_played: existingProgress.games_played + gamesPlayed,
-          accuracy_percentage: Math.round(
-            (existingProgress.accuracy_percentage + accuracyPercentage) / 2,
-          ),
-        })
+        .select('*')
         .eq('user_id', userId)
-        .eq('date', new Date().toISOString().split('T')[0]);
-    } else {
-      await supabase.from('daily_progress').insert({
-        user_id: userId,
-        date: new Date().toISOString().split('T')[0],
-        vocabulary_studied: vocabularyStudied,
-        sentences_completed: sentencesCompleted,
-        time_spent_minutes: timeSpentMinutes,
-        experience_gained: experienceGained,
-        games_played: gamesPlayed,
-        accuracy_percentage: accuracyPercentage,
-      });
-    }
+        .eq('date', new Date().toISOString().split('T')[0])
+        .maybeSingle();
 
-    await this.addExperience(experienceGained);
+      if (existingProgress) {
+        await supabase
+          .from('daily_progress')
+          .update({
+            vocabulary_studied: existingProgress.vocabulary_studied + vocabularyStudied,
+            sentences_completed: existingProgress.sentences_completed + sentencesCompleted,
+            time_spent_minutes: existingProgress.time_spent_minutes + timeSpentMinutes,
+            experience_gained: existingProgress.experience_gained + experienceGained,
+            games_played: existingProgress.games_played + gamesPlayed,
+            accuracy_percentage: Math.round(
+              (existingProgress.accuracy_percentage + accuracyPercentage) / 2,
+            ),
+          })
+          .eq('user_id', userId)
+          .eq('date', new Date().toISOString().split('T')[0]);
+      } else {
+        await supabase.from('daily_progress').insert({
+          user_id: userId,
+          date: new Date().toISOString().split('T')[0],
+          vocabulary_studied: vocabularyStudied,
+          sentences_completed: sentencesCompleted,
+          time_spent_minutes: timeSpentMinutes,
+          experience_gained: experienceGained,
+          games_played: gamesPlayed,
+          accuracy_percentage: accuracyPercentage,
+        });
+      }
+    } catch (e) {
+      console.warn('daily_progress update skipped (table may be missing):', e);
+    }
   }
 
   async updateLearningStreak(): Promise<void> {
@@ -373,46 +443,47 @@ class ProgressService {
     yesterday.setDate(yesterday.getDate() - 1);
     const yesterdayStr = yesterday.toISOString().split('T')[0];
 
-    const { data: yesterdayProgress } = await supabase
-      .from('daily_progress')
-      .select('*')
-      .eq('user_id', userId)
-      .eq('date', yesterdayStr)
-      .single();
+    try {
+      const { data: yesterdayProgress } = await supabase
+        .from('daily_progress')
+        .select('*')
+        .eq('user_id', userId)
+        .eq('date', yesterdayStr)
+        .maybeSingle();
 
-    const { data: streakData } = await supabase
-      .from('learning_streaks')
-      .select('*')
-      .eq('user_id', userId)
-      .single();
-
-    if (streakData) {
-      let newStreak = streakData.current_streak;
-      let newLongest = streakData.longest_streak;
-
-      if (yesterdayProgress) {
-        newStreak += 1;
-        newLongest = Math.max(newLongest, newStreak);
-      } else if (!yesterdayProgress) {
-        newStreak = 1;
-      }
-
-      await supabase
+      const { data: streakData } = await supabase
         .from('learning_streaks')
-        .update({
-          current_streak: newStreak,
-          longest_streak: newLongest,
-          is_active: true,
-        })
-        .eq('user_id', userId);
-    } else {
-      await supabase.from('learning_streaks').insert({
-        user_id: userId,
-        current_streak: 1,
-        longest_streak: 1,
-        start_date: new Date().toISOString(),
-        is_active: true,
-      });
+        .select('*')
+        .eq('user_id', userId)
+        .maybeSingle();
+
+      if (streakData) {
+        let newStreak = streakData.current_streak;
+        let newLongest = streakData.longest_streak;
+
+        if (yesterdayProgress) {
+          newStreak += 1;
+          newLongest = Math.max(newLongest, newStreak);
+        } else if (!yesterdayProgress) {
+          newStreak = 1;
+        }
+
+        await supabase
+          .from('learning_streaks')
+          .update({
+            current_streak: newStreak,
+            longest_streak: newLongest,
+          })
+          .eq('user_id', userId);
+      } else {
+        await supabase.from('learning_streaks').insert({
+          user_id: userId,
+          current_streak: 1,
+          longest_streak: 1,
+        });
+      }
+    } catch (e) {
+      console.warn('learning_streaks update skipped (table may be missing):', e);
     }
   }
 
@@ -424,16 +495,16 @@ class ProgressService {
       .from('skill_categories')
       .select('*')
       .eq('name', skillCategoryName)
-      .single();
+      .maybeSingle();
 
     if (!skillCategory) return;
 
     const { data: existingSkill } = await supabase
-      .from('user_skills')
+      .from('user_skill_progress')
       .select('*')
       .eq('user_id', userId)
       .eq('skill_category_id', skillCategory.id)
-      .single();
+      .maybeSingle();
 
     if (existingSkill) {
       const newExperience = existingSkill.experience + experienceGained;
@@ -446,7 +517,7 @@ class ProgressService {
       }
 
       await supabase
-        .from('user_skills')
+        .from('user_skill_progress')
         .update({
           experience: newExperience,
           level: newLevel,
@@ -456,7 +527,7 @@ class ProgressService {
         .eq('user_id', userId)
         .eq('skill_category_id', skillCategory.id);
     } else {
-      await supabase.from('user_skills').insert({
+      await supabase.from('user_skill_progress').insert({
         user_id: userId,
         skill_category_id: skillCategory.id,
         experience: experienceGained,
@@ -517,7 +588,7 @@ class ProgressService {
       .limit(30);
 
     const { data: userSkills } = await supabase
-      .from('user_skills')
+      .from('user_skill_progress')
       .select('*, skill_categories(*)')
       .eq('user_id', userId);
 
@@ -583,7 +654,6 @@ class ProgressService {
       questions_answered: questionsAnswered,
       correct_answers: correctAnswers,
       experience_gained: experienceGained,
-      played_at: new Date().toISOString(),
     });
 
     await this.updateDailyProgress(
@@ -592,7 +662,7 @@ class ProgressService {
       Math.round(durationSeconds / 60),
       experienceGained,
       1,
-      Math.round((correctAnswers / questionsAnswered) * 100),
+      questionsAnswered > 0 ? Math.round((correctAnswers / questionsAnswered) * 100) : 0,
     );
 
     await this.updateLearningStreak();

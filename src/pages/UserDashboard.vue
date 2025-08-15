@@ -10,13 +10,13 @@
         <div class="user-level-info q-mt-sm">
           <q-chip
             :color="levelColor"
-            text-color="white"
+            text-color="black"
             :label="`Level ${progressStore.learningStats.level}`"
             icon="star"
           />
           <q-chip
             color="warning"
-            text-color="white"
+            text-color="black"
             :label="`${progressStore.learningStats.experience} XP`"
             icon="bolt"
             class="q-ml-sm"
@@ -78,10 +78,10 @@
     <!-- Progress Details Dialog -->
     <q-dialog v-model="showProgressDialog" maximized>
       <q-card>
-        <q-bar class="bg-primary text-white">
+        <q-bar class="bg-primary text-black">
           <div class="text-h6">Detailed Progress Analytics</div>
           <q-space />
-          <q-btn dense flat icon="close" @click="showProgressDialog = false" />
+          <q-btn dense flat icon="close" color="black" @click="showProgressDialog = false" />
         </q-bar>
         <q-card-section class="q-pa-none" style="height: calc(100vh - 50px); overflow-y: auto">
           <ProgressDashboard />
@@ -128,6 +128,10 @@ onMounted(async () => {
   .q-chip {
     font-weight: 600;
   }
+  /* Ensure chip icons are black (override defaults on colored chips) */
+  .q-icon {
+    color: #000 !important;
+  }
 }
 
 .quick-action-card {
@@ -170,6 +174,26 @@ onMounted(async () => {
 
   .progress-stat {
     color: #333;
+  }
+
+  /* Force any white text classes to black within dashboard */
+  .text-white {
+    color: #000 !important;
+  }
+
+  /* Quasar chips on colored backgrounds default to white content; override to black */
+  .user-level-info .q-chip .q-chip__content {
+    color: #000 !important;
+  }
+  .user-level-info .q-chip .q-icon {
+    color: #000 !important;
+  }
+
+  /* Dialog top bar text and icons to black even on bg-primary */
+  .q-dialog .q-bar.bg-primary,
+  .q-dialog .q-bar.bg-primary * {
+    color: #000 !important;
+    fill: #000 !important;
   }
 }
 </style>

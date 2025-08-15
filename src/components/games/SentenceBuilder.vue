@@ -37,11 +37,34 @@
           item-key="id"
         >
           <template #item="{ element, index }">
-            <q-chip :key="index" color="secondary" text-color="white" class="cursor-pointer">
+            <q-chip
+              :key="index"
+              color="secondary"
+              text-color="white"
+              class="cursor-pointer"
+              @click.stop="addWord(index)"
+            >
               {{ element }}
             </q-chip>
           </template>
         </draggable>
+        <div v-if="isDev" class="q-mt-sm row q-gutter-sm">
+          <q-btn
+            size="sm"
+            color="secondary"
+            outline
+            label="Add First Word"
+            :disable="scrambledWords.length === 0"
+            @click="addWord(0)"
+          />
+          <q-btn
+            size="sm"
+            color="accent"
+            outline
+            label="Auto Fill Correct"
+            @click="autoFillCorrect"
+          />
+        </div>
       </div>
     </div>
 
@@ -71,6 +94,7 @@ import { useQuasar } from 'quasar';
 const gameStore = useGameStore();
 const progressStore = useProgressStore();
 const $q = useQuasar();
+const isDev = import.meta.env.DEV;
 
 const userAnswer = ref<string[]>([]);
 const scrambledWords = ref<string[]>([]);
@@ -92,6 +116,13 @@ const initializeQuestion = () => {
   }
 };
 
+const autoFillCorrect = () => {
+  if (!currentQuestion.value) return;
+  const tokens = currentQuestion.value.correctAnswer.split(' ');
+  userAnswer.value = [...tokens];
+  scrambledWords.value = [];
+};
+
 onMounted(async () => {
   if (!gameStore.sentenceGameActive) {
     const questions = await gameService.getSentenceQuestions(5);
@@ -108,7 +139,34 @@ onMounted(async () => {
 const removeWord = (index: number) => {
   const word = userAnswer.value.splice(index, 1)[0];
   if (word) {
+    console.log('[SentenceBuilder] removeWord', {
+      index,
+      word,
+      userAnswer: [...userAnswer.value],
+      scrambledBefore: [...scrambledWords.value],
+    });
     scrambledWords.value.push(word);
+    console.log('[SentenceBuilder] after removeWord', {
+      scrambledAfter: [...scrambledWords.value],
+      userAnswer: [...userAnswer.value],
+    });
+  }
+};
+
+const addWord = (index: number) => {
+  const word = scrambledWords.value.splice(index, 1)[0];
+  if (word) {
+    console.log('[SentenceBuilder] addWord', {
+      index,
+      word,
+      scrambledBefore: [...scrambledWords.value],
+      userAnswerBefore: [...userAnswer.value],
+    });
+    userAnswer.value.push(word);
+    console.log('[SentenceBuilder] after addWord', {
+      scrambledAfter: [...scrambledWords.value],
+      userAnswerAfter: [...userAnswer.value],
+    });
   }
 };
 
