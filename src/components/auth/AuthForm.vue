@@ -176,7 +176,7 @@ interface Props {
 
 const props = withDefaults(defineProps<Props>(), {
   mode: 'signin',
-  redirectTo: '/dashboard',
+  redirectTo: '/',
 });
 
 const emit = defineEmits<{

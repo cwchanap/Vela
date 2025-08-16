@@ -93,7 +93,7 @@ const authStore = useAuthStore();
 
 // State
 const authMode = ref<'signin' | 'signup'>('signin');
-const redirectTo = ref('/dashboard');
+const redirectTo = ref('/');
 
 // Methods
 const handleAuthSuccess = async (type: 'signin' | 'signup' | 'magic-link') => {
@@ -121,9 +121,9 @@ const handleAuthSuccess = async (type: 'signin' | 'signup' | 'magic-link') => {
     });
     // Small delay to allow notification to show before redirect
     await new Promise((resolve) => setTimeout(resolve, 1000));
-    // Explicitly redirect to dashboard after successful signin
+    // Explicitly redirect to home after successful signin
     // This ensures redirect happens even if router guard timing is off
-    await router.push({ name: 'dashboard' });
+    await router.push({ name: 'home' });
   }
 };
 

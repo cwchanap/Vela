@@ -122,7 +122,7 @@ const { user } = storeToRefs(authStore);
 const router = useRouter();
 const route = useRoute();
 
-const isDashboard = computed(() => route.name === 'dashboard');
+const isDashboard = computed(() => route.name === 'home');
 
 const toggleLeftDrawer = () => {
   leftDrawerOpen.value = !leftDrawerOpen.value;

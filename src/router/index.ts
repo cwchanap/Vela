@@ -39,6 +39,12 @@ export default defineRouter(function (/* { store, ssrContext } */) {
     try {
       const authStore = useAuthStore();
 
+      // Legacy path support: redirect old dashboard URL to home
+      if (to.path === '/dashboard') {
+        next({ name: 'home' });
+        return;
+      }
+
       // Initialize auth store if not already done
       if (!authStore.isInitialized) {
         await authStore.initialize();
@@ -55,7 +61,7 @@ export default defineRouter(function (/* { store, ssrContext } */) {
         });
       } else if (requiresGuest && authStore.isAuthenticated) {
         // Redirect authenticated users away from guest-only pages
-        next({ name: 'dashboard' });
+        next({ name: 'home' });
       } else {
         next();
       }

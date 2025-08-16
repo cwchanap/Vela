@@ -1,8 +1,8 @@
 export const mainNavigation = [
   {
-    name: 'Dashboard',
+    name: 'Home',
     icon: 'fas fa-tachometer-alt',
-    path: '/dashboard',
+    path: '/',
     requiresAuth: true,
   },
   {
