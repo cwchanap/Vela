@@ -11,6 +11,12 @@ const routes: RouteRecordRaw[] = [
         component: () => import('pages/IndexPage.vue'),
         meta: { requiresAuth: true },
       },
+      {
+        path: 'settings',
+        name: 'settings',
+        component: () => import('pages/settings/SettingsPage.vue'),
+        meta: { requiresAuth: true },
+      },
       // Legacy child redirect: '/dashboard' -> '/'
       {
         path: 'dashboard',

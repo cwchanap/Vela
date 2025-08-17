@@ -121,9 +121,9 @@ const handleAuthSuccess = async (type: 'signin' | 'signup' | 'magic-link') => {
     });
     // Small delay to allow notification to show before redirect
     await new Promise((resolve) => setTimeout(resolve, 1000));
-    // Explicitly redirect to home after successful signin
-    // This ensures redirect happens even if router guard timing is off
-    await router.push({ name: 'home' });
+    // Explicitly redirect to desired target (respects ?redirect=...)
+    // This ensures navigation even if router guard timing is off
+    await router.push(redirectTo.value);
   }
 };
 

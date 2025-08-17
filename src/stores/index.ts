@@ -5,6 +5,7 @@ export * from './auth';
 export * from './games';
 export * from './chat';
 export * from './progress';
+export * from './llmSettings';
 
 // Default export for Quasar compatibility - return Pinia instance
 export default function () {
