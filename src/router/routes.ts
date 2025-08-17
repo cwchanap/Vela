@@ -107,6 +107,20 @@ const routes: RouteRecordRaw[] = [
   //   ],
   // },
 
+  // Dev utilities
+  {
+    path: '/dev',
+    component: () => import('layouts/MainLayout.vue'),
+    meta: { requiresAuth: true },
+    children: [
+      {
+        path: 'llm',
+        name: 'dev-llm',
+        component: () => import('pages/dev/LLMTestPage.vue'),
+      },
+    ],
+  },
+
   // Always leave this as last one,
   // but you can also remove it
   {

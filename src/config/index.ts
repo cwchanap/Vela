@@ -9,6 +9,10 @@ export const config = {
   // AI service configuration
   ai: {
     openaiApiKey: import.meta.env.VITE_OPENAI_API_KEY || '',
+    googleApiKey: import.meta.env.VITE_GOOGLE_AI_API_KEY || '',
+    openrouterApiKey: import.meta.env.VITE_OPENROUTER_API_KEY || '',
+    defaultProvider: (import.meta.env.VITE_LLM_PROVIDER as 'google' | 'openrouter') || 'google',
+    defaultModel: import.meta.env.VITE_LLM_MODEL || 'gemini-1.5-flash',
   },
 
   // App configuration
