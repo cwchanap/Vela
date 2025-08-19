@@ -11,11 +11,10 @@ interface GoogleProviderOptions {
  */
 export class GoogleProvider implements LLMProvider {
   readonly name: LLMProviderName = 'google';
-  private apiKey: string | undefined;
   private model: string;
 
   constructor(options?: GoogleProviderOptions) {
-    this.apiKey = options?.apiKey;
+    // API calls are proxied via Supabase Edge Function; no client-side API key
     this.model = options?.model || 'gemini-2.5-flash-lite';
   }
 
@@ -28,76 +27,40 @@ export class GoogleProvider implements LLMProvider {
   }
 
   async generate(request: LLMRequest): Promise<LLMResponse> {
-    if (!this.apiKey) {
-      // Leave placeholder behavior per requirement
-      console.warn('[GoogleProvider] Missing API key. Set VITE_GOOGLE_AI_API_KEY');
-    }
-
     const modelForCall = request.model || this.model;
-    const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${modelForCall}:generateContent?key=${this.apiKey || 'YOUR_GOOGLE_AI_API_KEY'}`;
 
-    // Build contents array from messages/prompt
-    type Part = { text: string };
-    type Content = { role?: 'user' | 'model'; parts: Part[] };
-    type GenerateBody = {
-      contents: Content[];
-      generationConfig?: { temperature?: number; maxOutputTokens?: number };
-      systemInstruction?: { role?: 'system'; parts: Part[] };
+    const payload = {
+      provider: 'google' as const,
+      model: modelForCall,
+      messages: request.messages,
+      prompt: request.prompt,
+      system: request.system,
+      temperature: request.temperature ?? 0.7,
+      maxTokens: request.maxTokens ?? 1024,
     };
 
-    const contents: Content[] = [];
-    let systemInstruction: GenerateBody['systemInstruction'];
-
-    if (request.messages && request.messages.length > 0) {
-      for (const m of request.messages) {
-        if (m.role === 'system') {
-          systemInstruction = { role: 'system', parts: [{ text: m.content }] };
-        } else {
-          contents.push({
-            role: m.role === 'assistant' ? 'model' : 'user',
-            parts: [{ text: m.content }],
-          });
-        }
-      }
-    } else if (request.prompt) {
-      contents.push({ role: 'user', parts: [{ text: request.prompt }] });
-    } else {
-      throw new Error('GoogleProvider.generate requires prompt or messages');
-    }
-
-    const body: GenerateBody = {
-      contents,
-      generationConfig: {
-        temperature: request.temperature ?? 0.7,
-        maxOutputTokens: request.maxTokens ?? 1024,
-      },
-    };
-
-    if (request.system) {
-      body.systemInstruction = {
-        role: 'system',
-        parts: [{ text: request.system }],
-      };
-    } else if (systemInstruction) {
-      body.systemInstruction = systemInstruction;
-    }
-
-    const res = await fetch(endpoint, {
+    const res = await fetch('/api/llm-chat', {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(body),
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
     });
 
-    if (!res.ok) {
-      const txt = await res.text();
-      throw new Error(`GoogleProvider error ${res.status}: ${txt}`);
+    const textBody = await res.text();
+    type BridgeResponse = { text?: string; raw?: unknown; error?: string };
+    let data: BridgeResponse | null = null;
+    try {
+      data = textBody ? (JSON.parse(textBody) as BridgeResponse) : null;
+    } catch {
+      // keep raw text if not JSON
+      data = { raw: textBody };
     }
 
-    const data = await res.json();
-    const text = data?.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
+    if (!res.ok) {
+      const msg = data && data.error ? data.error : res.statusText;
+      throw new Error(`GoogleProvider bridge error: ${msg}`);
+    }
 
+    const text: string = data?.text ?? '';
     return { text, raw: data };
   }
 }

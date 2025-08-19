@@ -12,6 +12,12 @@ const routes: RouteRecordRaw[] = [
         meta: { requiresAuth: true },
       },
       {
+        path: 'chat',
+        name: 'ai-chat',
+        component: () => import('pages/chat/AIChatPage.vue'),
+        meta: { requiresAuth: true },
+      },
+      {
         path: 'settings',
         name: 'settings',
         component: () => import('pages/settings/SettingsPage.vue'),
@@ -113,19 +119,7 @@ const routes: RouteRecordRaw[] = [
   //   ],
   // },
 
-  // Dev utilities
-  {
-    path: '/dev',
-    component: () => import('layouts/MainLayout.vue'),
-    meta: { requiresAuth: true },
-    children: [
-      {
-        path: 'llm',
-        name: 'dev-llm',
-        component: () => import('pages/dev/LLMTestPage.vue'),
-      },
-    ],
-  },
+  // Dev utilities (removed LLM test page)
 
   // Always leave this as last one,
   // but you can also remove it

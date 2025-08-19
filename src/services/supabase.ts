@@ -50,6 +50,9 @@ export interface UserPreferences {
   difficulty: 'Beginner' | 'Intermediate' | 'Advanced';
   notifications: boolean;
   todayStudyTime?: number;
+  // Per-user LLM preferences
+  llm_provider?: 'google' | 'openrouter';
+  llm_models?: Partial<Record<'google' | 'openrouter', string>>;
 }
 
 export interface ChatContext {

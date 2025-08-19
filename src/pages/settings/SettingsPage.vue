@@ -64,7 +64,6 @@
 import { computed, ref, watch } from 'vue';
 import type { LLMProviderName } from '../../services/llm';
 import { useLLMSettingsStore } from '../../stores/llmSettings';
-import { config } from '../../config';
 
 const store = useLLMSettingsStore();
 
@@ -73,47 +72,43 @@ const providerOptions = [
   { label: 'OpenRouter', value: 'openrouter' },
 ] as { label: string; value: LLMProviderName }[];
 
-const selectedProvider = ref<LLMProviderName>(store.provider);
+// Bind provider via computed to store; model uses local buffer and commits on save
+const selectedProvider = computed<LLMProviderName>({
+  get: () => store.provider,
+  set: (v) => store.setProvider(v),
+});
 const model = ref<string>(store.currentModel);
 
+// Keep local model buffer aligned when provider changes
 watch(
   () => selectedProvider.value,
-  (prov) => {
-    store.setProvider(prov);
-    model.value = store.currentModel;
-  },
-);
-
-watch(
-  () => model.value,
   () => {
-    // No-op live; actual commit on save for UX
+    model.value = store.currentModel;
   },
 );
 
 const recommendedByProvider: Record<LLMProviderName, string[]> = {
   google: ['gemini-2.5-flash-lite', 'gemini-1.5-flash', 'gemini-2.0-flash'],
   openrouter: [
-    'openai/gpt-4o-mini',
-    'anthropic/claude-3.5-haiku',
-    'meta-llama/llama-3.1-8b-instruct',
+    'openai/gpt-oss-20b:free',
+    'moonshotai/kimi-k2:free',
+    'deepseek/deepseek-r1-0528:free',
+    'z-ai/glm-4.5-air:free',
+    'google/gemma-3-27b-it:free',
   ],
 };
 
 const recommendedModels = computed(() => recommendedByProvider[selectedProvider.value] || []);
 
-const save = () => {
-  store.setProvider(selectedProvider.value);
+const save = async () => {
   store.setModel(model.value.trim());
+  await store.save();
   store.notifySaved();
 };
 
-const resetDefaults = () => {
-  const defProvider = (config.ai.defaultProvider || 'google') as LLMProviderName;
-  const defModel = config.ai.defaultModel || 'gemini-2.5-flash-lite';
-  selectedProvider.value = defProvider;
-  model.value = defModel;
-  save();
+const resetDefaults = async () => {
+  await store.resetToDefaults();
+  model.value = store.currentModel;
 };
 
 const activeSummary = computed(() => `${store.provider} • ${store.currentModel}`);

@@ -8,9 +8,9 @@ export class LLMService {
   private providers: Partial<Record<LLMProviderName, LLMProvider>> = {};
 
   constructor() {
-    // Initialize default provider from config
-    const defaultName: LLMProviderName = config.ai.defaultProvider;
-    this.provider = this.initProvider(defaultName, config.ai.defaultModel);
+    // Initialize with safe internal defaults; store will override based on user profile
+    const defaultName: LLMProviderName = 'google';
+    this.provider = this.initProvider(defaultName);
   }
 
   private initProvider(name: LLMProviderName, model?: string): LLMProvider {
@@ -19,19 +19,18 @@ export class LLMService {
 
     let instance: LLMProvider;
     if (name === 'google') {
-      const opts: { apiKey?: string; model?: string } = { apiKey: config.ai.googleApiKey };
+      const opts: { model?: string } = {};
       if (model) opts.model = model;
       instance = new GoogleProvider(opts);
     } else if (name === 'openrouter') {
-      const opts: { apiKey?: string; model?: string; appName?: string } = {
-        apiKey: config.ai.openrouterApiKey,
+      const opts: { model?: string; appName?: string } = {
         appName: config.app.name,
       };
       if (model) opts.model = model;
       instance = new OpenRouterProvider(opts);
     } else {
       // Fallback to google
-      const opts: { apiKey?: string; model?: string } = { apiKey: config.ai.googleApiKey };
+      const opts: { model?: string } = {};
       if (model) opts.model = model;
       instance = new GoogleProvider(opts);
     }
@@ -48,7 +47,7 @@ export class LLMService {
   }
 
   setProvider(name: LLMProviderName, model?: string) {
-    this.provider = this.initProvider(name, model || config.ai.defaultModel);
+    this.provider = this.initProvider(name, model);
   }
 
   setModel(model: string) {
