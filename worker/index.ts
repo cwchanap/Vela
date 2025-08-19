@@ -1,5 +1,3 @@
-/// <reference types="@cloudflare/workers-types" />
-
 export interface Env {
   GEMINI_API_KEY?: string;
   GOOGLE_AI_API_KEY?: string;
@@ -10,7 +8,7 @@ export interface Env {
 import { handleLLMChat } from '../src/api/llm-chat';
 
 export default {
-  async fetch(request, env) {
+  async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
 
     // Only handle API routes here. Assets & SPA fallback are handled by the plugin via wrangler assets config.
@@ -18,9 +16,9 @@ export default {
       url.pathname === '/api/llm-chat' ||
       (url.pathname.startsWith('/api/llm-chat') && request.method === 'OPTIONS')
     ) {
-      return handleLLMChat(request, env as Env);
+      return handleLLMChat(request, env);
     }
 
     return new Response(null, { status: 404 });
   },
-} satisfies ExportedHandler<Env>;
+};
