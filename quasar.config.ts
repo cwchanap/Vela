@@ -2,6 +2,7 @@
 // https://v2.quasar.dev/quasar-cli-vite/quasar-config-file
 
 import { defineConfig } from '#q-app/wrappers';
+import { cloudflare } from '@cloudflare/vite-plugin';
 
 export default defineConfig((/* ctx */) => {
   return {
@@ -84,12 +85,26 @@ export default defineConfig((/* ctx */) => {
 
         // Optimize chunk size
         viteConf.build.chunkSizeWarningLimit = 1000;
+
+        // Register Cloudflare Vite plugin for single-command dev (Worker + Vite HMR)
+        viteConf.plugins = viteConf.plugins || [];
+        // Avoid duplicate registration if Quasar reuses the config
+        const hasCloudflare =
+          Array.isArray(viteConf.plugins) &&
+          viteConf.plugins.some((p: unknown) => {
+            if (typeof p === 'object' && p !== null && 'name' in p) {
+              const name = (p as { name?: string }).name;
+              return name === 'cloudflare' || name === 'cloudflare:dev-server';
+            }
+            return false;
+          });
+        if (!hasCloudflare) {
+          viteConf.plugins.push(cloudflare());
+        }
       },
       // viteVuePluginOptions: {},
 
       vitePlugins: [
-        // Cloudflare Vite plugin serves SPA assets and runs the Worker during dev/preview
-        ['@cloudflare/vite-plugin', {}],
         [
           'vite-plugin-checker',
           {

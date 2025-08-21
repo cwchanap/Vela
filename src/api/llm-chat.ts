@@ -1,6 +1,5 @@
 export interface Env {
   GEMINI_API_KEY?: string;
-  GOOGLE_AI_API_KEY?: string;
   OPENROUTER_API_KEY?: string;
   APP_NAME?: string;
 }
@@ -61,7 +60,7 @@ export async function handleLLMChat(request: Request, env: Env): Promise<Respons
 
   try {
     if (provider === 'google') {
-      const apiKey = env.GEMINI_API_KEY || env.GOOGLE_AI_API_KEY;
+      const apiKey = env.GEMINI_API_KEY;
       if (!apiKey) {
         return new Response(JSON.stringify({ error: 'Missing GEMINI_API_KEY server secret' }), {
           status: 500,

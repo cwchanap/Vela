@@ -1,6 +1,5 @@
 export interface Env {
   GEMINI_API_KEY?: string;
-  GOOGLE_AI_API_KEY?: string;
   OPENROUTER_API_KEY?: string;
   APP_NAME?: string;
 }
