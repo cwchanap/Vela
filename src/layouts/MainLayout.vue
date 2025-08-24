@@ -45,20 +45,21 @@
               <img :src="user.avatar_url || 'https://cdn.quasar.dev/img/boy-avatar.png'" />
             </q-avatar>
             <q-tooltip>Account</q-tooltip>
-            <q-menu>
-              <q-list style="min-width: 100px">
+            <q-menu class="account-menu" content-class="account-menu__content">
+              <q-list dense style="min-width: 100px" class="q-px-none q-py-xs">
                 <q-item
                   v-for="item in userNavigation"
                   :key="item.name"
                   v-ripple
                   clickable
+                  dense
+                  class="q-px-none q-py-xs"
                   :to="item.path"
                   @click="item.name === 'Logout' && handleLogout()"
                 >
-                  <q-item-section avatar>
-                    <q-icon :name="item.icon" :color="isDashboard ? 'black' : void 0" />
+                  <q-item-section class="q-pl-none">
+                    <span>{{ item.name }}</span>
                   </q-item-section>
-                  <q-item-section>{{ item.name }}</q-item-section>
                 </q-item>
               </q-list>
             </q-menu>
@@ -164,5 +165,33 @@ watch(
 .q-header.text-black * {
   color: #000 !important;
   fill: #000 !important;
+}
+
+/* Compact spacing for user avatar dropdown */
+.account-menu .q-item {
+  min-height: 34px;
+  padding-left: 0 !important;
+  padding-right: 8px;
+}
+.account-menu .q-item .q-item__section:first-child {
+  padding-left: 0 !important;
+  margin-left: 0 !important;
+}
+.account-menu .q-item .q-item__section--main {
+  padding-left: 0 !important;
+  margin-left: 0 !important;
+}
+.account-menu .q-item .q-item__section--main .row {
+  gap: 0 !important;
+}
+.account-menu .q-list {
+  padding-top: 4px;
+  padding-bottom: 4px;
+  padding-left: 0 !important;
+  padding-right: 0 !important;
+}
+/* Remove any container padding from the q-menu content */
+.account-menu__content {
+  padding: 0 !important;
 }
 </style>

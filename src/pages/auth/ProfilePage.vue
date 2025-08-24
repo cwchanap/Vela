@@ -29,9 +29,9 @@
         <UserProfile />
 
         <!-- Additional Profile Sections -->
-        <div class="row q-gutter-lg q-mt-lg">
+        <div class="row q-gutter-lg q-mt-lg justify-center">
           <!-- Learning Statistics -->
-          <div class="col-12 col-md-6">
+          <div class="col-12 col-sm-10 col-md-6 col-lg-5">
             <q-card>
               <q-card-section>
                 <div class="text-h6 q-mb-md">Learning Statistics</div>
@@ -73,7 +73,7 @@
           </div>
 
           <!-- Recent Activity -->
-          <div class="col-12 col-md-6">
+          <div class="col-12 col-sm-10 col-md-6 col-lg-5">
             <q-card>
               <q-card-section>
                 <div class="text-h6 q-mb-md">Recent Activity</div>
@@ -257,6 +257,12 @@ onMounted(async () => {
 .quick-actions .q-btn {
   margin-right: 0.5rem;
   margin-bottom: 0.5rem;
+}
+
+/* Center the Quick Actions card and keep it consistent with profile card width */
+.quick-actions > .q-card {
+  max-width: 600px;
+  margin: 0 auto;
 }
 
 @media (max-width: 600px) {

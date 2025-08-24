@@ -18,10 +18,16 @@
 
       <div class="row q-col-gutter-md q-mt-sm">
         <div class="col-12 col-md-8">
-          <q-input
+          <q-select
             v-model="model"
+            :options="modelOptions"
             label="Model"
             dense
+            options-dense
+            use-input
+            fill-input
+            input-debounce="0"
+            new-value-mode="add-unique"
             data-testid="llm-model-input"
             :hint="`Current provider: ${selectedProvider}`"
           />
@@ -34,15 +40,6 @@
             @click="save"
             data-testid="llm-save"
           />
-        </div>
-      </div>
-
-      <div class="q-mt-md">
-        <div class="text-caption text-grey-7 q-mb-xs">Recommended models</div>
-        <div class="row q-col-gutter-sm">
-          <div v-for="m in recommendedModels" :key="m" class="col-auto">
-            <q-chip clickable outline color="primary" @click="applyRecommended(m)">{{ m }}</q-chip>
-          </div>
         </div>
       </div>
 
@@ -87,18 +84,19 @@ watch(
   },
 );
 
-const recommendedByProvider: Record<LLMProviderName, string[]> = {
-  google: ['gemini-2.5-flash-lite', 'gemini-1.5-flash', 'gemini-2.0-flash'],
-  openrouter: [
-    'openai/gpt-oss-20b:free',
-    'moonshotai/kimi-k2:free',
-    'deepseek/deepseek-r1-0528:free',
-    'z-ai/glm-4.5-air:free',
-    'google/gemma-3-27b-it:free',
-  ],
-};
+// Free-form dropdown options; start with the current model and allow user-typed entries
+const modelOptions = ref<string[]>([store.currentModel]);
 
-const recommendedModels = computed(() => recommendedByProvider[selectedProvider.value] || []);
+// Keep options including the current model when provider (and thus currentModel) changes
+watch(
+  () => selectedProvider.value,
+  () => {
+    model.value = store.currentModel;
+    if (!modelOptions.value.includes(store.currentModel)) {
+      modelOptions.value.unshift(store.currentModel);
+    }
+  },
+);
 
 const save = async () => {
   store.setModel(model.value.trim());
@@ -112,10 +110,6 @@ const resetDefaults = async () => {
 };
 
 const activeSummary = computed(() => `${store.provider} • ${store.currentModel}`);
-
-function applyRecommended(m: string) {
-  model.value = m;
-}
 </script>
 
 <style scoped></style>
