@@ -172,6 +172,7 @@ watch(
   min-height: 34px;
   padding-left: 0 !important;
   padding-right: 8px;
+  text-align: center;
 }
 .account-menu .q-item .q-item__section:first-child {
   padding-left: 0 !important;
@@ -180,6 +181,7 @@ watch(
 .account-menu .q-item .q-item__section--main {
   padding-left: 0 !important;
   margin-left: 0 !important;
+  justify-content: center;
 }
 .account-menu .q-item .q-item__section--main .row {
   gap: 0 !important;
