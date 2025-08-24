@@ -14,7 +14,7 @@ export const mainNavigation = [
   {
     name: 'Games',
     icon: 'fas fa-gamepad',
-    path: '/games/vocabulary',
+    path: '/games',
     requiresAuth: true,
   },
   {

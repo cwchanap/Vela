@@ -74,6 +74,11 @@ const routes: RouteRecordRaw[] = [
     meta: { requiresAuth: true },
     children: [
       {
+        path: '',
+        name: 'games',
+        component: () => import('pages/games/GamesIndex.vue'),
+      },
+      {
         path: 'vocabulary',
         name: 'vocabulary-game',
         component: () => import('pages/games/VocabularyGame.vue'),
