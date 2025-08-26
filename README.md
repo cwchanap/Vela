@@ -9,6 +9,7 @@ A comprehensive Japanese language learning application built with Quasar Framewo
 - **Progress Tracking**: Individual word mastery with spaced repetition
 - **Gamification System**: Achievements, levels, and learning streaks
 - **AI Chat Integration**: Conversational practice with AI
+- **Chat History (Local DynamoDB)**: Persist and browse chat conversations locally during development
 - **Real-time Analytics**: Daily progress tracking and skill development
 
 ## Technology Stack
@@ -18,7 +19,7 @@ A comprehensive Japanese language learning application built with Quasar Framewo
 - **Authentication**: Supabase Auth with email/password
 - **State Management**: Pinia stores
 - **Build Tool**: Vite
-- **Deployment**: Netlify/Supabase
+- **Deployment**: Netlify/Supabase + Cloudflare Worker (local dev API bridge)
 
 ## Production Database Setup
 
@@ -57,6 +58,47 @@ npm run dev
 quasar dev
 ```
 
+### Local Chat History Setup (DynamoDB Local)
+
+This app can store AI chat history to a local DynamoDB instance for development.
+
+1. Start Docker Desktop (required to run containers)
+2. Launch DynamoDB Local:
+
+```bash
+npm run ddb:up
+```
+
+3. Create the table:
+
+```bash
+npm run ddb:init
+```
+
+4. Run the dev server with Worker bridge:
+
+```bash
+npm run dev:wrangler
+```
+
+Notes:
+
+- The Cloudflare Worker exposes REST endpoints:
+  - POST `/api/chat-history/save`
+  - GET `/api/chat-history/threads?user_id=...`
+  - GET `/api/chat-history/messages?chat_id=...`
+- Default local config is set in [wrangler.toml](wrangler.toml):
+  - `DDB_ENDPOINT=http://127.0.0.1:8000`
+  - `DDB_REGION=local`
+  - `DDB_TABLE=VelaChatMessages`
+- Optional client-env overrides exist in [.env.example](.env.example) for experimentation.
+
+### Using Chat History in the UI
+
+- Open the AI Chat page and use the top-right "History" button to view previous threads.
+- Selecting a thread loads all messages into the current chat.
+- New messages (user and AI) automatically persist to the current `chat_id`. A new conversation is started automatically on first send if none exists.
+
 ### Database Setup
 
 The production database is already configured with:
@@ -73,9 +115,18 @@ The production database is already configured with:
 
 ```bash
 npm run dev          # Start development server with hot reload
+npm run dev:wrangler # Run Worker bridge dev server (API + SPA assets)
 npm run build        # Build for production
 npm install          # Install dependencies
 npm run postinstall  # Run after install (runs quasar prepare)
+```
+
+### Local DynamoDB
+
+```bash
+npm run ddb:up    # Start DynamoDB Local via docker compose
+npm run ddb:init  # Create the VelaChatMessages table and GSI
+npm run ddb:down  # Stop containers
 ```
 
 ### Code Quality
@@ -118,15 +169,27 @@ The application is configured for Supabase hosting with:
 
 ```
 src/
-├── boot/           # Application initialization
-├── stores/         # Pinia state management
-├── services/       # API and business logic
-├── components/     # Reusable Vue components
-├── pages/          # Application pages
-├── layouts/        # Page layouts
-├── utils/          # Utility functions
-└── config/         # Configuration files
+├── api/           # Worker-handled API routes (LLM bridge, chat-history)
+├── boot/          # Application initialization
+├── stores/        # Pinia state management
+├── services/      # API and business logic
+├── components/    # Reusable Vue components
+├── pages/         # Application pages
+├── layouts/       # Page layouts
+├── utils/         # Utility functions
+└── config/        # Configuration files
 ```
+
+Key files:
+
+- Worker Router and API:
+  - [worker.fetch()](worker/index.ts:9)
+  - [handleChatHistory()](src/api/chat-history.ts:55)
+  - [handleLLMChat()](src/api/llm-chat.ts:1)
+- Frontend Chat UI and Store:
+  - [AIChatPage.vue](src/pages/chat/AIChatPage.vue:1)
+  - [useChatStore()](src/stores/chat.ts:12)
+  - [chatHistoryClient](src/services/chatHistoryClient.ts:1)
 
 ## Customization
 

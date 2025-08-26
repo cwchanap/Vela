@@ -1,6 +1,17 @@
 <template>
   <q-page class="column q-pa-md" data-testid="ai-chat-page">
-    <div class="text-h5 q-mb-md">AI Chat</div>
+    <div class="row items-center q-mb-md">
+      <div class="text-h5">AI Chat</div>
+      <q-space />
+      <q-btn
+        flat
+        dense
+        icon="history"
+        label="History"
+        @click="openHistory"
+        data-testid="llm-chat-history"
+      />
+    </div>
 
     <div
       class="col column bg-grey-2 q-pa-md rounded-borders"
@@ -65,6 +76,55 @@
         data-testid="llm-chat-clear"
       />
     </div>
+
+    <!-- History Dialog -->
+    <q-dialog v-model="showHistory">
+      <q-card style="min-width: 500px; max-width: 90vw">
+        <q-card-section class="row items-center">
+          <div class="text-h6">Chat History</div>
+          <q-space />
+          <q-btn icon="close" flat round dense v-close-popup />
+        </q-card-section>
+
+        <q-separator />
+
+        <q-card-section>
+          <div v-if="threadsLoading" class="row items-center">
+            <q-spinner class="q-mr-sm" />
+            <span>Loading threads…</span>
+          </div>
+          <div v-else-if="threads.length === 0" class="text-grey-7">
+            No previous conversations found.
+          </div>
+          <q-list v-else bordered separator>
+            <q-item
+              v-for="t in threads"
+              :key="t.chat_id"
+              clickable
+              v-ripple
+              @click="selectThread(t)"
+              data-testid="llm-chat-thread-item"
+            >
+              <q-item-section>
+                <q-item-label>{{ t.title }}</q-item-label>
+                <q-item-label caption>
+                  {{ new Date(t.lastDate).toLocaleString() }} • {{ t.messageCount }} messages
+                </q-item-label>
+              </q-item-section>
+              <q-item-section side>
+                <q-icon name="chevron_right" />
+              </q-item-section>
+            </q-item>
+          </q-list>
+        </q-card-section>
+
+        <q-separator />
+
+        <q-card-actions align="right">
+          <q-btn flat label="Close" v-close-popup />
+        </q-card-actions>
+      </q-card>
+    </q-dialog>
   </q-page>
 </template>
 
@@ -74,15 +134,23 @@ import { useQuasar } from 'quasar';
 import { storeToRefs } from 'pinia';
 import { useChatStore } from '../../stores/chat';
 import { useLLMSettingsStore } from '../../stores/llmSettings';
+import { useAuthStore } from '../../stores/auth';
+import { chatHistoryClient, type ChatThreadSummaryDTO } from '../../services/chatHistoryClient';
 import { llmService, type ChatMessage as LLMChatMessage } from '../../services/llm';
 
 const $q = useQuasar();
 const chat = useChatStore();
 const llmSettings = useLLMSettingsStore();
+const auth = useAuthStore();
 const { provider, currentModel } = storeToRefs(llmSettings);
 
 const input = ref('');
 const messagesEl = ref<HTMLElement | null>(null);
+
+// History dialog state
+const showHistory = ref(false);
+const threadsLoading = ref(false);
+const threads = ref<ChatThreadSummaryDTO[]>([]);
 
 const formatTime = (d: Date) =>
   new Date(d).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
@@ -100,12 +168,74 @@ const syncLLMFromSettings = () => {
   llmService.setModel(currentModel.value);
 };
 
+const getUserId = () => auth.user?.id || 'anonymous';
+
+const ensureChatId = () => {
+  if (!chat.chatId) {
+    chat.startNewChat();
+  }
+  return chat.chatId!;
+};
+
+const saveToHistory = async (chat_id: string, message: string, is_user: boolean) => {
+  try {
+    await chatHistoryClient.saveMessage({
+      chat_id,
+      user_id: getUserId(),
+      message,
+      is_user,
+    });
+  } catch (e) {
+    console.error('Failed to save chat message', e);
+    $q.notify({ type: 'warning', message: 'Failed to save chat history (local dev)' });
+  }
+};
+
+const openHistory = async () => {
+  threadsLoading.value = true;
+  showHistory.value = true;
+  try {
+    const uid = getUserId();
+    threads.value = await chatHistoryClient.listThreads(uid);
+  } catch (e) {
+    console.error(e);
+    $q.notify({ type: 'negative', message: 'Failed to load chat history' });
+  } finally {
+    threadsLoading.value = false;
+  }
+};
+
+const selectThread = async (t: ChatThreadSummaryDTO) => {
+  try {
+    const items = await chatHistoryClient.getMessages(t.chat_id);
+    chat.setChatId(t.chat_id);
+    chat.setMessages(
+      items.map((it) => ({
+        id: crypto.randomUUID(),
+        type: it.is_user ? 'user' : 'ai',
+        content: it.message,
+        timestamp: new Date(it.date),
+      })),
+    );
+    showHistory.value = false;
+    await scrollToBottom();
+  } catch (e) {
+    console.error(e);
+    $q.notify({ type: 'negative', message: 'Failed to load conversation' });
+  }
+};
+
 const onSend = async () => {
   const content = input.value.trim();
   if (!content || chat.isLoading) return;
 
   chat.clearError();
+
+  // Ensure we have a chat/thread id and persist the user message
+  const cid = ensureChatId();
   chat.addMessage({ type: 'user', content });
+  void saveToHistory(cid, content, true);
+
   input.value = '';
   await scrollToBottom();
 
@@ -131,6 +261,7 @@ const onSend = async () => {
     });
 
     chat.addMessage({ type: 'ai', content: resp.text });
+    void saveToHistory(cid, resp.text, false);
   } catch (e: unknown) {
     console.error(e);
     const message = e instanceof Error ? e.message : 'Failed to get AI response';

@@ -1,0 +1,21 @@
+version: '3.8'
+
+services:
+  dynamodb:
+    image: amazon/dynamodb-local:latest
+    container_name: vela-dynamodb-local
+    ports:
+      - '8000:8000'
+    command: -jar DynamoDBLocal.jar -sharedDb -dbPath /home/dynamodblocal/data
+    volumes:
+      - dynamodb-data:/home/dynamodblocal/data
+    environment:
+      - JAVA_TOOL_OPTIONS=-Xms256m -Xmx512m
+    healthcheck:
+      test: ['CMD-SHELL', 'curl -s http://localhost:8000/shell/ > /dev/null || exit 1']
+      interval: 5s
+      timeout: 2s
+      retries: 20
+
+volumes:
+  dynamodb-data:

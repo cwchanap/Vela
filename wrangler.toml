@@ -1,16 +1,26 @@
 name = "vela-app"
 compatibility_date = "2025-08-01"
 main = "./worker/index.ts"
+compatibility_flags = ["nodejs_compat"]
 
 [assets]
 # Serve the Quasar SPA; unmatched navigations fall back to index.html
 directory = "public"
 not_found_handling = "single-page-application"
-# Ensure API routes hit the Worker first (even for navigations)
-run_worker_first = ["/api/*"]
 
 [vars]
 APP_NAME = "Vela Japanese Learning App"
+
+# For local E2E in environments without Docker, use in-memory chat history.
+# Set to "ddb" to use DynamoDB (requires Docker and local dynamodb running)
+CHAT_HISTORY_MODE = "memory"
+
+# DynamoDB (Local) defaults for development
+# The Worker API will use these to connect to your local DynamoDB instance when running `wrangler dev`
+DDB_ENDPOINT = "http://127.0.0.1:8000"
+DDB_REGION = "local"
+DDB_TABLE = "VelaChatMessages"
+
 # Secrets to set via `wrangler secret put`:
 # - GEMINI_API_KEY
 # - OPENROUTER_API_KEY

@@ -15,6 +15,7 @@ export const useChatStore = defineStore('chat', () => {
   const isTyping = ref(false);
   const isLoading = ref(false);
   const error = ref<string | null>(null);
+  const chatId = ref<string | null>(null); // current conversation/thread id
 
   // Actions
   const addMessage = (message: Omit<ChatMessage, 'id' | 'timestamp'>) => {
@@ -24,6 +25,10 @@ export const useChatStore = defineStore('chat', () => {
       timestamp: new Date(),
     };
     messages.value.push(newMessage);
+  };
+
+  const setMessages = (list: ChatMessage[]) => {
+    messages.value = [...list];
   };
 
   const setTyping = (typing: boolean) => {
@@ -38,8 +43,19 @@ export const useChatStore = defineStore('chat', () => {
     error.value = errorMessage;
   };
 
+  const setChatId = (id: string | null) => {
+    chatId.value = id;
+  };
+
+  const startNewChat = () => {
+    chatId.value = crypto.randomUUID();
+    messages.value = [];
+    error.value = null;
+  };
+
   const clearMessages = () => {
     messages.value = [];
+    // keep chatId as-is so subsequent sends continue the same thread unless caller resets
   };
 
   const clearError = () => {
@@ -52,11 +68,15 @@ export const useChatStore = defineStore('chat', () => {
     isTyping,
     isLoading,
     error,
+    chatId,
     // Actions
     addMessage,
+    setMessages,
     setTyping,
     setLoading,
     setError,
+    setChatId,
+    startNewChat,
     clearMessages,
     clearError,
   };
