@@ -23,6 +23,12 @@ const routes: RouteRecordRaw[] = [
         component: () => import('pages/settings/SettingsPage.vue'),
         meta: { requiresAuth: true },
       },
+      {
+        path: 'progress',
+        name: 'progress',
+        component: () => import('pages/progress/ProgressPage.vue'),
+        meta: { requiresAuth: true },
+      },
       // Legacy child redirect: '/dashboard' -> '/'
       {
         path: 'dashboard',

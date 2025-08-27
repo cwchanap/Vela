@@ -23,6 +23,12 @@ export const mainNavigation = [
     path: '/chat',
     requiresAuth: true,
   },
+  {
+    name: 'Progress',
+    icon: 'fas fa-chart-line',
+    path: '/progress',
+    requiresAuth: true,
+  },
 ];
 
 export const userNavigation = [
