@@ -1,0 +1,33 @@
+{
+    "folders": [
+        {
+            "name": "Root",
+            "path": "."
+        },
+        {
+            "name": "Vela App",
+            "path": "./apps/vela"
+        },
+        {
+            "name": "CDK Infrastructure",
+            "path": "./packages/cdk"
+        }
+    ],
+    "settings": {
+        "typescript.preferences.includePackageJsonAutoImports": "on",
+        "typescript.suggest.autoImports": true,
+        "eslint.workingDirectories": [
+            "apps/vela",
+            "packages/cdk"
+        ]
+    },
+    "extensions": {
+        "recommendations": [
+            "ms-vscode.vscode-typescript-next",
+            "Vue.volar",
+            "bradlc.vscode-tailwindcss",
+            "esbenp.prettier-vscode",
+            "dbaeumer.vscode-eslint"
+        ]
+    }
+}
