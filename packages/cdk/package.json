@@ -3,7 +3,6 @@
   "version": "0.0.1",
   "description": "Vela AWS CDK Infrastructure",
   "author": "cwchanap <cwchanap@connect.ust.hk>",
-  "type": "module",
   "private": true,
   "scripts": {
     "build": "npm run lambda:build",
