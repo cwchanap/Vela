@@ -17,7 +17,20 @@
       "dependsOn": ["^format"]
     },
     "test": {
-      "dependsOn": ["^build"]
+      "dependsOn": ["^build"],
+      "outputs": ["test-results/**", "playwright-report/**"]
+    },
+    "test:headed": {
+      "dependsOn": ["^build"],
+      "cache": false
+    },
+    "test:ui": {
+      "dependsOn": ["^build"],
+      "cache": false
+    },
+    "test:debug": {
+      "dependsOn": ["^build"],
+      "cache": false
     },
     "cdk:synth": {
       "dependsOn": ["^build"]

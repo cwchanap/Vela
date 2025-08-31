@@ -41,3 +41,10 @@ cdk.out
 
 # Turbo
 .turbo
+
+# Playwright
+/test-results/
+/playwright-report/
+/blob-report/
+/playwright/.cache/
+test-results/

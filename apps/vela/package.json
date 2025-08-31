@@ -10,7 +10,11 @@
     "lint": "eslint \"./src/**/*.{ts,js,vue}\"",
     "lint:fix": "eslint \"./src/**/*.{ts,js,vue}\" --fix",
     "format": "prettier --write \"**/*.{js,ts,vue,scss,html,md,json}\" --ignore-path ../../.gitignore",
-    "test": "echo \"No test specified\" && exit 0",
+    "test": "playwright test",
+    "test:headed": "playwright test --headed",
+    "test:ui": "playwright test --ui",
+    "test:debug": "playwright test --debug",
+    "test:report": "playwright show-report",
     "dev": "quasar dev",
     "build": "quasar build",
     "postinstall": "quasar prepare"
@@ -27,6 +31,7 @@
     "vuedraggable": "^4.1.0"
   },
   "devDependencies": {
+    "@playwright/test": "^1.55.0",
     "@quasar/app-vite": "^2.1.0",
     "@types/node": "^20.5.9",
     "autoprefixer": "^10.4.2",
