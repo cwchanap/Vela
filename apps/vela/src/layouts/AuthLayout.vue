@@ -1,71 +1,47 @@
 <template>
-  <q-layout view="hHh lpR fFf">
-    <q-page-container>
-      <div class="auth-layout">
-        <div class="auth-container">
-          <div class="auth-header">
-            <q-img
-              src="/icons/favicon-96x96.png"
-              alt="Japanese Learning App"
-              width="64px"
-              height="64px"
-              class="auth-logo"
-            />
-            <h1 class="auth-title">{{ config.app.name }}</h1>
-            <p class="auth-subtitle">Learn Japanese with interactive games and AI assistance</p>
-          </div>
-
-          <div class="auth-content">
-            <router-view />
-          </div>
-
-          <div class="auth-footer">
-            <p class="text-caption text-dark">Version {{ config.app.version }}</p>
-          </div>
-        </div>
-      </div>
+  <q-layout view="hHh lpR fFf" class="auth-layout">
+    <q-page-container class="auth-page-container">
+      <router-view />
     </q-page-container>
   </q-layout>
 </template>
 
 <script setup lang="ts">
-import { config } from 'src/config';
+// Layout for authentication pages
 </script>
 
-<style lang="scss" scoped>
-.auth-layout {
-  min-height: 100vh;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  padding: 1rem;
+<style lang="scss">
+html,
+body,
+#q-app {
+  height: 100%;
+  margin: 0;
+  padding: 0;
 }
 
-.auth-container {
-  background: white;
-  border-radius: 12px;
-  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
-  padding: 2rem;
+.auth-layout {
+  height: 100vh;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+}
+
+.auth-page-container {
+  height: 100%;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+}
+
+/* Default styling for auth pages (signup, reset password, etc.) */
+.auth-page-container :deep(.auth-page) {
   width: 100%;
   max-width: 400px;
-  text-align: center;
-}
-
-.auth-header {
-  margin-bottom: 2rem;
-}
-
-.auth-logo {
-  margin: 0 auto 1rem;
+  padding: 2rem;
+  background: white;
   border-radius: 8px;
-}
-
-.auth-title {
-  font-size: 1.5rem;
-  font-weight: 600;
-  color: #2c3e50;
-  margin: 0 0 0.5rem;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
+  margin: 1rem;
 }
 
 .auth-subtitle {
@@ -91,6 +67,11 @@ import { config } from 'src/config';
 
   .auth-title {
     font-size: 1.25rem;
+  }
+
+  .auth-page-container :deep(.auth-page) {
+    margin: 0.5rem;
+    padding: 1.5rem;
   }
 }
 </style>
