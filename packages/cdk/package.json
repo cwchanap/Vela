@@ -6,7 +6,7 @@
   "private": true,
   "scripts": {
     "build": "npm run lambda:build",
-    "lambda:build": "tsc lambda/index.ts --outDir dist/lambda --target ES2020 --module commonjs --moduleResolution node --esModuleInterop --allowSyntheticDefaultImports --skipLibCheck",
+    "lambda:build": "tsc ../../apps/vela-api/src/index.ts --outDir dist/lambda --target ES2020 --module commonjs --moduleResolution node --esModuleInterop --allowSyntheticDefaultImports --skipLibCheck",
     "cdk:synth": "npx cdk synth",
     "cdk:deploy": "npx cdk deploy",
     "cdk:destroy": "npx cdk destroy",

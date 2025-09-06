@@ -143,7 +143,7 @@ export class VelaStack extends Stack {
 
     // S3 Bucket for Static Website
     const websiteBucket = new Bucket(this, 'VelaWebBucket', {
-      bucketName: 'vela-web',
+      bucketName: `vela-web-${Stack.of(this).account}`,
       websiteIndexDocument: 'index.html',
       websiteErrorDocument: 'index.html',
       publicReadAccess: true,
