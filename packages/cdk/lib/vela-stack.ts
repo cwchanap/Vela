@@ -11,6 +11,7 @@ import {
   AllowedMethods,
 } from 'aws-cdk-lib/aws-cloudfront';
 import { S3Origin, RestApiOrigin } from 'aws-cdk-lib/aws-cloudfront-origins';
+import { UserPool, UserPoolClient, AccountRecovery } from 'aws-cdk-lib/aws-cognito';
 import { Construct } from 'constructs';
 import * as path from 'path';
 
@@ -21,6 +22,48 @@ declare const process: any;
 export class VelaStack extends Stack {
   constructor(scope: Construct, id: string, props?: StackProps) {
     super(scope, id, props);
+
+    // Cognito User Pool for Authentication
+    const userPool = new UserPool(this, 'VelaUserPool', {
+      userPoolName: 'vela-user-pool',
+      selfSignUpEnabled: true,
+      signInAliases: {
+        email: true,
+      },
+      autoVerify: {
+        email: true,
+      },
+      standardAttributes: {
+        email: {
+          required: true,
+          mutable: true,
+        },
+      },
+      passwordPolicy: {
+        minLength: 6,
+        requireLowercase: false,
+        requireUppercase: false,
+        requireDigits: false,
+        requireSymbols: false,
+      },
+      accountRecovery: AccountRecovery.EMAIL_ONLY,
+    });
+
+    // Apply removal policy explicitly
+    userPool.applyRemovalPolicy(RemovalPolicy.DESTROY);
+
+    // Cognito User Pool Client for Web Application
+    const userPoolClient = new UserPoolClient(this, 'VelaUserPoolClient', {
+      userPool,
+      userPoolClientName: 'vela-web-client',
+      authFlows: {
+        adminUserPassword: true,
+        custom: true,
+        userPassword: true,
+        userSrp: true,
+      },
+      preventUserExistenceErrors: true,
+    });
 
     // DynamoDB Table for Chat History
     const chatHistoryTable = new Table(this, 'VelaTable', {
@@ -165,6 +208,22 @@ export class VelaStack extends Stack {
     new CfnOutput(this, 'CloudFrontDistributionId', {
       value: distribution.distributionId,
       description: 'CloudFront Distribution ID',
+    });
+
+    // Cognito Outputs
+    new CfnOutput(this, 'CognitoUserPoolId', {
+      value: userPool.userPoolId,
+      description: 'Cognito User Pool ID',
+    });
+
+    new CfnOutput(this, 'CognitoUserPoolClientId', {
+      value: userPoolClient.userPoolClientId,
+      description: 'Cognito User Pool Client ID',
+    });
+
+    new CfnOutput(this, 'CognitoRegion', {
+      value: Stack.of(this).region,
+      description: 'AWS Region for Cognito',
     });
   }
 }

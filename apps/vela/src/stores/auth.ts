@@ -7,7 +7,7 @@ import {
   type ProfileData,
 } from '../services/authService';
 import type { UserPreferences } from '../services/supabase';
-import type { Session } from '@supabase/supabase-js';
+import type { AppSession } from '../services/authService';
 
 export interface User {
   id: string;
@@ -27,7 +27,7 @@ export interface User {
 export const useAuthStore = defineStore('auth', () => {
   // State
   const user = ref<User | null>(null);
-  const session = ref<Session | null>(null);
+  const session = ref<AppSession | null>(null);
   const isLoading = ref(false);
   const error = ref<string | null>(null);
   const isInitialized = ref(false);
@@ -49,7 +49,7 @@ export const useAuthStore = defineStore('auth', () => {
     }
   };
 
-  const setSession = (sessionData: Session | null) => {
+  const setSession = (sessionData: AppSession | null) => {
     session.value = sessionData;
   };
 
@@ -194,25 +194,41 @@ export const useAuthStore = defineStore('auth', () => {
     }
   };
 
-  /**
-   * Sign in with magic link
-   */
-  const signInWithMagicLink = async (email: string) => {
+  // Cognito signup verification: confirm and resend code
+  const confirmSignUp = async (email: string, code: string) => {
     setLoading(true);
     setError(null);
 
     try {
-      const response = await authService.signInWithMagicLink(email);
-
+      const response = await authService.confirmSignUp(email, code);
       if (!response.success) {
-        setError(response.error || 'Magic link request failed');
+        setError(response.error || 'Verification failed');
         return false;
       }
-
       return true;
     } catch (err) {
-      console.error('Magic link error:', err);
-      setError('An unexpected error occurred while sending magic link');
+      console.error('Confirm signup error:', err);
+      setError('An unexpected error occurred during verification');
+      return false;
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const resendSignUpCode = async (email: string) => {
+    setLoading(true);
+    setError(null);
+
+    try {
+      const response = await authService.resendSignUpCode(email);
+      if (!response.success) {
+        setError(response.error || 'Resend verification code failed');
+        return false;
+      }
+      return true;
+    } catch (err) {
+      console.error('Resend code error:', err);
+      setError('An unexpected error occurred while resending verification code');
       return false;
     } finally {
       setLoading(false);
@@ -408,10 +424,11 @@ export const useAuthStore = defineStore('auth', () => {
     loadUserProfile,
     signUp,
     signIn,
-    signInWithMagicLink,
     signOut,
     resetPassword,
     updatePassword,
+    confirmSignUp,
+    resendSignUpCode,
     updateProfile,
     updateExperience,
     updateStreak,

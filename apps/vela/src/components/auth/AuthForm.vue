@@ -81,33 +81,7 @@
           :disable="!isFormValid"
         />
 
-        <!-- Divider -->
-        <div class="row items-center q-my-md">
-          <div class="col">
-            <q-separator />
-          </div>
-          <div class="col-auto q-px-md text-dark">or</div>
-          <div class="col">
-            <q-separator />
-          </div>
-        </div>
-
-        <!-- Magic link button -->
-        <q-btn
-          :label="`Send Magic Link to ${form.email || 'Email'}`"
-          color="secondary"
-          outline
-          size="lg"
-          class="full-width"
-          :loading="magicLinkLoading"
-          :disable="!form.email || !isValidEmail(form.email) || authStore.isLoading"
-          @click="handleMagicLink"
-        >
-          <template v-slot:default>
-            <q-icon name="link" class="q-mr-sm" />
-            Send Magic Link
-          </template>
-        </q-btn>
+        <!-- Alternative sign-in (Magic Link) removed: not supported by Cognito -->
 
         <!-- Toggle mode -->
         <div class="text-center q-mt-md">
@@ -180,7 +154,7 @@ const props = withDefaults(defineProps<Props>(), {
 });
 
 const emit = defineEmits<{
-  success: [type: 'signin' | 'signup' | 'magic-link'];
+  success: [type: 'signin' | 'signup'];
   error: [message: string];
 }>();
 
@@ -192,7 +166,6 @@ const authStore = useAuthStore();
 const isSignUp = ref(props.mode === 'signup');
 const showPassword = ref(false);
 const showForgotPassword = ref(false);
-const magicLinkLoading = ref(false);
 const resetLoading = ref(false);
 const resetEmail = ref('');
 
@@ -271,30 +244,7 @@ const handleSubmit = async () => {
   }
 };
 
-const handleMagicLink = async () => {
-  if (!form.email || !isValidEmail(form.email)) {
-    return;
-  }
-
-  magicLinkLoading.value = true;
-
-  try {
-    const success = await authStore.signInWithMagicLink(form.email);
-
-    if (success) {
-      $q.notify({
-        type: 'positive',
-        message: 'Magic link sent! Check your email to sign in.',
-        timeout: 5000,
-      });
-      emit('success', 'magic-link');
-    } else if (authStore.error) {
-      emit('error', authStore.error);
-    }
-  } finally {
-    magicLinkLoading.value = false;
-  }
-};
+// Magic link flow removed; Cognito does not support it
 
 const handlePasswordReset = async () => {
   if (!resetEmail.value || !isValidEmail(resetEmail.value)) {

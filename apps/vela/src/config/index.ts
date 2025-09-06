@@ -6,6 +6,13 @@ export const config = {
     anonKey: import.meta.env.VITE_SUPABASE_ANON_KEY || '',
   },
 
+  // Cognito configuration
+  cognito: {
+    userPoolId: import.meta.env.VITE_COGNITO_USER_POOL_ID || '',
+    userPoolClientId: import.meta.env.VITE_COGNITO_USER_POOL_CLIENT_ID || '',
+    region: import.meta.env.VITE_AWS_REGION || '',
+  },
+
   // AI service configuration
   ai: {
     // Client no longer uses provider API keys directly; calls are proxied via Supabase Edge Functions.
@@ -27,12 +34,20 @@ export const config = {
   dev: {
     devMode: import.meta.env.VITE_DEV_MODE === 'true',
   },
+
+  // Auth provider selection: 'supabase' | 'cognito'
+  // Default to 'cognito' as Supabase auth has been removed
+  authProvider: (import.meta.env.VITE_AUTH_PROVIDER as 'supabase' | 'cognito') || 'cognito',
 } as const;
 
 // Validation function to check required environment variables
 export const validateConfig = () => {
   try {
-    const requiredVars = ['VITE_SUPABASE_URL', 'VITE_SUPABASE_ANON_KEY'];
+    const provider = (import.meta.env.VITE_AUTH_PROVIDER as 'supabase' | 'cognito') || 'cognito';
+    const requiredVars =
+      provider === 'cognito'
+        ? ['VITE_COGNITO_USER_POOL_ID', 'VITE_COGNITO_USER_POOL_CLIENT_ID', 'VITE_AWS_REGION']
+        : ['VITE_SUPABASE_URL', 'VITE_SUPABASE_ANON_KEY'];
 
     // Ensure import.meta.env exists
     if (typeof import.meta === 'undefined' || !import.meta.env) {

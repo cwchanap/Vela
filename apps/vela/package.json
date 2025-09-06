@@ -24,6 +24,7 @@
     "@aws-sdk/lib-dynamodb": "^3.666.0",
     "@quasar/extras": "^1.16.4",
     "@supabase/supabase-js": "^2.52.1",
+    "aws-amplify": "^6.15.5",
     "pinia": "^2.1.7",
     "quasar": "^2.16.0",
     "vue": "^3.4.18",

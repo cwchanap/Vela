@@ -56,6 +56,10 @@ export default defineConfig((/* ctx */) => {
         // Make environment variables available to the app
         VITE_SUPABASE_URL: process.env.VITE_SUPABASE_URL,
         VITE_SUPABASE_ANON_KEY: process.env.VITE_SUPABASE_ANON_KEY,
+        VITE_AUTH_PROVIDER: process.env.VITE_AUTH_PROVIDER,
+        VITE_COGNITO_USER_POOL_ID: process.env.VITE_COGNITO_USER_POOL_ID,
+        VITE_COGNITO_USER_POOL_CLIENT_ID: process.env.VITE_COGNITO_USER_POOL_CLIENT_ID,
+        VITE_AWS_REGION: process.env.VITE_AWS_REGION,
         VITE_APP_NAME: process.env.VITE_APP_NAME,
         VITE_APP_VERSION: process.env.VITE_APP_VERSION,
         VITE_DEV_MODE: process.env.VITE_DEV_MODE,

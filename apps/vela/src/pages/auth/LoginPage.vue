@@ -35,6 +35,43 @@
           />
         </div>
 
+        <!-- Verification Dialog for Cognito Signup -->
+        <q-dialog v-model="showVerifyDialog">
+          <q-card style="min-width: 380px">
+            <q-card-section>
+              <div class="text-h6">Verify your email</div>
+              <div class="text-subtitle2 q-mt-xs">Enter the 6-digit code sent to your email</div>
+            </q-card-section>
+
+            <q-card-section class="q-pt-none">
+              <q-input v-model="verifyEmail" label="Email" type="email" outlined class="q-mb-md" />
+              <q-input v-model="verifyCode" label="Verification Code" outlined />
+            </q-card-section>
+
+            <q-card-actions align="between">
+              <q-btn
+                flat
+                color="primary"
+                label="Resend Code"
+                :loading="resendLoading"
+                :disable="!verifyEmail"
+                @click="handleResendCode"
+              />
+              <div>
+                <q-btn flat color="grey-7" label="Cancel" v-close-popup />
+                <q-btn
+                  unelevated
+                  color="primary"
+                  label="Confirm"
+                  :loading="verifyLoading"
+                  :disable="!verifyEmail || !verifyCode"
+                  @click="handleConfirmSignUp"
+                />
+              </div>
+            </q-card-actions>
+          </q-card>
+        </q-dialog>
+
         <!-- Modern Features Preview -->
         <div class="modern-features-preview glass-card q-mt-xl">
           <div class="features-header q-mb-lg">
@@ -96,23 +133,17 @@ const authMode = ref<'signin' | 'signup'>('signin');
 const redirectTo = ref('/');
 
 // Methods
-const handleAuthSuccess = async (type: 'signin' | 'signup' | 'magic-link') => {
+const handleAuthSuccess = async (type: 'signin' | 'signup') => {
   console.log('Auth success:', type);
 
-  if (type === 'magic-link') {
-    $q.notify({
-      type: 'info',
-      message: 'Check your email for the magic link to complete sign in.',
-      timeout: 5000,
-    });
-  } else if (type === 'signup') {
+  if (type === 'signup') {
     $q.notify({
       type: 'positive',
-      message: 'Account created successfully! Welcome to Japanese Learning App.',
+      message: 'Account created! Please verify your email to continue.',
       timeout: 5000,
     });
-    // Redirect immediately after signup without email verification
-    await router.push(redirectTo.value);
+    // Show verification dialog for Cognito confirmation
+    showVerifyDialog.value = true;
   } else if (type === 'signin') {
     $q.notify({
       type: 'positive',
@@ -156,6 +187,49 @@ onMounted(async () => {
     redirectTo.value = route.query.redirect;
   }
 });
+
+// Verification state and handlers
+const showVerifyDialog = ref(false);
+const verifyEmail = ref('');
+const verifyCode = ref('');
+const verifyLoading = ref(false);
+const resendLoading = ref(false);
+
+const handleConfirmSignUp = async () => {
+  if (!verifyEmail.value || !verifyCode.value) return;
+  verifyLoading.value = true;
+  try {
+    const ok = await authStore.confirmSignUp(verifyEmail.value, verifyCode.value);
+    if (ok) {
+      $q.notify({ type: 'positive', message: 'Email verified. You can sign in now.' });
+      showVerifyDialog.value = false;
+      verifyEmail.value = '';
+      verifyCode.value = '';
+      // Navigate to sign-in mode and redirect
+      authMode.value = 'signin';
+      await router.push(redirectTo.value);
+    } else if (authStore.error) {
+      $q.notify({ type: 'negative', message: authStore.error, timeout: 5000 });
+    }
+  } finally {
+    verifyLoading.value = false;
+  }
+};
+
+const handleResendCode = async () => {
+  if (!verifyEmail.value) return;
+  resendLoading.value = true;
+  try {
+    const ok = await authStore.resendSignUpCode(verifyEmail.value);
+    if (ok) {
+      $q.notify({ type: 'positive', message: 'Verification code resent.' });
+    } else if (authStore.error) {
+      $q.notify({ type: 'negative', message: authStore.error, timeout: 5000 });
+    }
+  } finally {
+    resendLoading.value = false;
+  }
+};
 </script>
 
 <style scoped>
