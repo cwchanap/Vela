@@ -1,6 +1,15 @@
 import { Hono } from 'hono';
-import type { Env, ChatHistoryItem, ChatThreadSummary } from '../types';
+import { zValidator } from '@hono/zod-validator';
+import type { Env } from '../types';
 import type { QueryCommandInput as DdbQueryCommandInput } from '@aws-sdk/lib-dynamodb';
+import {
+  ChatHistoryItemSchema,
+  ChatThreadSummarySchema,
+  UserIdQuerySchema,
+  ThreadIdQuerySchema,
+  type ChatHistoryItem,
+  type ChatThreadSummary,
+} from '../validation';
 
 const chatHistory = new Hono<{ Bindings: Env }>();
 
@@ -144,9 +153,9 @@ async function ddb_getMessages(env: Env, thread_id: string): Promise<ChatHistory
  * Routes
  * ============ */
 
-chatHistory.post('/save', async (c) => {
+chatHistory.post('/save', zValidator('json', ChatHistoryItemSchema), async (c) => {
   try {
-    const body = (await c.req.json()) as ChatHistoryItem;
+    const body = c.req.valid('json');
     await ddb_saveMessage(c.env, body);
     return c.json({ ok: true });
   } catch (e) {
@@ -156,13 +165,9 @@ chatHistory.post('/save', async (c) => {
   }
 });
 
-chatHistory.get('/threads', async (c) => {
+chatHistory.get('/threads', zValidator('query', UserIdQuerySchema), async (c) => {
   try {
-    const user_id = c.req.query('user_id') || '';
-    if (!user_id) {
-      return c.json({ error: 'user_id is required' }, 400);
-    }
-
+    const { user_id } = c.req.valid('query');
     const threads = await ddb_listThreads(c.env, user_id);
     return c.json({ threads });
   } catch (e) {
@@ -172,13 +177,9 @@ chatHistory.get('/threads', async (c) => {
   }
 });
 
-chatHistory.get('/messages', async (c) => {
+chatHistory.get('/messages', zValidator('query', ThreadIdQuerySchema), async (c) => {
   try {
-    const thread_id = c.req.query('thread_id') || '';
-    if (!thread_id) {
-      return c.json({ error: 'thread_id is required' }, 400);
-    }
-
+    const { thread_id } = c.req.valid('query');
     const items = await ddb_getMessages(c.env, thread_id);
     return c.json({ items });
   } catch (e) {

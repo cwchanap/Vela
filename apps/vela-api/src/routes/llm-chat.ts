@@ -1,5 +1,7 @@
 import { Hono } from 'hono';
-import type { Env, LLMBridgeRequest, ChatMessage } from '../types';
+import { zValidator } from '@hono/zod-validator';
+import type { Env } from '../types';
+import { LLMBridgeRequestSchema, type LLMBridgeRequest, type ChatMessage } from '../validation';
 
 const llmChat = new Hono<{ Bindings: Env }>();
 
@@ -16,15 +18,8 @@ llmChat.use('*', async (c, next) => {
   await next();
 });
 
-llmChat.post('/', async (c) => {
-  let input: LLMBridgeRequest;
-  try {
-    input = await c.req.json();
-  } catch (e: unknown) {
-    const msg = e instanceof Error ? e.message : String(e);
-    return c.json({ error: `Invalid JSON: ${msg}` }, 400);
-  }
-
+llmChat.post('/', zValidator('json', LLMBridgeRequestSchema), async (c) => {
+  const input = c.req.valid('json');
   const provider = input.provider;
   if (!provider) {
     return c.json({ error: 'Missing provider' }, 400);

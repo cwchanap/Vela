@@ -11,34 +11,10 @@ export interface Env {
   DDB_TABLE?: string; // e.g. VelaChatMessages
 }
 
-export interface ChatMessage {
-  role: 'system' | 'user' | 'assistant';
-  content: string;
-}
-
-export interface LLMBridgeRequest {
-  provider: 'google' | 'openrouter';
-  model?: string;
-  messages?: ChatMessage[];
-  prompt?: string;
-  system?: string;
-  temperature?: number;
-  maxTokens?: number;
-  appName?: string; // optional for OpenRouter X-Title
-  referer?: string; // optional for OpenRouter HTTP-Referer
-}
-
-export type ChatHistoryItem = {
-  ThreadId: string; // thread id (PK when using DDB)
-  Timestamp: number; // Unix timestamp in milliseconds (SK when using DDB)
-  UserId: string; // owner id (used by GSI in DDB)
-  message: string;
-  is_user: boolean;
-};
-
-export type ChatThreadSummary = {
-  ThreadId: string;
-  lastTimestamp: number;
-  title: string;
-  messageCount: number;
-};
+// Re-export types from validation schemas for backward compatibility
+export type {
+  ChatMessage,
+  LLMBridgeRequest,
+  ChatHistoryItem,
+  ChatThreadSummary,
+} from './validation';
