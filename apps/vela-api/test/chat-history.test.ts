@@ -4,9 +4,9 @@ import { chatHistory } from '../src/routes/chat-history';
 import type { ChatHistoryItem, Env } from '../src/types';
 
 // Mock AWS SDK
-const mockPutCommand = vi.fn();
-const mockQueryCommand = vi.fn();
-const mockSend = vi.fn();
+let mockPutCommand: any;
+let mockQueryCommand: any;
+let mockSend: any;
 
 vi.mock('@aws-sdk/client-dynamodb', () => ({
   DynamoDBClient: vi.fn().mockImplementation(() => ({})),
@@ -14,19 +14,28 @@ vi.mock('@aws-sdk/client-dynamodb', () => ({
 
 vi.mock('@aws-sdk/lib-dynamodb', () => ({
   DynamoDBDocumentClient: {
-    from: vi.fn().mockReturnValue({
-      send: mockSend,
-    }),
+    from: vi.fn().mockImplementation(() => ({
+      send: vi.fn(),
+    })),
   },
   PutCommand: vi.fn().mockImplementation((input: any) => {
+    if (!mockPutCommand) mockPutCommand = vi.fn();
     mockPutCommand(input);
     return { input };
   }),
   QueryCommand: vi.fn().mockImplementation((input: any) => {
+    if (!mockQueryCommand) mockQueryCommand = vi.fn();
     mockQueryCommand(input);
     return { input };
   }),
 }));
+
+// Initialize mockSend after mocks are set up
+beforeEach(() => {
+  mockSend = vi.fn();
+  mockPutCommand = vi.fn();
+  mockQueryCommand = vi.fn();
+});
 
 // Create a test app that includes the environment
 function createTestApp(env: Env = {}) {

@@ -1,5 +1,7 @@
 import { Hono } from 'hono';
 import { zValidator } from '@hono/zod-validator';
+import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
+import { DynamoDBDocumentClient, PutCommand, QueryCommand } from '@aws-sdk/lib-dynamodb';
 import type { Env } from '../types';
 import type { QueryCommandInput as DdbQueryCommandInput } from '@aws-sdk/lib-dynamodb';
 import {
@@ -47,10 +49,6 @@ async function getDdbDocClient(env: Env) {
     throw new Error('Missing AWS credentials');
   }
 
-  // Dynamic imports to avoid bundling AWS SDK unless needed
-  const { DynamoDBClient } = await import('@aws-sdk/client-dynamodb');
-  const { DynamoDBDocumentClient } = await import('@aws-sdk/lib-dynamodb');
-
   const base = new DynamoDBClient({
     region,
     endpoint,
@@ -71,14 +69,12 @@ function getTable(env: Env) {
 
 async function ddb_saveMessage(env: Env, item: ChatHistoryItem): Promise<void> {
   const doc = await getDdbDocClient(env);
-  const { PutCommand } = await import('@aws-sdk/lib-dynamodb');
   const input = { TableName: getTable(env), Item: item };
   await doc.send(new PutCommand(input));
 }
 
 async function ddb_listThreads(env: Env, user_id: string): Promise<ChatThreadSummary[]> {
   const doc = await getDdbDocClient(env);
-  const { QueryCommand } = await import('@aws-sdk/lib-dynamodb');
 
   const items: ChatHistoryItem[] = [];
   const input = {
@@ -126,7 +122,6 @@ async function ddb_listThreads(env: Env, user_id: string): Promise<ChatThreadSum
 
 async function ddb_getMessages(env: Env, thread_id: string): Promise<ChatHistoryItem[]> {
   const doc = await getDdbDocClient(env);
-  const { QueryCommand } = await import('@aws-sdk/lib-dynamodb');
 
   const items: ChatHistoryItem[] = [];
   const input = {
