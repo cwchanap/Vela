@@ -12,6 +12,8 @@ import {
 } from 'aws-cdk-lib/aws-cloudfront';
 import { S3Origin, RestApiOrigin } from 'aws-cdk-lib/aws-cloudfront-origins';
 import { UserPool, UserPoolClient, AccountRecovery } from 'aws-cdk-lib/aws-cognito';
+import { Certificate, CertificateValidation } from 'aws-cdk-lib/aws-certificatemanager';
+import { HostedZone } from 'aws-cdk-lib/aws-route53';
 import { Construct } from 'constructs';
 import * as path from 'path';
 
@@ -141,6 +143,12 @@ export class VelaStack extends Stack {
       anyMethod: true,
     });
 
+    // SSL Certificate for custom domain
+    const certificate = new Certificate(this, 'VelaCertificate', {
+      domainName: 'vela.cwchanap.dev',
+      validation: CertificateValidation.fromDns(),
+    });
+
     // S3 Bucket for Static Website
     const websiteBucket = new Bucket(this, 'VelaWebBucket', {
       bucketName: `vela-web-${Stack.of(this).account}`,
@@ -152,7 +160,7 @@ export class VelaStack extends Stack {
       autoDeleteObjects: false,
     });
 
-    // CloudFront Distribution
+    // CloudFront Distribution with custom domain
     const distribution = new Distribution(this, 'VelaDistribution', {
       defaultBehavior: {
         origin: new S3Origin(websiteBucket),
@@ -167,6 +175,8 @@ export class VelaStack extends Stack {
           allowedMethods: AllowedMethods.ALLOW_ALL,
         },
       },
+      domainNames: ['vela.cwchanap.dev'],
+      certificate,
       errorResponses: [
         {
           httpStatus: 404,
@@ -187,6 +197,12 @@ export class VelaStack extends Stack {
       destinationBucket: websiteBucket,
       distribution,
       distributionPaths: ['/*'],
+    });
+
+    // DNS Records for custom domain
+    // Create hosted zone for the domain
+    const hostedZone = new HostedZone(this, 'VelaHostedZone', {
+      zoneName: 'cwchanap.dev',
     });
 
     // Outputs
@@ -224,6 +240,48 @@ export class VelaStack extends Stack {
     new CfnOutput(this, 'CognitoRegion', {
       value: Stack.of(this).region,
       description: 'AWS Region for Cognito',
+    });
+
+    new CfnOutput(this, 'HostedZoneId', {
+      value: hostedZone.hostedZoneId,
+      description:
+        'Hosted Zone ID - check Route 53 console for name servers to update in Cloudflare',
+    });
+
+    new CfnOutput(this, 'CloudFrontDomain', {
+      value: distribution.distributionDomainName,
+      description: 'CloudFront domain name - use this for CNAME record in Cloudflare',
+    });
+
+    // Environment Variables for Frontend
+    new CfnOutput(this, 'VITE_SUPABASE_URL', {
+      value: process.env.VITE_SUPABASE_URL || '',
+      description: 'Supabase URL for frontend',
+    });
+
+    new CfnOutput(this, 'VITE_SUPABASE_ANON_KEY', {
+      value: process.env.VITE_SUPABASE_ANON_KEY || '',
+      description: 'Supabase Anonymous Key for frontend',
+    });
+
+    new CfnOutput(this, 'VITE_COGNITO_USER_POOL_ID', {
+      value: userPool.userPoolId,
+      description: 'Cognito User Pool ID for frontend',
+    });
+
+    new CfnOutput(this, 'VITE_COGNITO_USER_POOL_CLIENT_ID', {
+      value: userPoolClient.userPoolClientId,
+      description: 'Cognito User Pool Client ID for frontend',
+    });
+
+    new CfnOutput(this, 'VITE_AWS_REGION', {
+      value: Stack.of(this).region,
+      description: 'AWS Region for frontend',
+    });
+
+    new CfnOutput(this, 'VITE_API_URL', {
+      value: api.url,
+      description: 'API Gateway URL for frontend',
     });
   }
 }

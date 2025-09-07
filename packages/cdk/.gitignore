@@ -1,2 +1,4 @@
 dist/
 bin/
+
+cdk-outputs.json

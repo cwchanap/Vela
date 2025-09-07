@@ -21,6 +21,7 @@
     "cdk:deploy": "turbo cdk:deploy",
     "cdk:diff": "turbo cdk:diff",
     "cdk:destroy": "turbo cdk:destroy",
+    "build:production": "cd packages/cdk && npm run build:frontend",
     "prepare": "husky"
   },
   "devDependencies": {
