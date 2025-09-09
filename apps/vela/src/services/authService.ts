@@ -1,7 +1,37 @@
-import { supabase, type Profile, type ProfileInsert } from './supabase';
 // Amplify modular imports (installed via aws-amplify)
 // These imports will only be used when authProvider === 'cognito'
 // We import functions lazily inside methods to avoid bundling when not used.
+
+// Profile types for API operations
+export interface Profile {
+  id: string;
+  username: string | null;
+  email: string | null;
+  avatar_url: string | null;
+  native_language: string;
+  current_level: number;
+  total_experience: number;
+  learning_streak: number;
+  last_activity: string | null;
+  preferences: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ProfileInsert {
+  id: string;
+  username?: string | null;
+  email?: string | null;
+  avatar_url?: string | null;
+  native_language?: string;
+  current_level?: number;
+  total_experience?: number;
+  learning_streak?: number;
+  last_activity?: string | null;
+  preferences?: Record<string, unknown>;
+  created_at?: string;
+  updated_at?: string;
+}
 
 export interface AuthResponse {
   success: boolean;
@@ -74,7 +104,7 @@ class AuthService {
    */
   async signIn({ email, password }: SignInData): Promise<AuthResponse> {
     try {
-      const { signIn, getCurrentUser, fetchAuthSession } = await import('aws-amplify/auth');
+      const { signIn, getCurrentUser } = await import('aws-amplify/auth');
       await signIn({ username: email, password });
 
       // Fetch current user details
@@ -84,23 +114,8 @@ class AuthService {
         provider: 'cognito',
       };
 
-      // Fetch tokens and set up Supabase authentication
-      try {
-        const authSession = await fetchAuthSession();
-        if (authSession.tokens?.accessToken) {
-          // Set Supabase session with Cognito JWT token
-          // Note: Using access token only, refresh will be handled by Supabase
-          await supabase.auth.setSession({
-            access_token: authSession.tokens.accessToken.toString(),
-            refresh_token: authSession.tokens.accessToken.toString(), // Use access token as fallback
-          });
-          console.log('✅ Supabase authenticated with Cognito token');
-        } else {
-          console.warn('No tokens returned from Cognito session fetch');
-        }
-      } catch (e) {
-        console.warn('Failed to fetch Cognito auth session', e);
-      }
+      // Note: Supabase authentication is now handled via API endpoints
+      console.log('✅ User authenticated with Cognito');
 
       // Ensure profile exists
       await this.ensureProfileForCurrentUser(current.userId, email);
@@ -188,9 +203,7 @@ class AuthService {
       const { signOut } = await import('aws-amplify/auth');
       await signOut();
 
-      // Also sign out from Supabase
-      await supabase.auth.signOut();
-      console.log('✅ Signed out from both Cognito and Supabase');
+      console.log('✅ Signed out from Cognito');
 
       return { success: true };
     } catch (error) {
@@ -265,45 +278,42 @@ class AuthService {
   }
 
   /**
-   * Create user profile in the database
+   * Create user profile via API
    */
   private async createUserProfile(
     userId: string,
     profileData: Partial<ProfileInsert>,
   ): Promise<void> {
     try {
-      const { error } = await supabase.from('profiles').insert({
-        id: userId,
-        email: profileData.email ?? null,
-        username: profileData.username ?? null,
-        native_language: 'en',
-        current_level: 1,
-        total_experience: 0,
-        learning_streak: 0,
-        preferences: {},
+      await fetch('/api/profiles/create', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({
+          user_id: userId,
+          email: profileData.email,
+          username: profileData.username,
+        }),
       });
-
-      if (error) {
-        console.error('Error creating user profile:', error);
-      }
     } catch (error) {
       console.error('Error creating user profile:', error);
     }
   }
 
   /**
-   * Get user profile from database
+   * Get user profile from API
    */
   async getUserProfile(userId: string): Promise<Profile | null> {
     try {
-      const { data, error } = await supabase.from('profiles').select('*').eq('id', userId).single();
-
-      if (error) {
-        console.error('Error fetching user profile:', error);
+      const response = await fetch(`/api/profiles?user_id=${userId}`);
+      if (!response.ok) {
+        console.error('Error fetching user profile:', response.statusText);
         return null;
       }
 
-      return data;
+      const data = await response.json();
+      return data.profile;
     } catch (error) {
       console.error('Error fetching user profile:', error);
       return null;
@@ -311,22 +321,24 @@ class AuthService {
   }
 
   /**
-   * Update user profile in database
+   * Update user profile via API
    */
   async updateUserProfile(userId: string, profileData: ProfileData): Promise<AuthResponse> {
     try {
-      const { error } = await supabase
-        .from('profiles')
-        .update({
+      const response = await fetch('/api/profiles/update', {
+        method: 'PUT',
+        headers: {
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({
+          user_id: userId,
           ...profileData,
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', userId)
-        .select()
-        .single();
+        }),
+      });
 
-      if (error) {
-        return { success: false, error: error.message };
+      if (!response.ok) {
+        const errorData = await response.json();
+        return { success: false, error: errorData.error || 'Failed to update profile' };
       }
 
       return { success: true };
@@ -350,51 +362,23 @@ class AuthService {
           const { eventName } = data.payload || {};
           if (eventName === 'signedIn') {
             try {
-              const { getCurrentUser, fetchAuthSession } = await import('aws-amplify/auth');
+              const { getCurrentUser } = await import('aws-amplify/auth');
               const current = await getCurrentUser();
 
-              // Sync Supabase session with Cognito tokens
-              try {
-                const authSession = await fetchAuthSession();
-                if (authSession.tokens?.accessToken) {
-                  await supabase.auth.setSession({
-                    access_token: authSession.tokens.accessToken.toString(),
-                    refresh_token: authSession.tokens.accessToken.toString(), // Use access token as fallback
-                  });
-                  console.log('✅ Supabase session synced with Cognito');
-                }
-              } catch (e) {
-                console.warn('Failed to sync Supabase session:', e);
-              }
-
+              console.log('✅ User signed in with Cognito');
               callback('SIGNED_IN', { user: { id: current.userId }, provider: 'cognito' });
             } catch {
               callback('SIGNED_IN', null);
             }
           } else if (eventName === 'signedOut') {
-            // Clear Supabase session on sign out
-            await supabase.auth.signOut();
-            console.log('✅ Supabase session cleared');
+            console.log('✅ User signed out from Cognito');
             callback('SIGNED_OUT', null);
           } else if (eventName === 'tokenRefresh') {
             try {
-              const { getCurrentUser, fetchAuthSession } = await import('aws-amplify/auth');
+              const { getCurrentUser } = await import('aws-amplify/auth');
               const current = await getCurrentUser();
 
-              // Refresh Supabase session with new tokens
-              try {
-                const authSession = await fetchAuthSession();
-                if (authSession.tokens?.accessToken) {
-                  await supabase.auth.setSession({
-                    access_token: authSession.tokens.accessToken.toString(),
-                    refresh_token: authSession.tokens.accessToken.toString(), // Use access token as fallback
-                  });
-                  console.log('✅ Supabase session refreshed');
-                }
-              } catch (e) {
-                console.warn('Failed to refresh Supabase session:', e);
-              }
-
+              console.log('✅ Cognito token refreshed');
               callback('TOKEN_REFRESHED', { user: { id: current.userId }, provider: 'cognito' });
             } catch {
               callback('TOKEN_REFRESHED', null);

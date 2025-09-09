@@ -218,8 +218,7 @@ export const useProgressStore = defineStore('progress', () => {
         experienceGained,
       );
 
-      // Check for new achievements
-      await progressService.checkAndAwardAchievements();
+      // Achievement checking is now handled by the API
 
       // Reload analytics to get updated data
       await loadProgressAnalytics();
