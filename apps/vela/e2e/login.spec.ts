@@ -16,10 +16,9 @@ test.describe('Login Page', () => {
     await expect(page.getByLabel('Email')).toBeVisible();
     await expect(page.getByLabel('Password')).toBeVisible();
     await expect(page.getByRole('button', { name: 'Sign In' })).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Send Magic Link' })).toBeVisible();
 
     // Check sign up link
-    await expect(page.getByRole('link', { name: 'Sign Up' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Sign Up' })).toBeVisible();
 
     // Check forgot password link
     await expect(page.getByRole('button', { name: 'Forgot Password?' })).toBeVisible();

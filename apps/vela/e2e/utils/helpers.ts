@@ -58,8 +58,13 @@ export async function waitForApiResponse(page: Page, urlPattern: string | RegExp
  */
 export async function clearBrowserData(page: Page) {
   await page.context().clearCookies();
-  await page.evaluate(() => {
-    localStorage.clear();
-    sessionStorage.clear();
-  });
+  try {
+    await page.evaluate(() => {
+      localStorage.clear();
+      sessionStorage.clear();
+    });
+  } catch (error) {
+    // Ignore localStorage/sessionStorage access errors in some browser contexts
+    console.warn('Could not clear browser storage:', error);
+  }
 }

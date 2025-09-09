@@ -160,11 +160,29 @@ const handleAuthSuccess = async (type: 'signin' | 'signup') => {
 
 const handleAuthError = (message: string) => {
   console.error('Auth error:', message);
-  $q.notify({
-    type: 'negative',
-    message,
-    timeout: 5000,
-  });
+
+  // Check if this is a verification needed error
+  if (
+    message.includes('verify your account') ||
+    message.includes('UserNotConfirmedException') ||
+    message.includes('User needs to be authenticated to call this API')
+  ) {
+    // Pre-fill the verification dialog with the current email
+    verifyEmail.value = authStore.pendingVerificationEmail || '';
+    // Show verification dialog
+    showVerifyDialog.value = true;
+    $q.notify({
+      type: 'info',
+      message: 'Please verify your email to continue. Check your inbox for the verification code.',
+      timeout: 7000,
+    });
+  } else {
+    $q.notify({
+      type: 'negative',
+      message,
+      timeout: 5000,
+    });
+  }
 };
 
 onMounted(async () => {

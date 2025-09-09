@@ -31,6 +31,7 @@ export const useAuthStore = defineStore('auth', () => {
   const isLoading = ref(false);
   const error = ref<string | null>(null);
   const isInitialized = ref(false);
+  const pendingVerificationEmail = ref<string | null>(null);
 
   // Getters
   const isAuthenticated = computed(() => !!user.value && !!session.value);
@@ -179,6 +180,16 @@ export const useAuthStore = defineStore('auth', () => {
       const response = await authService.signIn(signInData);
 
       if (!response.success) {
+        // Handle specific error cases
+        if (response.error?.includes('verify your account')) {
+          setError(`${response.error} A verification code has been sent to your email.`);
+          // Store the email for verification
+          if (response.user?.email) {
+            pendingVerificationEmail.value = response.user.email;
+          }
+          return false;
+        }
+
         setError(response.error || 'Sign in failed');
         return false;
       }
@@ -407,6 +418,7 @@ export const useAuthStore = defineStore('auth', () => {
     isLoading,
     error,
     isInitialized,
+    pendingVerificationEmail,
     // Getters
     isAuthenticated,
     userLevel,

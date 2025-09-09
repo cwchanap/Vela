@@ -6,8 +6,12 @@ export default boot(() => {
   // Boot file for additional app initialization
   // Pinia is now initialized via stores/index.ts
   if (config.authProvider === 'cognito') {
-    configureAmplify();
-    console.log('✅ Amplify configured for Cognito');
+    const configured = configureAmplify();
+    if (configured) {
+      console.log('✅ Amplify configured for Cognito');
+    } else {
+      console.warn('⚠️ Amplify configuration failed - check environment variables');
+    }
   }
   console.log('✅ App boot initialized');
 });

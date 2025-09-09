@@ -32,8 +32,9 @@ export class VelaStack extends Stack {
       signInAliases: {
         email: true,
       },
+      // Disable email verification for development
       autoVerify: {
-        email: true,
+        email: false,
       },
       standardAttributes: {
         email: {

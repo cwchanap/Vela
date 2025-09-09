@@ -70,7 +70,7 @@ class AuthService {
   }
 
   /**
-   * Sign in with email and password - bypass email confirmation
+   * Sign in with email and password
    */
   async signIn({ email, password }: SignInData): Promise<AuthResponse> {
     try {
@@ -84,10 +84,18 @@ class AuthService {
         provider: 'cognito',
       };
 
-      // Optionally fetch tokens for debug (not used by app directly)
+      // Fetch tokens and set up Supabase authentication
       try {
         const authSession = await fetchAuthSession();
-        if (!authSession.tokens) {
+        if (authSession.tokens?.accessToken) {
+          // Set Supabase session with Cognito JWT token
+          // Note: Using access token only, refresh will be handled by Supabase
+          await supabase.auth.setSession({
+            access_token: authSession.tokens.accessToken.toString(),
+            refresh_token: authSession.tokens.accessToken.toString(), // Use access token as fallback
+          });
+          console.log('✅ Supabase authenticated with Cognito token');
+        } else {
           console.warn('No tokens returned from Cognito session fetch');
         }
       } catch (e) {
@@ -98,7 +106,28 @@ class AuthService {
       await this.ensureProfileForCurrentUser(current.userId, email);
 
       return { success: true, user: { id: current.userId, email }, session };
-    } catch (error) {
+    } catch (error: any) {
+      // Handle specific Cognito errors
+      if (error?.name === 'UserNotConfirmedException') {
+        return {
+          success: false,
+          error: 'Please check your email and verify your account before signing in.',
+          user: { id: '', email },
+        };
+      }
+
+      // Handle other authentication errors that might indicate unconfirmed user
+      if (
+        error?.message?.includes('User is not confirmed') ||
+        error?.message?.includes('UserNotConfirmedException')
+      ) {
+        return {
+          success: false,
+          error: 'Please check your email and verify your account before signing in.',
+          user: { id: '', email },
+        };
+      }
+
       return {
         success: false,
         error: error instanceof Error ? error.message : 'An unexpected error occurred',
@@ -158,6 +187,11 @@ class AuthService {
     try {
       const { signOut } = await import('aws-amplify/auth');
       await signOut();
+
+      // Also sign out from Supabase
+      await supabase.auth.signOut();
+      console.log('✅ Signed out from both Cognito and Supabase');
+
       return { success: true };
     } catch (error) {
       return {
@@ -316,18 +350,51 @@ class AuthService {
           const { eventName } = data.payload || {};
           if (eventName === 'signedIn') {
             try {
-              const { getCurrentUser } = await import('aws-amplify/auth');
+              const { getCurrentUser, fetchAuthSession } = await import('aws-amplify/auth');
               const current = await getCurrentUser();
+
+              // Sync Supabase session with Cognito tokens
+              try {
+                const authSession = await fetchAuthSession();
+                if (authSession.tokens?.accessToken) {
+                  await supabase.auth.setSession({
+                    access_token: authSession.tokens.accessToken.toString(),
+                    refresh_token: authSession.tokens.accessToken.toString(), // Use access token as fallback
+                  });
+                  console.log('✅ Supabase session synced with Cognito');
+                }
+              } catch (e) {
+                console.warn('Failed to sync Supabase session:', e);
+              }
+
               callback('SIGNED_IN', { user: { id: current.userId }, provider: 'cognito' });
             } catch {
               callback('SIGNED_IN', null);
             }
           } else if (eventName === 'signedOut') {
+            // Clear Supabase session on sign out
+            await supabase.auth.signOut();
+            console.log('✅ Supabase session cleared');
             callback('SIGNED_OUT', null);
           } else if (eventName === 'tokenRefresh') {
             try {
-              const { getCurrentUser } = await import('aws-amplify/auth');
+              const { getCurrentUser, fetchAuthSession } = await import('aws-amplify/auth');
               const current = await getCurrentUser();
+
+              // Refresh Supabase session with new tokens
+              try {
+                const authSession = await fetchAuthSession();
+                if (authSession.tokens?.accessToken) {
+                  await supabase.auth.setSession({
+                    access_token: authSession.tokens.accessToken.toString(),
+                    refresh_token: authSession.tokens.accessToken.toString(), // Use access token as fallback
+                  });
+                  console.log('✅ Supabase session refreshed');
+                }
+              } catch (e) {
+                console.warn('Failed to refresh Supabase session:', e);
+              }
+
               callback('TOKEN_REFRESHED', { user: { id: current.userId }, provider: 'cognito' });
             } catch {
               callback('TOKEN_REFRESHED', null);
