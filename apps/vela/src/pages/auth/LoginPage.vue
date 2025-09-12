@@ -35,43 +35,6 @@
           />
         </div>
 
-        <!-- Verification Dialog for Cognito Signup -->
-        <q-dialog v-model="showVerifyDialog">
-          <q-card style="min-width: 380px">
-            <q-card-section>
-              <div class="text-h6">Verify your email</div>
-              <div class="text-subtitle2 q-mt-xs">Enter the 6-digit code sent to your email</div>
-            </q-card-section>
-
-            <q-card-section class="q-pt-none">
-              <q-input v-model="verifyEmail" label="Email" type="email" outlined class="q-mb-md" />
-              <q-input v-model="verifyCode" label="Verification Code" outlined />
-            </q-card-section>
-
-            <q-card-actions align="between">
-              <q-btn
-                flat
-                color="primary"
-                label="Resend Code"
-                :loading="resendLoading"
-                :disable="!verifyEmail"
-                @click="handleResendCode"
-              />
-              <div>
-                <q-btn flat color="grey-7" label="Cancel" v-close-popup />
-                <q-btn
-                  unelevated
-                  color="primary"
-                  label="Confirm"
-                  :loading="verifyLoading"
-                  :disable="!verifyEmail || !verifyCode"
-                  @click="handleConfirmSignUp"
-                />
-              </div>
-            </q-card-actions>
-          </q-card>
-        </q-dialog>
-
         <!-- Modern Features Preview -->
         <div class="modern-features-preview glass-card q-mt-xl">
           <div class="features-header q-mb-lg">
@@ -139,11 +102,11 @@ const handleAuthSuccess = async (type: 'signin' | 'signup') => {
   if (type === 'signup') {
     $q.notify({
       type: 'positive',
-      message: 'Account created! Please verify your email to continue.',
+      message: 'Account created successfully! You can now sign in.',
       timeout: 5000,
     });
-    // Show verification dialog for Cognito confirmation
-    showVerifyDialog.value = true;
+    // Navigate to sign-in mode since no verification is needed
+    authMode.value = 'signin';
   } else if (type === 'signin') {
     $q.notify({
       type: 'positive',
@@ -160,29 +123,11 @@ const handleAuthSuccess = async (type: 'signin' | 'signup') => {
 
 const handleAuthError = (message: string) => {
   console.error('Auth error:', message);
-
-  // Check if this is a verification needed error
-  if (
-    message.includes('verify your account') ||
-    message.includes('UserNotConfirmedException') ||
-    message.includes('User needs to be authenticated to call this API')
-  ) {
-    // Pre-fill the verification dialog with the current email
-    verifyEmail.value = authStore.pendingVerificationEmail || '';
-    // Show verification dialog
-    showVerifyDialog.value = true;
-    $q.notify({
-      type: 'info',
-      message: 'Please verify your email to continue. Check your inbox for the verification code.',
-      timeout: 7000,
-    });
-  } else {
-    $q.notify({
-      type: 'negative',
-      message,
-      timeout: 5000,
-    });
-  }
+  $q.notify({
+    type: 'negative',
+    message,
+    timeout: 5000,
+  });
 };
 
 onMounted(async () => {
@@ -205,49 +150,6 @@ onMounted(async () => {
     redirectTo.value = route.query.redirect;
   }
 });
-
-// Verification state and handlers
-const showVerifyDialog = ref(false);
-const verifyEmail = ref('');
-const verifyCode = ref('');
-const verifyLoading = ref(false);
-const resendLoading = ref(false);
-
-const handleConfirmSignUp = async () => {
-  if (!verifyEmail.value || !verifyCode.value) return;
-  verifyLoading.value = true;
-  try {
-    const ok = await authStore.confirmSignUp(verifyEmail.value, verifyCode.value);
-    if (ok) {
-      $q.notify({ type: 'positive', message: 'Email verified. You can sign in now.' });
-      showVerifyDialog.value = false;
-      verifyEmail.value = '';
-      verifyCode.value = '';
-      // Navigate to sign-in mode and redirect
-      authMode.value = 'signin';
-      await router.push(redirectTo.value);
-    } else if (authStore.error) {
-      $q.notify({ type: 'negative', message: authStore.error, timeout: 5000 });
-    }
-  } finally {
-    verifyLoading.value = false;
-  }
-};
-
-const handleResendCode = async () => {
-  if (!verifyEmail.value) return;
-  resendLoading.value = true;
-  try {
-    const ok = await authStore.resendSignUpCode(verifyEmail.value);
-    if (ok) {
-      $q.notify({ type: 'positive', message: 'Verification code resent.' });
-    } else if (authStore.error) {
-      $q.notify({ type: 'negative', message: authStore.error, timeout: 5000 });
-    }
-  } finally {
-    resendLoading.value = false;
-  }
-};
 </script>
 
 <style scoped>

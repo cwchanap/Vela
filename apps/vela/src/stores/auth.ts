@@ -6,7 +6,7 @@ import {
   type SignInData,
   type ProfileData,
 } from '../services/authService';
-import type { UserPreferences } from '../services/supabase';
+import type { UserPreferences } from '../types/shared';
 import type { AppSession } from '../services/authService';
 
 export interface User {
@@ -131,7 +131,7 @@ export const useAuthStore = defineStore('auth', () => {
           total_experience: profile.total_experience,
           learning_streak: profile.learning_streak,
           native_language: profile.native_language,
-          preferences: profile.preferences,
+          preferences: profile.preferences as unknown as UserPreferences,
           last_activity: profile.last_activity || undefined,
           created_at: profile.created_at,
           updated_at: profile.updated_at,
@@ -181,8 +181,12 @@ export const useAuthStore = defineStore('auth', () => {
 
       if (!response.success) {
         // Handle specific error cases
-        if (response.error?.includes('verify your account')) {
-          setError(`${response.error} A verification code has been sent to your email.`);
+        if (
+          response.error?.includes('verify your email address') ||
+          response.error?.includes('User is not confirmed') ||
+          response.error?.includes('CONFIRM_SIGN_UP')
+        ) {
+          setError(response.error);
           // Store the email for verification
           if (response.user?.email) {
             pendingVerificationEmail.value = response.user.email;

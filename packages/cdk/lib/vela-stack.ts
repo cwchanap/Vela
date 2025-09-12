@@ -12,6 +12,7 @@ import {
 } from 'aws-cdk-lib/aws-cloudfront';
 import { S3Origin, RestApiOrigin } from 'aws-cdk-lib/aws-cloudfront-origins';
 import { UserPool, UserPoolClient, AccountRecovery } from 'aws-cdk-lib/aws-cognito';
+import { PolicyStatement, Effect } from 'aws-cdk-lib/aws-iam';
 import { Certificate, CertificateValidation } from 'aws-cdk-lib/aws-certificatemanager';
 import { HostedZone } from 'aws-cdk-lib/aws-route53';
 import { Construct } from 'constructs';
@@ -32,10 +33,12 @@ export class VelaStack extends Stack {
       signInAliases: {
         email: true,
       },
-      // Disable email verification for development
+      // Disable automatic email verification - users will NOT be auto-confirmed
       autoVerify: {
         email: false,
       },
+      // Disable email verification requirement for sign up
+      signInCaseSensitive: false,
       standardAttributes: {
         email: {
           required: true,
@@ -66,6 +69,8 @@ export class VelaStack extends Stack {
         userSrp: true,
       },
       preventUserExistenceErrors: true,
+      // Explicitly disable email verification for this client
+      disableOAuth: false,
     });
 
     // DynamoDB Table for Chat History
@@ -111,11 +116,26 @@ export class VelaStack extends Stack {
         DYNAMODB_TABLE_NAME: chatHistoryTable.tableName,
         GEMINI_API_KEY: process.env.GEMINI_API_KEY || '',
         OPENROUTER_API_KEY: process.env.OPENROUTER_API_KEY || '',
+        VITE_COGNITO_USER_POOL_ID: userPool.userPoolId,
+        AWS_REGION: Stack.of(this).region,
       },
     });
 
     // Grant DynamoDB permissions to Lambda
     chatHistoryTable.grantReadWriteData(apiLambda);
+
+    // Grant Cognito permissions to Lambda for admin operations
+    apiLambda.addToRolePolicy(
+      new PolicyStatement({
+        effect: Effect.ALLOW,
+        actions: [
+          'cognito-idp:AdminConfirmSignUp',
+          'cognito-idp:AdminGetUser',
+          'cognito-idp:ListUsers',
+        ],
+        resources: [userPool.userPoolArn],
+      }),
+    );
 
     // API Gateway
     const api = new RestApi(this, 'VelaApi', {

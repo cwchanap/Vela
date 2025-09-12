@@ -1,36 +1,59 @@
-// Amplify modular imports (installed via aws-amplify)
-// These imports will only be used when authProvider === 'cognito'
-// We import functions lazily inside methods to avoid bundling when not used.
+// AWS Cognito authentication using Amplify
+import { Amplify } from 'aws-amplify';
+import {
+  signUp,
+  signIn,
+  signOut,
+  getCurrentUser,
+  confirmSignUp,
+  resendSignUpCode,
+  fetchAuthSession,
+  resetPassword,
+} from 'aws-amplify/auth';
+import { Hub } from 'aws-amplify/utils';
+import type { Profile, ProfileInsert } from '../types/shared';
+import { config } from '../config';
 
-// Profile types for API operations
-export interface Profile {
-  id: string;
-  username: string | null;
-  email: string | null;
-  avatar_url: string | null;
-  native_language: string;
-  current_level: number;
-  total_experience: number;
-  learning_streak: number;
-  last_activity: string | null;
-  preferences: Record<string, unknown>;
-  created_at: string;
-  updated_at: string;
-}
+// Configure Amplify with Cognito
+const configureAmplify = () => {
+  if (config.authProvider !== 'cognito') {
+    console.warn('⚠️ Auth provider is not set to cognito');
+    return false;
+  }
 
-export interface ProfileInsert {
-  id: string;
-  username?: string | null;
-  email?: string | null;
-  avatar_url?: string | null;
-  native_language?: string;
-  current_level?: number;
-  total_experience?: number;
-  learning_streak?: number;
-  last_activity?: string | null;
-  preferences?: Record<string, unknown>;
-  created_at?: string;
-  updated_at?: string;
+  const { userPoolId, userPoolClientId, region } = config.cognito;
+  if (!userPoolId || !userPoolClientId || !region) {
+    console.warn('⚠️ Missing Cognito configuration. Authentication will be disabled.');
+    return false;
+  }
+
+  Amplify.configure({
+    Auth: {
+      Cognito: {
+        userPoolId,
+        userPoolClientId,
+      },
+    },
+  });
+
+  console.log('✅ Amplify configured with Cognito');
+  return true;
+};
+
+const cognitoEnabled = configureAmplify();
+
+// Listen to auth events
+if (cognitoEnabled) {
+  Hub.listen('auth', (data) => {
+    const { event } = data.payload;
+    if (event === 'signedIn') {
+      console.log('✅ User signed in to Cognito');
+    } else if (event === 'signedOut') {
+      console.log('✅ User signed out from Cognito');
+    } else if (event === 'tokenRefresh') {
+      console.log('✅ Cognito token refreshed successfully');
+    }
+  });
 }
 
 export interface AuthResponse {
@@ -65,7 +88,6 @@ export interface AppUser {
 
 export interface AppSession {
   user: AppUser | null;
-  // Optionally include raw provider session info for debugging
   provider?: 'cognito';
 }
 
@@ -74,23 +96,47 @@ class AuthService {
    * Sign up a new user with email and password
    */
   async signUp({ email, password, username }: SignUpData): Promise<AuthResponse> {
+    if (!cognitoEnabled) {
+      return {
+        success: false,
+        error: 'Authentication is currently disabled. Please check Cognito configuration.',
+      };
+    }
+
     try {
-      const { signUp } = await import('aws-amplify/auth');
       const result = await signUp({
         username: email,
         password,
         options: {
-          userAttributes: { email },
-          autoSignIn: true,
+          userAttributes: {
+            email,
+          },
+          // Auto-confirm user since email verification is disabled
+          autoSignIn: false, // Disable auto-signin to avoid verification issues
         },
       });
 
-      // In many setups, signUp may require confirmation; we still create a profile record for the userId
-      const userId = result.userId ?? '';
-      if (userId) {
-        await this.createUserProfile(userId, { email, username: username || null });
+      if (result.userId) {
+        // Automatically confirm the user to bypass email verification
+        try {
+          await this.autoConfirmUser(email);
+        } catch (confirmError) {
+          console.warn('Auto-confirmation failed, but signup was successful:', confirmError);
+          // Don't fail the signup if auto-confirmation fails
+        }
+
+        // Create user profile
+        await this.createUserProfile(result.userId, {
+          email,
+          username: username || email.split('@')[0] || null,
+        });
       }
-      return { success: true, user: { id: userId, email }, session: null };
+
+      return {
+        success: true,
+        user: { id: result.userId || '', email },
+        session: null,
+      };
     } catch (error) {
       return {
         success: false,
@@ -103,95 +149,71 @@ class AuthService {
    * Sign in with email and password
    */
   async signIn({ email, password }: SignInData): Promise<AuthResponse> {
-    try {
-      const { signIn, getCurrentUser } = await import('aws-amplify/auth');
-      await signIn({ username: email, password });
-
-      // Fetch current user details
-      const current = await getCurrentUser();
-      const session: AppSession = {
-        user: { id: current.userId, email },
-        provider: 'cognito',
+    if (!cognitoEnabled) {
+      return {
+        success: false,
+        error: 'Authentication is currently disabled. Please check Cognito configuration.',
       };
+    }
 
-      // Note: Supabase authentication is now handled via API endpoints
-      console.log('✅ User authenticated with Cognito');
+    try {
+      const result = await signIn({ username: email, password });
 
-      // Ensure profile exists
-      await this.ensureProfileForCurrentUser(current.userId, email);
+      if (result.isSignedIn) {
+        // Get current user to get the userId
+        const currentUser = await getCurrentUser();
 
-      return { success: true, user: { id: current.userId, email }, session };
-    } catch (error: any) {
-      // Handle specific Cognito errors
-      if (error?.name === 'UserNotConfirmedException') {
+        // Ensure profile exists
+        await this.ensureProfileForCurrentUser(currentUser.userId, email);
+
         return {
-          success: false,
-          error: 'Please check your email and verify your account before signing in.',
-          user: { id: '', email },
+          success: true,
+          user: { id: currentUser.userId, email },
+          session: {
+            user: { id: currentUser.userId, email },
+            provider: 'cognito',
+          },
         };
       }
 
-      // Handle other authentication errors that might indicate unconfirmed user
-      if (
-        error?.message?.includes('User is not confirmed') ||
-        error?.message?.includes('UserNotConfirmedException')
-      ) {
+      // Handle email verification requirement
+      if (result.nextStep?.signInStep === 'CONFIRM_SIGN_UP') {
         return {
           success: false,
-          error: 'Please check your email and verify your account before signing in.',
+          error:
+            'Your account requires email verification. Please check your email for a verification code and try signing up again.',
           user: { id: '', email },
         };
       }
 
       return {
         success: false,
-        error: error instanceof Error ? error.message : 'An unexpected error occurred',
+        error: 'Sign in failed',
       };
-    }
-  }
-
-  /**
-   * Sign in with magic link
-   */
-  async signInWithMagicLink(_email: string): Promise<AuthResponse> {
-    return { success: false, error: 'Magic link sign-in is not supported with Cognito' };
-  }
-
-  /**
-   * Confirm user signup with verification code (Cognito)
-   */
-  async confirmSignUp(email: string, code: string): Promise<AuthResponse> {
-    try {
-      const { confirmSignUp, getCurrentUser } = await import('aws-amplify/auth');
-      await confirmSignUp({ username: email, confirmationCode: code });
-
-      // Attempt to fetch current user after confirmation (may require explicit sign-in)
-      try {
-        const current = await getCurrentUser();
+    } catch (error) {
+      // Handle specific Cognito errors
+      if (error instanceof Error) {
+        if (
+          error.name === 'UserNotConfirmedException' ||
+          error.message.includes('User is not confirmed') ||
+          error.message.includes('UserNotConfirmedException')
+        ) {
+          return {
+            success: false,
+            error:
+              'Your account requires email verification. Please check your email for a verification code and complete the signup process.',
+            user: { id: '', email: email },
+          };
+        }
         return {
-          success: true,
-          user: { id: current.userId, email },
-          session: { user: { id: current.userId, email }, provider: 'cognito' },
+          success: false,
+          error: error.message,
         };
-      } catch {
-        // Not signed in yet; return success for confirmation step only
-        return { success: true, user: { id: '', email }, session: null };
       }
-    } catch (error: any) {
-      return { success: false, error: error?.message || 'Failed to confirm sign up' };
-    }
-  }
-
-  /**
-   * Resend verification code for signup (Cognito)
-   */
-  async resendSignUpCode(email: string): Promise<AuthResponse> {
-    try {
-      const { resendSignUpCode } = await import('aws-amplify/auth');
-      await resendSignUpCode({ username: email });
-      return { success: true } as AuthResponse;
-    } catch (error: any) {
-      return { success: false, error: error?.message || 'Failed to resend verification code' };
+      return {
+        success: false,
+        error: 'An unexpected error occurred',
+      };
     }
   }
 
@@ -199,12 +221,12 @@ class AuthService {
    * Sign out the current user
    */
   async signOut(): Promise<AuthResponse> {
+    if (!cognitoEnabled) {
+      return { success: true }; // Already "signed out" if auth is disabled
+    }
+
     try {
-      const { signOut } = await import('aws-amplify/auth');
       await signOut();
-
-      console.log('✅ Signed out from Cognito');
-
       return { success: true };
     } catch (error) {
       return {
@@ -218,14 +240,20 @@ class AuthService {
    * Get the current user session
    */
   async getCurrentSession(): Promise<AppSession | null> {
+    if (!cognitoEnabled) {
+      return null;
+    }
+
     try {
-      const { getCurrentUser } = await import('aws-amplify/auth');
-      try {
-        const current = await getCurrentUser();
-        return { user: { id: current.userId }, provider: 'cognito' };
-      } catch {
-        return null;
+      const session = await fetchAuthSession();
+      if (session.tokens?.accessToken) {
+        const user = await getCurrentUser();
+        return {
+          user: { id: user.userId, email: user.signInDetails?.loginId || null },
+          provider: 'cognito',
+        };
       }
+      return null;
     } catch (error) {
       console.error('Error getting session:', error);
       return null;
@@ -236,14 +264,13 @@ class AuthService {
    * Get the current user
    */
   async getCurrentUser(): Promise<{ id: string; email?: string | null } | null> {
+    if (!cognitoEnabled) {
+      return null;
+    }
+
     try {
-      const { getCurrentUser } = await import('aws-amplify/auth');
-      try {
-        const current = await getCurrentUser();
-        return { id: current.userId };
-      } catch {
-        return null;
-      }
+      const user = await getCurrentUser();
+      return { id: user.userId, email: user.signInDetails?.loginId || null };
     } catch (error) {
       console.error('Error getting user:', error);
       return null;
@@ -251,11 +278,88 @@ class AuthService {
   }
 
   /**
+   * Automatically confirm user after signup (bypasses email verification)
+   */
+  private async autoConfirmUser(email: string): Promise<void> {
+    try {
+      // Call our API endpoint to auto-confirm the user
+      const response = await fetch('/api/auth/auto-confirm', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({
+          email,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to auto-confirm user');
+      }
+
+      console.log('✅ User auto-confirmed successfully');
+    } catch (error) {
+      console.warn('Auto-confirmation failed:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Confirm user signup with verification code
+   */
+  async confirmSignUp(email: string, code: string): Promise<AuthResponse> {
+    if (!cognitoEnabled) {
+      return {
+        success: false,
+        error: 'Authentication is currently disabled.',
+      };
+    }
+
+    try {
+      await confirmSignUp({ username: email, confirmationCode: code });
+      return { success: true };
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to confirm sign up',
+      };
+    }
+  }
+
+  /**
+   * Resend verification code for signup
+   */
+  async resendSignUpCode(email: string): Promise<AuthResponse> {
+    if (!cognitoEnabled) {
+      return {
+        success: false,
+        error: 'Authentication is currently disabled.',
+      };
+    }
+
+    try {
+      await resendSignUpCode({ username: email });
+      return { success: true };
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to resend verification code',
+      };
+    }
+  }
+
+  /**
    * Reset password with email
    */
   async resetPassword(email: string): Promise<AuthResponse> {
+    if (!cognitoEnabled) {
+      return {
+        success: false,
+        error: 'Authentication is currently disabled.',
+      };
+    }
+
     try {
-      const { resetPassword } = await import('aws-amplify/auth');
       await resetPassword({ username: email });
       return { success: true };
     } catch (error) {
@@ -267,10 +371,17 @@ class AuthService {
   }
 
   /**
-   * Update user password
+   * Update user password (requires old password for Cognito)
    */
   async updatePassword(_newPassword: string): Promise<AuthResponse> {
-    // Cognito requires oldPassword for updatePassword; recommend reset flow instead
+    if (!cognitoEnabled) {
+      return {
+        success: false,
+        error: 'Authentication is currently disabled.',
+      };
+    }
+
+    // Cognito requires old password for update, recommend reset flow instead
     return {
       success: false,
       error: 'Password update requires current password with Cognito. Use reset password flow.',
@@ -354,51 +465,47 @@ class AuthService {
    * Listen to authentication state changes
    */
   onAuthStateChange(callback: (_event: string, _session: AppSession | null) => void) {
-    // Use Amplify Hub to listen to auth events
-    // Import lazily to avoid bundling when not used
-    import('aws-amplify/utils')
-      .then(({ Hub }) => {
-        Hub.listen('auth', async (data: any) => {
-          const { eventName } = data.payload || {};
-          if (eventName === 'signedIn') {
-            try {
-              const { getCurrentUser } = await import('aws-amplify/auth');
-              const current = await getCurrentUser();
+    if (!cognitoEnabled) {
+      console.warn('⚠️ Cognito authentication is disabled');
+      return {
+        unsubscribe: () => {
+          /* noop */
+        },
+      };
+    }
 
-              console.log('✅ User signed in with Cognito');
-              callback('SIGNED_IN', { user: { id: current.userId }, provider: 'cognito' });
-            } catch {
-              callback('SIGNED_IN', null);
-            }
-          } else if (eventName === 'signedOut') {
-            console.log('✅ User signed out from Cognito');
-            callback('SIGNED_OUT', null);
-          } else if (eventName === 'tokenRefresh') {
-            try {
-              const { getCurrentUser } = await import('aws-amplify/auth');
-              const current = await getCurrentUser();
+    const unsubscribe = Hub.listen('auth', async (data) => {
+      const { event } = data.payload;
 
-              console.log('✅ Cognito token refreshed');
-              callback('TOKEN_REFRESHED', { user: { id: current.userId }, provider: 'cognito' });
-            } catch {
-              callback('TOKEN_REFRESHED', null);
-            }
+      if (event === 'signedIn') {
+        try {
+          const user = await getCurrentUser();
+          const session = await fetchAuthSession();
+
+          if (session.tokens?.accessToken) {
+            // Ensure profile exists when user signs in
+            await this.ensureProfileForCurrentUser(user.userId, user.signInDetails?.loginId);
+
+            callback('SIGNED_IN', {
+              user: { id: user.userId, email: user.signInDetails?.loginId || null },
+              provider: 'cognito',
+            });
           }
-        });
-      })
-      .catch((e) => {
-        console.warn('Amplify Hub not available:', e);
-      });
-    // Return a simple unsubscribe interface (no-op)
+        } catch (error) {
+          console.error('Error handling sign in:', error);
+        }
+      } else if (event === 'signedOut') {
+        callback('SIGNED_OUT', null);
+      }
+    });
+
     return {
-      unsubscribe() {
-        /* noop */
-      },
-    } as unknown as { unsubscribe: () => void };
+      unsubscribe: () => unsubscribe(),
+    };
   }
 
   /**
-   * Ensure a user profile exists; create it if missing (used for Cognito users)
+   * Ensure a user profile exists; create it if missing
    */
   private async ensureProfileForCurrentUser(userId: string, email?: string | null): Promise<void> {
     try {

@@ -219,7 +219,7 @@ const handleSubmit = async () => {
     if (success) {
       $q.notify({
         type: 'positive',
-        message: 'Account created successfully! Please check your email to verify your account.',
+        message: 'Account created successfully! You can now sign in.',
         timeout: 5000,
       });
       emit('success', 'signup');

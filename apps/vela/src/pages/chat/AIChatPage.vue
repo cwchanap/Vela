@@ -108,7 +108,7 @@
           <q-list v-else bordered separator>
             <q-item
               v-for="t in threads"
-              :key="t.chat_id"
+              :key="t.ThreadId"
               clickable
               v-ripple
               @click="selectThread(t)"
@@ -117,7 +117,7 @@
               <q-item-section>
                 <q-item-label>{{ t.title }}</q-item-label>
                 <q-item-label caption>
-                  {{ new Date(t.lastDate).toLocaleString() }} • {{ t.messageCount }} messages
+                  {{ new Date(t.lastTimestamp).toLocaleString() }} • {{ t.messageCount }} messages
                 </q-item-label>
               </q-item-section>
               <q-item-section side>
@@ -144,7 +144,21 @@ import { storeToRefs } from 'pinia';
 import { useChatStore } from '../../stores/chat';
 import { useLLMSettingsStore } from '../../stores/llmSettings';
 import { useAuthStore } from '../../stores/auth';
-import { chatHistoryClient, type ChatThreadSummaryDTO } from '../../services/chatHistoryClient';
+// Chat history types for API calls
+interface ChatHistoryItemDTO {
+  ThreadId: string;
+  Timestamp: number;
+  UserId: string;
+  message: string;
+  is_user: boolean;
+}
+
+interface ChatThreadSummaryDTO {
+  ThreadId: string;
+  lastTimestamp: number;
+  title: string;
+  messageCount: number;
+}
 import { llmService, type ChatMessage as LLMChatMessage } from '../../services/llm';
 
 const $q = useQuasar();
@@ -192,15 +206,26 @@ const ensureChatId = () => {
 
 const saveToHistory = async (chat_id: string, message: string, is_user: boolean) => {
   try {
-    await chatHistoryClient.saveMessage({
-      chat_id,
-      user_id: getUserId(),
-      message,
-      is_user,
+    const response = await fetch('/api/chat-history/save', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        ThreadId: chat_id,
+        Timestamp: Date.now(),
+        UserId: getUserId(),
+        message,
+        is_user,
+      }),
     });
+
+    if (!response.ok) {
+      throw new Error('Failed to save message');
+    }
   } catch (e) {
     console.error('Failed to save chat message', e);
-    $q.notify({ type: 'warning', message: 'Failed to save chat history (local dev)' });
+    $q.notify({ type: 'warning', message: 'Failed to save chat history' });
   }
 };
 
@@ -209,7 +234,12 @@ const openHistory = async () => {
   showHistory.value = true;
   try {
     const uid = getUserId();
-    threads.value = await chatHistoryClient.listThreads(uid);
+    const response = await fetch(`/api/chat-history/threads?user_id=${encodeURIComponent(uid)}`);
+    if (!response.ok) {
+      throw new Error('Failed to load threads');
+    }
+    const data = await response.json();
+    threads.value = data.threads || [];
   } catch (e) {
     console.error(e);
     $q.notify({ type: 'negative', message: 'Failed to load chat history' });
@@ -220,15 +250,23 @@ const openHistory = async () => {
 
 const selectThread = async (t: ChatThreadSummaryDTO) => {
   try {
-    const items = await chatHistoryClient.getMessages(t.chat_id);
-    chat.setChatId(t.chat_id);
+    const response = await fetch(
+      `/api/chat-history/messages?thread_id=${encodeURIComponent(t.ThreadId)}`,
+    );
+    if (!response.ok) {
+      throw new Error('Failed to load messages');
+    }
+    const data = await response.json();
+    const items: ChatHistoryItemDTO[] = data.items || [];
+
+    chat.setChatId(t.ThreadId);
 
     // Convert the messages to the correct type format
-    const restoredMessages = items.map((it) => ({
+    const restoredMessages = items.map((it: ChatHistoryItemDTO) => ({
       id: crypto.randomUUID(),
       type: it.is_user ? ('user' as const) : ('ai' as const),
       content: it.message,
-      timestamp: new Date(it.date),
+      timestamp: new Date(it.Timestamp),
     }));
 
     // Check if the first message is the introductory AI greeting

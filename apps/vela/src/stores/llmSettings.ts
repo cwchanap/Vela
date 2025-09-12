@@ -4,7 +4,7 @@ import { LocalStorage, Notify } from 'quasar';
 import type { LLMProviderName } from '../services/llm';
 import { llmService } from '../services/llm';
 import { useAuthStore } from './auth';
-import type { UserPreferences } from '../services/supabase';
+import type { UserPreferences } from '../types/shared';
 
 export type ProviderModelMap = Partial<Record<LLMProviderName, string>>;
 

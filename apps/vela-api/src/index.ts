@@ -5,6 +5,7 @@ import { chatHistory } from './routes/chat-history';
 import { games } from './routes/games';
 import { progress } from './routes/progress';
 import { profiles } from './routes/profiles';
+import auth from './routes/auth';
 import type { Env } from './types';
 
 const app = new Hono<{ Bindings: Env }>();
@@ -27,5 +28,8 @@ app.route('/api/progress', progress);
 
 // Mount the profiles routes
 app.route('/api/profiles', profiles);
+
+// Mount the auth routes
+app.route('/api/auth', auth);
 
 export const handler = handle(app);

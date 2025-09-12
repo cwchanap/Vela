@@ -283,7 +283,7 @@ import { computed, onMounted, ref } from 'vue';
 import { useRouter } from 'vue-router';
 import { useQuasar } from 'quasar';
 import { useAuthStore } from '../stores/auth';
-import type { UserPreferences } from '../services/supabase';
+import type { UserPreferences } from '../types/shared';
 
 interface Achievement {
   id: string;

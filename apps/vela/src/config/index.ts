@@ -36,8 +36,8 @@ export const config = {
   },
 
   // Auth provider selection: 'supabase' | 'cognito'
-  // Default to 'cognito' as Supabase auth has been removed
-  authProvider: (import.meta.env.VITE_AUTH_PROVIDER as 'supabase' | 'cognito') || 'cognito',
+  // Default to 'supabase' as we've migrated to API-based authentication
+  authProvider: (import.meta.env.VITE_AUTH_PROVIDER as 'supabase' | 'cognito') || 'supabase',
 } as const;
 
 // Validation function to check required environment variables
