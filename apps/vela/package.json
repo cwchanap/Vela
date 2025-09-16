@@ -11,6 +11,8 @@
     "lint:fix": "eslint \"./src/**/*.{ts,js,vue}\" --fix",
     "format": "prettier --write \"**/*.{js,ts,vue,scss,html,md,json}\" --ignore-path ../../.gitignore",
     "test": "playwright test",
+    "test:unit": "quasar test -u",
+    "test:e2e": "playwright test",
     "test:headed": "playwright test --headed",
     "test:ui": "playwright test --ui",
     "test:debug": "playwright test --debug",
@@ -33,10 +35,14 @@
   "devDependencies": {
     "@playwright/test": "^1.55.0",
     "@quasar/app-vite": "^2.1.0",
+    "@quasar/quasar-app-extension-testing": "^2.2.0",
     "@types/node": "^20.5.9",
+    "@vue/test-utils": "^2.4.6",
     "autoprefixer": "^10.4.2",
+    "jsdom": "^26.1.0",
     "typescript": "~5.5.3",
     "vite-plugin-checker": "^0.9.0",
+    "vitest": "^3.2.4",
     "vue-tsc": "^2.0.29"
   },
   "engines": {

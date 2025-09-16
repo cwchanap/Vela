@@ -134,8 +134,8 @@ onMounted(async () => {
   // Initialize auth store
   await authStore.initialize();
 
-  // Check if user is already authenticated
-  if (authStore.isAuthenticated) {
+  // Check if user has a valid session (redirect immediately even if profile hasn't loaded)
+  if (authStore.session) {
     void router.push(redirectTo.value);
     return;
   }

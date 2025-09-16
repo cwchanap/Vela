@@ -2,9 +2,14 @@ import { Hono } from 'hono';
 import {
   CognitoIdentityProviderClient,
   AdminConfirmSignUpCommand,
+  ListUsersCommand,
+  InitiateAuthCommand,
+  AdminUserGlobalSignOutCommand,
+  GetUserCommand,
 } from '@aws-sdk/client-cognito-identity-provider';
+import type { Env } from '../types';
 
-const app = new Hono();
+const app = new Hono<{ Bindings: Env }>();
 
 const cognitoClient = new CognitoIdentityProviderClient({
   region: process.env.AWS_REGION || 'us-east-1',
@@ -24,19 +29,167 @@ app.post('/auto-confirm', async (c) => {
       return c.json({ error: 'User pool ID not configured' }, 500);
     }
 
-    // Auto-confirm the user using admin API
-    const command = new AdminConfirmSignUpCommand({
+    // First, find the user by email to get their username
+    const listUsersCommand = new ListUsersCommand({
       UserPoolId: userPoolId,
-      Username: email,
+      Filter: `email = "${email}"`,
     });
 
-    await cognitoClient.send(command);
+    const usersResponse = await cognitoClient.send(listUsersCommand);
 
-    console.log(`✅ User ${email} auto-confirmed successfully`);
+    if (!usersResponse.Users || usersResponse.Users.length === 0) {
+      return c.json({ error: 'User not found' }, 404);
+    }
+
+    const user = usersResponse.Users[0];
+    const username = user.Username;
+
+    if (!username) {
+      return c.json({ error: 'User username not found' }, 500);
+    }
+
+    // Auto-confirm the user using admin API
+    const confirmCommand = new AdminConfirmSignUpCommand({
+      UserPoolId: userPoolId,
+      Username: username,
+    });
+
+    await cognitoClient.send(confirmCommand);
+
+    console.log(`✅ User ${email} (username: ${username}) auto-confirmed successfully`);
     return c.json({ success: true, message: 'User auto-confirmed successfully' });
   } catch (error) {
     console.error('Auto-confirm error:', error);
     return c.json({ error: 'Failed to auto-confirm user' }, 500);
+  }
+});
+
+// Sign in endpoint
+app.post('/signin', async (c) => {
+  try {
+    const { email, password } = await c.req.json();
+
+    if (!email || !password) {
+      return c.json({ error: 'Email and password are required' }, 400);
+    }
+
+    const userPoolId = c.env.VITE_COGNITO_USER_POOL_ID;
+    if (!userPoolId) {
+      return c.json({ error: 'User pool ID not configured' }, 500);
+    }
+
+    // Proceed with authentication
+    const clientId = process.env.COGNITO_CLIENT_ID || '7fS0EEOID'; // Default from env
+
+    const authCommand = new InitiateAuthCommand({
+      AuthFlow: 'USER_PASSWORD_AUTH',
+      ClientId: clientId,
+      AuthParameters: {
+        USERNAME: email,
+        PASSWORD: password,
+      },
+    });
+
+    const authResponse = await cognitoClient.send(authCommand);
+
+    if (authResponse.AuthenticationResult) {
+      return c.json({
+        success: true,
+        message: 'Sign in successful',
+        tokens: {
+          accessToken: authResponse.AuthenticationResult.AccessToken,
+          refreshToken: authResponse.AuthenticationResult.RefreshToken,
+          idToken: authResponse.AuthenticationResult.IdToken,
+        },
+      });
+    } else {
+      return c.json({ error: 'Authentication failed' }, 401);
+    }
+  } catch (error: any) {
+    console.error('Sign in error:', error);
+
+    if (error.name === 'NotAuthorizedException') {
+      return c.json({ error: 'Invalid email or password' }, 401);
+    } else if (error.name === 'UserNotConfirmedException') {
+      return c.json({ error: 'User not confirmed. Please check your email.' }, 401);
+    }
+
+    return c.json({ error: 'Sign in failed' }, 500);
+  }
+});
+
+// Sign out endpoint
+app.post('/signout', async (c) => {
+  try {
+    const authHeader = c.req.header('Authorization');
+
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      const accessToken = authHeader.substring(7);
+
+      const userPoolId = c.env.VITE_COGNITO_USER_POOL_ID;
+      if (userPoolId) {
+        // Get username from access token to perform global sign out
+        try {
+          const getUserCommand = new GetUserCommand({
+            AccessToken: accessToken,
+          });
+          const userResponse = await cognitoClient.send(getUserCommand);
+
+          if (userResponse.Username) {
+            const signOutCommand = new AdminUserGlobalSignOutCommand({
+              UserPoolId: userPoolId,
+              Username: userResponse.Username,
+            });
+            await cognitoClient.send(signOutCommand);
+          }
+        } catch (error) {
+          console.log('Could not perform global sign out:', error);
+        }
+      }
+    }
+
+    return c.json({ success: true, message: 'Sign out successful' });
+  } catch (error) {
+    console.error('Sign out error:', error);
+    return c.json({ error: 'Sign out failed' }, 500);
+  }
+});
+
+// Session check endpoint
+app.get('/session', async (c) => {
+  try {
+    const authHeader = c.req.header('Authorization');
+
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return c.json({ authenticated: false, message: 'No access token provided' });
+    }
+
+    const accessToken = authHeader.substring(7);
+
+    const getUserCommand = new GetUserCommand({
+      AccessToken: accessToken,
+    });
+
+    const userResponse = await cognitoClient.send(getUserCommand);
+
+    return c.json({
+      authenticated: true,
+      user: {
+        username: userResponse.Username,
+        email: userResponse.UserAttributes?.find((attr) => attr.Name === 'email')?.Value,
+        emailVerified:
+          userResponse.UserAttributes?.find((attr) => attr.Name === 'email_verified')?.Value ===
+          'true',
+      },
+    });
+  } catch (error: any) {
+    console.error('Session check error:', error);
+
+    if (error.name === 'NotAuthorizedException' || error.name === 'InvalidParameterException') {
+      return c.json({ authenticated: false, message: 'Invalid or expired token' });
+    }
+
+    return c.json({ authenticated: false, message: 'Session check failed' }, 500);
   }
 });
 

@@ -4,7 +4,10 @@ import { waitForPageLoad, clearBrowserData } from './utils/helpers';
 
 test.describe('Authentication', () => {
   test.beforeEach(async ({ page }) => {
-    await clearBrowserData(page);
+    // Skip browser data clearing for redirect test to maintain session
+    if (!test.info().title.includes('should redirect authenticated users away from login page')) {
+      await clearBrowserData(page);
+    }
   });
 
   test('should display login page correctly', async ({ page }) => {
@@ -127,5 +130,26 @@ test.describe('Authentication', () => {
 
     // Should show reset form
     await expect(page.locator('input[type="email"]')).toBeVisible();
+  });
+
+  test('should redirect authenticated users away from login page', async ({ page }) => {
+    // First login to establish session
+    await page.goto('/auth/login');
+    await page.fill('input[type="email"]', TEST_USER.email);
+    await page.fill('input[type="password"]', TEST_USER.password);
+    await page.click('button[type="submit"]');
+
+    // Wait for successful login and redirect
+    await page.waitForURL(/\/(dashboard|home|\/|games)/, { timeout: 10000 });
+
+    // Now try to navigate back to login page
+    await page.goto('/auth/login');
+
+    // Should be automatically redirected away from login page
+    await page.waitForURL(/\/(dashboard|home|\/|games)/, { timeout: 5000 });
+
+    // Should not be on login page anymore
+    expect(page.url()).not.toContain('/auth/login');
+    expect(page.url()).not.toContain('/auth/signup');
   });
 });

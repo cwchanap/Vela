@@ -14,7 +14,7 @@ const UpdateProfileSchema = z.object({
   username: z.string().optional(),
   avatar_url: z.string().optional(),
   native_language: z.string().optional(),
-  preferences: z.record(z.unknown()).optional(),
+  preferences: z.record(z.string(), z.unknown()).optional(),
 });
 
 const profiles = new Hono<{ Bindings: Env }>();
@@ -40,11 +40,25 @@ async function getSupabaseClient(env: Env) {
   const supabaseUrl = env.SUPABASE_URL;
   const supabaseAnonKey = env.SUPABASE_ANON_KEY;
 
+  console.log('Supabase config check:', {
+    supabaseUrl: supabaseUrl ? 'present' : 'missing',
+    supabaseAnonKey: supabaseAnonKey ? 'present' : 'missing',
+    url: supabaseUrl,
+  });
+
   if (!supabaseUrl || !supabaseAnonKey) {
     throw new Error('Missing Supabase configuration');
   }
 
-  return createClient(supabaseUrl, supabaseAnonKey);
+  // Check for dummy values that indicate Supabase is disabled
+  if (supabaseUrl.includes('dummy') || supabaseAnonKey.includes('dummy')) {
+    throw new Error('Supabase is disabled in development environment');
+  }
+
+  console.log('Creating Supabase client with URL:', supabaseUrl);
+  const client = createClient(supabaseUrl, supabaseAnonKey);
+  console.log('Supabase client created successfully');
+  return client;
 }
 
 /* ============
@@ -54,13 +68,23 @@ async function getSupabaseClient(env: Env) {
 profiles.get('/', zValidator('query', UserIdQuerySchema), async (c) => {
   try {
     const { user_id } = c.req.valid('query');
+    console.log('Fetching profile for user_id:', user_id);
+
     const supabase = await getSupabaseClient(c.env);
+    console.log('Supabase client obtained, executing query...');
 
     const { data: profile, error } = await supabase
       .from('profiles')
       .select('*')
       .eq('id', user_id)
       .single();
+
+    console.log('Supabase query result:', {
+      hasData: !!profile,
+      hasError: !!error,
+      errorCode: error?.code,
+      errorMessage: error?.message,
+    });
 
     if (error) {
       if (error.code === 'PGRST116') {

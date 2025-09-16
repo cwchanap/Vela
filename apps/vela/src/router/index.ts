@@ -70,8 +70,8 @@ export default defineRouter(function (/* { store, ssrContext } */) {
           name: 'login',
           query: { redirect: to.fullPath },
         });
-      } else if (requiresGuest && authStore.isAuthenticated) {
-        // Redirect authenticated users away from guest-only pages
+      } else if (requiresGuest && authStore.session) {
+        // Redirect users with valid session away from guest-only pages (even if profile hasn't loaded)
         next({ name: 'home' });
       } else {
         next();

@@ -28,7 +28,7 @@ export class VelaStack extends Stack {
 
     // Cognito User Pool for Authentication
     const userPool = new UserPool(this, 'VelaUserPool', {
-      userPoolName: 'vela-user-pool',
+      userPoolName: `vela-user-pool-${Stack.of(this).account}`,
       selfSignUpEnabled: true,
       signInAliases: {
         email: true,

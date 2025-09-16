@@ -156,39 +156,35 @@ class AuthService {
       };
     }
 
-    try {
+    const performSignIn = async (): Promise<any> => {
       const result = await signIn({ username: email, password });
-
       if (result.isSignedIn) {
-        // Get current user to get the userId
-        const currentUser = await getCurrentUser();
-
-        // Ensure profile exists
-        await this.ensureProfileForCurrentUser(currentUser.userId, email);
-
-        return {
-          success: true,
-          user: { id: currentUser.userId, email },
-          session: {
-            user: { id: currentUser.userId, email },
-            provider: 'cognito',
-          },
-        };
+        return result;
+      } else if (result.nextStep?.signInStep === 'CONFIRM_SIGN_UP') {
+        // Auto-confirm user
+        await this.autoConfirmUser(email);
+        // Retry sign in
+        return await performSignIn();
+      } else {
+        throw new Error('Sign in failed');
       }
+    };
 
-      // Handle email verification requirement
-      if (result.nextStep?.signInStep === 'CONFIRM_SIGN_UP') {
-        return {
-          success: false,
-          error:
-            'Your account requires email verification. Please check your email for a verification code and try signing up again.',
-          user: { id: '', email },
-        };
-      }
+    try {
+      await performSignIn();
+      // Get current user to get the userId
+      const currentUser = await getCurrentUser();
+
+      // Ensure profile exists
+      await this.ensureProfileForCurrentUser(currentUser.userId, email);
 
       return {
-        success: false,
-        error: 'Sign in failed',
+        success: true,
+        user: { id: currentUser.userId, email },
+        session: {
+          user: { id: currentUser.userId, email },
+          provider: 'cognito',
+        },
       };
     } catch (error) {
       // Handle specific Cognito errors
@@ -198,12 +194,27 @@ class AuthService {
           error.message.includes('User is not confirmed') ||
           error.message.includes('UserNotConfirmedException')
         ) {
-          return {
-            success: false,
-            error:
-              'Your account requires email verification. Please check your email for a verification code and complete the signup process.',
-            user: { id: '', email: email },
-          };
+          try {
+            // Auto-confirm user
+            await this.autoConfirmUser(email);
+            // Retry sign in
+            await performSignIn();
+            const currentUser = await getCurrentUser();
+            await this.ensureProfileForCurrentUser(currentUser.userId, email);
+            return {
+              success: true,
+              user: { id: currentUser.userId, email },
+              session: {
+                user: { id: currentUser.userId, email },
+                provider: 'cognito',
+              },
+            };
+          } catch {
+            return {
+              success: false,
+              error: 'Sign in failed after auto-confirmation',
+            };
+          }
         }
         return {
           success: false,

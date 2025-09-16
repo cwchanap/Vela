@@ -111,6 +111,12 @@ export default defineConfig((/* ctx */) => {
     devServer: {
       // https: true,
       open: true, // opens browser window automatically
+      proxy: {
+        '/api': {
+          target: 'http://localhost:3001',
+          changeOrigin: true,
+        },
+      },
     },
 
     // https://v2.quasar.dev/quasar-cli-vite/quasar-config-file#framework
@@ -129,6 +135,14 @@ export default defineConfig((/* ctx */) => {
 
       // Quasar plugins
       plugins: ['Notify', 'Loading', 'LoadingBar', 'Dialog', 'LocalStorage', 'SessionStorage'],
+    },
+
+    // https://v2.quasar.dev/quasar-cli-vite/quasar-config-file#test
+    test: {
+      vitest: {
+        globals: true,
+        environment: 'jsdom',
+      },
     },
 
     // animations: 'all', // --- includes all animations
