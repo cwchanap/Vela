@@ -61,6 +61,27 @@ async function getSupabaseClient(env: Env) {
   return client;
 }
 
+// Mock profile data for development when Supabase is disabled
+const mockProfiles: Record<string, any> = {};
+
+function getMockProfile(userId: string) {
+  return (
+    mockProfiles[userId] || {
+      id: userId,
+      email: null,
+      username: null,
+      avatar_url: null,
+      native_language: 'en',
+      current_level: 1,
+      total_experience: 0,
+      learning_streak: 0,
+      preferences: {},
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    }
+  );
+}
+
 /* ============
  * Routes
  * ============ */
@@ -70,30 +91,40 @@ profiles.get('/', zValidator('query', UserIdQuerySchema), async (c) => {
     const { user_id } = c.req.valid('query');
     console.log('Fetching profile for user_id:', user_id);
 
-    const supabase = await getSupabaseClient(c.env);
-    console.log('Supabase client obtained, executing query...');
+    try {
+      const supabase = await getSupabaseClient(c.env);
+      console.log('Supabase client obtained, executing query...');
 
-    const { data: profile, error } = await supabase
-      .from('profiles')
-      .select('*')
-      .eq('id', user_id)
-      .single();
+      const { data: profile, error } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', user_id)
+        .single();
 
-    console.log('Supabase query result:', {
-      hasData: !!profile,
-      hasError: !!error,
-      errorCode: error?.code,
-      errorMessage: error?.message,
-    });
+      console.log('Supabase query result:', {
+        hasData: !!profile,
+        hasError: !!error,
+        errorCode: error?.code,
+        errorMessage: error?.message,
+      });
 
-    if (error) {
-      if (error.code === 'PGRST116') {
-        return c.json({ error: 'Profile not found' }, 404);
+      if (error) {
+        if (error.code === 'PGRST116') {
+          return c.json({ error: 'Profile not found' }, 404);
+        }
+        throw new Error(`Failed to fetch profile: ${error.message}`);
       }
-      throw new Error(`Failed to fetch profile: ${error.message}`);
-    }
 
-    return c.json({ profile });
+      return c.json({ profile });
+    } catch (supabaseError: any) {
+      // If Supabase is disabled, return mock data
+      if (supabaseError.message?.includes('Supabase is disabled')) {
+        console.log('Using mock profile data for development');
+        const profile = getMockProfile(user_id);
+        return c.json({ profile });
+      }
+      throw supabaseError;
+    }
   } catch (e) {
     console.error('profiles get error', e);
     const msg = e instanceof Error ? e.message : 'Unknown error';
@@ -104,24 +135,40 @@ profiles.get('/', zValidator('query', UserIdQuerySchema), async (c) => {
 profiles.put('/update', zValidator('json', UpdateProfileSchema), async (c) => {
   try {
     const profileData = c.req.valid('json');
-    const supabase = await getSupabaseClient(c.env);
 
-    const { error } = await supabase
-      .from('profiles')
-      .update({
-        username: profileData.username,
-        avatar_url: profileData.avatar_url,
-        native_language: profileData.native_language,
-        preferences: profileData.preferences,
-        updated_at: new Date().toISOString(),
-      })
-      .eq('id', profileData.user_id);
+    try {
+      const supabase = await getSupabaseClient(c.env);
 
-    if (error) {
-      throw new Error(`Failed to update profile: ${error.message}`);
+      const { error } = await supabase
+        .from('profiles')
+        .update({
+          username: profileData.username,
+          avatar_url: profileData.avatar_url,
+          native_language: profileData.native_language,
+          preferences: profileData.preferences,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', profileData.user_id);
+
+      if (error) {
+        throw new Error(`Failed to update profile: ${error.message}`);
+      }
+
+      return c.json({ success: true });
+    } catch (supabaseError: any) {
+      // If Supabase is disabled, update mock data
+      if (supabaseError.message?.includes('Supabase is disabled')) {
+        console.log('Updating mock profile data for development');
+        const existingProfile = getMockProfile(profileData.user_id);
+        mockProfiles[profileData.user_id] = {
+          ...existingProfile,
+          ...profileData,
+          updated_at: new Date().toISOString(),
+        };
+        return c.json({ success: true });
+      }
+      throw supabaseError;
     }
-
-    return c.json({ success: true });
   } catch (e) {
     console.error('profiles update error', e);
     const msg = e instanceof Error ? e.message : 'Unknown error';
@@ -142,24 +189,47 @@ profiles.post(
   async (c) => {
     try {
       const { user_id, email, username } = c.req.valid('json');
-      const supabase = await getSupabaseClient(c.env);
 
-      const { error } = await supabase.from('profiles').insert({
-        id: user_id,
-        email: email || null,
-        username: username || null,
-        native_language: 'en',
-        current_level: 1,
-        total_experience: 0,
-        learning_streak: 0,
-        preferences: {},
-      });
+      try {
+        const supabase = await getSupabaseClient(c.env);
 
-      if (error) {
-        throw new Error(`Failed to create profile: ${error.message}`);
+        const { error } = await supabase.from('profiles').insert({
+          id: user_id,
+          email: email || null,
+          username: username || null,
+          native_language: 'en',
+          current_level: 1,
+          total_experience: 0,
+          learning_streak: 0,
+          preferences: {},
+        });
+
+        if (error) {
+          throw new Error(`Failed to create profile: ${error.message}`);
+        }
+
+        return c.json({ success: true });
+      } catch (supabaseError: any) {
+        // If Supabase is disabled, create mock profile
+        if (supabaseError.message?.includes('Supabase is disabled')) {
+          console.log('Creating mock profile data for development');
+          mockProfiles[user_id] = {
+            id: user_id,
+            email: email || null,
+            username: username || null,
+            avatar_url: null,
+            native_language: 'en',
+            current_level: 1,
+            total_experience: 0,
+            learning_streak: 0,
+            preferences: {},
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          };
+          return c.json({ success: true });
+        }
+        throw supabaseError;
       }
-
-      return c.json({ success: true });
     } catch (e) {
       console.error('profiles create error', e);
       const msg = e instanceof Error ? e.message : 'Unknown error';

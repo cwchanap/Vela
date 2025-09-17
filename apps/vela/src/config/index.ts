@@ -30,6 +30,11 @@ export const config = {
     isProd: import.meta.env.PROD,
   },
 
+  // API configuration
+  api: {
+    url: import.meta.env.VITE_API_URL || '',
+  },
+
   // Development configuration
   dev: {
     devMode: import.meta.env.VITE_DEV_MODE === 'true',

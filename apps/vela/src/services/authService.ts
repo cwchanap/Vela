@@ -294,7 +294,7 @@ class AuthService {
   private async autoConfirmUser(email: string): Promise<void> {
     try {
       // Call our API endpoint to auto-confirm the user
-      const response = await fetch('/api/auth/auto-confirm', {
+      const response = await fetch(`${config.api.url}auth/auto-confirm`, {
         method: 'POST',
         headers: {
           'content-type': 'application/json',
@@ -407,7 +407,7 @@ class AuthService {
     profileData: Partial<ProfileInsert>,
   ): Promise<void> {
     try {
-      await fetch('/api/profiles/create', {
+      await fetch(`${config.api.url}profiles/create`, {
         method: 'POST',
         headers: {
           'content-type': 'application/json',
@@ -428,7 +428,7 @@ class AuthService {
    */
   async getUserProfile(userId: string): Promise<Profile | null> {
     try {
-      const response = await fetch(`/api/profiles?user_id=${userId}`);
+      const response = await fetch(`${config.api.url}profiles?user_id=${userId}`);
       if (!response.ok) {
         console.error('Error fetching user profile:', response.statusText);
         return null;
@@ -447,7 +447,7 @@ class AuthService {
    */
   async updateUserProfile(userId: string, profileData: ProfileData): Promise<AuthResponse> {
     try {
-      const response = await fetch('/api/profiles/update', {
+      const response = await fetch(`${config.api.url}profiles/update`, {
         method: 'PUT',
         headers: {
           'content-type': 'application/json',

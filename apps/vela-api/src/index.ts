@@ -77,6 +77,14 @@ if (process.env.NODE_ENV === 'development') {
     COGNITO_CLIENT_ID: process.env.COGNITO_CLIENT_ID,
   };
 
+  console.log('Environment variables loaded:', {
+    AWS_REGION: mockEnv.AWS_REGION,
+    VITE_COGNITO_USER_POOL_ID: mockEnv.VITE_COGNITO_USER_POOL_ID,
+    AWS_ACCESS_KEY_ID: mockEnv.AWS_ACCESS_KEY_ID ? 'present' : 'missing',
+    SUPABASE_URL: mockEnv.SUPABASE_URL,
+    SUPABASE_ANON_KEY: mockEnv.SUPABASE_ANON_KEY ? 'present' : 'missing',
+  });
+
   // Add middleware to inject mock environment
   app.use('*', async (c: Context, next: Next) => {
     // @ts-ignore - Inject mock environment for development

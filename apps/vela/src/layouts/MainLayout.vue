@@ -32,7 +32,7 @@
 
         <q-space />
 
-        <div v-if="user" class="q-gutter-sm row items-center no-wrap">
+        <div v-if="user && isInitialized" class="q-gutter-sm row items-center no-wrap">
           <q-btn round dense flat icon="notifications" :color="isDashboard ? 'black' : void 0">
             <q-badge color="red" :text-color="isDashboard ? 'black' : 'white'" floating>
               2
@@ -119,7 +119,7 @@ const $q = useQuasar();
 const leftDrawerOpen = ref(false);
 const drawerMini = ref(false);
 const authStore = useAuthStore();
-const { user } = storeToRefs(authStore);
+const { user, isInitialized } = storeToRefs(authStore);
 const router = useRouter();
 const route = useRoute();
 
