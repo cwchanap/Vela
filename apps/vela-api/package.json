@@ -2,7 +2,7 @@
   "name": "vela-api",
   "type": "module",
   "scripts": {
-    "dev": "tsx watch src/index.ts",
+    "dev": "NODE_ENV=development tsx watch src/index.ts",
     "build": "esbuild --bundle --outfile=./dist/index.js --platform=node --target=node20 ./src/index.ts",
     "zip": "zip -j lambda.zip dist/index.js",
     "update": "aws lambda update-function-code --zip-file fileb://lambda.zip --function-name vela-api",
@@ -16,8 +16,10 @@
     "@types/aws-lambda": "^8.10.143",
     "@vitest/coverage-v8": "^1.6.0",
     "esbuild": "^0.21.4",
+    "nodemon": "^3.1.10",
     "npm-run-all2": "^6.2.0",
     "tsx": "^4.19.1",
+    "vite": "^7.1.5",
     "vitest": "^1.6.0"
   },
   "dependencies": {
