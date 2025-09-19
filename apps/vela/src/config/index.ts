@@ -1,10 +1,6 @@
 // Environment configuration
 export const config = {
   // Supabase configuration
-  supabase: {
-    url: import.meta.env.VITE_SUPABASE_URL || '',
-    anonKey: import.meta.env.VITE_SUPABASE_ANON_KEY || '',
-  },
 
   // Cognito configuration
   cognito: {
@@ -52,7 +48,7 @@ export const validateConfig = () => {
     const requiredVars =
       provider === 'cognito'
         ? ['VITE_COGNITO_USER_POOL_ID', 'VITE_COGNITO_USER_POOL_CLIENT_ID', 'VITE_AWS_REGION']
-        : ['VITE_SUPABASE_URL', 'VITE_SUPABASE_ANON_KEY'];
+        : [];
 
     // Ensure import.meta.env exists
     if (typeof import.meta === 'undefined' || !import.meta.env) {

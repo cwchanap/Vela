@@ -58,7 +58,7 @@ applyTo: '**'
 #### Configuration
 
 - `src/config/index.ts` - Environment variable configuration with validation
-- Environment variables: VITE_SUPABASE_URL, VITE_SUPABASE_ANON_KEY, VITE_OPENAI_API_KEY, VITE_APP_NAME, VITE_APP_VERSION, VITE_DEV_MODE
+- Environment variables: VITE_OPENAI_API_KEY, VITE_APP_NAME, VITE_APP_VERSION, VITE_DEV_MODE
 
 #### Routing & Pages
 

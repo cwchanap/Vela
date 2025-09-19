@@ -1,6 +1,5 @@
 import { Hono } from 'hono';
 import { zValidator } from '@hono/zod-validator';
-import { createClient } from '@supabase/supabase-js';
 import type { Env } from '../types';
 import {
   ChatHistoryItemSchema,
@@ -10,6 +9,8 @@ import {
   type ChatHistoryItem,
   type ChatThreadSummary,
 } from '../validation';
+import { docClient, TABLE_NAMES } from '../dynamodb';
+import { PutCommand, QueryCommand, ScanCommand } from '@aws-sdk/lib-dynamodb';
 
 const chatHistory = new Hono<{ Bindings: Env }>();
 
@@ -27,113 +28,114 @@ chatHistory.use('*', async (c, next) => {
 });
 
 /* ========================
- * Supabase implementation
+ * DynamoDB implementation
  * ======================== */
 
-async function getSupabaseClient(env: Env) {
-  const supabaseUrl = env.SUPABASE_URL;
-  const supabaseAnonKey = env.SUPABASE_ANON_KEY;
-
-  if (!supabaseUrl || !supabaseAnonKey) {
-    throw new Error('Missing Supabase configuration');
-  }
-
-  return createClient(supabaseUrl, supabaseAnonKey);
-}
-
-async function supabase_saveMessage(env: Env, item: ChatHistoryItem): Promise<void> {
-  const supabase = await getSupabaseClient(env);
-
-  const { error } = await supabase.from('chat_history').insert({
-    id: crypto.randomUUID(),
-    user_id: item.UserId,
-    message_type: item.is_user ? 'user' : 'ai',
-    content: item.message,
-    context: {},
-    created_at: new Date(item.Timestamp).toISOString(),
-  });
-
-  if (error) {
-    throw new Error(`Failed to save message: ${error.message}`);
-  }
-}
-
-async function supabase_listThreads(env: Env, user_id: string): Promise<ChatThreadSummary[]> {
-  const supabase = await getSupabaseClient(env);
-
-  // Get all messages for the user
-  const { data: messages, error } = await supabase
-    .from('chat_history')
-    .select('*')
-    .eq('user_id', user_id)
-    .order('created_at', { ascending: false });
-
-  if (error) {
-    throw new Error(`Failed to fetch threads: ${error.message}`);
-  }
-
-  if (!messages) {
-    return [];
-  }
-
-  // Group messages by thread (we'll use a simple approach - group by date for now)
-  const threadMap = new Map<string, typeof messages>();
-
-  for (const message of messages) {
-    const date = new Date(message.created_at).toDateString();
-    if (!threadMap.has(date)) {
-      threadMap.set(date, []);
-    }
-    threadMap.get(date)!.push(message);
-  }
-
-  const summaries: ChatThreadSummary[] = [];
-  for (const [date, threadMessages] of threadMap.entries()) {
-    const sorted = threadMessages.sort(
-      (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime(),
-    );
-    const last = sorted[sorted.length - 1];
-    const firstUser = sorted.find((m) => m.message_type === 'user') || sorted[0];
-    const title = (firstUser?.content || 'Conversation').slice(0, 60);
-
-    summaries.push({
-      ThreadId: date,
-      lastTimestamp: new Date(last.created_at).getTime(),
-      title,
-      messageCount: threadMessages.length,
+async function dynamodb_saveMessage(env: Env, item: ChatHistoryItem): Promise<void> {
+  try {
+    const command = new PutCommand({
+      TableName: TABLE_NAMES.CHAT_HISTORY,
+      Item: {
+        ThreadId: item.ThreadId || 'default',
+        Timestamp: item.Timestamp,
+        UserId: item.UserId,
+        message: item.message,
+        is_user: item.is_user,
+        context: {},
+      },
     });
+    await docClient.send(command);
+  } catch (error) {
+    console.error('DynamoDB save message error:', error);
+    throw new Error(
+      `Failed to save message: ${error instanceof Error ? error.message : 'Unknown error'}`,
+    );
   }
-
-  return summaries.sort((a, b) => b.lastTimestamp - a.lastTimestamp);
 }
 
-async function supabase_getMessages(env: Env, thread_id: string): Promise<ChatHistoryItem[]> {
-  const supabase = await getSupabaseClient(env);
+async function dynamodb_listThreads(env: Env, user_id: string): Promise<ChatThreadSummary[]> {
+  try {
+    // Query all messages for the user using the GSI
+    const command = new QueryCommand({
+      TableName: TABLE_NAMES.CHAT_HISTORY,
+      IndexName: 'UserIdIndex',
+      KeyConditionExpression: 'UserId = :userId',
+      ExpressionAttributeValues: {
+        ':userId': user_id,
+      },
+      ScanIndexForward: false, // Sort by timestamp descending
+    });
 
-  // For now, we'll fetch messages by date (thread_id is the date string)
-  const { data: messages, error } = await supabase
-    .from('chat_history')
-    .select('*')
-    .eq('user_id', 'current_user_id') // This should be passed from the request
-    .gte('created_at', `${thread_id} 00:00:00`)
-    .lt('created_at', `${thread_id} 23:59:59`)
-    .order('created_at', { ascending: true });
+    const response = await docClient.send(command);
+    const messages = response.Items || [];
 
-  if (error) {
-    throw new Error(`Failed to fetch messages: ${error.message}`);
+    if (!messages.length) {
+      return [];
+    }
+
+    // Group messages by ThreadId
+    const threadMap = new Map<string, any[]>();
+
+    for (const message of messages) {
+      const threadId = message.ThreadId;
+      if (!threadMap.has(threadId)) {
+        threadMap.set(threadId, []);
+      }
+      threadMap.get(threadId)!.push(message);
+    }
+
+    const summaries: ChatThreadSummary[] = [];
+    for (const [threadId, threadMessages] of threadMap.entries()) {
+      const sorted = threadMessages.sort((a, b) => a.Timestamp - b.Timestamp);
+      const last = sorted[sorted.length - 1];
+      const firstUser = sorted.find((m) => m.is_user) || sorted[0];
+      const title = (firstUser?.message || 'Conversation').slice(0, 60);
+
+      summaries.push({
+        ThreadId: threadId,
+        lastTimestamp: last.Timestamp,
+        title,
+        messageCount: threadMessages.length,
+      });
+    }
+
+    return summaries.sort((a, b) => b.lastTimestamp - a.lastTimestamp);
+  } catch (error) {
+    console.error('DynamoDB list threads error:', error);
+    throw new Error(
+      `Failed to fetch threads: ${error instanceof Error ? error.message : 'Unknown error'}`,
+    );
   }
+}
 
-  if (!messages) {
-    return [];
+async function dynamodb_getMessages(env: Env, thread_id: string): Promise<ChatHistoryItem[]> {
+  try {
+    // Query messages by ThreadId
+    const command = new QueryCommand({
+      TableName: TABLE_NAMES.CHAT_HISTORY,
+      KeyConditionExpression: 'ThreadId = :threadId',
+      ExpressionAttributeValues: {
+        ':threadId': thread_id,
+      },
+      ScanIndexForward: true, // Sort by timestamp ascending
+    });
+
+    const response = await docClient.send(command);
+    const messages = response.Items || [];
+
+    return messages.map((message) => ({
+      ThreadId: message.ThreadId,
+      Timestamp: message.Timestamp,
+      UserId: message.UserId,
+      message: message.message,
+      is_user: message.is_user,
+    }));
+  } catch (error) {
+    console.error('DynamoDB get messages error:', error);
+    throw new Error(
+      `Failed to fetch messages: ${error instanceof Error ? error.message : 'Unknown error'}`,
+    );
   }
-
-  return messages.map((message) => ({
-    ThreadId: thread_id,
-    Timestamp: new Date(message.created_at).getTime(),
-    UserId: message.user_id,
-    message: message.content,
-    is_user: message.message_type === 'user',
-  }));
 }
 
 /* ============
@@ -143,7 +145,7 @@ async function supabase_getMessages(env: Env, thread_id: string): Promise<ChatHi
 chatHistory.post('/save', zValidator('json', ChatHistoryItemSchema), async (c) => {
   try {
     const body = c.req.valid('json');
-    await supabase_saveMessage(c.env, body);
+    await dynamodb_saveMessage(c.env, body);
     return c.json({ ok: true });
   } catch (e) {
     console.error('chat-history save error', e);
@@ -155,7 +157,7 @@ chatHistory.post('/save', zValidator('json', ChatHistoryItemSchema), async (c) =
 chatHistory.get('/threads', zValidator('query', UserIdQuerySchema), async (c) => {
   try {
     const { user_id } = c.req.valid('query');
-    const threads = await supabase_listThreads(c.env, user_id);
+    const threads = await dynamodb_listThreads(c.env, user_id);
     return c.json({ threads });
   } catch (e) {
     console.error('chat-history threads error', e);
@@ -167,7 +169,7 @@ chatHistory.get('/threads', zValidator('query', UserIdQuerySchema), async (c) =>
 chatHistory.get('/messages', zValidator('query', ThreadIdQuerySchema), async (c) => {
   try {
     const { thread_id } = c.req.valid('query');
-    const items = await supabase_getMessages(c.env, thread_id);
+    const items = await dynamodb_getMessages(c.env, thread_id);
     return c.json({ items });
   } catch (e) {
     console.error('chat-history messages error', e);

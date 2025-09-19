@@ -74,8 +74,8 @@ export class VelaStack extends Stack {
     });
 
     // DynamoDB Table for Chat History
-    const chatHistoryTable = new Table(this, 'VelaTable', {
-      tableName: 'vela',
+    const chatHistoryTable = new Table(this, 'VelaChatHistoryTable', {
+      tableName: 'vela-chat-history',
       partitionKey: {
         name: 'ThreadId',
         type: AttributeType.STRING,
@@ -104,6 +104,84 @@ export class VelaStack extends Stack {
       },
     });
 
+    // DynamoDB Table for User Profiles
+    const profilesTable = new Table(this, 'VelaProfilesTable', {
+      tableName: 'vela-profiles',
+      partitionKey: {
+        name: 'user_id',
+        type: AttributeType.STRING,
+      },
+      billingMode: BillingMode.PAY_PER_REQUEST,
+      removalPolicy: RemovalPolicy.RETAIN,
+      pointInTimeRecoverySpecification: {
+        pointInTimeRecoveryEnabled: true,
+      },
+    });
+
+    // DynamoDB Table for Vocabulary
+    const vocabularyTable = new Table(this, 'VelaVocabularyTable', {
+      tableName: 'vela-vocabulary',
+      partitionKey: {
+        name: 'id',
+        type: AttributeType.STRING,
+      },
+      billingMode: BillingMode.PAY_PER_REQUEST,
+      removalPolicy: RemovalPolicy.RETAIN,
+      pointInTimeRecoverySpecification: {
+        pointInTimeRecoveryEnabled: true,
+      },
+    });
+
+    // DynamoDB Table for Sentences
+    const sentencesTable = new Table(this, 'VelaSentencesTable', {
+      tableName: 'vela-sentences',
+      partitionKey: {
+        name: 'id',
+        type: AttributeType.STRING,
+      },
+      billingMode: BillingMode.PAY_PER_REQUEST,
+      removalPolicy: RemovalPolicy.RETAIN,
+      pointInTimeRecoverySpecification: {
+        pointInTimeRecoveryEnabled: true,
+      },
+    });
+
+    // DynamoDB Table for Game Sessions
+    const gameSessionsTable = new Table(this, 'VelaGameSessionsTable', {
+      tableName: 'vela-game-sessions',
+      partitionKey: {
+        name: 'user_id',
+        type: AttributeType.STRING,
+      },
+      sortKey: {
+        name: 'session_id',
+        type: AttributeType.STRING,
+      },
+      billingMode: BillingMode.PAY_PER_REQUEST,
+      removalPolicy: RemovalPolicy.RETAIN,
+      pointInTimeRecoverySpecification: {
+        pointInTimeRecoveryEnabled: true,
+      },
+    });
+
+    // DynamoDB Table for Daily Progress
+    const dailyProgressTable = new Table(this, 'VelaDailyProgressTable', {
+      tableName: 'vela-daily-progress',
+      partitionKey: {
+        name: 'user_id',
+        type: AttributeType.STRING,
+      },
+      sortKey: {
+        name: 'date',
+        type: AttributeType.STRING,
+      },
+      billingMode: BillingMode.PAY_PER_REQUEST,
+      removalPolicy: RemovalPolicy.RETAIN,
+      pointInTimeRecoverySpecification: {
+        pointInTimeRecoveryEnabled: true,
+      },
+    });
+
     // Lambda Function
     const apiLambda = new Function(this, 'VelaApiFunction', {
       functionName: 'vela-api',
@@ -114,6 +192,11 @@ export class VelaStack extends Stack {
       memorySize: 512,
       environment: {
         DYNAMODB_TABLE_NAME: chatHistoryTable.tableName,
+        PROFILES_TABLE_NAME: profilesTable.tableName,
+        VOCABULARY_TABLE_NAME: vocabularyTable.tableName,
+        SENTENCES_TABLE_NAME: sentencesTable.tableName,
+        GAME_SESSIONS_TABLE_NAME: gameSessionsTable.tableName,
+        DAILY_PROGRESS_TABLE_NAME: dailyProgressTable.tableName,
         GEMINI_API_KEY: process.env.GEMINI_API_KEY || '',
         OPENROUTER_API_KEY: process.env.OPENROUTER_API_KEY || '',
         VITE_COGNITO_USER_POOL_ID: userPool.userPoolId,
@@ -123,6 +206,11 @@ export class VelaStack extends Stack {
 
     // Grant DynamoDB permissions to Lambda
     chatHistoryTable.grantReadWriteData(apiLambda);
+    profilesTable.grantReadWriteData(apiLambda);
+    vocabularyTable.grantReadWriteData(apiLambda);
+    sentencesTable.grantReadWriteData(apiLambda);
+    gameSessionsTable.grantReadWriteData(apiLambda);
+    dailyProgressTable.grantReadWriteData(apiLambda);
 
     // Grant Cognito permissions to Lambda for admin operations
     apiLambda.addToRolePolicy(
@@ -237,9 +325,34 @@ export class VelaStack extends Stack {
       description: 'API Gateway URL',
     });
 
-    new CfnOutput(this, 'DynamoDBTableName', {
+    new CfnOutput(this, 'DynamoDBChatHistoryTableName', {
       value: chatHistoryTable.tableName,
-      description: 'DynamoDB Table Name',
+      description: 'DynamoDB Chat History Table Name',
+    });
+
+    new CfnOutput(this, 'DynamoDBProfilesTableName', {
+      value: profilesTable.tableName,
+      description: 'DynamoDB Profiles Table Name',
+    });
+
+    new CfnOutput(this, 'DynamoDBVocabularyTableName', {
+      value: vocabularyTable.tableName,
+      description: 'DynamoDB Vocabulary Table Name',
+    });
+
+    new CfnOutput(this, 'DynamoDBSentencesTableName', {
+      value: sentencesTable.tableName,
+      description: 'DynamoDB Sentences Table Name',
+    });
+
+    new CfnOutput(this, 'DynamoDBGameSessionsTableName', {
+      value: gameSessionsTable.tableName,
+      description: 'DynamoDB Game Sessions Table Name',
+    });
+
+    new CfnOutput(this, 'DynamoDBDailyProgressTableName', {
+      value: dailyProgressTable.tableName,
+      description: 'DynamoDB Daily Progress Table Name',
     });
 
     new CfnOutput(this, 'CloudFrontDistributionId', {
@@ -275,15 +388,6 @@ export class VelaStack extends Stack {
     });
 
     // Environment Variables for Frontend
-    new CfnOutput(this, 'VITE_SUPABASE_URL', {
-      value: process.env.VITE_SUPABASE_URL || '',
-      description: 'Supabase URL for frontend',
-    });
-
-    new CfnOutput(this, 'VITE_SUPABASE_ANON_KEY', {
-      value: process.env.VITE_SUPABASE_ANON_KEY || '',
-      description: 'Supabase Anonymous Key for frontend',
-    });
 
     new CfnOutput(this, 'VITE_COGNITO_USER_POOL_ID', {
       value: userPool.userPoolId,

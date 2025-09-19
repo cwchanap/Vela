@@ -1,8 +1,8 @@
 import { Hono } from 'hono';
 import { zValidator } from '@hono/zod-validator';
-import { createClient } from '@supabase/supabase-js';
 import { z } from 'zod';
 import type { Env } from '../types';
+import { vocabulary as vocabularyDB, sentences as sentencesDB } from '../dynamodb';
 
 // Validation schemas
 const VocabularyQuerySchema = z.object({
@@ -34,21 +34,6 @@ games.use('*', async (c, next) => {
   await next();
 });
 
-/* ========================
- * Supabase implementation
- * ======================== */
-
-async function getSupabaseClient(env: Env) {
-  const supabaseUrl = env.SUPABASE_URL;
-  const supabaseAnonKey = env.SUPABASE_ANON_KEY;
-
-  if (!supabaseUrl || !supabaseAnonKey) {
-    throw new Error('Missing Supabase configuration');
-  }
-
-  return createClient(supabaseUrl, supabaseAnonKey);
-}
-
 /* ============
  * Routes
  * ============ */
@@ -56,13 +41,8 @@ async function getSupabaseClient(env: Env) {
 games.get('/vocabulary', zValidator('query', VocabularyQuerySchema), async (c) => {
   try {
     const { limit } = c.req.valid('query');
-    const supabase = await getSupabaseClient(c.env);
 
-    const { data: vocabulary, error } = await supabase.from('vocabulary').select('*').limit(limit);
-
-    if (error) {
-      throw new Error(`Failed to fetch vocabulary: ${error.message}`);
-    }
+    const vocabulary = await vocabularyDB.getAll(limit);
 
     return c.json({ vocabulary: vocabulary || [] });
   } catch (e) {
@@ -75,13 +55,8 @@ games.get('/vocabulary', zValidator('query', VocabularyQuerySchema), async (c) =
 games.get('/sentences', zValidator('query', SentencesQuerySchema), async (c) => {
   try {
     const { limit } = c.req.valid('query');
-    const supabase = await getSupabaseClient(c.env);
 
-    const { data: sentences, error } = await supabase.from('sentences').select('*').limit(limit);
-
-    if (error) {
-      throw new Error(`Failed to fetch sentences: ${error.message}`);
-    }
+    const sentences = await sentencesDB.getAll(limit);
 
     return c.json({ sentences: sentences || [] });
   } catch (e) {

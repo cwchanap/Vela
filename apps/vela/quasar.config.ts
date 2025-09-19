@@ -54,8 +54,6 @@ export default defineConfig((/* ctx */) => {
       // analyze: true, // Enable bundle analyzer when needed
       env: {
         // Make environment variables available to the app
-        VITE_SUPABASE_URL: process.env.VITE_SUPABASE_URL,
-        VITE_SUPABASE_ANON_KEY: process.env.VITE_SUPABASE_ANON_KEY,
         VITE_AUTH_PROVIDER: process.env.VITE_AUTH_PROVIDER,
         VITE_COGNITO_USER_POOL_ID: process.env.VITE_COGNITO_USER_POOL_ID,
         VITE_COGNITO_USER_POOL_CLIENT_ID: process.env.VITE_COGNITO_USER_POOL_CLIENT_ID,

@@ -73,8 +73,8 @@ This is a **Turborepo monorepo** containing:
 
 #### Infrastructure
 
-- **Database**: Supabase (PostgreSQL with real-time subscriptions)
-- **Authentication**: Supabase Auth with email/password and magic links
+- **Database**: DynamoDB (NoSQL database)
+- **Authentication**: AWS Cognito with email/password
 - **Cloud**: AWS CDK for infrastructure as code
 - **Deployment**: AWS Lambda for serverless functions
 
@@ -104,19 +104,18 @@ This is a **Turborepo monorepo** containing:
 
 #### Services Layer
 
-- `apps/vela/src/services/supabase.ts` - Supabase client configuration with comprehensive TypeScript types for database schema
 - `apps/vela/src/services/authService.ts` - Authentication business logic and API calls
 - `apps/vela/src/services/gameService.ts` - Game logic for vocabulary and sentence games
 - `apps/vela/src/services/progressService.ts` - Learning progress tracking services
 - `apps/vela/src/services/chatHistoryClient.ts` - Chat history management
 - `apps/vela/src/services/llm/` - LLM provider integrations (Google, OpenRouter)
-- Database schema includes: profiles, vocabulary, user_progress, game_sessions, chat_history, sentences
+- Database schema includes: profiles, vocabulary, game_sessions, chat_history, sentences
 
 #### Configuration
 
 - `apps/vela/src/config/index.ts` - Environment variable configuration with validation
 - `apps/vela/src/config/navigation.ts` - Navigation menu configuration
-- Environment variables: VITE_SUPABASE_URL, VITE_SUPABASE_ANON_KEY, VITE_APP_NAME, VITE_APP_VERSION, VITE_DEV_MODE
+- Environment variables: VITE_APP_NAME, VITE_APP_VERSION, VITE_DEV_MODE
 
 #### Routing & Pages
 
@@ -128,15 +127,15 @@ This is a **Turborepo monorepo** containing:
 - Game pages: `/games`, `/games/vocabulary`, `/games/sentence` with interactive learning components
 - Route guards handle authentication state and redirects
 
-### Database Schema (Supabase)
+### Database Schema (DynamoDB)
 
-The application uses a comprehensive database schema for a Japanese learning app:
+The application uses DynamoDB tables for a Japanese learning app:
 
 - **profiles** - User profiles with preferences, level, experience, streak
 - **vocabulary** - Japanese vocabulary with hiragana/katakana/romaji/translations
 - **sentences** - Japanese sentences for anagram games with translations
-- **user_progress** - Individual word mastery tracking with spaced repetition
 - **game_sessions** - Game completion records with scores and experience
+- **daily_progress** - Daily learning progress tracking
 - **chat_history** - AI chat conversation storage
 
 ### Development Patterns
@@ -144,20 +143,20 @@ The application uses a comprehensive database schema for a Japanese learning app
 #### Authentication Flow
 
 1. Auth state managed in Pinia store with reactive session tracking
-2. Supabase handles session persistence and refresh automatically
+2. AWS Cognito handles session persistence and refresh automatically
 3. Router guards check auth requirements using meta properties
 4. User profiles are loaded and synced with auth state changes
 
 #### Environment Configuration
 
-- Development fallbacks to local Supabase instance (127.0.0.1:54321)
+- Development uses local DynamoDB tables
 - Production requires proper environment variables
 - Config validation runs at app startup
 
 #### TypeScript Integration
 
 - Strict TypeScript configuration enabled
-- Comprehensive database types generated from Supabase schema
+- Comprehensive database types for DynamoDB schema
 - Vue SFC type checking enabled via vite-plugin-checker
 
 #### Build Configuration

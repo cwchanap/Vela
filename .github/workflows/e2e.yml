@@ -32,10 +32,6 @@ jobs:
       - name: Run Playwright tests
         run: npm run test
         working-directory: ./apps/vela
-        env:
-          # Add environment variables needed for testing
-          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
-          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
 
       - uses: actions/upload-artifact@v4
         if: always()

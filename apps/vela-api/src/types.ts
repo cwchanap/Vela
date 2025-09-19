@@ -3,10 +3,6 @@ export interface Env {
   OPENROUTER_API_KEY?: string;
   APP_NAME?: string;
 
-  // Supabase configuration
-  SUPABASE_URL?: string;
-  SUPABASE_ANON_KEY?: string;
-
   // AWS configuration
   AWS_ACCESS_KEY_ID?: string;
   AWS_SECRET_ACCESS_KEY?: string;
