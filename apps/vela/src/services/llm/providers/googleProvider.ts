@@ -14,7 +14,7 @@ export class GoogleProvider implements LLMProvider {
   private model: string;
 
   constructor(options?: GoogleProviderOptions) {
-    // API calls are proxied via Supabase Edge Function; no client-side API key
+    // API calls are proxied via AWS Lambda API; no client-side API key
     this.model = options?.model || 'gemini-2.5-flash-lite';
   }
 

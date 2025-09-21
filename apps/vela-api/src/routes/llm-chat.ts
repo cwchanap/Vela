@@ -18,11 +18,21 @@ llmChat.use('*', async (c, next) => {
   await next();
 });
 
-llmChat.post('/', zValidator('json', LLMBridgeRequestSchema), async (c) => {
-  const input = c.req.valid('json');
+llmChat.post('/', async (c) => {
+  let input;
+  try {
+    input = await c.req.json();
+  } catch (e) {
+    return c.json({ error: 'Invalid JSON' }, 400);
+  }
+
   const provider = input.provider;
   if (!provider) {
     return c.json({ error: 'Missing provider' }, 400);
+  }
+
+  if (!input.messages && !input.prompt) {
+    return c.json({ error: 'Missing prompt or messages' }, 400);
   }
 
   try {

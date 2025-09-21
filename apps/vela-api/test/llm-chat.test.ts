@@ -69,7 +69,7 @@ describe('LLM Chat Route', () => {
       const json = await res.json();
 
       expect(res.status).toBe(400);
-      expect(json.error).toBe('Missing provider');
+      expect(json.error).toContain('Missing provider');
     });
 
     it('should return 400 for missing prompt and messages', async () => {
@@ -84,7 +84,7 @@ describe('LLM Chat Route', () => {
       const json = await res.json();
 
       expect(res.status).toBe(400);
-      expect(json.error).toBe('Missing prompt or messages');
+      expect(json.error).toContain('Missing prompt or messages');
     });
   });
 

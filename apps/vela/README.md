@@ -6,8 +6,8 @@ The main Vela Japanese Learning Application built with Quasar Framework (Vue 3 +
 
 - Japanese vocabulary learning games
 - Sentence anagram games
-- User progress tracking with Supabase
-- Authentication with Supabase Auth
+- User progress tracking with DynamoDB
+- Authentication with AWS Cognito
 
 ## Development
 
@@ -29,8 +29,8 @@ npm run format
 
 - **Framework**: Quasar Framework (Vue 3 + TypeScript)
 - **State Management**: Pinia
-- **Backend**: Supabase (Auth + Database)
-- **AWS Services**: DynamoDB, Lambda
+- **Backend**: AWS Lambda API with DynamoDB
+- **Authentication**: AWS Cognito
 - **Build Tool**: Vite
 
 ## Configuration

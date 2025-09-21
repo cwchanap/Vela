@@ -32,6 +32,11 @@ chatHistory.use('*', async (c, next) => {
  * ======================== */
 
 async function dynamodb_saveMessage(env: Env, item: ChatHistoryItem): Promise<void> {
+  // Check for missing AWS credentials
+  if (!env.AWS_ACCESS_KEY_ID || !env.AWS_SECRET_ACCESS_KEY) {
+    throw new Error('Missing AWS credentials');
+  }
+
   try {
     const command = new PutCommand({
       TableName: TABLE_NAMES.CHAT_HISTORY,
@@ -54,6 +59,11 @@ async function dynamodb_saveMessage(env: Env, item: ChatHistoryItem): Promise<vo
 }
 
 async function dynamodb_listThreads(env: Env, user_id: string): Promise<ChatThreadSummary[]> {
+  // Check for missing AWS credentials
+  if (!env.AWS_ACCESS_KEY_ID || !env.AWS_SECRET_ACCESS_KEY) {
+    throw new Error('Missing AWS credentials');
+  }
+
   try {
     // Query all messages for the user using the GSI
     const command = new QueryCommand({
@@ -109,15 +119,19 @@ async function dynamodb_listThreads(env: Env, user_id: string): Promise<ChatThre
 }
 
 async function dynamodb_getMessages(env: Env, thread_id: string): Promise<ChatHistoryItem[]> {
+  // Check for missing AWS credentials
+  if (!env.AWS_ACCESS_KEY_ID || !env.AWS_SECRET_ACCESS_KEY) {
+    throw new Error('Missing AWS credentials');
+  }
+
   try {
-    // Query messages by ThreadId
-    const command = new QueryCommand({
+    // Scan messages by ThreadId (since we don't have a primary key on ThreadId)
+    const command = new ScanCommand({
       TableName: TABLE_NAMES.CHAT_HISTORY,
-      KeyConditionExpression: 'ThreadId = :threadId',
+      FilterExpression: 'ThreadId = :threadId',
       ExpressionAttributeValues: {
         ':threadId': thread_id,
       },
-      ScanIndexForward: true, // Sort by timestamp ascending
     });
 
     const response = await docClient.send(command);
@@ -154,9 +168,12 @@ chatHistory.post('/save', zValidator('json', ChatHistoryItemSchema), async (c) =
   }
 });
 
-chatHistory.get('/threads', zValidator('query', UserIdQuerySchema), async (c) => {
+chatHistory.get('/threads', async (c) => {
   try {
-    const { user_id } = c.req.valid('query');
+    const { user_id } = c.req.query();
+    if (!user_id) {
+      return c.json({ error: 'user_id is required' }, 400);
+    }
     const threads = await dynamodb_listThreads(c.env, user_id);
     return c.json({ threads });
   } catch (e) {
@@ -166,9 +183,12 @@ chatHistory.get('/threads', zValidator('query', UserIdQuerySchema), async (c) =>
   }
 });
 
-chatHistory.get('/messages', zValidator('query', ThreadIdQuerySchema), async (c) => {
+chatHistory.get('/messages', async (c) => {
   try {
-    const { thread_id } = c.req.valid('query');
+    const { thread_id } = c.req.query();
+    if (!thread_id) {
+      return c.json({ error: 'thread_id is required' }, 400);
+    }
     const items = await dynamodb_getMessages(c.env, thread_id);
     return c.json({ items });
   } catch (e) {

@@ -59,7 +59,7 @@ export default defineRouter(function (/* { store, ssrContext } */) {
         (typeof import.meta !== 'undefined' && import.meta.env?.VITE_DEV_MODE === 'true');
 
       if (requiresAuth && !authStore.isAuthenticated && isDev) {
-        // Allow access in dev to facilitate E2E without Supabase running
+        // Allow access in dev to facilitate E2E without full AWS setup
         next();
         return;
       }

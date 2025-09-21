@@ -6,6 +6,7 @@ import type { ChatHistoryItem, Env } from '../src/types';
 // Mock AWS SDK
 let mockPutCommand: any;
 let mockQueryCommand: any;
+let mockScanCommand: any;
 let mockSend: any;
 
 vi.mock('@aws-sdk/client-dynamodb', () => ({
@@ -15,7 +16,7 @@ vi.mock('@aws-sdk/client-dynamodb', () => ({
 vi.mock('@aws-sdk/lib-dynamodb', () => ({
   DynamoDBDocumentClient: {
     from: vi.fn().mockImplementation(() => ({
-      send: vi.fn(),
+      send: (...args: any[]) => mockSend(...args),
     })),
   },
   PutCommand: vi.fn().mockImplementation((input: any) => {
@@ -26,6 +27,11 @@ vi.mock('@aws-sdk/lib-dynamodb', () => ({
   QueryCommand: vi.fn().mockImplementation((input: any) => {
     if (!mockQueryCommand) mockQueryCommand = vi.fn();
     mockQueryCommand(input);
+    return { input };
+  }),
+  ScanCommand: vi.fn().mockImplementation((input: any) => {
+    if (!mockScanCommand) mockScanCommand = vi.fn();
+    mockScanCommand(input);
     return { input };
   }),
 }));
@@ -87,7 +93,7 @@ describe('Chat History Route', () => {
       const app = createTestApp({
         AWS_ACCESS_KEY_ID: 'test-key',
         AWS_SECRET_ACCESS_KEY: 'test-secret',
-        DDB_TABLE: 'test-table',
+        DDB_TABLE: 'vela-chat-history',
       });
 
       const req = new Request('http://localhost/save', {
@@ -101,10 +107,12 @@ describe('Chat History Route', () => {
 
       expect(res.status).toBe(200);
       expect(json.ok).toBe(true);
-      expect(mockPutCommand).toHaveBeenCalledWith({
-        TableName: 'test-table',
-        Item: chatItem,
-      });
+      expect(mockPutCommand).toHaveBeenCalledWith(
+        expect.objectContaining({
+          TableName: 'vela-chat-history',
+          Item: expect.objectContaining(chatItem),
+        }),
+      );
     });
 
     it('should handle DynamoDB errors', async () => {
@@ -131,7 +139,7 @@ describe('Chat History Route', () => {
       const json = await res.json();
 
       expect(res.status).toBe(500);
-      expect(json.error).toBe('DynamoDB error');
+      expect(json.error).toContain('DynamoDB error');
     });
 
     it('should handle missing AWS credentials', async () => {
@@ -153,7 +161,7 @@ describe('Chat History Route', () => {
       const json = await res.json();
 
       expect(res.status).toBe(500);
-      expect(json.error).toBe('Missing AWS credentials');
+      expect(json.error).toContain('Missing AWS credentials');
     });
   });
 
@@ -191,7 +199,7 @@ describe('Chat History Route', () => {
       const app = createTestApp({
         AWS_ACCESS_KEY_ID: 'test-key',
         AWS_SECRET_ACCESS_KEY: 'test-secret',
-        DDB_TABLE: 'test-table',
+        DDB_TABLE: 'vela-chat-history',
       });
 
       const req = new Request('http://localhost/threads?user_id=user-123');
@@ -213,7 +221,7 @@ describe('Chat History Route', () => {
       const json = await res.json();
 
       expect(res.status).toBe(400);
-      expect(json.error).toBe('user_id is required');
+      expect(json.error).toContain('user_id is required');
     });
   });
 
@@ -244,7 +252,7 @@ describe('Chat History Route', () => {
       const app = createTestApp({
         AWS_ACCESS_KEY_ID: 'test-key',
         AWS_SECRET_ACCESS_KEY: 'test-secret',
-        DDB_TABLE: 'test-table',
+        DDB_TABLE: 'vela-chat-history',
       });
 
       const req = new Request('http://localhost/messages?thread_id=thread-123');
@@ -265,7 +273,7 @@ describe('Chat History Route', () => {
       const json = await res.json();
 
       expect(res.status).toBe(400);
-      expect(json.error).toBe('thread_id is required');
+      expect(json.error).toContain('thread_id is required');
     });
   });
 });

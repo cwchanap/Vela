@@ -11,7 +11,7 @@ import {
 
 // Create DynamoDB client
 const client = new DynamoDBClient({
-  region: process.env.AWS_REGION || 'us-east-1',
+  region: process.env.DDB_REGION || process.env.AWS_REGION || 'us-east-1',
   endpoint: process.env.DDB_ENDPOINT, // Optional: for local development
 });
 

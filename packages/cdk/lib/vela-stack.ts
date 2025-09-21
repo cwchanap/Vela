@@ -33,11 +33,9 @@ export class VelaStack extends Stack {
       signInAliases: {
         email: true,
       },
-      // Disable automatic email verification - users will NOT be auto-confirmed
       autoVerify: {
         email: false,
       },
-      // Disable email verification requirement for sign up
       signInCaseSensitive: false,
       standardAttributes: {
         email: {
@@ -69,11 +67,10 @@ export class VelaStack extends Stack {
         userSrp: true,
       },
       preventUserExistenceErrors: true,
-      // Explicitly disable email verification for this client
       disableOAuth: false,
     });
 
-    // DynamoDB Table for Chat History
+    // DynamoDB Tables
     const chatHistoryTable = new Table(this, 'VelaChatHistoryTable', {
       tableName: 'vela-chat-history',
       partitionKey: {
@@ -85,7 +82,7 @@ export class VelaStack extends Stack {
         type: AttributeType.NUMBER,
       },
       billingMode: BillingMode.PAY_PER_REQUEST,
-      removalPolicy: RemovalPolicy.RETAIN,
+      removalPolicy: RemovalPolicy.DESTROY,
       pointInTimeRecoverySpecification: {
         pointInTimeRecoveryEnabled: true,
       },
@@ -104,7 +101,6 @@ export class VelaStack extends Stack {
       },
     });
 
-    // DynamoDB Table for User Profiles
     const profilesTable = new Table(this, 'VelaProfilesTable', {
       tableName: 'vela-profiles',
       partitionKey: {
@@ -112,13 +108,12 @@ export class VelaStack extends Stack {
         type: AttributeType.STRING,
       },
       billingMode: BillingMode.PAY_PER_REQUEST,
-      removalPolicy: RemovalPolicy.RETAIN,
+      removalPolicy: RemovalPolicy.DESTROY,
       pointInTimeRecoverySpecification: {
         pointInTimeRecoveryEnabled: true,
       },
     });
 
-    // DynamoDB Table for Vocabulary
     const vocabularyTable = new Table(this, 'VelaVocabularyTable', {
       tableName: 'vela-vocabulary',
       partitionKey: {
@@ -126,13 +121,12 @@ export class VelaStack extends Stack {
         type: AttributeType.STRING,
       },
       billingMode: BillingMode.PAY_PER_REQUEST,
-      removalPolicy: RemovalPolicy.RETAIN,
+      removalPolicy: RemovalPolicy.DESTROY,
       pointInTimeRecoverySpecification: {
         pointInTimeRecoveryEnabled: true,
       },
     });
 
-    // DynamoDB Table for Sentences
     const sentencesTable = new Table(this, 'VelaSentencesTable', {
       tableName: 'vela-sentences',
       partitionKey: {
@@ -140,13 +134,12 @@ export class VelaStack extends Stack {
         type: AttributeType.STRING,
       },
       billingMode: BillingMode.PAY_PER_REQUEST,
-      removalPolicy: RemovalPolicy.RETAIN,
+      removalPolicy: RemovalPolicy.DESTROY,
       pointInTimeRecoverySpecification: {
         pointInTimeRecoveryEnabled: true,
       },
     });
 
-    // DynamoDB Table for Game Sessions
     const gameSessionsTable = new Table(this, 'VelaGameSessionsTable', {
       tableName: 'vela-game-sessions',
       partitionKey: {
@@ -158,13 +151,12 @@ export class VelaStack extends Stack {
         type: AttributeType.STRING,
       },
       billingMode: BillingMode.PAY_PER_REQUEST,
-      removalPolicy: RemovalPolicy.RETAIN,
+      removalPolicy: RemovalPolicy.DESTROY,
       pointInTimeRecoverySpecification: {
         pointInTimeRecoveryEnabled: true,
       },
     });
 
-    // DynamoDB Table for Daily Progress
     const dailyProgressTable = new Table(this, 'VelaDailyProgressTable', {
       tableName: 'vela-daily-progress',
       partitionKey: {
@@ -176,7 +168,7 @@ export class VelaStack extends Stack {
         type: AttributeType.STRING,
       },
       billingMode: BillingMode.PAY_PER_REQUEST,
-      removalPolicy: RemovalPolicy.RETAIN,
+      removalPolicy: RemovalPolicy.DESTROY,
       pointInTimeRecoverySpecification: {
         pointInTimeRecoveryEnabled: true,
       },
@@ -200,7 +192,7 @@ export class VelaStack extends Stack {
         GEMINI_API_KEY: process.env.GEMINI_API_KEY || '',
         OPENROUTER_API_KEY: process.env.OPENROUTER_API_KEY || '',
         VITE_COGNITO_USER_POOL_ID: userPool.userPoolId,
-        AWS_REGION: Stack.of(this).region,
+        DDB_REGION: Stack.of(this).region,
       },
     });
 

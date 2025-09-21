@@ -225,7 +225,7 @@ The application uses DynamoDB tables for a Japanese learning app:
 
 #### Game Service
 
-- `src/services/gameService.ts` - Fetches questions from Supabase
+- `src/services/gameService.ts` - Fetches questions from DynamoDB via API
 - Vocabulary questions with multiple choice options
 - Sentence questions with scrambled word arrays
 
@@ -268,7 +268,7 @@ The application uses DynamoDB tables for a Japanese learning app:
 
 Each package handles environment variables differently:
 
-- **Vela App**: Uses Vite's `import.meta.env` with fallbacks for local Supabase
+- **Vela App**: Uses Vite's `import.meta.env` with AWS Cognito configuration
 - **Vela API**: Standard Node.js `process.env`
 - **CDK**: Uses AWS CDK's built-in environment handling
 

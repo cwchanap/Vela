@@ -1,7 +1,5 @@
 // Environment configuration
 export const config = {
-  // Supabase configuration
-
   // Cognito configuration
   cognito: {
     userPoolId: import.meta.env.VITE_COGNITO_USER_POOL_ID || '',
@@ -11,7 +9,7 @@ export const config = {
 
   // AI service configuration
   ai: {
-    // Client no longer uses provider API keys directly; calls are proxied via Supabase Edge Functions.
+    // Client no longer uses provider API keys directly; calls are proxied via AWS Lambda API.
     // Keep empty to avoid bundling secrets into the frontend.
     openaiApiKey: '',
     googleApiKey: '',
@@ -36,15 +34,15 @@ export const config = {
     devMode: import.meta.env.VITE_DEV_MODE === 'true',
   },
 
-  // Auth provider selection: 'supabase' | 'cognito'
-  // Default to 'supabase' as we've migrated to API-based authentication
-  authProvider: (import.meta.env.VITE_AUTH_PROVIDER as 'supabase' | 'cognito') || 'supabase',
+  // Auth provider selection: 'cognito'
+  // Default to 'cognito' as we've migrated from Supabase to AWS Cognito
+  authProvider: (import.meta.env.VITE_AUTH_PROVIDER as 'cognito') || 'cognito',
 } as const;
 
 // Validation function to check required environment variables
 export const validateConfig = () => {
   try {
-    const provider = (import.meta.env.VITE_AUTH_PROVIDER as 'supabase' | 'cognito') || 'cognito';
+    const provider = (import.meta.env.VITE_AUTH_PROVIDER as 'cognito') || 'cognito';
     const requiredVars =
       provider === 'cognito'
         ? ['VITE_COGNITO_USER_POOL_ID', 'VITE_COGNITO_USER_POOL_CLIENT_ID', 'VITE_AWS_REGION']

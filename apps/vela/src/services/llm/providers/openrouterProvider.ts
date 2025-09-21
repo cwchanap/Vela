@@ -16,7 +16,7 @@ export class OpenRouterProvider implements LLMProvider {
   private appName: string | null;
 
   constructor(options?: OpenRouterOptions) {
-    // API calls are proxied via Supabase Edge Function; no client-side API key
+    // API calls are proxied via AWS Lambda API; no client-side API key
     this.model = options?.model || 'openai/gpt-oss-20b:free';
     this.appName = options?.appName ?? null;
   }

@@ -74,8 +74,8 @@ The main Vela application built with Quasar Framework (Vue 3 + TypeScript). Feat
 
 - Japanese vocabulary learning games
 - Sentence anagram games
-- User progress tracking with Supabase
-- Authentication with Supabase Auth
+- User progress tracking with DynamoDB
+- Authentication with AWS Cognito
 
 ### @vela/cdk
 
