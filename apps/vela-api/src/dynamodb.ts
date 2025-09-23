@@ -1,4 +1,5 @@
-import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
+import './env';
+import { DynamoDBClient, type DynamoDBClientConfig } from '@aws-sdk/client-dynamodb';
 import {
   DynamoDBDocumentClient,
   GetCommand,
@@ -10,13 +11,50 @@ import {
 } from '@aws-sdk/lib-dynamodb';
 
 // Create DynamoDB client
-const client = new DynamoDBClient({
-  region: process.env.DDB_REGION || process.env.AWS_REGION || 'us-east-1',
-  endpoint: process.env.DDB_ENDPOINT, // Optional: for local development
-});
+const sanitize = (v?: string) => {
+  if (!v) return undefined;
+  const s = v.trim();
+  if (!s || s === 'undefined' || s === 'null') return undefined;
+  return s;
+};
+
+const endpointSanitized = sanitize(process.env.DDB_ENDPOINT);
+const isLocalDdb =
+  !!endpointSanitized &&
+  (endpointSanitized.includes('localhost') ||
+    endpointSanitized.includes('127.0.0.1') ||
+    endpointSanitized.includes(':8000'));
+
+const clientConfig: DynamoDBClientConfig = {
+  region: sanitize(process.env.DDB_REGION) || process.env.AWS_REGION || 'us-east-1',
+};
+
+if (endpointSanitized) {
+  // Only set endpoint when a valid value exists
+  (clientConfig as any).endpoint = endpointSanitized;
+}
+
+// When using DynamoDB local, any credentials will do, but SDK still requires them
+if (isLocalDdb) {
+  clientConfig.credentials = {
+    accessKeyId: process.env.AWS_ACCESS_KEY_ID || 'local',
+    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY || 'local',
+  };
+}
+
+const client = new DynamoDBClient(clientConfig);
 
 // Create DynamoDB document client
 const docClient = DynamoDBDocumentClient.from(client);
+
+// Debug: show resolved config in development
+if (process.env.NODE_ENV === 'development') {
+  console.log('[DynamoDB] Resolved config', {
+    endpoint: endpointSanitized || 'AWS default',
+    region: clientConfig.region,
+    isLocal: isLocalDdb,
+  });
+}
 
 // Table names from environment variables
 const TABLE_NAMES = {
@@ -25,7 +63,7 @@ const TABLE_NAMES = {
   SENTENCES: process.env.SENTENCES_TABLE_NAME || 'vela-sentences',
   GAME_SESSIONS: process.env.GAME_SESSIONS_TABLE_NAME || 'vela-game-sessions',
   DAILY_PROGRESS: process.env.DAILY_PROGRESS_TABLE_NAME || 'vela-daily-progress',
-  CHAT_HISTORY: process.env.DYNAMODB_TABLE_NAME || 'vela-chat-history',
+  CHAT_HISTORY: process.env.DYNAMODB_TABLE_NAME || process.env.DDB_TABLE || 'vela-chat-history',
 };
 
 // Helper function to handle DynamoDB errors

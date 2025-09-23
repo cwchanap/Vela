@@ -32,11 +32,6 @@ chatHistory.use('*', async (c, next) => {
  * ======================== */
 
 async function dynamodb_saveMessage(env: Env, item: ChatHistoryItem): Promise<void> {
-  // Check for missing AWS credentials
-  if (!env.AWS_ACCESS_KEY_ID || !env.AWS_SECRET_ACCESS_KEY) {
-    throw new Error('Missing AWS credentials');
-  }
-
   try {
     const command = new PutCommand({
       TableName: TABLE_NAMES.CHAT_HISTORY,
@@ -59,11 +54,6 @@ async function dynamodb_saveMessage(env: Env, item: ChatHistoryItem): Promise<vo
 }
 
 async function dynamodb_listThreads(env: Env, user_id: string): Promise<ChatThreadSummary[]> {
-  // Check for missing AWS credentials
-  if (!env.AWS_ACCESS_KEY_ID || !env.AWS_SECRET_ACCESS_KEY) {
-    throw new Error('Missing AWS credentials');
-  }
-
   try {
     // Query all messages for the user using the GSI
     const command = new QueryCommand({
@@ -76,7 +66,31 @@ async function dynamodb_listThreads(env: Env, user_id: string): Promise<ChatThre
       ScanIndexForward: false, // Sort by timestamp descending
     });
 
-    const response = await docClient.send(command);
+    let response;
+    try {
+      response = await docClient.send(command);
+    } catch (err: any) {
+      // Fallback: if the index doesn't exist (local dev), scan and filter by UserId
+      const errMsg = err?.message || '';
+      const missingIndex =
+        err?.name === 'ResourceNotFoundException' ||
+        err?.name === 'ValidationException' ||
+        errMsg.includes('Requested resource not found') ||
+        errMsg.includes('Invalid IndexName');
+      if (missingIndex) {
+        const scan = new ScanCommand({
+          TableName: TABLE_NAMES.CHAT_HISTORY,
+          FilterExpression: 'UserId = :userId',
+          ExpressionAttributeValues: {
+            ':userId': user_id,
+          },
+        });
+        response = await docClient.send(scan);
+      } else {
+        throw err;
+      }
+    }
+
     const messages = response.Items || [];
 
     if (!messages.length) {
@@ -119,11 +133,6 @@ async function dynamodb_listThreads(env: Env, user_id: string): Promise<ChatThre
 }
 
 async function dynamodb_getMessages(env: Env, thread_id: string): Promise<ChatHistoryItem[]> {
-  // Check for missing AWS credentials
-  if (!env.AWS_ACCESS_KEY_ID || !env.AWS_SECRET_ACCESS_KEY) {
-    throw new Error('Missing AWS credentials');
-  }
-
   try {
     // Scan messages by ThreadId (since we don't have a primary key on ThreadId)
     const command = new ScanCommand({

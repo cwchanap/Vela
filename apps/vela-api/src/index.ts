@@ -47,21 +47,23 @@ if (process.env.NODE_ENV === 'development') {
     AWS_SECRET_ACCESS_KEY: process.env.AWS_SECRET_ACCESS_KEY,
     AWS_REGION: process.env.AWS_REGION || 'us-east-1',
     VITE_COGNITO_USER_POOL_ID: process.env.VITE_COGNITO_USER_POOL_ID,
-    DDB_ENDPOINT: process.env.DDB_ENDPOINT,
-    DDB_REGION: process.env.DDB_REGION,
-    DDB_TABLE: process.env.DDB_TABLE,
+    DDB_ENDPOINT: process.env.DDB_ENDPOINT || process.env.VITE_DDB_ENDPOINT,
+    DDB_REGION: process.env.DDB_REGION || process.env.VITE_DDB_REGION,
+    DDB_TABLE: process.env.DDB_TABLE || process.env.VITE_DDB_TABLE,
     COGNITO_CLIENT_ID:
       process.env.COGNITO_CLIENT_ID || process.env.VITE_COGNITO_USER_POOL_CLIENT_ID,
   };
 
   console.log('Environment variables loaded:', {
     AWS_REGION: mockEnv.AWS_REGION,
-    VITE_COGNITO_USER_POOL_ID: mockEnv.VITE_COGNITO_USER_POOL_ID,
+    VITE_COGNITO_USER_POOL_ID: mockEnv.VITE_COGNITO_USER_POOL_ID ? 'present' : 'missing',
     VITE_COGNITO_USER_POOL_CLIENT_ID: process.env.VITE_COGNITO_USER_POOL_CLIENT_ID
       ? 'present'
       : 'missing',
     COGNITO_CLIENT_ID: mockEnv.COGNITO_CLIENT_ID ? 'present' : 'missing',
     AWS_ACCESS_KEY_ID: mockEnv.AWS_ACCESS_KEY_ID ? 'present' : 'missing',
+    DDB_ENDPOINT: mockEnv.DDB_ENDPOINT ? mockEnv.DDB_ENDPOINT : 'not set',
+    DDB_TABLE: mockEnv.DDB_TABLE ? mockEnv.DDB_TABLE : 'not set',
   });
 
   // Add middleware to inject mock environment
@@ -108,9 +110,9 @@ if (process.env.NODE_ENV === 'development') {
     AWS_SECRET_ACCESS_KEY: process.env.AWS_SECRET_ACCESS_KEY,
     AWS_REGION: process.env.AWS_REGION || 'us-east-1',
     VITE_COGNITO_USER_POOL_ID: process.env.VITE_COGNITO_USER_POOL_ID,
-    DDB_ENDPOINT: process.env.DDB_ENDPOINT,
-    DDB_REGION: process.env.DDB_REGION,
-    DDB_TABLE: process.env.DDB_TABLE,
+    DDB_ENDPOINT: process.env.DDB_ENDPOINT || process.env.VITE_DDB_ENDPOINT,
+    DDB_REGION: process.env.DDB_REGION || process.env.VITE_DDB_REGION,
+    DDB_TABLE: process.env.DDB_TABLE || process.env.VITE_DDB_TABLE,
     COGNITO_CLIENT_ID: process.env.COGNITO_CLIENT_ID,
   };
   const profiles = createProfilesRoute(mockEnv);
