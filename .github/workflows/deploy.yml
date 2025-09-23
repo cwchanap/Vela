@@ -111,17 +111,31 @@ jobs:
           name: frontend-dist-${{ github.sha }}
           path: dist/spa/
 
+      - name: Export CDK outputs to packages/cdk/cdk-outputs.json
+        run: |
+          mkdir -p packages/cdk
+          aws cloudformation describe-stacks \
+            --stack-name VelaStack \
+            --query 'Stacks[0].Outputs[*].{OutputKey:OutputKey,OutputValue:OutputValue,Description:Description}' \
+            --output json \
+            --region ${{ env.AWS_REGION }} > packages/cdk/cdk-outputs.json
+        continue-on-error: true
+
+      - name: Inject Vite env (.env.production) from CDK outputs
+        run: node packages/cdk/scripts/inject-env.js
+        continue-on-error: true
+
       - name: Install CDK CLI
         run: npm install -g aws-cdk
 
       - name: Bootstrap CDK (if needed)
-        run: cd infrastructure && npx cdk bootstrap --require-approval never
+        run: cd packages/cdk && npx cdk bootstrap --require-approval never
 
       - name: Deploy infrastructure with CDK
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
-        run: cd infrastructure && npx cdk deploy --require-approval never
+        run: cd packages/cdk && npx cdk deploy --require-approval never
 
       - name: Get deployment outputs
         id: get-outputs

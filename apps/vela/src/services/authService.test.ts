@@ -28,11 +28,13 @@ vi.mock('aws-amplify', () => ({
 // Mock config
 vi.mock('../config', () => ({
   config: {
-    authProvider: 'cognito',
     cognito: {
       userPoolId: 'test-pool-id',
       userPoolClientId: 'test-client-id',
       region: 'us-east-1',
+    },
+    api: {
+      url: '/api/',
     },
   },
 }));

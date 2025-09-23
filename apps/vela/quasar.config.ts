@@ -54,10 +54,10 @@ export default defineConfig((/* ctx */) => {
       // analyze: true, // Enable bundle analyzer when needed
       env: {
         // Make environment variables available to the app
-        VITE_AUTH_PROVIDER: process.env.VITE_AUTH_PROVIDER,
         VITE_COGNITO_USER_POOL_ID: process.env.VITE_COGNITO_USER_POOL_ID,
         VITE_COGNITO_USER_POOL_CLIENT_ID: process.env.VITE_COGNITO_USER_POOL_CLIENT_ID,
         VITE_AWS_REGION: process.env.VITE_AWS_REGION,
+        VITE_API_URL: process.env.VITE_API_URL,
         VITE_APP_NAME: process.env.VITE_APP_NAME,
         VITE_APP_VERSION: process.env.VITE_APP_VERSION,
         VITE_DEV_MODE: process.env.VITE_DEV_MODE,
@@ -111,7 +111,7 @@ export default defineConfig((/* ctx */) => {
       open: true, // opens browser window automatically
       proxy: {
         '/api': {
-          target: 'http://localhost:3001',
+          target: 'http://localhost:9005',
           changeOrigin: true,
         },
       },

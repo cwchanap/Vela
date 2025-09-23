@@ -26,27 +26,23 @@ export const config = {
 
   // API configuration
   api: {
-    url: import.meta.env.VITE_API_URL || '',
+    url: import.meta.env.VITE_API_URL || '/api/',
   },
 
   // Development configuration
   dev: {
     devMode: import.meta.env.VITE_DEV_MODE === 'true',
   },
-
-  // Auth provider selection: 'cognito'
-  // Default to 'cognito' as we've migrated from Supabase to AWS Cognito
-  authProvider: (import.meta.env.VITE_AUTH_PROVIDER as 'cognito') || 'cognito',
 } as const;
 
 // Validation function to check required environment variables
 export const validateConfig = () => {
   try {
-    const provider = (import.meta.env.VITE_AUTH_PROVIDER as 'cognito') || 'cognito';
-    const requiredVars =
-      provider === 'cognito'
-        ? ['VITE_COGNITO_USER_POOL_ID', 'VITE_COGNITO_USER_POOL_CLIENT_ID', 'VITE_AWS_REGION']
-        : [];
+    const requiredVars = [
+      'VITE_COGNITO_USER_POOL_ID',
+      'VITE_COGNITO_USER_POOL_CLIENT_ID',
+      'VITE_AWS_REGION',
+    ];
 
     // Ensure import.meta.env exists
     if (typeof import.meta === 'undefined' || !import.meta.env) {

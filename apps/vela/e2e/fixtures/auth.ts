@@ -1,9 +1,9 @@
 import { test as base, expect, Page } from '@playwright/test';
 
-// Test user credentials from the project instructions
+// Test user credentials: override via environment for flexibility
 export const TEST_USER = {
-  email: 'testuser.vela@gmail.com',
-  password: 'TestPass123!',
+  email: process.env.TEST_EMAIL || 'testuser.vela@gmail.com',
+  password: process.env.TEST_PASSWORD || 'TestPass123!',
 };
 
 // Extend base test with authentication fixture

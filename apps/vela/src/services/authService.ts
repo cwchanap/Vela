@@ -16,11 +16,6 @@ import { config } from '../config';
 
 // Configure Amplify with Cognito
 const configureAmplify = () => {
-  if (config.authProvider !== 'cognito') {
-    console.warn('⚠️ Auth provider is not set to cognito');
-    return false;
-  }
-
   const { userPoolId, userPoolClientId, region } = config.cognito;
   if (!userPoolId || !userPoolClientId || !region) {
     console.warn('⚠️ Missing Cognito configuration. Authentication will be disabled.');
@@ -36,7 +31,14 @@ const configureAmplify = () => {
     },
   });
 
-  console.log('✅ Amplify configured with Cognito');
+  if (config.app?.isDev) {
+    console.debug('✅ Amplify configured with Cognito', {
+      userPoolId,
+      userPoolClientId,
+    });
+  } else {
+    console.log('✅ Amplify configured with Cognito');
+  }
   return true;
 };
 

@@ -192,6 +192,8 @@ export class VelaStack extends Stack {
         GEMINI_API_KEY: process.env.GEMINI_API_KEY || '',
         OPENROUTER_API_KEY: process.env.OPENROUTER_API_KEY || '',
         VITE_COGNITO_USER_POOL_ID: userPool.userPoolId,
+        VITE_COGNITO_USER_POOL_CLIENT_ID: userPoolClient.userPoolClientId,
+        COGNITO_CLIENT_ID: userPoolClient.userPoolClientId,
         DDB_REGION: Stack.of(this).region,
       },
     });

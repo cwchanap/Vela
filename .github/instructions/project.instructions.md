@@ -28,8 +28,8 @@ applyTo: '**'
 
 - **Framework**: Quasar Framework (Vue 3 + TypeScript)
 - **State Management**: Pinia stores
-- **Database**: Supabase (PostgreSQL with real-time subscriptions)
-- **Authentication**: Supabase Auth with email/password and magic links
+- **Database**: DynamoDB (via API)
+- **Authentication**: AWS Cognito (email/password)
 - **Build Tool**: Vite
 - **Routing**: Vue Router with history mode
 - **UI Interactions**: vuedraggable for drag-and-drop functionality
@@ -38,7 +38,7 @@ applyTo: '**'
 
 #### Boot System
 
-- `src/boot/main.ts` - Initializes Pinia and Supabase, runs before app mounts
+- `src/boot/main.ts` - Simple boot initialization (Pinia), runs before app mounts
 - Boot files are configured in `quasar.config.ts` and run during app initialization
 
 #### State Management (Pinia Stores)
@@ -50,9 +50,8 @@ applyTo: '**'
 
 #### Services Layer
 
-- `src/services/supabase.ts` - Supabase client configuration with comprehensive TypeScript types for database schema
-- `src/services/authService.ts` - Authentication business logic and API calls
-- `src/services/gameService.ts` - Game logic for vocabulary and sentence games
+- `src/services/authService.ts` - Authentication business logic and API calls (Cognito)
+- `src/services/gameService.ts` - Game logic for vocabulary and sentence games (via API)
 - Database schema includes: profiles, vocabulary, user_progress, game_sessions, chat_history, sentences
 
 #### Configuration
@@ -68,7 +67,7 @@ applyTo: '**'
 - Main layouts: `MainLayout.vue`, `AuthLayout.vue`
 - Game pages: `/games/vocabulary`, `/games/sentence` with interactive learning components
 
-### Database Schema (Supabase)
+### Database Schema (DynamoDB)
 
 The application uses a comprehensive database schema for a Japanese learning app:
 
@@ -84,20 +83,20 @@ The application uses a comprehensive database schema for a Japanese learning app
 #### Authentication Flow
 
 1. Auth state managed in Pinia store with reactive session tracking
-2. Supabase handles session persistence and refresh automatically
+2. AWS Cognito handles session persistence and refresh automatically
 3. Router guards check auth requirements using meta properties
 4. User profiles are loaded and synced with auth state changes
 
 #### Environment Configuration
 
-- Development fallbacks to local Supabase instance (127.0.0.1:54321)
-- Production requires proper environment variables
+- Development uses local API and optional local DynamoDB if needed
+- Production requires proper environment variables (Cognito, API URL)
 - Config validation runs at app startup
 
 #### TypeScript Integration
 
 - Strict TypeScript configuration enabled
-- Comprehensive database types generated from Supabase schema
+- Comprehensive database types for application data models
 - Vue SFC type checking enabled via vite-plugin-checker
 
 #### Build Configuration
@@ -138,7 +137,7 @@ The application uses a comprehensive database schema for a Japanese learning app
 
 #### Game Service
 
-- `src/services/gameService.ts` - Fetches questions from Supabase
+- `src/services/gameService.ts` - Fetches questions from API
 - Vocabulary questions with multiple choice options
 - Sentence questions with scrambled word arrays
 

@@ -73,13 +73,22 @@ app.post('/signin', async (c) => {
       return c.json({ error: 'Email and password are required' }, 400);
     }
 
-    const userPoolId = c.env.VITE_COGNITO_USER_POOL_ID;
+    const userPoolId = c.env.VITE_COGNITO_USER_POOL_ID || process.env.VITE_COGNITO_USER_POOL_ID;
     if (!userPoolId) {
       return c.json({ error: 'User pool ID not configured' }, 500);
     }
 
     // Proceed with authentication
-    const clientId = process.env.COGNITO_CLIENT_ID || '7fS0EEOID'; // Default from env
+    const clientId = process.env.COGNITO_CLIENT_ID || process.env.VITE_COGNITO_USER_POOL_CLIENT_ID;
+    if (!clientId) {
+      return c.json({ error: 'Cognito client ID not configured' }, 500);
+    }
+
+    console.log('Cognito signin params', {
+      userPoolId,
+      clientId,
+      region: process.env.AWS_REGION || 'us-east-1',
+    });
 
     const authCommand = new InitiateAuthCommand({
       AuthFlow: 'USER_PASSWORD_AUTH',
@@ -114,7 +123,7 @@ app.post('/signin', async (c) => {
       return c.json({ error: 'User not confirmed. Please check your email.' }, 401);
     }
 
-    return c.json({ error: 'Sign in failed' }, 500);
+    return c.json({ error: 'Sign in failed', name: error?.name }, 500);
   }
 });
 

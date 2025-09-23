@@ -52,7 +52,7 @@ export default defineConfig({
     },
     {
       command: 'cd ../vela-api && npm run dev',
-      url: 'http://localhost:3001',
+      url: 'http://localhost:9005',
       reuseExistingServer: !process.env.CI,
       timeout: 60 * 1000,
     },

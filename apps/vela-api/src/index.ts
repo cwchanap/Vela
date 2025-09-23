@@ -8,16 +8,18 @@ import { profiles as createProfilesRoute } from './routes/profiles';
 import auth from './routes/auth';
 import type { Env } from './types';
 import { serve } from '@hono/node-server';
-import { readFileSync } from 'fs';
+import { readFileSync, existsSync } from 'fs';
 import { resolve } from 'path';
 import { Context, Next } from 'hono';
 
 const app = new Hono<{ Bindings: Env }>();
 
 if (process.env.NODE_ENV === 'development') {
-  // Load .env file manually
+  // Load .env file manually (prefer app-specific .env, then root .env)
   try {
-    const envPath = resolve(process.cwd(), '.env');
+    const apiEnvPath = resolve(process.cwd(), 'apps/vela-api/.env');
+    const rootEnvPath = resolve(process.cwd(), '.env');
+    const envPath = existsSync(apiEnvPath) ? apiEnvPath : rootEnvPath;
     const envContent = readFileSync(envPath, 'utf-8');
     const envLines = envContent.split('\n');
 
@@ -28,7 +30,7 @@ if (process.env.NODE_ENV === 'development') {
         process.env[key.trim()] = value;
       }
     }
-    console.log('✅ Loaded .env file');
+    console.log(`✅ Loaded .env file from: ${envPath}`);
   } catch (error) {
     console.log(
       '⚠️ Could not load .env file:',
@@ -48,12 +50,17 @@ if (process.env.NODE_ENV === 'development') {
     DDB_ENDPOINT: process.env.DDB_ENDPOINT,
     DDB_REGION: process.env.DDB_REGION,
     DDB_TABLE: process.env.DDB_TABLE,
-    COGNITO_CLIENT_ID: process.env.COGNITO_CLIENT_ID,
+    COGNITO_CLIENT_ID:
+      process.env.COGNITO_CLIENT_ID || process.env.VITE_COGNITO_USER_POOL_CLIENT_ID,
   };
 
   console.log('Environment variables loaded:', {
     AWS_REGION: mockEnv.AWS_REGION,
     VITE_COGNITO_USER_POOL_ID: mockEnv.VITE_COGNITO_USER_POOL_ID,
+    VITE_COGNITO_USER_POOL_CLIENT_ID: process.env.VITE_COGNITO_USER_POOL_CLIENT_ID
+      ? 'present'
+      : 'missing',
+    COGNITO_CLIENT_ID: mockEnv.COGNITO_CLIENT_ID ? 'present' : 'missing',
     AWS_ACCESS_KEY_ID: mockEnv.AWS_ACCESS_KEY_ID ? 'present' : 'missing',
   });
 
