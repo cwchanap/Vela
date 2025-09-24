@@ -6,6 +6,7 @@ import { OpenRouterProvider } from './providers/openrouterProvider';
 export class LLMService {
   private provider: LLMProvider;
   private providers: Partial<Record<LLMProviderName, LLMProvider>> = {};
+  private apiKey: string | undefined;
 
   constructor() {
     // Initialize with safe internal defaults; store will override based on user profile
@@ -58,8 +59,16 @@ export class LLMService {
     return this.provider.getModel();
   }
 
+  setApiKey(key?: string) {
+    this.apiKey = key?.trim() ?? undefined;
+  }
+
   async generate(request: LLMRequest): Promise<LLMResponse> {
-    return this.provider.generate(request);
+    const req: LLMRequest = { ...request };
+    if (this.apiKey) {
+      req.apiKey = this.apiKey;
+    }
+    return this.provider.generate(req);
   }
 }
 

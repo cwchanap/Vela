@@ -165,7 +165,7 @@ const $q = useQuasar();
 const chat = useChatStore();
 const llmSettings = useLLMSettingsStore();
 const auth = useAuthStore();
-const { provider, currentModel } = storeToRefs(llmSettings);
+const { provider, currentModel, currentApiKey } = storeToRefs(llmSettings);
 
 // Greeting message constant
 const GREETING_MESSAGE =
@@ -193,6 +193,7 @@ const syncLLMFromSettings = () => {
   // Ensure llmService matches current settings (store also sets this when settings change)
   llmService.setProvider(provider.value, currentModel.value);
   llmService.setModel(currentModel.value);
+  llmService.setApiKey(currentApiKey.value);
 };
 
 const getUserId = () => auth.user?.id || 'anonymous';

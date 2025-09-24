@@ -34,6 +34,7 @@ export const LLMBridgeRequestSchema = z
     maxTokens: z.number().int().positive().optional(),
     appName: z.string().optional(),
     referer: z.string().optional(),
+    apiKey: z.string().min(1).optional(),
   })
   .refine((data) => data.messages || data.prompt, {
     message: 'Either messages or prompt must be provided',

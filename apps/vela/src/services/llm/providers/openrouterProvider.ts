@@ -51,6 +51,7 @@ export class OpenRouterProvider implements LLMProvider {
       maxTokens: request.maxTokens ?? 1024,
       appName: this.appName || 'Vela Japanese Learning App',
       referer: typeof window !== 'undefined' ? window.location.origin : 'http://localhost',
+      apiKey: request.apiKey,
     };
 
     const res = await fetch('/api/llm-chat', {

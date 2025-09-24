@@ -17,7 +17,7 @@
       />
 
       <div class="row q-col-gutter-md q-mt-sm">
-        <div class="col-12 col-md-8">
+        <div class="col-12 col-md-6">
           <q-select
             v-model="model"
             :options="modelOptions"
@@ -32,7 +32,36 @@
             :hint="`Current provider: ${selectedProvider}`"
           />
         </div>
-        <div class="col-12 col-md-4">
+        <div class="col-12 col-md-6">
+          <q-input
+            v-model="apiKeyInput"
+            :type="showApiKey ? 'text' : 'password'"
+            label="API Key (optional)"
+            dense
+            outlined
+            clearable
+            data-testid="llm-api-key-input"
+            :hint="apiKeyHint"
+          >
+            <template #append>
+              <q-icon
+                :name="showApiKey ? 'visibility_off' : 'visibility'"
+                class="cursor-pointer"
+                @click="showApiKey = !showApiKey"
+              />
+            </template>
+          </q-input>
+          <div class="row q-col-gutter-sm q-mt-xs">
+            <div class="col-auto">
+              <q-btn flat size="sm" label="Use server key" @click="clearApiKey" />
+            </div>
+            <div class="col-auto">
+              <q-badge v-if="hasCustomKey" color="positive" outline>Using your key</q-badge>
+              <q-badge v-else color="grey" outline>Using server key</q-badge>
+            </div>
+          </div>
+        </div>
+        <div class="col-12 col-md-4 q-mt-sm">
           <q-btn
             class="full-width"
             color="primary"
@@ -75,12 +104,15 @@ const selectedProvider = computed<LLMProviderName>({
   set: (v) => store.setProvider(v),
 });
 const model = ref<string>(store.currentModel);
+const apiKeyInput = ref<string>(store.currentApiKey || '');
+const showApiKey = ref(false);
 
 // Keep local model buffer aligned when provider changes
 watch(
   () => selectedProvider.value,
   () => {
     model.value = store.currentModel;
+    apiKeyInput.value = store.currentApiKey || '';
   },
 );
 
@@ -100,6 +132,7 @@ watch(
 
 const save = async () => {
   store.setModel(model.value.trim());
+  store.setApiKey(apiKeyInput.value);
   await store.save();
   store.notifySaved();
 };
@@ -107,9 +140,21 @@ const save = async () => {
 const resetDefaults = async () => {
   await store.resetToDefaults();
   model.value = store.currentModel;
+  apiKeyInput.value = store.currentApiKey || '';
 };
 
 const activeSummary = computed(() => `${store.provider} • ${store.currentModel}`);
+
+const hasCustomKey = computed(() => !!store.currentApiKey);
+const apiKeyHint = computed(() =>
+  hasCustomKey.value
+    ? 'Your personal API key will be used for this provider'
+    : 'Optional: enter your own API key. Leave blank to use the server key',
+);
+
+const clearApiKey = () => {
+  apiKeyInput.value = '';
+};
 </script>
 
 <style scoped></style>

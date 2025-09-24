@@ -7,10 +7,12 @@ import { useAuthStore } from './auth';
 import type { UserPreferences } from '../types/shared';
 
 export type ProviderModelMap = Partial<Record<LLMProviderName, string>>;
+export type ProviderKeyMap = Partial<Record<LLMProviderName, string>>;
 
 interface PersistedSettings {
   provider: LLMProviderName;
   models: ProviderModelMap;
+  keys?: ProviderKeyMap;
 }
 
 const STORAGE_KEY = 'llm_settings_v1';
@@ -26,6 +28,7 @@ export const useLLMSettingsStore = defineStore('llmSettings', () => {
   // State
   const provider = ref<LLMProviderName>(DEFAULT_PROVIDER);
   const models = ref<ProviderModelMap>({ ...DEFAULT_MODELS });
+  const keys = ref<ProviderKeyMap>({});
 
   // Getters
   const currentModel = computed(
@@ -34,6 +37,8 @@ export const useLLMSettingsStore = defineStore('llmSettings', () => {
       DEFAULT_MODELS[provider.value] ||
       DEFAULT_MODELS[DEFAULT_PROVIDER]!,
   );
+
+  const currentApiKey = computed(() => keys.value[provider.value]);
 
   // Actions
   const setProvider = (name: LLMProviderName) => {
@@ -44,6 +49,7 @@ export const useLLMSettingsStore = defineStore('llmSettings', () => {
     }
     // apply to service
     llmService.setProvider(name, models.value[name]);
+    llmService.setApiKey(keys.value[name]);
     persist();
   };
 
@@ -54,7 +60,11 @@ export const useLLMSettingsStore = defineStore('llmSettings', () => {
   };
 
   const persist = () => {
-    const data: PersistedSettings = { provider: provider.value, models: models.value };
+    const data: PersistedSettings = {
+      provider: provider.value,
+      models: models.value,
+      keys: keys.value,
+    };
     LocalStorage.set(STORAGE_KEY, data);
   };
 
@@ -64,6 +74,7 @@ export const useLLMSettingsStore = defineStore('llmSettings', () => {
   const applyToService = () => {
     llmService.setProvider(provider.value, currentModel.value);
     llmService.setModel(currentModel.value);
+    llmService.setApiKey(currentApiKey.value);
   };
 
   const loadFromProfile = () => {
@@ -73,10 +84,12 @@ export const useLLMSettingsStore = defineStore('llmSettings', () => {
     if (!prefs) return false;
     const p = prefs.llm_provider;
     const m = prefs.llm_models;
+    const k = (prefs as any).llm_keys as ProviderKeyMap | undefined;
     if (p) provider.value = p;
     if (m) models.value = { ...models.value, ...m };
+    if (k) keys.value = { ...keys.value, ...k };
     applyToService();
-    return !!p || !!m;
+    return !!p || !!m || !!k;
   };
 
   const saveToProfile = async () => {
@@ -87,6 +100,7 @@ export const useLLMSettingsStore = defineStore('llmSettings', () => {
       ...existing,
       llm_provider: provider.value,
       llm_models: models.value,
+      llm_keys: keys.value,
     };
     const ok = await auth.updateProfile({
       preferences: nextPrefs as unknown as Record<string, unknown>,
@@ -102,6 +116,7 @@ export const useLLMSettingsStore = defineStore('llmSettings', () => {
       if (data && data.provider) {
         provider.value = data.provider;
         models.value = data.models || {};
+        keys.value = data.keys || {};
       }
       applyToService();
     }
@@ -113,11 +128,18 @@ export const useLLMSettingsStore = defineStore('llmSettings', () => {
   // Keep service in sync on changes (defensive)
   watch(provider, (p) => {
     llmService.setProvider(p, currentModel.value);
+    llmService.setApiKey(currentApiKey.value);
   });
   watch(
     () => currentModel.value,
     (m) => {
       llmService.setModel(m);
+    },
+  );
+  watch(
+    () => currentApiKey.value,
+    (k) => {
+      llmService.setApiKey(k);
     },
   );
 
@@ -136,6 +158,7 @@ export const useLLMSettingsStore = defineStore('llmSettings', () => {
   const resetToDefaults = async () => {
     provider.value = DEFAULT_PROVIDER;
     models.value = { ...DEFAULT_MODELS };
+    keys.value = {};
     applyToService();
     persist();
     await saveToProfile();
@@ -146,15 +169,29 @@ export const useLLMSettingsStore = defineStore('llmSettings', () => {
     await saveToProfile();
   };
 
+  const setApiKey = (key?: string | null) => {
+    const trimmed = (key ?? '').trim();
+    if (!trimmed) {
+      delete keys.value[provider.value];
+    } else {
+      keys.value[provider.value] = trimmed;
+    }
+    applyToService();
+    persist();
+  };
+
   return {
     // state
     provider,
     models,
+    keys,
     // getters
     currentModel,
+    currentApiKey,
     // actions
     setProvider,
     setModel,
+    setApiKey,
     persist,
     load,
     save,

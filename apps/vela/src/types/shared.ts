@@ -7,6 +7,8 @@ export interface UserPreferences {
   // Per-user LLM preferences
   llm_provider?: 'google' | 'openrouter';
   llm_models?: Partial<Record<'google' | 'openrouter', string>>;
+  // Optional per-provider API keys saved by the user
+  llm_keys?: Partial<Record<'google' | 'openrouter', string>>;
 }
 
 export interface ChatContext {

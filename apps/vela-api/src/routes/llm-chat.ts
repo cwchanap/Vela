@@ -37,7 +37,7 @@ llmChat.post('/', async (c) => {
 
   try {
     if (provider === 'google') {
-      const apiKey = c.env.GEMINI_API_KEY;
+      const apiKey: string | undefined = input.apiKey || c.env.GEMINI_API_KEY;
       if (!apiKey) {
         return c.json({ error: 'Missing GEMINI_API_KEY server secret' }, 500);
       }
@@ -102,7 +102,7 @@ llmChat.post('/', async (c) => {
     }
 
     if (provider === 'openrouter') {
-      const apiKey = c.env.OPENROUTER_API_KEY;
+      const apiKey: string | undefined = input.apiKey || c.env.OPENROUTER_API_KEY;
       if (!apiKey) {
         return c.json({ error: 'Missing OPENROUTER_API_KEY server secret' }, 500);
       }

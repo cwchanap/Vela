@@ -37,6 +37,7 @@ export class GoogleProvider implements LLMProvider {
       system: request.system,
       temperature: request.temperature ?? 0.7,
       maxTokens: request.maxTokens ?? 1024,
+      apiKey: request.apiKey,
     };
 
     const res = await fetch('/api/llm-chat', {
