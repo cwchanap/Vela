@@ -9,12 +9,16 @@ import {
   ViewerProtocolPolicy,
   CachePolicy,
   AllowedMethods,
+  OriginRequestPolicy,
 } from 'aws-cdk-lib/aws-cloudfront';
 import { S3Origin, RestApiOrigin } from 'aws-cdk-lib/aws-cloudfront-origins';
 import { UserPool, UserPoolClient, AccountRecovery } from 'aws-cdk-lib/aws-cognito';
 import { PolicyStatement, Effect } from 'aws-cdk-lib/aws-iam';
-import { Certificate, CertificateValidation } from 'aws-cdk-lib/aws-certificatemanager';
-import { HostedZone } from 'aws-cdk-lib/aws-route53';
+import {
+  Certificate,
+  CertificateValidation,
+  ICertificate,
+} from 'aws-cdk-lib/aws-certificatemanager';
 import { Construct } from 'constructs';
 import * as path from 'path';
 
@@ -246,11 +250,24 @@ export class VelaStack extends Stack {
       anyMethod: true,
     });
 
-    // SSL Certificate for custom domain
-    const certificate = new Certificate(this, 'VelaCertificate', {
-      domainName: 'vela.cwchanap.dev',
-      validation: CertificateValidation.fromDns(),
-    });
+    // Custom domain configuration
+    const defaultDomainName = 'vela.cwchanap.dev';
+    const configuredDomain = process.env.DOMAIN_NAME?.trim();
+    const domainName =
+      configuredDomain && configuredDomain.length > 0 ? configuredDomain : defaultDomainName;
+
+    const certificateArn = process.env.CLOUDFRONT_CERT_ARN || process.env.ACM_CERT_ARN;
+
+    let certificate: ICertificate;
+    if (certificateArn) {
+      certificate = Certificate.fromCertificateArn(this, 'VelaCertificate', certificateArn);
+    } else {
+      // Fallback: create a certificate. Ensure your stack region is us-east-1 for CloudFront, and complete DNS validation manually in your DNS provider (Cloudflare).
+      certificate = new Certificate(this, 'VelaCertificate', {
+        domainName,
+        validation: CertificateValidation.fromDns(),
+      });
+    }
 
     // S3 Bucket for Static Website
     const websiteBucket = new Bucket(this, 'VelaWebBucket', {
@@ -263,22 +280,16 @@ export class VelaStack extends Stack {
       autoDeleteObjects: false,
     });
 
-    // CloudFront Distribution with custom domain
-    const distribution = new Distribution(this, 'VelaDistribution', {
+    const apiOrigin = new RestApiOrigin(api);
+
+    // CloudFront Distribution with custom domain (new logical ID to force replacement)
+    const distribution = new Distribution(this, 'VelaDistributionNew', {
       defaultBehavior: {
         origin: new S3Origin(websiteBucket),
         viewerProtocolPolicy: ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
         cachePolicy: CachePolicy.CACHING_OPTIMIZED,
       },
-      additionalBehaviors: {
-        '/api/*': {
-          origin: new RestApiOrigin(api),
-          viewerProtocolPolicy: ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
-          cachePolicy: CachePolicy.CACHING_DISABLED,
-          allowedMethods: AllowedMethods.ALLOW_ALL,
-        },
-      },
-      domainNames: ['vela.cwchanap.dev'],
+      domainNames: [domainName],
       certificate,
       errorResponses: [
         {
@@ -294,18 +305,27 @@ export class VelaStack extends Stack {
       ],
     });
 
+    // Ensure API routes are evaluated before default behavior
+    distribution.addBehavior('api/*', apiOrigin, {
+      viewerProtocolPolicy: ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
+      cachePolicy: CachePolicy.CACHING_DISABLED,
+      originRequestPolicy: OriginRequestPolicy.ALL_VIEWER_EXCEPT_HOST_HEADER,
+      allowedMethods: AllowedMethods.ALLOW_ALL,
+    });
+
+    distribution.addBehavior('api', apiOrigin, {
+      viewerProtocolPolicy: ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
+      cachePolicy: CachePolicy.CACHING_DISABLED,
+      originRequestPolicy: OriginRequestPolicy.ALL_VIEWER_EXCEPT_HOST_HEADER,
+      allowedMethods: AllowedMethods.ALLOW_ALL,
+    });
+
     // Deploy website to S3
     new BucketDeployment(this, 'VelaWebsiteDeployment', {
       sources: [Source.asset(path.join(__dirname, '../../../apps/vela/dist/spa'))],
       destinationBucket: websiteBucket,
       distribution,
       distributionPaths: ['/*'],
-    });
-
-    // DNS Records for custom domain
-    // Create hosted zone for the domain
-    const hostedZone = new HostedZone(this, 'VelaHostedZone', {
-      zoneName: 'cwchanap.dev',
     });
 
     // Outputs
@@ -370,12 +390,6 @@ export class VelaStack extends Stack {
       description: 'AWS Region for Cognito',
     });
 
-    new CfnOutput(this, 'HostedZoneId', {
-      value: hostedZone.hostedZoneId,
-      description:
-        'Hosted Zone ID - check Route 53 console for name servers to update in Cloudflare',
-    });
-
     new CfnOutput(this, 'CloudFrontDomain', {
       value: distribution.distributionDomainName,
       description: 'CloudFront domain name - use this for CNAME record in Cloudflare',
@@ -399,8 +413,8 @@ export class VelaStack extends Stack {
     });
 
     new CfnOutput(this, 'VITE_API_URL', {
-      value: api.url,
-      description: 'API Gateway URL for frontend',
+      value: '/api/',
+      description: 'Frontend API base path via CloudFront',
     });
   }
 }
