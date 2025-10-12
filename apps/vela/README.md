@@ -13,16 +13,16 @@ The main Vela Japanese Learning Application built with Quasar Framework (Vue 3 +
 
 ```bash
 # Start development server
-npm run dev
+pnpm dev
 
 # Build for production
-npm run build
+pnpm build
 
 # Lint code
-npm run lint
+pnpm lint
 
 # Format code
-npm run format
+pnpm format
 ```
 
 ## Tech Stack

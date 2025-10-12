@@ -14,40 +14,40 @@ This is a **Turborepo monorepo** containing:
 
 ### Monorepo Commands (run from root)
 
-- `npm run dev` - Start all development servers using Turbo
-- `npm run build` - Build all packages using Turbo
-- `npm run lint` - Lint all packages using Turbo
-- `npm run lint:fix` - Lint and fix all packages using Turbo
-- `npm run format` - Format all packages using Turbo
-- `npm run test` - Run tests for all packages using Turbo
-- `npm run clean` - Clean all build artifacts using Turbo
-- `npm install` - Install dependencies for all packages
-- `npm run prepare` - Set up Husky pre-commit hooks
+- `pnpm dev` - Start all development servers using Turbo
+- `pnpm build` - Build all packages using Turbo
+- `pnpm lint` - Lint all packages using Turbo
+- `pnpm lint:fix` - Lint and fix all packages using Turbo
+- `pnpm format` - Format all packages using Turbo
+- `pnpm test` - Run tests for all packages using Turbo
+- `pnpm clean` - Clean all build artifacts using Turbo
+- `pnpm install` - Install dependencies for all packages
+- `pnpm prepare` - Set up Husky pre-commit hooks
 
 ### Vela App Commands (from apps/vela/)
 
-- `npm run dev` or `quasar dev` - Start Quasar development server with hot reload
-- `npm run build` or `quasar build` - Build for production
-- `npm run postinstall` - Run after install (runs `quasar prepare`)
-- `npm run test` - Run Playwright end-to-end tests
-- `npm run test:headed` - Run Playwright tests in headed mode
-- `npm run test:ui` - Run Playwright tests with UI mode
-- `npm run test:debug` - Run Playwright tests in debug mode
+- `pnpm dev` or `quasar dev` - Start Quasar development server with hot reload
+- `pnpm build` or `quasar build` - Build for production
+- `pnpm postinstall` - Run after install (runs `quasar prepare`)
+- `pnpm test` - Run Playwright end-to-end tests
+- `pnpm test:headed` - Run Playwright tests in headed mode
+- `pnpm test:ui` - Run Playwright tests with UI mode
+- `pnpm test:debug` - Run Playwright tests in debug mode
 
 ### Vela API Commands (from apps/vela-api/)
 
-- `npm run dev` - Start API development server with tsx watch
-- `npm run build` - Bundle API for deployment
-- `npm run test` - Run API tests with Vitest
-- `npm run test:watch` - Run API tests in watch mode
-- `npm run test:coverage` - Run API tests with coverage
+- `pnpm dev` - Start API development server with tsx watch
+- `pnpm build` - Bundle API for deployment
+- `pnpm test` - Run API tests with Vitest
+- `pnpm test:watch` - Run API tests in watch mode
+- `pnpm test:coverage` - Run API tests with coverage
 
 ### AWS CDK Commands (from packages/cdk/)
 
-- `npm run cdk:synth` - Synthesize CloudFormation template
-- `npm run cdk:deploy` - Deploy infrastructure to AWS
-- `npm run cdk:diff` - Check differences between deployed and local stacks
-- `npm run cdk:destroy` - Destroy deployed infrastructure
+- `pnpm cdk:synth` - Synthesize CloudFormation template
+- `pnpm cdk:deploy` - Deploy infrastructure to AWS
+- `pnpm cdk:diff` - Check differences between deployed and local stacks
+- `pnpm cdk:destroy` - Destroy deployed infrastructure
 
 ## Project Architecture
 
@@ -84,7 +84,7 @@ This is a **Turborepo monorepo** containing:
 - **Linting**: ESLint with TypeScript and Vue support (flat config)
 - **Formatting**: Prettier
 - **Git Hooks**: Husky with lint-staged
-- **Package Manager**: npm with workspaces
+- **Package Manager**: pnpm with workspaces
 
 ### Core Application Structure (Vela App)
 
@@ -254,8 +254,8 @@ The application uses DynamoDB tables for a Japanese learning app:
 
 ### Working with Multiple Packages
 
-1. **Root Level**: Use `npm run <command>` to run tasks across all packages
-2. **Package Specific**: Navigate to specific package directory for targeted commands
+1. **Root Level**: Use `pnpm <script>` to run tasks across all packages
+2. **Package Specific**: Navigate to specific package directory for targeted commands or use `pnpm --filter`
 3. **Dependencies**: Turborepo handles task dependencies (e.g., `build` depends on `^build`)
 
 ### Testing Strategy
@@ -276,6 +276,6 @@ Each package handles environment variables differently:
 
 - Always run monorepo commands from the root directory when possible
 - Individual package commands should be run from their respective directories
-- Turborepo caches build outputs - use `npm run clean` if you encounter cache issues
+- Turborepo caches build outputs - use `pnpm clean` if you encounter cache issues
 - The lint configuration uses ESLint flat config format (modern ESLint v9+ style)
 - Pre-commit hooks run linting and formatting automatically via Husky

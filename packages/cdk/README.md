@@ -14,25 +14,25 @@ AWS CDK infrastructure code for deploying the Vela application and its backend s
 
 ```bash
 # Build Lambda functions
-npm run build
+pnpm run build
 
 # Synthesize CloudFormation template
-npm run cdk:synth
+pnpm cdk:synth
 
 # Deploy infrastructure
-npm run cdk:deploy
+pnpm cdk:deploy
 
 # Check differences
-npm run cdk:diff
+pnpm cdk:diff
 
 # Destroy infrastructure
-npm run cdk:destroy
+pnpm cdk:destroy
 
 # Lint code
-npm run lint
+pnpm run lint
 
 # Format code
-npm run format
+pnpm run format
 ```
 
 ## Infrastructure Components
@@ -46,5 +46,5 @@ npm run format
 ## Prerequisites
 
 - AWS CLI configured
-- AWS CDK CLI installed (`npm install -g aws-cdk`)
+- AWS CDK CLI available (`pnpm dlx aws-cdk <command>`)
 - Appropriate AWS permissions for deploying resources

@@ -6,20 +6,20 @@ applyTo: '**'
 
 ### Development and Build
 
-- `npm run dev` or `quasar dev` - Start development server with hot reload
-- `npm run build` or `quasar build` - Build for production
-- `npm install` - Install dependencies
-- `npm run postinstall` - Run after install (runs `quasar prepare`)
+- `pnpm dev` or `quasar dev` - Start development server with hot reload
+- `pnpm build` or `quasar build` - Build for production
+- `pnpm install` - Install dependencies
+- `pnpm postinstall` - Run after install (runs `quasar prepare`)
 
 ### Code Quality
 
-- `npm run lint` - Lint TypeScript/Vue files with ESLint
-- `npm run format` - Format code with Prettier
-- `npm run prepare` - Set up Husky pre-commit hooks
+- `pnpm lint` - Lint TypeScript/Vue files with ESLint
+- `pnpm format` - Format code with Prettier
+- `pnpm prepare` - Set up Husky pre-commit hooks
 
 ### Testing
 
-- `npm test` - Currently no tests configured (exits with 0)
+- `pnpm test` - Currently no tests configured (exits with 0)
 - For future testing setup: Consider Vitest for unit tests, @vue/test-utils for component testing
 
 ## Project Architecture
