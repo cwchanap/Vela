@@ -12,6 +12,9 @@
   "scripts": {
     "build": "turbo build",
     "dev": "turbo dev --parallel",
+    "dev:vela-ext": "turbo run dev --filter=./apps/vela-ext",
+    "build:vela-ext": "turbo run build --filter=./apps/vela-ext",
+    "zip:vela-ext": "turbo run zip --filter=./apps/vela-ext",
     "lint": "turbo lint",
     "lint:fix": "turbo lint:fix",
     "format": "turbo format",

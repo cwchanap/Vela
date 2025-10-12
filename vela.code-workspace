@@ -13,6 +13,10 @@
             "path": "./apps/vela-api"
         },
         {
+            "name": "Vela Extension",
+            "path": "./apps/vela-ext"
+        },
+        {
             "name": "CDK Infrastructure",
             "path": "./packages/cdk"
         }
@@ -23,6 +27,7 @@
         "eslint.workingDirectories": [
             "apps/vela",
             "apps/vela-api",
+            "apps/vela-ext",
             "packages/cdk"
         ]
     },
