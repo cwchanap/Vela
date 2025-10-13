@@ -64,6 +64,7 @@ const TABLE_NAMES = {
   GAME_SESSIONS: process.env.GAME_SESSIONS_TABLE_NAME || 'vela-game-sessions',
   DAILY_PROGRESS: process.env.DAILY_PROGRESS_TABLE_NAME || 'vela-daily-progress',
   CHAT_HISTORY: process.env.DYNAMODB_TABLE_NAME || process.env.DDB_TABLE || 'vela-chat-history',
+  SAVED_SENTENCES: process.env.SAVED_SENTENCES_TABLE_NAME || 'vela-saved-sentences',
 };
 
 // Helper function to handle DynamoDB errors
@@ -288,6 +289,75 @@ export const dailyProgress = {
       });
       const response = await docClient.send(command);
       return response.Attributes;
+    } catch (error) {
+      handleDynamoError(error);
+    }
+  },
+};
+
+// Saved sentences operations
+export const savedSentences = {
+  async create(userId: string, sentence: string, sourceUrl?: string, context?: string) {
+    try {
+      const sentenceId = `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+      const timestamp = Date.now();
+
+      const command = new PutCommand({
+        TableName: TABLE_NAMES.SAVED_SENTENCES,
+        Item: {
+          user_id: userId,
+          sentence_id: sentenceId,
+          sentence,
+          source_url: sourceUrl,
+          context,
+          created_at: timestamp,
+          updated_at: timestamp,
+        },
+      });
+      await docClient.send(command);
+      return {
+        user_id: userId,
+        sentence_id: sentenceId,
+        sentence,
+        source_url: sourceUrl,
+        context,
+        created_at: timestamp,
+        updated_at: timestamp,
+      };
+    } catch (error) {
+      handleDynamoError(error);
+    }
+  },
+
+  async getByUser(userId: string, limit: number = 50) {
+    try {
+      const command = new QueryCommand({
+        TableName: TABLE_NAMES.SAVED_SENTENCES,
+        KeyConditionExpression: 'user_id = :userId',
+        ExpressionAttributeValues: {
+          ':userId': userId,
+        },
+        Limit: limit,
+        ScanIndexForward: false, // Return most recent first
+      });
+      const response = await docClient.send(command);
+      return response.Items || [];
+    } catch (error) {
+      handleDynamoError(error);
+    }
+  },
+
+  async delete(userId: string, sentenceId: string) {
+    try {
+      const command = new DeleteCommand({
+        TableName: TABLE_NAMES.SAVED_SENTENCES,
+        Key: {
+          user_id: userId,
+          sentence_id: sentenceId,
+        },
+      });
+      await docClient.send(command);
+      return { success: true };
     } catch (error) {
       handleDynamoError(error);
     }

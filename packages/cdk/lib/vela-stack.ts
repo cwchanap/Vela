@@ -178,6 +178,23 @@ export class VelaStack extends Stack {
       },
     });
 
+    const savedSentencesTable = new Table(this, 'VelaSavedSentencesTable', {
+      tableName: 'vela-saved-sentences',
+      partitionKey: {
+        name: 'user_id',
+        type: AttributeType.STRING,
+      },
+      sortKey: {
+        name: 'sentence_id',
+        type: AttributeType.STRING,
+      },
+      billingMode: BillingMode.PAY_PER_REQUEST,
+      removalPolicy: RemovalPolicy.DESTROY,
+      pointInTimeRecoverySpecification: {
+        pointInTimeRecoveryEnabled: true,
+      },
+    });
+
     // Lambda Function
     const apiLambda = new Function(this, 'VelaApiFunction', {
       functionName: 'vela-api',
@@ -193,6 +210,7 @@ export class VelaStack extends Stack {
         SENTENCES_TABLE_NAME: sentencesTable.tableName,
         GAME_SESSIONS_TABLE_NAME: gameSessionsTable.tableName,
         DAILY_PROGRESS_TABLE_NAME: dailyProgressTable.tableName,
+        SAVED_SENTENCES_TABLE_NAME: savedSentencesTable.tableName,
         GEMINI_API_KEY: process.env.GEMINI_API_KEY || '',
         OPENROUTER_API_KEY: process.env.OPENROUTER_API_KEY || '',
         VITE_COGNITO_USER_POOL_ID: userPool.userPoolId,
@@ -209,6 +227,7 @@ export class VelaStack extends Stack {
     sentencesTable.grantReadWriteData(apiLambda);
     gameSessionsTable.grantReadWriteData(apiLambda);
     dailyProgressTable.grantReadWriteData(apiLambda);
+    savedSentencesTable.grantReadWriteData(apiLambda);
 
     // Grant Cognito permissions to Lambda for admin operations
     apiLambda.addToRolePolicy(
@@ -367,6 +386,11 @@ export class VelaStack extends Stack {
     new CfnOutput(this, 'DynamoDBDailyProgressTableName', {
       value: dailyProgressTable.tableName,
       description: 'DynamoDB Daily Progress Table Name',
+    });
+
+    new CfnOutput(this, 'DynamoDBSavedSentencesTableName', {
+      value: savedSentencesTable.tableName,
+      description: 'DynamoDB Saved Sentences Table Name',
     });
 
     new CfnOutput(this, 'CloudFrontDistributionId', {
