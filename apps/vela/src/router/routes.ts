@@ -29,6 +29,12 @@ const routes: RouteRecordRaw[] = [
         component: () => import('pages/progress/ProgressPage.vue'),
         meta: { requiresAuth: true },
       },
+      {
+        path: 'saved-sentences',
+        name: 'saved-sentences',
+        component: () => import('pages/dictionary/SavedSentencesPage.vue'),
+        meta: { requiresAuth: true },
+      },
       // Legacy child redirect: '/dashboard' -> '/'
       {
         path: 'dashboard',

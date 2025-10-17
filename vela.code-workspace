@@ -1,43 +1,39 @@
 {
-    "folders": [
-        {
-            "name": "Root",
-            "path": "."
-        },
-        {
-            "name": "Vela App",
-            "path": "./apps/vela"
-        },
-        {
-            "name": "Vela API",
-            "path": "./apps/vela-api"
-        },
-        {
-            "name": "Vela Extension",
-            "path": "./apps/vela-ext"
-        },
-        {
-            "name": "CDK Infrastructure",
-            "path": "./packages/cdk"
-        }
-    ],
-    "settings": {
-        "typescript.preferences.includePackageJsonAutoImports": "on",
-        "typescript.suggest.autoImports": true,
-        "eslint.workingDirectories": [
-            "apps/vela",
-            "apps/vela-api",
-            "apps/vela-ext",
-            "packages/cdk"
-        ]
+  "folders": [
+    {
+      "name": "Root",
+      "path": ".",
     },
-    "extensions": {
-        "recommendations": [
-            "ms-vscode.vscode-typescript-next",
-            "Vue.volar",
-            "bradlc.vscode-tailwindcss",
-            "esbenp.prettier-vscode",
-            "dbaeumer.vscode-eslint"
-        ]
-    }
+    {
+      "name": "Vela App",
+      "path": "./apps/vela",
+    },
+    {
+      "name": "Vela API",
+      "path": "./apps/vela-api",
+    },
+    {
+      "name": "Vela Extension",
+      "path": "./apps/vela-ext",
+    },
+    {
+      "name": "CDK Infrastructure",
+      "path": "./packages/cdk",
+    },
+  ],
+  "settings": {
+    "typescript.preferences.includePackageJsonAutoImports": "on",
+    "typescript.suggest.autoImports": true,
+    "eslint.workingDirectories": ["apps/vela", "apps/vela-api", "apps/vela-ext", "packages/cdk"],
+    "python.languageServer": "None",
+  },
+  "extensions": {
+    "recommendations": [
+      "ms-vscode.vscode-typescript-next",
+      "Vue.volar",
+      "bradlc.vscode-tailwindcss",
+      "esbenp.prettier-vscode",
+      "dbaeumer.vscode-eslint",
+    ],
+  },
 }

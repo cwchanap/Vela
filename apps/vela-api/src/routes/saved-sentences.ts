@@ -16,6 +16,17 @@ const cognitoClient = new CognitoIdentityProviderClient({
   region: process.env.AWS_REGION || 'us-east-1',
 });
 
+// CORS middleware
+app.use('*', async (c, next) => {
+  c.header('Access-Control-Allow-Origin', '*');
+  c.header('Access-Control-Allow-Headers', 'authorization, x-client-info, apikey, content-type');
+  c.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+  if (c.req.method === 'OPTIONS') {
+    return c.text('', 200);
+  }
+  await next();
+});
+
 // Middleware to verify authentication and extract user ID
 async function authMiddleware(
   c: Context<{ Bindings: Env; Variables: Variables }>,

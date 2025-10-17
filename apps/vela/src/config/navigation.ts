@@ -29,6 +29,12 @@ export const mainNavigation = [
     path: '/progress',
     requiresAuth: true,
   },
+  {
+    name: 'Saved Sentences',
+    icon: 'fas fa-bookmark',
+    path: '/saved-sentences',
+    requiresAuth: true,
+  },
 ];
 
 export const userNavigation = [
