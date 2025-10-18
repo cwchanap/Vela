@@ -6,6 +6,7 @@ import {
   InitiateAuthCommand,
   AdminUserGlobalSignOutCommand,
   GetUserCommand,
+  InitiateAuthCommandOutput,
 } from '@aws-sdk/client-cognito-identity-provider';
 import type { Env } from '../types';
 
@@ -124,6 +125,55 @@ app.post('/signin', async (c) => {
     }
 
     return c.json({ error: 'Sign in failed', name: error?.name }, 500);
+  }
+});
+
+// Refresh token endpoint
+app.post('/refresh', async (c) => {
+  try {
+    const { refreshToken } = await c.req.json();
+
+    if (!refreshToken) {
+      return c.json({ error: 'Refresh token is required' }, 400);
+    }
+
+    const clientId = process.env.COGNITO_CLIENT_ID || process.env.VITE_COGNITO_USER_POOL_CLIENT_ID;
+    if (!clientId) {
+      return c.json({ error: 'Cognito client ID not configured' }, 500);
+    }
+
+    const authCommand = new InitiateAuthCommand({
+      AuthFlow: 'REFRESH_TOKEN_AUTH',
+      ClientId: clientId,
+      AuthParameters: {
+        REFRESH_TOKEN: refreshToken,
+      },
+    });
+
+    const authResponse: InitiateAuthCommandOutput = await cognitoClient.send(authCommand);
+
+    if (authResponse.AuthenticationResult) {
+      return c.json({
+        success: true,
+        message: 'Token refreshed successfully',
+        tokens: {
+          accessToken: authResponse.AuthenticationResult.AccessToken,
+          idToken: authResponse.AuthenticationResult.IdToken,
+          // Refresh token is not returned in REFRESH_TOKEN_AUTH flow, use the existing one
+          refreshToken: refreshToken,
+        },
+      });
+    } else {
+      return c.json({ error: 'Token refresh failed' }, 401);
+    }
+  } catch (error: any) {
+    console.error('Token refresh error:', error);
+
+    if (error.name === 'NotAuthorizedException') {
+      return c.json({ error: 'Invalid or expired refresh token' }, 401);
+    }
+
+    return c.json({ error: 'Token refresh failed', name: error?.name }, 500);
   }
 });
 

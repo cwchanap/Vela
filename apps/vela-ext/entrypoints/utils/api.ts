@@ -52,6 +52,25 @@ export async function checkSession(accessToken: string): Promise<boolean> {
   }
 }
 
+// Refresh token
+export async function refreshToken(refreshToken: string): Promise<AuthTokens> {
+  const response = await fetch(`${API_BASE_URL}/auth/refresh`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ refreshToken }),
+  });
+
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.error || 'Token refresh failed');
+  }
+
+  const data = await response.json();
+  return data.tokens;
+}
+
 // Saved Sentences API
 export async function saveSentence(accessToken: string, params: SaveSentenceParams): Promise<void> {
   const response = await fetch(`${API_BASE_URL}/saved-sentences`, {
