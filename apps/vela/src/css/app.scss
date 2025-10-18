@@ -180,6 +180,15 @@ body.body--dark ::-webkit-scrollbar-track {
   background-clip: text;
 }
 
+// Improved text contrast for light mode
+.text-grey {
+  color: #555 !important;
+}
+
+.text-caption {
+  color: #555 !important;
+}
+
 // Page transitions
 .page-enter-active,
 .page-leave-active {

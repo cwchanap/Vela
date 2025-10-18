@@ -489,7 +489,7 @@ body.body--dark .welcome-subtitle {
 
 .stat-label {
   font-size: 0.9rem;
-  color: #666;
+  color: #555;
   font-weight: 500;
 }
 
@@ -522,7 +522,7 @@ body.body--dark .stat-label {
 }
 
 .section-subtitle {
-  color: #666;
+  color: #555;
   margin: 0;
   font-size: 1rem;
 }
@@ -601,7 +601,7 @@ body.body--dark .action-title {
 }
 
 .action-description {
-  color: #666;
+  color: #555;
   font-size: 0.9rem;
   line-height: 1.5;
   margin: 0 0 1.5rem 0;
@@ -618,7 +618,7 @@ body.body--dark .action-description {
   border-radius: var(--border-radius-xl);
   font-size: 0.8rem;
   font-weight: 500;
-  color: #666;
+  color: #555;
   border: 1px solid var(--glass-border);
 }
 
@@ -657,7 +657,7 @@ body.body--dark .coming-soon-badge {
 
 .progress-label {
   font-size: 0.8rem;
-  color: #666;
+  color: #555;
   margin-top: 0.25rem;
 }
 
@@ -688,7 +688,7 @@ body.body--dark .progress-stats {
 }
 
 .stat-label {
-  color: #666;
+  color: #555;
   font-size: 0.9rem;
 }
 
@@ -708,14 +708,14 @@ body.body--dark .stat-value {
 .start-btn {
   width: 100%;
   background: var(--gradient-primary);
-  color: #333;
+  color: #fff;
   font-weight: 600;
   padding: 0.75rem 1.5rem;
   border-radius: var(--border-radius-md);
 }
 
 body.body--dark .start-btn {
-  color: #000;
+  color: #fff;
 }
 
 /* Empty Achievements */
@@ -729,7 +729,7 @@ body.body--dark .start-btn {
 }
 
 .empty-icon {
-  color: #999;
+  color: #777;
 }
 
 body.body--dark .empty-icon {
@@ -748,7 +748,7 @@ body.body--dark .empty-title {
 }
 
 .empty-subtitle {
-  color: #666;
+  color: #555;
   font-size: 0.9rem;
   margin: 0;
 }
@@ -788,7 +788,7 @@ body.body--dark .empty-subtitle {
 
 .achievement-description {
   font-size: 0.8rem;
-  color: #666;
+  color: #555;
 }
 
 body.body--dark .achievement-description {

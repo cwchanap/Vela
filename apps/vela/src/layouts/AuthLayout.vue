@@ -50,7 +50,7 @@ body.body--dark .auth-page-container :deep(.auth-page) {
 }
 
 .auth-subtitle {
-  color: #7f8c8d;
+  color: #5a6c6d;
   margin: 0 0 1rem;
   font-size: 0.9rem;
 }
