@@ -4,6 +4,8 @@ export interface UserPreferences {
   difficulty: 'Beginner' | 'Intermediate' | 'Advanced';
   notifications: boolean;
   todayStudyTime?: number;
+  // Theme preferences
+  darkMode?: boolean;
   // Per-user LLM preferences
   llm_provider?: 'google' | 'openrouter';
   llm_models?: Partial<Record<'google' | 'openrouter', string>>;

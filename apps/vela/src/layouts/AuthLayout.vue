@@ -44,10 +44,19 @@ body,
   margin: 1rem;
 }
 
+body.body--dark .auth-page-container :deep(.auth-page) {
+  background: #1e1e1e;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+}
+
 .auth-subtitle {
   color: #7f8c8d;
   margin: 0 0 1rem;
   font-size: 0.9rem;
+}
+
+body.body--dark .auth-subtitle {
+  color: #b8b8b8;
 }
 
 .auth-content {
@@ -57,6 +66,10 @@ body,
 .auth-footer {
   border-top: 1px solid #ecf0f1;
   padding-top: 1rem;
+}
+
+body.body--dark .auth-footer {
+  border-top: 1px solid #424242;
 }
 
 @media (max-width: 480px) {

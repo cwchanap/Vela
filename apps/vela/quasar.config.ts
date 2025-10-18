@@ -132,7 +132,15 @@ export default defineConfig((/* ctx */) => {
       // directives: [],
 
       // Quasar plugins
-      plugins: ['Notify', 'Loading', 'LoadingBar', 'Dialog', 'LocalStorage', 'SessionStorage'],
+      plugins: [
+        'Notify',
+        'Loading',
+        'LoadingBar',
+        'Dialog',
+        'LocalStorage',
+        'SessionStorage',
+        'Dark',
+      ],
     },
 
     // https://v2.quasar.dev/quasar-cli-vite/quasar-config-file#test

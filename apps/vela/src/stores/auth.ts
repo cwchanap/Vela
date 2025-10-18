@@ -415,6 +415,35 @@ export const useAuthStore = defineStore('auth', () => {
     }
   };
 
+  /**
+   * Update user preferences
+   */
+  const updatePreferences = async (preferences: Partial<UserPreferences>) => {
+    if (!user.value) return false;
+
+    try {
+      const success = await updateProfile({
+        preferences: {
+          ...(user.value.preferences as UserPreferences),
+          ...preferences,
+        },
+      });
+
+      if (success && user.value) {
+        // Update local state immediately
+        user.value.preferences = {
+          ...(user.value.preferences as UserPreferences),
+          ...preferences,
+        };
+      }
+
+      return success;
+    } catch (err) {
+      console.error('Preferences update error:', err);
+      return false;
+    }
+  };
+
   return {
     // State
     user,
@@ -448,5 +477,6 @@ export const useAuthStore = defineStore('auth', () => {
     updateProfile,
     updateExperience,
     updateStreak,
+    updatePreferences,
   };
 });

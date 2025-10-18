@@ -386,6 +386,10 @@ onMounted(async () => {
   font-weight: 300;
 }
 
+body.body--dark .welcome-subtitle {
+  color: #e0e0e0;
+}
+
 /* Floating decorative circles */
 .welcome-decoration {
   position: absolute;
@@ -489,6 +493,10 @@ onMounted(async () => {
   font-weight: 500;
 }
 
+body.body--dark .stat-label {
+  color: #b8b8b8;
+}
+
 /* Main Content Grid */
 .main-content-grid {
   display: grid;
@@ -517,6 +525,10 @@ onMounted(async () => {
   color: #666;
   margin: 0;
   font-size: 1rem;
+}
+
+body.body--dark .section-subtitle {
+  color: #b8b8b8;
 }
 
 /* Action Cards Grid */
@@ -584,11 +596,19 @@ onMounted(async () => {
   color: #000;
 }
 
+body.body--dark .action-title {
+  color: #fff;
+}
+
 .action-description {
   color: #666;
   font-size: 0.9rem;
   line-height: 1.5;
   margin: 0 0 1.5rem 0;
+}
+
+body.body--dark .action-description {
+  color: #b8b8b8;
 }
 
 .coming-soon-badge {
@@ -600,6 +620,10 @@ onMounted(async () => {
   font-weight: 500;
   color: #666;
   border: 1px solid var(--glass-border);
+}
+
+body.body--dark .coming-soon-badge {
+  color: #b8b8b8;
 }
 
 /* Sidebar Styles */
@@ -637,11 +661,19 @@ onMounted(async () => {
   margin-top: 0.25rem;
 }
 
+body.body--dark .progress-label {
+  color: #b8b8b8;
+}
+
 .progress-stats {
   background: rgba(255, 255, 255, 0.1);
   border-radius: var(--border-radius-sm);
   padding: 1rem;
   border: 1px solid var(--glass-border);
+}
+
+body.body--dark .progress-stats {
+  background: rgba(255, 255, 255, 0.05);
 }
 
 .stat-row {
@@ -660,9 +692,17 @@ onMounted(async () => {
   font-size: 0.9rem;
 }
 
+body.body--dark .stat-row .stat-label {
+  color: #b8b8b8;
+}
+
 .stat-value {
   font-weight: 600;
   color: #000;
+}
+
+body.body--dark .stat-value {
+  color: #fff;
 }
 
 .start-btn {
@@ -672,6 +712,10 @@ onMounted(async () => {
   font-weight: 600;
   padding: 0.75rem 1.5rem;
   border-radius: var(--border-radius-md);
+}
+
+body.body--dark .start-btn {
+  color: #000;
 }
 
 /* Empty Achievements */
@@ -688,6 +732,10 @@ onMounted(async () => {
   color: #999;
 }
 
+body.body--dark .empty-icon {
+  color: #888;
+}
+
 .empty-title {
   color: #333;
   font-size: 1.1rem;
@@ -695,10 +743,18 @@ onMounted(async () => {
   margin: 0 0 0.5rem 0;
 }
 
+body.body--dark .empty-title {
+  color: #e0e0e0;
+}
+
 .empty-subtitle {
   color: #666;
   font-size: 0.9rem;
   margin: 0;
+}
+
+body.body--dark .empty-subtitle {
+  color: #b8b8b8;
 }
 
 /* Achievement Items */
@@ -733,6 +789,10 @@ onMounted(async () => {
 .achievement-description {
   font-size: 0.8rem;
   color: #666;
+}
+
+body.body--dark .achievement-description {
+  color: #b8b8b8;
 }
 
 /* Responsive Design */

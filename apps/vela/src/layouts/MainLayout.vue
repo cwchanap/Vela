@@ -33,14 +33,24 @@
         <q-space />
 
         <div v-if="user && isInitialized" class="q-gutter-sm row items-center no-wrap">
-          <q-btn round dense flat icon="notifications" :color="isDashboard ? 'black' : void 0">
-            <q-badge color="red" :text-color="isDashboard ? 'black' : 'white'" floating>
-              2
-            </q-badge>
+          <q-btn
+            round
+            dense
+            flat
+            :icon="themeStore.isDark ? 'light_mode' : 'dark_mode'"
+            :color="headerIconColor"
+            data-testid="btn-toggle-theme"
+            @click="themeStore.toggle()"
+          >
+            <q-tooltip>{{ themeStore.isDark ? 'Light mode' : 'Dark mode' }}</q-tooltip>
+          </q-btn>
+
+          <q-btn round dense flat icon="notifications" :color="headerIconColor">
+            <q-badge color="red" :text-color="badgeTextColor" floating> 2 </q-badge>
             <q-tooltip>Notifications</q-tooltip>
           </q-btn>
 
-          <q-btn round flat :color="isDashboard ? 'black' : void 0">
+          <q-btn round flat :color="headerIconColor">
             <q-avatar size="26px">
               <img :src="user.avatar_url || 'https://cdn.quasar.dev/img/boy-avatar.png'" />
             </q-avatar>
@@ -110,6 +120,7 @@
 <script setup lang="ts">
 import { ref, onMounted, watch, computed } from 'vue';
 import { useAuthStore } from 'src/stores/auth';
+import { useThemeStore } from 'src/stores/theme';
 import { storeToRefs } from 'pinia';
 import { mainNavigation, userNavigation } from 'src/config/navigation';
 import { useRouter, useRoute } from 'vue-router';
@@ -119,11 +130,27 @@ const $q = useQuasar();
 const leftDrawerOpen = ref(false);
 const drawerMini = ref(false);
 const authStore = useAuthStore();
+const themeStore = useThemeStore();
 const { user, isInitialized } = storeToRefs(authStore);
 const router = useRouter();
 const route = useRoute();
 
 const isDashboard = computed(() => route.name === 'home');
+
+// Header colors that respect both dashboard state and dark mode
+const headerIconColor = computed(() => {
+  // In dark mode, always use white/no specific color (uses default white from Quasar)
+  if (themeStore.isDark) return undefined;
+  // In light mode dashboard, use black
+  return isDashboard.value ? 'black' : undefined;
+});
+
+const badgeTextColor = computed(() => {
+  // In dark mode, always use white
+  if (themeStore.isDark) return 'white';
+  // In light mode dashboard, use black
+  return isDashboard.value ? 'black' : 'white';
+});
 
 const toggleLeftDrawer = () => {
   leftDrawerOpen.value = !leftDrawerOpen.value;
@@ -156,8 +183,13 @@ watch(
 </script>
 
 <style lang="scss">
+// Page container background - respects dark mode
 .q-page-container {
   background-color: #f0f2f5;
+}
+
+body.body--dark .q-page-container {
+  background-color: #121212;
 }
 
 /* Force header content to black on dashboard (when we apply text-black dynamically) */
@@ -165,6 +197,13 @@ watch(
 .q-header.text-black * {
   color: #000 !important;
   fill: #000 !important;
+}
+
+/* In dark mode, override the forced black text on dashboard header */
+body.body--dark .q-header.text-black,
+body.body--dark .q-header.text-black * {
+  color: #fff !important;
+  fill: #fff !important;
 }
 
 /* Compact spacing for user avatar dropdown */
