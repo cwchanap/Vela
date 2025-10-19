@@ -35,6 +35,12 @@ const routes: RouteRecordRaw[] = [
         component: () => import('pages/dictionary/SavedSentencesPage.vue'),
         meta: { requiresAuth: true },
       },
+      {
+        path: 'profile',
+        name: 'profile',
+        component: () => import('pages/auth/ProfilePage.vue'),
+        meta: { requiresAuth: true },
+      },
       // Legacy child redirect: '/dashboard' -> '/'
       {
         path: 'dashboard',
@@ -59,12 +65,6 @@ const routes: RouteRecordRaw[] = [
         name: 'signup',
         component: () => import('pages/auth/LoginPage.vue'),
         meta: { requiresGuest: true },
-      },
-      {
-        path: 'profile',
-        name: 'profile',
-        component: () => import('pages/auth/ProfilePage.vue'),
-        meta: { requiresAuth: true },
       },
       {
         path: 'callback',

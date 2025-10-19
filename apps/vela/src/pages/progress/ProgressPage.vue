@@ -1,44 +1,51 @@
 <template>
-  <q-page class="progress-page q-pa-md">
-    <div class="page-header q-mb-lg">
-      <div class="text-h4 q-mb-sm">Learning Progress</div>
-      <div class="text-subtitle1 text-grey-7">Track your Japanese learning journey</div>
-    </div>
+  <q-page class="progress-page">
+    <div class="progress-container">
+      <!-- Page Header -->
+      <div class="page-header q-mb-lg">
+        <div class="text-h4 q-mb-sm">Learning Progress</div>
+        <div class="text-subtitle1 text-grey-7">Track your Japanese learning journey</div>
+      </div>
 
-    <div class="progress-content">
       <!-- Main Progress Dashboard -->
-      <ProgressDashboard class="q-mb-lg" />
+      <div class="dashboard-section q-mb-lg">
+        <ProgressDashboard />
+      </div>
 
+      <!-- Progress Content -->
       <div class="row q-col-gutter-lg">
         <!-- Progress Chart Section -->
-        <div class="col-12 col-md-8">
-          <q-card class="progress-chart-card">
+        <div class="col-12 col-lg-8">
+          <q-card class="full-height">
             <q-card-section>
               <div class="text-h6 q-mb-md">Progress Over Time</div>
-              <ProgressChart
-                :data="chartData"
-                type="line"
-                :height="300"
-                data-key="experience"
-                color="primary"
-              />
+              <div class="chart-wrapper">
+                <ProgressChart
+                  :data="chartData"
+                  type="line"
+                  :height="300"
+                  data-key="experience"
+                  color="primary"
+                />
+              </div>
             </q-card-section>
           </q-card>
         </div>
 
         <!-- Skills and Achievements Section -->
-        <div class="col-12 col-md-4">
-          <div class="column q-gutter-md">
+        <div class="col-12 col-lg-4">
+          <div class="sidebar-content">
             <!-- Skill Categories -->
-            <q-card>
+            <q-card class="q-mb-lg">
               <q-card-section>
                 <div class="text-h6 q-mb-md">Skill Categories</div>
-                <div class="column q-gutter-sm">
+                <div class="skills-list">
                   <SkillCategoryCard
                     v-for="skill in skillCategories"
                     :key="skill.name"
                     :skill="skill"
                     :show-actions="false"
+                    class="q-mb-sm"
                   />
                 </div>
               </q-card-section>
@@ -51,11 +58,12 @@
                 <div v-if="recentAchievements.length === 0" class="text-grey-7 text-center q-py-md">
                   No achievements yet. Keep learning to unlock them!
                 </div>
-                <div v-else class="column q-gutter-sm">
+                <div v-else class="achievements-list">
                   <AchievementItem
                     v-for="achievement in recentAchievements"
                     :key="achievement.id"
                     :achievement="achievement"
+                    class="q-mb-sm"
                     @click="showAchievementDialog(achievement)"
                   />
                 </div>
@@ -107,31 +115,89 @@ onMounted(async () => {
 
 <style lang="scss" scoped>
 .progress-page {
-  max-width: 1200px;
+  padding: 1.5rem;
+}
+
+.progress-container {
+  max-width: 1400px;
   margin: 0 auto;
+  width: 100%;
 }
 
 .page-header {
   text-align: center;
 }
 
-.progress-content {
-  width: 100%;
+.dashboard-section {
+  max-width: 100%;
 }
 
-.progress-chart-card {
-  height: fit-content;
+.chart-wrapper {
+  width: 100%;
+  overflow-x: auto;
+}
+
+.sidebar-content {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.skills-list,
+.achievements-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.full-height {
+  height: 100%;
+}
+
+@media (max-width: 1280px) {
+  .progress-page {
+    padding: 1rem;
+  }
+
+  .progress-container {
+    max-width: 1200px;
+  }
+}
+
+@media (max-width: 1024px) {
+  .sidebar-content {
+    flex-direction: row;
+    gap: 1rem;
+  }
+
+  .sidebar-content > .q-card {
+    flex: 1;
+    margin-bottom: 0 !important;
+  }
 }
 
 @media (max-width: 768px) {
   .progress-page {
-    padding: 1rem 0.5rem;
+    padding: 0.75rem;
   }
 
   .page-header {
     margin-bottom: 1rem;
   }
 
+  .text-h4 {
+    font-size: 1.75rem;
+  }
+
+  .sidebar-content {
+    flex-direction: column;
+  }
+
+  .sidebar-content > .q-card:first-child {
+    margin-bottom: 1rem !important;
+  }
+}
+
+@media (max-width: 600px) {
   .text-h4 {
     font-size: 1.5rem;
   }

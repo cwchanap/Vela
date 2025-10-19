@@ -41,7 +41,7 @@ export const userNavigation = [
   {
     name: 'Profile',
     icon: 'fas fa-user',
-    path: '/auth/profile',
+    path: '/profile',
   },
   {
     name: 'Settings',

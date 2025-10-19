@@ -1,149 +1,100 @@
 <template>
-  <q-page class="profile-page">
-    <div class="container">
-      <!-- Page Header -->
-      <div class="page-header q-mb-lg">
-        <q-btn flat round icon="arrow_back" @click="$router.back()" class="q-mr-md" />
-        <div>
-          <div class="text-h5">Profile Settings</div>
-          <div class="text-subtitle2 text-dark">Manage your account and learning preferences</div>
-        </div>
-      </div>
+  <q-page class="q-pa-md">
+    <!-- Page Header -->
+    <div class="row items-center justify-between q-mb-md">
+      <div class="text-h6">Profile Settings</div>
+    </div>
 
-      <!-- Loading State -->
-      <div v-if="authStore.isLoading && !authStore.user" class="text-center q-py-xl">
-        <q-spinner-dots size="3rem" color="primary" />
-        <div class="text-subtitle1 q-mt-md">Loading profile...</div>
-      </div>
+    <!-- Loading State -->
+    <div v-if="authStore.isLoading && !authStore.user" class="text-center q-py-xl">
+      <q-spinner-dots size="3rem" color="primary" />
+      <div class="text-subtitle1 q-mt-md">Loading profile...</div>
+    </div>
 
-      <!-- Not Authenticated -->
-      <div v-else-if="!authStore.isAuthenticated" class="text-center q-py-xl">
-        <q-icon name="person_off" size="4rem" color="grey-5" />
-        <div class="text-h6 q-mt-md">Not Signed In</div>
-        <div class="text-subtitle2 text-dark q-mb-md">Please sign in to view your profile</div>
-        <q-btn color="primary" label="Sign In" @click="$router.push('/auth/login')" />
-      </div>
+    <!-- Not Authenticated -->
+    <div v-else-if="!authStore.isAuthenticated" class="text-center q-py-xl">
+      <q-icon name="person_off" size="4rem" color="grey-5" />
+      <div class="text-h6 q-mt-md">Not Signed In</div>
+      <div class="text-subtitle2 text-grey-7 q-mb-md">Please sign in to view your profile</div>
+      <q-btn color="primary" label="Sign In" @click="$router.push('/auth/login')" />
+    </div>
 
-      <!-- Profile Content -->
-      <div v-else class="profile-content">
-        <UserProfile />
-
-        <!-- Additional Profile Sections -->
-        <div class="row q-gutter-lg q-mt-lg justify-center">
-          <!-- Learning Statistics -->
-          <div class="col-12 col-sm-10 col-md-6 col-lg-5">
-            <q-card>
-              <q-card-section>
-                <div class="text-h6 q-mb-md">Learning Statistics</div>
-
-                <div class="stats-grid">
-                  <div class="stat-item">
-                    <div class="stat-value">{{ authStore.userLevel }}</div>
-                    <div class="stat-label">Current Level</div>
-                  </div>
-
-                  <div class="stat-item">
-                    <div class="stat-value">{{ authStore.userExperience }}</div>
-                    <div class="stat-label">Total XP</div>
-                  </div>
-
-                  <div class="stat-item">
-                    <div class="stat-value">{{ authStore.userStreak }}</div>
-                    <div class="stat-label">Day Streak</div>
-                  </div>
-
-                  <div class="stat-item">
-                    <div class="stat-value">{{ nextLevelXP }}</div>
-                    <div class="stat-label">XP to Next Level</div>
-                  </div>
-                </div>
-
-                <!-- Progress Bar -->
-                <div class="q-mt-md">
-                  <div class="text-caption text-dark q-mb-xs">
-                    Level {{ authStore.userLevel }} Progress
-                  </div>
-                  <q-linear-progress :value="levelProgress" color="primary" size="8px" rounded />
-                  <div class="text-caption text-dark q-mt-xs">
-                    {{ currentLevelXP }} / {{ xpPerLevel }} XP
-                  </div>
-                </div>
-              </q-card-section>
-            </q-card>
-          </div>
-
-          <!-- Recent Activity -->
-          <div class="col-12 col-sm-10 col-md-6 col-lg-5">
-            <q-card>
-              <q-card-section>
-                <div class="text-h6 q-mb-md">Recent Activity</div>
-
-                <div v-if="recentActivity.length === 0" class="text-center q-py-md">
-                  <q-icon name="history" size="2rem" color="grey-5" />
-                  <div class="text-subtitle2 text-dark q-mt-sm">No recent activity</div>
-                  <div class="text-caption text-grey-5">
-                    Start learning to see your progress here
-                  </div>
-                </div>
-
-                <q-list v-else separator>
-                  <q-item v-for="activity in recentActivity" :key="activity.id" class="q-px-none">
-                    <q-item-section avatar>
-                      <q-icon :name="activity.icon" :color="activity.color" />
-                    </q-item-section>
-
-                    <q-item-section>
-                      <q-item-label>{{ activity.title }}</q-item-label>
-                      <q-item-label caption>{{ activity.description }}</q-item-label>
-                    </q-item-section>
-
-                    <q-item-section side>
-                      <q-item-label caption>{{ activity.time }}</q-item-label>
-                    </q-item-section>
-                  </q-item>
-                </q-list>
-              </q-card-section>
-            </q-card>
-          </div>
-        </div>
-
-        <!-- Quick Actions -->
-        <div class="quick-actions q-mt-lg">
-          <q-card>
+    <!-- Profile Content -->
+    <div v-else class="profile-content">
+      <!-- Content Grid -->
+      <div class="content-grid">
+        <!-- Left Column: Stats and Activity -->
+        <div class="left-column">
+          <!-- Learning Statistics Card -->
+          <q-card flat bordered class="q-mb-md">
             <q-card-section>
-              <div class="text-h6 q-mb-md">Quick Actions</div>
+              <div class="text-subtitle1 q-mb-md">Learning Statistics</div>
 
-              <div class="row q-gutter-md">
-                <q-btn
-                  color="primary"
-                  icon="play_arrow"
-                  label="Start Learning"
-                  @click="$router.push('/games')"
-                />
+              <div class="stats-grid">
+                <div class="stat-box">
+                  <div class="stat-value">{{ authStore.userLevel }}</div>
+                  <div class="stat-label">Level</div>
+                </div>
+                <div class="stat-box">
+                  <div class="stat-value">{{ authStore.userExperience }}</div>
+                  <div class="stat-label">Total XP</div>
+                </div>
+                <div class="stat-box">
+                  <div class="stat-value">{{ authStore.userStreak }}</div>
+                  <div class="stat-label">Day Streak</div>
+                </div>
+                <div class="stat-box">
+                  <div class="stat-value">{{ nextLevelXP }}</div>
+                  <div class="stat-label">Next Level</div>
+                </div>
+              </div>
 
-                <q-btn
-                  color="secondary"
-                  icon="chat"
-                  label="AI Tutor"
-                  @click="$router.push('/chat')"
-                />
-
-                <q-btn
-                  color="positive"
-                  icon="analytics"
-                  label="View Progress"
-                  @click="$router.push('/progress')"
-                />
-
-                <q-btn
-                  color="info"
-                  icon="settings"
-                  label="Settings"
-                  @click="$router.push('/settings')"
-                />
+              <div class="progress-section">
+                <div class="progress-header">
+                  <span class="text-caption">Level {{ authStore.userLevel }} Progress</span>
+                  <span class="text-caption text-weight-medium">
+                    {{ currentLevelXP }} / {{ xpPerLevel }} XP
+                  </span>
+                </div>
+                <q-linear-progress :value="levelProgress" color="primary" size="10px" rounded />
               </div>
             </q-card-section>
           </q-card>
+
+          <!-- Recent Activity Card -->
+          <q-card flat bordered>
+            <q-card-section>
+              <div class="text-subtitle1 q-mb-md">Recent Activity</div>
+
+              <div v-if="recentActivity.length === 0" class="text-center q-py-md">
+                <q-icon name="history" size="2.5rem" color="grey-5" />
+                <div class="text-body2 text-grey-7 q-mt-sm">No recent activity</div>
+                <div class="text-caption text-grey-6">Start learning to see your progress</div>
+              </div>
+
+              <q-list v-else>
+                <q-item v-for="activity in recentActivity" :key="activity.id" class="q-px-none">
+                  <q-item-section avatar>
+                    <q-avatar :color="activity.color" text-color="white" size="40px">
+                      <q-icon :name="activity.icon" />
+                    </q-avatar>
+                  </q-item-section>
+                  <q-item-section>
+                    <q-item-label class="text-weight-medium">{{ activity.title }}</q-item-label>
+                    <q-item-label caption>{{ activity.description }}</q-item-label>
+                  </q-item-section>
+                  <q-item-section side>
+                    <q-item-label caption class="text-grey-7">{{ activity.time }}</q-item-label>
+                  </q-item-section>
+                </q-item>
+              </q-list>
+            </q-card-section>
+          </q-card>
+        </div>
+
+        <!-- Right Column: User Profile Card -->
+        <div class="profile-card-wrapper">
+          <UserProfile />
         </div>
       </div>
     </div>
@@ -209,74 +160,98 @@ onMounted(async () => {
 });
 </script>
 
-<style scoped>
-.profile-page {
-  padding: 1rem;
-  max-width: 1200px;
-  margin: 0 auto;
-}
-
-.page-header {
-  display: flex;
-  align-items: center;
-}
-
-.container {
-  width: 100%;
-}
-
+<style scoped lang="scss">
 .profile-content {
   width: 100%;
 }
 
+.content-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 1rem;
+
+  @media (min-width: 1024px) {
+    grid-template-columns: 1fr 400px;
+    gap: 1.5rem;
+  }
+}
+
+.left-column {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.profile-card-wrapper {
+  width: 100%;
+}
+
+// Stats Section
 .stats-grid {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
   gap: 1rem;
+  margin-bottom: 1.5rem;
 }
 
-.stat-item {
+.stat-box {
   text-align: center;
-  padding: 1rem;
-  background: rgba(0, 0, 0, 0.05);
-  border-radius: 8px;
+  padding: 1.25rem 1rem;
+  background: rgba(var(--q-primary-rgb), 0.05);
+  border-radius: 12px;
+  transition: all 0.2s ease;
+
+  &:hover {
+    background: rgba(var(--q-primary-rgb), 0.08);
+    transform: translateY(-2px);
+  }
 }
 
 .stat-value {
-  font-size: 1.5rem;
-  font-weight: bold;
+  font-size: 2rem;
+  font-weight: 700;
   color: var(--q-primary);
-}
-
-.stat-label {
-  font-size: 0.875rem;
-  color: var(--q-dark);
-  margin-top: 0.25rem;
-}
-
-.quick-actions .q-btn {
-  margin-right: 0.5rem;
+  line-height: 1;
   margin-bottom: 0.5rem;
 }
 
-/* Center the Quick Actions card and keep it consistent with profile card width */
-.quick-actions > .q-card {
-  max-width: 600px;
-  margin: 0 auto;
+.stat-label {
+  font-size: 0.75rem;
+  color: var(--q-grey-7);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  font-weight: 600;
 }
 
-@media (max-width: 600px) {
-  .profile-page {
-    padding: 0.5rem;
+.progress-section {
+  .progress-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 0.5rem;
+    color: var(--q-grey-7);
   }
+}
 
-  .stats-grid {
+// Mobile Adjustments
+@media (max-width: 1023px) {
+  .content-grid {
     grid-template-columns: 1fr;
   }
+}
 
-  .quick-actions .q-btn {
-    width: 100%;
-    margin-right: 0;
+@media (max-width: 767px) {
+  .stats-grid {
+    grid-template-columns: 1fr;
+    gap: 0.75rem;
+  }
+
+  .stat-box {
+    padding: 1rem;
+  }
+
+  .stat-value {
+    font-size: 1.75rem;
   }
 }
 </style>
