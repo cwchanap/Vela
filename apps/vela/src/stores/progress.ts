@@ -6,6 +6,9 @@ import {
   type Achievement,
   type SkillCategory,
 } from '../services/progressService';
+import { queryClient } from '../boot/query';
+import { progressKeys } from '../composables/queries/useProgressQueries';
+import { useAuthStore } from './auth';
 
 export interface UserProgress {
   vocabulary_id: string;
@@ -176,10 +179,35 @@ export const useProgressStore = defineStore('progress', () => {
     isLoading.value = loading;
   };
 
-  const loadProgressAnalytics = async () => {
+  const loadProgressAnalytics = async (userId: string | null) => {
     try {
       setLoading(true);
-      const data = await progressService.getProgressAnalytics();
+
+      // Fall back to current user from auth store if userId not provided
+      const authStore = useAuthStore();
+      const effectiveUserId = userId ?? authStore.user?.id ?? null;
+
+      const queryKey = progressKeys.analytics(effectiveUserId);
+      const queryState = queryClient.getQueryState(queryKey);
+
+      // Check if cached data is fresh (not invalidated AND not stale)
+      // staleTime is 5 minutes (from boot/query.ts)
+      const STALE_TIME = 5 * 60 * 1000;
+      const isInvalidated = queryState?.isInvalidated ?? true;
+      const dataAge = queryState?.dataUpdatedAt ? Date.now() - queryState.dataUpdatedAt : Infinity;
+      const isStale = dataAge > STALE_TIME;
+
+      // Only use cached data if it's fresh (not invalidated AND not stale)
+      const isFresh = !isInvalidated && !isStale && queryState?.data;
+      const cachedData = isFresh ? queryClient.getQueryData<ProgressAnalytics>(queryKey) : null;
+
+      const data = cachedData || (await progressService.getProgressAnalytics());
+
+      // Update cache with fresh data using the effective user ID
+      if (data && effectiveUserId) {
+        queryClient.setQueryData(queryKey, data);
+      }
+
       analytics.value = data;
       achievements.value = data.achievements || [];
       skillCategories.value = data.skillCategories;
@@ -205,6 +233,7 @@ export const useProgressStore = defineStore('progress', () => {
     durationSeconds: number,
     questionsAnswered: number,
     correctAnswers: number,
+    userId: string | null = null,
   ) => {
     try {
       const experienceGained = calculateExperienceGained(score, correctAnswers, questionsAnswered);
@@ -220,8 +249,11 @@ export const useProgressStore = defineStore('progress', () => {
 
       // Achievement checking is now handled by the API
 
+      // Invalidate progress queries to trigger refetch
+      queryClient.invalidateQueries({ queryKey: progressKeys.all });
+
       // Reload analytics to get updated data
-      await loadProgressAnalytics();
+      await loadProgressAnalytics(userId);
     } catch (error) {
       console.error('Failed to record game session:', error);
     }

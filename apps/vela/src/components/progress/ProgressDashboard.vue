@@ -189,12 +189,14 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue';
 import { useProgressStore } from 'src/stores/progress';
+import { useAuthStore } from 'src/stores/auth';
 import ProgressChart from './ProgressChart.vue';
 import SkillCategoryCard from './SkillCategoryCard.vue';
 import AchievementItem from './AchievementItem.vue';
 import AchievementDialog from './AchievementDialog.vue';
 
 const progressStore = useProgressStore();
+const authStore = useAuthStore();
 const showAchievementDialog = ref(false);
 
 const todayProgress = computed(() => progressStore.getTodayProgress());
@@ -211,7 +213,7 @@ watch(
 );
 
 onMounted(async () => {
-  await progressStore.loadProgressAnalytics();
+  await progressStore.loadProgressAnalytics(authStore.user?.id || null);
 });
 </script>
 

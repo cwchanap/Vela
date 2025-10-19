@@ -6,8 +6,10 @@ import {
   type SignInData,
   type ProfileData,
 } from '../services/authService';
-import type { UserPreferences } from '../types/shared';
+import type { UserPreferences, Profile } from '../types/shared';
 import type { AppSession } from '../services/authService';
+import { queryClient } from '../boot/query';
+import { authKeys } from '../composables/queries/useAuthQueries';
 
 export interface User {
   id: string;
@@ -119,9 +121,26 @@ export const useAuthStore = defineStore('auth', () => {
    */
   const loadUserProfile = async (userId: string) => {
     try {
-      const profile = await authService.getUserProfile(userId);
+      const queryKey = authKeys.profile(userId);
+      const queryState = queryClient.getQueryState(queryKey);
+
+      // Check if cached data is fresh (not invalidated AND not stale)
+      // staleTime is 5 minutes (from boot/query.ts)
+      const STALE_TIME = 5 * 60 * 1000;
+      const isInvalidated = queryState?.isInvalidated ?? true;
+      const dataAge = queryState?.dataUpdatedAt ? Date.now() - queryState.dataUpdatedAt : Infinity;
+      const isStale = dataAge > STALE_TIME;
+
+      // Only use cached data if it's fresh (not invalidated AND not stale)
+      const isFresh = !isInvalidated && !isStale && queryState?.data;
+      const cachedProfile = isFresh ? queryClient.getQueryData<Profile>(queryKey) : null;
+
+      const profile = cachedProfile || (await authService.getUserProfile(userId));
 
       if (profile) {
+        // Update query cache with fresh data
+        queryClient.setQueryData(queryKey, profile);
+
         setUser({
           id: profile.id,
           email: profile.email || '',
@@ -198,6 +217,13 @@ export const useAuthStore = defineStore('auth', () => {
         return false;
       }
 
+      // Invalidate auth-related queries to refetch fresh data
+      if (response.success && response.user) {
+        queryClient.invalidateQueries({ queryKey: authKeys.session() });
+        queryClient.invalidateQueries({ queryKey: authKeys.user() });
+        queryClient.invalidateQueries({ queryKey: authKeys.profile(response.user.id) });
+      }
+
       // Session and user will be set via auth state change listener
       return true;
     } catch (err) {
@@ -264,6 +290,9 @@ export const useAuthStore = defineStore('auth', () => {
         setError(response.error || 'Sign out failed');
         return false;
       }
+
+      // Clear all cached queries on sign out
+      queryClient.clear();
 
       clearAuth();
       return true;
@@ -345,6 +374,9 @@ export const useAuthStore = defineStore('auth', () => {
         setError(response.error || 'Profile update failed');
         return false;
       }
+
+      // Invalidate profile query to refetch fresh data
+      queryClient.invalidateQueries({ queryKey: authKeys.profile(user.value.id) });
 
       // Reload user profile to get updated data
       await loadUserProfile(user.value.id);

@@ -25,6 +25,7 @@
     "@aws-sdk/client-dynamodb": "^3.666.0",
     "@aws-sdk/lib-dynamodb": "^3.666.0",
     "@quasar/extras": "^1.16.4",
+    "@tanstack/vue-query": "^5.90.5",
     "aws-amplify": "^6.15.5",
     "pinia": "^2.1.7",
     "quasar": "^2.16.0",

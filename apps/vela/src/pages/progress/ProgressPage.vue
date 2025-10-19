@@ -82,6 +82,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue';
 import { useProgressStore } from 'src/stores/progress';
+import { useAuthStore } from 'src/stores/auth';
 import { storeToRefs } from 'pinia';
 import ProgressDashboard from 'src/components/progress/ProgressDashboard.vue';
 import ProgressChart from 'src/components/progress/ProgressChart.vue';
@@ -91,6 +92,7 @@ import AchievementDialog from 'src/components/progress/AchievementDialog.vue';
 import type { Achievement } from 'src/services/progressService';
 
 const progressStore = useProgressStore();
+const authStore = useAuthStore();
 const { skillCategories, recentAchievements, dailyProgressChart } = storeToRefs(progressStore);
 
 // Dialog state
@@ -109,7 +111,7 @@ const showAchievementDialog = (achievement: Achievement) => {
 
 onMounted(async () => {
   // Load progress data when component mounts
-  await progressStore.loadProgressAnalytics();
+  await progressStore.loadProgressAnalytics(authStore.user?.id || null);
 });
 </script>
 
