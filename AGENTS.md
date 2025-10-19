@@ -1,30 +1,26 @@
-# Repository Guidelines
+# AGENTS.md - Vela Japanese Learning App
 
-## Project Structure & Module Organization
+## Build, Lint, and Test Commands
 
-This Turborepo workspace hosts both runtime and infrastructure code. The Quasar/Vue app lives in `apps/vela/src`, with static assets in `apps/vela/public` and Playwright specs in `apps/vela/e2e`. Lambda-ready API handlers sit in `apps/vela-api/src` with Vitest suites in `apps/vela-api/test`. CDK stacks are declared in `packages/cdk/lib/vela-stack.ts` and helper scripts in `packages/cdk/scripts`. Create shared utilities as packages under `packages/` for reuse across apps.
+- `pnpm install` - Install all workspace dependencies.
+- `pnpm dev` - Start development servers (app, API, extension).
+- `pnpm build` - Build all packages for production.
+- `pnpm lint` / `pnpm format` - Lint and format code with ESLint/Prettier.
+- `pnpm test` - Run all tests; for single test: `pnpm --filter @vela/app run test -- some.spec.ts` (Playwright/Vitest).
+- `pnpm --filter @vela/app run test:unit` - Run unit tests only.
+- `pnpm --filter @vela-api run test` - Run API tests only.
 
-## Build, Test, and Development Commands
+## Code Style Guidelines
 
-- `pnpm install` — install all workspace dependencies at the root.
-- `pnpm dev` — launch default dev tasks; `pnpm --filter @vela/app run dev` targets the app only.
-- `pnpm build` — compile every workspace before release or packaging.
-- `pnpm test` — run repo-wide suites; use `pnpm --filter @vela/app run test:unit` or `pnpm --filter @vela/app run test:e2e` for focused checks.
-- `pnpm cdk:deploy` — deploy the CDK stack after reviewing `pnpm cdk:diff`.
-- `pnpm lint` / `pnpm format` — apply ESLint and Prettier rules.
+- **Formatting**: Prettier enforces 2-space indentation, trailing semicolons, single quotes. Run `pnpm format` before committing.
+- **Imports**: Organize imports: external libraries first, then internal modules; group by type (types, components, services).
+- **Types**: Use TypeScript strictly; prefer typed interfaces over `any`; enable Vue SFC type checking.
+- **Naming**: Vue components in PascalCase, composables as `useSomething`, stores/actions in camelCase, constants in UPPER_CASE.
+- **Error Handling**: Use try-catch for async operations; log errors appropriately; avoid exposing sensitive info in logs.
+- **Conventions**: Colocate styles/assets with components; prefix unused vars with `_`; follow security best practices (no secrets in code).
 
-## Coding Style & Naming Conventions
+## Agent Rules
 
-Prettier enforces two-space indentation, trailing semicolons, and single quotes—run `pnpm format` before committing. ESLint (see `eslint.config.js`) allows intentionally unused values only when prefixed with `_`. Name Vue components with `PascalCase`, composables with `useSomething`, and stores or actions in `camelCase`. Prefer typed interfaces over `any` in both app and CDK code, and colocate feature-specific styles or assets with the component they support.
-
-## Testing Guidelines
-
-Vitest powers unit tests placed alongside code as `*.test.ts` (e.g., `authService.test.ts`). Playwright covers end-to-end flows in `apps/vela/e2e/*.spec.ts`; add scenarios per feature to keep suites focused. Run `pnpm test` before submitting a PR and regenerate reports with `pnpm --filter @vela/app run test:report` when debugging failures. Cover new DynamoDB paths, auth checks, and API integrations with regression tests whenever they change.
-
-## Commit & Pull Request Guidelines
-
-Use Conventional Commits (`feat: allow offline practice mode`) and limit each commit to a single concern. Pull requests need a short summary, linked issue or ticket, and evidence that `pnpm lint`, `pnpm test`, and `pnpm cdk:synth` succeeded. Include UI screenshots when you change visible flows and note deployment risks or required migrations.
-
-## Security & Configuration Tips
-
-Copy `.env.example` to configure local secrets and keep `.env*` files out of version control. Verify AWS credentials before running any `pnpm cdk:*` command, and document new environment variables in the relevant README or `.env.example`.
+- Cursor/Windsurf: See `.windsurf/rules/project.md` for detailed project structure and commands.
+- Copilot: See `.github/instructions/project.instructions.md` for architecture and development patterns.
+- Always run `pnpm lint` and `pnpm test` before commits; use Conventional Commits (e.g., `feat: add new game`).

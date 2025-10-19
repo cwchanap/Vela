@@ -8,6 +8,7 @@ This is a **Turborepo monorepo** containing:
 
 - `apps/vela` - Main Vela Japanese learning app (Quasar/Vue.js)
 - `apps/vela-api` - API backend (Hono framework)
+- `apps/vela-ext` - Browser extension for saving Japanese sentences (WXT/Vue.js)
 - `packages/cdk` - AWS CDK infrastructure code
 
 ## Common Development Commands
@@ -36,11 +37,28 @@ This is a **Turborepo monorepo** containing:
 
 ### Vela API Commands (from apps/vela-api/)
 
-- `pnpm dev` - Start API development server with tsx watch
+- `pnpm dev` - Start API development server with tsx watch (runs on port 9005)
 - `pnpm build` - Bundle API for deployment
 - `pnpm test` - Run API tests with Vitest
 - `pnpm test:watch` - Run API tests in watch mode
 - `pnpm test:coverage` - Run API tests with coverage
+
+### Vela Extension Commands (from apps/vela-ext/)
+
+- `pnpm dev` or `wxt` - Start WXT development server for Chrome
+- `pnpm dev:firefox` or `wxt -b firefox` - Start WXT development server for Firefox
+- `pnpm build` or `wxt build` - Build extension for Chrome
+- `pnpm build:firefox` or `wxt build -b firefox` - Build extension for Firefox
+- `pnpm zip` or `wxt zip` - Create distribution zip for Chrome
+- `pnpm zip:firefox` or `wxt zip -b firefox` - Create distribution zip for Firefox
+- `pnpm compile` - Type check without emitting (vue-tsc)
+- `pnpm postinstall` - Prepare WXT (runs after install)
+
+Root-level extension commands:
+
+- `pnpm dev:vela-ext` - Start extension dev server from root
+- `pnpm build:vela-ext` - Build extension from root
+- `pnpm zip:vela-ext` - Create extension zip from root
 
 ### AWS CDK Commands (from packages/cdk/)
 
@@ -69,7 +87,16 @@ This is a **Turborepo monorepo** containing:
 - **Build**: esbuild for bundling
 - **Database Client**: AWS SDK for DynamoDB
 - **Testing**: Vitest
-- **Development**: tsx watch for hot reload
+- **Development**: tsx watch for hot reload (port 9005)
+
+#### Vela Extension (Browser Extension)
+
+- **Framework**: WXT (Web Extension Toolkit) with Vue 3
+- **Runtime**: Browser extension (Chrome/Firefox)
+- **Build**: WXT build system
+- **Features**: Context menu for saving Japanese sentences, storage, notifications
+- **Permissions**: contextMenus, storage, notifications, host_permissions for vela.cwchanap.dev
+- **Structure**: background.ts (service worker), content.ts (content script), popup/ (extension popup UI)
 
 #### Infrastructure
 
@@ -177,11 +204,21 @@ The application uses DynamoDB tables for a Japanese learning app:
 - **esbuild**: Fast bundling for AWS Lambda deployment
 - **Development**: tsx watch for hot reload during development
 
-#### Key Files
+#### Key Files & Routes
 
-- `apps/vela-api/src/index.ts` - Main API entry point
+- `apps/vela-api/src/index.ts` - Main API entry point with route mounting
 - `apps/vela-api/src/dev.ts` - Development server setup
+- `apps/vela-api/src/routes/` - API route handlers organized by feature
+  - `llm-chat.ts` - LLM chat endpoints
+  - `chat-history.ts` - Chat history storage
+  - `games.ts` - Game data and questions
+  - `progress.ts` - Learning progress tracking
+  - `profiles.ts` - User profile management
+  - `auth.ts` - Authentication endpoints
+  - `saved-sentences.ts` - Saved Japanese sentences from extension
 - Lambda packaging via esbuild with single bundle output
+- Development mode loads .env files and mocks Lambda environment
+- API routes mounted at `/api/*` prefix
 
 ### AWS CDK Infrastructure
 
@@ -260,16 +297,27 @@ The application uses DynamoDB tables for a Japanese learning app:
 
 ### Testing Strategy
 
-- **Vela App**: Playwright for end-to-end testing with multiple test modes
+- **Vela App**: Playwright for end-to-end testing with multiple test modes (headed, UI, debug)
 - **Vela API**: Vitest for unit testing with coverage support
+- **Vela Extension**: Type checking via vue-tsc (no runtime tests currently)
 - **CDK**: No specific tests configured currently
+
+### Test Account Credentials
+
+For testing authenticated features:
+
+- Email: `test@cwchanap.dev`
+- Password: `password123`
 
 ### Environment Variables
 
 Each package handles environment variables differently:
 
-- **Vela App**: Uses Vite's `import.meta.env` with AWS Cognito configuration
-- **Vela API**: Standard Node.js `process.env`
+- **Vela App**: Uses Vite's `import.meta.env` with AWS Cognito configuration (VITE\_\* prefix)
+- **Vela API**: Standard Node.js `process.env`, loads from `.env` file in development
+  - Development mode checks both `apps/vela-api/.env` and root `.env`
+  - Required: AWS credentials, Cognito config, DynamoDB config, optional LLM API keys
+- **Vela Extension**: Uses WXT's built-in environment handling
 - **CDK**: Uses AWS CDK's built-in environment handling
 
 ### Important Development Notes
@@ -279,3 +327,11 @@ Each package handles environment variables differently:
 - Turborepo caches build outputs - use `pnpm clean` if you encounter cache issues
 - The lint configuration uses ESLint flat config format (modern ESLint v9+ style)
 - Pre-commit hooks run linting and formatting automatically via Husky
+
+### Development Server Ports
+
+- **Vela App**: Port 9000 (Quasar dev server)
+- **Vela API**: Port 9005 (Hono development server)
+- **Vela Extension**: No dev server port (runs in browser)
+
+Before starting dev servers, check if they're already running to avoid port conflicts.

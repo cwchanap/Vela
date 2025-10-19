@@ -2,56 +2,70 @@
 trigger: always_on
 ---
 
-# CLAUDE.md
-
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
-
 ## Project Structure
 
 This is a **Turborepo monorepo** containing:
 
 - `apps/vela` - Main Vela Japanese learning app (Quasar/Vue.js)
 - `apps/vela-api` - API backend (Hono framework)
+- `apps/vela-ext` - Browser extension for saving Japanese sentences (WXT/Vue.js)
 - `packages/cdk` - AWS CDK infrastructure code
 
 ## Common Development Commands
 
 ### Monorepo Commands (run from root)
 
-- `npm run dev` - Start all development servers using Turbo
-- `npm run build` - Build all packages using Turbo
-- `npm run lint` - Lint all packages using Turbo
-- `npm run lint:fix` - Lint and fix all packages using Turbo
-- `npm run format` - Format all packages using Turbo
-- `npm run test` - Run tests for all packages using Turbo
-- `npm run clean` - Clean all build artifacts using Turbo
-- `npm install` - Install dependencies for all packages
-- `npm run prepare` - Set up Husky pre-commit hooks
+- `pnpm dev` - Start all development servers using Turbo
+- `pnpm build` - Build all packages using Turbo
+- `pnpm lint` - Lint all packages using Turbo
+- `pnpm lint:fix` - Lint and fix all packages using Turbo
+- `pnpm format` - Format all packages using Turbo
+- `pnpm test` - Run tests for all packages using Turbo
+- `pnpm clean` - Clean all build artifacts using Turbo
+- `pnpm install` - Install dependencies for all packages
+- `pnpm prepare` - Set up Husky pre-commit hooks
 
 ### Vela App Commands (from apps/vela/)
 
-- `npm run dev` or `quasar dev` - Start Quasar development server with hot reload
-- `npm run build` or `quasar build` - Build for production
-- `npm run postinstall` - Run after install (runs `quasar prepare`)
-- `npm run test` - Run Playwright end-to-end tests
-- `npm run test:headed` - Run Playwright tests in headed mode
-- `npm run test:ui` - Run Playwright tests with UI mode
-- `npm run test:debug` - Run Playwright tests in debug mode
+- `pnpm dev` or `quasar dev` - Start Quasar development server with hot reload
+- `pnpm build` or `quasar build` - Build for production
+- `pnpm postinstall` - Run after install (runs `quasar prepare`)
+- `pnpm test` - Run Playwright end-to-end tests
+- `pnpm test:headed` - Run Playwright tests in headed mode
+- `pnpm test:ui` - Run Playwright tests with UI mode
+- `pnpm test:debug` - Run Playwright tests in debug mode
 
 ### Vela API Commands (from apps/vela-api/)
 
-- `npm run dev` - Start API development server with tsx watch
-- `npm run build` - Bundle API for deployment
-- `npm run test` - Run API tests with Vitest
-- `npm run test:watch` - Run API tests in watch mode
-- `npm run test:coverage` - Run API tests with coverage
+- `pnpm dev` - Start API development server with tsx watch (runs on port 9005)
+- `pnpm build` - Bundle API for deployment
+- `pnpm test` - Run API tests with Vitest
+- `pnpm test:watch` - Run API tests in watch mode
+- `pnpm test:coverage` - Run API tests with coverage
+
+### Vela Extension Commands (from apps/vela-ext/)
+
+- `pnpm dev` or `wxt` - Start WXT development server for Chrome
+- `pnpm dev:firefox` or `wxt -b firefox` - Start WXT development server for Firefox
+- `pnpm build` or `wxt build` - Build extension for Chrome
+- `pnpm build:firefox` or `wxt build -b firefox` - Build extension for Firefox
+- `pnpm zip` or `wxt zip` - Create distribution zip for Chrome
+- `pnpm zip:firefox` or `wxt zip -b firefox` - Create distribution zip for Firefox
+- `pnpm compile` - Type check without emitting (vue-tsc)
+- `pnpm postinstall` - Prepare WXT (runs after install)
+
+Root-level extension commands:
+
+- `pnpm dev:vela-ext` - Start extension dev server from root
+- `pnpm build:vela-ext` - Build extension from root
+- `pnpm zip:vela-ext` - Create extension zip from root
 
 ### AWS CDK Commands (from packages/cdk/)
 
-- `npm run cdk:synth` - Synthesize CloudFormation template
-- `npm run cdk:deploy` - Deploy infrastructure to AWS
-- `npm run cdk:diff` - Check differences between deployed and local stacks
-- `npm run cdk:destroy` - Destroy deployed infrastructure
+- `pnpm cdk:synth` - Synthesize CloudFormation template
+- `pnpm cdk:deploy` - Deploy infrastructure to AWS
+- `pnpm cdk:diff` - Check differences between deployed and local stacks
+- `pnpm cdk:destroy` - Destroy deployed infrastructure
 
 ## Project Architecture
 
@@ -73,12 +87,21 @@ This is a **Turborepo monorepo** containing:
 - **Build**: esbuild for bundling
 - **Database Client**: AWS SDK for DynamoDB
 - **Testing**: Vitest
-- **Development**: tsx watch for hot reload
+- **Development**: tsx watch for hot reload (port 9005)
+
+#### Vela Extension (Browser Extension)
+
+- **Framework**: WXT (Web Extension Toolkit) with Vue 3
+- **Runtime**: Browser extension (Chrome/Firefox)
+- **Build**: WXT build system
+- **Features**: Context menu for saving Japanese sentences, storage, notifications
+- **Permissions**: contextMenus, storage, notifications, host_permissions for vela.cwchanap.dev
+- **Structure**: background.ts (service worker), content.ts (content script), popup/ (extension popup UI)
 
 #### Infrastructure
 
-- **Database**: Supabase (PostgreSQL with real-time subscriptions)
-- **Authentication**: Supabase Auth with email/password and magic links
+- **Database**: DynamoDB (NoSQL database)
+- **Authentication**: AWS Cognito with email/password
 - **Cloud**: AWS CDK for infrastructure as code
 - **Deployment**: AWS Lambda for serverless functions
 
@@ -88,7 +111,7 @@ This is a **Turborepo monorepo** containing:
 - **Linting**: ESLint with TypeScript and Vue support (flat config)
 - **Formatting**: Prettier
 - **Git Hooks**: Husky with lint-staged
-- **Package Manager**: npm with workspaces
+- **Package Manager**: pnpm with workspaces
 
 ### Core Application Structure (Vela App)
 
@@ -108,13 +131,12 @@ This is a **Turborepo monorepo** containing:
 
 #### Services Layer
 
-- `apps/vela/src/services/supabase.ts` - Supabase client configuration with comprehensive TypeScript types for database schema
 - `apps/vela/src/services/authService.ts` - Authentication business logic and API calls
 - `apps/vela/src/services/gameService.ts` - Game logic for vocabulary and sentence games
 - `apps/vela/src/services/progressService.ts` - Learning progress tracking services
 - `apps/vela/src/services/chatHistoryClient.ts` - Chat history management
 - `apps/vela/src/services/llm/` - LLM provider integrations (Google, OpenRouter)
-- Database schema includes: profiles, vocabulary, user_progress, game_sessions, chat_history, sentences
+- Database schema includes: profiles, vocabulary, game_sessions, chat_history, sentences
 
 #### Configuration
 
@@ -132,15 +154,15 @@ This is a **Turborepo monorepo** containing:
 - Game pages: `/games`, `/games/vocabulary`, `/games/sentence` with interactive learning components
 - Route guards handle authentication state and redirects
 
-### Database Schema (Supabase)
+### Database Schema (DynamoDB)
 
-The application uses a comprehensive database schema for a Japanese learning app:
+The application uses DynamoDB tables for a Japanese learning app:
 
 - **profiles** - User profiles with preferences, level, experience, streak
 - **vocabulary** - Japanese vocabulary with hiragana/katakana/romaji/translations
 - **sentences** - Japanese sentences for anagram games with translations
-- **user_progress** - Individual word mastery tracking with spaced repetition
 - **game_sessions** - Game completion records with scores and experience
+- **daily_progress** - Daily learning progress tracking
 - **chat_history** - AI chat conversation storage
 
 ### Development Patterns
@@ -148,20 +170,20 @@ The application uses a comprehensive database schema for a Japanese learning app
 #### Authentication Flow
 
 1. Auth state managed in Pinia store with reactive session tracking
-2. Supabase handles session persistence and refresh automatically
+2. AWS Cognito handles session persistence and refresh automatically
 3. Router guards check auth requirements using meta properties
 4. User profiles are loaded and synced with auth state changes
 
 #### Environment Configuration
 
-- Development fallbacks to local Supabase instance (127.0.0.1:54321)
+- Development uses local DynamoDB tables
 - Production requires proper environment variables
 - Config validation runs at app startup
 
 #### TypeScript Integration
 
 - Strict TypeScript configuration enabled
-- Comprehensive database types generated from Supabase schema
+- Comprehensive database types for DynamoDB schema
 - Vue SFC type checking enabled via vite-plugin-checker
 
 #### Build Configuration
@@ -182,11 +204,21 @@ The application uses a comprehensive database schema for a Japanese learning app
 - **esbuild**: Fast bundling for AWS Lambda deployment
 - **Development**: tsx watch for hot reload during development
 
-#### Key Files
+#### Key Files & Routes
 
-- `apps/vela-api/src/index.ts` - Main API entry point
+- `apps/vela-api/src/index.ts` - Main API entry point with route mounting
 - `apps/vela-api/src/dev.ts` - Development server setup
+- `apps/vela-api/src/routes/` - API route handlers organized by feature
+  - `llm-chat.ts` - LLM chat endpoints
+  - `chat-history.ts` - Chat history storage
+  - `games.ts` - Game data and questions
+  - `progress.ts` - Learning progress tracking
+  - `profiles.ts` - User profile management
+  - `auth.ts` - Authentication endpoints
+  - `saved-sentences.ts` - Saved Japanese sentences from extension
 - Lambda packaging via esbuild with single bundle output
+- Development mode loads .env files and mocks Lambda environment
+- API routes mounted at `/api/*` prefix
 
 ### AWS CDK Infrastructure
 
@@ -206,48 +238,6 @@ The application uses a comprehensive database schema for a Japanese learning app
 - **Vue Type Checking**: Enabled in development via vite-plugin-checker
 - **Turborepo**: Intelligent build caching and task orchestration
 
-### Game System
-
-#### Implemented Games
-
-1. **Vocabulary Game** (`/games/vocabulary`)
-   - Multiple choice format with 4 options
-   - Fetches random vocabulary from database
-   - Real-time scoring and timer
-   - Components: `VocabularyCard`, `GameTimer`, `ScoreDisplay`
-
-2. **Sentence Anagram Game** (`/games/sentence`)
-   - Drag-and-drop interface using vuedraggable
-   - Scrambled Japanese sentence reconstruction
-   - Component: `SentenceBuilder`
-
-#### Game Components
-
-- `src/components/games/GameTimer.vue` - Timer display
-- `src/components/games/ScoreDisplay.vue` - Score tracking
-- `src/components/games/VocabularyCard.vue` - Multiple choice questions
-- `src/components/games/SentenceBuilder.vue` - Drag-and-drop sentence building
-
-#### Game Service
-
-- `src/services/gameService.ts` - Fetches questions from Supabase
-- Vocabulary questions with multiple choice options
-- Sentence questions with scrambled word arrays
-
-### Japanese Language Utilities
-
-#### Character Detection (`src/utils/japanese.ts`)
-
-- `isHiragana()`, `isKatakana()`, `isKanji()` - Character type detection
-- `analyzeText()` - Text composition analysis
-- `assessDifficulty()` - Automatic difficulty scoring based on character types and length
-
-#### Text Processing
-
-- `hiraganaToRomaji()` - Basic romanization mapping
-- `parseFurigana()` - Furigana segment parsing (simplified implementation)
-- Text analysis for learning progression
-
 ## Monorepo Development Workflow
 
 ### Turborepo Configuration
@@ -259,28 +249,47 @@ The application uses a comprehensive database schema for a Japanese learning app
 
 ### Working with Multiple Packages
 
-1. **Root Level**: Use `npm run <command>` to run tasks across all packages
-2. **Package Specific**: Navigate to specific package directory for targeted commands
+1. **Root Level**: Use `pnpm <script>` to run tasks across all packages
+2. **Package Specific**: Navigate to specific package directory for targeted commands or use `pnpm --filter`
 3. **Dependencies**: Turborepo handles task dependencies (e.g., `build` depends on `^build`)
 
 ### Testing Strategy
 
-- **Vela App**: Playwright for end-to-end testing with multiple test modes
+- **Vela App**: Playwright for end-to-end testing with multiple test modes (headed, UI, debug)
 - **Vela API**: Vitest for unit testing with coverage support
+- **Vela Extension**: Type checking via vue-tsc (no runtime tests currently)
 - **CDK**: No specific tests configured currently
+
+### Test Account Credentials
+
+For testing authenticated features:
+
+- Email: `test@cwchanap.dev`
+- Password: `password123`
 
 ### Environment Variables
 
 Each package handles environment variables differently:
 
-- **Vela App**: Uses Vite's `import.meta.env` with fallbacks for local Supabase
-- **Vela API**: Standard Node.js `process.env`
+- **Vela App**: Uses Vite's `import.meta.env` with AWS Cognito configuration (VITE\_\* prefix)
+- **Vela API**: Standard Node.js `process.env`, loads from `.env` file in development
+  - Development mode checks both `apps/vela-api/.env` and root `.env`
+  - Required: AWS credentials, Cognito config, DynamoDB config, optional LLM API keys
+- **Vela Extension**: Uses WXT's built-in environment handling
 - **CDK**: Uses AWS CDK's built-in environment handling
 
 ### Important Development Notes
 
 - Always run monorepo commands from the root directory when possible
 - Individual package commands should be run from their respective directories
-- Turborepo caches build outputs - use `npm run clean` if you encounter cache issues
+- Turborepo caches build outputs - use `pnpm clean` if you encounter cache issues
 - The lint configuration uses ESLint flat config format (modern ESLint v9+ style)
 - Pre-commit hooks run linting and formatting automatically via Husky
+
+### Development Server Ports
+
+- **Vela App**: Port 9000 (Quasar dev server)
+- **Vela API**: Port 9005 (Hono development server)
+- **Vela Extension**: No dev server port (runs in browser)
+
+Before starting dev servers, check if they're already running to avoid port conflicts.
