@@ -8,8 +8,8 @@ import {
 } from '../services/authService';
 import type { UserPreferences, Profile } from '../types/shared';
 import type { AppSession } from '../services/authService';
-import { queryClient } from '../boot/query';
-import { authKeys } from '../composables/queries/useAuthQueries';
+import { queryClient, QUERY_STALE_TIME } from '../boot/query';
+import { authKeys } from '@vela/common';
 
 export interface User {
   id: string;
@@ -125,11 +125,10 @@ export const useAuthStore = defineStore('auth', () => {
       const queryState = queryClient.getQueryState(queryKey);
 
       // Check if cached data is fresh (not invalidated AND not stale)
-      // staleTime is 5 minutes (from boot/query.ts)
-      const STALE_TIME = 5 * 60 * 1000;
+      // staleTime is 5 minutes (from @vela/query)
       const isInvalidated = queryState?.isInvalidated ?? true;
       const dataAge = queryState?.dataUpdatedAt ? Date.now() - queryState.dataUpdatedAt : Infinity;
-      const isStale = dataAge > STALE_TIME;
+      const isStale = dataAge > QUERY_STALE_TIME;
 
       // Only use cached data if it's fresh (not invalidated AND not stale)
       const isFresh = !isInvalidated && !isStale && queryState?.data;

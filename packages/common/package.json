@@ -1,0 +1,36 @@
+{
+  "name": "@vela/common",
+  "version": "0.0.1",
+  "description": "Shared utilities and configuration for Vela apps",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "clean": "rm -rf dist",
+    "lint": "eslint \"src/**/*.ts\"",
+    "lint:fix": "eslint \"src/**/*.ts\" --fix"
+  },
+  "dependencies": {
+    "@tanstack/vue-query": "^5.90.5",
+    "vue": "^3.5.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.5.9",
+    "typescript": "~5.6.3"
+  },
+  "peerDependencies": {
+    "@tanstack/vue-query": "^5.90.5",
+    "vue": "^3.5.0"
+  }
+}

@@ -6,8 +6,8 @@ import {
   type Achievement,
   type SkillCategory,
 } from '../services/progressService';
-import { queryClient } from '../boot/query';
-import { progressKeys } from '../composables/queries/useProgressQueries';
+import { queryClient, QUERY_STALE_TIME } from '../boot/query';
+import { progressKeys } from '@vela/common';
 import { useAuthStore } from './auth';
 
 export interface UserProgress {
@@ -191,11 +191,10 @@ export const useProgressStore = defineStore('progress', () => {
       const queryState = queryClient.getQueryState(queryKey);
 
       // Check if cached data is fresh (not invalidated AND not stale)
-      // staleTime is 5 minutes (from boot/query.ts)
-      const STALE_TIME = 5 * 60 * 1000;
+      // staleTime is 5 minutes (from @vela/query)
       const isInvalidated = queryState?.isInvalidated ?? true;
       const dataAge = queryState?.dataUpdatedAt ? Date.now() - queryState.dataUpdatedAt : Infinity;
-      const isStale = dataAge > STALE_TIME;
+      const isStale = dataAge > QUERY_STALE_TIME;
 
       // Only use cached data if it's fresh (not invalidated AND not stale)
       const isFresh = !isInvalidated && !isStale && queryState?.data;
