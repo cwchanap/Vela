@@ -29,10 +29,14 @@ function handleLogout() {
 
 <style scoped>
 .loading {
-  padding: 40px;
-  text-align: center;
+  width: 400px;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   font-family:
     -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-  color: #666;
+  color: #a0a0a0;
+  background-color: #1e1e1e;
 }
 </style>

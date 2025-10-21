@@ -142,11 +142,13 @@ async function handleLogin() {
 
 .login-container {
   min-width: 320px;
-  height: 100vh;
+  width: 400px;
+  height: 100%;
   font-family:
     -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
   display: flex;
   flex-direction: column;
+  background-color: var(--bg-primary);
 }
 
 .login-card {

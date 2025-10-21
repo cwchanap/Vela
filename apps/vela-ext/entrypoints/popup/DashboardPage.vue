@@ -4,22 +4,29 @@
       <div class="dashboard-header">
         <div class="header-top">
           <h2>Vela Dictionary</h2>
-          <button
-            @click="toggleTheme"
-            class="theme-toggle"
-            :title="isDarkMode ? 'Switch to Light Mode' : 'Switch to Dark Mode'"
-          >
-            {{ isDarkMode ? '☀️' : '🌙' }}
-          </button>
+          <div class="header-actions">
+            <button
+              @click="toggleTheme"
+              class="icon-button"
+              :title="isDarkMode ? 'Switch to Light Mode' : 'Switch to Dark Mode'"
+            >
+              {{ isDarkMode ? '☀️' : '🌙' }}
+            </button>
+            <button @click="handleLogout" class="icon-button" title="Logout">🚪</button>
+          </div>
         </div>
         <p>Logged in as: {{ userEmail }}</p>
-        <button @click="handleLogout" class="logout-button">Logout</button>
       </div>
 
       <div class="dashboard-content">
         <div class="instructions">
-          <h3>How to save sentences:</h3>
-          <ol>
+          <div class="instructions-header" @click="instructionsExpanded = !instructionsExpanded">
+            <h3>How to save sentences</h3>
+            <button class="collapse-icon" type="button">
+              {{ instructionsExpanded ? '▼' : '▶' }}
+            </button>
+          </div>
+          <ol v-show="instructionsExpanded">
             <li>Select any text on a webpage</li>
             <li>Right-click to open the context menu</li>
             <li>Click "Save to Vela Dictionary"</li>
@@ -38,13 +45,28 @@
             {{ error }}
           </div>
 
+          <button @click="openWebapp" class="view-all-button" v-if="sentences.length > 0">
+            View All in Webapp →
+          </button>
+
           <div v-if="sentences.length === 0 && !loading" class="empty-state">
             No saved sentences yet. Start by selecting text on any webpage!
           </div>
 
           <div v-else class="sentences-list">
-            <div v-for="item in sentences" :key="item.sentence_id" class="sentence-item">
-              <div class="sentence-text">{{ item.sentence }}</div>
+            <div v-for="item in recentSentences" :key="item.sentence_id" class="sentence-item">
+              <div class="sentence-header">
+                <div class="sentence-text">{{ item.sentence }}</div>
+                <a
+                  v-if="item.source_url"
+                  :href="item.source_url"
+                  target="_blank"
+                  class="source-link"
+                  title="Open source"
+                >
+                  🔗
+                </a>
+              </div>
               <div v-if="item.source_url" class="sentence-meta">
                 Source: <a :href="item.source_url" target="_blank">{{ item.source_url }}</a>
               </div>
@@ -60,7 +82,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, watch } from 'vue';
+import { ref, onMounted, watch, computed } from 'vue';
 import { getSavedSentences } from '../utils/api';
 import {
   getValidAccessToken,
@@ -78,6 +100,7 @@ const sentences = ref<any[]>([]);
 const loading = ref(false);
 const error = ref('');
 const isDarkMode = ref(false);
+const instructionsExpanded = ref(false);
 
 onMounted(async () => {
   const email = await getUserEmail();
@@ -151,6 +174,18 @@ function formatDate(timestamp: number): string {
   const date = new Date(timestamp);
   return date.toLocaleDateString() + ' ' + date.toLocaleTimeString();
 }
+
+function openWebapp() {
+  // Use localhost in dev mode, production URL in production
+  const isDev = import.meta.env.MODE === 'development';
+  const baseUrl = isDev ? 'http://localhost:9000' : 'https://vela.cwchanap.dev';
+  browser.tabs.create({ url: `${baseUrl}/saved-sentences` });
+}
+
+// Computed property to show only first 5 sentences
+const recentSentences = computed(() => {
+  return sentences.value.slice(0, 5);
+});
 </script>
 
 <style scoped>
@@ -190,14 +225,14 @@ function formatDate(timestamp: number): string {
 }
 
 .dashboard-container {
-  min-width: 400px;
-  max-height: 600px;
-  height: 100vh;
+  width: 400px;
+  height: 100%;
   font-family:
     -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
   overflow: hidden;
   display: flex;
   flex-direction: column;
+  background-color: var(--bg-primary);
 }
 
 .dashboard-card {
@@ -227,7 +262,12 @@ function formatDate(timestamp: number): string {
   color: var(--text-primary);
 }
 
-.theme-toggle {
+.header-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.icon-button {
   padding: 6px 12px;
   background-color: var(--bg-secondary);
   color: var(--text-primary);
@@ -239,7 +279,7 @@ function formatDate(timestamp: number): string {
   line-height: 1;
 }
 
-.theme-toggle:hover {
+.icon-button:hover {
   background-color: var(--bg-hover);
   border-color: var(--border-hover);
 }
@@ -248,23 +288,6 @@ function formatDate(timestamp: number): string {
   margin: 0 0 12px;
   font-size: 14px;
   color: var(--text-tertiary);
-}
-
-.logout-button {
-  padding: 8px 16px;
-  background-color: var(--bg-primary);
-  color: var(--text-secondary);
-  border: 1px solid var(--border-color);
-  border-radius: 6px;
-  font-size: 14px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: all 0.2s;
-}
-
-.logout-button:hover {
-  background-color: var(--bg-hover);
-  border-color: var(--border-hover);
 }
 
 .dashboard-content {
@@ -277,21 +300,48 @@ function formatDate(timestamp: number): string {
 }
 
 .instructions {
-  padding: 16px;
+  padding: 12px 16px;
   background-color: var(--bg-secondary);
   border-radius: 6px;
   border: 1px solid var(--border-color);
 }
 
+.instructions-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  cursor: pointer;
+  user-select: none;
+}
+
+.instructions-header:hover {
+  opacity: 0.8;
+}
+
 .instructions h3 {
-  margin: 0 0 12px;
+  margin: 0;
   font-size: 16px;
   font-weight: 600;
   color: var(--text-primary);
 }
 
+.collapse-icon {
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  font-size: 14px;
+  cursor: pointer;
+  padding: 0;
+  width: 20px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+}
+
 .instructions ol {
-  margin: 0;
+  margin: 12px 0 0;
   padding-left: 20px;
 }
 
@@ -377,18 +427,39 @@ function formatDate(timestamp: number): string {
   background-color: var(--bg-hover);
 }
 
+.sentence-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
 .sentence-text {
   font-size: 15px;
   font-weight: 500;
   color: var(--text-primary);
-  margin-bottom: 8px;
   line-height: 1.5;
+  flex: 1;
+}
+
+.source-link {
+  font-size: 16px;
+  text-decoration: none;
+  opacity: 0.6;
+  transition: opacity 0.2s;
+  flex-shrink: 0;
+}
+
+.source-link:hover {
+  opacity: 1;
 }
 
 .sentence-meta {
   font-size: 13px;
   color: var(--text-tertiary);
   margin-bottom: 4px;
+  word-break: break-all;
 }
 
 .sentence-meta a {
@@ -405,5 +476,23 @@ function formatDate(timestamp: number): string {
 .sentence-date {
   font-size: 12px;
   color: var(--text-muted);
+}
+
+.view-all-button {
+  width: 100%;
+  padding: 12px;
+  margin-bottom: 12px;
+  background-color: var(--accent-color);
+  color: white;
+  border: none;
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background-color 0.2s;
+}
+
+.view-all-button:hover {
+  background-color: var(--accent-hover);
 }
 </style>

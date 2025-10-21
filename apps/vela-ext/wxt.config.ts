@@ -9,7 +9,10 @@ export default defineConfig({
   manifest: {
     name: 'Vela Japanese Dictionary',
     description: 'Save Japanese sentences to your Vela dictionary',
-    permissions: ['contextMenus', 'storage', 'notifications'],
-    host_permissions: ['https://vela.cwchanap.dev/*'],
+    permissions: ['contextMenus', 'storage', 'notifications', 'tabs'],
+    host_permissions: [
+      'https://vela.cwchanap.dev/*',
+      'http://localhost:9000/*', // Allow localhost in development
+    ],
   },
 });
