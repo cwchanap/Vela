@@ -1,5 +1,9 @@
 import { Hono } from 'hono';
 import { zValidator } from '@hono/zod-validator';
+import {
+  GetUserCommand,
+  CognitoIdentityProviderClient,
+} from '@aws-sdk/client-cognito-identity-provider';
 import type { Env } from '../types';
 import {
   ChatHistoryItemSchema,
@@ -10,15 +14,47 @@ import {
   type ChatThreadSummary,
 } from '../validation';
 import { docClient, TABLE_NAMES } from '../dynamodb';
-import { PutCommand, QueryCommand, ScanCommand } from '@aws-sdk/lib-dynamodb';
+import { PutCommand, QueryCommand, ScanCommand, BatchWriteCommand } from '@aws-sdk/lib-dynamodb';
 
 const chatHistory = new Hono<{ Bindings: Env }>();
+
+const cognitoClient = new CognitoIdentityProviderClient({
+  region: process.env.AWS_REGION || 'us-east-1',
+});
+
+// Helper to validate token and extract user ID from Cognito
+async function getUserIdFromToken(authHeader: string | undefined): Promise<string | null> {
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    return null;
+  }
+
+  try {
+    const accessToken = authHeader.substring(7);
+
+    // Validate token with Cognito to verify signature and prevent forgery
+    const getUserCommand = new GetUserCommand({
+      AccessToken: accessToken,
+    });
+
+    const userResponse = await cognitoClient.send(getUserCommand);
+
+    // IMPORTANT: Return the Cognito sub to match what's stored in chat messages
+    // Messages are saved with UserId = auth.user.id which is the Cognito sub
+    // Note: Username is the login email, but we need the actual sub attribute
+    const userId = userResponse.UserAttributes?.find((attr) => attr.Name === 'sub')?.Value;
+
+    return userId || null;
+  } catch (error) {
+    console.error('Token validation error:', error);
+    return null;
+  }
+}
 
 // Custom CORS handler
 chatHistory.use('*', async (c, next) => {
   c.header('Access-Control-Allow-Origin', '*');
-  c.header('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
-  c.header('Access-Control-Allow-Headers', 'content-type');
+  c.header('Access-Control-Allow-Methods', 'GET,POST,DELETE,OPTIONS');
+  c.header('Access-Control-Allow-Headers', 'content-type,authorization');
 
   if (c.req.method === 'OPTIONS') {
     return c.text('', 200);
@@ -161,6 +197,86 @@ async function dynamodb_getMessages(env: Env, thread_id: string): Promise<ChatHi
   }
 }
 
+async function dynamodb_deleteThread(env: Env, thread_id: string): Promise<void> {
+  try {
+    const allMessages: any[] = [];
+    let lastEvaluatedKey: Record<string, any> | undefined;
+
+    // Paginate through all scan results to get ALL messages in the thread
+    do {
+      const scanCommand: ScanCommand = new ScanCommand({
+        TableName: TABLE_NAMES.CHAT_HISTORY,
+        FilterExpression: 'ThreadId = :threadId',
+        ExpressionAttributeValues: {
+          ':threadId': thread_id,
+        },
+        ExclusiveStartKey: lastEvaluatedKey,
+      });
+
+      const response = await docClient.send(scanCommand);
+      const messages = response.Items || [];
+      allMessages.push(...messages);
+      lastEvaluatedKey = response.LastEvaluatedKey;
+    } while (lastEvaluatedKey);
+
+    if (allMessages.length === 0) {
+      return; // Nothing to delete
+    }
+
+    // DynamoDB BatchWrite can handle up to 25 items at a time
+    const batchSize = 25;
+    for (let i = 0; i < allMessages.length; i += batchSize) {
+      const batch = allMessages.slice(i, i + batchSize);
+      let deleteRequests = batch.map((msg) => ({
+        DeleteRequest: {
+          Key: {
+            ThreadId: msg.ThreadId,
+            Timestamp: msg.Timestamp,
+          },
+        },
+      }));
+
+      // Retry unprocessed items until all are deleted (with max retries to prevent infinite loops)
+      let retries = 0;
+      const maxRetries = 5;
+
+      while (deleteRequests.length > 0 && retries < maxRetries) {
+        const batchCommand = new BatchWriteCommand({
+          RequestItems: {
+            [TABLE_NAMES.CHAT_HISTORY]: deleteRequests,
+          },
+        });
+
+        const response = await docClient.send(batchCommand);
+
+        // Check for unprocessed items and retry them
+        const unprocessedItems = response.UnprocessedItems?.[TABLE_NAMES.CHAT_HISTORY];
+        if (unprocessedItems && unprocessedItems.length > 0) {
+          deleteRequests = unprocessedItems as any; // DynamoDB SDK returns the same format we need
+          retries++;
+          // Exponential backoff: wait before retrying
+          await new Promise((resolve) => setTimeout(resolve, Math.pow(2, retries) * 100));
+        } else {
+          // All items processed successfully
+          break;
+        }
+      }
+
+      // If we exhausted retries and still have unprocessed items, throw an error
+      if (deleteRequests.length > 0 && retries >= maxRetries) {
+        throw new Error(
+          `Failed to delete all messages after ${maxRetries} retries. ${deleteRequests.length} items remain unprocessed.`,
+        );
+      }
+    }
+  } catch (error) {
+    console.error('DynamoDB delete thread error:', error);
+    throw new Error(
+      `Failed to delete thread: ${error instanceof Error ? error.message : 'Unknown error'}`,
+    );
+  }
+}
+
 /* ============
  * Routes
  * ============ */
@@ -202,6 +318,44 @@ chatHistory.get('/messages', async (c) => {
     return c.json({ items });
   } catch (e) {
     console.error('chat-history messages error', e);
+    const msg = e instanceof Error ? e.message : 'Unknown error';
+    return c.json({ error: msg }, 500);
+  }
+});
+
+chatHistory.delete('/thread', async (c) => {
+  try {
+    // SECURITY: Authenticate the user
+    const userId = await getUserIdFromToken(c.req.header('Authorization'));
+    if (!userId) {
+      return c.json({ error: 'Unauthorized' }, 401);
+    }
+
+    const { thread_id } = c.req.query();
+    if (!thread_id) {
+      return c.json({ error: 'thread_id is required' }, 400);
+    }
+
+    // SECURITY: Verify the user owns this thread before deleting
+    // Get at least one message from the thread to check ownership
+    const messages = await dynamodb_getMessages(c.env, thread_id);
+
+    if (messages.length === 0) {
+      // Thread doesn't exist or is already empty
+      return c.json({ ok: true });
+    }
+
+    // Check if the first message belongs to the authenticated user
+    const threadOwner = messages[0].UserId;
+    if (threadOwner !== userId) {
+      return c.json({ error: 'Forbidden: You do not own this thread' }, 403);
+    }
+
+    // User owns the thread, proceed with deletion
+    await dynamodb_deleteThread(c.env, thread_id);
+    return c.json({ ok: true });
+  } catch (e) {
+    console.error('chat-history delete thread error', e);
     const msg = e instanceof Error ? e.message : 'Unknown error';
     return c.json({ error: msg }, 500);
   }

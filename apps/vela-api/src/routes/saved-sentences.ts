@@ -1,4 +1,4 @@
-import { Hono, Context } from 'hono';
+import { Hono } from 'hono';
 import {
   GetUserCommand,
   CognitoIdentityProviderClient,
@@ -6,11 +6,7 @@ import {
 import { savedSentences } from '../dynamodb';
 import type { Env } from '../types';
 
-type Variables = {
-  userId: string;
-};
-
-const app = new Hono<{ Bindings: Env; Variables: Variables }>();
+const app = new Hono<{ Bindings: Env }>();
 
 const cognitoClient = new CognitoIdentityProviderClient({
   region: process.env.AWS_REGION || 'us-east-1',
@@ -27,52 +23,43 @@ app.use('*', async (c, next) => {
   await next();
 });
 
-// Middleware to verify authentication and extract user ID
-async function authMiddleware(
-  c: Context<{ Bindings: Env; Variables: Variables }>,
-  next: () => Promise<void>,
-) {
+// Helper to validate token and extract user ID from Cognito
+async function getUserIdFromToken(authHeader: string | undefined): Promise<string | null> {
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    return null;
+  }
+
   try {
-    const authHeader = c.req.header('Authorization');
-
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      return c.json({ error: 'Unauthorized: No access token provided' }, 401);
-    }
-
     const accessToken = authHeader.substring(7);
 
+    // IMPORTANT: Validate token with Cognito to verify signature and prevent forgery
     const getUserCommand = new GetUserCommand({
       AccessToken: accessToken,
     });
 
     const userResponse = await cognitoClient.send(getUserCommand);
+
+    // IMPORTANT: Return email to match existing saved_sentences table data
+    // The saved_sentences table was created with email as the user_id partition key
+    // (unlike chat_history which uses Cognito sub)
     const email = userResponse.UserAttributes?.find((attr) => attr.Name === 'email')?.Value;
 
-    if (!email) {
-      return c.json({ error: 'Unauthorized: User email not found' }, 401);
-    }
-
-    // Store user ID in context for use in routes
-    c.set('userId', email);
-    await next();
-  } catch (error: any) {
-    console.error('Auth middleware error:', error);
-
-    if (error.name === 'NotAuthorizedException' || error.name === 'InvalidParameterException') {
-      return c.json({ error: 'Unauthorized: Invalid or expired token' }, 401);
-    }
-
-    return c.json({ error: 'Authentication failed' }, 500);
+    return email || null;
+  } catch (error) {
+    console.error('Token validation error:', error);
+    return null;
   }
 }
-
-// Apply auth middleware to all routes
-app.use('*', authMiddleware);
 
 // Save a sentence
 app.post('/', async (c) => {
   try {
-    const userId = c.get('userId');
+    const userId = await getUserIdFromToken(c.req.header('Authorization'));
+
+    if (!userId) {
+      return c.json({ error: 'Unauthorized' }, 401);
+    }
+
     const body = await c.req.json();
     const { sentence, sourceUrl, context } = body;
 
@@ -95,7 +82,12 @@ app.post('/', async (c) => {
 // Get user's saved sentences
 app.get('/', async (c) => {
   try {
-    const userId = c.get('userId');
+    const userId = await getUserIdFromToken(c.req.header('Authorization'));
+
+    if (!userId) {
+      return c.json({ error: 'Unauthorized' }, 401);
+    }
+
     const limit = parseInt(c.req.query('limit') || '50', 10);
 
     const sentences = await savedSentences.getByUser(userId, limit);
@@ -113,7 +105,12 @@ app.get('/', async (c) => {
 // Delete a saved sentence
 app.delete('/:sentenceId', async (c) => {
   try {
-    const userId = c.get('userId');
+    const userId = await getUserIdFromToken(c.req.header('Authorization'));
+
+    if (!userId) {
+      return c.json({ error: 'Unauthorized' }, 401);
+    }
+
     const sentenceId = c.req.param('sentenceId');
 
     if (!sentenceId) {

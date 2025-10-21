@@ -54,6 +54,34 @@ Get all chat threads for a user.
 
 Get all messages in a specific thread.
 
+**DELETE /api/chat-history/thread?thread_id=THREAD_ID**
+
+**Requires Authentication**: Delete a chat thread and all its messages. The API validates that the authenticated user owns the thread before deletion. Requires a valid Cognito access token in the `Authorization: Bearer <token>` header.
+
+### Saved Sentences API
+
+**Requires Authentication**: All endpoints require a valid Cognito access token in the `Authorization: Bearer <token>` header. The API validates tokens with AWS Cognito to verify authenticity and prevent forgery.
+
+**GET /api/saved-sentences?limit=50**
+
+Get saved sentences for the authenticated user.
+
+**POST /api/saved-sentences**
+
+Save a new sentence.
+
+```json
+{
+  "sentence": "これは例文です",
+  "sourceUrl": "https://example.com",
+  "context": "Example context"
+}
+```
+
+**DELETE /api/saved-sentences/:sentenceId**
+
+Delete a saved sentence.
+
 ## Environment Variables
 
 The following environment variables are required:
@@ -64,10 +92,18 @@ The following environment variables are required:
 - `OPENROUTER_API_KEY`: OpenRouter API key
 - `APP_NAME`: Application name for OpenRouter headers
 
-### Chat History (DynamoDB)
+### AWS Configuration
 
-- `AWS_ACCESS_KEY_ID`: AWS access key
-- `AWS_SECRET_ACCESS_KEY`: AWS secret key
+**Required for Cognito token validation and DynamoDB access:**
+
+- `AWS_ACCESS_KEY_ID`: AWS access key (required)
+- `AWS_SECRET_ACCESS_KEY`: AWS secret key (required)
+- `AWS_REGION`: AWS region (default: us-east-1)
+
+**Security Note**: The Saved Sentences API uses `GetUserCommand` from AWS Cognito to validate access tokens and verify their signatures. This prevents token forgery and ensures only authenticated users can access their data.
+
+### DynamoDB Configuration
+
 - `DDB_ENDPOINT`: DynamoDB endpoint (default: https://dynamodb.us-east-1.amazonaws.com)
 - `DDB_REGION`: AWS region (default: us-east-1)
 - `DDB_TABLE`: DynamoDB table name (default: vela)

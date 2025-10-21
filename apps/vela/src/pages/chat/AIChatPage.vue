@@ -1,5 +1,5 @@
 <template>
-  <q-page class="column q-pa-md" data-testid="ai-chat-page">
+  <q-page class="column q-pa-md" style="min-height: calc(100vh - 50px)" data-testid="ai-chat-page">
     <div class="row items-center q-mb-md">
       <div class="text-h5">AI Chat</div>
       <q-space />
@@ -23,8 +23,8 @@
     </div>
 
     <div
-      class="col column bg-grey-2 q-pa-md rounded-borders"
-      style="min-height: 300px; max-height: 60vh; overflow: auto"
+      class="col column q-pa-md rounded-borders chat-container"
+      style="min-height: 300px; overflow-y: auto; flex: 1"
       ref="messagesEl"
     >
       <template v-if="chat.messages.length === 0">
@@ -37,10 +37,11 @@
           v-for="m in chat.messages"
           :key="m.id"
           :sent="m.type === 'user'"
-          :bg-color="m.type === 'user' ? 'primary' : 'grey-3'"
-          :text-color="m.type === 'user' ? 'white' : 'dark'"
+          :bg-color="m.type === 'user' ? 'primary' : 'secondary'"
+          :text-color="'white'"
           :name="m.type === 'user' ? 'You' : 'AI'"
           :stamp="formatTime(m.timestamp)"
+          :class="m.type === 'ai' ? 'ai-message' : 'user-message'"
         >
           <div class="message-content" v-text="m.content" />
         </q-chat-message>
@@ -52,39 +53,28 @@
       </div>
     </div>
 
-    <div class="row items-center q-gutter-sm q-mt-md">
-      <q-input
-        class="col"
-        outlined
-        dense
-        v-model="input"
-        :disable="chat.isLoading"
-        placeholder="Type your message..."
-        data-testid="llm-chat-input"
-        @keyup.enter="onSend"
-      >
-        <template #append>
-          <q-btn
-            color="primary"
-            :loading="chat.isLoading"
-            round
-            dense
-            icon="send"
-            @click="onSend"
-            data-testid="llm-chat-send"
-          />
-        </template>
-      </q-input>
-      <q-btn
-        flat
-        dense
-        icon="clear_all"
-        label="Clear"
-        @click="onClear"
-        :disable="chat.isLoading"
-        data-testid="llm-chat-clear"
-      />
-    </div>
+    <q-input
+      outlined
+      dense
+      v-model="input"
+      :disable="chat.isLoading"
+      placeholder="Type your message..."
+      data-testid="llm-chat-input"
+      @keyup.enter="onSend"
+      class="q-mt-md"
+    >
+      <template #append>
+        <q-btn
+          color="primary"
+          :loading="chat.isLoading"
+          round
+          dense
+          icon="send"
+          @click="onSend"
+          data-testid="llm-chat-send"
+        />
+      </template>
+    </q-input>
 
     <!-- History Dialog -->
     <q-dialog v-model="showHistory">
@@ -121,7 +111,17 @@
                 </q-item-label>
               </q-item-section>
               <q-item-section side>
-                <q-icon name="chevron_right" />
+                <q-btn
+                  flat
+                  dense
+                  round
+                  icon="delete"
+                  color="negative"
+                  @click.stop="confirmDelete(t)"
+                  data-testid="llm-chat-delete-thread"
+                >
+                  <q-tooltip>Delete conversation</q-tooltip>
+                </q-btn>
               </q-item-section>
             </q-item>
           </q-list>
@@ -131,6 +131,37 @@
 
         <q-card-actions align="right">
           <q-btn flat label="Close" v-close-popup />
+        </q-card-actions>
+      </q-card>
+    </q-dialog>
+
+    <!-- Delete Confirmation Dialog -->
+    <q-dialog v-model="showDeleteConfirm">
+      <q-card style="min-width: 350px">
+        <q-card-section>
+          <div class="text-h6">Delete Conversation?</div>
+        </q-card-section>
+
+        <q-card-section>
+          <div class="text-body2">
+            Are you sure you want to delete this conversation?
+            <div class="q-mt-sm text-caption text-grey-7">"{{ threadToDelete?.title }}"</div>
+            <div class="q-mt-sm text-negative text-weight-medium">
+              This action cannot be undone.
+            </div>
+          </div>
+        </q-card-section>
+
+        <q-card-actions align="right">
+          <q-btn flat label="Cancel" v-close-popup :disable="isDeleting" />
+          <q-btn
+            flat
+            label="Delete"
+            color="negative"
+            @click="deleteThread"
+            :loading="isDeleting"
+            data-testid="llm-chat-confirm-delete"
+          />
         </q-card-actions>
       </q-card>
     </q-dialog>
@@ -144,6 +175,7 @@ import { storeToRefs } from 'pinia';
 import { useChatStore } from '../../stores/chat';
 import { useLLMSettingsStore } from '../../stores/llmSettings';
 import { useAuthStore } from '../../stores/auth';
+import { fetchAuthSession } from 'aws-amplify/auth';
 // Chat history types for API calls
 interface ChatHistoryItemDTO {
   ThreadId: string;
@@ -178,6 +210,11 @@ const messagesEl = ref<HTMLElement | null>(null);
 const showHistory = ref(false);
 const threadsLoading = ref(false);
 const threads = ref<ChatThreadSummaryDTO[]>([]);
+
+// Delete confirmation dialog state
+const showDeleteConfirm = ref(false);
+const threadToDelete = ref<ChatThreadSummaryDTO | null>(null);
+const isDeleting = ref(false);
 
 const formatTime = (d: Date) =>
   new Date(d).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
@@ -349,10 +386,6 @@ const onSend = async () => {
   }
 };
 
-const onClear = () => {
-  chat.clearMessages();
-};
-
 const onNewChat = () => {
   chat.startNewChat();
   // Add a fresh greeting for the new chat
@@ -361,6 +394,62 @@ const onNewChat = () => {
     content: GREETING_MESSAGE,
   });
   void scrollToBottom();
+};
+
+const confirmDelete = (t: ChatThreadSummaryDTO) => {
+  threadToDelete.value = t;
+  showDeleteConfirm.value = true;
+};
+
+const deleteThread = async () => {
+  if (!threadToDelete.value) return;
+
+  isDeleting.value = true;
+  try {
+    // Get auth token for authorization
+    const session = await fetchAuthSession();
+    const accessToken = session.tokens?.accessToken?.toString();
+
+    if (!accessToken) {
+      throw new Error('Not authenticated');
+    }
+
+    const response = await fetch(
+      `/api/chat-history/thread?thread_id=${encodeURIComponent(threadToDelete.value.ThreadId)}`,
+      {
+        method: 'DELETE',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+        },
+      },
+    );
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({ error: 'Failed to delete thread' }));
+      throw new Error(errorData.error || 'Failed to delete thread');
+    }
+
+    // Remove from local list
+    threads.value = threads.value.filter((t) => t.ThreadId !== threadToDelete.value!.ThreadId);
+
+    // If the deleted thread is the current chat, start a new chat
+    if (chat.chatId === threadToDelete.value.ThreadId) {
+      chat.startNewChat();
+      chat.addMessage({
+        type: 'ai',
+        content: GREETING_MESSAGE,
+      });
+    }
+
+    $q.notify({ type: 'positive', message: 'Conversation deleted successfully' });
+    showDeleteConfirm.value = false;
+    threadToDelete.value = null;
+  } catch (e) {
+    console.error(e);
+    $q.notify({ type: 'negative', message: 'Failed to delete conversation' });
+  } finally {
+    isDeleting.value = false;
+  }
 };
 
 onMounted(() => {
@@ -376,11 +465,53 @@ onMounted(() => {
 });
 </script>
 
-<style scoped>
+<style scoped lang="scss">
 .rounded-borders {
   border-radius: 8px;
 }
+
+.chat-container {
+  background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+  box-shadow: inset 0 2px 8px rgba(0, 0, 0, 0.06);
+}
+
+// Dark mode chat container
+body.body--dark .chat-container {
+  background: linear-gradient(135deg, #1e1e1e 0%, #2d2d2d 100%);
+  box-shadow: inset 0 2px 8px rgba(0, 0, 0, 0.3);
+}
+
 .message-content {
   white-space: pre-wrap;
+}
+
+// AI message with gradient background
+:deep(.ai-message .q-message-text) {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%) !important;
+  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
+}
+
+// User message with solid primary color
+:deep(.user-message .q-message-text) {
+  background: #1976d2 !important;
+  box-shadow: 0 4px 12px rgba(25, 118, 210, 0.3);
+}
+
+// Enhance message bubble appearance
+:deep(.q-message-text) {
+  border-radius: 12px !important;
+  padding: 12px 16px !important;
+}
+
+// Message name styling
+:deep(.q-message-name) {
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+
+// Timestamp styling
+:deep(.q-message-stamp) {
+  font-size: 11px;
+  opacity: 0.7;
 }
 </style>

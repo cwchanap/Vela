@@ -98,6 +98,7 @@
             v-ripple
             clickable
             :to="link.path"
+            exact
           >
             <q-item-section avatar>
               <q-icon :name="link.icon" />
