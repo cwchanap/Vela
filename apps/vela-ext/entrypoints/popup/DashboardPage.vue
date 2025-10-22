@@ -21,7 +21,7 @@
       <div class="dashboard-content">
         <div class="instructions">
           <div class="instructions-header" @click="instructionsExpanded = !instructionsExpanded">
-            <h3>How to save sentences</h3>
+            <h3>How to save entries</h3>
             <button class="collapse-icon" type="button">
               {{ instructionsExpanded ? '▼' : '▶' }}
             </button>
@@ -29,14 +29,14 @@
           <ol v-show="instructionsExpanded">
             <li>Select any text on a webpage</li>
             <li>Right-click to open the context menu</li>
-            <li>Click "Save to Vela Dictionary"</li>
+            <li>Click "Save to My Dictionaries"</li>
           </ol>
         </div>
 
-        <div class="saved-sentences">
+        <div class="my-dictionaries">
           <div class="section-header">
-            <h3>Your Saved Sentences</h3>
-            <button @click="loadSentences" :disabled="loading" class="refresh-button">
+            <h3>Your Dictionary Entries</h3>
+            <button @click="loadEntries" :disabled="loading" class="refresh-button">
               {{ loading ? 'Loading...' : 'Refresh' }}
             </button>
           </div>
@@ -45,18 +45,18 @@
             {{ error }}
           </div>
 
-          <button @click="openWebapp" class="view-all-button" v-if="sentences.length > 0">
-            View All in Webapp →
+          <button @click="openWebapp" class="view-all-button" v-if="entries.length > 0">
+            Open in Web App →
           </button>
 
-          <div v-if="sentences.length === 0 && !loading" class="empty-state">
-            No saved sentences yet. Start by selecting text on any webpage!
+          <div v-if="entries.length === 0 && !loading" class="empty-state">
+            No dictionary entries yet. Start by selecting text on any webpage!
           </div>
 
-          <div v-else class="sentences-list">
-            <div v-for="item in recentSentences" :key="item.sentence_id" class="sentence-item">
-              <div class="sentence-header">
-                <div class="sentence-text">{{ item.sentence }}</div>
+          <div v-else class="entries-list">
+            <div v-for="item in recentEntries" :key="item.sentence_id" class="entry-item">
+              <div class="entry-header">
+                <div class="entry-text">{{ item.sentence }}</div>
                 <a
                   v-if="item.source_url"
                   :href="item.source_url"
@@ -67,10 +67,10 @@
                   🔗
                 </a>
               </div>
-              <div v-if="item.source_url" class="sentence-meta">
+              <div v-if="item.source_url" class="entry-meta">
                 Source: <a :href="item.source_url" target="_blank">{{ item.source_url }}</a>
               </div>
-              <div class="sentence-date">
+              <div class="entry-date">
                 {{ formatDate(item.created_at) }}
               </div>
             </div>
@@ -83,7 +83,7 @@
 
 <script setup lang="ts">
 import { ref, onMounted, watch, computed } from 'vue';
-import { getSavedSentences } from '../utils/api';
+import { getMyDictionaries } from '../utils/api';
 import {
   getValidAccessToken,
   refreshAccessToken,
@@ -96,7 +96,7 @@ const emit = defineEmits<{
 }>();
 
 const userEmail = ref('');
-const sentences = ref<any[]>([]);
+const entries = ref<any[]>([]);
 const loading = ref(false);
 const error = ref('');
 const isDarkMode = ref(false);
@@ -112,7 +112,7 @@ onMounted(async () => {
   const savedTheme = await browser.storage.local.get('theme_preference');
   isDarkMode.value = savedTheme.theme_preference === 'dark';
 
-  await loadSentences();
+  await loadEntries();
 });
 
 // Watch for theme changes and persist to storage
@@ -120,7 +120,7 @@ watch(isDarkMode, async (newValue) => {
   await browser.storage.local.set({ theme_preference: newValue ? 'dark' : 'light' });
 });
 
-async function loadSentences() {
+async function loadEntries() {
   loading.value = true;
   error.value = '';
 
@@ -128,8 +128,8 @@ async function loadSentences() {
     let accessToken = await getValidAccessToken();
 
     try {
-      const data = await getSavedSentences(accessToken);
-      sentences.value = data;
+      const data = await getMyDictionaries(accessToken);
+      entries.value = data;
     } catch (apiError: any) {
       // If unauthorized, try to refresh token and retry once
       if (
@@ -138,8 +138,8 @@ async function loadSentences() {
       ) {
         try {
           accessToken = await refreshAccessToken();
-          const data = await getSavedSentences(accessToken);
-          sentences.value = data;
+          const data = await getMyDictionaries(accessToken);
+          entries.value = data;
         } catch (refreshError) {
           throw refreshError; // Let outer catch handle it
         }
@@ -148,7 +148,7 @@ async function loadSentences() {
       }
     }
   } catch (err) {
-    error.value = err instanceof Error ? err.message : 'Failed to load sentences';
+    error.value = err instanceof Error ? err.message : 'Failed to load dictionary entries';
 
     // If session expired, log out the user
     if (err instanceof Error && err.message.includes('Session expired')) {
@@ -179,12 +179,12 @@ function openWebapp() {
   // Use localhost in dev mode, production URL in production
   const isDev = import.meta.env.MODE === 'development';
   const baseUrl = isDev ? 'http://localhost:9000' : 'https://vela.cwchanap.dev';
-  browser.tabs.create({ url: `${baseUrl}/saved-sentences` });
+  browser.tabs.create({ url: `${baseUrl}/my-dictionaries` });
 }
 
-// Computed property to show only first 5 sentences
-const recentSentences = computed(() => {
-  return sentences.value.slice(0, 5);
+// Computed property to show only first 5 entries
+const recentEntries = computed(() => {
+  return entries.value.slice(0, 5);
 });
 </script>
 
@@ -351,7 +351,7 @@ const recentSentences = computed(() => {
   color: var(--text-secondary);
 }
 
-.saved-sentences {
+.my-dictionaries {
   display: flex;
   flex-direction: column;
   gap: 12px;
@@ -408,26 +408,28 @@ const recentSentences = computed(() => {
   font-size: 14px;
 }
 
-.sentences-list {
+.entries-list {
   display: flex;
   flex-direction: column;
   gap: 12px;
 }
 
-.sentence-item {
-  padding: 14px;
-  background-color: var(--bg-secondary);
+.entry-item {
+  padding: 12px;
   border: 1px solid var(--border-color);
-  border-radius: 6px;
-  transition: all 0.2s;
+  border-radius: 8px;
+  background: var(--bg-secondary);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
 
-.sentence-item:hover {
+.entry-item:hover {
   border-color: var(--accent-color);
   background-color: var(--bg-hover);
 }
 
-.sentence-header {
+.entry-header {
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
@@ -435,11 +437,11 @@ const recentSentences = computed(() => {
   margin-bottom: 8px;
 }
 
-.sentence-text {
-  font-size: 15px;
-  font-weight: 500;
-  color: var(--text-primary);
+.entry-text {
+  font-size: 14px;
   line-height: 1.5;
+  color: var(--text-primary);
+  word-break: break-word;
   flex: 1;
 }
 
@@ -455,27 +457,26 @@ const recentSentences = computed(() => {
   opacity: 1;
 }
 
-.sentence-meta {
-  font-size: 13px;
-  color: var(--text-tertiary);
-  margin-bottom: 4px;
+.entry-meta {
+  font-size: 12px;
+  color: var(--text-secondary);
   word-break: break-all;
 }
 
-.sentence-meta a {
+.entry-meta a {
   color: var(--accent-color);
   text-decoration: none;
   transition: opacity 0.2s;
 }
 
-.sentence-meta a:hover {
+.entry-meta a:hover {
   opacity: 0.8;
   text-decoration: underline;
 }
 
-.sentence-date {
+.entry-date {
   font-size: 12px;
-  color: var(--text-muted);
+  color: var(--text-secondary);
 }
 
 .view-all-button {

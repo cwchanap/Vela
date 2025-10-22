@@ -7,7 +7,7 @@ export interface AuthTokens {
   idToken: string;
 }
 
-export interface SaveSentenceParams {
+export interface SaveDictionaryEntryParams {
   sentence: string;
   sourceUrl?: string;
   context?: string;
@@ -71,9 +71,12 @@ export async function refreshToken(refreshToken: string): Promise<AuthTokens> {
   return data.tokens;
 }
 
-// Saved Sentences API
-export async function saveSentence(accessToken: string, params: SaveSentenceParams): Promise<void> {
-  const response = await fetch(`${API_BASE_URL}/saved-sentences`, {
+// My Dictionaries API
+export async function saveDictionaryEntry(
+  accessToken: string,
+  params: SaveDictionaryEntryParams,
+): Promise<void> {
+  const response = await fetch(`${API_BASE_URL}/my-dictionaries`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -84,12 +87,12 @@ export async function saveSentence(accessToken: string, params: SaveSentencePara
 
   if (!response.ok) {
     const error = await response.json();
-    throw new Error(error.error || 'Failed to save sentence');
+    throw new Error(error.error || 'Failed to save dictionary entry');
   }
 }
 
-export async function getSavedSentences(accessToken: string, limit = 50) {
-  const response = await fetch(`${API_BASE_URL}/saved-sentences?limit=${limit}`, {
+export async function getMyDictionaries(accessToken: string, limit = 50) {
+  const response = await fetch(`${API_BASE_URL}/my-dictionaries?limit=${limit}`, {
     method: 'GET',
     headers: {
       Authorization: `Bearer ${accessToken}`,
@@ -98,7 +101,7 @@ export async function getSavedSentences(accessToken: string, limit = 50) {
 
   if (!response.ok) {
     const error = await response.json();
-    throw new Error(error.error || 'Failed to fetch saved sentences');
+    throw new Error(error.error || 'Failed to fetch dictionary entries');
   }
 
   const data = await response.json();

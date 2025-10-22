@@ -2,4 +2,4 @@
 export * from './useAuthQueries';
 export * from './useGameQueries';
 export * from './useProgressQueries';
-export * from './useSavedSentencesQueries';
+export * from './useMyDictionariesQueries';

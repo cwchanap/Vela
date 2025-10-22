@@ -60,7 +60,7 @@ export default defineBackground(() => {
   browser.runtime.onInstalled.addListener(() => {
     browser.contextMenus.create({
       id: 'save-to-vela',
-      title: 'Save to Vela Dictionary',
+      title: 'Save to My Dictionaries',
       contexts: ['selection'],
     });
     console.log('Context menu created');
@@ -79,8 +79,8 @@ export default defineBackground(() => {
       try {
         let accessToken = await getAccessToken();
 
-        // Try to save the sentence
-        let response = await fetch(`${API_BASE_URL}/saved-sentences`, {
+        // Try to save the dictionary entry
+        let response = await fetch(`${API_BASE_URL}/my-dictionaries`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -99,7 +99,7 @@ export default defineBackground(() => {
             accessToken = await refreshAccessToken();
 
             // Retry the request with new token
-            response = await fetch(`${API_BASE_URL}/saved-sentences`, {
+            response = await fetch(`${API_BASE_URL}/my-dictionaries`, {
               method: 'POST',
               headers: {
                 'Content-Type': 'application/json',
@@ -118,14 +118,14 @@ export default defineBackground(() => {
 
         if (!response.ok) {
           const error = await response.json();
-          throw new Error(error.error || 'Failed to save sentence');
+          throw new Error(error.error || 'Failed to save dictionary entry');
         }
 
         // Show success notification
         browser.notifications.create({
           type: 'basic',
           iconUrl: browser.runtime.getURL('/icon/128.png'),
-          title: 'Vela - Sentence Saved',
+          title: 'Vela - Entry Saved',
           message: `Saved: ${selectedText.substring(0, 50)}${selectedText.length > 50 ? '...' : ''}`,
         });
       } catch (error) {
@@ -136,7 +136,7 @@ export default defineBackground(() => {
           type: 'basic',
           iconUrl: browser.runtime.getURL('/icon/128.png'),
           title: 'Vela - Error',
-          message: error instanceof Error ? error.message : 'Failed to save sentence',
+          message: error instanceof Error ? error.message : 'Failed to save dictionary entry',
         });
       }
     }

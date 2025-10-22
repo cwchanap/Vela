@@ -2,8 +2,10 @@
   <q-page class="q-pa-md">
     <div class="row q-mb-md">
       <div class="col">
-        <h4 class="q-my-none">Saved Sentences</h4>
-        <p class="text-grey-7">Sentences saved from the browser extension</p>
+        <h4 class="q-my-none">My Dictionaries</h4>
+        <p class="text-grey-7">
+          Manage sentences saved to your dictionaries from the browser extension
+        </p>
       </div>
       <div class="col-auto">
         <q-btn
@@ -11,15 +13,15 @@
           icon="refresh"
           label="Refresh"
           :loading="loading"
-          @click="loadSentences"
+          @click="loadEntries"
         />
       </div>
     </div>
 
     <!-- Loading State -->
-    <div v-if="loading && sentences.length === 0" class="text-center q-pa-xl">
+    <div v-if="loading && entries.length === 0" class="text-center q-pa-xl">
       <q-spinner color="primary" size="3em" />
-      <p class="text-grey-7 q-mt-md">Loading saved sentences...</p>
+      <p class="text-grey-7 q-mt-md">Loading dictionary entries...</p>
     </div>
 
     <!-- Error State -->
@@ -29,16 +31,16 @@
       </template>
       {{ error }}
       <template #action>
-        <q-btn flat color="white" label="Retry" @click="loadSentences" />
+        <q-btn flat color="white" label="Retry" @click="loadEntries" />
       </template>
     </q-banner>
 
     <!-- Empty State -->
-    <q-card v-else-if="sentences.length === 0" flat bordered class="q-pa-xl text-center">
+    <q-card v-else-if="entries.length === 0" flat bordered class="q-pa-xl text-center">
       <q-icon name="chat_bubble_outline" size="4em" color="grey-5" />
-      <h6 class="q-mt-md q-mb-sm">No Saved Sentences Yet</h6>
+      <h6 class="q-mt-md q-mb-sm">No Dictionary Entries Yet</h6>
       <p class="text-grey-7 q-mb-md">
-        Install the Vela browser extension to save sentences from any webpage.
+        Install the Vela browser extension to save entries from any webpage.
       </p>
       <q-btn
         color="primary"
@@ -50,25 +52,25 @@
       />
     </q-card>
 
-    <!-- Sentences List -->
-    <div v-else class="sentences-grid">
-      <q-card v-for="item in sentences" :key="item.sentence_id" flat bordered class="sentence-card">
+    <!-- Entries List -->
+    <div v-else class="entries-grid">
+      <q-card v-for="item in entries" :key="item.sentence_id" flat bordered class="entry-card">
         <q-card-section>
-          <div class="sentence-text">{{ item.sentence }}</div>
+          <div class="entry-text">{{ item.sentence }}</div>
 
-          <div v-if="item.context" class="sentence-meta q-mt-sm">
+          <div v-if="item.context" class="entry-meta q-mt-sm">
             <q-icon name="description" size="xs" class="q-mr-xs" />
             <span class="text-grey-7">{{ item.context }}</span>
           </div>
 
-          <div v-if="item.source_url" class="sentence-meta q-mt-xs">
+          <div v-if="item.source_url" class="entry-meta q-mt-xs">
             <q-icon name="link" size="xs" class="q-mr-xs" />
             <a :href="item.source_url" target="_blank" class="text-primary">
               {{ formatUrl(item.source_url) }}
             </a>
           </div>
 
-          <div class="sentence-date q-mt-sm text-grey-6">
+          <div class="entry-date q-mt-sm text-grey-6">
             <q-icon name="schedule" size="xs" class="q-mr-xs" />
             {{ formatDate(item.created_at) }}
           </div>
@@ -92,13 +94,13 @@
     <q-dialog v-model="deleteDialog">
       <q-card style="min-width: 350px">
         <q-card-section>
-          <div class="text-h6">Delete Sentence</div>
+          <div class="text-h6">Delete Entry</div>
         </q-card-section>
 
         <q-card-section class="q-pt-none">
-          Are you sure you want to delete this sentence?
-          <div v-if="sentenceToDelete" class="q-mt-md q-pa-sm bg-grey-2 rounded-borders">
-            <em>"{{ sentenceToDelete.sentence }}"</em>
+          Are you sure you want to delete this entry?
+          <div v-if="entryToDelete" class="q-mt-md q-pa-sm bg-grey-2 rounded-borders">
+            <em>"{{ entryToDelete.sentence }}"</em>
           </div>
         </q-card-section>
 
@@ -115,67 +117,67 @@
 import { ref, onMounted } from 'vue';
 import { useQuasar } from 'quasar';
 import {
-  getSavedSentences,
-  deleteSavedSentence,
-  type SavedSentence,
-} from 'src/services/savedSentencesService';
+  getMyDictionaries,
+  deleteDictionaryEntry,
+  type MyDictionaryEntry,
+} from 'src/services/myDictionariesService';
 
 const $q = useQuasar();
 
-const sentences = ref<SavedSentence[]>([]);
+const entries = ref<MyDictionaryEntry[]>([]);
 const loading = ref(false);
 const error = ref('');
 const deleteDialog = ref(false);
 const deleting = ref(false);
-const sentenceToDelete = ref<SavedSentence | null>(null);
+const entryToDelete = ref<MyDictionaryEntry | null>(null);
 
 onMounted(() => {
-  loadSentences();
+  loadEntries();
 });
 
-async function loadSentences() {
+async function loadEntries() {
   loading.value = true;
   error.value = '';
 
   try {
-    sentences.value = await getSavedSentences();
+    entries.value = await getMyDictionaries();
   } catch (err) {
-    error.value = err instanceof Error ? err.message : 'Failed to load saved sentences';
+    error.value = err instanceof Error ? err.message : 'Failed to load dictionary entries';
   } finally {
     loading.value = false;
   }
 }
 
-function confirmDelete(sentence: SavedSentence) {
-  sentenceToDelete.value = sentence;
+function confirmDelete(entry: MyDictionaryEntry) {
+  entryToDelete.value = entry;
   deleteDialog.value = true;
 }
 
 async function handleDelete() {
-  if (!sentenceToDelete.value) return;
+  if (!entryToDelete.value) return;
 
   deleting.value = true;
 
   try {
-    await deleteSavedSentence(sentenceToDelete.value.sentence_id);
+    await deleteDictionaryEntry(entryToDelete.value.sentence_id);
 
     // Remove from list
-    sentences.value = sentences.value.filter(
-      (s) => s.sentence_id !== sentenceToDelete.value?.sentence_id,
+    entries.value = entries.value.filter(
+      (entry) => entry.sentence_id !== entryToDelete.value?.sentence_id,
     );
 
     $q.notify({
       type: 'positive',
-      message: 'Sentence deleted successfully',
+      message: 'Dictionary entry deleted successfully',
       position: 'top',
     });
 
     deleteDialog.value = false;
-    sentenceToDelete.value = null;
+    entryToDelete.value = null;
   } catch (err) {
     $q.notify({
       type: 'negative',
-      message: err instanceof Error ? err.message : 'Failed to delete sentence',
+      message: err instanceof Error ? err.message : 'Failed to delete dictionary entry',
       position: 'top',
     });
   } finally {
@@ -213,42 +215,42 @@ function formatUrl(url: string): string {
 </script>
 
 <style scoped>
-.sentences-grid {
+.entries-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
   gap: 16px;
 }
 
-.sentence-card {
+.entry-card {
   transition: box-shadow 0.2s;
 }
 
-.sentence-card:hover {
+.entry-card:hover {
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
 }
 
-.sentence-text {
+.entry-text {
   font-size: 16px;
   font-weight: 500;
   line-height: 1.6;
   color: #1a1a1a;
 }
 
-.sentence-meta {
+.entry-meta {
   display: flex;
   align-items: center;
   font-size: 13px;
 }
 
-.sentence-meta a {
+.entry-meta a {
   text-decoration: none;
 }
 
-.sentence-meta a:hover {
+.entry-meta a:hover {
   text-decoration: underline;
 }
 
-.sentence-date {
+.entry-date {
   display: flex;
   align-items: center;
   font-size: 12px;

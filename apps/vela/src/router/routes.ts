@@ -30,9 +30,9 @@ const routes: RouteRecordRaw[] = [
         meta: { requiresAuth: true },
       },
       {
-        path: 'saved-sentences',
-        name: 'saved-sentences',
-        component: () => import('pages/dictionary/SavedSentencesPage.vue'),
+        path: 'my-dictionaries',
+        name: 'my-dictionaries',
+        component: () => import('pages/dictionary/MyDictionariesPage.vue'),
         meta: { requiresAuth: true },
       },
       {

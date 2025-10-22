@@ -3,7 +3,7 @@ import {
   GetUserCommand,
   CognitoIdentityProviderClient,
 } from '@aws-sdk/client-cognito-identity-provider';
-import { savedSentences } from '../dynamodb';
+import { myDictionaries } from '../dynamodb';
 import type { Env } from '../types';
 
 const app = new Hono<{ Bindings: Env }>();
@@ -67,7 +67,7 @@ app.post('/', async (c) => {
       return c.json({ error: 'Sentence is required' }, 400);
     }
 
-    const result = await savedSentences.create(userId, sentence.trim(), sourceUrl, context);
+    const result = await myDictionaries.create(userId, sentence.trim(), sourceUrl, context);
 
     return c.json({
       success: true,
@@ -90,7 +90,7 @@ app.get('/', async (c) => {
 
     const limit = parseInt(c.req.query('limit') || '50', 10);
 
-    const sentences = await savedSentences.getByUser(userId, limit);
+    const sentences = await myDictionaries.getByUser(userId, limit);
 
     return c.json({
       success: true,
@@ -117,7 +117,7 @@ app.delete('/:sentenceId', async (c) => {
       return c.json({ error: 'Sentence ID is required' }, 400);
     }
 
-    await savedSentences.delete(userId, sentenceId);
+    await myDictionaries.delete(userId, sentenceId);
 
     return c.json({
       success: true,

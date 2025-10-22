@@ -6,7 +6,7 @@ import { games } from './routes/games';
 import { progress } from './routes/progress';
 import { profiles as createProfilesRoute } from './routes/profiles';
 import auth from './routes/auth';
-import savedSentences from './routes/saved-sentences';
+import myDictionaries from './routes/my-dictionaries';
 import type { Env } from './types';
 import { serve } from '@hono/node-server';
 import { readFileSync, existsSync } from 'fs';
@@ -129,7 +129,7 @@ if (process.env.NODE_ENV === 'development') {
 // Mount the auth routes
 app.route('/api/auth', auth);
 
-// Mount the saved sentences routes
-app.route('/api/saved-sentences', savedSentences);
+// Mount the my dictionaries routes
+app.route('/api/my-dictionaries', myDictionaries);
 
 export const handler = handle(app);

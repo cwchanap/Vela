@@ -1,7 +1,7 @@
 import { fetchAuthSession } from 'aws-amplify/auth';
 import { config } from 'src/config';
 
-export interface SavedSentence {
+export interface MyDictionaryEntry {
   user_id: string;
   sentence_id: string;
   sentence: string;
@@ -12,9 +12,9 @@ export interface SavedSentence {
 }
 
 /**
- * Fetch saved sentences for the current user
+ * Fetch dictionary entries for the current user
  */
-export async function getSavedSentences(limit = 50): Promise<SavedSentence[]> {
+export async function getMyDictionaries(limit = 50): Promise<MyDictionaryEntry[]> {
   try {
     const session = await fetchAuthSession();
     const accessToken = session.tokens?.accessToken?.toString();
@@ -23,7 +23,7 @@ export async function getSavedSentences(limit = 50): Promise<SavedSentence[]> {
       throw new Error('Not authenticated');
     }
 
-    const response = await fetch(`${config.api.url}saved-sentences?limit=${limit}`, {
+    const response = await fetch(`${config.api.url}my-dictionaries?limit=${limit}`, {
       method: 'GET',
       headers: {
         Authorization: `Bearer ${accessToken}`,
@@ -33,21 +33,21 @@ export async function getSavedSentences(limit = 50): Promise<SavedSentence[]> {
 
     if (!response.ok) {
       const error = await response.json();
-      throw new Error(error.error || 'Failed to fetch saved sentences');
+      throw new Error(error.error || 'Failed to fetch dictionary entries');
     }
 
     const data = await response.json();
     return data.data || [];
   } catch (error) {
-    console.error('Error fetching saved sentences:', error);
+    console.error('Error fetching dictionary entries:', error);
     throw error;
   }
 }
 
 /**
- * Delete a saved sentence
+ * Delete a dictionary entry
  */
-export async function deleteSavedSentence(sentenceId: string): Promise<void> {
+export async function deleteDictionaryEntry(sentenceId: string): Promise<void> {
   try {
     const session = await fetchAuthSession();
     const accessToken = session.tokens?.accessToken?.toString();
@@ -56,7 +56,7 @@ export async function deleteSavedSentence(sentenceId: string): Promise<void> {
       throw new Error('Not authenticated');
     }
 
-    const response = await fetch(`${config.api.url}saved-sentences/${sentenceId}`, {
+    const response = await fetch(`${config.api.url}my-dictionaries/${sentenceId}`, {
       method: 'DELETE',
       headers: {
         Authorization: `Bearer ${accessToken}`,
@@ -66,10 +66,10 @@ export async function deleteSavedSentence(sentenceId: string): Promise<void> {
 
     if (!response.ok) {
       const error = await response.json();
-      throw new Error(error.error || 'Failed to delete sentence');
+      throw new Error(error.error || 'Failed to delete dictionary entry');
     }
   } catch (error) {
-    console.error('Error deleting saved sentence:', error);
+    console.error('Error deleting dictionary entry:', error);
     throw error;
   }
 }

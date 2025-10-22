@@ -30,9 +30,9 @@ export const mainNavigation = [
     requiresAuth: true,
   },
   {
-    name: 'Saved Sentences',
+    name: 'My Dictionaries',
     icon: 'fas fa-bookmark',
-    path: '/saved-sentences',
+    path: '/my-dictionaries',
     requiresAuth: true,
   },
 ];
