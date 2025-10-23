@@ -11,6 +11,13 @@ export interface MyDictionaryEntry {
   updated_at: number;
 }
 
+export interface SentenceAnalysis {
+  sentence: string;
+  analysis: string;
+  provider: string;
+  model: string;
+}
+
 /**
  * Fetch dictionary entries for the current user
  */
