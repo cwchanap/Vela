@@ -43,7 +43,12 @@
           :stamp="formatTime(m.timestamp)"
           :class="m.type === 'ai' ? 'ai-message' : 'user-message'"
         >
-          <div class="message-content" v-text="m.content" />
+          <div
+            v-if="m.type === 'ai'"
+            class="message-content markdown-content"
+            v-html="renderMarkdown(m.content)"
+          />
+          <div v-else class="message-content" v-text="m.content" />
         </q-chat-message>
       </div>
 
@@ -176,6 +181,8 @@ import { useChatStore } from '../../stores/chat';
 import { useLLMSettingsStore } from '../../stores/llmSettings';
 import { useAuthStore } from '../../stores/auth';
 import { fetchAuthSession } from 'aws-amplify/auth';
+import { marked } from 'marked';
+import DOMPurify from 'dompurify';
 // Chat history types for API calls
 interface ChatHistoryItemDTO {
   ThreadId: string;
@@ -218,6 +225,52 @@ const isDeleting = ref(false);
 
 const formatTime = (d: Date) =>
   new Date(d).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+// Configure marked options
+marked.setOptions({
+  breaks: true,
+  gfm: true,
+});
+
+// Render markdown with XSS protection
+const renderMarkdown = (text: string): string => {
+  if (!text) return '';
+  const rawHtml = marked.parse(text) as string;
+  // Sanitize HTML to prevent XSS attacks from LLM output
+  return DOMPurify.sanitize(rawHtml, {
+    ALLOWED_TAGS: [
+      'h1',
+      'h2',
+      'h3',
+      'h4',
+      'h5',
+      'h6',
+      'p',
+      'br',
+      'strong',
+      'em',
+      'u',
+      's',
+      'del',
+      'ul',
+      'ol',
+      'li',
+      'blockquote',
+      'code',
+      'pre',
+      'a',
+      'hr',
+      'table',
+      'thead',
+      'tbody',
+      'tr',
+      'th',
+      'td',
+    ],
+    ALLOWED_ATTR: ['href', 'target', 'rel'],
+    ALLOW_DATA_ATTR: false,
+  });
+};
 
 const scrollToBottom = async () => {
   await nextTick();
@@ -485,6 +538,10 @@ body.body--dark .chat-container {
   white-space: pre-wrap;
 }
 
+.message-content.markdown-content {
+  white-space: normal;
+}
+
 // AI message with gradient background
 :deep(.ai-message .q-message-text) {
   background: linear-gradient(135deg, #667eea 0%, #764ba2 100%) !important;
@@ -513,5 +570,132 @@ body.body--dark .chat-container {
 :deep(.q-message-stamp) {
   font-size: 11px;
   opacity: 0.7;
+}
+
+/* Markdown content styling in chat messages */
+:deep(.markdown-content) {
+  line-height: 1.6;
+  color: white;
+}
+
+:deep(.markdown-content h1),
+:deep(.markdown-content h2),
+:deep(.markdown-content h3),
+:deep(.markdown-content h4),
+:deep(.markdown-content h5),
+:deep(.markdown-content h6) {
+  margin-top: 0.8em;
+  margin-bottom: 0.3em;
+  font-weight: 600;
+  color: white;
+}
+
+:deep(.markdown-content h1) {
+  font-size: 1.5em;
+}
+
+:deep(.markdown-content h2) {
+  font-size: 1.3em;
+}
+
+:deep(.markdown-content h3) {
+  font-size: 1.1em;
+}
+
+:deep(.markdown-content p) {
+  margin: 0 !important;
+  display: inline;
+}
+
+:deep(.markdown-content p:not(:last-child)::after) {
+  content: '\A\A';
+  white-space: pre;
+}
+
+:deep(.markdown-content ul),
+:deep(.markdown-content ol) {
+  margin: 0 0 0.5em 0 !important;
+  padding-left: 1.5em;
+}
+
+:deep(.markdown-content li) {
+  margin-bottom: 0.2em;
+}
+
+:deep(.markdown-content li p) {
+  margin: 0 0 0.2em 0 !important;
+}
+
+:deep(.markdown-content code) {
+  background-color: rgba(0, 0, 0, 0.2);
+  padding: 0.2em 0.4em;
+  border-radius: 3px;
+  font-family: 'Courier New', monospace;
+  font-size: 0.9em;
+  color: #ffd700;
+}
+
+:deep(.markdown-content pre) {
+  background-color: rgba(0, 0, 0, 0.3);
+  padding: 0.8em;
+  border-radius: 6px;
+  overflow-x: auto;
+  margin-bottom: 0.8em;
+}
+
+:deep(.markdown-content pre code) {
+  background-color: transparent;
+  padding: 0;
+  color: #f0f0f0;
+}
+
+:deep(.markdown-content blockquote) {
+  border-left: 3px solid rgba(255, 255, 255, 0.5);
+  padding-left: 0.8em;
+  margin-left: 0;
+  color: rgba(255, 255, 255, 0.9);
+  font-style: italic;
+}
+
+:deep(.markdown-content strong) {
+  font-weight: 600;
+  color: white;
+}
+
+:deep(.markdown-content em) {
+  font-style: italic;
+}
+
+:deep(.markdown-content a) {
+  color: #64b5f6;
+  text-decoration: underline;
+}
+
+:deep(.markdown-content a:hover) {
+  color: #90caf9;
+}
+
+:deep(.markdown-content hr) {
+  border: none;
+  border-top: 1px solid rgba(255, 255, 255, 0.3);
+  margin: 1em 0;
+}
+
+:deep(.markdown-content table) {
+  border-collapse: collapse;
+  width: 100%;
+  margin-bottom: 0.8em;
+}
+
+:deep(.markdown-content th),
+:deep(.markdown-content td) {
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  padding: 0.4em;
+  text-align: left;
+}
+
+:deep(.markdown-content th) {
+  background-color: rgba(0, 0, 0, 0.2);
+  font-weight: 600;
 }
 </style>
