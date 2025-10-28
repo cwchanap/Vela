@@ -31,7 +31,17 @@
 
 _GATE: Must pass before Phase 0 research. Re-check after Phase 1 design._
 
-[Gates determined based on constitution file]
+Verify compliance with [Vela Constitution](../../.specify/memory/constitution.md):
+
+- [ ] **Principle I: TypeScript-First** - All new code will use TypeScript with strict mode, no `any` types
+- [ ] **Principle II: Monorepo Architecture** - Changes fit within existing workspace structure or justified new workspace
+- [ ] **Principle III: Test-First** - User stories have Given-When-Then scenarios; tests will be written before implementation
+- [ ] **Principle IV: Component-Driven UI** - UI changes follow Vue 3 Composition API + Quasar patterns, components are colocated
+- [ ] **Principle V: API-First Backend** - API contracts defined with Zod validation, service layer separation maintained
+- [ ] **Principle VI: Security & Authentication** - No secrets in code, input validation planned, authentication middleware used
+- [ ] **Principle VII: Code Quality** - ESLint/Prettier/Husky configuration unchanged or extended appropriately
+
+**Violations requiring justification**: [List any principles that cannot be followed with rationale, or write "None"]
 
 ## Project Structure
 
