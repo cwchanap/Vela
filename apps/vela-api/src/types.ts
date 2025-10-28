@@ -14,6 +14,10 @@ export interface Env {
   DDB_ENDPOINT?: string;
   DDB_REGION?: string;
   DDB_TABLE?: string;
+
+  // TTS configuration
+  TTS_AUDIO_BUCKET_NAME?: string;
+  ELEVENLABS_API_KEY?: string;
 }
 
 // Re-export types from validation schemas for backward compatibility

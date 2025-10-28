@@ -1,4 +1,5 @@
 import type { LLMProvider, LLMProviderName, LLMRequest, LLMResponse } from '../types';
+import { getApiUrl } from 'src/utils/api';
 
 interface GoogleProviderOptions {
   apiKey?: string;
@@ -40,7 +41,7 @@ export class GoogleProvider implements LLMProvider {
       apiKey: request.apiKey,
     };
 
-    const res = await fetch('/api/llm-chat', {
+    const res = await fetch(getApiUrl('llm-chat'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),

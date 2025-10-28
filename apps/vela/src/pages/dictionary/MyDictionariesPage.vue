@@ -56,7 +56,22 @@
     <div v-else class="entries-grid">
       <q-card v-for="item in entries" :key="item.sentence_id" flat bordered class="entry-card">
         <q-card-section>
-          <div class="entry-text">{{ item.sentence }}</div>
+          <div class="row items-start q-mb-sm">
+            <div class="col entry-text">{{ item.sentence }}</div>
+            <q-btn
+              flat
+              round
+              dense
+              icon="volume_up"
+              color="primary"
+              size="sm"
+              class="q-ml-sm"
+              @click="handlePronounce(item)"
+              data-testid="btn-pronounce-sentence"
+            >
+              <q-tooltip>Pronunciation</q-tooltip>
+            </q-btn>
+          </div>
 
           <div v-if="item.context" class="entry-meta q-mt-sm">
             <q-icon name="description" size="xs" class="q-mr-xs" />
@@ -176,9 +191,12 @@ import {
   type SentenceAnalysis,
 } from 'src/services/myDictionariesService';
 import { useLLMSettingsStore } from 'src/stores/llmSettings';
+import { useAuthStore } from 'src/stores/auth';
+import { generatePronunciation, playAudio } from 'src/services/ttsService';
 
 const $q = useQuasar();
 const llmSettings = useLLMSettingsStore();
+const authStore = useAuthStore();
 const { provider, currentModel, currentApiKey } = storeToRefs(llmSettings);
 
 const entries = ref<MyDictionaryEntry[]>([]);
@@ -417,6 +435,37 @@ async function handleAskAI(entry: MyDictionaryEntry) {
       position: 'top',
     });
     analyzing.value = false;
+  }
+}
+
+async function handlePronounce(entry: MyDictionaryEntry) {
+  if (!authStore.user?.id) {
+    $q.notify({
+      type: 'warning',
+      message: 'Please sign in to use pronunciation features',
+      position: 'top',
+    });
+    return;
+  }
+
+  try {
+    // Use sentence_id as vocabulary ID for TTS caching
+    const { audioUrl } = await generatePronunciation(
+      entry.sentence_id,
+      entry.sentence,
+      authStore.user.id,
+    );
+    await playAudio(audioUrl);
+  } catch (err) {
+    console.error('Pronunciation error:', err);
+    $q.notify({
+      type: 'negative',
+      message:
+        err instanceof Error
+          ? err.message
+          : 'Failed to play pronunciation. Please check your TTS settings.',
+      position: 'top',
+    });
   }
 }
 </script>

@@ -68,6 +68,7 @@ const TABLE_NAMES = {
     process.env.MY_DICTIONARIES_TABLE_NAME ||
     process.env.SAVED_SENTENCES_TABLE_NAME ||
     'vela-saved-sentences',
+  TTS_SETTINGS: process.env.TTS_SETTINGS_TABLE_NAME || 'vela-tts-settings',
 };
 
 // Helper function to handle DynamoDB errors
@@ -361,6 +362,38 @@ export const myDictionaries = {
       });
       await docClient.send(command);
       return { success: true };
+    } catch (error) {
+      handleDynamoError(error);
+    }
+  },
+};
+
+// TTS Settings operations
+export const ttsSettings = {
+  async get(userId: string) {
+    try {
+      const command = new GetCommand({
+        TableName: TABLE_NAMES.TTS_SETTINGS,
+        Key: { user_id: userId },
+      });
+      const response = await docClient.send(command);
+      return response.Item;
+    } catch (error) {
+      handleDynamoError(error);
+    }
+  },
+
+  async put(settings: any) {
+    try {
+      const command = new PutCommand({
+        TableName: TABLE_NAMES.TTS_SETTINGS,
+        Item: {
+          ...settings,
+          updated_at: new Date().toISOString(),
+        },
+      });
+      await docClient.send(command);
+      return settings;
     } catch (error) {
       handleDynamoError(error);
     }

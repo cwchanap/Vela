@@ -126,6 +126,87 @@
         </div>
       </div>
     </q-card>
+
+    <!-- TTS Settings -->
+    <q-card flat bordered class="q-pa-md q-mb-lg">
+      <div class="text-subtitle1 q-mb-sm">Text-to-Speech (ElevenLabs)</div>
+      <div class="text-caption text-grey q-mb-md">
+        Configure ElevenLabs API for pronunciation features
+      </div>
+
+      <div class="row q-col-gutter-md">
+        <div class="col-12">
+          <q-input
+            v-model="ttsApiKeyInput"
+            :type="showTtsApiKey ? 'text' : 'password'"
+            label="ElevenLabs API Key"
+            dense
+            outlined
+            clearable
+            data-testid="tts-api-key-input"
+            hint="Your ElevenLabs API key for text-to-speech generation"
+          >
+            <template #append>
+              <q-icon
+                :name="showTtsApiKey ? 'visibility_off' : 'visibility'"
+                class="cursor-pointer"
+                @click="showTtsApiKey = !showTtsApiKey"
+              />
+            </template>
+          </q-input>
+        </div>
+        <div class="col-12 col-md-6">
+          <q-input
+            v-model="ttsVoiceId"
+            label="Voice ID (optional)"
+            dense
+            outlined
+            hint="Default: pNInz6obpgDQGcFmaJgB"
+            data-testid="tts-voice-id-input"
+          />
+        </div>
+        <div class="col-12 col-md-6">
+          <q-input
+            v-model="ttsModel"
+            label="Model (optional)"
+            dense
+            outlined
+            hint="Default: eleven_multilingual_v2"
+            data-testid="tts-model-input"
+          />
+        </div>
+        <div class="col-12">
+          <q-btn
+            class="full-width"
+            color="primary"
+            label="Save TTS Settings"
+            :disable="!canSaveTTS || !ttsApiKeyInput"
+            @click="saveSettingsHandler"
+            data-testid="tts-save"
+          />
+        </div>
+      </div>
+
+      <q-separator class="q-my-md" />
+
+      <div class="row items-center">
+        <div class="col">
+          <div class="text-caption">
+            {{
+              isAuthenticated
+                ? hasTTSKey
+                  ? 'TTS API key configured'
+                  : 'No TTS API key configured'
+                : 'Sign in to configure TTS settings'
+            }}
+          </div>
+        </div>
+        <div class="col-auto">
+          <q-badge v-if="hasTTSKey" color="positive" outline>Configured</q-badge>
+          <q-badge v-else color="grey" outline>Not configured</q-badge>
+        </div>
+      </div>
+    </q-card>
   </q-page>
 </template>
 
@@ -136,12 +217,18 @@ import { useLLMSettingsStore } from '../../stores/llmSettings';
 import { useThemeStore } from '../../stores/theme';
 import { useAuthStore } from '../../stores/auth';
 import { Notify } from 'quasar';
+import {
+  getTTSSettings as fetchTTSSettings,
+  saveTTSSettings as updateTTSSettings,
+} from '../../services/ttsService';
 
 const store = useLLMSettingsStore();
 const themeStore = useThemeStore();
 const authStore = useAuthStore();
 
 const isAuthenticated = computed(() => authStore.isAuthenticated);
+const currentUserId = computed(() => authStore.user?.id || authStore.session?.user?.id || null);
+const canSaveTTS = computed(() => !!currentUserId.value);
 const darkModeEnabled = ref(themeStore.isDark);
 
 const toggleDarkMode = () => {
@@ -220,6 +307,87 @@ const apiKeyHint = computed(() =>
 const clearApiKey = () => {
   apiKeyInput.value = '';
 };
+
+// TTS Settings
+const ttsApiKeyInput = ref('');
+const ttsVoiceId = ref('');
+const ttsModel = ref('');
+const showTtsApiKey = ref(false);
+const hasTTSKey = ref(false);
+
+// Load TTS settings on mount
+const loadTTSSettings = async () => {
+  const userId = currentUserId.value;
+  if (!userId) return;
+
+  try {
+    // Use the getTTSSettings service which includes auth header
+    const data = await fetchTTSSettings();
+    hasTTSKey.value = data.hasApiKey;
+    ttsVoiceId.value = data.voiceId || '';
+    ttsModel.value = data.model || '';
+  } catch (error) {
+    console.error('Failed to load TTS settings:', error);
+  }
+};
+
+// Save TTS settings
+const saveSettingsHandler = async () => {
+  const userId = currentUserId.value;
+
+  if (!userId) {
+    Notify.create({
+      type: 'negative',
+      message: 'Please sign in to save TTS settings',
+      position: 'top',
+    });
+    return;
+  }
+
+  if (!ttsApiKeyInput.value) {
+    Notify.create({
+      type: 'negative',
+      message: 'Please enter an ElevenLabs API key',
+      position: 'top',
+    });
+    return;
+  }
+
+  try {
+    // Use the saveTTSSettings service which includes auth header
+    await updateTTSSettings(
+      userId, // Deprecated parameter but kept for backward compat
+      ttsApiKeyInput.value,
+      ttsVoiceId.value || undefined,
+      ttsModel.value || undefined,
+    );
+
+    hasTTSKey.value = true;
+    Notify.create({
+      type: 'positive',
+      message: 'TTS settings saved successfully',
+      position: 'top',
+    });
+  } catch (error) {
+    console.error('Error saving TTS settings:', error);
+    Notify.create({
+      type: 'negative',
+      message: error instanceof Error ? error.message : 'Failed to save TTS settings',
+      position: 'top',
+    });
+  }
+};
+
+// Load TTS settings when authenticated
+watch(
+  () => currentUserId.value,
+  (userId) => {
+    if (userId) {
+      loadTTSSettings();
+    }
+  },
+  { immediate: true },
+);
 </script>
 
 <style scoped>

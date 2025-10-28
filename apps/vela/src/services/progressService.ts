@@ -1,4 +1,5 @@
 import { useAuthStore } from 'src/stores/auth';
+import { getApiUrl } from 'src/utils/api';
 
 async function httpJson(input: RequestInfo, init?: RequestInit) {
   const res = await fetch(input, {
@@ -150,7 +151,7 @@ class ProgressService {
     }
 
     try {
-      const analytics = await httpJson(`/api/progress/analytics?user_id=${userId}`);
+      const analytics = await httpJson(getApiUrl(`progress/analytics?user_id=${userId}`));
       return analytics;
     } catch (error) {
       console.error('Error fetching progress analytics:', error);
@@ -203,7 +204,7 @@ class ProgressService {
     if (!userId) return;
 
     try {
-      await httpJson('/api/progress/game-session', {
+      await httpJson(getApiUrl('progress/game-session'), {
         method: 'POST',
         body: JSON.stringify({
           user_id: userId,

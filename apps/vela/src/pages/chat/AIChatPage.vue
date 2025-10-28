@@ -183,6 +183,7 @@ import { useAuthStore } from '../../stores/auth';
 import { fetchAuthSession } from 'aws-amplify/auth';
 import { marked } from 'marked';
 import DOMPurify from 'dompurify';
+import { getApiUrl } from '../../utils/api';
 // Chat history types for API calls
 interface ChatHistoryItemDTO {
   ThreadId: string;
@@ -232,44 +233,64 @@ marked.setOptions({
   gfm: true,
 });
 
+// Configure DOMPurify to enforce noopener noreferrer on external links
+DOMPurify.addHook('afterSanitizeAttributes', (node) => {
+  // Enforce rel="noopener noreferrer" on all links with target="_blank" to prevent tabnabbing
+  if (node.tagName === 'A' && node.getAttribute('target') === '_blank') {
+    node.setAttribute('rel', 'noopener noreferrer');
+  }
+});
+
 // Render markdown with XSS protection
 const renderMarkdown = (text: string): string => {
   if (!text) return '';
-  const rawHtml = marked.parse(text) as string;
-  // Sanitize HTML to prevent XSS attacks from LLM output
-  return DOMPurify.sanitize(rawHtml, {
-    ALLOWED_TAGS: [
-      'h1',
-      'h2',
-      'h3',
-      'h4',
-      'h5',
-      'h6',
-      'p',
-      'br',
-      'strong',
-      'em',
-      'u',
-      's',
-      'del',
-      'ul',
-      'ol',
-      'li',
-      'blockquote',
-      'code',
-      'pre',
-      'a',
-      'hr',
-      'table',
-      'thead',
-      'tbody',
-      'tr',
-      'th',
-      'td',
-    ],
-    ALLOWED_ATTR: ['href', 'target', 'rel'],
-    ALLOW_DATA_ATTR: false,
-  });
+
+  try {
+    const rawHtml = marked.parse(text) as string;
+    // Sanitize HTML to prevent XSS attacks from LLM output
+    return DOMPurify.sanitize(rawHtml, {
+      ALLOWED_TAGS: [
+        'h1',
+        'h2',
+        'h3',
+        'h4',
+        'h5',
+        'h6',
+        'p',
+        'br',
+        'strong',
+        'em',
+        'u',
+        's',
+        'del',
+        'ul',
+        'ol',
+        'li',
+        'blockquote',
+        'code',
+        'pre',
+        'a',
+        'hr',
+        'table',
+        'thead',
+        'tbody',
+        'tr',
+        'th',
+        'td',
+      ],
+      ALLOWED_ATTR: ['href', 'target', 'rel'],
+      ALLOW_DATA_ATTR: false,
+    });
+  } catch (error) {
+    // Log parsing error with context for debugging
+    console.error('Failed to parse markdown content:', error, { text });
+    // Return escaped text as safe fallback to prevent rendering issues
+    return DOMPurify.sanitize(text, {
+      ALLOWED_TAGS: [],
+      ALLOWED_ATTR: [],
+      ALLOW_DATA_ATTR: false,
+    });
+  }
 };
 
 const scrollToBottom = async () => {
@@ -297,7 +318,7 @@ const ensureChatId = () => {
 
 const saveToHistory = async (chat_id: string, message: string, is_user: boolean) => {
   try {
-    const response = await fetch('/api/chat-history/save', {
+    const response = await fetch(getApiUrl('chat-history/save'), {
       method: 'POST',
       headers: {
         'content-type': 'application/json',
@@ -325,7 +346,9 @@ const openHistory = async () => {
   showHistory.value = true;
   try {
     const uid = getUserId();
-    const response = await fetch(`/api/chat-history/threads?user_id=${encodeURIComponent(uid)}`);
+    const response = await fetch(
+      getApiUrl(`chat-history/threads?user_id=${encodeURIComponent(uid)}`),
+    );
     if (!response.ok) {
       throw new Error('Failed to load threads');
     }
@@ -342,7 +365,7 @@ const openHistory = async () => {
 const selectThread = async (t: ChatThreadSummaryDTO) => {
   try {
     const response = await fetch(
-      `/api/chat-history/messages?thread_id=${encodeURIComponent(t.ThreadId)}`,
+      getApiUrl(`chat-history/messages?thread_id=${encodeURIComponent(t.ThreadId)}`),
     );
     if (!response.ok) {
       throw new Error('Failed to load messages');
@@ -468,7 +491,9 @@ const deleteThread = async () => {
     }
 
     const response = await fetch(
-      `/api/chat-history/thread?thread_id=${encodeURIComponent(threadToDelete.value.ThreadId)}`,
+      getApiUrl(
+        `chat-history/thread?thread_id=${encodeURIComponent(threadToDelete.value.ThreadId)}`,
+      ),
       {
         method: 'DELETE',
         headers: {

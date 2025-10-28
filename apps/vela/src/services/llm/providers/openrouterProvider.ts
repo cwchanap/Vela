@@ -1,6 +1,7 @@
 import type { LLMProvider, LLMProviderName, LLMRequest, LLMResponse, ChatMessage } from '../types';
+import { getApiUrl } from 'src/utils/api';
 
-interface OpenRouterOptions {
+interface OpenRouterProviderOptions {
   apiKey?: string;
   model?: string;
   appName?: string;
@@ -15,7 +16,7 @@ export class OpenRouterProvider implements LLMProvider {
   private model: string;
   private appName: string | null;
 
-  constructor(options?: OpenRouterOptions) {
+  constructor(options?: OpenRouterProviderOptions) {
     // API calls are proxied via AWS Lambda API; no client-side API key
     this.model = options?.model || 'openai/gpt-oss-20b:free';
     this.appName = options?.appName ?? null;
@@ -54,7 +55,7 @@ export class OpenRouterProvider implements LLMProvider {
       apiKey: request.apiKey,
     };
 
-    const res = await fetch('/api/llm-chat', {
+    const res = await fetch(getApiUrl('llm-chat'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),

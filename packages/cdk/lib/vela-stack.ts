@@ -2,7 +2,7 @@ import { Stack, StackProps, Duration, RemovalPolicy, CfnOutput } from 'aws-cdk-l
 import { Function, Runtime, Code } from 'aws-cdk-lib/aws-lambda';
 import { RestApi, LambdaIntegration, Cors } from 'aws-cdk-lib/aws-apigateway';
 import { Table, AttributeType, BillingMode } from 'aws-cdk-lib/aws-dynamodb';
-import { Bucket, BlockPublicAccess } from 'aws-cdk-lib/aws-s3';
+import { Bucket, BlockPublicAccess, HttpMethods } from 'aws-cdk-lib/aws-s3';
 import { BucketDeployment, Source } from 'aws-cdk-lib/aws-s3-deployment';
 import {
   Distribution,
@@ -14,6 +14,9 @@ import {
 import { S3Origin, RestApiOrigin } from 'aws-cdk-lib/aws-cloudfront-origins';
 import { UserPool, UserPoolClient, AccountRecovery } from 'aws-cdk-lib/aws-cognito';
 import { PolicyStatement, Effect } from 'aws-cdk-lib/aws-iam';
+import * as rds from 'aws-cdk-lib/aws-rds';
+import * as ec2 from 'aws-cdk-lib/aws-ec2';
+import * as secretsmanager from 'aws-cdk-lib/aws-secretsmanager';
 import {
   Certificate,
   CertificateValidation,
@@ -195,14 +198,146 @@ export class VelaStack extends Stack {
       },
     });
 
+    const ttsSettingsTable = new Table(this, 'VelaTTSSettingsTable', {
+      tableName: 'vela-tts-settings',
+      partitionKey: {
+        name: 'user_id',
+        type: AttributeType.STRING,
+      },
+      billingMode: BillingMode.PAY_PER_REQUEST,
+      removalPolicy: RemovalPolicy.DESTROY,
+      pointInTimeRecoverySpecification: {
+        pointInTimeRecoveryEnabled: true,
+      },
+    });
+
+    // S3 Bucket for TTS Audio Storage
+    const ttsAudioBucket = new Bucket(this, 'VelaTTSAudioBucket', {
+      bucketName: `vela-tts-audio-${Stack.of(this).account}`,
+      publicReadAccess: false,
+      blockPublicAccess: BlockPublicAccess.BLOCK_ALL,
+      removalPolicy: RemovalPolicy.RETAIN,
+      autoDeleteObjects: false,
+      versioned: false,
+      cors: [
+        {
+          allowedMethods: [HttpMethods.GET, HttpMethods.HEAD],
+          allowedOrigins: ['*'],
+          allowedHeaders: ['*'],
+          maxAge: 3600,
+        },
+      ],
+    });
+
+    // VPC for Aurora Serverless v2 and Lambda
+    // Note: Lambda functions need to reach external APIs (Gemini, OpenRouter, ElevenLabs)
+    // and AWS services (DynamoDB, S3, Secrets Manager, RDS Data API, Cognito).
+    //
+    // Two approaches:
+    // A) Dev/Testing (current): PRIVATE_WITH_EGRESS + NAT Gateway for internet access
+    //    - Simple setup, Lambda can reach external APIs and AWS services via internet
+    //    - Cost: ~$32/month per NAT Gateway (+ data transfer fees)
+    //
+    // B) Production: PRIVATE_ISOLATED + VPC Endpoints for cost optimization
+    //    - Add Interface endpoints: secretsmanager, rds-data, cognito-idp (~$7/month each)
+    //    - Add Gateway endpoints: dynamodb, s3 (free)
+    //    - External APIs: Either keep API Lambda outside VPC or add NAT for specific routes
+    //    - More complex but eliminates NAT Gateway cost if external APIs moved server-side
+    const vpc = new ec2.Vpc(this, 'VelaVPC', {
+      maxAzs: 2,
+      natGateways: 1, // Enable NAT Gateway for internet egress (dev/testing approach)
+      subnetConfiguration: [
+        {
+          cidrMask: 24,
+          name: 'public',
+          subnetType: ec2.SubnetType.PUBLIC,
+        },
+        {
+          cidrMask: 24,
+          name: 'private-with-egress',
+          subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS, // Allows internet via NAT
+        },
+      ],
+    });
+
+    // TODO: For production cost optimization, consider switching to PRIVATE_ISOLATED
+    // and adding VPC endpoints:
+    // - vpc.addInterfaceEndpoint('SecretsManagerEndpoint', {...})
+    // - vpc.addInterfaceEndpoint('RDSDataEndpoint', {...})
+    // - vpc.addInterfaceEndpoint('CognitoEndpoint', {...})
+    // - vpc.addGatewayEndpoint('DynamoDBEndpoint', {...})
+    // - vpc.addGatewayEndpoint('S3Endpoint', {...})
+
+    // Security Group for Aurora
+    const dbSecurityGroup = new ec2.SecurityGroup(this, 'VelaDBSecurityGroup', {
+      vpc,
+      description: 'Security group for Aurora DSQL database',
+      allowAllOutbound: true,
+    });
+
+    // Allow Lambda to access Aurora
+    dbSecurityGroup.addIngressRule(
+      ec2.Peer.ipv4(vpc.vpcCidrBlock),
+      ec2.Port.tcp(5432),
+      'Allow PostgreSQL access from VPC',
+    );
+
+    // Aurora Serverless v2 Database Credentials
+    const dbCredentials = new secretsmanager.Secret(this, 'VelaDBCredentials', {
+      secretName: 'vela-aurora-credentials',
+      generateSecretString: {
+        secretStringTemplate: JSON.stringify({ username: 'vela_admin' }),
+        generateStringKey: 'password',
+        excludePunctuation: true,
+        includeSpace: false,
+        passwordLength: 32,
+      },
+    });
+
+    // Aurora Serverless v2 Cluster (PostgreSQL)
+    // Cost optimization: Single writer instance without read replicas for initial deployment
+    // Aurora Serverless v2 scales automatically based on load (0.5 to 1 ACU)
+    // Estimated cost: ~$43/month (writer only) vs ~$86/month (with reader replica)
+    // Add reader instances later when read traffic justifies the cost
+    const dbCluster = new rds.DatabaseCluster(this, 'VelaAuroraCluster', {
+      engine: rds.DatabaseClusterEngine.auroraPostgres({
+        version: rds.AuroraPostgresEngineVersion.VER_15_5,
+      }),
+      credentials: rds.Credentials.fromSecret(dbCredentials),
+      writer: rds.ClusterInstance.serverlessV2('writer', {
+        publiclyAccessible: false,
+      }),
+      // Reader instances removed for cost optimization
+      // Uncomment when read traffic requires horizontal scaling:
+      // readers: [
+      //   rds.ClusterInstance.serverlessV2('reader', {
+      //     scaleWithWriter: true,
+      //   }),
+      // ],
+      vpc,
+      vpcSubnets: {
+        subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS,
+      },
+      securityGroups: [dbSecurityGroup],
+      defaultDatabaseName: 'vela',
+      removalPolicy: RemovalPolicy.DESTROY,
+      serverlessV2MinCapacity: 0.5,
+      serverlessV2MaxCapacity: 1,
+    });
+
     // Lambda Function
     const apiLambda = new Function(this, 'VelaApiFunction', {
       functionName: 'vela-api',
       runtime: Runtime.NODEJS_20_X,
       handler: 'index.handler',
       code: Code.fromAsset(path.join(__dirname, '../dist/lambda')),
-      timeout: Duration.seconds(30),
-      memorySize: 512,
+      timeout: Duration.seconds(60), // Increased for TTS operations
+      memorySize: 1024, // Increased for audio processing
+      vpc,
+      vpcSubnets: {
+        subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS,
+      },
+      securityGroups: [dbSecurityGroup],
       environment: {
         DYNAMODB_TABLE_NAME: chatHistoryTable.tableName,
         PROFILES_TABLE_NAME: profilesTable.tableName,
@@ -211,8 +346,13 @@ export class VelaStack extends Stack {
         GAME_SESSIONS_TABLE_NAME: gameSessionsTable.tableName,
         DAILY_PROGRESS_TABLE_NAME: dailyProgressTable.tableName,
         SAVED_SENTENCES_TABLE_NAME: savedSentencesTable.tableName,
+        TTS_AUDIO_BUCKET_NAME: ttsAudioBucket.bucketName,
+        AURORA_DB_SECRET_ARN: dbCredentials.secretArn,
+        AURORA_DB_CLUSTER_ARN: dbCluster.clusterArn,
+        AURORA_DB_NAME: 'vela',
         GEMINI_API_KEY: process.env.GEMINI_API_KEY || '',
         OPENROUTER_API_KEY: process.env.OPENROUTER_API_KEY || '',
+        ELEVENLABS_API_KEY: process.env.ELEVENLABS_API_KEY || '',
         VITE_COGNITO_USER_POOL_ID: userPool.userPoolId,
         VITE_COGNITO_USER_POOL_CLIENT_ID: userPoolClient.userPoolClientId,
         COGNITO_CLIENT_ID: userPoolClient.userPoolClientId,
@@ -228,6 +368,28 @@ export class VelaStack extends Stack {
     gameSessionsTable.grantReadWriteData(apiLambda);
     dailyProgressTable.grantReadWriteData(apiLambda);
     savedSentencesTable.grantReadWriteData(apiLambda);
+    ttsSettingsTable.grantReadWriteData(apiLambda);
+
+    // Grant S3 permissions to Lambda for TTS audio
+    ttsAudioBucket.grantReadWrite(apiLambda);
+
+    // Grant Secrets Manager permissions to Lambda for Aurora credentials
+    dbCredentials.grantRead(apiLambda);
+
+    // Grant Aurora Data API permissions to Lambda
+    apiLambda.addToRolePolicy(
+      new PolicyStatement({
+        effect: Effect.ALLOW,
+        actions: [
+          'rds-data:ExecuteStatement',
+          'rds-data:BatchExecuteStatement',
+          'rds-data:BeginTransaction',
+          'rds-data:CommitTransaction',
+          'rds-data:RollbackTransaction',
+        ],
+        resources: [dbCluster.clusterArn],
+      }),
+    );
 
     // Grant Cognito permissions to Lambda for admin operations
     apiLambda.addToRolePolicy(
@@ -439,6 +601,27 @@ export class VelaStack extends Stack {
     new CfnOutput(this, 'VITE_API_URL', {
       value: '/api/',
       description: 'Frontend API base path via CloudFront',
+    });
+
+    // TTS and Aurora Outputs
+    new CfnOutput(this, 'TTSAudioBucketName', {
+      value: ttsAudioBucket.bucketName,
+      description: 'S3 bucket for TTS audio files',
+    });
+
+    new CfnOutput(this, 'AuroraClusterArn', {
+      value: dbCluster.clusterArn,
+      description: 'Aurora Serverless v2 cluster ARN',
+    });
+
+    new CfnOutput(this, 'AuroraSecretArn', {
+      value: dbCredentials.secretArn,
+      description: 'Aurora database credentials secret ARN',
+    });
+
+    new CfnOutput(this, 'AuroraClusterEndpoint', {
+      value: dbCluster.clusterEndpoint.hostname,
+      description: 'Aurora cluster endpoint',
     });
   }
 }

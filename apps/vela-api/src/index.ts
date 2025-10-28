@@ -7,11 +7,13 @@ import { progress } from './routes/progress';
 import { profiles as createProfilesRoute } from './routes/profiles';
 import auth from './routes/auth';
 import myDictionaries from './routes/my-dictionaries';
+import createTTSRoute from './routes/tts';
 import type { Env } from './types';
 import { serve } from '@hono/node-server';
 import { readFileSync, existsSync } from 'fs';
 import { resolve } from 'path';
 import { Context, Next } from 'hono';
+import { initializeAuthVerifier } from './middleware/auth';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -39,6 +41,18 @@ if (process.env.NODE_ENV === 'development') {
     );
   }
 
+  // Initialize auth verifier AFTER loading .env so Cognito config is available
+  const userPoolId = process.env.VITE_COGNITO_USER_POOL_ID;
+  const clientId = process.env.VITE_COGNITO_USER_POOL_CLIENT_ID || process.env.COGNITO_CLIENT_ID;
+
+  if (userPoolId && clientId) {
+    initializeAuthVerifier(userPoolId, clientId);
+  } else {
+    console.warn(
+      '⚠️ Cognito configuration missing. Authentication will fail for protected routes.',
+    );
+  }
+
   // Mock environment variables for development
   const mockEnv: Env = {
     GEMINI_API_KEY: process.env.GEMINI_API_KEY,
@@ -53,6 +67,8 @@ if (process.env.NODE_ENV === 'development') {
     DDB_TABLE: process.env.DDB_TABLE || process.env.VITE_DDB_TABLE,
     COGNITO_CLIENT_ID:
       process.env.COGNITO_CLIENT_ID || process.env.VITE_COGNITO_USER_POOL_CLIENT_ID,
+    TTS_AUDIO_BUCKET_NAME: process.env.TTS_AUDIO_BUCKET_NAME,
+    ELEVENLABS_API_KEY: process.env.ELEVENLABS_API_KEY,
   };
 
   console.log('Environment variables loaded:', {
@@ -115,15 +131,47 @@ if (process.env.NODE_ENV === 'development') {
     DDB_REGION: process.env.DDB_REGION || process.env.VITE_DDB_REGION,
     DDB_TABLE: process.env.DDB_TABLE || process.env.VITE_DDB_TABLE,
     COGNITO_CLIENT_ID: process.env.COGNITO_CLIENT_ID,
+    TTS_AUDIO_BUCKET_NAME: process.env.TTS_AUDIO_BUCKET_NAME,
+    ELEVENLABS_API_KEY: process.env.ELEVENLABS_API_KEY,
   };
   const profiles = createProfilesRoute(mockEnv);
   app.route('/api/profiles', profiles);
+
+  const tts = createTTSRoute(mockEnv);
+  app.route('/api/tts', tts);
 } else {
-  // In production, the environment is passed differently (e.g., by the Lambda context)
-  // For now, we'll just create it with an empty object, but this will need to be
-  // adapted for a real production environment.
-  const profiles = createProfilesRoute({} as Env);
+  // Production: Initialize auth verifier with Lambda environment variables
+  const userPoolId = process.env.VITE_COGNITO_USER_POOL_ID;
+  const clientId = process.env.VITE_COGNITO_USER_POOL_CLIENT_ID || process.env.COGNITO_CLIENT_ID;
+
+  if (userPoolId && clientId) {
+    initializeAuthVerifier(userPoolId, clientId);
+  } else {
+    console.warn('⚠️ Cognito configuration missing in production. Authentication will fail.');
+  }
+
+  // Production: Create env object from Lambda environment variables
+  const prodEnv: Env = {
+    GEMINI_API_KEY: process.env.GEMINI_API_KEY,
+    OPENROUTER_API_KEY: process.env.OPENROUTER_API_KEY,
+    APP_NAME: process.env.APP_NAME,
+    AWS_ACCESS_KEY_ID: process.env.AWS_ACCESS_KEY_ID,
+    AWS_SECRET_ACCESS_KEY: process.env.AWS_SECRET_ACCESS_KEY,
+    AWS_REGION: process.env.AWS_REGION,
+    VITE_COGNITO_USER_POOL_ID: process.env.VITE_COGNITO_USER_POOL_ID,
+    DDB_ENDPOINT: process.env.DDB_ENDPOINT,
+    DDB_REGION: process.env.DDB_REGION,
+    DDB_TABLE: process.env.DDB_TABLE,
+    COGNITO_CLIENT_ID: process.env.COGNITO_CLIENT_ID,
+    TTS_AUDIO_BUCKET_NAME: process.env.TTS_AUDIO_BUCKET_NAME,
+    ELEVENLABS_API_KEY: process.env.ELEVENLABS_API_KEY,
+  };
+
+  const profiles = createProfilesRoute(prodEnv);
   app.route('/api/profiles', profiles);
+
+  const tts = createTTSRoute(prodEnv);
+  app.route('/api/tts', tts);
 }
 
 // Mount the auth routes

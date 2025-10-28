@@ -1,5 +1,6 @@
 import type { Question, SentenceQuestion } from 'src/stores/games';
 import type { Vocabulary, Sentence } from 'src/types/database';
+import { getApiUrl } from 'src/utils/api';
 
 function shuffle<T>(array: T[]): T[] {
   let currentIndex = array.length,
@@ -37,7 +38,7 @@ async function httpJson(input: RequestInfo, init?: RequestInit) {
 
 async function getSentenceQuestions(count = 5): Promise<SentenceQuestion[]> {
   try {
-    const data = await httpJson(`/api/games/sentences?limit=${count}`);
+    const data = await httpJson(getApiUrl(`games/sentences?limit=${count}`));
     const sentences: Sentence[] = data.sentences || [];
 
     return sentences.map((sentence) => {
@@ -59,7 +60,7 @@ async function getSentenceQuestions(count = 5): Promise<SentenceQuestion[]> {
 
 async function getVocabularyQuestions(count = 10): Promise<Question[]> {
   try {
-    const data = await httpJson(`/api/games/vocabulary?limit=${count}`);
+    const data = await httpJson(getApiUrl(`games/vocabulary?limit=${count}`));
     const vocabulary: Vocabulary[] = data.vocabulary || [];
 
     // Create multiple choice questions

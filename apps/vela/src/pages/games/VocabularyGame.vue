@@ -7,7 +7,11 @@
     </div>
     <div v-else-if="gameStore.gameActive && currentQuestion">
       <game-timer />
-      <vocabulary-card :question="currentQuestion" @answer="handleAnswer" />
+      <vocabulary-card
+        :question="currentQuestion"
+        @answer="handleAnswer"
+        @pronounce="handlePronounce"
+      />
       <score-display :score="gameStore.score" />
     </div>
     <div v-else>
@@ -20,13 +24,18 @@
 import { computed, ref, watch } from 'vue';
 import { useGameStore } from 'src/stores/games';
 import { useProgressStore } from 'src/stores/progress';
+import { useAuthStore } from 'src/stores/auth';
 import { gameService } from '../../services/gameService';
+import { pronounceWord } from '../../services/ttsService';
 import VocabularyCard from 'src/components/games/VocabularyCard.vue';
 import ScoreDisplay from 'src/components/games/ScoreDisplay.vue';
 import GameTimer from 'src/components/games/GameTimer.vue';
+import { Notify } from 'quasar';
+import type { Vocabulary } from 'src/types/database';
 
 const gameStore = useGameStore();
 const progressStore = useProgressStore();
+const authStore = useAuthStore();
 
 const gameStartTime = ref<Date | null>(null);
 const correctAnswers = ref(0);
@@ -57,6 +66,32 @@ function handleAnswer(selectedAnswer: string) {
   progressStore.updateProgress(currentQuestion.value.word.id, isCorrect);
 
   gameStore.answerQuestion(isCorrect);
+}
+
+async function handlePronounce(word: Vocabulary) {
+  const user = authStore.user;
+  if (!user?.id) {
+    Notify.create({
+      type: 'warning',
+      message: 'Please sign in to use pronunciation features',
+      position: 'top',
+    });
+    return;
+  }
+
+  try {
+    await pronounceWord(word, user.id);
+  } catch (error) {
+    console.error('Pronunciation error:', error);
+    Notify.create({
+      type: 'negative',
+      message:
+        error instanceof Error
+          ? error.message
+          : 'Failed to play pronunciation. Please check your TTS settings.',
+      position: 'top',
+    });
+  }
 }
 
 // Watch for game end to record session
