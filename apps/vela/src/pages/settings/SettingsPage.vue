@@ -79,7 +79,7 @@
           <q-input
             v-model="apiKeyInput"
             :type="showApiKey ? 'text' : 'password'"
-            label="API Key (optional)"
+            label="API Key"
             dense
             outlined
             clearable
@@ -94,15 +94,6 @@
               />
             </template>
           </q-input>
-          <div class="row q-col-gutter-sm q-mt-xs">
-            <div class="col-auto">
-              <q-btn flat size="sm" label="Use server key" @click="clearApiKey" />
-            </div>
-            <div class="col-auto">
-              <q-badge v-if="hasCustomKey" color="positive" outline>Using your key</q-badge>
-              <q-badge v-else color="grey" outline>Using server key</q-badge>
-            </div>
-          </div>
         </div>
         <div class="col-12 col-md-4 q-mt-sm">
           <q-btn
@@ -301,12 +292,8 @@ const hasCustomKey = computed(() => !!store.currentApiKey);
 const apiKeyHint = computed(() =>
   hasCustomKey.value
     ? 'Your personal API key will be used for this provider'
-    : 'Optional: enter your own API key. Leave blank to use the server key',
+    : 'Enter your API key for this provider',
 );
-
-const clearApiKey = () => {
-  apiKeyInput.value = '';
-};
 
 // TTS Settings
 const ttsApiKeyInput = ref('');

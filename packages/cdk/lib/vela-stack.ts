@@ -350,8 +350,6 @@ export class VelaStack extends Stack {
         AURORA_DB_SECRET_ARN: dbCredentials.secretArn,
         AURORA_DB_CLUSTER_ARN: dbCluster.clusterArn,
         AURORA_DB_NAME: 'vela',
-        GEMINI_API_KEY: process.env.GEMINI_API_KEY || '',
-        OPENROUTER_API_KEY: process.env.OPENROUTER_API_KEY || '',
         ELEVENLABS_API_KEY: process.env.ELEVENLABS_API_KEY || '',
         VITE_COGNITO_USER_POOL_ID: userPool.userPoolId,
         VITE_COGNITO_USER_POOL_CLIENT_ID: userPoolClient.userPoolClientId,

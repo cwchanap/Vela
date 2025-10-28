@@ -73,11 +73,11 @@ describe('LLM Chat Route', () => {
     });
 
     it('should return 400 for missing prompt and messages', async () => {
-      const app = createTestApp({ GEMINI_API_KEY: 'test-key' });
+      const app = createTestApp();
       const req = new Request('http://localhost/', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ provider: 'google' }),
+        body: JSON.stringify({ provider: 'google', apiKey: 'test-key' }),
       });
 
       const res = await app.request(req);
@@ -89,7 +89,7 @@ describe('LLM Chat Route', () => {
   });
 
   describe('Google provider', () => {
-    it('should return 500 when API key is missing', async () => {
+    it('should return 400 when API key is missing', async () => {
       const app = createTestApp();
       const req = new Request('http://localhost/', {
         method: 'POST',
@@ -103,8 +103,8 @@ describe('LLM Chat Route', () => {
       const res = await app.request(req);
       const json = await res.json();
 
-      expect(res.status).toBe(500);
-      expect(json.error).toBe('Missing GEMINI_API_KEY server secret');
+      expect(res.status).toBe(400);
+      expect(json.error).toBe('Missing API key for Google provider');
     });
 
     it('should make successful request to Google API', async () => {
@@ -123,12 +123,13 @@ describe('LLM Chat Route', () => {
         text: () => Promise.resolve(JSON.stringify(mockResponse)),
       });
 
-      const app = createTestApp({ GEMINI_API_KEY: 'test-key' });
+      const app = createTestApp();
       const req = new Request('http://localhost/', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           provider: 'google',
+          apiKey: 'test-key',
           prompt: 'Hello',
           model: 'gemini-2.5-flash-lite',
           temperature: 0.7,
@@ -160,12 +161,13 @@ describe('LLM Chat Route', () => {
         text: () => Promise.resolve('Bad Request'),
       });
 
-      const app = createTestApp({ GEMINI_API_KEY: 'test-key' });
+      const app = createTestApp();
       const req = new Request('http://localhost/', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           provider: 'google',
+          apiKey: 'test-key',
           prompt: 'Hello',
         }),
       });
@@ -179,7 +181,7 @@ describe('LLM Chat Route', () => {
   });
 
   describe('OpenRouter provider', () => {
-    it('should return 500 when API key is missing', async () => {
+    it('should return 400 when API key is missing', async () => {
       const app = createTestApp();
       const req = new Request('http://localhost/', {
         method: 'POST',
@@ -193,8 +195,8 @@ describe('LLM Chat Route', () => {
       const res = await app.request(req);
       const json = await res.json();
 
-      expect(res.status).toBe(500);
-      expect(json.error).toBe('Missing OPENROUTER_API_KEY server secret');
+      expect(res.status).toBe(400);
+      expect(json.error).toBe('Missing API key for OpenRouter provider');
     });
 
     it('should make successful request to OpenRouter API', async () => {
@@ -214,7 +216,6 @@ describe('LLM Chat Route', () => {
       });
 
       const app = createTestApp({
-        OPENROUTER_API_KEY: 'test-key',
         APP_NAME: 'Vela App',
       });
       const req = new Request('http://localhost/', {
@@ -222,6 +223,7 @@ describe('LLM Chat Route', () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           provider: 'openrouter',
+          apiKey: 'test-key',
           prompt: 'Hello',
           model: 'openai/gpt-oss-20b:free',
           temperature: 0.7,
@@ -270,12 +272,13 @@ describe('LLM Chat Route', () => {
         text: () => Promise.resolve(JSON.stringify(mockResponse)),
       });
 
-      const app = createTestApp({ GEMINI_API_KEY: 'test-key' });
+      const app = createTestApp();
       const req = new Request('http://localhost/', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           provider: 'google',
+          apiKey: 'test-key',
           messages: [
             { role: 'system', content: 'You are helpful' },
             { role: 'user', content: 'Hello' },

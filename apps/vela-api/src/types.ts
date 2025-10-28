@@ -1,6 +1,4 @@
 export interface Env {
-  GEMINI_API_KEY?: string;
-  OPENROUTER_API_KEY?: string;
   APP_NAME?: string;
 
   // AWS configuration

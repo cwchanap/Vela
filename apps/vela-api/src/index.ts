@@ -55,8 +55,6 @@ if (process.env.NODE_ENV === 'development') {
 
   // Mock environment variables for development
   const mockEnv: Env = {
-    GEMINI_API_KEY: process.env.GEMINI_API_KEY,
-    OPENROUTER_API_KEY: process.env.OPENROUTER_API_KEY,
     APP_NAME: process.env.APP_NAME || 'Vela Japanese Learning App (Dev)',
     AWS_ACCESS_KEY_ID: process.env.AWS_ACCESS_KEY_ID,
     AWS_SECRET_ACCESS_KEY: process.env.AWS_SECRET_ACCESS_KEY,
@@ -120,8 +118,6 @@ app.route('/api/progress', progress);
 // Mount the profiles routes
 if (process.env.NODE_ENV === 'development') {
   const mockEnv: Env = {
-    GEMINI_API_KEY: process.env.GEMINI_API_KEY,
-    OPENROUTER_API_KEY: process.env.OPENROUTER_API_KEY,
     APP_NAME: process.env.APP_NAME || 'Vela Japanese Learning App (Dev)',
     AWS_ACCESS_KEY_ID: process.env.AWS_ACCESS_KEY_ID,
     AWS_SECRET_ACCESS_KEY: process.env.AWS_SECRET_ACCESS_KEY,
@@ -152,8 +148,6 @@ if (process.env.NODE_ENV === 'development') {
 
   // Production: Create env object from Lambda environment variables
   const prodEnv: Env = {
-    GEMINI_API_KEY: process.env.GEMINI_API_KEY,
-    OPENROUTER_API_KEY: process.env.OPENROUTER_API_KEY,
     APP_NAME: process.env.APP_NAME,
     AWS_ACCESS_KEY_ID: process.env.AWS_ACCESS_KEY_ID,
     AWS_SECRET_ACCESS_KEY: process.env.AWS_SECRET_ACCESS_KEY,

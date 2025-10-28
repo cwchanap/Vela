@@ -162,9 +162,9 @@ Keep it concise and educational.`;
 
     // Call the appropriate LLM provider with streaming support
     if (provider === 'google') {
-      const key: string | undefined = apiKey || c.env.GEMINI_API_KEY;
+      const key: string | undefined = apiKey;
       if (!key) {
-        return c.json({ error: 'Missing GEMINI_API_KEY' }, 500);
+        return c.json({ error: 'Missing API key for Google provider' }, 400);
       }
 
       const llmModel = model || 'gemini-2.5-flash-lite';
@@ -269,9 +269,9 @@ Keep it concise and educational.`;
     }
 
     if (provider === 'openrouter') {
-      const key: string | undefined = apiKey || c.env.OPENROUTER_API_KEY;
+      const key: string | undefined = apiKey;
       if (!key) {
-        return c.json({ error: 'Missing OPENROUTER_API_KEY' }, 500);
+        return c.json({ error: 'Missing API key for OpenRouter provider' }, 400);
       }
 
       const llmModel = model || 'openai/gpt-oss-20b:free';

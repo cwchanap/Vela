@@ -88,8 +88,8 @@ The following environment variables are required:
 
 ### LLM Chat
 
-- `GEMINI_API_KEY`: Google Gemini API key
-- `OPENROUTER_API_KEY`: OpenRouter API key
+Users must provide their own API keys when making requests to LLM providers (Google Gemini, OpenRouter, etc.). API keys are sent in the request body and are not stored on the server.
+
 - `APP_NAME`: Application name for OpenRouter headers
 
 ### AWS Configuration

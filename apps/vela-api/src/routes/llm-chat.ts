@@ -37,9 +37,9 @@ llmChat.post('/', async (c) => {
 
   try {
     if (provider === 'google') {
-      const apiKey: string | undefined = input.apiKey || c.env.GEMINI_API_KEY;
+      const apiKey: string | undefined = input.apiKey;
       if (!apiKey) {
-        return c.json({ error: 'Missing GEMINI_API_KEY server secret' }, 500);
+        return c.json({ error: 'Missing API key for Google provider' }, 400);
       }
 
       const model = input.model || 'gemini-2.5-flash-lite';
@@ -102,9 +102,9 @@ llmChat.post('/', async (c) => {
     }
 
     if (provider === 'openrouter') {
-      const apiKey: string | undefined = input.apiKey || c.env.OPENROUTER_API_KEY;
+      const apiKey: string | undefined = input.apiKey;
       if (!apiKey) {
-        return c.json({ error: 'Missing OPENROUTER_API_KEY server secret' }, 500);
+        return c.json({ error: 'Missing API key for OpenRouter provider' }, 400);
       }
 
       const model = input.model || 'openai/gpt-oss-20b:free';
