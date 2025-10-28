@@ -161,5 +161,5 @@ Use Playwright MCP to interact with browser for testing. DON't USE windsurf buil
 
 # Test account:
 
-Email: testuser.vela@gmail.com
-Password: TestPass123!
+Email: test@cwchanap.dev
+Password: password123
