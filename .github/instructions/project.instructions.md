@@ -157,7 +157,7 @@ The application uses a comprehensive database schema for a Japanese learning app
 
 # IMPORTANT!!
 
-Use Playwright MCP to interact with browser for testing. DON't USE windsurf built browser! Also don't run `npm run dev` to start the server as it may already started, check if it is running first: http://localhost:9000/
+Use Chrome dev MCP to interact with browser for testing. DON't USE windsurf built browser! Also don't run `npm run dev` to start the server as it may already started, check if it is running first: http://localhost:9000/
 
 # Test account:
 
