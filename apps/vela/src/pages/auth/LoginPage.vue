@@ -1,76 +1,46 @@
 <template>
   <q-page class="modern-auth-page animated-bg">
-    <div class="auth-wrapper">
-      <!-- Floating Decorative Elements -->
-      <div class="floating-shapes">
-        <div class="shape shape-1 floating"></div>
-        <div class="shape shape-2 floating"></div>
-        <div class="shape shape-3 floating"></div>
-        <div class="shape shape-4 floating"></div>
-      </div>
+    <!-- Floating Decorative Elements -->
+    <div class="floating-shapes">
+      <div class="shape shape-1"></div>
+      <div class="shape shape-2"></div>
+      <div class="shape shape-3"></div>
+    </div>
 
-      <div class="auth-container">
-        <!-- Modern App Branding -->
-        <div class="modern-branding q-mb-xl">
-          <div class="brand-logo floating">
-            <q-icon name="school" size="4rem" class="text-white" />
+    <div class="auth-container">
+      <div class="auth-content">
+        <!-- App Branding -->
+        <div class="brand-section">
+          <div class="brand-icon">
+            <q-icon name="school" size="3.5rem" color="white" />
           </div>
-          <div class="brand-content">
-            <h1 class="brand-title text-white">日本語学習</h1>
-            <h2 class="brand-subtitle text-white">Japanese Learning App</h2>
-            <p class="brand-description text-white">
-              Master Japanese through interactive games and AI assistance
-            </p>
-          </div>
+          <h1 class="brand-title">日本語学習</h1>
+          <p class="brand-tagline">Master Japanese with Interactive Learning</p>
         </div>
 
-        <!-- Modern Authentication Form -->
-        <div class="auth-form-wrapper glass-card">
+        <!-- Authentication Card -->
+        <div class="auth-card">
           <AuthForm
             :mode="authMode"
             :redirect-to="redirectTo"
             @success="handleAuthSuccess"
             @error="handleAuthError"
-            class="modern-auth-form"
           />
         </div>
 
-        <!-- Modern Features Preview -->
-        <div class="modern-features-preview glass-card q-mt-xl">
-          <div class="features-header q-mb-lg">
-            <h3 class="features-title text-white text-center">What you'll learn</h3>
+        <!-- Features Preview -->
+        <div class="features-section">
+          <div class="feature-pill">
+            <q-icon name="quiz" size="1.25rem" />
+            <span>Vocabulary Games</span>
           </div>
-
-          <div class="features-grid">
-            <div class="feature-item" data-aos="fade-up" data-aos-delay="100">
-              <div class="feature-icon-wrapper vocab-gradient">
-                <q-icon name="quiz" size="2rem" class="text-white" />
-              </div>
-              <div class="feature-content">
-                <h4 class="feature-title text-white">Vocabulary Games</h4>
-                <p class="feature-description text-white">Interactive flashcards and quizzes</p>
-              </div>
-            </div>
-
-            <div class="feature-item" data-aos="fade-up" data-aos-delay="200">
-              <div class="feature-icon-wrapper ai-gradient">
-                <q-icon name="psychology" size="2rem" class="text-white" />
-              </div>
-              <div class="feature-content">
-                <h4 class="feature-title text-white">AI Tutor</h4>
-                <p class="feature-description text-white">Personalized learning assistance</p>
-              </div>
-            </div>
-
-            <div class="feature-item" data-aos="fade-up" data-aos-delay="300">
-              <div class="feature-icon-wrapper progress-gradient">
-                <q-icon name="trending_up" size="2rem" class="text-white" />
-              </div>
-              <div class="feature-content">
-                <h4 class="feature-title text-white">Progress Tracking</h4>
-                <p class="feature-description text-white">Monitor your learning journey</p>
-              </div>
-            </div>
+          <div class="feature-pill">
+            <q-icon name="psychology" size="1.25rem" />
+            <span>AI-Powered Tutor</span>
+          </div>
+          <div class="feature-pill">
+            <q-icon name="trending_up" size="1.25rem" />
+            <span>Track Progress</span>
           </div>
         </div>
       </div>
@@ -156,270 +126,88 @@ onMounted(async () => {
 /* Modern Authentication Page */
 .modern-auth-page {
   min-height: 100vh;
-  position: relative;
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 2rem 1rem;
-  overflow: hidden;
-}
-
-.auth-wrapper {
   position: relative;
-  z-index: 2;
-  width: 100%;
-  max-width: 500px;
+  overflow: hidden;
+  padding: 2rem 1rem;
 }
 
-/* Floating Decorative Shapes */
+/* Floating Background Shapes */
 .floating-shapes {
   position: absolute;
   top: 0;
   left: 0;
   right: 0;
   bottom: 0;
-  z-index: 1;
+  z-index: 0;
   pointer-events: none;
+  overflow: hidden;
 }
 
 .shape {
   position: absolute;
-  opacity: 0.1;
   border-radius: 50%;
+  filter: blur(80px);
+  opacity: 0.3;
+  animation: float 20s ease-in-out infinite;
 }
 
 .shape-1 {
-  width: 200px;
-  height: 200px;
-  background: var(--gradient-warm);
-  top: 10%;
+  width: 400px;
+  height: 400px;
+  background: radial-gradient(circle, rgba(255, 107, 107, 0.4), rgba(255, 170, 65, 0.2));
+  top: -100px;
   left: -100px;
   animation-delay: 0s;
 }
 
 .shape-2 {
-  width: 150px;
-  height: 150px;
-  background: var(--gradient-cool);
-  top: 70%;
-  right: -75px;
-  animation-delay: 2s;
+  width: 350px;
+  height: 350px;
+  background: radial-gradient(circle, rgba(94, 114, 228, 0.4), rgba(130, 88, 255, 0.2));
+  bottom: -100px;
+  right: -100px;
+  animation-delay: 5s;
 }
 
 .shape-3 {
-  width: 80px;
-  height: 80px;
-  background: var(--gradient-secondary);
-  top: 30%;
-  right: 20%;
-  animation-delay: 4s;
+  width: 300px;
+  height: 300px;
+  background: radial-gradient(circle, rgba(52, 211, 153, 0.3), rgba(33, 206, 153, 0.2));
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  animation-delay: 10s;
 }
 
-.shape-4 {
-  width: 120px;
-  height: 120px;
-  background: var(--gradient-success);
-  bottom: 20%;
-  left: 10%;
-  animation-delay: 6s;
-}
-
-/* Modern Branding */
-.modern-branding {
-  text-align: center;
-  margin-bottom: 3rem;
-}
-
-.brand-logo {
-  margin-bottom: 1.5rem;
-  animation-delay: 0.5s;
-}
-
-.brand-title {
-  font-size: 3rem;
-  font-weight: 800;
-  margin: 0 0 0.5rem 0;
-  text-shadow: 0 2px 20px rgba(0, 0, 0, 0.3);
-  letter-spacing: -1px;
-}
-
-.brand-subtitle {
-  font-size: 1.5rem;
-  font-weight: 300;
-  margin: 0 0 1rem 0;
-  text-shadow: 0 2px 10px rgba(0, 0, 0, 0.2);
-}
-
-.brand-description {
-  font-size: 1.1rem;
-  font-weight: 300;
-  opacity: 0.9;
-  margin: 0;
-  text-shadow: 0 1px 5px rgba(0, 0, 0, 0.2);
-}
-
-/* Authentication Form Wrapper */
-.auth-form-wrapper {
-  padding: 2.5rem;
-  border: 1px solid var(--glass-border);
-  margin-bottom: 2rem;
-}
-
-/* Modern Features Preview */
-.modern-features-preview {
-  padding: 2rem;
-  border: 1px solid var(--glass-border);
-}
-
-.features-header {
-  text-align: center;
-}
-
-.features-title {
-  font-size: 1.5rem;
-  font-weight: 600;
-  margin: 0;
-  text-shadow: 0 2px 10px rgba(0, 0, 0, 0.2);
-}
-
-.features-grid {
-  display: grid;
-  grid-template-columns: 1fr;
-  gap: 1.5rem;
-}
-
-.feature-item {
-  display: flex;
-  align-items: center;
-  gap: 1rem;
-  padding: 1rem;
-  border-radius: var(--border-radius-md);
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  transition: all 0.3s ease;
-}
-
-.feature-item:hover {
-  background: rgba(255, 255, 255, 0.1);
-  transform: translateY(-2px);
-}
-
-.feature-icon-wrapper {
-  width: 60px;
-  height: 60px;
-  border-radius: var(--border-radius-md);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  box-shadow: var(--shadow-soft);
-  flex-shrink: 0;
-}
-
-.vocab-gradient {
-  background: var(--gradient-primary);
-}
-.ai-gradient {
-  background: var(--gradient-success);
-}
-.progress-gradient {
-  background: var(--gradient-warm);
-}
-
-.feature-content {
-  flex: 1;
-}
-
-.feature-title {
-  font-size: 1.1rem;
-  font-weight: 600;
-  margin: 0 0 0.25rem 0;
-  text-shadow: 0 1px 5px rgba(0, 0, 0, 0.2);
-}
-
-.feature-description {
-  font-size: 0.9rem;
-  opacity: 0.8;
-  margin: 0;
-  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
-}
-
-/* Enhanced Glass Card */
-.auth-container .glass-card {
-  backdrop-filter: blur(20px);
-  background: rgba(255, 255, 255, 0.15);
-  border: 1px solid rgba(255, 255, 255, 0.2);
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
-}
-
-/* Responsive Design */
-@media (max-width: 768px) {
-  .modern-auth-page {
-    padding: 1rem 0.5rem;
+@keyframes float {
+  0%,
+  100% {
+    transform: translate(0, 0) scale(1);
   }
-
-  .brand-title {
-    font-size: 2.5rem;
+  33% {
+    transform: translate(30px, -30px) scale(1.1);
   }
-
-  .brand-subtitle {
-    font-size: 1.2rem;
-  }
-
-  .brand-description {
-    font-size: 1rem;
-  }
-
-  .auth-form-wrapper {
-    padding: 2rem;
-  }
-
-  .modern-features-preview {
-    padding: 1.5rem;
+  66% {
+    transform: translate(-20px, 20px) scale(0.9);
   }
 }
 
-@media (max-width: 480px) {
-  .brand-title {
-    font-size: 2rem;
-  }
-
-  .brand-subtitle {
-    font-size: 1rem;
-  }
-
-  .brand-description {
-    font-size: 0.9rem;
-  }
-
-  .auth-form-wrapper {
-    padding: 1.5rem;
-  }
-
-  .modern-features-preview {
-    padding: 1rem;
-  }
-
-  .feature-item {
-    flex-direction: column;
-    text-align: center;
-    gap: 0.75rem;
-  }
-
-  .feature-icon-wrapper {
-    width: 50px;
-    height: 50px;
-  }
-}
-
-/* Additional Animation Enhancement */
+/* Main Container */
 .auth-container {
-  animation: slideInUp 0.8s ease-out;
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  max-width: 420px;
+  animation: fadeInUp 0.6s ease-out;
 }
 
-@keyframes slideInUp {
+@keyframes fadeInUp {
   from {
     opacity: 0;
-    transform: translateY(30px);
+    transform: translateY(20px);
   }
   to {
     opacity: 1;
@@ -427,21 +215,153 @@ onMounted(async () => {
   }
 }
 
-/* Enhanced floating animation with different timings */
-.floating {
-  animation-duration: 4s;
+.auth-content {
+  display: flex;
+  flex-direction: column;
+  gap: 2rem;
 }
 
-.shape-1.floating {
-  animation-duration: 8s;
+/* Brand Section */
+.brand-section {
+  text-align: center;
+  color: white;
 }
-.shape-2.floating {
-  animation-duration: 6s;
+
+.brand-icon {
+  margin-bottom: 1rem;
+  animation: pulse 2s ease-in-out infinite;
 }
-.shape-3.floating {
-  animation-duration: 10s;
+
+@keyframes pulse {
+  0%,
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  50% {
+    transform: scale(1.05);
+    opacity: 0.9;
+  }
 }
-.shape-4.floating {
-  animation-duration: 7s;
+
+.brand-title {
+  font-size: 2.75rem;
+  font-weight: 700;
+  margin: 0 0 0.5rem 0;
+  color: white;
+  text-shadow: 0 2px 20px rgba(0, 0, 0, 0.3);
+  letter-spacing: 2px;
+}
+
+.brand-tagline {
+  font-size: 1rem;
+  font-weight: 400;
+  margin: 0;
+  color: rgba(255, 255, 255, 0.9);
+  text-shadow: 0 1px 10px rgba(0, 0, 0, 0.2);
+}
+
+/* Authentication Card */
+.auth-card {
+  background: rgba(255, 255, 255, 0.95);
+  backdrop-filter: blur(10px);
+  border-radius: 20px;
+  padding: 2.5rem;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+  border: 1px solid rgba(255, 255, 255, 0.5);
+  transition: all 0.3s ease;
+}
+
+.auth-card:hover {
+  box-shadow: 0 25px 70px rgba(0, 0, 0, 0.4);
+  transform: translateY(-2px);
+}
+
+/* Features Section */
+.features-section {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  justify-content: center;
+}
+
+.feature-pill {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.75rem 1.25rem;
+  background: rgba(255, 255, 255, 0.15);
+  backdrop-filter: blur(10px);
+  border-radius: 50px;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  color: white;
+  font-size: 0.875rem;
+  font-weight: 500;
+  transition: all 0.3s ease;
+  cursor: default;
+  text-shadow: 0 1px 5px rgba(0, 0, 0, 0.2);
+}
+
+.feature-pill:hover {
+  background: rgba(255, 255, 255, 0.25);
+  border-color: rgba(255, 255, 255, 0.5);
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+}
+
+.feature-pill .q-icon {
+  opacity: 0.95;
+}
+
+/* Responsive Design */
+@media (max-width: 600px) {
+  .modern-auth-page {
+    padding: 1.5rem 1rem;
+  }
+
+  .auth-container {
+    max-width: 100%;
+  }
+
+  .brand-title {
+    font-size: 2.25rem;
+  }
+
+  .brand-tagline {
+    font-size: 0.9rem;
+  }
+
+  .auth-card {
+    padding: 2rem 1.5rem;
+    border-radius: 16px;
+  }
+
+  .feature-pill {
+    font-size: 0.8rem;
+    padding: 0.625rem 1rem;
+  }
+
+  .feature-pill .q-icon {
+    font-size: 1.1rem;
+  }
+}
+
+@media (max-width: 400px) {
+  .brand-title {
+    font-size: 2rem;
+  }
+
+  .auth-card {
+    padding: 1.75rem 1.25rem;
+  }
+
+  .features-section {
+    gap: 0.5rem;
+  }
+
+  .feature-pill {
+    font-size: 0.75rem;
+    padding: 0.5rem 0.875rem;
+  }
 }
 </style>
