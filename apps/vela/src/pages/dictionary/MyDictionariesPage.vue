@@ -198,6 +198,7 @@ const $q = useQuasar();
 const llmSettings = useLLMSettingsStore();
 const authStore = useAuthStore();
 const { provider, currentModel, currentApiKey } = storeToRefs(llmSettings);
+const { user, isAuthenticated } = storeToRefs(authStore);
 
 const entries = ref<MyDictionaryEntry[]>([]);
 const loading = ref(false);
@@ -439,7 +440,8 @@ async function handleAskAI(entry: MyDictionaryEntry) {
 }
 
 async function handlePronounce(entry: MyDictionaryEntry) {
-  if (!authStore.user?.id) {
+  // Check if authenticated and has a valid session
+  if (!isAuthenticated.value || !authStore.session?.user?.id) {
     $q.notify({
       type: 'warning',
       message: 'Please sign in to use pronunciation features',
@@ -450,11 +452,9 @@ async function handlePronounce(entry: MyDictionaryEntry) {
 
   try {
     // Use sentence_id as vocabulary ID for TTS caching
-    const { audioUrl } = await generatePronunciation(
-      entry.sentence_id,
-      entry.sentence,
-      authStore.user.id,
-    );
+    // Get user ID from session if profile hasn't loaded yet
+    const userId = user.value?.id || authStore.session.user.id;
+    const { audioUrl } = await generatePronunciation(entry.sentence_id, entry.sentence, userId);
     await playAudio(audioUrl);
   } catch (err) {
     console.error('Pronunciation error:', err);
