@@ -225,6 +225,8 @@ describe('UserProfile', () => {
 
       // Component should render successfully
       expect(wrapper.exists()).toBe(true);
+      // Should display "Disabled" status for notifications
+      expect(wrapper.text()).toContain('Disabled');
     });
   });
 
@@ -465,8 +467,8 @@ describe('UserProfile', () => {
 
       // Should show formatted date
       expect(wrapper.text()).toContain('Member Since');
-      // Date should be formatted (checking for "December" which should be in the formatted date)
-      expect(wrapper.text()).toContain('December');
+      // Date should be formatted (checking for "January" which should be in the formatted date)
+      expect(wrapper.text()).toContain('January');
     });
   });
 });

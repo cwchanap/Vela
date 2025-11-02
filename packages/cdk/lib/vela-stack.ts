@@ -212,6 +212,26 @@ export class VelaStack extends Stack {
     });
 
     // S3 Bucket for TTS Audio Storage
+    // Configure CORS origins for TTS audio bucket
+    const frontendOrigins = process.env.FRONTEND_ORIGINS
+      ? process.env.FRONTEND_ORIGINS.split(',').map((origin) => origin.trim())
+      : [];
+
+    // Add localhost fallback for development
+    if (process.env.NODE_ENV !== 'production') {
+      frontendOrigins.push('http://localhost:3000');
+    }
+
+    // Ensure we have at least one origin (fallback to current domain if no origins configured)
+    const defaultDomainName = 'vela.cwchanap.dev';
+    const configuredDomain = process.env.DOMAIN_NAME?.trim();
+    const domainName =
+      configuredDomain && configuredDomain.length > 0 ? configuredDomain : defaultDomainName;
+
+    if (frontendOrigins.length === 0) {
+      frontendOrigins.push(`https://${domainName}`);
+    }
+
     const ttsAudioBucket = new Bucket(this, 'VelaTTSAudioBucket', {
       bucketName: `vela-tts-audio-${Stack.of(this).account}`,
       publicReadAccess: false,
@@ -222,7 +242,7 @@ export class VelaStack extends Stack {
       cors: [
         {
           allowedMethods: [HttpMethods.GET, HttpMethods.HEAD],
-          allowedOrigins: ['*'],
+          allowedOrigins: frontendOrigins,
           allowedHeaders: ['*'],
           maxAge: 3600,
         },
@@ -430,10 +450,6 @@ export class VelaStack extends Stack {
     });
 
     // Custom domain configuration
-    const defaultDomainName = 'vela.cwchanap.dev';
-    const configuredDomain = process.env.DOMAIN_NAME?.trim();
-    const domainName =
-      configuredDomain && configuredDomain.length > 0 ? configuredDomain : defaultDomainName;
 
     const certificateArn = process.env.CLOUDFRONT_CERT_ARN || process.env.ACM_CERT_ARN;
 

@@ -67,6 +67,8 @@ if (process.env.NODE_ENV === 'development') {
       process.env.COGNITO_CLIENT_ID || process.env.VITE_COGNITO_USER_POOL_CLIENT_ID,
     TTS_AUDIO_BUCKET_NAME: process.env.TTS_AUDIO_BUCKET_NAME,
     ELEVENLABS_API_KEY: process.env.ELEVENLABS_API_KEY,
+    CORS_ALLOWED_ORIGINS:
+      process.env.CORS_ALLOWED_ORIGINS || 'http://localhost:9000,http://127.0.0.1:9000',
   };
 
   console.log('Environment variables loaded:', {
@@ -129,6 +131,8 @@ if (process.env.NODE_ENV === 'development') {
     COGNITO_CLIENT_ID: process.env.COGNITO_CLIENT_ID,
     TTS_AUDIO_BUCKET_NAME: process.env.TTS_AUDIO_BUCKET_NAME,
     ELEVENLABS_API_KEY: process.env.ELEVENLABS_API_KEY,
+    CORS_ALLOWED_ORIGINS:
+      process.env.CORS_ALLOWED_ORIGINS || 'http://localhost:9000,http://127.0.0.1:9000',
   };
   const profiles = createProfilesRoute(mockEnv);
   app.route('/api/profiles', profiles);
@@ -159,6 +163,7 @@ if (process.env.NODE_ENV === 'development') {
     COGNITO_CLIENT_ID: process.env.COGNITO_CLIENT_ID,
     TTS_AUDIO_BUCKET_NAME: process.env.TTS_AUDIO_BUCKET_NAME,
     ELEVENLABS_API_KEY: process.env.ELEVENLABS_API_KEY,
+    CORS_ALLOWED_ORIGINS: process.env.CORS_ALLOWED_ORIGINS,
   };
 
   const profiles = createProfilesRoute(prodEnv);

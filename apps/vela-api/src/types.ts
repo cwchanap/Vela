@@ -16,6 +16,9 @@ export interface Env {
   // TTS configuration
   TTS_AUDIO_BUCKET_NAME?: string;
   ELEVENLABS_API_KEY?: string;
+
+  // CORS configuration
+  CORS_ALLOWED_ORIGINS?: string;
 }
 
 // Re-export types from validation schemas for backward compatibility

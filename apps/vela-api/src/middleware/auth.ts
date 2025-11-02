@@ -1,6 +1,13 @@
 import { Context, Next } from 'hono';
 import { CognitoJwtVerifier } from 'aws-jwt-verify';
 
+// Type for authenticated context with userId
+export type AuthContext = {
+  Variables: {
+    userId: string;
+  };
+};
+
 // Create verifier for Cognito ID tokens
 const createVerifier = (userPoolId: string, clientId: string) => {
   return CognitoJwtVerifier.create({
@@ -47,7 +54,7 @@ async function getUserIdFromToken(token: string): Promise<string | null> {
  * Authentication middleware that extracts and validates JWT token
  * Sets c.get('userId') for downstream handlers
  */
-export async function requireAuth(c: Context, next: Next) {
+export async function requireAuth(c: Context<AuthContext>, next: Next) {
   const authHeader = c.req.header('Authorization');
 
   if (!authHeader || !authHeader.startsWith('Bearer ')) {

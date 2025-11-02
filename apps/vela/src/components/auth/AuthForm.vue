@@ -42,7 +42,7 @@
       <!-- Password field -->
       <q-input
         v-model="form.password"
-        :label="isSignUp ? 'Password' : 'Password'"
+        label="Password"
         :type="showPassword ? 'text' : 'password'"
         outlined
         :disable="authStore.isLoading"
@@ -55,6 +55,9 @@
         <template v-slot:append>
           <q-icon
             :name="showPassword ? 'visibility_off' : 'visibility'"
+            :aria-label="showPassword ? 'Hide password' : 'Show password'"
+            role="button"
+            tabindex="0"
             class="cursor-pointer"
             @click="showPassword = !showPassword"
           />

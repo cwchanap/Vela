@@ -57,8 +57,16 @@ export async function generatePronunciation(
   });
 
   if (!response.ok) {
-    const error = await response.json();
-    throw new Error(error.error || 'Failed to generate pronunciation');
+    let errorMessage = `Failed to generate pronunciation (status: ${response.status})`;
+    try {
+      const error = await response.json();
+      errorMessage = error.error || errorMessage;
+    } catch {
+      // If JSON parsing fails, try to get the response as text
+      const errorText = await response.text();
+      errorMessage = errorText || `${errorMessage}: ${response.statusText}`;
+    }
+    throw new Error(errorMessage);
   }
 
   return response.json();
@@ -110,8 +118,16 @@ export async function saveTTSSettings(
   });
 
   if (!response.ok) {
-    const error = await response.json();
-    throw new Error(error.error || 'Failed to save TTS settings');
+    let errorMessage = 'Failed to save TTS settings';
+    try {
+      const error = await response.json();
+      errorMessage = error.error || errorMessage;
+    } catch {
+      // If JSON parsing fails, try to get the response as text
+      const errorText = await response.text();
+      errorMessage = errorText || response.statusText || errorMessage;
+    }
+    throw new Error(errorMessage);
   }
 }
 
@@ -127,7 +143,16 @@ export async function getTTSSettings(_userId?: string): Promise<TTSSettings> {
   });
 
   if (!response.ok) {
-    throw new Error('Failed to fetch TTS settings');
+    let errorMessage = 'Failed to fetch TTS settings';
+    try {
+      const error = await response.json();
+      errorMessage = error.error || errorMessage;
+    } catch {
+      // If JSON parsing fails, try to get the response as text
+      const errorText = await response.text();
+      errorMessage = errorText || response.statusText || errorMessage;
+    }
+    throw new Error(errorMessage);
   }
 
   return response.json();

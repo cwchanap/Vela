@@ -10,8 +10,14 @@ import {
   HeadObjectCommand,
 } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
-import { requireAuth } from '../middleware/auth';
+import { requireAuth, type AuthContext } from '../middleware/auth';
 import { createHash } from 'crypto';
+
+/**
+ * Default TTS settings for ElevenLabs
+ */
+const DEFAULT_VOICE_ID = 'ErXwobaYiN019PkySvjV';
+const DEFAULT_MODEL = 'eleven_multilingual_v2';
 
 /**
  * Generate a cache key that includes userId and TTS settings
@@ -59,9 +65,31 @@ type AuthContext = {
 const createTTSRoute = (env: Env) => {
   const tts = new Hono<{ Bindings: Env } & AuthContext>();
 
-  // Custom CORS handler
+  // Secure CORS handler with origin validation
   tts.use('*', async (c, next) => {
-    c.header('Access-Control-Allow-Origin', '*');
+    const origin = c.req.header('Origin');
+
+    // Parse allowed origins from environment variable
+    const allowedOrigins = env.CORS_ALLOWED_ORIGINS?.split(',').map((o) => o.trim()) || [];
+
+    // Check if the request origin is in the allowlist
+    const isAllowedOrigin = origin && allowedOrigins.includes(origin);
+
+    if (isAllowedOrigin) {
+      // Set specific origin instead of wildcard
+      c.header('Access-Control-Allow-Origin', origin);
+      c.header('Access-Control-Allow-Credentials', 'true');
+    } else if (origin) {
+      // Origin not allowed - return 403 for non-OPTIONS requests
+      if (c.req.method !== 'OPTIONS') {
+        return c.json({ error: 'CORS policy violation: Origin not allowed' }, 403);
+      }
+      // For OPTIONS requests with invalid origin, don't set CORS headers
+      await next();
+      return;
+    }
+
+    // Set other CORS headers
     c.header('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
     c.header('Access-Control-Allow-Headers', 'content-type, authorization');
 
@@ -107,8 +135,8 @@ const createTTSRoute = (env: Env) => {
 
       // Generate cache key that includes userId and TTS settings
       // This ensures each user gets their own cached audio with their chosen voice/model
-      const effectiveVoiceId = voiceId || 'ErXwobaYiN019PkySvjV';
-      const effectiveModel = model || 'eleven_multilingual_v2';
+      const effectiveVoiceId = voiceId || DEFAULT_VOICE_ID;
+      const effectiveModel = model || DEFAULT_MODEL;
       const s3Key = generateCacheKey(userId, vocabularyId, effectiveVoiceId, effectiveModel);
 
       try {
@@ -139,25 +167,38 @@ const createTTSRoute = (env: Env) => {
         }
       }
 
-      // Call ElevenLabs API to generate audio
-      const elevenLabsUrl = `https://api.elevenlabs.io/v1/text-to-speech/${voiceId || 'ErXwobaYiN019PkySvjV'}`;
+      // Call ElevenLabs API to generate audio with timeout
+      const elevenLabsUrl = `https://api.elevenlabs.io/v1/text-to-speech/${voiceId || DEFAULT_VOICE_ID}`;
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
 
-      const elevenLabsResponse = await fetch(elevenLabsUrl, {
-        method: 'POST',
-        headers: {
-          Accept: 'audio/mpeg',
-          'Content-Type': 'application/json',
-          'xi-api-key': apiKey,
-        },
-        body: JSON.stringify({
-          text,
-          model_id: model || 'eleven_multilingual_v2',
-          voice_settings: {
-            stability: 0.5,
-            similarity_boost: 0.75,
+      let elevenLabsResponse: Response;
+      try {
+        elevenLabsResponse = await fetch(elevenLabsUrl, {
+          method: 'POST',
+          headers: {
+            Accept: 'audio/mpeg',
+            'Content-Type': 'application/json',
+            'xi-api-key': apiKey,
           },
-        }),
-      });
+          body: JSON.stringify({
+            text,
+            model_id: model || DEFAULT_MODEL,
+            voice_settings: {
+              stability: 0.5,
+              similarity_boost: 0.75,
+            },
+          }),
+          signal: controller.signal,
+        });
+        clearTimeout(timeoutId); // Clear timeout on successful fetch
+      } catch (error: any) {
+        clearTimeout(timeoutId); // Clear timeout on error
+        if (error.name === 'AbortError') {
+          return c.json({ error: 'Request timeout: TTS generation took too long' }, 504);
+        }
+        throw error; // Re-throw other errors to be handled by outer catch
+      }
 
       if (!elevenLabsResponse.ok) {
         const errorText = await elevenLabsResponse.text();
@@ -230,8 +271,8 @@ const createTTSRoute = (env: Env) => {
         }
 
         const { voice_id: voiceId, model } = settings;
-        const effectiveVoiceId = voiceId || 'ErXwobaYiN019PkySvjV';
-        const effectiveModel = model || 'eleven_multilingual_v2';
+        const effectiveVoiceId = voiceId || DEFAULT_VOICE_ID;
+        const effectiveModel = model || DEFAULT_MODEL;
 
         // Initialize S3 client - use process.env in production
         const region = env.AWS_REGION || process.env.AWS_REGION || 'us-east-1';

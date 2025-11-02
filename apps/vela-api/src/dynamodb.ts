@@ -368,7 +368,21 @@ export const myDictionaries = {
   },
 };
 
+// Legacy alias for saved sentences (browser extension compatibility)
+export const savedSentences = {
+  create: myDictionaries.create,
+};
+
 // TTS Settings operations
+interface TTSSSettings {
+  user_id: string;
+  api_key: string;
+  voice_id: string | null;
+  model: string | null;
+  created_at?: number;
+  updated_at?: number;
+}
+
 export const ttsSettings = {
   async get(userId: string) {
     try {
@@ -383,17 +397,26 @@ export const ttsSettings = {
     }
   },
 
-  async put(settings: any) {
+  async put(settings: Omit<TTSSSettings, 'created_at' | 'updated_at'>) {
     try {
+      // Validate required user_id
+      if (!settings.user_id || typeof settings.user_id !== 'string') {
+        throw new Error('user_id is required and must be a string');
+      }
+
+      const timestamp = Date.now();
+      const itemToStore: TTSSSettings = {
+        ...settings,
+        created_at: timestamp, // Always set created_at for new items
+        updated_at: timestamp,
+      };
+
       const command = new PutCommand({
         TableName: TABLE_NAMES.TTS_SETTINGS,
-        Item: {
-          ...settings,
-          updated_at: new Date().toISOString(),
-        },
+        Item: itemToStore,
       });
       await docClient.send(command);
-      return settings;
+      return itemToStore;
     } catch (error) {
       handleDynamoError(error);
     }

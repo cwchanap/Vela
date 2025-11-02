@@ -432,28 +432,44 @@ describe('gameService', () => {
         {
           id: 'vocab-1',
           japanese_word: '猫',
+          hiragana: 'ねこ',
+          romaji: 'neko',
           english_translation: 'cat',
+          difficulty_level: 1,
+          category: 'animals',
           created_at: '2024-01-01T00:00:00Z',
         },
         {
           id: 'vocab-2',
           japanese_word: '犬',
+          hiragana: 'いぬ',
+          romaji: 'inu',
           english_translation: 'dog',
+          difficulty_level: 1,
+          category: 'animals',
           created_at: '2024-01-01T00:00:00Z',
         },
         {
           id: 'vocab-3',
           japanese_word: '鳥',
+          hiragana: 'とり',
+          romaji: 'tori',
           english_translation: 'bird',
+          difficulty_level: 2,
+          category: 'animals',
           created_at: '2024-01-01T00:00:00Z',
         },
         {
           id: 'vocab-4',
           japanese_word: '魚',
+          hiragana: 'さかな',
+          romaji: 'sakana',
           english_translation: 'fish',
+          difficulty_level: 2,
+          category: 'animals',
           created_at: '2024-01-01T00:00:00Z',
         },
-      ] as Vocabulary[];
+      ];
 
       mockFetch.mockResolvedValue({
         ok: true,

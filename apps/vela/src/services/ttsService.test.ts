@@ -635,6 +635,14 @@ describe('ttsService', () => {
         }),
       );
       expect(audioInstance?.src).toBe('https://example.com/audio/neko.mp3');
+
+      // Verify that the deprecated userId is not included in the request body
+      const requestBody = JSON.parse(mockFetch.mock.calls[0][1].body);
+      expect(requestBody).toStrictEqual({
+        vocabularyId: 'vocab-1',
+        text: '猫',
+      });
+      expect(requestBody).not.toHaveProperty('userId');
     });
 
     it('should throw error when TTS generation fails', async () => {

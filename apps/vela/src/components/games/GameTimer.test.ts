@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { mount, flushPromises } from '@vue/test-utils';
+import { nextTick } from 'vue';
 import { createPinia, setActivePinia } from 'pinia';
 import GameTimer from './GameTimer.vue';
 import { useGameStore } from 'src/stores/games';
@@ -26,11 +27,23 @@ describe('GameTimer', () => {
 
     // Initial render shows 60
     expect(wrapper.text()).toContain('Time: 60');
+    expect(wrapper.vm.timeLeft).toBe(60);
 
-    // Component uses setInterval which is hard to test with fake timers
-    // Just verify the component structure is correct
-    expect(wrapper.find('.text-h6').exists()).toBe(true);
-    expect(wrapper.find('.q-mb-md').exists()).toBe(true);
+    // Wait a bit and check that timer starts decrementing
+    await vi.advanceTimersByTimeAsync(1500); // Wait 1.5 seconds to ensure timer fires
+    await nextTick();
+
+    // Should have decremented at least once
+    expect(wrapper.vm.timeLeft).toBeLessThan(60);
+    expect(wrapper.vm.timeLeft).toBeGreaterThanOrEqual(58); // Should be around 59 or 58
+
+    // Wait another second
+    await vi.advanceTimersByTimeAsync(1000);
+    await nextTick();
+
+    // Should have decremented more
+    expect(wrapper.vm.timeLeft).toBeLessThan(59);
+    expect(wrapper.vm.timeLeft).toBeGreaterThanOrEqual(57);
   });
 
   it('should countdown from 60 to 0', async () => {
@@ -38,9 +51,20 @@ describe('GameTimer', () => {
 
     // Initial value
     expect(wrapper.text()).toContain('Time: 60');
+    expect(wrapper.vm.timeLeft).toBe(60);
 
-    // Verify component is properly mounted
-    expect(wrapper.vm).toBeDefined();
+    // Advance timers for full countdown (60 seconds)
+    await vi.advanceTimersByTimeAsync(60000);
+    await nextTick();
+    await flushPromises();
+
+    // Force Vue to update the DOM
+    wrapper.vm.$forceUpdate();
+    await nextTick();
+
+    // Should now display 0 or negative
+    expect(wrapper.vm.timeLeft).toBeLessThanOrEqual(0);
+    expect(wrapper.text()).toMatch(/Time: (0|-\d+)/);
   });
 
   it('should call gameStore.endGame when timer reaches 0', async () => {

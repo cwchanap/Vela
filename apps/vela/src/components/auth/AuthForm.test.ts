@@ -329,25 +329,76 @@ describe('AuthForm', () => {
   });
 
   describe('UI Elements', () => {
-    it('should have form element', () => {
+    it('should show email icon in email input', () => {
       const wrapper = mountComponent();
 
-      const form = wrapper.find('form');
-      expect(form.exists()).toBe(true);
+      const emailInput = wrapper.findAllComponents({ name: 'QInput' }).find((input) => {
+        return input.props('label') === 'Email';
+      });
+
+      expect(emailInput?.exists()).toBe(true);
+      const emailIcon = emailInput?.findComponent({ name: 'QIcon' });
+      expect(emailIcon?.props('name')).toBe('email');
     });
 
-    it('should show sign-in related icons', () => {
+    it('should show lock icon in password input', () => {
       const wrapper = mountComponent();
 
-      const icons = wrapper.findAllComponents({ name: 'QIcon' });
-      expect(icons.length).toBeGreaterThan(0);
+      const passwordInput = wrapper.findAllComponents({ name: 'QInput' }).find((input) => {
+        return input.props('label') === 'Password';
+      });
+
+      expect(passwordInput?.exists()).toBe(true);
+      const lockIcon = passwordInput?.findComponent({ name: 'QIcon' });
+      expect(lockIcon?.props('name')).toBe('lock');
     });
 
-    it('should have input components', () => {
+    it('should show password visibility toggle icon', () => {
       const wrapper = mountComponent();
 
-      const inputs = wrapper.findAllComponents({ name: 'QInput' });
-      expect(inputs.length).toBeGreaterThan(0);
+      const passwordInput = wrapper.findAllComponents({ name: 'QInput' }).find((input) => {
+        return input.props('label') === 'Password';
+      });
+
+      expect(passwordInput?.exists()).toBe(true);
+      const visibilityIcon = passwordInput?.findAllComponents({ name: 'QIcon' }).find((icon) => {
+        return icon.props('name') === 'visibility' || icon.props('name') === 'visibility_off';
+      });
+      expect(visibilityIcon?.exists()).toBe(true);
+    });
+
+    it('should have email input with correct type', () => {
+      const wrapper = mountComponent();
+
+      const emailInput = wrapper.findAllComponents({ name: 'QInput' }).find((input) => {
+        return input.props('label') === 'Email';
+      });
+
+      expect(emailInput?.exists()).toBe(true);
+      expect(emailInput?.props('type')).toBe('email');
+    });
+
+    it('should have password input with correct type', () => {
+      const wrapper = mountComponent();
+
+      const passwordInput = wrapper.findAllComponents({ name: 'QInput' }).find((input) => {
+        return input.props('label') === 'Password';
+      });
+
+      expect(passwordInput?.exists()).toBe(true);
+      expect(passwordInput?.props('type')).toBe('password');
+    });
+
+    it('should show person icon in username input when in sign-up mode', () => {
+      const wrapper = mountComponent({ mode: 'signup' });
+
+      const usernameInput = wrapper.findAllComponents({ name: 'QInput' }).find((input) => {
+        return input.props('label') === 'Username (optional)';
+      });
+
+      expect(usernameInput?.exists()).toBe(true);
+      const personIcon = usernameInput?.findComponent({ name: 'QIcon' });
+      expect(personIcon?.props('name')).toBe('person');
     });
   });
 });

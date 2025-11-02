@@ -74,21 +74,23 @@ describe('SentenceBuilder', () => {
   });
 
   it('should display English translation of current question', async () => {
-    mountComponent();
-    await flushPromises();
+    const gameStore = useGameStore();
+    gameStore.startSentenceGame(mockSentenceQuestions);
 
     const wrapper = mountComponent();
     await flushPromises();
+    await wrapper.vm.$nextTick();
 
     expect(wrapper.text()).toContain('I like cats');
   });
 
   it('should initialize scrambled words from question', async () => {
-    mountComponent();
-    await flushPromises();
+    const gameStore = useGameStore();
+    gameStore.startSentenceGame(mockSentenceQuestions);
 
     const wrapper = mountComponent();
     await flushPromises();
+    await wrapper.vm.$nextTick();
 
     // Should have scrambled words available - check text content
     expect(wrapper.text()).toContain('Available Words:');
@@ -97,11 +99,12 @@ describe('SentenceBuilder', () => {
   });
 
   it('should have "Check Answer" button disabled when no answer', async () => {
-    mountComponent();
-    await flushPromises();
+    const gameStore = useGameStore();
+    gameStore.startSentenceGame(mockSentenceQuestions);
 
     const wrapper = mountComponent();
     await flushPromises();
+    await wrapper.vm.$nextTick();
 
     const checkButton = wrapper
       .findAll('button')
@@ -110,21 +113,23 @@ describe('SentenceBuilder', () => {
   });
 
   it('should display instruction text', async () => {
-    mountComponent();
-    await flushPromises();
+    const gameStore = useGameStore();
+    gameStore.startSentenceGame(mockSentenceQuestions);
 
     const wrapper = mountComponent();
     await flushPromises();
+    await wrapper.vm.$nextTick();
 
     expect(wrapper.text()).toContain('Unscramble the sentence:');
   });
 
   it('should display "Your Answer" and "Available Words" sections', async () => {
-    mountComponent();
-    await flushPromises();
+    const gameStore = useGameStore();
+    gameStore.startSentenceGame(mockSentenceQuestions);
 
     const wrapper = mountComponent();
     await flushPromises();
+    await wrapper.vm.$nextTick();
 
     expect(wrapper.text()).toContain('Your Answer:');
     expect(wrapper.text()).toContain('Available Words:');
@@ -152,22 +157,24 @@ describe('SentenceBuilder', () => {
   });
 
   it('should show game content when game is active', async () => {
-    mountComponent();
-    await flushPromises();
+    const gameStore = useGameStore();
+    gameStore.startSentenceGame(mockSentenceQuestions);
 
     const wrapper = mountComponent();
     await flushPromises();
+    await wrapper.vm.$nextTick();
 
     expect(wrapper.findComponent({ name: 'QSpinnerDots' }).exists()).toBe(false);
     expect(wrapper.text()).not.toContain('Loading game...');
   });
 
   it('should have correct number of scrambled words', async () => {
-    mountComponent();
-    await flushPromises();
+    const gameStore = useGameStore();
+    gameStore.startSentenceGame(mockSentenceQuestions);
 
     const wrapper = mountComponent();
     await flushPromises();
+    await wrapper.vm.$nextTick();
 
     // Component should show word bank section
     expect(wrapper.text()).toContain('Available Words:');
@@ -175,44 +182,48 @@ describe('SentenceBuilder', () => {
   });
 
   it('should display English translation as hint', async () => {
-    mountComponent();
-    await flushPromises();
+    const gameStore = useGameStore();
+    gameStore.startSentenceGame(mockSentenceQuestions);
 
     const wrapper = mountComponent();
     await flushPromises();
+    await wrapper.vm.$nextTick();
 
     const englishTranslation = mockSentenceQuestions[0]?.sentence.english_translation;
     expect(wrapper.text()).toContain(englishTranslation || '');
   });
 
   it('should create drop zone for user answer', async () => {
-    mountComponent();
-    await flushPromises();
+    const gameStore = useGameStore();
+    gameStore.startSentenceGame(mockSentenceQuestions);
 
     const wrapper = mountComponent();
     await flushPromises();
+    await wrapper.vm.$nextTick();
 
     const dropZone = wrapper.find('.drop-zone');
     expect(dropZone.exists()).toBe(true);
   });
 
   it('should create word bank for available words', async () => {
-    mountComponent();
-    await flushPromises();
+    const gameStore = useGameStore();
+    gameStore.startSentenceGame(mockSentenceQuestions);
 
     const wrapper = mountComponent();
     await flushPromises();
+    await wrapper.vm.$nextTick();
 
     const wordBank = wrapper.find('.word-bank');
     expect(wordBank.exists()).toBe(true);
   });
 
   it('should have proper styling for drop zone', async () => {
-    mountComponent();
-    await flushPromises();
+    const gameStore = useGameStore();
+    gameStore.startSentenceGame(mockSentenceQuestions);
 
     const wrapper = mountComponent();
     await flushPromises();
+    await wrapper.vm.$nextTick();
 
     const dropZone = wrapper.find('.drop-zone');
     expect(dropZone.classes()).toContain('bg-grey-2');
@@ -220,11 +231,12 @@ describe('SentenceBuilder', () => {
   });
 
   it('should have proper styling for word bank', async () => {
-    mountComponent();
-    await flushPromises();
+    const gameStore = useGameStore();
+    gameStore.startSentenceGame(mockSentenceQuestions);
 
     const wrapper = mountComponent();
     await flushPromises();
+    await wrapper.vm.$nextTick();
 
     const wordBank = wrapper.find('.word-bank');
     expect(wordBank.classes()).toContain('bg-grey-2');
