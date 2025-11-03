@@ -488,7 +488,7 @@ describe('ttsService', () => {
         json: vi.fn().mockResolvedValue({ error: 'Settings not found' }),
       });
 
-      await expect(getTTSSettings()).rejects.toThrow('Failed to fetch TTS settings');
+      await expect(getTTSSettings()).rejects.toThrow('Settings not found');
     });
 
     it('should use GET method (default)', async () => {

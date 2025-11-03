@@ -16,9 +16,14 @@
     "format": {
       "dependsOn": ["^format"]
     },
-    "test": {
+    "test:unit": {
       "dependsOn": ["^build"],
-      "outputs": ["test-results/**", "playwright-report/**"]
+      "outputs": ["test-results/**"]
+    },
+    "test:e2e": {
+      "dependsOn": ["^build"],
+      "cache": false,
+      "outputs": ["playwright-report/**"]
     },
     "test:headed": {
       "dependsOn": ["^build"],

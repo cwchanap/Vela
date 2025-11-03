@@ -53,7 +53,7 @@ async function getUserIdFromToken(authHeader: string | undefined): Promise<strin
 // Custom CORS handler
 chatHistory.use('*', async (c, next) => {
   c.header('Access-Control-Allow-Origin', '*');
-  c.header('Access-Control-Allow-Methods', 'GET,POST,DELETE,OPTIONS');
+  c.header('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
   c.header('Access-Control-Allow-Headers', 'content-type,authorization');
 
   if (c.req.method === 'OPTIONS') {
@@ -283,6 +283,10 @@ async function dynamodb_deleteThread(env: Env, thread_id: string): Promise<void>
 
 chatHistory.post('/save', zValidator('json', ChatHistoryItemSchema), async (c) => {
   try {
+    const hasAwsCredentials = c.env.AWS_ACCESS_KEY_ID && c.env.AWS_SECRET_ACCESS_KEY;
+    if (!hasAwsCredentials) {
+      return c.json({ error: 'Missing AWS credentials' }, 500);
+    }
     const body = c.req.valid('json');
     await dynamodb_saveMessage(c.env, body);
     return c.json({ ok: true });

@@ -467,8 +467,12 @@ describe('UserProfile', () => {
 
       // Should show formatted date
       expect(wrapper.text()).toContain('Member Since');
-      // Date should be formatted (checking for "January" which should be in the formatted date)
-      expect(wrapper.text()).toContain('January');
+      const expectedDate = new Date(mockUser.created_at).toLocaleDateString('en-US', {
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric',
+      });
+      expect(wrapper.text()).toContain(expectedDate);
     });
   });
 });

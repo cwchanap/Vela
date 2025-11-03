@@ -7,7 +7,8 @@
     "zip": "zip -j lambda.zip dist/index.js",
     "update": "aws lambda update-function-code --zip-file fileb://lambda.zip --function-name vela-api",
     "deploy": "run-s build zip update",
-    "test": "vitest",
+    "test": "pnpm run test:unit",
+    "test:unit": "vitest",
     "test:watch": "vitest --watch",
     "test:coverage": "vitest --coverage"
   },
