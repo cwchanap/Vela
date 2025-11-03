@@ -471,6 +471,7 @@ describe('UserProfile', () => {
         year: 'numeric',
         month: 'long',
         day: 'numeric',
+        timeZone: 'UTC',
       });
       expect(wrapper.text()).toContain(expectedDate);
     });

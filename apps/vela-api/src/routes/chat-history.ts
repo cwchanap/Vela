@@ -53,7 +53,7 @@ async function getUserIdFromToken(authHeader: string | undefined): Promise<strin
 // Custom CORS handler
 chatHistory.use('*', async (c, next) => {
   c.header('Access-Control-Allow-Origin', '*');
-  c.header('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
+  c.header('Access-Control-Allow-Methods', 'GET,POST,OPTIONS,DELETE');
   c.header('Access-Control-Allow-Headers', 'content-type,authorization');
 
   if (c.req.method === 'OPTIONS') {
@@ -299,6 +299,10 @@ chatHistory.post('/save', zValidator('json', ChatHistoryItemSchema), async (c) =
 
 chatHistory.get('/threads', async (c) => {
   try {
+    const hasAwsCredentials = c.env.AWS_ACCESS_KEY_ID && c.env.AWS_SECRET_ACCESS_KEY;
+    if (!hasAwsCredentials) {
+      return c.json({ error: 'Missing AWS credentials' }, 500);
+    }
     const { user_id } = c.req.query();
     if (!user_id) {
       return c.json({ error: 'user_id is required' }, 400);
@@ -314,6 +318,10 @@ chatHistory.get('/threads', async (c) => {
 
 chatHistory.get('/messages', async (c) => {
   try {
+    const hasAwsCredentials = c.env.AWS_ACCESS_KEY_ID && c.env.AWS_SECRET_ACCESS_KEY;
+    if (!hasAwsCredentials) {
+      return c.json({ error: 'Missing AWS credentials' }, 500);
+    }
     const { thread_id } = c.req.query();
     if (!thread_id) {
       return c.json({ error: 'thread_id is required' }, 400);
@@ -329,6 +337,10 @@ chatHistory.get('/messages', async (c) => {
 
 chatHistory.delete('/thread', async (c) => {
   try {
+    const hasAwsCredentials = c.env.AWS_ACCESS_KEY_ID && c.env.AWS_SECRET_ACCESS_KEY;
+    if (!hasAwsCredentials) {
+      return c.json({ error: 'Missing AWS credentials' }, 500);
+    }
     // SECURITY: Authenticate the user
     const userId = await getUserIdFromToken(c.req.header('Authorization'));
     if (!userId) {
