@@ -158,6 +158,130 @@ export default [
     },
   },
 
+  // TypeScript files in common package
+  {
+    files: ['packages/common/**/*.ts'],
+    languageOptions: {
+      parser: parserTs,
+      ecmaVersion: 'latest',
+      sourceType: 'module',
+      globals: {
+        ...globals.node,
+        process: 'readonly',
+      },
+    },
+    plugins: {
+      '@typescript-eslint': pluginTs,
+    },
+    rules: {
+      '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_' }],
+      'prefer-promise-reject-errors': 'off',
+      'no-debugger': isProduction ? 'error' : 'off',
+    },
+  },
+
+  // TypeScript files in vela-api package
+  {
+    files: ['apps/vela-api/**/*.ts'],
+    languageOptions: {
+      parser: parserTs,
+      ecmaVersion: 'latest',
+      sourceType: 'module',
+      globals: {
+        ...globals.node,
+        process: 'readonly',
+      },
+    },
+    plugins: {
+      '@typescript-eslint': pluginTs,
+    },
+    rules: {
+      '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_' }],
+      'prefer-promise-reject-errors': 'off',
+      'no-debugger': isProduction ? 'error' : 'off',
+    },
+  },
+
+  // JavaScript files in vela-api package
+  {
+    files: ['apps/vela-api/**/*.js'],
+    languageOptions: {
+      ecmaVersion: 'latest',
+      sourceType: 'module',
+      globals: {
+        ...globals.node,
+        process: 'readonly',
+      },
+    },
+    rules: {
+      'prefer-promise-reject-errors': 'off',
+      'no-debugger': isProduction ? 'error' : 'off',
+    },
+  },
+
+  // Vue files in vela-ext package
+  {
+    files: ['apps/vela-ext/**/*.vue'],
+    languageOptions: {
+      parser: parserVue,
+      parserOptions: {
+        parser: parserTs,
+        ecmaVersion: 'latest',
+        sourceType: 'module',
+      },
+      globals: {
+        ...globals.browser,
+        ...globals.node,
+        process: 'readonly',
+        chrome: 'readonly',
+        browser: 'readonly',
+      },
+    },
+    plugins: {
+      vue: pluginVue,
+      '@typescript-eslint': pluginTs,
+    },
+    rules: {
+      ...pluginVue.configs['flat/essential'].rules,
+      '@typescript-eslint/no-unused-vars': [
+        'error',
+        { argsIgnorePattern: '^_', varsIgnorePattern: '^_' },
+      ],
+      'no-unused-vars': ['error', { argsIgnorePattern: '^_', varsIgnorePattern: '^_' }],
+      'prefer-promise-reject-errors': 'off',
+      'no-debugger': isProduction ? 'error' : 'off',
+    },
+  },
+
+  // TypeScript files in vela-ext package
+  {
+    files: ['apps/vela-ext/**/*.ts'],
+    languageOptions: {
+      parser: parserTs,
+      ecmaVersion: 'latest',
+      sourceType: 'module',
+      globals: {
+        ...globals.browser,
+        ...globals.node,
+        process: 'readonly',
+        chrome: 'readonly',
+        browser: 'readonly',
+      },
+    },
+    plugins: {
+      '@typescript-eslint': pluginTs,
+    },
+    rules: {
+      '@typescript-eslint/no-unused-vars': [
+        'error',
+        { argsIgnorePattern: '^_', varsIgnorePattern: '^_' },
+      ],
+      'no-unused-vars': ['error', { argsIgnorePattern: '^_', varsIgnorePattern: '^_' }],
+      'prefer-promise-reject-errors': 'off',
+      'no-debugger': isProduction ? 'error' : 'off',
+    },
+  },
+
   // Prettier formatting
   prettierSkipFormatting,
 ];
