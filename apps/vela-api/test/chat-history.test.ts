@@ -74,7 +74,7 @@ describe('Chat History Route', () => {
 
       expect(res.status).toBe(200);
       expect(res.headers.get('Access-Control-Allow-Origin')).toBe('*');
-      expect(res.headers.get('Access-Control-Allow-Methods')).toBe('GET,POST,OPTIONS');
+      expect(res.headers.get('Access-Control-Allow-Methods')).toBe('GET,POST,OPTIONS,DELETE');
     });
   });
 
@@ -215,7 +215,10 @@ describe('Chat History Route', () => {
     });
 
     it('should return 400 when user_id is missing', async () => {
-      const app = createTestApp({});
+      const app = createTestApp({
+        AWS_ACCESS_KEY_ID: 'test-key',
+        AWS_SECRET_ACCESS_KEY: 'test-secret',
+      });
       const req = new Request('http://localhost/threads');
       const res = await app.request(req);
       const json = await res.json();
@@ -267,7 +270,10 @@ describe('Chat History Route', () => {
     });
 
     it('should return 400 when thread_id is missing', async () => {
-      const app = createTestApp({});
+      const app = createTestApp({
+        AWS_ACCESS_KEY_ID: 'test-key',
+        AWS_SECRET_ACCESS_KEY: 'test-secret',
+      });
       const req = new Request('http://localhost/messages');
       const res = await app.request(req);
       const json = await res.json();

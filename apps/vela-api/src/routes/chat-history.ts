@@ -1,5 +1,7 @@
 import { Hono } from 'hono';
+import type { Context } from 'hono';
 import { zValidator } from '@hono/zod-validator';
+import { env } from 'hono/adapter';
 import {
   GetUserCommand,
   CognitoIdentityProviderClient,
@@ -18,12 +20,19 @@ import { PutCommand, QueryCommand, ScanCommand, BatchWriteCommand } from '@aws-s
 
 const chatHistory = new Hono<{ Bindings: Env }>();
 
-const cognitoClient = new CognitoIdentityProviderClient({
-  region: process.env.AWS_REGION || 'us-east-1',
-});
+// Create Cognito client with environment variables from context
+const createCognitoClient = (c: Context<{ Bindings: Env }>) => {
+  const { AWS_REGION = 'us-east-1' } = env<{ AWS_REGION: string }>(c);
+  return new CognitoIdentityProviderClient({
+    region: AWS_REGION,
+  });
+};
 
 // Helper to validate token and extract user ID from Cognito
-async function getUserIdFromToken(authHeader: string | undefined): Promise<string | null> {
+async function getUserIdFromToken(
+  authHeader: string | undefined,
+  c: Context<{ Bindings: Env }>,
+): Promise<string | null> {
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
     return null;
   }
@@ -36,6 +45,7 @@ async function getUserIdFromToken(authHeader: string | undefined): Promise<strin
       AccessToken: accessToken,
     });
 
+    const cognitoClient = createCognitoClient(c);
     const userResponse = await cognitoClient.send(getUserCommand);
 
     // IMPORTANT: Return the Cognito sub to match what's stored in chat messages
@@ -342,7 +352,7 @@ chatHistory.delete('/thread', async (c) => {
       return c.json({ error: 'Missing AWS credentials' }, 500);
     }
     // SECURITY: Authenticate the user
-    const userId = await getUserIdFromToken(c.req.header('Authorization'));
+    const userId = await getUserIdFromToken(c.req.header('Authorization'), c);
     if (!userId) {
       return c.json({ error: 'Unauthorized' }, 401);
     }
