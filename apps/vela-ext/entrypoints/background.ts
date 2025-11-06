@@ -48,6 +48,7 @@ async function refreshAccessToken(): Promise<string> {
     return newTokens.accessToken;
   } catch (error) {
     // Refresh failed, clear auth data
+    console.error('Token refresh error:', error);
     await browser.storage.local.remove(['vela_auth_tokens', 'vela_user_email']);
     throw new Error('Session expired. Please log in again.');
   }
@@ -95,25 +96,21 @@ export default defineBackground(() => {
 
         // If unauthorized, try to refresh token and retry once
         if (response.status === 401) {
-          try {
-            accessToken = await refreshAccessToken();
+          accessToken = await refreshAccessToken();
 
-            // Retry the request with new token
-            response = await fetch(`${API_BASE_URL}/my-dictionaries`, {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                Authorization: `Bearer ${accessToken}`,
-              },
-              body: JSON.stringify({
-                sentence: selectedText,
-                sourceUrl: tab?.url,
-                context: tab?.title,
-              }),
-            });
-          } catch (refreshError) {
-            throw refreshError;
-          }
+          // Retry the request with new token
+          response = await fetch(`${API_BASE_URL}/my-dictionaries`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${accessToken}`,
+            },
+            body: JSON.stringify({
+              sentence: selectedText,
+              sourceUrl: tab?.url,
+              context: tab?.title,
+            }),
+          });
         }
 
         if (!response.ok) {

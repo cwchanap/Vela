@@ -55,13 +55,6 @@ const VocabularyIdParamSchema = z.object({
   vocabularyId: z.string().min(1),
 });
 
-// Type for authenticated context with userId
-type AuthContext = {
-  Variables: {
-    userId: string;
-  };
-};
-
 const createTTSRoute = (env: Env) => {
   const tts = new Hono<{ Bindings: Env } & AuthContext>();
 

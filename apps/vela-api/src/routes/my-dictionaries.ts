@@ -5,7 +5,6 @@ import {
 } from '@aws-sdk/client-cognito-identity-provider';
 import { myDictionaries } from '../dynamodb';
 import type { Env } from '../types';
-import type { ChatMessage } from '../validation';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -239,6 +238,7 @@ Keep it concise and educational.`;
                     }
                   } catch (e) {
                     // Skip invalid JSON
+                    console.debug('Skipping invalid JSON chunk:', e);
                   }
                 }
               }
@@ -357,6 +357,7 @@ Keep it concise and educational.`;
                     }
                   } catch (e) {
                     // Skip invalid JSON
+                    console.debug('Skipping invalid JSON chunk:', e);
                   }
                 }
               }

@@ -18,6 +18,7 @@ const UpdateProfileSchema = z.object({
 });
 
 const createProfilesRoute = (env: Env) => {
+  console.debug('Creating profiles route with env:', env ? 'provided' : 'not provided');
   const profiles = new Hono<{ Bindings: Env }>();
 
   // Custom CORS handler

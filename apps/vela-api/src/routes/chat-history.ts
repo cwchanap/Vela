@@ -9,7 +9,6 @@ import {
 import type { Env } from '../types';
 import {
   ChatHistoryItemSchema,
-  ChatThreadSummarySchema,
   UserIdQuerySchema,
   ThreadIdQuerySchema,
   type ChatHistoryItem,
@@ -307,16 +306,13 @@ chatHistory.post('/save', zValidator('json', ChatHistoryItemSchema), async (c) =
   }
 });
 
-chatHistory.get('/threads', async (c) => {
+chatHistory.get('/threads', zValidator('query', UserIdQuerySchema), async (c) => {
   try {
     const hasAwsCredentials = c.env.AWS_ACCESS_KEY_ID && c.env.AWS_SECRET_ACCESS_KEY;
     if (!hasAwsCredentials) {
       return c.json({ error: 'Missing AWS credentials' }, 500);
     }
-    const { user_id } = c.req.query();
-    if (!user_id) {
-      return c.json({ error: 'user_id is required' }, 400);
-    }
+    const { user_id } = c.req.valid('query');
     const threads = await dynamodb_listThreads(c.env, user_id);
     return c.json({ threads });
   } catch (e) {
@@ -326,16 +322,13 @@ chatHistory.get('/threads', async (c) => {
   }
 });
 
-chatHistory.get('/messages', async (c) => {
+chatHistory.get('/messages', zValidator('query', ThreadIdQuerySchema), async (c) => {
   try {
     const hasAwsCredentials = c.env.AWS_ACCESS_KEY_ID && c.env.AWS_SECRET_ACCESS_KEY;
     if (!hasAwsCredentials) {
       return c.json({ error: 'Missing AWS credentials' }, 500);
     }
-    const { thread_id } = c.req.query();
-    if (!thread_id) {
-      return c.json({ error: 'thread_id is required' }, 400);
-    }
+    const { thread_id } = c.req.valid('query');
     const items = await dynamodb_getMessages(c.env, thread_id);
     return c.json({ items });
   } catch (e) {
@@ -345,7 +338,7 @@ chatHistory.get('/messages', async (c) => {
   }
 });
 
-chatHistory.delete('/thread', async (c) => {
+chatHistory.delete('/thread', zValidator('query', ThreadIdQuerySchema), async (c) => {
   try {
     const hasAwsCredentials = c.env.AWS_ACCESS_KEY_ID && c.env.AWS_SECRET_ACCESS_KEY;
     if (!hasAwsCredentials) {
@@ -357,10 +350,7 @@ chatHistory.delete('/thread', async (c) => {
       return c.json({ error: 'Unauthorized' }, 401);
     }
 
-    const { thread_id } = c.req.query();
-    if (!thread_id) {
-      return c.json({ error: 'thread_id is required' }, 400);
-    }
+    const { thread_id } = c.req.valid('query');
 
     // SECURITY: Verify the user owns this thread before deleting
     // Get at least one message from the thread to check ownership

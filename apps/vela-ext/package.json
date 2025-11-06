@@ -12,6 +12,9 @@
     "zip": "wxt zip",
     "zip:firefox": "wxt zip -b firefox",
     "compile": "vue-tsc --noEmit",
+    "lint": "eslint \"{entrypoints,components}/**/*.{ts,js,vue}\" --ignore-pattern node_modules",
+    "lint:fix": "eslint \"{entrypoints,components}/**/*.{ts,js,vue}\" --fix --ignore-pattern node_modules",
+    "format": "prettier --write \"{entrypoints,components}/**/*.{ts,js,vue,json}\" --ignore-path ../../.gitignore",
     "postinstall": "wxt prepare"
   },
   "dependencies": {
@@ -21,6 +24,8 @@
   },
   "devDependencies": {
     "@wxt-dev/module-vue": "^1.0.2",
+    "eslint": "^9.14.0",
+    "prettier": "^3.3.3",
     "typescript": "^5.9.2",
     "vue-tsc": "^3.0.6",
     "wxt": "^0.20.6"

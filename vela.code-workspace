@@ -20,11 +20,15 @@
       "name": "CDK Infrastructure",
       "path": "./packages/cdk",
     },
+    {
+      "name": "Common",
+      "path": "./packages/common",
+    },
   ],
   "settings": {
     "typescript.preferences.includePackageJsonAutoImports": "on",
     "typescript.suggest.autoImports": true,
-    "eslint.workingDirectories": ["apps/vela", "apps/vela-api", "apps/vela-ext", "packages/cdk"],
+    "eslint.workingDirectories": ["apps/vela", "apps/vela-api", "apps/vela-ext", "packages/cdk", "packages/common"],
     "python.languageServer": "None",
   },
   "extensions": {

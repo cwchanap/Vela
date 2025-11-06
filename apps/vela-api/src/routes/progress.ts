@@ -104,7 +104,7 @@ progress.post('/game-session', zValidator('json', RecordGameSessionSchema), asyn
 
     if (dailyProgress) {
       // Update existing daily progress
-      const updatedProgress = await dailyProgressDB.update(sessionData.user_id, today, {
+      await dailyProgressDB.update(sessionData.user_id, today, {
         vocabulary_studied:
           dailyProgress.vocabulary_studied +
           (sessionData.game_type === 'vocabulary' ? sessionData.questions_answered : 0),

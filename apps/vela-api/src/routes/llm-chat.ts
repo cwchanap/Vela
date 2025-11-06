@@ -1,7 +1,5 @@
 import { Hono } from 'hono';
-import { zValidator } from '@hono/zod-validator';
 import type { Env } from '../types';
-import { LLMBridgeRequestSchema, type LLMBridgeRequest, type ChatMessage } from '../validation';
 
 const llmChat = new Hono<{ Bindings: Env }>();
 
@@ -23,6 +21,7 @@ llmChat.post('/', async (c) => {
   try {
     input = await c.req.json();
   } catch (e) {
+    console.error('JSON parse error:', e);
     return c.json({ error: 'Invalid JSON' }, 400);
   }
 
@@ -111,7 +110,8 @@ llmChat.post('/', async (c) => {
       const endpoint = 'https://openrouter.ai/api/v1/chat/completions';
 
       const messages: { role: 'system' | 'user' | 'assistant'; content: string }[] = [];
-      const pushMsg = (m: ChatMessage) => messages.push({ role: m.role, content: m.content });
+      const pushMsg = (m: { role: 'system' | 'user' | 'assistant'; content: string }) =>
+        messages.push({ role: m.role, content: m.content });
 
       if (input.system) messages.push({ role: 'system', content: input.system });
       if (input.messages && input.messages.length > 0) {

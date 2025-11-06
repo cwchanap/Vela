@@ -266,6 +266,8 @@ export default [
         process: 'readonly',
         chrome: 'readonly',
         browser: 'readonly',
+        defineBackground: 'readonly',
+        defineContentScript: 'readonly',
       },
     },
     plugins: {

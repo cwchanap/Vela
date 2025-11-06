@@ -136,13 +136,15 @@ async function loadEntries() {
         apiError.message?.includes('Unauthorized') ||
         apiError.message?.includes('expired token')
       ) {
-        try {
-          accessToken = await refreshAccessToken();
-          const data = await getMyDictionaries(accessToken);
-          entries.value = data;
-        } catch (refreshError) {
-          throw refreshError; // Let outer catch handle it
+        accessToken = await refreshAccessToken();
+
+        // Validate the refreshed token before proceeding
+        if (!accessToken) {
+          throw new Error('Session expired. Please log in again.');
         }
+
+        const data = await getMyDictionaries(accessToken);
+        entries.value = data;
       } else {
         throw apiError;
       }

@@ -67,6 +67,7 @@ export async function refreshAccessToken(): Promise<string> {
     return newTokens.accessToken;
   } catch (error) {
     // Refresh failed, clear auth data
+    console.error('Token refresh error:', error);
     await clearAuthData();
     throw new Error('Session expired. Please log in again.');
   }

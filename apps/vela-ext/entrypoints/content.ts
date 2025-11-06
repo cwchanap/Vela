@@ -1,3 +1,4 @@
+// Content script entrypoint
 export default defineContentScript({
   matches: ['*://*.google.com/*'],
   main() {

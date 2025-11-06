@@ -1,6 +1,12 @@
 {
   "permissions": {
-    "allow": ["Bash(pnpm --filter vela-api test)"],
+    "allow": [
+      "Bash(pnpm --filter vela-api test)",
+      "Bash(pnpm lint:*)",
+      "Bash(pnpm format:*)",
+      "Bash(pnpm clean:*)",
+      "Bash(pnpm exec lint-staged:*)"
+    ],
     "deny": [],
     "ask": []
   }
