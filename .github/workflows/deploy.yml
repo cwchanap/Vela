@@ -12,7 +12,8 @@ env:
   AWS_REGION: "us-east-1"
 
 jobs:
-  lint-and-test:
+  pr-build-and-lint:
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -35,11 +36,38 @@ jobs:
       - name: Run linter
         run: pnpm lint
 
-      - name: Run tests
+      - name: Build frontend
+        run: pnpm build
+
+      - name: Build Lambda function
+        run: pnpm --filter @vela/cdk run lambda:build
+
+  pr-unit-test:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: "pnpm"
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run unit tests
         run: pnpm test
 
   build:
-    needs: lint-and-test
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     outputs:
       lambda-artifact: ${{ steps.upload-lambda.outputs.artifact-id }}
@@ -85,7 +113,7 @@ jobs:
           retention-days: 7
 
   deploy:
-    if: github.ref == 'refs/heads/main'
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
     needs: build
     runs-on: ubuntu-latest
     environment: production
@@ -178,7 +206,7 @@ jobs:
           echo "🔗 API URL: ${{ steps.get-outputs.outputs.api-url }}"
 
   cleanup:
-    if: always()
+    if: ${{ always() && github.event_name != 'pull_request' }}
     needs: [build, deploy]
     runs-on: ubuntu-latest
     steps:
