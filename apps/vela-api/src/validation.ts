@@ -55,3 +55,5 @@ export type ChatHistoryItem = z.infer<typeof ChatHistoryItemSchema>;
 export type ChatThreadSummary = z.infer<typeof ChatThreadSummarySchema>;
 export type ChatMessage = z.infer<typeof ChatMessageSchema>;
 export type LLMBridgeRequest = z.infer<typeof LLMBridgeRequestSchema>;
+export type UserIdQuery = z.infer<typeof UserIdQuerySchema>;
+export type ThreadIdQuery = z.infer<typeof ThreadIdQuerySchema>;

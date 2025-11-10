@@ -13,11 +13,39 @@ import {
   ThreadIdQuerySchema,
   type ChatHistoryItem,
   type ChatThreadSummary,
+  type UserIdQuery,
+  type ThreadIdQuery,
 } from '../validation';
 import { docClient, TABLE_NAMES } from '../dynamodb';
 import { PutCommand, QueryCommand, ScanCommand, BatchWriteCommand } from '@aws-sdk/lib-dynamodb';
+import type { ZodIssue, ZodTypeAny } from 'zod';
 
 const chatHistory = new Hono<{ Bindings: Env }>();
+
+const formatIssueMessage = (issue: ZodIssue) => {
+  if (issue.code === 'invalid_type') {
+    const received = 'received' in issue ? issue.received : undefined;
+    if (received === 'undefined' || received === undefined) {
+      const field = issue.path.join('.') || 'value';
+      return `${field} is required`;
+    }
+  }
+
+  if (issue.code === 'too_small' && 'minimum' in issue && issue.minimum === 1) {
+    const field = issue.path.join('.') || 'value';
+    return `${field} is required`;
+  }
+
+  return issue.message;
+};
+
+const createQueryValidator = (schema: ZodTypeAny) =>
+  zValidator('query', schema, (result, c) => {
+    if (!result.success) {
+      const message = result.error.issues.map(formatIssueMessage).join(', ');
+      return c.json({ error: message }, 400);
+    }
+  });
 
 // Create Cognito client with environment variables from context
 const createCognitoClient = (c: Context<{ Bindings: Env }>) => {
@@ -306,13 +334,13 @@ chatHistory.post('/save', zValidator('json', ChatHistoryItemSchema), async (c) =
   }
 });
 
-chatHistory.get('/threads', zValidator('query', UserIdQuerySchema), async (c) => {
+chatHistory.get('/threads', createQueryValidator(UserIdQuerySchema), async (c) => {
   try {
     const hasAwsCredentials = c.env.AWS_ACCESS_KEY_ID && c.env.AWS_SECRET_ACCESS_KEY;
     if (!hasAwsCredentials) {
       return c.json({ error: 'Missing AWS credentials' }, 500);
     }
-    const { user_id } = c.req.valid('query');
+    const { user_id } = c.req.valid('query') as UserIdQuery;
     const threads = await dynamodb_listThreads(c.env, user_id);
     return c.json({ threads });
   } catch (e) {
@@ -322,13 +350,13 @@ chatHistory.get('/threads', zValidator('query', UserIdQuerySchema), async (c) =>
   }
 });
 
-chatHistory.get('/messages', zValidator('query', ThreadIdQuerySchema), async (c) => {
+chatHistory.get('/messages', createQueryValidator(ThreadIdQuerySchema), async (c) => {
   try {
     const hasAwsCredentials = c.env.AWS_ACCESS_KEY_ID && c.env.AWS_SECRET_ACCESS_KEY;
     if (!hasAwsCredentials) {
       return c.json({ error: 'Missing AWS credentials' }, 500);
     }
-    const { thread_id } = c.req.valid('query');
+    const { thread_id } = c.req.valid('query') as ThreadIdQuery;
     const items = await dynamodb_getMessages(c.env, thread_id);
     return c.json({ items });
   } catch (e) {
@@ -338,7 +366,7 @@ chatHistory.get('/messages', zValidator('query', ThreadIdQuerySchema), async (c)
   }
 });
 
-chatHistory.delete('/thread', zValidator('query', ThreadIdQuerySchema), async (c) => {
+chatHistory.delete('/thread', createQueryValidator(ThreadIdQuerySchema), async (c) => {
   try {
     const hasAwsCredentials = c.env.AWS_ACCESS_KEY_ID && c.env.AWS_SECRET_ACCESS_KEY;
     if (!hasAwsCredentials) {
@@ -350,7 +378,7 @@ chatHistory.delete('/thread', zValidator('query', ThreadIdQuerySchema), async (c
       return c.json({ error: 'Unauthorized' }, 401);
     }
 
-    const { thread_id } = c.req.valid('query');
+    const { thread_id } = c.req.valid('query') as ThreadIdQuery;
 
     // SECURITY: Verify the user owns this thread before deleting
     // Get at least one message from the thread to check ownership
