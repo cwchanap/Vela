@@ -12,6 +12,9 @@
     "zip": "wxt zip",
     "zip:firefox": "wxt zip -b firefox",
     "compile": "vue-tsc --noEmit",
+    "test": "pnpm run test:unit",
+    "test:unit": "vitest run",
+    "test:watch": "vitest",
     "lint": "eslint \"{entrypoints,components}/**/*.{ts,js,vue}\" --ignore-pattern node_modules",
     "lint:fix": "eslint \"{entrypoints,components}/**/*.{ts,js,vue}\" --fix --ignore-pattern node_modules",
     "format": "prettier --write \"{entrypoints,components}/**/*.{ts,js,vue,json}\" --ignore-path ../../.gitignore",
@@ -28,6 +31,7 @@
     "prettier": "^3.3.3",
     "typescript": "^5.9.2",
     "vue-tsc": "^3.0.6",
+    "vitest": "^3.2.4",
     "wxt": "^0.20.6"
   }
 }

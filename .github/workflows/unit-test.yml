@@ -30,6 +30,9 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Build shared packages
+        run: pnpm --filter @vela/common run build
+
       - name: Run app unit tests
         run: pnpm --filter @vela/app run test:unit
 
@@ -73,6 +76,9 @@ jobs:
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+
+      - name: Build shared packages
+        run: pnpm --filter @vela/common run build
 
       - name: Type check browser extension
         run: pnpm --filter wxt-vue-starter run compile
