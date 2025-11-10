@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { Hono } from 'hono';
-import { chatHistory } from './chat-history';
-import type { ChatHistoryItem, Env } from '../types';
+import { chatHistory } from '../../src/routes/chat-history';
+import type { ChatHistoryItem, Env } from '../../src/types';
 
 // Mock AWS SDK
 let mockPutCommand: any;
