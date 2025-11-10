@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { Hono } from 'hono';
-import { llmChat } from '../src/routes/llm-chat';
-import type { Env } from '../src/types';
+import { llmChat } from './llm-chat';
+import type { Env } from '../types';
 
 // Mock fetch globally
 global.fetch = vi.fn();

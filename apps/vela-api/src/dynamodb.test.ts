@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { savedSentences } from '../src/dynamodb';
+import { savedSentences } from './dynamodb';
 
 // Mock the AWS SDK
 vi.mock('@aws-sdk/client-dynamodb', () => ({
