@@ -637,7 +637,18 @@ describe('ttsService', () => {
       expect(audioInstance?.src).toBe('https://example.com/audio/neko.mp3');
 
       // Verify that the deprecated userId is not included in the request body
-      const requestBody = JSON.parse(mockFetch.mock.calls[0][1].body);
+      const firstCall = mockFetch.mock.calls[0];
+      if (!firstCall) {
+        throw new Error('Expected fetch to be called');
+      }
+
+      const [, requestInit] = firstCall as [string, RequestInit];
+      const body = requestInit.body;
+      if (typeof body !== 'string') {
+        throw new Error('Expected request body to be a string');
+      }
+
+      const requestBody = JSON.parse(body);
       expect(requestBody).toStrictEqual({
         vocabularyId: 'vocab-1',
         text: '猫',
