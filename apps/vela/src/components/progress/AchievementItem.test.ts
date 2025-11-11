@@ -101,63 +101,25 @@ describe('AchievementItem', () => {
   });
 
   describe('Category Colors', () => {
-    it('should use primary color for vocabulary category', () => {
-      wrapper = mountComponent();
-      const avatar = wrapper.findComponent({ name: 'QAvatar' });
-      expect(avatar.props('color')).toBe('primary');
-    });
+    const categoryColorMap = [
+      { category: 'vocabulary', color: 'primary' },
+      { category: 'grammar', color: 'secondary' },
+      { category: 'streak', color: 'orange' },
+      { category: 'level', color: 'purple' },
+      { category: 'special', color: 'pink' },
+      { category: 'unknown', color: 'grey' },
+    ];
 
-    it('should use secondary color for grammar category', () => {
-      const grammarAchievement: Achievement = {
-        ...mockEarnedAchievement,
-        category: 'grammar',
-      };
-      wrapper = mountComponent({ achievement: grammarAchievement });
-      const avatar = wrapper.findComponent({ name: 'QAvatar' });
-      expect(avatar.props('color')).toBe('secondary');
-    });
-
-    it('should use orange color for streak category', () => {
-      const streakAchievement: Achievement = {
-        ...mockEarnedAchievement,
-        category: 'streak',
-        icon: 'local_fire_department',
-      };
-      wrapper = mountComponent({ achievement: streakAchievement });
-      const avatar = wrapper.findComponent({ name: 'QAvatar' });
-      expect(avatar.props('color')).toBe('orange');
-    });
-
-    it('should use purple color for level category', () => {
-      const levelAchievement: Achievement = {
-        ...mockEarnedAchievement,
-        category: 'level',
-        icon: 'star',
-      };
-      wrapper = mountComponent({ achievement: levelAchievement });
-      const avatar = wrapper.findComponent({ name: 'QAvatar' });
-      expect(avatar.props('color')).toBe('purple');
-    });
-
-    it('should use pink color for special category', () => {
-      const specialAchievement: Achievement = {
-        ...mockEarnedAchievement,
-        category: 'special',
-        icon: 'celebration',
-      };
-      wrapper = mountComponent({ achievement: specialAchievement });
-      const avatar = wrapper.findComponent({ name: 'QAvatar' });
-      expect(avatar.props('color')).toBe('pink');
-    });
-
-    it('should use grey color for unknown category', () => {
-      const unknownAchievement: Achievement = {
-        ...mockEarnedAchievement,
-        category: 'unknown',
-      };
-      wrapper = mountComponent({ achievement: unknownAchievement });
-      const avatar = wrapper.findComponent({ name: 'QAvatar' });
-      expect(avatar.props('color')).toBe('grey');
+    categoryColorMap.forEach(({ category, color }) => {
+      it(`should use ${color} color for ${category} category`, () => {
+        const achievement: Achievement = {
+          ...mockEarnedAchievement,
+          category,
+        };
+        wrapper = mountComponent({ achievement });
+        const avatar = wrapper.findComponent({ name: 'QAvatar' });
+        expect(avatar.props('color')).toBe(color);
+      });
     });
   });
 
