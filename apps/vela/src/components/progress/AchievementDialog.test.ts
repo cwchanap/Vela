@@ -53,6 +53,7 @@ describe('AchievementDialog', () => {
     if (wrapper) {
       wrapper.unmount();
     }
+    vi.useRealTimers();
     vi.restoreAllMocks();
   });
 
