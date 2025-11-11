@@ -136,40 +136,21 @@ describe('AchievementDialog', () => {
   });
 
   describe('Category Colors', () => {
-    it('should return primary for vocabulary category', () => {
-      wrapper = mountComponent();
-      const vm = wrapper.vm as any;
-      expect(vm.getCategoryColor('vocabulary')).toBe('primary');
-    });
+    const categoryColorMap = [
+      { category: 'vocabulary', color: 'primary' },
+      { category: 'grammar', color: 'secondary' },
+      { category: 'streak', color: 'orange' },
+      { category: 'level', color: 'purple' },
+      { category: 'special', color: 'pink' },
+      { category: 'unknown', color: 'grey' },
+    ];
 
-    it('should return secondary for grammar category', () => {
-      wrapper = mountComponent();
-      const vm = wrapper.vm as any;
-      expect(vm.getCategoryColor('grammar')).toBe('secondary');
-    });
-
-    it('should return orange for streak category', () => {
-      wrapper = mountComponent();
-      const vm = wrapper.vm as any;
-      expect(vm.getCategoryColor('streak')).toBe('orange');
-    });
-
-    it('should return purple for level category', () => {
-      wrapper = mountComponent();
-      const vm = wrapper.vm as any;
-      expect(vm.getCategoryColor('level')).toBe('purple');
-    });
-
-    it('should return pink for special category', () => {
-      wrapper = mountComponent();
-      const vm = wrapper.vm as any;
-      expect(vm.getCategoryColor('special')).toBe('pink');
-    });
-
-    it('should return grey for unknown category', () => {
-      wrapper = mountComponent();
-      const vm = wrapper.vm as any;
-      expect(vm.getCategoryColor('unknown')).toBe('grey');
+    categoryColorMap.forEach(({ category, color }) => {
+      it(`should return ${color} for ${category} category`, () => {
+        wrapper = mountComponent();
+        const vm = wrapper.vm as any;
+        expect(vm.getCategoryColor(category)).toBe(color);
+      });
     });
   });
 
