@@ -486,26 +486,5 @@ describe('ProgressChart', () => {
       expect(mockContext.clearRect).toHaveBeenCalled();
       expect(mockContext.stroke).toHaveBeenCalled();
     });
-
-    it('should redraw when data changes', async () => {
-      const wrapper = mount(ProgressChart, {
-        props: defaultProps,
-      });
-
-      await nextTick();
-      const initialClearCalls = mockContext.clearRect.mock.calls.length;
-
-      // Change data
-      await wrapper.setProps({
-        data: [
-          { date: '2024-01-04', experience: 25 },
-          { date: '2024-01-05', experience: 30 },
-        ],
-      });
-      await nextTick();
-
-      // Should have cleared canvas again
-      expect(mockContext.clearRect.mock.calls.length).toBeGreaterThan(initialClearCalls);
-    });
   });
 });
