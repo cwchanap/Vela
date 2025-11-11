@@ -58,7 +58,7 @@ jobs:
       - name: Run API unit tests
         run: pnpm --filter vela-api run test:unit
 
-  ext-typecheck:
+  ext-tests:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -82,3 +82,6 @@ jobs:
 
       - name: Type check browser extension
         run: pnpm --filter wxt-vue-starter run compile
+
+      - name: Run extension unit tests
+        run: pnpm --filter wxt-vue-starter run test:unit
