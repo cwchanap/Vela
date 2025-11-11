@@ -241,6 +241,7 @@ describe('AchievementItem', () => {
   describe('Date Formatting', () => {
     beforeEach(() => {
       // Mock current date to ensure consistent test results
+      vi.useFakeTimers();
       vi.setSystemTime(new Date('2024-01-17T12:00:00Z'));
     });
 
