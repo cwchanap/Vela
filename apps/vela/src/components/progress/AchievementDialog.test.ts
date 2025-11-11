@@ -196,10 +196,6 @@ describe('AchievementDialog', () => {
       await wrapper.setProps({ modelValue: true });
       await flushPromises();
 
-      // Clear any emissions from opening
-      wrapper.emitted('update:modelValue');
-      wrapper.emitted('close');
-
       // Fast-forward time by 10 seconds
       vi.advanceTimersByTime(10000);
       await flushPromises();
