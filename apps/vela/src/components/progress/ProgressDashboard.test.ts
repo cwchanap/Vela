@@ -18,7 +18,7 @@ vi.mock('./ProgressChart.vue', () => ({
   default: {
     name: 'ProgressChart',
     props: ['data', 'type', 'height', 'dataKey', 'color', 'width'],
-    template: '<div class="mock-progress-chart"></div>',
+    template: '<div class="mock-progress-chart" :data-type="type" :data-key="dataKey"></div>',
   },
 }));
 
@@ -342,18 +342,28 @@ describe('ProgressDashboard', () => {
 
     it('should pass correct props to weekly chart', () => {
       const wrapper = mountComponent();
-      const text = wrapper.text();
 
-      // Verify section exists
-      expect(text).toContain('Weekly Progress');
+      // Find all ProgressChart mocks
+      const charts = wrapper.findAll('.mock-progress-chart');
+      expect(charts.length).toBeGreaterThanOrEqual(2); // Weekly and monthly
+
+      // First chart should be the weekly chart with 'line' type and 'experience' dataKey
+      const weeklyChart = charts[0];
+      expect(weeklyChart.attributes('data-type')).toBe('line');
+      expect(weeklyChart.attributes('data-key')).toBe('experience');
     });
 
     it('should pass correct props to monthly chart', () => {
       const wrapper = mountComponent();
-      const text = wrapper.text();
 
-      // Verify section exists
-      expect(text).toContain('Monthly Overview');
+      // Find all ProgressChart mocks
+      const charts = wrapper.findAll('.mock-progress-chart');
+      expect(charts.length).toBeGreaterThanOrEqual(2); // Weekly and monthly
+
+      // Second chart should be the monthly chart with 'bar' type and 'vocabulary' dataKey
+      const monthlyChart = charts[1];
+      expect(monthlyChart.attributes('data-type')).toBe('bar');
+      expect(monthlyChart.attributes('data-key')).toBe('vocabulary');
     });
   });
 
