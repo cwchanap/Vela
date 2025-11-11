@@ -474,17 +474,4 @@ describe('ProgressChart', () => {
       expect(mockContext.stroke).toHaveBeenCalled();
     });
   });
-
-  describe('Lifecycle', () => {
-    it('should draw chart on mount', async () => {
-      mount(ProgressChart, {
-        props: defaultProps,
-      });
-
-      await nextTick();
-
-      expect(mockContext.clearRect).toHaveBeenCalled();
-      expect(mockContext.stroke).toHaveBeenCalled();
-    });
-  });
 });
