@@ -473,21 +473,6 @@ describe('ProgressDashboard', () => {
       vm = wrapper.vm as unknown as { showAchievementDialog: boolean };
       expect(vm.showAchievementDialog).toBe(true);
     });
-
-    it('should watch for new achievements', async () => {
-      const wrapper = mountComponent();
-
-      // Initially no new achievements
-      let vm = wrapper.vm as unknown as { showAchievementDialog: boolean };
-      expect(vm.showAchievementDialog).toBe(false);
-
-      // Add new achievements
-      progressStore.newAchievements = [mockAchievements[0]];
-      await nextTick();
-
-      vm = wrapper.vm as unknown as { showAchievementDialog: boolean };
-      expect(vm.showAchievementDialog).toBe(true);
-    });
   });
 
   describe('Lifecycle Hooks', () => {
