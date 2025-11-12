@@ -70,7 +70,7 @@ describe('ProgressDashboard', () => {
   };
 
   const mockDailyProgress: DailyProgress = {
-    date: new Date().toISOString(),
+    date: new Date().toISOString().split('T')[0], // Use date portion only (YYYY-MM-DD)
     vocabulary_studied: 15,
     sentences_completed: 8,
     time_spent_minutes: 45,
