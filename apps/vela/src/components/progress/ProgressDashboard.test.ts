@@ -43,7 +43,8 @@ vi.mock('./AchievementDialog.vue', () => ({
     name: 'AchievementDialog',
     props: ['modelValue', 'achievements'],
     emits: ['update:modelValue', 'close'],
-    template: '<div class="mock-achievement-dialog"></div>',
+    template:
+      '<div class="mock-achievement-dialog" :data-visible="modelValue" :data-achievements-count="achievements.length"></div>',
   },
 }));
 
@@ -461,17 +462,18 @@ describe('ProgressDashboard', () => {
     it('should show dialog when new achievements are present', async () => {
       const wrapper = mountComponent();
 
-      // Initially no dialog
-      let vm = wrapper.vm as unknown as { showAchievementDialog: boolean };
-      expect(vm.showAchievementDialog).toBe(false);
+      // Initially dialog should not be visible
+      let dialog = wrapper.find('.mock-achievement-dialog');
+      expect(dialog.attributes('data-visible')).toBe('false');
 
       // Add new achievements to trigger watcher
       progressStore.newAchievements = [mockAchievements[0]];
       await nextTick();
 
-      // Dialog should be shown now
-      vm = wrapper.vm as unknown as { showAchievementDialog: boolean };
-      expect(vm.showAchievementDialog).toBe(true);
+      // Dialog should now be visible
+      dialog = wrapper.find('.mock-achievement-dialog');
+      expect(dialog.attributes('data-visible')).toBe('true');
+      expect(dialog.attributes('data-achievements-count')).toBe('1');
     });
   });
 
