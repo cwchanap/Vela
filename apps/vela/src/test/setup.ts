@@ -7,7 +7,7 @@ global.window.scrollTo = vi.fn();
 
 // Mock IntersectionObserver
 global.IntersectionObserver = class IntersectionObserver {
-  constructor() {}
+  constructor(_callback?: any, _options?: any) {}
   observe() {}
   unobserve() {}
   disconnect() {}
@@ -21,7 +21,7 @@ global.IntersectionObserver = class IntersectionObserver {
 
 // Mock ResizeObserver
 global.ResizeObserver = class ResizeObserver {
-  constructor() {}
+  constructor(_callback?: any) {}
   observe() {}
   unobserve() {}
   disconnect() {}
