@@ -350,8 +350,9 @@ describe('ProgressDashboard', () => {
 
       // First chart should be the weekly chart with 'line' type and 'experience' dataKey
       const weeklyChart = charts[0];
-      expect(weeklyChart.attributes('data-type')).toBe('line');
-      expect(weeklyChart.attributes('data-key')).toBe('experience');
+      expect(weeklyChart).toBeDefined();
+      expect(weeklyChart!.attributes('data-type')).toBe('line');
+      expect(weeklyChart!.attributes('data-key')).toBe('experience');
     });
 
     it('should pass correct props to monthly chart', () => {
@@ -363,8 +364,9 @@ describe('ProgressDashboard', () => {
 
       // Second chart should be the monthly chart with 'bar' type and 'vocabulary' dataKey
       const monthlyChart = charts[1];
-      expect(monthlyChart.attributes('data-type')).toBe('bar');
-      expect(monthlyChart.attributes('data-key')).toBe('vocabulary');
+      expect(monthlyChart).toBeDefined();
+      expect(monthlyChart!.attributes('data-type')).toBe('bar');
+      expect(monthlyChart!.attributes('data-key')).toBe('vocabulary');
     });
   });
 
