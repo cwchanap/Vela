@@ -271,9 +271,9 @@ describe('AchievementItem', () => {
           ...mockEarnedAchievement,
           category,
         };
-        wrapper = mountComponent({ achievement });
-        expect(wrapper.exists()).toBe(true);
-        wrapper.unmount();
+        const testWrapper = mountComponent({ achievement });
+        expect(testWrapper.exists()).toBe(true);
+        testWrapper.unmount();
       });
     });
 
