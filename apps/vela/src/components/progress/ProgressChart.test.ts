@@ -57,9 +57,13 @@ const mockCanvasContext = () => {
 
 describe('ProgressChart', () => {
   let mockContext: ReturnType<typeof mockCanvasContext>;
+  let originalGetContext: typeof HTMLCanvasElement.prototype.getContext;
 
   beforeEach(() => {
     mockContext = mockCanvasContext();
+
+    // Save original getContext method
+    originalGetContext = HTMLCanvasElement.prototype.getContext;
 
     // Mock HTMLCanvasElement.getContext
     HTMLCanvasElement.prototype.getContext = vi.fn(
@@ -68,6 +72,8 @@ describe('ProgressChart', () => {
   });
 
   afterEach(() => {
+    // Restore original getContext method
+    HTMLCanvasElement.prototype.getContext = originalGetContext;
     vi.restoreAllMocks();
   });
 
