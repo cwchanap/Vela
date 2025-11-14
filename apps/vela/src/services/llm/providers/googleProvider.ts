@@ -9,13 +9,15 @@ interface GoogleProviderOptions {
 /**
  * Google AI Studio (Generative Language API - Gemini) provider
  * Docs: https://ai.google.dev/gemini-api/docs
+ *
+ * API calls are routed through the server which handles API keys.
+ * Server-side API keys are preferred; user-provided keys are optional overrides.
  */
 export class GoogleProvider implements LLMProvider {
   readonly name: LLMProviderName = 'google';
   private model: string;
 
   constructor(options?: GoogleProviderOptions) {
-    // API calls are proxied via AWS Lambda API; no client-side API key
     this.model = options?.model || 'gemini-2.5-flash-lite';
   }
 
