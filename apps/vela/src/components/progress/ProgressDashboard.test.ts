@@ -203,10 +203,10 @@ describe('ProgressDashboard', () => {
     progressStore = useProgressStore();
     authStore = useAuthStore();
 
-    // Set up default store state
+    // Set up default store state with deep clones to prevent test pollution
     authStore.user = mockUser;
-    progressStore.analytics = mockProgressAnalytics;
-    progressStore.skillCategories = mockSkillCategories;
+    progressStore.analytics = JSON.parse(JSON.stringify(mockProgressAnalytics));
+    progressStore.skillCategories = JSON.parse(JSON.stringify(mockSkillCategories));
     progressStore.learningStats = {
       totalWordsLearned: 150,
       currentStreak: 7,
