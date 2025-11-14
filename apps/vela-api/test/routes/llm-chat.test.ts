@@ -89,7 +89,7 @@ describe('LLM Chat Route', () => {
   });
 
   describe('Google provider', () => {
-    it('should return 400 when API key is missing', async () => {
+    it('should return 400 when API key is missing (no server key)', async () => {
       const app = createTestApp();
       const req = new Request('http://localhost/', {
         method: 'POST',
@@ -104,7 +104,98 @@ describe('LLM Chat Route', () => {
       const json = await res.json();
 
       expect(res.status).toBe(400);
-      expect(json.error).toBe('Missing API key for Google provider');
+      expect(json.error).toContain('Missing API key for Google provider');
+    });
+
+    it('should use server-side API key when available', async () => {
+      const mockResponse = {
+        candidates: [
+          {
+            content: {
+              parts: [{ text: 'Server key response' }],
+            },
+          },
+        ],
+      };
+
+      (global.fetch as any).mockResolvedValueOnce({
+        ok: true,
+        text: () => Promise.resolve(JSON.stringify(mockResponse)),
+      });
+
+      const app = createTestApp({
+        GOOGLE_API_KEY: 'server-side-key',
+      });
+      const req = new Request('http://localhost/', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          provider: 'google',
+          prompt: 'Hello',
+        }),
+      });
+
+      const res = await app.request(req);
+      const json = await res.json();
+
+      expect(res.status).toBe(200);
+      expect(json.text).toBe('Server key response');
+
+      // Verify the fetch call used server key via header
+      expect(global.fetch).toHaveBeenCalledWith(
+        expect.stringContaining('generativelanguage.googleapis.com'),
+        expect.objectContaining({
+          headers: expect.objectContaining({
+            'x-goog-api-key': 'server-side-key',
+          }),
+        }),
+      );
+    });
+
+    it('should allow user key to override server key', async () => {
+      const mockResponse = {
+        candidates: [
+          {
+            content: {
+              parts: [{ text: 'User key response' }],
+            },
+          },
+        ],
+      };
+
+      (global.fetch as any).mockResolvedValueOnce({
+        ok: true,
+        text: () => Promise.resolve(JSON.stringify(mockResponse)),
+      });
+
+      const app = createTestApp({
+        GOOGLE_API_KEY: 'server-side-key',
+      });
+      const req = new Request('http://localhost/', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          provider: 'google',
+          apiKey: 'user-key',
+          prompt: 'Hello',
+        }),
+      });
+
+      const res = await app.request(req);
+      await res.json(); // Consume response
+
+      expect(res.status).toBe(200);
+
+      // Verify the fetch call used user key (overriding server key) via header
+      const fetchCall = (global.fetch as any).mock.calls[0];
+      expect(fetchCall[0]).toEqual(expect.stringContaining('generativelanguage.googleapis.com'));
+      expect(fetchCall[1]).toEqual(
+        expect.objectContaining({
+          headers: expect.objectContaining({
+            'x-goog-api-key': 'user-key',
+          }),
+        }),
+      );
     });
 
     it('should make successful request to Google API', async () => {
@@ -149,7 +240,10 @@ describe('LLM Chat Route', () => {
         expect.stringContaining('generativelanguage.googleapis.com'),
         expect.objectContaining({
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: expect.objectContaining({
+            'Content-Type': 'application/json',
+            'x-goog-api-key': 'test-key',
+          }),
         }),
       );
     });
@@ -181,7 +275,7 @@ describe('LLM Chat Route', () => {
   });
 
   describe('OpenRouter provider', () => {
-    it('should return 400 when API key is missing', async () => {
+    it('should return 400 when API key is missing (no server key)', async () => {
       const app = createTestApp();
       const req = new Request('http://localhost/', {
         method: 'POST',
@@ -196,7 +290,99 @@ describe('LLM Chat Route', () => {
       const json = await res.json();
 
       expect(res.status).toBe(400);
-      expect(json.error).toBe('Missing API key for OpenRouter provider');
+      expect(json.error).toContain('Missing API key for OpenRouter provider');
+    });
+
+    it('should use server-side API key when available', async () => {
+      const mockResponse = {
+        choices: [
+          {
+            message: {
+              content: 'Server key response',
+            },
+          },
+        ],
+      };
+
+      (global.fetch as any).mockResolvedValueOnce({
+        ok: true,
+        text: () => Promise.resolve(JSON.stringify(mockResponse)),
+      });
+
+      const app = createTestApp({
+        OPENROUTER_API_KEY: 'server-side-key',
+        APP_NAME: 'Vela App',
+      });
+      const req = new Request('http://localhost/', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          provider: 'openrouter',
+          prompt: 'Hello',
+        }),
+      });
+
+      const res = await app.request(req);
+      const json = await res.json();
+
+      expect(res.status).toBe(200);
+      expect(json.text).toBe('Server key response');
+
+      // Verify the fetch call used server key
+      expect(global.fetch).toHaveBeenCalledWith(
+        'https://openrouter.ai/api/v1/chat/completions',
+        expect.objectContaining({
+          headers: expect.objectContaining({
+            Authorization: 'Bearer server-side-key',
+          }),
+        }),
+      );
+    });
+
+    it('should allow user key to override server key', async () => {
+      const mockResponse = {
+        choices: [
+          {
+            message: {
+              content: 'User key response',
+            },
+          },
+        ],
+      };
+
+      (global.fetch as any).mockResolvedValueOnce({
+        ok: true,
+        text: () => Promise.resolve(JSON.stringify(mockResponse)),
+      });
+
+      const app = createTestApp({
+        OPENROUTER_API_KEY: 'server-side-key',
+        APP_NAME: 'Vela App',
+      });
+      const req = new Request('http://localhost/', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          provider: 'openrouter',
+          apiKey: 'user-key',
+          prompt: 'Hello',
+        }),
+      });
+
+      const res = await app.request(req);
+      await res.json(); // Consume response
+
+      expect(res.status).toBe(200);
+
+      // Verify the fetch call used user key, not server key
+      expect(global.fetch).toHaveBeenCalledWith(
+        'https://openrouter.ai/api/v1/chat/completions',
+        expect.objectContaining({
+          headers: expect.objectContaining({
+            Authorization: 'Bearer user-key',
+          }),
+        }),
+      );
     });
 
     it('should make successful request to OpenRouter API', async () => {

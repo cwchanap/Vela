@@ -36,13 +36,20 @@ llmChat.post('/', async (c) => {
 
   try {
     if (provider === 'google') {
-      const apiKey: string | undefined = input.apiKey;
+      // Prefer user-provided API key, fall back to server-side key
+      const apiKey: string | undefined = input.apiKey || c.env.GOOGLE_API_KEY;
       if (!apiKey) {
-        return c.json({ error: 'Missing API key for Google provider' }, 400);
+        return c.json(
+          {
+            error:
+              'Missing API key for Google provider. Configure GOOGLE_API_KEY on server or provide your own API key.',
+          },
+          400,
+        );
       }
 
       const model = input.model || 'gemini-2.5-flash-lite';
-      const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+      const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
 
       type Part = { text: string };
       type Content = { role?: 'user' | 'model'; parts: Part[] };
@@ -86,7 +93,10 @@ llmChat.post('/', async (c) => {
 
       const res = await fetch(endpoint, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'x-goog-api-key': apiKey,
+        },
         body: JSON.stringify(body),
       });
 
@@ -101,9 +111,16 @@ llmChat.post('/', async (c) => {
     }
 
     if (provider === 'openrouter') {
-      const apiKey: string | undefined = input.apiKey;
+      // Prefer user-provided API key, fall back to server-side key
+      const apiKey: string | undefined = input.apiKey || c.env.OPENROUTER_API_KEY;
       if (!apiKey) {
-        return c.json({ error: 'Missing API key for OpenRouter provider' }, 400);
+        return c.json(
+          {
+            error:
+              'Missing API key for OpenRouter provider. Configure OPENROUTER_API_KEY on server or provide your own API key.',
+          },
+          400,
+        );
       }
 
       const model = input.model || 'openai/gpt-oss-20b:free';

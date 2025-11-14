@@ -17,6 +17,10 @@ export interface Env {
   TTS_AUDIO_BUCKET_NAME?: string;
   ELEVENLABS_API_KEY?: string;
 
+  // LLM API Keys (server-side)
+  GOOGLE_API_KEY?: string;
+  OPENROUTER_API_KEY?: string;
+
   // CORS configuration
   CORS_ALLOWED_ORIGINS?: string;
 }
