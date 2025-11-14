@@ -60,7 +60,7 @@ describe('AchievementDialog', () => {
   const mountComponent = (props = {}) => {
     return mount(AchievementDialog, {
       global: {
-        plugins: [[Quasar, {}]],
+        plugins: [Quasar],
       },
       props: {
         modelValue: false,
