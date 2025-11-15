@@ -30,14 +30,53 @@ describe('LLM Chat Route', () => {
   });
 
   describe('CORS handling', () => {
-    it('should handle OPTIONS request', async () => {
-      const app = createTestApp();
+    it('should handle OPTIONS request without Origin by not setting Access-Control-Allow-Origin', async () => {
+      const app = createTestApp({
+        CORS_ALLOWED_ORIGINS: 'http://localhost:9000',
+      });
       const req = new Request('http://localhost/', { method: 'OPTIONS' });
       const res = await app.request(req);
 
       expect(res.status).toBe(200);
-      expect(res.headers.get('Access-Control-Allow-Origin')).toBe('*');
+      expect(res.headers.get('Access-Control-Allow-Origin')).toBeNull();
       expect(res.headers.get('Access-Control-Allow-Methods')).toBe('POST,OPTIONS');
+    });
+
+    it('should set Access-Control-Allow-Origin when Origin is allowed', async () => {
+      const app = createTestApp({
+        CORS_ALLOWED_ORIGINS: 'http://localhost:9000',
+      });
+      const req = new Request('http://localhost/', {
+        method: 'OPTIONS',
+        headers: {
+          Origin: 'http://localhost:9000',
+        },
+      });
+      const res = await app.request(req);
+
+      expect(res.status).toBe(200);
+      expect(res.headers.get('Access-Control-Allow-Origin')).toBe('http://localhost:9000');
+      expect(res.headers.get('Access-Control-Allow-Methods')).toBe('POST,OPTIONS');
+    });
+
+    it('should reject disallowed Origin with 403 and not set wildcard', async () => {
+      const app = createTestApp({
+        CORS_ALLOWED_ORIGINS: 'http://localhost:9000',
+      });
+      const req = new Request('http://localhost/', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Origin: 'https://malicious.example.com',
+        },
+        body: JSON.stringify({ provider: 'google', apiKey: 'test-key', prompt: 'Hello' }),
+      });
+      const res = await app.request(req);
+      const json = await res.json();
+
+      expect(res.status).toBe(403);
+      expect(json.error).toContain('CORS policy violation: Origin not allowed');
+      expect(res.headers.get('Access-Control-Allow-Origin')).toBeNull();
     });
   });
 
@@ -477,27 +516,38 @@ describe('LLM Chat Route', () => {
 
       expect(res.status).toBe(200);
 
-      // Verify that fetch was called
-      expect(global.fetch).toHaveBeenCalled();
-      const fetchCall = (global.fetch as any).mock.calls[0];
-      const requestBody = JSON.parse(fetchCall[1].body);
+      // Verify that fetch was called with the expected request body
+      const expectedBody = {
+        contents: [
+          {
+            role: 'user',
+            parts: [{ text: 'Hello' }],
+          },
+          {
+            role: 'model',
+            parts: [{ text: 'Hi there!' }],
+          },
+          {
+            role: 'user',
+            parts: [{ text: 'How are you?' }],
+          },
+        ],
+        generationConfig: {
+          temperature: 0.7,
+          maxOutputTokens: 1024,
+        },
+        systemInstruction: {
+          role: 'system',
+          parts: [{ text: 'You are helpful' }],
+        },
+      };
 
-      // Should have system instruction
-      expect(requestBody.systemInstruction).toEqual({
-        role: 'system',
-        parts: [{ text: 'You are helpful' }],
-      });
-
-      // Should have user and model messages (excluding system)
-      expect(requestBody.contents).toHaveLength(3);
-      expect(requestBody.contents[0]).toEqual({
-        role: 'user',
-        parts: [{ text: 'Hello' }],
-      });
-      expect(requestBody.contents[1]).toEqual({
-        role: 'model',
-        parts: [{ text: 'Hi there!' }],
-      });
+      expect(global.fetch).toHaveBeenCalledWith(
+        expect.stringContaining('generativelanguage.googleapis.com'),
+        expect.objectContaining({
+          body: JSON.stringify(expectedBody),
+        }),
+      );
     });
   });
 });
