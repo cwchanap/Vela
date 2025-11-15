@@ -14,6 +14,7 @@ import { readFileSync, existsSync } from 'fs';
 import { resolve } from 'path';
 import { Context, Next } from 'hono';
 import { initializeAuthVerifier } from './middleware/auth';
+import { corsMiddleware } from './middleware/cors';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -102,6 +103,9 @@ if (process.env.NODE_ENV === 'development') {
     port,
   });
 }
+
+// Apply centralized CORS middleware globally
+app.use('*', corsMiddleware);
 
 app.get('/', (c) => {
   return c.text('Vela API - Hello Hono!');

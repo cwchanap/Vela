@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { Hono } from 'hono';
 import { llmChat } from '../../src/routes/llm-chat';
+import { corsMiddleware } from '../../src/middleware/cors';
 import type { Env } from '../../src/types';
 
 // Mock fetch globally
@@ -17,6 +18,9 @@ function createTestApp(env: Env = {}) {
     Object.assign(c.env, env);
     await next();
   });
+
+  // Apply CORS middleware (now centralized)
+  app.use('*', corsMiddleware);
 
   // Mount the routes
   app.route('/', llmChat);
@@ -37,9 +41,11 @@ describe('LLM Chat Route', () => {
       const req = new Request('http://localhost/', { method: 'OPTIONS' });
       const res = await app.request(req);
 
-      expect(res.status).toBe(200);
+      expect(res.status).toBe(204);
       expect(res.headers.get('Access-Control-Allow-Origin')).toBeNull();
-      expect(res.headers.get('Access-Control-Allow-Methods')).toBe('POST,OPTIONS');
+      expect(res.headers.get('Access-Control-Allow-Methods')).toBe(
+        'GET, POST, PUT, DELETE, OPTIONS',
+      );
     });
 
     it('should set Access-Control-Allow-Origin when Origin is allowed', async () => {
@@ -54,9 +60,11 @@ describe('LLM Chat Route', () => {
       });
       const res = await app.request(req);
 
-      expect(res.status).toBe(200);
+      expect(res.status).toBe(204);
       expect(res.headers.get('Access-Control-Allow-Origin')).toBe('http://localhost:9000');
-      expect(res.headers.get('Access-Control-Allow-Methods')).toBe('POST,OPTIONS');
+      expect(res.headers.get('Access-Control-Allow-Methods')).toBe(
+        'GET, POST, PUT, DELETE, OPTIONS',
+      );
     });
 
     it('should reject disallowed Origin with 403 and not set wildcard', async () => {
