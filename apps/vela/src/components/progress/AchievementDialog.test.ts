@@ -254,12 +254,20 @@ describe('AchievementDialog', () => {
     });
 
     it('should clear timer when dialog is closed manually', async () => {
-      wrapper = mountComponent({ modelValue: true });
-      const vm = wrapper.vm as any;
+      wrapper = mountComponent({ modelValue: false });
+
+      // Open the dialog to start the timer
+      await wrapper.setProps({ modelValue: true });
       await flushPromises();
+
+      const vm = wrapper.vm as any;
 
       // Manually close
       vm.closeDialog();
+      await flushPromises();
+
+      // Update prop to reflect the close (simulating parent component response)
+      await wrapper.setProps({ modelValue: false });
       await flushPromises();
 
       const emitCount = wrapper.emitted('close')?.length || 0;
