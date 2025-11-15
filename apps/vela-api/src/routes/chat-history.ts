@@ -87,19 +87,6 @@ async function getUserIdFromToken(
   }
 }
 
-// Custom CORS handler
-chatHistory.use('*', async (c, next) => {
-  c.header('Access-Control-Allow-Origin', '*');
-  c.header('Access-Control-Allow-Methods', 'GET,POST,OPTIONS,DELETE');
-  c.header('Access-Control-Allow-Headers', 'content-type,authorization');
-
-  if (c.req.method === 'OPTIONS') {
-    return c.text('', 200);
-  }
-
-  await next();
-});
-
 /* ========================
  * DynamoDB implementation
  * ======================== */

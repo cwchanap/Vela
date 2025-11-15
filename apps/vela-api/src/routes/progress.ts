@@ -25,19 +25,6 @@ const RecordGameSessionSchema = z.object({
 
 const progress = new Hono<{ Bindings: Env }>();
 
-// Custom CORS handler
-progress.use('*', async (c, next) => {
-  c.header('Access-Control-Allow-Origin', '*');
-  c.header('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
-  c.header('Access-Control-Allow-Headers', 'content-type');
-
-  if (c.req.method === 'OPTIONS') {
-    return c.text('', 200);
-  }
-
-  await next();
-});
-
 /* ============
  * Routes
  * ============ */
