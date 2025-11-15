@@ -58,41 +58,6 @@ const VocabularyIdParamSchema = z.object({
 const createTTSRoute = (env: Env) => {
   const tts = new Hono<{ Bindings: Env } & AuthContext>();
 
-  // Secure CORS handler with origin validation
-  tts.use('*', async (c, next) => {
-    const origin = c.req.header('Origin');
-
-    // Parse allowed origins from environment variable
-    const allowedOrigins = env.CORS_ALLOWED_ORIGINS?.split(',').map((o) => o.trim()) || [];
-
-    // Check if the request origin is in the allowlist
-    const isAllowedOrigin = origin && allowedOrigins.includes(origin);
-
-    if (isAllowedOrigin) {
-      // Set specific origin instead of wildcard
-      c.header('Access-Control-Allow-Origin', origin);
-      c.header('Access-Control-Allow-Credentials', 'true');
-    } else if (origin) {
-      // Origin not allowed - return 403 for non-OPTIONS requests
-      if (c.req.method !== 'OPTIONS') {
-        return c.json({ error: 'CORS policy violation: Origin not allowed' }, 403);
-      }
-      // For OPTIONS requests with invalid origin, don't set CORS headers
-      await next();
-      return;
-    }
-
-    // Set other CORS headers
-    c.header('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
-    c.header('Access-Control-Allow-Headers', 'content-type, authorization');
-
-    if (c.req.method === 'OPTIONS') {
-      return c.text('', 200);
-    }
-
-    await next();
-  });
-
   /**
    * POST /api/tts/generate
    * Generate TTS audio for a vocabulary word using ElevenLabs

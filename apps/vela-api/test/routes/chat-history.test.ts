@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { Hono } from 'hono';
 import { chatHistory } from '../../src/routes/chat-history';
+import { corsMiddleware } from '../../src/middleware/cors';
 import type { ChatHistoryItem, Env } from '../../src/types';
 
 // Mock AWS SDK
@@ -55,6 +56,9 @@ function createTestApp(env: Env = {}) {
     await next();
   });
 
+  // Apply CORS middleware (now centralized)
+  app.use('*', corsMiddleware);
+
   // Mount the routes
   app.route('/', chatHistory);
 
@@ -68,13 +72,17 @@ describe('Chat History Route', () => {
 
   describe('CORS handling', () => {
     it('should handle OPTIONS request', async () => {
-      const app = createTestApp();
+      const app = createTestApp({
+        CORS_ALLOWED_ORIGINS: 'http://localhost:9000',
+      });
       const req = new Request('http://localhost/threads', { method: 'OPTIONS' });
       const res = await app.request(req);
 
-      expect(res.status).toBe(200);
-      expect(res.headers.get('Access-Control-Allow-Origin')).toBe('*');
-      expect(res.headers.get('Access-Control-Allow-Methods')).toBe('GET,POST,OPTIONS,DELETE');
+      expect(res.status).toBe(204);
+      expect(res.headers.get('Access-Control-Allow-Origin')).toBeNull();
+      expect(res.headers.get('Access-Control-Allow-Methods')).toBe(
+        'GET, POST, PUT, DELETE, OPTIONS',
+      );
     });
   });
 

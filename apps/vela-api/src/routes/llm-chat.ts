@@ -3,42 +3,6 @@ import type { Env } from '../types';
 
 const llmChat = new Hono<{ Bindings: Env }>();
 
-// Custom CORS handler with origin validation
-llmChat.use('*', async (c, next) => {
-  const origin = c.req.header('Origin');
-
-  // Parse allowed origins from environment variable (comma-separated)
-  const allowedOrigins = c.env.CORS_ALLOWED_ORIGINS?.split(',').map((o) => o.trim()) || [];
-
-  const isAllowedOrigin = origin && allowedOrigins.includes(origin);
-
-  if (origin && !isAllowedOrigin) {
-    // Origin not allowed - return 403 for non-OPTIONS requests
-    if (c.req.method !== 'OPTIONS') {
-      return c.json({ error: 'CORS policy violation: Origin not allowed' }, 403);
-    }
-
-    // For OPTIONS requests with invalid origin, don't set CORS headers
-    await next();
-    return;
-  }
-
-  if (isAllowedOrigin && origin) {
-    // Set specific origin instead of wildcard
-    c.header('Access-Control-Allow-Origin', origin);
-  }
-
-  // Set other CORS headers
-  c.header('Access-Control-Allow-Headers', 'authorization, x-client-info, apikey, content-type');
-  c.header('Access-Control-Allow-Methods', 'POST,OPTIONS');
-
-  if (c.req.method === 'OPTIONS') {
-    return c.text('', 200);
-  }
-
-  await next();
-});
-
 llmChat.post('/', async (c) => {
   let input;
   try {
