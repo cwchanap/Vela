@@ -229,28 +229,27 @@ describe('AchievementDialog', () => {
       // Fast-forward 5 seconds
       vi.advanceTimersByTime(5000);
 
-      // Close dialog
+      // Close dialog (clearing the timer)
       await wrapper.setProps({ modelValue: false });
       await flushPromises();
 
-      // Clear emissions
-      const updateEmissions = wrapper.emitted('update:modelValue')?.length || 0;
-      const closeEmissions = wrapper.emitted('close')?.length || 0;
-
-      // Reopen dialog
+      // Reopen dialog (starting a new timer)
       await wrapper.setProps({ modelValue: true });
       await flushPromises();
 
-      // Fast-forward 9 more seconds (total would be 14 if timer didn't reset)
+      // Fast-forward 9 seconds from reopen - should NOT auto-close yet
       vi.advanceTimersByTime(9000);
       await flushPromises();
 
-      // Should not have closed yet (timer restarted)
-      const newUpdateEmissions = wrapper.emitted('update:modelValue')?.length || 0;
-      const newCloseEmissions = wrapper.emitted('close')?.length || 0;
+      expect(wrapper.emitted('update:modelValue')).toBeFalsy();
+      expect(wrapper.emitted('close')).toBeFalsy();
 
-      expect(newUpdateEmissions).toBe(updateEmissions);
-      expect(newCloseEmissions).toBe(closeEmissions);
+      // Fast-forward 1 more second (10 total from reopen) - should auto-close now
+      vi.advanceTimersByTime(1000);
+      await flushPromises();
+
+      expect(wrapper.emitted('update:modelValue')).toBeTruthy();
+      expect(wrapper.emitted('close')).toBeTruthy();
     });
 
     it('should clear timer when dialog is closed manually', async () => {
