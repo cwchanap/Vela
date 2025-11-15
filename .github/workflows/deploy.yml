@@ -23,7 +23,6 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
-          cache: "pnpm"
 
       - name: Install pnpm
         uses: pnpm/action-setup@v4
@@ -68,7 +67,6 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
-          cache: "pnpm"
 
       - name: Install pnpm
         uses: pnpm/action-setup@v4
@@ -149,7 +147,7 @@ jobs:
           echo "🔗 API URL: ${{ steps.get-outputs.outputs.api-url }}"
 
   cleanup:
-    if: always()
+    if: always() && needs.build.result == 'success'
     needs: [build, deploy]
     runs-on: ubuntu-latest
     steps:
