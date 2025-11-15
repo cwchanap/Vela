@@ -187,9 +187,8 @@ describe('LLM Chat Route', () => {
       expect(res.status).toBe(200);
 
       // Verify the fetch call used user key (overriding server key) via header
-      const fetchCall = (global.fetch as any).mock.calls[0];
-      expect(fetchCall[0]).toEqual(expect.stringContaining('generativelanguage.googleapis.com'));
-      expect(fetchCall[1]).toEqual(
+      expect(global.fetch).toHaveBeenCalledWith(
+        expect.stringContaining('generativelanguage.googleapis.com'),
         expect.objectContaining({
           headers: expect.objectContaining({
             'x-goog-api-key': 'user-key',
