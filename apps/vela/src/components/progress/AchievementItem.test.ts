@@ -235,7 +235,7 @@ describe('AchievementItem', () => {
         earned_at: '2024-01-14T10:00:00Z',
       };
       wrapper = mountComponent({ achievement: threeDaysAgoAchievement });
-      expect(wrapper.text()).toContain('days ago');
+      expect(wrapper.text()).toContain('Earned 3 days ago');
     });
 
     it('should display formatted date for achievements earned over a week ago', () => {
