@@ -205,7 +205,10 @@ describe('AchievementDialog', () => {
     });
 
     it('should not auto-close before 10 seconds', async () => {
-      wrapper = mountComponent({ modelValue: true });
+      wrapper = mountComponent({ modelValue: false });
+
+      // Open the dialog to start the timer
+      await wrapper.setProps({ modelValue: true });
       await flushPromises();
 
       // Fast-forward time by 9 seconds
