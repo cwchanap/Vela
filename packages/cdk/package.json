@@ -12,7 +12,7 @@
     "cdk:destroy": "pnpm dlx aws-cdk destroy",
     "cdk:diff": "pnpm dlx aws-cdk diff",
     "get-outputs": "aws cloudformation describe-stacks --stack-name VelaStack --query 'Stacks[0].Outputs' --output json > cdk-outputs.json",
-    "build:frontend": "pnpm run get-outputs && node scripts/inject-env.js && pnpm --filter @vela/app run build",
+    "build:frontend": "pnpm run get-outputs && tsx scripts/inject-env.ts && pnpm --filter @vela/app run build",
     "lint": "eslint \"**/*.{ts,js}\"",
     "lint:fix": "eslint \"**/*.{ts,js}\" --fix",
     "format": "prettier --write \"**/*.{js,ts,json,md}\" --ignore-path ../../.gitignore"

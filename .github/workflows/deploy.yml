@@ -106,7 +106,7 @@ jobs:
         continue-on-error: true
 
       - name: Inject Vite env (.env.production) from CDK outputs
-        run: node packages/cdk/scripts/inject-env.js
+        run: pnpm --filter @vela/cdk exec -- tsx scripts/inject-env.ts
         continue-on-error: true
 
       - name: Bootstrap CDK (if needed)
