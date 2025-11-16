@@ -354,6 +354,39 @@ describe('CORS Middleware', () => {
       expect(json.message).toBe('GET success');
       expect(res.headers.get('Access-Control-Allow-Origin')).toBe('http://localhost:9000');
     });
+
+    it('should fallback to process.env.CORS_ALLOWED_ORIGINS when c.env is not available', async () => {
+      // Set process.env for this test
+      const originalEnv = process.env.CORS_ALLOWED_ORIGINS;
+      process.env.CORS_ALLOWED_ORIGINS = 'http://fallback-origin.com';
+
+      try {
+        // Create app without c.env set (simulating production before env injection)
+        const app = new Hono<{ Bindings: Env }>();
+        app.use('*', corsMiddleware);
+        app.get('/test', (c) => c.json({ message: 'GET success' }));
+
+        const req = new Request('http://localhost/test', {
+          method: 'GET',
+          headers: {
+            Origin: 'http://fallback-origin.com',
+          },
+        });
+        const res = await app.request(req);
+        const json = await res.json();
+
+        expect(res.status).toBe(200);
+        expect(json.message).toBe('GET success');
+        expect(res.headers.get('Access-Control-Allow-Origin')).toBe('http://fallback-origin.com');
+      } finally {
+        // Restore original env
+        if (originalEnv !== undefined) {
+          process.env.CORS_ALLOWED_ORIGINS = originalEnv;
+        } else {
+          delete process.env.CORS_ALLOWED_ORIGINS;
+        }
+      }
+    });
   });
 
   describe('Consistency between OPTIONS and POST', () => {
