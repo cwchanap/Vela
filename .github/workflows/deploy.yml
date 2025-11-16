@@ -45,7 +45,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: lambda-function-${{ github.sha }}
-          path: dist/lambda/
+          path: packages/cdk/dist/lambda/
           retention-days: 7
 
       - name: Upload frontend artifact
@@ -53,7 +53,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: frontend-dist-${{ github.sha }}
-          path: dist/spa/
+          path: apps/vela/dist/spa/
           retention-days: 7
 
   deploy:
@@ -87,13 +87,13 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: lambda-function-${{ github.sha }}
-          path: dist/lambda/
+          path: packages/cdk/dist/lambda/
 
       - name: Download frontend artifact
         uses: actions/download-artifact@v4
         with:
           name: frontend-dist-${{ github.sha }}
-          path: dist/spa/
+          path: apps/vela/dist/spa/
 
       - name: Export CDK outputs to packages/cdk/cdk-outputs.json
         run: |
