@@ -15,7 +15,9 @@ export const corsMiddleware = async (c: Context<{ Bindings: Env }>, next: Next) 
   const origin = c.req.header('Origin');
 
   // Parse allowed origins from environment variable (comma-separated)
-  const allowedOrigins = c.env?.CORS_ALLOWED_ORIGINS?.split(',').map((o) => o.trim()) || [];
+  // Fall back to process.env if c.env is not available (e.g., in production before env injection)
+  const corsConfig = c.env?.CORS_ALLOWED_ORIGINS || process.env.CORS_ALLOWED_ORIGINS;
+  const allowedOrigins = corsConfig?.split(',').map((o) => o.trim()) || [];
 
   const isAllowedOrigin = origin && allowedOrigins.includes(origin);
 
