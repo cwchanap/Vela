@@ -139,8 +139,7 @@ describe('DashboardPage', () => {
 
     it('should display user email on mount', async () => {
       wrapper = mount(DashboardPage);
-      await wrapper.vm.$nextTick();
-      await new Promise((resolve) => setTimeout(resolve, 0));
+      await flushPromises();
 
       expect(mockGetUserEmail).toHaveBeenCalled();
       expect(wrapper.text()).toContain('test@example.com');
@@ -148,8 +147,7 @@ describe('DashboardPage', () => {
 
     it('should load dictionary entries on mount', async () => {
       wrapper = mount(DashboardPage);
-      await wrapper.vm.$nextTick();
-      await new Promise((resolve) => setTimeout(resolve, 0));
+      await flushPromises();
 
       expect(mockGetValidAccessToken).toHaveBeenCalled();
       expect(mockGetMyDictionaries).toHaveBeenCalledWith('valid-token');
@@ -159,8 +157,7 @@ describe('DashboardPage', () => {
       storageState.theme_preference = 'dark';
 
       wrapper = mount(DashboardPage);
-      await wrapper.vm.$nextTick();
-      await new Promise((resolve) => setTimeout(resolve, 0));
+      await flushPromises();
 
       const container = wrapper.find('.dashboard-container');
       expect(container.classes()).toContain('dark');
@@ -168,7 +165,7 @@ describe('DashboardPage', () => {
 
     it('should default to light theme if no preference is saved', async () => {
       wrapper = mount(DashboardPage);
-      await wrapper.vm.$nextTick();
+      await flushPromises();
 
       const container = wrapper.find('.dashboard-container');
       expect(container.classes()).not.toContain('dark');
@@ -240,7 +237,7 @@ describe('DashboardPage', () => {
   describe('Logout Functionality', () => {
     it('should call clearAuthData when logout button is clicked', async () => {
       wrapper = mount(DashboardPage);
-      await wrapper.vm.$nextTick();
+      await flushPromises();
 
       const logoutButton = wrapper.findAll('.icon-button')[1];
       await logoutButton.trigger('click');
@@ -250,7 +247,7 @@ describe('DashboardPage', () => {
 
     it('should emit logout event when logout button is clicked', async () => {
       wrapper = mount(DashboardPage);
-      await wrapper.vm.$nextTick();
+      await flushPromises();
 
       const logoutButton = wrapper.findAll('.icon-button')[1];
       await logoutButton.trigger('click');
@@ -263,7 +260,7 @@ describe('DashboardPage', () => {
   describe('Instructions Section', () => {
     it('should render instructions section', async () => {
       wrapper = mount(DashboardPage);
-      await wrapper.vm.$nextTick();
+      await flushPromises();
 
       expect(wrapper.find('.instructions').exists()).toBe(true);
       expect(wrapper.text()).toContain('How to save entries');
@@ -271,7 +268,7 @@ describe('DashboardPage', () => {
 
     it('should toggle instructions visibility when header is clicked', async () => {
       wrapper = mount(DashboardPage);
-      await wrapper.vm.$nextTick();
+      await flushPromises();
 
       const instructionsHeader = wrapper.find('.instructions-header');
 
@@ -294,7 +291,7 @@ describe('DashboardPage', () => {
 
     it('should display correct collapse icon based on expanded state', async () => {
       wrapper = mount(DashboardPage);
-      await wrapper.vm.$nextTick();
+      await flushPromises();
 
       const instructionsHeader = wrapper.find('.instructions-header');
       const collapseIcon = wrapper.find('.collapse-icon');
@@ -304,6 +301,7 @@ describe('DashboardPage', () => {
 
       // After expanding
       await instructionsHeader.trigger('click');
+      await wrapper.vm.$nextTick();
       expect(collapseIcon.text()).toBe('▼');
     });
   });
@@ -331,8 +329,7 @@ describe('DashboardPage', () => {
 
     it('should display dictionary entries after loading', async () => {
       wrapper = mount(DashboardPage);
-      await wrapper.vm.$nextTick();
-      await new Promise((resolve) => setTimeout(resolve, 0));
+      await flushPromises();
 
       const entries = wrapper.findAll('.entry-item');
       expect(entries.length).toBe(5); // Only first 5 entries
@@ -340,20 +337,21 @@ describe('DashboardPage', () => {
 
     it('should display only first 5 entries when more than 5 exist', async () => {
       wrapper = mount(DashboardPage);
-      await wrapper.vm.$nextTick();
-      await new Promise((resolve) => setTimeout(resolve, 0));
+      await flushPromises();
 
       const entries = wrapper.findAll('.entry-item');
       expect(entries.length).toBe(5);
-      expect(mockEntries.length).toBe(6); // Verify we have more than 5 entries
+
+      // Verify the 6th entry is not displayed
+      const allEntryTexts = entries.map((e) => e.find('.entry-text').text());
+      expect(allEntryTexts).not.toContain('いただきます'); // 6th entry
     });
 
     it('should display empty state when no entries exist', async () => {
       mockGetMyDictionaries.mockResolvedValue([]);
 
       wrapper = mount(DashboardPage);
-      await wrapper.vm.$nextTick();
-      await new Promise((resolve) => setTimeout(resolve, 0));
+      await flushPromises();
 
       expect(wrapper.find('.empty-state').exists()).toBe(true);
       expect(wrapper.text()).toContain('No dictionary entries yet');
@@ -361,8 +359,7 @@ describe('DashboardPage', () => {
 
     it('should display entry text correctly', async () => {
       wrapper = mount(DashboardPage);
-      await wrapper.vm.$nextTick();
-      await new Promise((resolve) => setTimeout(resolve, 0));
+      await flushPromises();
 
       const firstEntry = wrapper.findAll('.entry-item')[0];
       expect(firstEntry.text()).toContain('こんにちは');
@@ -370,8 +367,7 @@ describe('DashboardPage', () => {
 
     it('should display source link when source_url exists', async () => {
       wrapper = mount(DashboardPage);
-      await wrapper.vm.$nextTick();
-      await new Promise((resolve) => setTimeout(resolve, 0));
+      await flushPromises();
 
       const firstEntry = wrapper.findAll('.entry-item')[0];
       const sourceLink = firstEntry.find('.source-link');
@@ -381,8 +377,7 @@ describe('DashboardPage', () => {
 
     it('should not display source link when source_url is empty', async () => {
       wrapper = mount(DashboardPage);
-      await wrapper.vm.$nextTick();
-      await new Promise((resolve) => setTimeout(resolve, 0));
+      await flushPromises();
 
       const thirdEntry = wrapper.findAll('.entry-item')[2];
       const sourceLink = thirdEntry.find('.source-link');
@@ -391,8 +386,7 @@ describe('DashboardPage', () => {
 
     it('should format and display entry date', async () => {
       wrapper = mount(DashboardPage);
-      await wrapper.vm.$nextTick();
-      await new Promise((resolve) => setTimeout(resolve, 0));
+      await flushPromises();
 
       const firstEntry = wrapper.findAll('.entry-item')[0];
       const dateElement = firstEntry.find('.entry-date');
@@ -403,8 +397,7 @@ describe('DashboardPage', () => {
 
     it('should display "View All" button when entries exist', async () => {
       wrapper = mount(DashboardPage);
-      await wrapper.vm.$nextTick();
-      await new Promise((resolve) => setTimeout(resolve, 0));
+      await flushPromises();
 
       const viewAllButton = wrapper.find('.view-all-button');
       expect(viewAllButton.exists()).toBe(true);
@@ -415,8 +408,7 @@ describe('DashboardPage', () => {
       mockGetMyDictionaries.mockResolvedValue([]);
 
       wrapper = mount(DashboardPage);
-      await wrapper.vm.$nextTick();
-      await new Promise((resolve) => setTimeout(resolve, 0));
+      await flushPromises();
 
       const viewAllButton = wrapper.find('.view-all-button');
       expect(viewAllButton.exists()).toBe(false);
@@ -426,8 +418,7 @@ describe('DashboardPage', () => {
   describe('Refresh Functionality', () => {
     it('should reload entries when refresh button is clicked', async () => {
       wrapper = mount(DashboardPage);
-      await wrapper.vm.$nextTick();
-      await new Promise((resolve) => setTimeout(resolve, 0));
+      await flushPromises();
 
       mockGetMyDictionaries.mockClear();
 
@@ -463,8 +454,7 @@ describe('DashboardPage', () => {
       mockGetMyDictionaries.mockRejectedValue(new Error('Network error'));
 
       wrapper = mount(DashboardPage);
-      await wrapper.vm.$nextTick();
-      await new Promise((resolve) => setTimeout(resolve, 0));
+      await flushPromises();
 
       expect(wrapper.find('.error-message').exists()).toBe(true);
       expect(wrapper.text()).toContain('Network error');
@@ -477,8 +467,7 @@ describe('DashboardPage', () => {
       mockRefreshAccessToken.mockResolvedValue('new-token');
 
       wrapper = mount(DashboardPage);
-      await wrapper.vm.$nextTick();
-      await new Promise((resolve) => setTimeout(resolve, 0));
+      await flushPromises();
 
       expect(mockRefreshAccessToken).toHaveBeenCalled();
       expect(mockGetMyDictionaries).toHaveBeenCalledTimes(2);
@@ -492,8 +481,7 @@ describe('DashboardPage', () => {
       mockRefreshAccessToken.mockResolvedValue('new-token');
 
       wrapper = mount(DashboardPage);
-      await wrapper.vm.$nextTick();
-      await new Promise((resolve) => setTimeout(resolve, 0));
+      await flushPromises();
 
       expect(mockRefreshAccessToken).toHaveBeenCalled();
       expect(mockGetMyDictionaries).toHaveBeenCalledTimes(2);
@@ -505,7 +493,7 @@ describe('DashboardPage', () => {
       mockGetMyDictionaries.mockRejectedValue(new Error('Session expired. Please log in again.'));
 
       wrapper = mount(DashboardPage);
-      await wrapper.vm.$nextTick();
+      await flushPromises();
       await vi.runAllTimersAsync();
 
       expect(wrapper.find('.error-message').exists()).toBe(true);
@@ -524,8 +512,7 @@ describe('DashboardPage', () => {
       mockRefreshAccessToken.mockResolvedValue(''); // Return empty token to simulate failure
 
       wrapper = mount(DashboardPage);
-      await wrapper.vm.$nextTick();
-      await new Promise((resolve) => setTimeout(resolve, 50));
+      await flushPromises();
 
       expect(wrapper.find('.error-message').exists()).toBe(true);
     });
@@ -534,8 +521,7 @@ describe('DashboardPage', () => {
   describe('Open Web App', () => {
     it('should open web app when view all button is clicked', async () => {
       wrapper = mount(DashboardPage);
-      await wrapper.vm.$nextTick();
-      await new Promise((resolve) => setTimeout(resolve, 50));
+      await flushPromises();
 
       const viewAllButton = wrapper.find('.view-all-button');
       await viewAllButton.trigger('click');
@@ -549,8 +535,7 @@ describe('DashboardPage', () => {
   describe('Date Formatting', () => {
     it('should format date correctly', async () => {
       wrapper = mount(DashboardPage);
-      await wrapper.vm.$nextTick();
-      await new Promise((resolve) => setTimeout(resolve, 50));
+      await flushPromises();
 
       const firstEntry = wrapper.findAll('.entry-item')[0];
       const dateText = firstEntry.find('.entry-date').text();

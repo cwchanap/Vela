@@ -9,7 +9,7 @@ export default defineConfig({
   plugins: [vue() as unknown as any],
   test: {
     globals: true,
-    environment: 'jsdom',
+    environment: 'happy-dom',
     include: ['{components,entrypoints}/**/*.{test,spec}.ts'],
     coverage: {
       reporter: ['text', 'json', 'html'],
