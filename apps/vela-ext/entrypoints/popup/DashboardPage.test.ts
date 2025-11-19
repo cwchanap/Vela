@@ -273,19 +273,19 @@ describe('DashboardPage', () => {
       const instructionsHeader = wrapper.find('.instructions-header');
 
       // Initially collapsed - check via style or v-show attribute
-      let instructionsList = wrapper.find('.instructions ol');
+      let instructionsList = wrapper.find<HTMLElement>('.instructions ol');
       expect(instructionsList.element.style.display).toBe('none');
 
       // Click to expand
       await instructionsHeader.trigger('click');
       await wrapper.vm.$nextTick();
-      instructionsList = wrapper.find('.instructions ol');
+      instructionsList = wrapper.find<HTMLElement>('.instructions ol');
       expect(instructionsList.element.style.display).not.toBe('none');
 
       // Click to collapse
       await instructionsHeader.trigger('click');
       await wrapper.vm.$nextTick();
-      instructionsList = wrapper.find('.instructions ol');
+      instructionsList = wrapper.find<HTMLElement>('.instructions ol');
       expect(instructionsList.element.style.display).toBe('none');
     });
 
@@ -494,11 +494,10 @@ describe('DashboardPage', () => {
 
       wrapper = mount(DashboardPage);
       await flushPromises();
-      await vi.runAllTimersAsync();
 
       expect(wrapper.find('.error-message').exists()).toBe(true);
 
-      // Fast-forward time by 2 seconds
+      // Fast-forward time by 2 seconds to trigger the logout timeout
       await vi.advanceTimersByTimeAsync(2000);
 
       expect(mockClearAuthData).toHaveBeenCalled();
