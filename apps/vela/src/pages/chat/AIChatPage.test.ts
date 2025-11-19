@@ -92,6 +92,26 @@ describe('AIChatPage', () => {
     updated_at: '2024-01-01T00:00:00.000Z',
   };
 
+  // Reusable mock thread data to avoid duplication across tests
+  const createMockThread = (overrides = {}) => ({
+    ThreadId: 'thread-1',
+    lastTimestamp: Date.now(),
+    title: 'Test conversation',
+    messageCount: 5,
+    ...overrides,
+  });
+
+  // Helper to mock LLM service response
+  const mockLLMServiceResponse = (
+    text = 'AI response',
+    usage = { prompt: 0, completion: 0, total: 0 },
+  ) => {
+    vi.spyOn(llmModule.llmService, 'generate').mockResolvedValue({
+      text,
+      usage,
+    });
+  };
+
   const mountComponent = (props = {}) => {
     const mockQuasarInstance = {
       notify: notifyCreateSpy,
@@ -231,10 +251,7 @@ describe('AIChatPage', () => {
   describe('Sending Messages', () => {
     it('should send message when send button is clicked', async () => {
       const chatStore = useChatStore();
-      vi.spyOn(llmModule.llmService, 'generate').mockResolvedValue({
-        text: 'AI response',
-        usage: { prompt: 0, completion: 0, total: 0 },
-      });
+      mockLLMServiceResponse();
 
       fetchMock.mockResolvedValueOnce({
         ok: true,
@@ -267,10 +284,7 @@ describe('AIChatPage', () => {
     });
 
     it('should clear input after sending message', async () => {
-      vi.spyOn(llmModule.llmService, 'generate').mockResolvedValue({
-        text: 'AI response',
-        usage: { prompt: 0, completion: 0, total: 0 },
-      });
+      mockLLMServiceResponse();
 
       fetchMock.mockResolvedValueOnce({
         ok: true,
@@ -323,10 +337,7 @@ describe('AIChatPage', () => {
     });
 
     it('should add AI response to messages', async () => {
-      vi.spyOn(llmModule.llmService, 'generate').mockResolvedValue({
-        text: 'This is AI response',
-        usage: { prompt: 0, completion: 0, total: 0 },
-      });
+      mockLLMServiceResponse('This is AI response');
 
       fetchMock.mockResolvedValue({
         ok: true,
@@ -425,14 +436,7 @@ describe('AIChatPage', () => {
     });
 
     it('should load threads when opening history', async () => {
-      const mockThreads = [
-        {
-          ThreadId: 'thread-1',
-          lastTimestamp: Date.now(),
-          title: 'Test conversation',
-          messageCount: 5,
-        },
-      ];
+      const mockThreads = [createMockThread()];
 
       fetchMock.mockResolvedValueOnce({
         ok: true,
@@ -452,12 +456,13 @@ describe('AIChatPage', () => {
     });
 
     it('should show loading state while fetching threads', async () => {
-      fetchMock.mockImplementation(
-        () =>
-          new Promise((resolve) => {
-            setTimeout(() => resolve({ ok: true, json: async () => ({ threads: [] }) }), 100);
-          }),
-      );
+      // Create a promise that we can control when it resolves
+      let resolveFetch: (_value: any) => void;
+      const fetchPromise = new Promise((resolve) => {
+        resolveFetch = resolve;
+      });
+
+      fetchMock.mockReturnValueOnce(fetchPromise as any);
 
       const wrapper = mountComponent();
       const historyButton = wrapper.find('[data-testid="llm-chat-history"]');
@@ -465,7 +470,12 @@ describe('AIChatPage', () => {
       await historyButton.trigger('click');
       await wrapper.vm.$nextTick();
 
+      // At this point, fetch is in progress and loading state should be visible
       expect(wrapper.text()).toContain('Loading threads');
+
+      // Clean up by resolving the promise
+      resolveFetch!({ ok: true, json: async () => ({ threads: [] }) });
+      await flushPromises();
     });
 
     it('should show empty state when no threads exist', async () => {
@@ -484,14 +494,7 @@ describe('AIChatPage', () => {
     });
 
     it('should load thread messages when thread is selected', async () => {
-      const mockThreads = [
-        {
-          ThreadId: 'thread-1',
-          lastTimestamp: Date.now(),
-          title: 'Test conversation',
-          messageCount: 2,
-        },
-      ];
+      const mockThreads = [createMockThread({ messageCount: 2 })];
 
       const mockMessages = [
         {
@@ -538,14 +541,7 @@ describe('AIChatPage', () => {
 
   describe('Delete Thread Functionality', () => {
     it('should show delete confirmation dialog', async () => {
-      const mockThreads = [
-        {
-          ThreadId: 'thread-1',
-          lastTimestamp: Date.now(),
-          title: 'Test conversation',
-          messageCount: 5,
-        },
-      ];
+      const mockThreads = [createMockThread()];
 
       fetchMock.mockResolvedValueOnce({
         ok: true,
@@ -567,14 +563,7 @@ describe('AIChatPage', () => {
     });
 
     it('should delete thread when confirmed', async () => {
-      const mockThreads = [
-        {
-          ThreadId: 'thread-1',
-          lastTimestamp: Date.now(),
-          title: 'Test conversation',
-          messageCount: 5,
-        },
-      ];
+      const mockThreads = [createMockThread()];
 
       vi.mocked(awsAmplify.fetchAuthSession).mockResolvedValue({
         tokens: {
@@ -627,14 +616,7 @@ describe('AIChatPage', () => {
     });
 
     it('should handle delete errors', async () => {
-      const mockThreads = [
-        {
-          ThreadId: 'thread-1',
-          lastTimestamp: Date.now(),
-          title: 'Test conversation',
-          messageCount: 5,
-        },
-      ];
+      const mockThreads = [createMockThread()];
 
       vi.mocked(awsAmplify.fetchAuthSession).mockResolvedValue({
         tokens: {
@@ -788,10 +770,7 @@ describe('AIChatPage', () => {
 
   describe('Keyboard Shortcuts', () => {
     it('should send message on Enter key', async () => {
-      vi.spyOn(llmModule.llmService, 'generate').mockResolvedValue({
-        text: 'AI response',
-        usage: { prompt: 0, completion: 0, total: 0 },
-      });
+      mockLLMServiceResponse();
 
       fetchMock.mockResolvedValue({
         ok: true,
@@ -863,14 +842,7 @@ describe('AIChatPage', () => {
         tokens: undefined,
       } as any);
 
-      const mockThreads = [
-        {
-          ThreadId: 'thread-1',
-          lastTimestamp: Date.now(),
-          title: 'Test conversation',
-          messageCount: 5,
-        },
-      ];
+      const mockThreads = [createMockThread()];
 
       fetchMock.mockResolvedValueOnce({
         ok: true,
@@ -904,10 +876,7 @@ describe('AIChatPage', () => {
       const chatStore = useChatStore();
       chatStore.setChatId(null);
 
-      vi.spyOn(llmModule.llmService, 'generate').mockResolvedValue({
-        text: 'AI response',
-        usage: { prompt: 0, completion: 0, total: 0 },
-      });
+      mockLLMServiceResponse();
 
       fetchMock.mockResolvedValue({
         ok: true,
@@ -925,10 +894,7 @@ describe('AIChatPage', () => {
     });
 
     it('should save messages to history', async () => {
-      vi.spyOn(llmModule.llmService, 'generate').mockResolvedValue({
-        text: 'AI response',
-        usage: { prompt: 0, completion: 0, total: 0 },
-      });
+      mockLLMServiceResponse();
 
       fetchMock.mockResolvedValue({
         ok: true,
