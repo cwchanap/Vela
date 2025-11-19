@@ -18,6 +18,7 @@ const mockLocation = {
 Object.defineProperty(global, 'window', {
   value: { location: mockLocation },
   writable: true,
+  configurable: true,
 });
 
 describe('OpenRouterProvider', () => {
