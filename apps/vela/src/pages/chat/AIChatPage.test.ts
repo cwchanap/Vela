@@ -92,8 +92,29 @@ describe('AIChatPage', () => {
     updated_at: '2024-01-01T00:00:00.000Z',
   };
 
+  // Type definitions for better type safety
+  type MockThread = {
+    ThreadId: string;
+    lastTimestamp: number;
+    title: string;
+    messageCount: number;
+  };
+
+  type MockMessage = {
+    ThreadId: string;
+    Timestamp: number;
+    UserId: string;
+    message: string;
+    is_user: boolean;
+  };
+
+  type MockResponse<T = Record<string, unknown>> = {
+    ok: boolean;
+    json: () => Promise<T>;
+  };
+
   // Reusable mock thread data to avoid duplication across tests
-  const createMockThread = (overrides = {}) => ({
+  const createMockThread = (overrides: Partial<MockThread> = {}): MockThread => ({
     ThreadId: 'thread-1',
     lastTimestamp: Date.now(),
     title: 'Test conversation',
@@ -113,11 +134,11 @@ describe('AIChatPage', () => {
   };
 
   // Helper to mock successful save operations (chat history, etc.)
-  const mockSuccessfulSaveResponse = (data = {}) => {
+  const mockSuccessfulSaveResponse = <T = Record<string, unknown>>(data = {} as T) => {
     fetchMock.mockResolvedValueOnce({
       ok: true,
       json: async () => data,
-    });
+    } as MockResponse<T>);
   };
 
   // Helper to create mock messages for chat history
@@ -126,7 +147,7 @@ describe('AIChatPage', () => {
     isUser: boolean,
     timestampOffset = 0,
     threadId = 'thread-1',
-  ) => ({
+  ): MockMessage => ({
     ThreadId: threadId,
     Timestamp: Date.now() + timestampOffset,
     UserId: 'user-123',
@@ -142,7 +163,7 @@ describe('AIChatPage', () => {
           toString: () => token,
         },
       },
-    } as any);
+    } as ReturnType<typeof awsAmplify.fetchAuthSession>);
   };
 
   const mountComponent = (props = {}) => {
@@ -299,12 +320,13 @@ describe('AIChatPage', () => {
     });
 
     it('should not send empty messages', async () => {
+      const wrapper = mountComponent();
+      await flushPromises(); // Wait for component to mount and add greeting
+
       const chatStore = useChatStore();
       const initialLength = chatStore.messages.length;
 
-      const wrapper = mountComponent();
       const input = wrapper.find('[data-testid="llm-chat-input"]');
-
       await input.setValue('   ');
       await wrapper.find('[data-testid="llm-chat-send"]').trigger('click');
       await flushPromises();
@@ -328,12 +350,16 @@ describe('AIChatPage', () => {
 
     it('should show typing indicator while AI is responding', async () => {
       // Create a controlled promise to test the typing indicator
-      let resolveLLM: (_value: any) => void;
-      const llmPromise = new Promise((resolve) => {
+      type LLMResponse = {
+        text: string;
+        usage: { prompt: number; completion: number; total: number };
+      };
+      let resolveLLM: (_value: LLMResponse) => void;
+      const llmPromise = new Promise<LLMResponse>((resolve) => {
         resolveLLM = resolve;
       });
 
-      vi.spyOn(llmModule.llmService, 'generate').mockReturnValueOnce(llmPromise as any);
+      vi.spyOn(llmModule.llmService, 'generate').mockReturnValueOnce(llmPromise);
       mockSuccessfulSaveResponse();
 
       const wrapper = mountComponent();
@@ -378,11 +404,7 @@ describe('AIChatPage', () => {
       vi.spyOn(llmModule.llmService, 'generate').mockRejectedValue(
         new Error('API connection failed'),
       );
-
-      fetchMock.mockResolvedValue({
-        ok: true,
-        json: async () => ({}),
-      });
+      mockSuccessfulSaveResponse(); // User message save succeeds
 
       const wrapper = mountComponent();
       const chatStore = useChatStore();
@@ -392,10 +414,12 @@ describe('AIChatPage', () => {
       await wrapper.find('[data-testid="llm-chat-send"]').trigger('click');
       await flushPromises();
 
+      // Check that error was captured and notification was shown
       expect(chatStore.error).toBeTruthy();
       expect(notifyCreateSpy).toHaveBeenCalledWith(
         expect.objectContaining({
           type: 'negative',
+          message: expect.stringContaining('Failed'),
         }),
       );
     });
@@ -473,12 +497,13 @@ describe('AIChatPage', () => {
 
     it('should show loading state while fetching threads', async () => {
       // Create a promise that we can control when it resolves
-      let resolveFetch: (_value: any) => void;
-      const fetchPromise = new Promise((resolve) => {
+      type FetchResponse = MockResponse<{ threads: MockThread[] }>;
+      let resolveFetch: (_value: FetchResponse) => void;
+      const fetchPromise = new Promise<FetchResponse>((resolve) => {
         resolveFetch = resolve;
       });
 
-      fetchMock.mockReturnValueOnce(fetchPromise as any);
+      fetchMock.mockReturnValueOnce(fetchPromise);
 
       const wrapper = mountComponent();
       const historyButton = wrapper.find('[data-testid="llm-chat-history"]');
