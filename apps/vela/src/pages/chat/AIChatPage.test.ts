@@ -49,8 +49,24 @@ describe('AIChatPage', () => {
   let queryClient: QueryClient;
 
   beforeEach(() => {
+    // Create fresh Pinia instance for test isolation
     setActivePinia(createPinia());
     vi.clearAllMocks();
+
+    // Reset store state for test isolation
+    const chatStore = useChatStore();
+    const llmSettingsStore = useLLMSettingsStore();
+    const authStore = useAuthStore();
+
+    chatStore.startNewChat();
+    chatStore.setLoading(false);
+    chatStore.setTyping(false);
+    chatStore.setError(null);
+
+    llmSettingsStore.setProvider('google');
+    llmSettingsStore.setModel('gemini-2.5-flash-lite');
+
+    authStore.user = null;
 
     // Create a new QueryClient for each test
     queryClient = new QueryClient({
@@ -75,7 +91,26 @@ describe('AIChatPage', () => {
     vi.restoreAllMocks();
   });
 
-  const mockUser = {
+  // Type definition for mock user
+  type MockUser = {
+    id: string;
+    email: string;
+    username: string;
+    current_level: number;
+    total_experience: number;
+    learning_streak: number;
+    native_language: string;
+    preferences: {
+      dailyGoal: number;
+      difficulty: 'Beginner' | 'Intermediate' | 'Advanced';
+      notifications: boolean;
+    };
+    created_at: string;
+    updated_at: string;
+  };
+
+  // Factory function to create mock user with optional overrides
+  const createMockUser = (overrides: Partial<MockUser> = {}): MockUser => ({
     id: 'user-123',
     email: 'test@example.com',
     username: 'testuser',
@@ -90,7 +125,10 @@ describe('AIChatPage', () => {
     },
     created_at: '2024-01-01T00:00:00.000Z',
     updated_at: '2024-01-01T00:00:00.000Z',
-  };
+    ...overrides,
+  });
+
+  const mockUser = createMockUser();
 
   // Type definitions for better type safety
   type MockThread = {
@@ -139,6 +177,12 @@ describe('AIChatPage', () => {
       ok: true,
       json: async () => data,
     } as MockResponse<T>);
+  };
+
+  // Helper to mock two successful saves (user message + AI response)
+  const mockChatMessageSaves = () => {
+    mockSuccessfulSaveResponse(); // User message save
+    mockSuccessfulSaveResponse(); // AI response save
   };
 
   // Helper to create mock messages for chat history
@@ -383,8 +427,7 @@ describe('AIChatPage', () => {
 
     it('should add AI response to messages', async () => {
       mockLLMServiceResponse('This is AI response');
-      mockSuccessfulSaveResponse();
-      mockSuccessfulSaveResponse(); // Two saves: user message and AI response
+      mockChatMessageSaves();
 
       const wrapper = mountComponent();
       const chatStore = useChatStore();
@@ -785,8 +828,7 @@ describe('AIChatPage', () => {
   describe('Keyboard Shortcuts', () => {
     it('should send message on Enter key', async () => {
       mockLLMServiceResponse();
-      mockSuccessfulSaveResponse();
-      mockSuccessfulSaveResponse(); // Two saves: user message and AI response
+      mockChatMessageSaves();
 
       const wrapper = mountComponent();
       const chatStore = useChatStore();
@@ -888,8 +930,7 @@ describe('AIChatPage', () => {
       chatStore.setChatId(null);
 
       mockLLMServiceResponse();
-      mockSuccessfulSaveResponse();
-      mockSuccessfulSaveResponse(); // Two saves: user message and AI response
+      mockChatMessageSaves();
 
       const wrapper = mountComponent();
       const input = wrapper.find('[data-testid="llm-chat-input"]');
@@ -903,8 +944,7 @@ describe('AIChatPage', () => {
 
     it('should save messages to history', async () => {
       mockLLMServiceResponse();
-      mockSuccessfulSaveResponse();
-      mockSuccessfulSaveResponse(); // Two saves: user message and AI response
+      mockChatMessageSaves();
 
       const wrapper = mountComponent();
       const input = wrapper.find('[data-testid="llm-chat-input"]');
