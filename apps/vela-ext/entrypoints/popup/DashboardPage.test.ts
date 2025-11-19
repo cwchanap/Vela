@@ -521,7 +521,7 @@ describe('DashboardPage', () => {
       await viewAllButton.trigger('click');
 
       expect(browser.tabs.create).toHaveBeenCalled();
-      const callArg = (browser.tabs.create as any).mock.calls[0][0];
+      const callArg = vi.mocked(browser.tabs.create).mock.calls[0][0];
       expect(callArg.url).toContain('/my-dictionaries');
     });
   });
