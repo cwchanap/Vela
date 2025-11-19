@@ -177,17 +177,14 @@ describe('DashboardPage', () => {
       wrapper = mount(DashboardPage);
       await flushPromises();
 
-      // Find the button and trigger click
-      const themeButton = wrapper.findAll('.icon-button')[0];
+      // Find the button by title attribute instead of array index
+      const themeButton = wrapper.find('[title="Switch to Dark Mode"]');
       expect(themeButton.exists()).toBe(true);
 
       // Trigger the click event
       await themeButton.trigger('click');
       await flushPromises();
-
-      // Wait for all async operations to complete
       await wrapper.vm.$nextTick();
-      await new Promise((resolve) => setTimeout(resolve, 50));
 
       // Verify the dark class is applied
       const container = wrapper.find('.dashboard-container');
@@ -199,11 +196,10 @@ describe('DashboardPage', () => {
       wrapper = mount(DashboardPage);
       await flushPromises();
 
-      const themeButton = wrapper.findAll('.icon-button')[0];
+      const themeButton = wrapper.find('[title="Switch to Dark Mode"]');
       await themeButton.trigger('click');
       await flushPromises();
       await wrapper.vm.$nextTick();
-      await new Promise((resolve) => setTimeout(resolve, 50));
 
       expect(browser.storage.local.set).toHaveBeenCalledWith({
         theme_preference: 'dark',
@@ -214,7 +210,7 @@ describe('DashboardPage', () => {
       wrapper = mount(DashboardPage);
       await flushPromises();
 
-      const themeButton = wrapper.findAll('.icon-button')[0];
+      const themeButton = wrapper.find('[title="Switch to Dark Mode"]');
       expect(themeButton.text()).toBe('🌙');
     });
 
@@ -222,14 +218,13 @@ describe('DashboardPage', () => {
       wrapper = mount(DashboardPage);
       await flushPromises();
 
-      const themeButton = wrapper.findAll('.icon-button')[0];
+      const themeButton = wrapper.find('[title="Switch to Dark Mode"]');
       await themeButton.trigger('click');
       await flushPromises();
       await wrapper.vm.$nextTick();
-      await new Promise((resolve) => setTimeout(resolve, 50));
 
-      // Re-query to get updated text
-      const updatedButton = wrapper.findAll('.icon-button')[0];
+      // After clicking, the title changes to "Switch to Light Mode"
+      const updatedButton = wrapper.find('[title="Switch to Light Mode"]');
       expect(updatedButton.text()).toBe('☀️');
     });
   });
@@ -239,7 +234,7 @@ describe('DashboardPage', () => {
       wrapper = mount(DashboardPage);
       await flushPromises();
 
-      const logoutButton = wrapper.findAll('.icon-button')[1];
+      const logoutButton = wrapper.find('[title="Logout"]');
       await logoutButton.trigger('click');
 
       expect(mockClearAuthData).toHaveBeenCalled();
@@ -249,7 +244,7 @@ describe('DashboardPage', () => {
       wrapper = mount(DashboardPage);
       await flushPromises();
 
-      const logoutButton = wrapper.findAll('.icon-button')[1];
+      const logoutButton = wrapper.find('[title="Logout"]');
       await logoutButton.trigger('click');
 
       expect(wrapper.emitted('logout')).toBeTruthy();
@@ -315,8 +310,8 @@ describe('DashboardPage', () => {
       mockGetMyDictionaries.mockReturnValue(promise);
 
       wrapper = mount(DashboardPage);
+      await flushPromises();
       await wrapper.vm.$nextTick();
-      await new Promise((resolve) => setTimeout(resolve, 10));
 
       // Check that the refresh button shows "Loading..."
       const refreshButton = wrapper.find('.refresh-button');
@@ -324,7 +319,7 @@ describe('DashboardPage', () => {
 
       // Resolve the promise
       resolvePromise!(mockEntries);
-      await wrapper.vm.$nextTick();
+      await flushPromises();
     });
 
     it('should display dictionary entries after loading', async () => {
@@ -436,8 +431,8 @@ describe('DashboardPage', () => {
       mockGetMyDictionaries.mockReturnValue(promise);
 
       wrapper = mount(DashboardPage);
+      await flushPromises();
       await wrapper.vm.$nextTick();
-      await new Promise((resolve) => setTimeout(resolve, 10));
 
       const refreshButton = wrapper.find('.refresh-button');
       // The :disabled selector checks if the disabled attribute exists
@@ -445,7 +440,7 @@ describe('DashboardPage', () => {
 
       // Resolve the promise
       resolvePromise!(mockEntries);
-      await wrapper.vm.$nextTick();
+      await flushPromises();
     });
   });
 
