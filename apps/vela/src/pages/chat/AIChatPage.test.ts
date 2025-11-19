@@ -112,6 +112,39 @@ describe('AIChatPage', () => {
     });
   };
 
+  // Helper to mock successful save operations (chat history, etc.)
+  const mockSuccessfulSaveResponse = (data = {}) => {
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      json: async () => data,
+    });
+  };
+
+  // Helper to create mock messages for chat history
+  const createMockMessage = (
+    message: string,
+    isUser: boolean,
+    timestampOffset = 0,
+    threadId = 'thread-1',
+  ) => ({
+    ThreadId: threadId,
+    Timestamp: Date.now() + timestampOffset,
+    UserId: 'user-123',
+    message,
+    is_user: isUser,
+  });
+
+  // Helper to mock auth session with token
+  const mockAuthSession = (token = 'mock-token') => {
+    vi.mocked(awsAmplify.fetchAuthSession).mockResolvedValue({
+      tokens: {
+        accessToken: {
+          toString: () => token,
+        },
+      },
+    } as any);
+  };
+
   const mountComponent = (props = {}) => {
     const mockQuasarInstance = {
       notify: notifyCreateSpy,
@@ -252,11 +285,7 @@ describe('AIChatPage', () => {
     it('should send message when send button is clicked', async () => {
       const chatStore = useChatStore();
       mockLLMServiceResponse();
-
-      fetchMock.mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({}),
-      });
+      mockSuccessfulSaveResponse();
 
       const wrapper = mountComponent();
       const input = wrapper.find('[data-testid="llm-chat-input"]');
@@ -285,11 +314,7 @@ describe('AIChatPage', () => {
 
     it('should clear input after sending message', async () => {
       mockLLMServiceResponse();
-
-      fetchMock.mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({}),
-      });
+      mockSuccessfulSaveResponse();
 
       const wrapper = mountComponent();
       const input = wrapper.find('[data-testid="llm-chat-input"]');
@@ -302,24 +327,14 @@ describe('AIChatPage', () => {
     });
 
     it('should show typing indicator while AI is responding', async () => {
-      vi.spyOn(llmModule.llmService, 'generate').mockImplementation(
-        () =>
-          new Promise((resolve) => {
-            setTimeout(
-              () =>
-                resolve({
-                  text: 'AI response',
-                  usage: { prompt: 0, completion: 0, total: 0 },
-                }),
-              100,
-            );
-          }),
-      );
-
-      fetchMock.mockResolvedValue({
-        ok: true,
-        json: async () => ({}),
+      // Create a controlled promise to test the typing indicator
+      let resolveLLM: (_value: any) => void;
+      const llmPromise = new Promise((resolve) => {
+        resolveLLM = resolve;
       });
+
+      vi.spyOn(llmModule.llmService, 'generate').mockReturnValueOnce(llmPromise as any);
+      mockSuccessfulSaveResponse();
 
       const wrapper = mountComponent();
       const chatStore = useChatStore();
@@ -329,20 +344,21 @@ describe('AIChatPage', () => {
       await wrapper.find('[data-testid="llm-chat-send"]').trigger('click');
       await wrapper.vm.$nextTick();
 
+      // At this point, LLM is processing and typing indicator should be visible
       expect(chatStore.isTyping).toBe(true);
       expect(wrapper.text()).toContain('AI is typing…');
 
+      // Resolve the LLM promise
+      resolveLLM!({ text: 'AI response', usage: { prompt: 0, completion: 0, total: 0 } });
       await flushPromises();
+
       expect(chatStore.isTyping).toBe(false);
     });
 
     it('should add AI response to messages', async () => {
       mockLLMServiceResponse('This is AI response');
-
-      fetchMock.mockResolvedValue({
-        ok: true,
-        json: async () => ({}),
-      });
+      mockSuccessfulSaveResponse();
+      mockSuccessfulSaveResponse(); // Two saves: user message and AI response
 
       const wrapper = mountComponent();
       const chatStore = useChatStore();
@@ -495,22 +511,9 @@ describe('AIChatPage', () => {
 
     it('should load thread messages when thread is selected', async () => {
       const mockThreads = [createMockThread({ messageCount: 2 })];
-
       const mockMessages = [
-        {
-          ThreadId: 'thread-1',
-          Timestamp: Date.now(),
-          UserId: 'user-123',
-          message: 'Hello',
-          is_user: true,
-        },
-        {
-          ThreadId: 'thread-1',
-          Timestamp: Date.now() + 1000,
-          UserId: 'user-123',
-          message: 'Hi there',
-          is_user: false,
-        },
+        createMockMessage('Hello', true),
+        createMockMessage('Hi there', false, 1000),
       ];
 
       fetchMock
@@ -564,14 +567,7 @@ describe('AIChatPage', () => {
 
     it('should delete thread when confirmed', async () => {
       const mockThreads = [createMockThread()];
-
-      vi.mocked(awsAmplify.fetchAuthSession).mockResolvedValue({
-        tokens: {
-          accessToken: {
-            toString: () => 'mock-token',
-          },
-        },
-      } as any);
+      mockAuthSession();
 
       fetchMock
         .mockResolvedValueOnce({
@@ -617,14 +613,7 @@ describe('AIChatPage', () => {
 
     it('should handle delete errors', async () => {
       const mockThreads = [createMockThread()];
-
-      vi.mocked(awsAmplify.fetchAuthSession).mockResolvedValue({
-        tokens: {
-          accessToken: {
-            toString: () => 'mock-token',
-          },
-        },
-      } as any);
+      mockAuthSession();
 
       fetchMock
         .mockResolvedValueOnce({
@@ -771,11 +760,8 @@ describe('AIChatPage', () => {
   describe('Keyboard Shortcuts', () => {
     it('should send message on Enter key', async () => {
       mockLLMServiceResponse();
-
-      fetchMock.mockResolvedValue({
-        ok: true,
-        json: async () => ({}),
-      });
+      mockSuccessfulSaveResponse();
+      mockSuccessfulSaveResponse(); // Two saves: user message and AI response
 
       const wrapper = mountComponent();
       const chatStore = useChatStore();
@@ -877,11 +863,8 @@ describe('AIChatPage', () => {
       chatStore.setChatId(null);
 
       mockLLMServiceResponse();
-
-      fetchMock.mockResolvedValue({
-        ok: true,
-        json: async () => ({}),
-      });
+      mockSuccessfulSaveResponse();
+      mockSuccessfulSaveResponse(); // Two saves: user message and AI response
 
       const wrapper = mountComponent();
       const input = wrapper.find('[data-testid="llm-chat-input"]');
@@ -895,11 +878,8 @@ describe('AIChatPage', () => {
 
     it('should save messages to history', async () => {
       mockLLMServiceResponse();
-
-      fetchMock.mockResolvedValue({
-        ok: true,
-        json: async () => ({}),
-      });
+      mockSuccessfulSaveResponse();
+      mockSuccessfulSaveResponse(); // Two saves: user message and AI response
 
       const wrapper = mountComponent();
       const input = wrapper.find('[data-testid="llm-chat-input"]');
