@@ -303,7 +303,7 @@ describe('DashboardPage', () => {
 
   describe('Dictionary Entries Display', () => {
     it('should display loading state while fetching entries', async () => {
-      let resolvePromise: (_value: any) => void;
+      let resolvePromise: (_value: any) => void = () => {};
       const promise = new Promise((resolve) => {
         resolvePromise = resolve;
       });
@@ -318,7 +318,7 @@ describe('DashboardPage', () => {
       expect(refreshButton.text()).toContain('Loading');
 
       // Resolve the promise
-      resolvePromise!(mockEntries);
+      resolvePromise(mockEntries);
       await flushPromises();
     });
 
@@ -424,7 +424,7 @@ describe('DashboardPage', () => {
     });
 
     it('should disable refresh button while loading', async () => {
-      let resolvePromise: (_value: any) => void;
+      let resolvePromise: (_value: any) => void = () => {};
       const promise = new Promise((resolve) => {
         resolvePromise = resolve;
       });
@@ -439,7 +439,7 @@ describe('DashboardPage', () => {
       expect(refreshButton.attributes()).toHaveProperty('disabled');
 
       // Resolve the promise
-      resolvePromise!(mockEntries);
+      resolvePromise(mockEntries);
       await flushPromises();
     });
   });
