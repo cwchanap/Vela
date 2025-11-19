@@ -103,7 +103,6 @@ jobs:
             --query 'Stacks[0].Outputs[*].{OutputKey:OutputKey,OutputValue:OutputValue,Description:Description}' \
             --output json \
             --region ${{ env.AWS_REGION }} > packages/cdk/cdk-outputs.json
-        continue-on-error: true
 
       - name: Inject Vite env (.env.production) from CDK outputs
         run: pnpm --filter @vela/cdk exec -- tsx scripts/inject-env.ts
@@ -113,7 +112,7 @@ jobs:
         run: pnpm --filter @vela/cdk exec -- cdk bootstrap --require-approval never
 
       - name: Deploy infrastructure with CDK
-        run: pnpm --filter @vela/cdk exec -- cdk deploy --require-approval never
+        run: pnpm --filter @vela/cdk exec -- cdk deploy --all --require-approval never
 
       - name: Get deployment outputs
         id: get-outputs
