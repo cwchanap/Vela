@@ -398,7 +398,8 @@ describe('AIChatPage', () => {
         text: string;
         usage: { prompt: number; completion: number; total: number };
       };
-      let resolveLLM: (_value: LLMResponse) => void;
+      // Initialize with a no-op to avoid non-null assertion
+      let resolveLLM: (_value: LLMResponse) => void = () => {};
       const llmPromise = new Promise<LLMResponse>((resolve) => {
         resolveLLM = resolve;
       });
@@ -419,7 +420,7 @@ describe('AIChatPage', () => {
       expect(wrapper.text()).toContain('AI is typing…');
 
       // Resolve the LLM promise
-      resolveLLM!({ text: 'AI response', usage: { prompt: 0, completion: 0, total: 0 } });
+      resolveLLM({ text: 'AI response', usage: { prompt: 0, completion: 0, total: 0 } });
       await flushPromises();
 
       expect(chatStore.isTyping).toBe(false);
@@ -541,7 +542,8 @@ describe('AIChatPage', () => {
     it('should show loading state while fetching threads', async () => {
       // Create a promise that we can control when it resolves
       type FetchResponse = MockResponse<{ threads: MockThread[] }>;
-      let resolveFetch: (_value: FetchResponse) => void;
+      // Initialize with a no-op to avoid non-null assertion
+      let resolveFetch: (_value: FetchResponse) => void = () => {};
       const fetchPromise = new Promise<FetchResponse>((resolve) => {
         resolveFetch = resolve;
       });
@@ -558,7 +560,7 @@ describe('AIChatPage', () => {
       expect(wrapper.text()).toContain('Loading threads');
 
       // Clean up by resolving the promise
-      resolveFetch!({ ok: true, json: async () => ({ threads: [] }) });
+      resolveFetch({ ok: true, json: async () => ({ threads: [] }) });
       await flushPromises();
     });
 
@@ -891,9 +893,10 @@ describe('AIChatPage', () => {
     });
 
     it('should handle missing auth token gracefully', async () => {
+      // Mock a session with missing tokens
       vi.mocked(awsAmplify.fetchAuthSession).mockResolvedValue({
         tokens: undefined,
-      } as any);
+      } as ReturnType<typeof awsAmplify.fetchAuthSession>);
 
       const mockThreads = [createMockThread()];
 
