@@ -485,20 +485,22 @@ describe('DashboardPage', () => {
     it('should logout user after 2 seconds when session expired', async () => {
       vi.useFakeTimers();
 
-      mockGetMyDictionaries.mockRejectedValue(new Error('Session expired. Please log in again.'));
+      try {
+        mockGetMyDictionaries.mockRejectedValue(new Error('Session expired. Please log in again.'));
 
-      wrapper = mount(DashboardPage);
-      await flushPromises();
+        wrapper = mount(DashboardPage);
+        await flushPromises();
 
-      expect(wrapper.find('.error-message').exists()).toBe(true);
+        expect(wrapper.find('.error-message').exists()).toBe(true);
 
-      // Fast-forward time by 2 seconds to trigger the logout timeout
-      await vi.advanceTimersByTimeAsync(2000);
+        // Fast-forward time by 2 seconds to trigger the logout timeout
+        await vi.advanceTimersByTimeAsync(2000);
 
-      expect(mockClearAuthData).toHaveBeenCalled();
-      expect(wrapper.emitted('logout')).toBeTruthy();
-
-      vi.useRealTimers();
+        expect(mockClearAuthData).toHaveBeenCalled();
+        expect(wrapper.emitted('logout')).toBeTruthy();
+      } finally {
+        vi.useRealTimers();
+      }
     });
 
     it('should show error when refresh token fails', async () => {
