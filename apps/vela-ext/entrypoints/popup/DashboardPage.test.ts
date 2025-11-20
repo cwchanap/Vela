@@ -356,16 +356,26 @@ describe('DashboardPage', () => {
       wrapper = mount(DashboardPage);
       await flushPromises();
 
-      const firstEntry = wrapper.findAll('.entry-item')[0];
-      expect(firstEntry.text()).toContain('こんにちは');
+      const entries = wrapper.findAll('.entry-item');
+      const entryTexts = entries.map((entry) => entry.find('.entry-text').text());
+      expect(entryTexts).toContain('こんにちは');
     });
 
     it('should display source link when source_url exists', async () => {
       wrapper = mount(DashboardPage);
       await flushPromises();
 
-      const firstEntry = wrapper.findAll('.entry-item')[0];
-      const sourceLink = firstEntry.find('.source-link');
+      const entries = wrapper.findAll('.entry-item');
+      // Find entry with 'こんにちは' which has a source URL in mockEntries
+      const entryWithSource = entries.find(
+        (entry) => entry.find('.entry-text').text() === 'こんにちは',
+      );
+
+      if (!entryWithSource) {
+        throw new Error('Expected to find entry with text こんにちは');
+      }
+
+      const sourceLink = entryWithSource.find('.source-link');
       expect(sourceLink.exists()).toBe(true);
       expect(sourceLink.attributes('href')).toBe('https://example.com/1');
     });
@@ -374,8 +384,17 @@ describe('DashboardPage', () => {
       wrapper = mount(DashboardPage);
       await flushPromises();
 
-      const thirdEntry = wrapper.findAll('.entry-item')[2];
-      const sourceLink = thirdEntry.find('.source-link');
+      const entries = wrapper.findAll('.entry-item');
+      // Find entry with 'さようなら' which has no source URL in mockEntries
+      const entryWithoutSource = entries.find(
+        (entry) => entry.find('.entry-text').text() === 'さようなら',
+      );
+
+      if (!entryWithoutSource) {
+        throw new Error('Expected to find entry with text さようなら');
+      }
+
+      const sourceLink = entryWithoutSource.find('.source-link');
       expect(sourceLink.exists()).toBe(false);
     });
 
@@ -383,11 +402,16 @@ describe('DashboardPage', () => {
       wrapper = mount(DashboardPage);
       await flushPromises();
 
-      const firstEntry = wrapper.findAll('.entry-item')[0];
-      const dateElement = firstEntry.find('.entry-date');
-      expect(dateElement.exists()).toBe(true);
-      // Date formatting is locale-dependent, so just check it exists
-      expect(dateElement.text().length).toBeGreaterThan(0);
+      const entries = wrapper.findAll('.entry-item');
+      expect(entries.length).toBeGreaterThan(0);
+
+      // Check that all entries have date elements
+      entries.forEach((entry) => {
+        const dateElement = entry.find('.entry-date');
+        expect(dateElement.exists()).toBe(true);
+        // Date formatting is locale-dependent, so just check it exists
+        expect(dateElement.text().length).toBeGreaterThan(0);
+      });
     });
 
     it('should display "View All" button when entries exist', async () => {
@@ -533,8 +557,19 @@ describe('DashboardPage', () => {
       wrapper = mount(DashboardPage);
       await flushPromises();
 
-      const firstEntry = wrapper.findAll('.entry-item')[0];
-      const dateText = firstEntry.find('.entry-date').text();
+      const entries = wrapper.findAll('.entry-item');
+      expect(entries.length).toBeGreaterThan(0);
+
+      // Find the entry with the known text 'こんにちは' from mockEntries
+      const targetEntry = entries.find(
+        (entry) => entry.find('.entry-text').text() === 'こんにちは',
+      );
+
+      if (!targetEntry) {
+        throw new Error('Expected to find entry with text こんにちは');
+      }
+
+      const dateText = targetEntry.find('.entry-date').text();
 
       // Just verify that the date is formatted (contains date and time parts)
       expect(dateText).toBeTruthy();
