@@ -175,7 +175,6 @@ describe('DashboardPage', () => {
       // Trigger the click event
       await themeButton.trigger('click');
       await flushPromises();
-      await wrapper.vm.$nextTick();
 
       // Verify the dark class is applied
       const container = wrapper.find('.dashboard-container');
@@ -190,7 +189,6 @@ describe('DashboardPage', () => {
       const themeButton = wrapper.find('[title="Switch to Dark Mode"]');
       await themeButton.trigger('click');
       await flushPromises();
-      await wrapper.vm.$nextTick();
 
       expect(browser.storage.local.set).toHaveBeenCalledWith({
         theme_preference: 'dark',
@@ -212,7 +210,6 @@ describe('DashboardPage', () => {
       const themeButton = wrapper.find('[title="Switch to Dark Mode"]');
       await themeButton.trigger('click');
       await flushPromises();
-      await wrapper.vm.$nextTick();
 
       // After clicking, the title changes to "Switch to Light Mode"
       const updatedButton = wrapper.find('[title="Switch to Light Mode"]');
@@ -302,7 +299,6 @@ describe('DashboardPage', () => {
 
       wrapper = mount(DashboardPage);
       await flushPromises();
-      await wrapper.vm.$nextTick();
 
       // Check that the refresh button shows "Loading..."
       const refreshButton = wrapper.find('.refresh-button');
@@ -447,7 +443,6 @@ describe('DashboardPage', () => {
 
       wrapper = mount(DashboardPage);
       await flushPromises();
-      await wrapper.vm.$nextTick();
 
       const refreshButton = wrapper.find('.refresh-button');
       // The :disabled selector checks if the disabled attribute exists
