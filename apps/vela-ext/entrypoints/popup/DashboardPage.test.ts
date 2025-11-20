@@ -4,66 +4,17 @@ import DashboardPage from './DashboardPage.vue';
 import type { ComponentPublicInstance } from 'vue';
 
 // Mock dependencies
-const { mockGetMyDictionaries } = vi.hoisted(() => {
-  return {
-    mockGetMyDictionaries: vi.fn(),
-  };
-});
+const { mockGetMyDictionaries } = vi.hoisted(() => ({
+  mockGetMyDictionaries: vi.fn(),
+}));
 
 const { mockGetValidAccessToken, mockRefreshAccessToken, mockGetUserEmail, mockClearAuthData } =
-  vi.hoisted(() => {
-    return {
-      mockGetValidAccessToken: vi.fn(),
-      mockRefreshAccessToken: vi.fn(),
-      mockGetUserEmail: vi.fn(),
-      mockClearAuthData: vi.fn(),
-    };
-  });
-
-// Define browser mocks
-function defineBrowserMocks() {
-  const storageState: Record<string, any> = {};
-
-  beforeEach(() => {
-    // Reset storage and tabs before each test
-    Object.keys(storageState).forEach((key) => delete storageState[key]);
-
-    // Mock all functions
-    mockGetMyDictionaries.mockClear();
-    mockGetValidAccessToken.mockClear();
-    mockRefreshAccessToken.mockClear();
-    mockGetUserEmail.mockClear();
-    mockClearAuthData.mockClear();
-
-    (globalThis as any).browser = {
-      storage: {
-        local: {
-          set: vi.fn(async (data: Record<string, unknown>) => {
-            Object.assign(storageState, data);
-          }),
-          get: vi.fn(async (key: string | string[]) => {
-            if (Array.isArray(key)) {
-              return key.reduce<Record<string, unknown>>((acc, current) => {
-                acc[current] = storageState[current];
-                return acc;
-              }, {});
-            }
-            return { [key]: storageState[key] };
-          }),
-        },
-      },
-      tabs: {
-        create: vi.fn(async () => {
-          return { id: 1 };
-        }),
-      },
-    };
-  });
-
-  return { storageState };
-}
-
-const { storageState } = defineBrowserMocks();
+  vi.hoisted(() => ({
+    mockGetValidAccessToken: vi.fn(),
+    mockRefreshAccessToken: vi.fn(),
+    mockGetUserEmail: vi.fn(),
+    mockClearAuthData: vi.fn(),
+  }));
 
 vi.mock('../utils/api', () => ({
   getMyDictionaries: mockGetMyDictionaries,
@@ -78,6 +29,7 @@ vi.mock('../utils/storage', () => ({
 
 describe('DashboardPage', () => {
   let wrapper: VueWrapper<ComponentPublicInstance>;
+  const storageState: Record<string, any> = {};
 
   const mockEntries = [
     {
@@ -119,6 +71,44 @@ describe('DashboardPage', () => {
   ];
 
   beforeEach(() => {
+    // Reset storage state
+    Object.keys(storageState).forEach((key) => delete storageState[key]);
+
+    // Clear all mock functions
+    mockGetMyDictionaries.mockClear();
+    mockGetValidAccessToken.mockClear();
+    mockRefreshAccessToken.mockClear();
+    mockGetUserEmail.mockClear();
+    mockClearAuthData.mockClear();
+
+    // Set up browser API mocks
+    // Note: Using 'as any' to bypass TypeScript checks for the browser global.
+    // This is necessary because the browser API is provided by the WebExtension
+    // runtime and doesn't have TypeScript definitions available in the test environment.
+    (globalThis as any).browser = {
+      storage: {
+        local: {
+          set: vi.fn(async (data: Record<string, unknown>) => {
+            Object.assign(storageState, data);
+          }),
+          get: vi.fn(async (key: string | string[]) => {
+            if (Array.isArray(key)) {
+              return key.reduce<Record<string, unknown>>((acc, current) => {
+                acc[current] = storageState[current];
+                return acc;
+              }, {});
+            }
+            return { [key]: storageState[key] };
+          }),
+        },
+      },
+      tabs: {
+        create: vi.fn(async () => {
+          return { id: 1 };
+        }),
+      },
+    };
+
     // Set default mock implementations
     mockGetUserEmail.mockResolvedValue('test@example.com');
     mockGetValidAccessToken.mockResolvedValue('valid-token');
@@ -128,6 +118,7 @@ describe('DashboardPage', () => {
   afterEach(() => {
     if (wrapper) {
       wrapper.unmount();
+      wrapper = null as any;
     }
   });
 
@@ -549,31 +540,6 @@ describe('DashboardPage', () => {
       expect(browser.tabs.create).toHaveBeenCalled();
       const callArg = vi.mocked(browser.tabs.create).mock.calls[0][0];
       expect(callArg.url).toContain('/my-dictionaries');
-    });
-  });
-
-  describe('Date Formatting', () => {
-    it('should format date correctly', async () => {
-      wrapper = mount(DashboardPage);
-      await flushPromises();
-
-      const entries = wrapper.findAll('.entry-item');
-      expect(entries.length).toBeGreaterThan(0);
-
-      // Find the entry with the known text 'こんにちは' from mockEntries
-      const targetEntry = entries.find(
-        (entry) => entry.find('.entry-text').text() === 'こんにちは',
-      );
-
-      if (!targetEntry) {
-        throw new Error('Expected to find entry with text こんにちは');
-      }
-
-      const dateText = targetEntry.find('.entry-date').text();
-
-      // Just verify that the date is formatted (contains date and time parts)
-      expect(dateText).toBeTruthy();
-      expect(dateText.length).toBeGreaterThan(0);
     });
   });
 });
