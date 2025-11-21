@@ -350,7 +350,7 @@ describe('AIChatPage', () => {
     it('should send message when send button is clicked', async () => {
       const chatStore = useChatStore();
       mockLLMServiceResponse();
-      mockSuccessfulSaveResponse();
+      mockChatMessageSaves();
 
       const wrapper = mountComponent();
       const input = wrapper.find('[data-testid="llm-chat-input"]');
@@ -380,7 +380,7 @@ describe('AIChatPage', () => {
 
     it('should clear input after sending message', async () => {
       mockLLMServiceResponse();
-      mockSuccessfulSaveResponse();
+      mockChatMessageSaves();
 
       const wrapper = mountComponent();
       const input = wrapper.find('[data-testid="llm-chat-input"]');
@@ -405,7 +405,7 @@ describe('AIChatPage', () => {
       });
 
       vi.spyOn(llmModule.llmService, 'generate').mockReturnValueOnce(llmPromise);
-      mockSuccessfulSaveResponse();
+      mockChatMessageSaves();
 
       const wrapper = mountComponent();
       const chatStore = useChatStore();
