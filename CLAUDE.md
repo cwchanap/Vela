@@ -128,7 +128,7 @@ Root-level extension commands:
 #### Infrastructure
 
 - **Database**: DynamoDB (NoSQL database, 8 tables)
-- **Relational DB**: Aurora Serverless v2 (PostgreSQL 15.5, VPC private subnet)
+- **Relational DB**: Aurora Serverless v2 (PostgreSQL 16.4, VPC private subnet)
 - **Authentication**: AWS Cognito with email/password
 - **Cloud**: AWS CDK for infrastructure as code
 - **Compute**: AWS Lambda for serverless functions
@@ -330,7 +330,7 @@ The application uses 8 DynamoDB tables:
 #### Infrastructure as Code
 
 - `packages/cdk/` - AWS CDK application in TypeScript
-- `packages/cdk/lib/vela-stack.ts` - Main CloudFormation stack (645 lines)
+- `packages/cdk/app.ts` - CDK app with 5 separate stacks
 - Lambda function deployment with esbuild bundling
 - DynamoDB tables with pay-per-request billing
 - Aurora Serverless v2 (PostgreSQL) in VPC private subnet
@@ -339,6 +339,26 @@ The application uses 8 DynamoDB tables:
 - VPC with public/private subnets, NAT Gateway for Lambda internet access
 - ACM certificate for HTTPS
 - Security groups for Aurora access
+
+#### Stack Architecture
+
+The CDK application uses a multi-stack architecture for better separation of concerns:
+
+1. **AuthStack** (`lib/auth-stack.ts`) - Cognito User Pool and Client
+2. **DatabaseStack** (`lib/database-stack.ts`) - DynamoDB tables, Aurora Serverless v2, VPC
+3. **StorageStack** (`lib/storage-stack.ts`) - S3 buckets for TTS audio and static web
+4. **ApiStack** (`lib/api-stack.ts`) - Lambda function, API Gateway
+5. **StaticWebStack** (`lib/static-web-stack.ts`) - CloudFront distribution, S3 deployment
+
+**Stack Dependencies:**
+
+```
+AuthStack → (no deps)
+DatabaseStack → (no deps)
+StorageStack → (no deps)
+ApiStack → depends on [auth, database, storage]
+StaticWebStack → depends on [auth, database, storage, api]
+```
 
 #### Key Infrastructure Resources
 

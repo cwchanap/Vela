@@ -57,7 +57,7 @@ jobs:
           retention-days: 7
 
   deploy:
-    if: github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
     needs: build
     runs-on: ubuntu-latest
     environment: production
@@ -103,17 +103,16 @@ jobs:
             --query 'Stacks[0].Outputs[*].{OutputKey:OutputKey,OutputValue:OutputValue,Description:Description}' \
             --output json \
             --region ${{ env.AWS_REGION }} > packages/cdk/cdk-outputs.json
-        continue-on-error: true
 
       - name: Inject Vite env (.env.production) from CDK outputs
-        run: node packages/cdk/scripts/inject-env.js
+        run: pnpm --filter @vela/cdk exec -- tsx scripts/inject-env.ts
         continue-on-error: true
 
       - name: Bootstrap CDK (if needed)
         run: pnpm --filter @vela/cdk exec -- cdk bootstrap --require-approval never
 
       - name: Deploy infrastructure with CDK
-        run: pnpm --filter @vela/cdk exec -- cdk deploy --require-approval never
+        run: pnpm --filter @vela/cdk exec -- cdk deploy --all --require-approval never
 
       - name: Get deployment outputs
         id: get-outputs
