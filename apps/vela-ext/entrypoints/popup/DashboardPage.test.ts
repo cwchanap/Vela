@@ -82,9 +82,7 @@ describe('DashboardPage', () => {
     mockClearAuthData.mockClear();
 
     // Set up browser API mocks
-    // Note: Using 'as any' to bypass TypeScript checks for the browser global.
-    // This is necessary because the browser API is provided by the WebExtension
-    // runtime and doesn't have TypeScript definitions available in the test environment.
+    // Using 'as any' to assign mock implementation to the global browser object in the test environment.
     (globalThis as any).browser = {
       storage: {
         local: {
