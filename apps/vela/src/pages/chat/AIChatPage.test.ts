@@ -8,6 +8,7 @@ import { useChatStore } from '../../stores/chat';
 import { useLLMSettingsStore } from '../../stores/llmSettings';
 import { useAuthStore } from '../../stores/auth';
 import * as llmModule from '../../services/llm';
+import type { LLMResponse } from '../../services/llm/types';
 import * as awsAmplify from 'aws-amplify/auth';
 
 // Mock modules
@@ -161,13 +162,9 @@ describe('AIChatPage', () => {
   });
 
   // Helper to mock LLM service response
-  const mockLLMServiceResponse = (
-    text = 'AI response',
-    usage = { prompt: 0, completion: 0, total: 0 },
-  ) => {
+  const mockLLMServiceResponse = (text = 'AI response') => {
     vi.spyOn(llmModule.llmService, 'generate').mockResolvedValue({
       text,
-      usage,
     });
   };
 
@@ -394,10 +391,6 @@ describe('AIChatPage', () => {
 
     it('should show typing indicator while AI is responding', async () => {
       // Create a controlled promise to test the typing indicator
-      type LLMResponse = {
-        text: string;
-        usage: { prompt: number; completion: number; total: number };
-      };
       // Initialize with a no-op to avoid non-null assertion
       let resolveLLM: (_value: LLMResponse) => void = () => {};
       const llmPromise = new Promise<LLMResponse>((resolve) => {
@@ -420,7 +413,7 @@ describe('AIChatPage', () => {
       expect(wrapper.text()).toContain('AI is typing…');
 
       // Resolve the LLM promise
-      resolveLLM({ text: 'AI response', usage: { prompt: 0, completion: 0, total: 0 } });
+      resolveLLM({ text: 'AI response' });
       await flushPromises();
 
       expect(chatStore.isTyping).toBe(false);
