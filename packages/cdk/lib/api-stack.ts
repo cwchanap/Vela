@@ -25,7 +25,9 @@ export class ApiStack extends Stack {
   constructor(scope: Construct, id: string, props: ApiStackProps) {
     super(scope, id, props);
 
-    const { auth, database, storage } = props;
+    const { auth, database } = props;
+
+    const ttsAudioBucketName = `vela-tts-audio-${Stack.of(this).account}`;
 
     const apiLambda = new Function(this, 'VelaApiFunction', {
       functionName: 'vela-api',
@@ -47,7 +49,8 @@ export class ApiStack extends Stack {
         GAME_SESSIONS_TABLE_NAME: database.gameSessionsTable.tableName,
         DAILY_PROGRESS_TABLE_NAME: database.dailyProgressTable.tableName,
         SAVED_SENTENCES_TABLE_NAME: database.savedSentencesTable.tableName,
-        TTS_AUDIO_BUCKET_NAME: storage.ttsAudioBucket.bucketName,
+        TTS_SETTINGS_TABLE_NAME: database.ttsSettingsTable.tableName,
+        TTS_AUDIO_BUCKET_NAME: ttsAudioBucketName,
         AURORA_DB_SECRET_ARN: database.dbCredentials.secretArn,
         AURORA_DB_CLUSTER_ARN: database.dbCluster.clusterArn,
         AURORA_DB_NAME: 'vela',
@@ -68,7 +71,19 @@ export class ApiStack extends Stack {
     database.savedSentencesTable.grantReadWriteData(apiLambda);
     database.ttsSettingsTable.grantReadWriteData(apiLambda);
 
-    storage.ttsAudioBucket.grantReadWrite(apiLambda);
+    apiLambda.addToRolePolicy(
+      new PolicyStatement({
+        effect: Effect.ALLOW,
+        actions: [
+          's3:GetObject',
+          's3:PutObject',
+          's3:DeleteObject',
+          's3:HeadObject',
+          's3:ListBucket',
+        ],
+        resources: [`arn:aws:s3:::${ttsAudioBucketName}`, `arn:aws:s3:::${ttsAudioBucketName}/*`],
+      }),
+    );
 
     database.dbCredentials.grantRead(apiLambda);
 

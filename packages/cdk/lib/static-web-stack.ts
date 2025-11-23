@@ -35,7 +35,7 @@ export class StaticWebStack extends Stack {
   constructor(scope: Construct, id: string, props: StaticWebStackProps) {
     super(scope, id, props);
 
-    const { auth, database, storage, api } = props;
+    const { auth, database, api } = props;
 
     const configuredDomain = process.env.DOMAIN_NAME?.trim();
     const domainName =
@@ -56,6 +56,7 @@ export class StaticWebStack extends Stack {
     }
 
     const websiteBucket = new Bucket(this, 'VelaWebBucket', {
+      bucketName: `vela-web-${Stack.of(this).account}`,
       websiteIndexDocument: 'index.html',
       websiteErrorDocument: 'index.html',
       publicReadAccess: true,
@@ -203,8 +204,10 @@ export class StaticWebStack extends Stack {
       description: 'Frontend API base path via CloudFront',
     });
 
+    const ttsAudioBucketName = `vela-tts-audio-${Stack.of(this).account}`;
+
     new CfnOutput(this, 'TTSAudioBucketName', {
-      value: storage.ttsAudioBucket.bucketName,
+      value: ttsAudioBucketName,
       description: 'S3 bucket for TTS audio files',
     });
 

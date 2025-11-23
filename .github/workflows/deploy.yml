@@ -96,13 +96,26 @@ jobs:
           path: apps/vela/dist/spa/
 
       - name: Export CDK outputs to packages/cdk/cdk-outputs.json
+        env:
+          STACK_NAME: VelaStack
         run: |
           mkdir -p packages/cdk
-          aws cloudformation describe-stacks \
-            --stack-name VelaStack \
+          if aws cloudformation describe-stacks \
+            --stack-name "$STACK_NAME" \
             --query 'Stacks[0].Outputs[*].{OutputKey:OutputKey,OutputValue:OutputValue,Description:Description}' \
             --output json \
-            --region ${{ env.AWS_REGION }} > packages/cdk/cdk-outputs.json
+            --region ${{ env.AWS_REGION }} > packages/cdk/cdk-outputs.json; then
+            echo "Exported CloudFormation outputs for $STACK_NAME"
+          else
+            status=$?
+            if aws cloudformation describe-stacks --stack-name "$STACK_NAME" --region ${{ env.AWS_REGION }} >/dev/null 2>&1; then
+              echo "Failed to export outputs for existing stack $STACK_NAME" >&2
+              exit $status
+            else
+              echo "Stack $STACK_NAME not found yet; skipping outputs export"
+              rm -f packages/cdk/cdk-outputs.json
+            fi
+          fi
 
       - name: Inject Vite env (.env.production) from CDK outputs
         run: pnpm --filter @vela/cdk exec -- tsx scripts/inject-env.ts

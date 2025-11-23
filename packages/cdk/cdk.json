@@ -1,7 +1,7 @@
 {
   "app": "npx tsx app.ts",
   "watch": {
-    "include": ["bin/**", "lib/**"],
+    "include": ["app.ts", "lib/**"],
     "exclude": [
       "README.md",
       "cdk*.json",
