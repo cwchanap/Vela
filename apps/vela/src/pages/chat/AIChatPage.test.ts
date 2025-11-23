@@ -300,11 +300,14 @@ describe('AIChatPage', () => {
       expect(wrapper.text()).toContain('What would you like to practice today?');
     });
 
-    it('should show placeholder text when no messages', () => {
+    it('should show placeholder text when no messages', async () => {
+      const wrapper = mountComponent();
+      await flushPromises();
+
+      // Clear messages after component has mounted (greeting was added)
       const chatStore = useChatStore();
       chatStore.setMessages([]);
-
-      const wrapper = mountComponent();
+      await wrapper.vm.$nextTick();
 
       expect(wrapper.text()).toContain('Start a conversation below');
     });
@@ -391,7 +394,6 @@ describe('AIChatPage', () => {
 
     it('should show typing indicator while AI is responding', async () => {
       // Create a controlled promise to test the typing indicator
-      // Initialize with a no-op to avoid non-null assertion
       let resolveLLM: (_value: LLMResponse) => void = () => {};
       const llmPromise = new Promise<LLMResponse>((resolve) => {
         resolveLLM = resolve;
@@ -457,8 +459,8 @@ describe('AIChatPage', () => {
 
       // Note: Notification testing is skipped because useQuasar() composable
       // mocking is unreliable in unit tests. The component does call $q.notify
-      // (see AIChatPage.vue:457), but the Quasar injection system doesn't pick
-      // up our mock properly. This is better tested in E2E tests.
+      // in the onSend error handler, but the Quasar injection system doesn't
+      // pick up our mock properly. This is better tested in E2E tests.
     });
   });
 
@@ -884,8 +886,8 @@ describe('AIChatPage', () => {
 
       // Note: Notification testing is skipped because useQuasar() composable
       // mocking is unreliable in unit tests. The component does call $q.notify
-      // (see AIChatPage.vue:359), but the Quasar injection system doesn't pick
-      // up our mock properly. This is better tested in E2E tests.
+      // in the openHistory error handler, but the Quasar injection system
+      // doesn't pick up our mock properly. This is better tested in E2E tests.
     });
 
     it('should handle missing auth token gracefully', async () => {
