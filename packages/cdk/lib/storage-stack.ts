@@ -17,7 +17,7 @@ export class StorageStack extends Stack {
       : [];
 
     if (process.env.NODE_ENV !== 'production') {
-      frontendOrigins.push('http://localhost:3000');
+      frontendOrigins.push('http://localhost:9000');
     }
 
     const defaultDomainName = 'vela.cwchanap.dev';
@@ -30,6 +30,7 @@ export class StorageStack extends Stack {
     }
 
     const ttsAudioBucket = new Bucket(this, 'VelaTTSAudioBucket', {
+      bucketName: `vela-tts-audio-${Stack.of(this).account}`,
       publicReadAccess: false,
       blockPublicAccess: BlockPublicAccess.BLOCK_ALL,
       removalPolicy: RemovalPolicy.RETAIN,

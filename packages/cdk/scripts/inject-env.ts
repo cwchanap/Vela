@@ -10,11 +10,19 @@ type OutputMap = Record<string, string>;
 
 function loadOutputs(outputsPath: string): OutputMap {
   if (!fs.existsSync(outputsPath)) {
-    throw new Error(`CloudFormation outputs file not found at ${outputsPath}`);
+    throw new Error(
+      `CloudFormation outputs file not found at resolved path: ${outputsPath}. Run 'pnpm run get-outputs' first.`,
+    );
   }
 
   const raw = fs.readFileSync(outputsPath, 'utf8');
-  const data: OutputEntry[] = JSON.parse(raw);
+  let data: OutputEntry[];
+  try {
+    data = JSON.parse(raw);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`Failed to parse CloudFormation outputs JSON at ${outputsPath}: ${message}`);
+  }
 
   if (!Array.isArray(data)) {
     throw new Error('Expected CloudFormation outputs JSON to be an array');
@@ -57,12 +65,19 @@ function main(): void {
 
   const repoRoot = path.resolve(process.cwd(), '..', '..');
   const envFilePath = path.join(repoRoot, 'apps', 'vela', '.env.production');
+  const envDir = path.dirname(envFilePath);
+  fs.mkdirSync(envDir, { recursive: true });
 
   const lines = Object.entries(envVars).map(([key, value]) => `${key}=${value}`);
   const content = `${lines.join('\n')}\n`;
 
-  fs.writeFileSync(envFilePath, content, 'utf8');
-  console.log(`Wrote environment variables to ${envFilePath}`);
+  try {
+    fs.writeFileSync(envFilePath, content, 'utf8');
+    console.log(`Wrote environment variables to ${envFilePath}`);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`Failed to write environment variables to ${envFilePath}: ${message}`);
+  }
 }
 
 main();

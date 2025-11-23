@@ -346,7 +346,7 @@ The CDK application uses a multi-stack architecture for better separation of con
 
 1. **AuthStack** (`lib/auth-stack.ts`) - Cognito User Pool and Client
 2. **DatabaseStack** (`lib/database-stack.ts`) - DynamoDB tables, Aurora Serverless v2, VPC
-3. **StorageStack** (`lib/storage-stack.ts`) - S3 buckets for TTS audio and static web
+3. **StorageStack** (`lib/storage-stack.ts`) - S3 bucket for TTS audio storage
 4. **ApiStack** (`lib/api-stack.ts`) - Lambda function, API Gateway
 5. **StaticWebStack** (`lib/static-web-stack.ts`) - CloudFront distribution, S3 deployment
 
