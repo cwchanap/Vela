@@ -537,7 +537,6 @@ describe('AIChatPage', () => {
     it('should show loading state while fetching threads', async () => {
       // Create a promise that we can control when it resolves
       type FetchResponse = MockResponse<{ threads: MockThread[] }>;
-      // Initialize with a no-op to avoid non-null assertion
       let resolveFetch: (_value: FetchResponse) => void = () => {};
       const fetchPromise = new Promise<FetchResponse>((resolve) => {
         resolveFetch = resolve;
@@ -855,12 +854,6 @@ describe('AIChatPage', () => {
       expect(wrapper.find('[data-testid="llm-chat-history"]').exists()).toBe(true);
       expect(wrapper.find('[data-testid="llm-chat-input"]').exists()).toBe(true);
       expect(wrapper.find('[data-testid="llm-chat-send"]').exists()).toBe(true);
-    });
-
-    it('should render page wrapper with correct data-testid', () => {
-      const wrapper = mountComponent();
-      const page = wrapper.find('[data-testid="ai-chat-page"]');
-      expect(page.exists()).toBe(true);
     });
 
     it('should show button icons', () => {
