@@ -36,10 +36,7 @@ export class StaticWebStack extends Stack {
     super(scope, id, props);
 
     const { auth, database, api } = props;
-
-    const configuredDomain = process.env.DOMAIN_NAME?.trim();
-    const domainName =
-      configuredDomain && configuredDomain.length > 0 ? configuredDomain : undefined;
+    const domainName = 'vela.cwchanap.dev';
 
     const certificateArn = process.env.CLOUDFRONT_CERT_ARN || process.env.ACM_CERT_ARN;
 
