@@ -48,6 +48,7 @@ describe('AIChatPage', () => {
   let fetchMock: ReturnType<typeof vi.fn>;
   let notifyCreateSpy: ReturnType<typeof vi.fn>;
   let queryClient: QueryClient;
+  let originalFetch: typeof global.fetch;
 
   beforeEach(() => {
     // Create fresh Pinia instance for test isolation
@@ -78,7 +79,8 @@ describe('AIChatPage', () => {
       },
     });
 
-    // Mock fetch
+    // Mock fetch and capture original for restoration
+    originalFetch = global.fetch;
     fetchMock = vi.fn();
     global.fetch = fetchMock;
 
@@ -90,6 +92,8 @@ describe('AIChatPage', () => {
   afterEach(() => {
     queryClient.clear();
     vi.restoreAllMocks();
+    // Restore original fetch to prevent test pollution
+    global.fetch = originalFetch;
   });
 
   // Type definition for mock user
