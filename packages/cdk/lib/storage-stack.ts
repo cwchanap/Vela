@@ -20,10 +20,7 @@ export class StorageStack extends Stack {
       frontendOrigins.push('http://localhost:9000');
     }
 
-    const defaultDomainName = 'vela.cwchanap.dev';
-    const configuredDomain = process.env.DOMAIN_NAME?.trim();
-    const domainName =
-      configuredDomain && configuredDomain.length > 0 ? configuredDomain : defaultDomainName;
+    const domainName = 'vela.cwchanap.dev';
 
     if (frontendOrigins.length === 0) {
       frontendOrigins.push(`https://${domainName}`);
