@@ -20,6 +20,7 @@ import { AuthStack } from './auth-stack';
 import { DatabaseStack } from './database-stack';
 import { StorageStack } from './storage-stack';
 import { ApiStack } from './api-stack';
+import { getTtsAudioBucketName } from './naming';
 
 declare const __dirname: string;
 declare const process: any;
@@ -201,7 +202,7 @@ export class StaticWebStack extends Stack {
       description: 'Frontend API base path via CloudFront',
     });
 
-    const ttsAudioBucketName = `vela-tts-audio-${Stack.of(this).account}`;
+    const ttsAudioBucketName = getTtsAudioBucketName(this);
 
     new CfnOutput(this, 'TTSAudioBucketName', {
       value: ttsAudioBucketName,

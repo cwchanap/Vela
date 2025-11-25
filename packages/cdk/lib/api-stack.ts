@@ -8,6 +8,7 @@ import { Construct } from 'constructs';
 import { AuthStack } from './auth-stack';
 import { DatabaseStack } from './database-stack';
 import { StorageStack } from './storage-stack';
+import { getTtsAudioBucketName } from './naming';
 
 declare const __dirname: string;
 declare const process: any;
@@ -27,7 +28,7 @@ export class ApiStack extends Stack {
 
     const { auth, database } = props;
 
-    const ttsAudioBucketName = `vela-tts-audio-${Stack.of(this).account}`;
+    const ttsAudioBucketName = getTtsAudioBucketName(this);
 
     const apiLambda = new Function(this, 'VelaApiFunction', {
       functionName: 'vela-api',
