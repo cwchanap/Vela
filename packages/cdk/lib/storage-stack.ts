@@ -1,6 +1,7 @@
 import { Stack, StackProps, RemovalPolicy } from 'aws-cdk-lib';
 import { Bucket, BlockPublicAccess, HttpMethods } from 'aws-cdk-lib/aws-s3';
 import { Construct } from 'constructs';
+import { getTtsAudioBucketName } from './naming';
 
 declare const process: any;
 
@@ -27,7 +28,7 @@ export class StorageStack extends Stack {
     }
 
     const ttsAudioBucket = new Bucket(this, 'VelaTTSAudioBucket', {
-      bucketName: `vela-tts-audio-${Stack.of(this).account}`,
+      bucketName: getTtsAudioBucketName(this),
       publicReadAccess: false,
       blockPublicAccess: BlockPublicAccess.BLOCK_ALL,
       removalPolicy: RemovalPolicy.RETAIN,
