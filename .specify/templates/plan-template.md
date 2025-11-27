@@ -31,7 +31,15 @@
 
 _GATE: Must pass before Phase 0 research. Re-check after Phase 1 design._
 
-[Gates determined based on constitution file]
+| Principle                  | Status | Notes                                           |
+| -------------------------- | ------ | ----------------------------------------------- |
+| I. TypeScript Strictness   | [ ]    | Strict config, no untyped code                  |
+| II. Test Discipline        | [ ]    | E2E/Unit/API tests per package requirements     |
+| III. Monorepo Architecture | [ ]    | Proper package placement (apps/_ or packages/_) |
+| IV. Infrastructure as Code | [ ]    | CDK for any new AWS resources                   |
+| V. Code Quality Gates      | [ ]    | ESLint/Prettier/TypeScript compliance           |
+
+_Mark [x] when verified. Violations require Complexity Tracking justification._
 
 ## Project Structure
 
