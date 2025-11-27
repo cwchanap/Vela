@@ -526,3 +526,12 @@ In production:
 
 - CloudFront handles routing: `/api/*` → API Gateway, `/*` → S3 static website
 - CORS configured on API Gateway for allowed origins
+
+## Active Technologies
+
+- TypeScript (Node.js 20 for Lambda, CDK v2 TypeScript for infrastructure) + AWS CDK v2 (`aws-cdk-lib`, `constructs`), AWS SDK v3 (DynamoDB), Hono (API framework), AWS RDS Data API client for executing SQL against Aurora / DSQL (001-aurora-dsql-migration)
+- DynamoDB tables for application data; Aurora DSQL cluster as the single relational database for current and future SQL workloads; S3 for TTS audio and static assets (001-aurora-dsql-migration)
+
+## Recent Changes
+
+- 001-aurora-dsql-migration: Added TypeScript (Node.js 20 for Lambda, CDK v2 TypeScript for infrastructure) + AWS CDK v2 (`aws-cdk-lib`, `constructs`), AWS SDK v3 (DynamoDB), Hono (API framework), AWS RDS Data API client for executing SQL against Aurora / DSQL
