@@ -41,8 +41,8 @@ vi.mock('src/stores/llmSettings', () => {
 });
 
 const authUser = ref(null as { id: string } | null);
-const authSession = { user: null as { id: string } | null };
-const isAuthenticated = computed(() => Boolean(authUser.value && authSession.user));
+const authSession = ref(null as { user: { id: string } | null } | null);
+const isAuthenticated = computed(() => Boolean(authUser.value && authSession.value));
 
 vi.mock('src/stores/auth', () => ({
   useAuthStore: () => ({
@@ -99,7 +99,7 @@ describe('MyDictionariesPage', () => {
     mockGetMyDictionaries.mockReset();
     mockDeleteDictionaryEntry.mockReset();
     authUser.value = null;
-    authSession.user = null;
+    authSession.value = null;
     mockNotify.mockReset();
   });
 
