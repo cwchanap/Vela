@@ -1,43 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { mount, flushPromises } from '@vue/test-utils';
 import { computed, ref } from 'vue';
+import { Quasar } from 'quasar';
 import MyDictionariesPage from './MyDictionariesPage.vue';
 
 const mockGetMyDictionaries = vi.fn();
 const mockDeleteDictionaryEntry = vi.fn();
 const mockNotify = vi.fn();
-
-function createQuasarStubs() {
-  return {
-    QPage: { template: '<div><slot /></div>' },
-    QBtn: {
-      props: ['label', 'icon'],
-      template: '<button @click="$emit(\'click\')"><slot />{{ label }}</button>',
-    },
-    QSpinner: { template: '<div class="q-spinner" />' },
-    QBanner: { template: '<div class="q-banner"><slot /><slot name="action" /></div>' },
-    QCard: { template: '<div class="q-card"><slot /></div>' },
-    QCardSection: { template: '<section class="q-card-section"><slot /></section>' },
-    QCardActions: { template: '<div class="q-card-actions"><slot /></div>' },
-    QDialog: {
-      props: ['modelValue'],
-      template: '<div v-if="modelValue"><slot /></div>',
-    },
-    QIcon: { props: ['name'], template: '<i :data-icon="name"><slot /></i>' },
-    QTooltip: { template: '<div class="q-tooltip"><slot /></div>' },
-    QSpace: { template: '<div class="q-space" />' },
-    QSeparator: { template: '<hr />' },
-  };
-}
-
-function createClosePopupDirective() {
-  return {
-    name: 'close-popup',
-    beforeMount: vi.fn(),
-    updated: vi.fn(),
-    unmounted: vi.fn(),
-  };
-}
 
 vi.mock('src/services/myDictionariesService', () => ({
   getMyDictionaries: (...args: unknown[]) => mockGetMyDictionaries(...args),
@@ -59,14 +28,6 @@ vi.mock('src/config', () => ({
       url: '/api/',
     },
   },
-}));
-
-vi.mock('quasar', () => ({
-  useQuasar: () => ({
-    notify: mockNotify,
-  }),
-  ClosePopup: createClosePopupDirective(),
-  ...createQuasarStubs(),
 }));
 
 vi.mock('src/stores/llmSettings', () => {
@@ -91,22 +52,23 @@ vi.mock('src/stores/auth', () => ({
   }),
 }));
 
-const quasarStubs = createQuasarStubs();
-const closePopupDirective = createClosePopupDirective();
-
 const mountPage = async () => {
   const wrapper = mount(MyDictionariesPage, {
     global: {
+      plugins: [Quasar],
       stubs: {
         transition: false,
         teleport: false,
-        ...quasarStubs,
-      },
-      directives: {
-        ClosePopup: closePopupDirective,
+        QPage: { template: '<div class="q-page"><slot /></div>' },
+        QLayout: { template: '<div class="q-layout"><slot /></div>' },
       },
     },
   });
+
+  const $q = (wrapper.vm as { $q?: { notify?: typeof mockNotify } }).$q;
+  if ($q) {
+    $q.notify = mockNotify;
+  }
 
   await flushPromises();
   return wrapper;
