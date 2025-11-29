@@ -8,6 +8,7 @@ import { profiles as createProfilesRoute } from './routes/profiles';
 import auth from './routes/auth';
 import myDictionaries from './routes/my-dictionaries';
 import createTTSRoute from './routes/tts';
+import { dsqlHealth } from './routes/dsql-health';
 import type { Env } from './types';
 import { serve } from '@hono/node-server';
 import { readFileSync, existsSync } from 'fs';
@@ -122,6 +123,11 @@ app.route('/api/games', games);
 
 // Mount the progress routes
 app.route('/api/progress', progress);
+
+// Mount the internal DSQL health-check route under the /api prefix so that
+// it is reachable externally at /prod/api/internal/dsql-health via API
+// Gateway's /api proxy resource.
+app.route('/api/internal/dsql-health', dsqlHealth);
 
 // Mount the profiles routes
 if (process.env.NODE_ENV === 'development') {

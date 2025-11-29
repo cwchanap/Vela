@@ -5,6 +5,8 @@
 1. **Adopt Aurora DSQL as the only relational database for Vela**
    - Replace the existing Aurora PostgreSQL (Aurora RDS) cluster definition in `packages/cdk/lib/database-stack.ts` with an Aurora DSQL cluster defined via the `AWS::DSQL::Cluster` CloudFormation resource using CDK L1 constructs.
    - Keep the existing VPC, subnet, and security group model.
+   - Target AWS region for Aurora DSQL: `us-east-1` (via the shared CDK `env` configuration).
+   - Engine family/version: Aurora DSQL in `us-east-1` using the region's current default Aurora DSQL engine version (explicit engine version is managed by the service and not pinned in the template).
 
 2. **Treat the migration as infra-only for now**
    - No current workloads persist business data to Aurora; all production data is in DynamoDB tables.
@@ -17,6 +19,7 @@
 4. **Use the AWS-recommended access mechanism for Aurora DSQL from Lambda**
    - Use the Aurora DSQL Connector for node-postgres together with `@aws-sdk/dsql-signer` to establish IAM-authenticated, TLS-encrypted PostgreSQL connections from the API Lambda to the Aurora DSQL cluster.
    - The API will encapsulate this access in a small helper module (planned as `apps/vela-api/src/dsql.ts`).
+   - The Lambda execution role will require Aurora DSQL IAM actions such as `dsql:DbConnect` (and, if needed for administration, `dsql:DbConnectAdmin`) scoped to the cluster resource ARN pattern `arn:aws:dsql:<region>:<account-id>:cluster/<identifier>`.
 
 5. **Add a simple DSQL connectivity health-check**
    - Implement a function that performs a trivial query (for example, `SELECT 1`) and logs success/failure.

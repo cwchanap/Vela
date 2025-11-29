@@ -23,9 +23,9 @@ description: 'Task list for Aurora DSQL migration feature implementation'
 
 **Purpose**: Ensure the repository, dependencies, and baseline environment are ready for Aurora DSQL work.
 
-- [ ] T001 Confirm feature branch `001-aurora-dsql-migration` is checked out in repository root `./`
-- [ ] T002 [P] Install monorepo dependencies with `pnpm install` in repository root `./`
-- [ ] T003 [P] Verify CDK commands are available by running `pnpm cdk:synth` once in `packages/cdk/`
+- [x] T001 Confirm feature branch `001-aurora-dsql-migration` is checked out in repository root `./`
+- [x] T002 [P] Install monorepo dependencies with `pnpm install` in repository root `./`
+- [x] T003 [P] Verify CDK commands are available by running `pnpm cdk:synth` once in `packages/cdk/`
 
 **Checkpoint**: Repository is on the correct branch, dependencies installed, and CDK commands are verified.
 
@@ -37,8 +37,8 @@ description: 'Task list for Aurora DSQL migration feature implementation'
 
 **⚠️ CRITICAL**: No user story work should begin until this phase is complete.
 
-- [ ] T004 Document chosen Aurora DSQL engine family and version for the target region in `specs/001-aurora-dsql-migration/research.md`
-- [ ] T005 Document the Lambda-to-DSQL access mechanism (for example, RDS Data API or equivalent) and any required IAM actions in `specs/001-aurora-dsql-migration/research.md`
+- [x] T004 Document chosen Aurora DSQL engine family and version for the target region in `specs/001-aurora-dsql-migration/research.md`
+- [x] T005 Document the Lambda-to-DSQL access mechanism (for example, RDS Data API or equivalent) and any required IAM actions in `specs/001-aurora-dsql-migration/research.md`
 
 **Checkpoint**: Aurora DSQL engine/version and access method are decided and documented.
 
@@ -56,16 +56,16 @@ description: 'Task list for Aurora DSQL migration feature implementation'
 
 ### Implementation for User Story 1
 
-- [ ] T006 [P] [US1] Update Aurora cluster definition to use Aurora DSQL engine/version in `packages/cdk/lib/database-stack.ts`
-- [ ] T007 [P] [US1] Verify and adjust, if needed, the database credentials secret configuration and naming for Aurora DSQL in `packages/cdk/lib/database-stack.ts`
-- [ ] T008 [P] [US1] Ensure API Lambda environment variables for database access (`AURORA_DB_CLUSTER_ARN`, `AURORA_DB_SECRET_ARN`, `AURORA_DB_NAME`) remain correctly wired to the new DSQL cluster in `packages/cdk/lib/api-stack.ts`
-- [ ] T009 [US1] Confirm IAM policy for database access uses the correct actions and scopes for the chosen Aurora DSQL access mechanism in `packages/cdk/lib/api-stack.ts`
-- [ ] T010 [US1] Run `pnpm cdk:diff DatabaseStack ApiStack` from `packages/cdk/` and verify that only the Aurora cluster definition is changing from PostgreSQL to DSQL
-- [ ] T011 [US1] Deploy updated `DatabaseStack` and `ApiStack` with `pnpm cdk:deploy DatabaseStack ApiStack` from `packages/cdk/` and verify an Aurora DSQL cluster is created and no Aurora PostgreSQL cluster remains
-- [ ] T012 [P] [US1] Implement Aurora DSQL helper module to execute a trivial query (for example, `SELECT 1`) using env configuration in `apps/vela-api/src/dsql.ts`
-- [ ] T013 [P] [US1] Implement internal DSQL health-check route based on `contracts/dsql-health.openapi.yaml` (for example, `GET /internal/dsql-health`) in `apps/vela-api/src/routes/dsql-health.ts`
-- [ ] T014 [US1] Wire the DSQL health-check route into the main Hono app by routing it under the appropriate prefix in `apps/vela-api/src/index.ts`
-- [ ] T015 [US1] Manually exercise the DSQL health-check endpoint against the deployed environment and confirm logs show a successful test query against Aurora DSQL
+- [x] T006 [P] [US1] Update Aurora cluster definition to use Aurora DSQL engine/version in `packages/cdk/lib/database-stack.ts`
+- [x] T007 [P] [US1] Verify and adjust, if needed, the database credentials secret configuration and naming for Aurora DSQL in `packages/cdk/lib/database-stack.ts`
+- [x] T008 [P] [US1] Ensure API Lambda environment variables for database access (`AURORA_DB_CLUSTER_ARN`, `AURORA_DB_SECRET_ARN`, `AURORA_DB_NAME`) remain correctly wired to the new DSQL cluster in `packages/cdk/lib/api-stack.ts`
+- [x] T009 [US1] Confirm IAM policy for database access uses the correct actions and scopes for the chosen Aurora DSQL access mechanism in `packages/cdk/lib/api-stack.ts`
+- [x] T010 [US1] Run `pnpm cdk:diff DatabaseStack ApiStack` from `packages/cdk/` and verify that only the Aurora cluster definition is changing from PostgreSQL to DSQL
+- [x] T011 [US1] Deploy updated `DatabaseStack` and `ApiStack` with `pnpm cdk:deploy DatabaseStack ApiStack` from `packages/cdk/` and verify an Aurora DSQL cluster is created and no Aurora PostgreSQL cluster remains
+- [x] T012 [P] [US1] Implement Aurora DSQL helper module to execute a trivial query (for example, `SELECT 1`) using env configuration in `apps/vela-api/src/dsql.ts`
+- [x] T013 [P] [US1] Implement internal DSQL health-check route based on `contracts/dsql-health.openapi.yaml` (for example, `GET /internal/dsql-health`) in `apps/vela-api/src/routes/dsql-health.ts`
+- [x] T014 [US1] Wire the DSQL health-check route into the main Hono app by routing it under the appropriate prefix in `apps/vela-api/src/index.ts`
+- [x] T015 [US1] Manually exercise the DSQL health-check endpoint against the deployed environment and confirm logs show a successful test query against Aurora DSQL
 
 - [ ] T029 [US1] Implement an automated health-check loop test that calls `/internal/dsql-health` repeatedly (for example, 100 times) against a non-production environment and record the observed success rate in `specs/001-aurora-dsql-migration/research.md`
 

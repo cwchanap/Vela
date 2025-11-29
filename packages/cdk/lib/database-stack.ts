@@ -1,6 +1,5 @@
-import { Stack, StackProps, RemovalPolicy } from 'aws-cdk-lib';
+import { Stack, StackProps, RemovalPolicy, CfnResource } from 'aws-cdk-lib';
 import { Table, AttributeType, BillingMode } from 'aws-cdk-lib/aws-dynamodb';
-import * as rds from 'aws-cdk-lib/aws-rds';
 import * as ec2 from 'aws-cdk-lib/aws-ec2';
 import * as secretsmanager from 'aws-cdk-lib/aws-secretsmanager';
 import { Construct } from 'constructs';
@@ -20,7 +19,8 @@ export class DatabaseStack extends Stack {
   public readonly vpc: ec2.Vpc;
   public readonly dbSecurityGroup: ec2.SecurityGroup;
   public readonly dbCredentials: secretsmanager.Secret;
-  public readonly dbCluster: rds.DatabaseCluster;
+  public readonly dbClusterArn: string;
+  public readonly dbClusterEndpoint: string;
 
   constructor(scope: Construct, id: string, props?: DatabaseStackProps) {
     super(scope, id, props);
@@ -197,24 +197,21 @@ export class DatabaseStack extends Stack {
       },
     });
 
-    const dbCluster = new rds.DatabaseCluster(this, 'VelaAuroraCluster', {
-      engine: rds.DatabaseClusterEngine.auroraPostgres({
-        version: rds.AuroraPostgresEngineVersion.VER_16_4,
-      }),
-      credentials: rds.Credentials.fromSecret(dbCredentials),
-      writer: rds.ClusterInstance.serverlessV2('writer', {
-        publiclyAccessible: false,
-      }),
-      vpc,
-      vpcSubnets: {
-        subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS,
+    const dsqlCluster = new CfnResource(this, 'VelaAuroraDsqlCluster', {
+      type: 'AWS::DSQL::Cluster',
+      properties: {
+        DeletionProtectionEnabled: false,
+        Tags: [
+          {
+            Key: 'Name',
+            Value: 'vela-aurora-dsql-cluster',
+          },
+        ],
       },
-      securityGroups: [dbSecurityGroup],
-      defaultDatabaseName: 'vela',
-      removalPolicy: RemovalPolicy.DESTROY,
-      serverlessV2MinCapacity: 0.5,
-      serverlessV2MaxCapacity: 1,
     });
+
+    const dbClusterArn = dsqlCluster.getAtt('ResourceArn').toString();
+    const dbClusterEndpoint = dsqlCluster.getAtt('Endpoint').toString();
 
     this.chatHistoryTable = chatHistoryTable;
     this.profilesTable = profilesTable;
@@ -228,6 +225,7 @@ export class DatabaseStack extends Stack {
     this.vpc = vpc;
     this.dbSecurityGroup = dbSecurityGroup;
     this.dbCredentials = dbCredentials;
-    this.dbCluster = dbCluster;
+    this.dbClusterArn = dbClusterArn;
+    this.dbClusterEndpoint = dbClusterEndpoint;
   }
 }
