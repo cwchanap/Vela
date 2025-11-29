@@ -53,7 +53,8 @@ export class ApiStack extends Stack {
         TTS_SETTINGS_TABLE_NAME: database.ttsSettingsTable.tableName,
         TTS_AUDIO_BUCKET_NAME: ttsAudioBucketName,
         AURORA_DB_SECRET_ARN: database.dbCredentials.secretArn,
-        AURORA_DB_CLUSTER_ARN: database.dbCluster.clusterArn,
+        AURORA_DB_CLUSTER_ARN: database.dbClusterArn,
+        AURORA_DB_ENDPOINT: database.dbClusterEndpoint,
         AURORA_DB_NAME: 'vela',
         ELEVENLABS_API_KEY: process.env.ELEVENLABS_API_KEY || '',
         VITE_COGNITO_USER_POOL_ID: auth.userPool.userPoolId,
@@ -91,14 +92,8 @@ export class ApiStack extends Stack {
     apiLambda.addToRolePolicy(
       new PolicyStatement({
         effect: Effect.ALLOW,
-        actions: [
-          'rds-data:ExecuteStatement',
-          'rds-data:BatchExecuteStatement',
-          'rds-data:BeginTransaction',
-          'rds-data:CommitTransaction',
-          'rds-data:RollbackTransaction',
-        ],
-        resources: [database.dbCluster.clusterArn],
+        actions: ['dsql:DbConnect', 'dsql:DbConnectAdmin'],
+        resources: [database.dbClusterArn],
       }),
     );
 
