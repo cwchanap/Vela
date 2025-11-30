@@ -96,11 +96,8 @@ const mockEntries = [
 describe('MyDictionariesPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockGetMyDictionaries.mockReset();
-    mockDeleteDictionaryEntry.mockReset();
     authUser.value = null;
     authSession.value = null;
-    mockNotify.mockReset();
   });
 
   it('loads and displays dictionary entries', async () => {
