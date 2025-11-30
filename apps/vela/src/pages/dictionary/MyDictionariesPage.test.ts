@@ -58,7 +58,7 @@ const mountPage = async () => {
       plugins: [Quasar],
       stubs: {
         transition: false,
-        teleport: false,
+        teleport: true,
         QPage: { template: '<div class="q-page"><slot /></div>' },
         QLayout: { template: '<div class="q-layout"><slot /></div>' },
       },
@@ -136,19 +136,30 @@ describe('MyDictionariesPage', () => {
     mockDeleteDictionaryEntry.mockResolvedValue(undefined);
 
     const wrapper = await mountPage();
-    const vm = wrapper.vm as unknown as {
-      confirmDelete: (_entry: (typeof mockEntries)[number]) => void;
-      handleDelete: () => Promise<void>;
-      entries: (typeof mockEntries)[];
-    };
 
-    vm.confirmDelete(mockEntries[0]);
-    await vm.handleDelete();
+    const deleteButtons = wrapper
+      .findAll('button')
+      .filter((btn) => btn.text().trim().includes('Delete'));
+    expect(deleteButtons[0]).toBeTruthy();
+
+    await deleteButtons[0]!.trigger('click');
+    await flushPromises();
+
+    const deleteDialog = wrapper.find('.q-dialog');
+    expect(deleteDialog.exists()).toBe(true);
+
+    const confirmButton = deleteDialog
+      .findAll('button')
+      .find((btn) => btn.text().trim() === 'Delete');
+    expect(confirmButton).toBeTruthy();
+
+    await confirmButton!.trigger('click');
     await flushPromises();
 
     expect(mockDeleteDictionaryEntry).toHaveBeenCalledWith('sentence-1');
-    expect(vm.entries).toHaveLength(1);
-    expect(vm.entries[0]?.sentence_id).toBe('sentence-2');
+    expect(wrapper.findAll('.q-card')).toHaveLength(1);
+    expect(wrapper.text()).toContain('今日は晴れです');
+    expect(wrapper.text()).not.toContain('私は猫が好きです');
     expect(mockNotify).toHaveBeenCalledWith(
       expect.objectContaining({
         type: 'positive',
