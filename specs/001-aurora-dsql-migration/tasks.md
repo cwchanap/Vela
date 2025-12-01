@@ -85,10 +85,10 @@ description: 'Task list for Aurora DSQL migration feature implementation'
 ### Implementation for User Story 2
 
 - [ ] T016 [US2] Run the existing API tests with `pnpm test` in `apps/vela-api/` and capture baseline results before applying DSQL-related code changes (or from main branch if needed)
-- [ ] T017 [US2] After DSQL infrastructure and API changes are applied, rerun `pnpm test` in `apps/vela-api/` and confirm all previously passing tests still pass unchanged
+- [x] T017 [US2] After DSQL infrastructure and API changes are applied, rerun `pnpm test` in `apps/vela-api/` and confirm all previously passing tests still pass unchanged
 - [ ] T018 [US2] Optionally run additional application-wide tests (for example, `pnpm test` in `apps/vela/` if relevant) to confirm no regressions outside the API
-- [ ] T019 [US2] Verify that `pnpm cdk:destroy DatabaseStack ApiStack` from `packages/cdk/` cleanly removes the Aurora DSQL cluster and related resources in non-production, with no orphaned security groups or secrets
-- [ ] T020 [US2] Document any unexpected test or deployment issues and their resolutions in `specs/001-aurora-dsql-migration/research.md`
+- [x] T019 [US2] Verify that `pnpm cdk:destroy DatabaseStack ApiStack` from `packages/cdk/` cleanly removes the Aurora DSQL cluster and related resources in non-production, with no orphaned security groups or secrets
+- [x] T020 [US2] Document any unexpected test or deployment issues and their resolutions in `specs/001-aurora-dsql-migration/research.md`
 
 - [ ] T030 [US2] Perform a code and configuration review across `packages/cdk/` and `apps/vela-api/` (for example, using grep for Aurora PostgreSQL-specific engine/version identifiers or resource names) to confirm no legacy Aurora RDS references remain, and document findings in `specs/001-aurora-dsql-migration/research.md`
 - [ ] T031 [US2] In a non-production environment, intentionally misconfigure Aurora DSQL environment variables (for example, invalid secret ARN or cluster ARN), call `/internal/dsql-health`, and verify that logs clearly describe the configuration error; restore the correct configuration afterward
@@ -109,10 +109,10 @@ description: 'Task list for Aurora DSQL migration feature implementation'
 
 ### Implementation for User Story 3
 
-- [ ] T021 [P] [US3] Extend the `Env` interface with Aurora DSQL configuration fields (cluster ARN, secret ARN, database name) in `apps/vela-api/src/types.ts`
-- [ ] T022 [P] [US3] Update development `mockEnv` and production `prodEnv` objects to include Aurora DSQL configuration values where available in `apps/vela-api/src/index.ts`
-- [ ] T023 [P] [US3] Add structured logging around DSQL health-check success and failure, including clear error messages when configuration is invalid, in `apps/vela-api/src/dsql.ts`
-- [ ] T024 [US3] Update the quickstart documentation to explicitly list required Aurora DSQL environment variables and how to use the health-check for debugging in `specs/001-aurora-dsql-migration/quickstart.md`
+- [x] T021 [P] [US3] Extend the `Env` interface with Aurora DSQL configuration fields (cluster ARN, secret ARN, database name) in `apps/vela-api/src/types.ts`
+- [x] T022 [P] [US3] Update development `mockEnv` and production `prodEnv` objects to include Aurora DSQL configuration values where available in `apps/vela-api/src/index.ts`
+- [x] T023 [P] [US3] Add structured logging around DSQL health-check success and failure, including clear error messages when configuration is invalid, in `apps/vela-api/src/dsql.ts`
+- [x] T024 [US3] Update the quickstart documentation to explicitly list required Aurora DSQL environment variables and how to use the health-check for debugging in `specs/001-aurora-dsql-migration/quickstart.md`
 
 **Checkpoint**: DSQL configuration is visible in type definitions and runtime logs, and engineers have clear documentation on how to debug DSQL connectivity.
 

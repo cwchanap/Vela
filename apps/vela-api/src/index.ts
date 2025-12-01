@@ -73,6 +73,11 @@ if (process.env.NODE_ENV === 'development') {
     OPENROUTER_API_KEY: process.env.OPENROUTER_API_KEY,
     CORS_ALLOWED_ORIGINS:
       process.env.CORS_ALLOWED_ORIGINS || 'http://localhost:9000,http://127.0.0.1:9000',
+    AURORA_DB_CLUSTER_ARN: process.env.AURORA_DB_CLUSTER_ARN,
+    AURORA_DB_SECRET_ARN: process.env.AURORA_DB_SECRET_ARN,
+    AURORA_DB_ENDPOINT: process.env.AURORA_DB_ENDPOINT,
+    AURORA_DB_NAME: process.env.AURORA_DB_NAME,
+    AURORA_DB_USER: process.env.AURORA_DB_USER,
   };
 
   console.log('Environment variables loaded:', {
@@ -180,6 +185,11 @@ if (process.env.NODE_ENV === 'development') {
     GOOGLE_API_KEY: process.env.GOOGLE_API_KEY,
     OPENROUTER_API_KEY: process.env.OPENROUTER_API_KEY,
     CORS_ALLOWED_ORIGINS: process.env.CORS_ALLOWED_ORIGINS,
+    AURORA_DB_CLUSTER_ARN: process.env.AURORA_DB_CLUSTER_ARN,
+    AURORA_DB_SECRET_ARN: process.env.AURORA_DB_SECRET_ARN,
+    AURORA_DB_ENDPOINT: process.env.AURORA_DB_ENDPOINT,
+    AURORA_DB_NAME: process.env.AURORA_DB_NAME,
+    AURORA_DB_USER: process.env.AURORA_DB_USER,
   };
 
   const profiles = createProfilesRoute(prodEnv);
