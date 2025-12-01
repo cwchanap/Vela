@@ -47,14 +47,23 @@ pnpm install
 pnpm dev
 ```
 
-Ensure that the required Aurora DSQL environment variables (cluster ARN, secret ARN, database name) are set for the dev server, either via `.env` or your shell environment.
+Ensure that the required Aurora DSQL environment variables are set for the dev server, either via `.env` or your shell environment. At minimum:
+
+- `AURORA_DB_CLUSTER_ARN` – Aurora DSQL cluster ARN (from `DatabaseStack`/`VelaStack` outputs)
+- `AURORA_DB_SECRET_ARN` – Secrets Manager ARN for the Aurora credentials
+- `AURORA_DB_ENDPOINT` – Aurora DSQL cluster endpoint hostname
+- `AURORA_DB_NAME` – Logical database name (for example, `vela`)
+- `AURORA_DB_USER` – Database user for the health-check (defaults to `admin` if not set)
 
 ## 5. Exercise the DSQL health-check
 
 Once the API is running and wired to the Aurora DSQL cluster:
 
-- Call the internal DSQL health-check endpoint or script (to be implemented as part of this feature) that executes a trivial query (for example, `SELECT 1`).
-- Confirm that logs show a successful connection and query result.
+- Call the internal DSQL health-check endpoint, which executes a trivial query (`SELECT 1`) against Aurora DSQL:
+  - Locally (dev server): `GET http://localhost:9005/api/internal/dsql-health`
+  - Deployed via API Gateway/CloudFront: `GET https://<your-domain>/api/internal/dsql-health`
+
+- Confirm that the endpoint returns `{"status":"ok", ...}` and that logs show a successful connection and query result. If configuration is invalid (for example, missing `AURORA_DB_ENDPOINT`), the logs will include a structured `"[DSQL] Health-check configuration error"` entry describing which variables are missing.
 
 ## 6. Run tests
 

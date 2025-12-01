@@ -8,6 +8,13 @@ export interface Env {
   VITE_COGNITO_USER_POOL_ID?: string;
   COGNITO_CLIENT_ID?: string;
 
+  // Aurora DSQL configuration
+  AURORA_DB_CLUSTER_ARN?: string;
+  AURORA_DB_SECRET_ARN?: string;
+  AURORA_DB_ENDPOINT?: string;
+  AURORA_DB_NAME?: string;
+  AURORA_DB_USER?: string;
+
   // DynamoDB configuration
   DDB_ENDPOINT?: string;
   DDB_REGION?: string;

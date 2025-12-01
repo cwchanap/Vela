@@ -46,6 +46,12 @@
 3. **Introduce new services or separate repository for relational workloads**
    - _Rejected because_: The current scale does not justify additional services. Reusing the existing API Lambda and CDK stacks keeps the design simple and maintainable.
 
+## Deployment & lifecycle notes
+
+- `StaticWebStack` configures the SPA bucket (`VelaWebBucket`) with `RemovalPolicy.RETAIN`, so a `cdk destroy VelaStack` leaves the bucket in the account. Subsequent `cdk deploy VelaStack` attempts will fail early with `AWS::EarlyValidation::ResourceExistenceCheck` if the retained bucket (`vela-web-<account-id>`) is not deleted first. The fix is to empty and remove the retained bucket so CloudFormation can recreate it as part of the new stack.
+- When recreating `VelaStack` after a full destroy, CloudFront alias and DNS validation can also block stack creation if `vela.cwchanap.dev` (or a wildcard such as `*.cwchanap.dev`) still resolves to an unrelated CloudFront distribution. In practice, we had to temporarily remove the DNS record, redeploy `VelaStack` to obtain the new `CloudFrontDomain` output, and then point `vela.cwchanap.dev` at the fresh distribution domain.
+- After completing these steps, `VelaStack` deploys cleanly alongside `DatabaseStack` and `ApiStack`, and `https://vela.cwchanap.dev/api/internal/dsql-health` returns `status: "ok"` indicating a successful `SELECT 1` against Aurora DSQL.
+
 ## Open Questions (to be resolved during implementation)
 
 - None currently. Engine family (Aurora DSQL via `AWS::DSQL::Cluster`) and Lambda access pattern (Aurora DSQL Connector for node-postgres + `@aws-sdk/dsql-signer`) have been selected. Any additional questions that arise during implementation (for example, tuning options or advanced multi-Region settings) should be recorded here.
