@@ -214,11 +214,6 @@ export class StaticWebStack extends Stack {
       description: 'Aurora DSQL cluster ARN',
     });
 
-    new CfnOutput(this, 'AuroraSecretArn', {
-      value: database.dbCredentials.secretArn,
-      description: 'Aurora database credentials secret ARN',
-    });
-
     new CfnOutput(this, 'AuroraClusterEndpoint', {
       value: database.dbClusterEndpoint,
       description: 'Aurora DSQL cluster endpoint',

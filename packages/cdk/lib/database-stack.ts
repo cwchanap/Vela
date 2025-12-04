@@ -1,8 +1,9 @@
 import { Stack, StackProps, RemovalPolicy, CfnResource } from 'aws-cdk-lib';
 import { Table, AttributeType, BillingMode } from 'aws-cdk-lib/aws-dynamodb';
 import * as ec2 from 'aws-cdk-lib/aws-ec2';
-import * as secretsmanager from 'aws-cdk-lib/aws-secretsmanager';
 import { Construct } from 'constructs';
+
+declare const process: any;
 
 export interface DatabaseStackProps extends StackProps {}
 
@@ -18,7 +19,6 @@ export class DatabaseStack extends Stack {
 
   public readonly vpc: ec2.Vpc;
   public readonly dbSecurityGroup: ec2.SecurityGroup;
-  public readonly dbCredentials: secretsmanager.Secret;
   public readonly dbClusterArn: string;
   public readonly dbClusterEndpoint: string;
 
@@ -176,31 +176,14 @@ export class DatabaseStack extends Stack {
 
     const dbSecurityGroup = new ec2.SecurityGroup(this, 'VelaDBSecurityGroup', {
       vpc,
-      description: 'Security group for Aurora DSQL database',
+      description: 'Security group for Lambda functions to access Aurora DSQL via VPC networking',
       allowAllOutbound: true,
-    });
-
-    dbSecurityGroup.addIngressRule(
-      ec2.Peer.ipv4(vpc.vpcCidrBlock),
-      ec2.Port.tcp(5432),
-      'Allow PostgreSQL access from VPC',
-    );
-
-    const dbCredentials = new secretsmanager.Secret(this, 'VelaDBCredentials', {
-      secretName: 'vela-aurora-credentials',
-      generateSecretString: {
-        secretStringTemplate: JSON.stringify({ username: 'vela_admin' }),
-        generateStringKey: 'password',
-        excludePunctuation: true,
-        includeSpace: false,
-        passwordLength: 32,
-      },
     });
 
     const dsqlCluster = new CfnResource(this, 'VelaAuroraDsqlCluster', {
       type: 'AWS::DSQL::Cluster',
       properties: {
-        DeletionProtectionEnabled: false,
+        DeletionProtectionEnabled: process.env.DSQL_DELETION_PROTECTION === 'true',
         Tags: [
           {
             Key: 'Name',
@@ -224,7 +207,6 @@ export class DatabaseStack extends Stack {
 
     this.vpc = vpc;
     this.dbSecurityGroup = dbSecurityGroup;
-    this.dbCredentials = dbCredentials;
     this.dbClusterArn = dbClusterArn;
     this.dbClusterEndpoint = dbClusterEndpoint;
   }
