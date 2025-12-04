@@ -174,6 +174,7 @@ export class DatabaseStack extends Stack {
       ],
     });
 
+    // Security group used by API Lambda for VPC networking; not attached directly to Aurora DSQL cluster
     const dbSecurityGroup = new ec2.SecurityGroup(this, 'VelaDBSecurityGroup', {
       vpc,
       description: 'Security group for Lambda functions to access Aurora DSQL via VPC networking',
