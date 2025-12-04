@@ -52,7 +52,6 @@ export class ApiStack extends Stack {
         SAVED_SENTENCES_TABLE_NAME: database.savedSentencesTable.tableName,
         TTS_SETTINGS_TABLE_NAME: database.ttsSettingsTable.tableName,
         TTS_AUDIO_BUCKET_NAME: ttsAudioBucketName,
-        AURORA_DB_SECRET_ARN: database.dbCredentials.secretArn,
         AURORA_DB_CLUSTER_ARN: database.dbClusterArn,
         AURORA_DB_ENDPOINT: database.dbClusterEndpoint,
         AURORA_DB_NAME: 'vela',
@@ -86,8 +85,6 @@ export class ApiStack extends Stack {
         resources: [`arn:aws:s3:::${ttsAudioBucketName}`, `arn:aws:s3:::${ttsAudioBucketName}/*`],
       }),
     );
-
-    database.dbCredentials.grantRead(apiLambda);
 
     apiLambda.addToRolePolicy(
       new PolicyStatement({
