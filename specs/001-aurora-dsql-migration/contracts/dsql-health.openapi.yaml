@@ -4,7 +4,7 @@ info:
   version: 1.0.0
 
 paths:
-  /internal/dsql-health:
+  /api/internal/dsql-health:
     get:
       summary: Aurora DSQL connectivity health-check
       description: >-
