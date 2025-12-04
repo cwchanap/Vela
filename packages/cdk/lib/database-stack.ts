@@ -195,6 +195,7 @@ export class DatabaseStack extends Stack {
     });
 
     const dbClusterArn = dsqlCluster.getAtt('ResourceArn').toString();
+    // Use the Endpoint attribute because AuroraDSQLClient.host expects the cluster connection endpoint hostname.
     const dbClusterEndpoint = dsqlCluster.getAtt('Endpoint').toString();
 
     this.chatHistoryTable = chatHistoryTable;
