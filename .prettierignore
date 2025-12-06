@@ -1,0 +1,14 @@
+node_modules/
+dist/
+build/
+.quasar/
+cdk.out/
+.turbo/
+coverage/
+test-results/
+playwright-report/
+blob-report/
+playwright/.cache/
+package-lock.json
+yarn.lock
+pnpm-lock.yaml

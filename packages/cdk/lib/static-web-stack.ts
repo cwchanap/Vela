@@ -210,18 +210,13 @@ export class StaticWebStack extends Stack {
     });
 
     new CfnOutput(this, 'AuroraClusterArn', {
-      value: database.dbCluster.clusterArn,
-      description: 'Aurora Serverless v2 cluster ARN',
-    });
-
-    new CfnOutput(this, 'AuroraSecretArn', {
-      value: database.dbCredentials.secretArn,
-      description: 'Aurora database credentials secret ARN',
+      value: database.dbClusterArn,
+      description: 'Aurora DSQL cluster ARN',
     });
 
     new CfnOutput(this, 'AuroraClusterEndpoint', {
-      value: database.dbCluster.clusterEndpoint.hostname,
-      description: 'Aurora cluster endpoint',
+      value: database.dbClusterEndpoint,
+      description: 'Aurora DSQL cluster endpoint',
     });
   }
 }

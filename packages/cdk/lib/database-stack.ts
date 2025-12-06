@@ -1,9 +1,9 @@
-import { Stack, StackProps, RemovalPolicy } from 'aws-cdk-lib';
+import { Stack, StackProps, RemovalPolicy, CfnResource } from 'aws-cdk-lib';
 import { Table, AttributeType, BillingMode } from 'aws-cdk-lib/aws-dynamodb';
-import * as rds from 'aws-cdk-lib/aws-rds';
 import * as ec2 from 'aws-cdk-lib/aws-ec2';
-import * as secretsmanager from 'aws-cdk-lib/aws-secretsmanager';
 import { Construct } from 'constructs';
+
+declare const process: any;
 
 export interface DatabaseStackProps extends StackProps {}
 
@@ -19,8 +19,8 @@ export class DatabaseStack extends Stack {
 
   public readonly vpc: ec2.Vpc;
   public readonly dbSecurityGroup: ec2.SecurityGroup;
-  public readonly dbCredentials: secretsmanager.Secret;
-  public readonly dbCluster: rds.DatabaseCluster;
+  public readonly dbClusterArn: string;
+  public readonly dbClusterEndpoint: string;
 
   constructor(scope: Construct, id: string, props?: DatabaseStackProps) {
     super(scope, id, props);
@@ -174,47 +174,29 @@ export class DatabaseStack extends Stack {
       ],
     });
 
+    // Security group used by API Lambda for VPC networking; not attached directly to Aurora DSQL cluster
     const dbSecurityGroup = new ec2.SecurityGroup(this, 'VelaDBSecurityGroup', {
       vpc,
-      description: 'Security group for Aurora DSQL database',
+      description: 'Security group for Lambda functions to access Aurora DSQL via VPC networking',
       allowAllOutbound: true,
     });
 
-    dbSecurityGroup.addIngressRule(
-      ec2.Peer.ipv4(vpc.vpcCidrBlock),
-      ec2.Port.tcp(5432),
-      'Allow PostgreSQL access from VPC',
-    );
-
-    const dbCredentials = new secretsmanager.Secret(this, 'VelaDBCredentials', {
-      secretName: 'vela-aurora-credentials',
-      generateSecretString: {
-        secretStringTemplate: JSON.stringify({ username: 'vela_admin' }),
-        generateStringKey: 'password',
-        excludePunctuation: true,
-        includeSpace: false,
-        passwordLength: 32,
+    const dsqlCluster = new CfnResource(this, 'VelaAuroraDsqlCluster', {
+      type: 'AWS::DSQL::Cluster',
+      properties: {
+        DeletionProtectionEnabled: process.env.DSQL_DELETION_PROTECTION === 'true',
+        Tags: [
+          {
+            Key: 'Name',
+            Value: 'vela-aurora-dsql-cluster',
+          },
+        ],
       },
     });
 
-    const dbCluster = new rds.DatabaseCluster(this, 'VelaAuroraCluster', {
-      engine: rds.DatabaseClusterEngine.auroraPostgres({
-        version: rds.AuroraPostgresEngineVersion.VER_16_4,
-      }),
-      credentials: rds.Credentials.fromSecret(dbCredentials),
-      writer: rds.ClusterInstance.serverlessV2('writer', {
-        publiclyAccessible: false,
-      }),
-      vpc,
-      vpcSubnets: {
-        subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS,
-      },
-      securityGroups: [dbSecurityGroup],
-      defaultDatabaseName: 'vela',
-      removalPolicy: RemovalPolicy.DESTROY,
-      serverlessV2MinCapacity: 0.5,
-      serverlessV2MaxCapacity: 1,
-    });
+    const dbClusterArn = dsqlCluster.getAtt('ResourceArn').toString();
+    // Use the Endpoint attribute because AuroraDSQLClient.host expects the cluster connection endpoint hostname.
+    const dbClusterEndpoint = dsqlCluster.getAtt('Endpoint').toString();
 
     this.chatHistoryTable = chatHistoryTable;
     this.profilesTable = profilesTable;
@@ -227,7 +209,7 @@ export class DatabaseStack extends Stack {
 
     this.vpc = vpc;
     this.dbSecurityGroup = dbSecurityGroup;
-    this.dbCredentials = dbCredentials;
-    this.dbCluster = dbCluster;
+    this.dbClusterArn = dbClusterArn;
+    this.dbClusterEndpoint = dbClusterEndpoint;
   }
 }
