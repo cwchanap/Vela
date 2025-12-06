@@ -89,7 +89,7 @@ export class ApiStack extends Stack {
     apiLambda.addToRolePolicy(
       new PolicyStatement({
         effect: Effect.ALLOW,
-        actions: ['dsql:DbConnect', 'dsql:DbConnectAdmin'],
+        actions: ['dsql:DbConnect'],
         resources: [database.dbClusterArn],
       }),
     );

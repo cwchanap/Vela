@@ -10,7 +10,6 @@ export interface Env {
 
   // Aurora DSQL configuration
   AURORA_DB_CLUSTER_ARN?: string;
-  AURORA_DB_SECRET_ARN?: string;
   AURORA_DB_ENDPOINT?: string;
   AURORA_DB_NAME?: string;
   AURORA_DB_USER?: string;
