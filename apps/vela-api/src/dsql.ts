@@ -16,7 +16,6 @@ export async function checkDsqlHealth(): Promise<DsqlHealthResult> {
       env: {
         AURORA_DB_ENDPOINT: process.env.AURORA_DB_ENDPOINT ? 'present' : 'missing',
         AURORA_DB_CLUSTER_ARN: process.env.AURORA_DB_CLUSTER_ARN ? 'present' : 'missing',
-        AURORA_DB_SECRET_ARN: process.env.AURORA_DB_SECRET_ARN ? 'present' : 'missing',
         AURORA_DB_USER: process.env.AURORA_DB_USER ?? 'not set',
       },
     });
