@@ -24,6 +24,9 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Build shared common package
+        run: pnpm --filter @vela/common run build
+
       - name: Install Playwright Browsers
         run: npx playwright install --with-deps
         working-directory: ./apps/vela
