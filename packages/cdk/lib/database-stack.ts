@@ -1,4 +1,4 @@
-import { Stack, StackProps, RemovalPolicy, CfnResource, CfnOutput } from 'aws-cdk-lib';
+import { Stack, StackProps, RemovalPolicy, CfnResource } from 'aws-cdk-lib';
 import { Table, AttributeType, BillingMode } from 'aws-cdk-lib/aws-dynamodb';
 import * as ec2 from 'aws-cdk-lib/aws-ec2';
 import { Construct } from 'constructs';
@@ -174,7 +174,8 @@ export class DatabaseStack extends Stack {
       ],
     });
 
-    // Security group used by API Lambda for VPC networking; not attached directly to Aurora DSQL cluster
+    // Legacy security group that was previously imported by ApiStack for Lambda VPC networking.
+    // ApiStack now uses its own VelaApiSecurityGroup; this SG is retained for potential future use.
     const dbSecurityGroup = new ec2.SecurityGroup(this, 'VelaDBSecurityGroup', {
       vpc,
       description: 'Security group for Aurora DSQL database',
@@ -217,10 +218,5 @@ export class DatabaseStack extends Stack {
     this.dbSecurityGroup = dbSecurityGroup;
     this.dbClusterArn = dbClusterArn;
     this.dbClusterEndpoint = dbClusterEndpoint;
-
-    new CfnOutput(this, 'DBSecurityGroupIdExport', {
-      value: dbSecurityGroup.securityGroupId,
-      exportName: 'DatabaseStack:ExportsOutputFnGetAttVelaDBSecurityGroup0D67BD9BGroupId8DF12E00',
-    });
   }
 }

@@ -30,6 +30,7 @@ export class ApiStack extends Stack {
 
     const ttsAudioBucketName = getTtsAudioBucketName(this);
 
+    // Dedicated security group for the API Lambda so ApiStack no longer imports DatabaseStack's SG.
     const apiSecurityGroup = new ec2.SecurityGroup(this, 'VelaApiSecurityGroup', {
       vpc: database.vpc,
       description: 'Security group for Vela API Lambda to access Aurora DSQL via VPC networking',
