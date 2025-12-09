@@ -30,6 +30,12 @@ export class ApiStack extends Stack {
 
     const ttsAudioBucketName = getTtsAudioBucketName(this);
 
+    const apiSecurityGroup = new ec2.SecurityGroup(this, 'VelaApiSecurityGroup', {
+      vpc: database.vpc,
+      description: 'Security group for Vela API Lambda to access Aurora DSQL via VPC networking',
+      allowAllOutbound: true,
+    });
+
     const apiLambda = new Function(this, 'VelaApiFunction', {
       functionName: 'vela-api',
       runtime: Runtime.NODEJS_20_X,
@@ -41,7 +47,7 @@ export class ApiStack extends Stack {
       vpcSubnets: {
         subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS,
       },
-      securityGroups: [database.dbSecurityGroup],
+      securityGroups: [apiSecurityGroup],
       environment: {
         DYNAMODB_TABLE_NAME: database.chatHistoryTable.tableName,
         PROFILES_TABLE_NAME: database.profilesTable.tableName,

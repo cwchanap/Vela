@@ -1,4 +1,4 @@
-import { Stack, StackProps, RemovalPolicy, CfnResource } from 'aws-cdk-lib';
+import { Stack, StackProps, RemovalPolicy, CfnResource, CfnOutput } from 'aws-cdk-lib';
 import { Table, AttributeType, BillingMode } from 'aws-cdk-lib/aws-dynamodb';
 import * as ec2 from 'aws-cdk-lib/aws-ec2';
 import { Construct } from 'constructs';
@@ -177,9 +177,15 @@ export class DatabaseStack extends Stack {
     // Security group used by API Lambda for VPC networking; not attached directly to Aurora DSQL cluster
     const dbSecurityGroup = new ec2.SecurityGroup(this, 'VelaDBSecurityGroup', {
       vpc,
-      description: 'Security group for Lambda functions to access Aurora DSQL via VPC networking',
+      description: 'Security group for Aurora DSQL database',
       allowAllOutbound: true,
     });
+
+    dbSecurityGroup.addIngressRule(
+      ec2.Peer.ipv4('10.0.0.0/16'),
+      ec2.Port.tcp(5432),
+      'Allow PostgreSQL access from VPC',
+    );
 
     const dsqlCluster = new CfnResource(this, 'VelaAuroraDsqlCluster', {
       type: 'AWS::DSQL::Cluster',
@@ -211,5 +217,10 @@ export class DatabaseStack extends Stack {
     this.dbSecurityGroup = dbSecurityGroup;
     this.dbClusterArn = dbClusterArn;
     this.dbClusterEndpoint = dbClusterEndpoint;
+
+    new CfnOutput(this, 'DBSecurityGroupIdExport', {
+      value: dbSecurityGroup.securityGroupId,
+      exportName: 'DatabaseStack:ExportsOutputFnGetAttVelaDBSecurityGroup0D67BD9BGroupId8DF12E00',
+    });
   }
 }
