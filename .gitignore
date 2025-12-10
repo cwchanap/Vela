@@ -48,3 +48,6 @@ cdk.out
 /blob-report/
 /playwright/.cache/
 test-results/
+
+# Specs folder (internal documentation)
+specs/
