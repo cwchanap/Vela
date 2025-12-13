@@ -10,7 +10,7 @@
     "lint": "eslint \"./src/**/*.{ts,js,vue}\"",
     "lint:fix": "eslint \"./src/**/*.{ts,js,vue}\" --fix",
     "format": "prettier --write \"**/*.{js,ts,vue,scss,html,md,json}\" --ignore-path ../../.gitignore",
-    "test": "pnpm run test:unit",
+    "test": "bun run test:unit",
     "test:unit": "vitest run",
     "test:e2e": "playwright test",
     "test:headed": "playwright test --headed",
@@ -39,6 +39,7 @@
   "devDependencies": {
     "@playwright/test": "^1.55.0",
     "@quasar/app-vite": "^2.1.0",
+    "@quasar/vite-plugin": "^1.8.0",
     "@quasar/quasar-app-extension-testing": "^2.2.0",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/vue": "^8.1.0",

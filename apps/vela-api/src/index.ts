@@ -10,7 +10,6 @@ import myDictionaries from './routes/my-dictionaries';
 import createTTSRoute from './routes/tts';
 import { dsqlHealth } from './routes/dsql-health';
 import type { Env } from './types';
-import { serve } from '@hono/node-server';
 import { readFileSync, existsSync } from 'fs';
 import { resolve } from 'path';
 import { Context, Next } from 'hono';
@@ -18,6 +17,7 @@ import { initializeAuthVerifier } from './middleware/auth';
 import { corsMiddleware } from './middleware/cors';
 
 const app = new Hono<{ Bindings: Env }>();
+const bunRuntime = (globalThis as typeof globalThis & { Bun?: any }).Bun ?? null;
 
 if (process.env.NODE_ENV === 'development') {
   // Load .env file manually (prefer app-specific .env, then root .env)
@@ -100,13 +100,18 @@ if (process.env.NODE_ENV === 'development') {
     await next();
   });
 
-  const port = 9005;
-  console.log(`🚀 Vela API development server running on port ${port}`);
-
-  serve({
-    fetch: app.fetch,
-    port,
-  });
+  const port = Number(process.env.PORT) || 9005;
+  if (bunRuntime) {
+    bunRuntime.serve({
+      fetch: app.fetch,
+      port,
+    });
+    console.log(`🚀 Vela API development server running on port ${port}`);
+  } else {
+    console.log(
+      '⚠️ Bun runtime not detected. Run "bun --watch src/index.ts" for the local API dev server.',
+    );
+  }
 }
 
 // Apply centralized CORS middleware globally
