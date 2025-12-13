@@ -11,7 +11,7 @@ type OutputMap = Record<string, string>;
 function loadOutputs(outputsPath: string): OutputMap {
   if (!fs.existsSync(outputsPath)) {
     throw new Error(
-      `CloudFormation outputs file not found at resolved path: ${outputsPath}. Run 'pnpm run get-outputs' first.`,
+      `CloudFormation outputs file not found at resolved path: ${outputsPath}. Run 'bun run get-outputs' first.`,
     );
   }
 

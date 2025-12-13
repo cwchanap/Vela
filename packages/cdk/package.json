@@ -5,14 +5,14 @@
   "author": "cwchanap <cwchanap@connect.ust.hk>",
   "private": true,
   "scripts": {
-    "build": "pnpm run lambda:build",
+    "build": "bun run lambda:build",
     "lambda:build": "esbuild ../../apps/vela-api/src/index.ts --bundle --outfile=dist/lambda/index.js --platform=node --target=node20 --format=cjs --external:@aws-sdk/*",
-    "cdk:synth": "pnpm dlx aws-cdk synth",
-    "cdk:deploy": "pnpm dlx aws-cdk deploy",
-    "cdk:destroy": "pnpm dlx aws-cdk destroy",
-    "cdk:diff": "pnpm dlx aws-cdk diff",
+    "cdk:synth": "bunx aws-cdk synth",
+    "cdk:deploy": "bunx aws-cdk deploy",
+    "cdk:destroy": "bunx aws-cdk destroy",
+    "cdk:diff": "bunx aws-cdk diff",
     "get-outputs": "aws cloudformation describe-stacks --stack-name VelaStack --query 'Stacks[0].Outputs' --output json > cdk-outputs.json",
-    "build:frontend": "pnpm run get-outputs && tsx scripts/inject-env.ts && pnpm --filter @vela/app run build",
+    "build:frontend": "bun run get-outputs && bun scripts/inject-env.ts && bun --cwd ../../ run --filter @vela/app build",
     "lint": "eslint \"**/*.{ts,js}\"",
     "lint:fix": "eslint \"**/*.{ts,js}\" --fix",
     "format": "prettier --write \"**/*.{js,ts,json,md}\" --ignore-path ../../.gitignore"
@@ -32,8 +32,6 @@
     "aws-cdk-lib": "^2.172.0",
     "constructs": "^10.4.2",
     "esbuild": "^0.21.4",
-    "ts-node": "^10.9.2",
-    "tsx": "^4.20.5",
     "typescript": "~5.5.3"
   },
   "engines": {

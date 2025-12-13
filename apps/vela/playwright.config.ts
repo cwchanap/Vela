@@ -45,13 +45,13 @@ export default defineConfig({
   /* Run your local dev server before starting the tests */
   webServer: [
     {
-      command: 'npm run dev',
+      command: 'bun run dev',
       url: 'http://localhost:9000',
       reuseExistingServer: !process.env.CI,
       timeout: 120 * 1000,
     },
     {
-      command: 'cd ../vela-api && npm run dev',
+      command: 'bun --cwd ../vela-api run dev',
       url: 'http://localhost:9005',
       reuseExistingServer: !process.env.CI,
       timeout: 60 * 1000,
