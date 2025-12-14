@@ -10,8 +10,8 @@ interface ChutesProviderOptions {
  * Chutes.ai provider (OpenAI-compatible Chat Completions)
  * Docs: https://chutes.ai
  *
- * API calls are routed through the server which handles API keys.
- * User-provided API keys are required for this provider.
+ * API calls are routed through the server as a proxy/bridge.
+ * User-provided API keys are required for this provider (no server-side fallback).
  */
 export class ChutesProvider implements LLMProvider {
   readonly name: LLMProviderName = 'chutes';
@@ -65,7 +65,7 @@ export class ChutesProvider implements LLMProvider {
     try {
       data = textBody ? (JSON.parse(textBody) as BridgeResponse) : null;
     } catch {
-      data = { raw: textBody };
+      data = { raw: textBody, text: textBody };
     }
 
     if (!res.ok) {

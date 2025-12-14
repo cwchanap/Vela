@@ -224,8 +224,8 @@ describe('ChutesProvider', () => {
       };
 
       const result = await provider.generate(request);
-      expect(result.text).toBe('');
-      expect(result.raw).toEqual({ raw: 'not valid json' });
+      expect(result.text).toBe('not valid json');
+      expect(result.raw).toEqual({ raw: 'not valid json', text: 'not valid json' });
     });
 
     it('should use custom temperature and maxTokens', async () => {

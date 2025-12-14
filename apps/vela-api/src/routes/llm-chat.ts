@@ -1,6 +1,14 @@
 import { Hono } from 'hono';
 import type { Env } from '../types';
 
+type ChutesChatCompletionResponse = {
+  choices?: Array<{
+    message?: {
+      content?: string;
+    };
+  }>;
+};
+
 const llmChat = new Hono<{ Bindings: Env }>();
 
 llmChat.post('/', async (c) => {
@@ -209,9 +217,9 @@ llmChat.post('/', async (c) => {
         return c.json({ error: `Chutes.ai error ${res.status}: ${txt}` }, 500);
       }
 
-      let data: unknown;
+      let data: ChutesChatCompletionResponse;
       try {
-        data = JSON.parse(txt) as unknown;
+        data = JSON.parse(txt) as ChutesChatCompletionResponse;
       } catch (e) {
         return c.json({ error: `Chutes.ai JSON parse error: ${String(e)}: ${txt}` }, 500);
       }
