@@ -7,10 +7,10 @@ export interface UserPreferences {
   // Theme preferences
   darkMode?: boolean;
   // Per-user LLM preferences
-  llm_provider?: 'google' | 'openrouter';
-  llm_models?: Partial<Record<'google' | 'openrouter', string>>;
+  llm_provider?: 'google' | 'openrouter' | 'chutes';
+  llm_models?: Partial<Record<'google' | 'openrouter' | 'chutes', string>>;
   // Optional per-provider API keys saved by the user
-  llm_keys?: Partial<Record<'google' | 'openrouter', string>>;
+  llm_keys?: Partial<Record<'google' | 'openrouter' | 'chutes', string>>;
 }
 
 export interface ChatContext {

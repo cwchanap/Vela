@@ -23,6 +23,7 @@ export const useLLMSettingsStore = defineStore('llmSettings', () => {
   const DEFAULT_MODELS: ProviderModelMap = {
     google: 'gemini-2.5-flash-lite',
     openrouter: 'openai/gpt-oss-20b:free',
+    chutes: 'openai/gpt-oss-120b',
   };
 
   // State
@@ -45,7 +46,7 @@ export const useLLMSettingsStore = defineStore('llmSettings', () => {
     provider.value = name;
     // ensure model exists for provider
     if (!models.value[name]) {
-      models.value[name] = name === 'google' ? DEFAULT_MODELS.google! : DEFAULT_MODELS.openrouter!;
+      models.value[name] = DEFAULT_MODELS[name] ?? DEFAULT_MODELS.google!;
     }
     // apply to service
     llmService.setProvider(name, models.value[name]);

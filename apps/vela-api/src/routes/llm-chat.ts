@@ -156,6 +156,64 @@ llmChat.post('/', async (c) => {
       return c.json({ text, raw: data });
     }
 
+    if (provider === 'chutes') {
+      // Chutes.ai requires user-provided API key (no server-side key)
+      const apiKey: string | undefined = input.apiKey;
+      if (!apiKey) {
+        return c.json(
+          {
+            error:
+              'Missing API key for Chutes.ai provider. Please provide your own API key in settings.',
+          },
+          400,
+        );
+      }
+
+      const model = input.model || 'openai/gpt-oss-120b';
+      const endpoint = 'https://api.chutes.ai/v1/chat/completions';
+
+      const messages: { role: 'system' | 'user' | 'assistant'; content: string }[] = [];
+      const pushMsg = (m: { role: 'system' | 'user' | 'assistant'; content: string }) =>
+        messages.push({ role: m.role, content: m.content });
+
+      if (input.system) messages.push({ role: 'system', content: input.system });
+      if (input.messages && input.messages.length > 0) {
+        for (const m of input.messages) pushMsg(m);
+      } else if (input.prompt) {
+        messages.push({ role: 'user', content: input.prompt });
+      } else {
+        return c.json({ error: 'Missing prompt or messages' }, 400);
+      }
+
+      const body = {
+        model,
+        messages,
+        temperature: input.temperature ?? 0.7,
+        max_tokens: input.maxTokens ?? 1024,
+        stream: false,
+      };
+
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${apiKey}`,
+      };
+
+      const res = await fetch(endpoint, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(body),
+      });
+
+      const txt = await res.text();
+      if (!res.ok) {
+        return c.json({ error: `Chutes.ai error ${res.status}: ${txt}` }, 500);
+      }
+
+      const data = JSON.parse(txt);
+      const text: string = data?.choices?.[0]?.message?.content ?? '';
+      return c.json({ text, raw: data });
+    }
+
     return c.json({ error: 'Unsupported provider' }, 400);
   } catch (e) {
     return c.json({ error: String(e) }, 500);

@@ -2,6 +2,7 @@ import { config } from '../../config';
 import type { LLMProvider, LLMProviderName, LLMRequest, LLMResponse } from './types';
 import { GoogleProvider } from './providers/googleProvider';
 import { OpenRouterProvider } from './providers/openrouterProvider';
+import { ChutesProvider } from './providers/chutesProvider';
 
 export class LLMService {
   private provider: LLMProvider;
@@ -29,6 +30,10 @@ export class LLMService {
       };
       if (model) opts.model = model;
       instance = new OpenRouterProvider(opts);
+    } else if (name === 'chutes') {
+      const opts: { model?: string } = {};
+      if (model) opts.model = model;
+      instance = new ChutesProvider(opts);
     } else {
       // Fallback to google
       const opts: { model?: string } = {};
