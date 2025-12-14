@@ -1,6 +1,6 @@
 // Shared LLM types and provider interface
 
-export type LLMProviderName = 'google' | 'openrouter';
+export type LLMProviderName = 'google' | 'openrouter' | 'chutes';
 
 export type ChatRole = 'system' | 'user' | 'assistant';
 

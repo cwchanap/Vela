@@ -239,6 +239,7 @@ const saveThemeToProfile = async () => {
 const providerOptions = [
   { label: 'Google (Gemini API)', value: 'google' },
   { label: 'OpenRouter', value: 'openrouter' },
+  { label: 'Chutes.ai', value: 'chutes' },
 ] as { label: string; value: LLMProviderName }[];
 
 // Bind provider via computed to store; model uses local buffer and commits on save
