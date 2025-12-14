@@ -18,6 +18,7 @@ export default [
       '**/dist/**',
       '**/.quasar/**',
       '**/cdk.out/**',
+      '**/cdk-out-synth/**',
       '**/.turbo/**',
       '**/coverage/**',
     ],

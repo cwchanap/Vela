@@ -16,11 +16,11 @@ interface ChutesProviderOptions {
 export class ChutesProvider implements LLMProvider {
   readonly name: LLMProviderName = 'chutes';
   private model: string;
-  private apiKey?: string;
+  private apiKey: string | undefined;
 
   constructor(options?: ChutesProviderOptions) {
     this.model = options?.model || 'openai/gpt-oss-120b';
-    this.apiKey = options?.apiKey ?? undefined;
+    this.apiKey = options?.apiKey;
   }
 
   setModel(model: string): void {
