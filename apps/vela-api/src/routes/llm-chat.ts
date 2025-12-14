@@ -209,7 +209,12 @@ llmChat.post('/', async (c) => {
         return c.json({ error: `Chutes.ai error ${res.status}: ${txt}` }, 500);
       }
 
-      const data = JSON.parse(txt);
+      let data: unknown;
+      try {
+        data = JSON.parse(txt) as unknown;
+      } catch (e) {
+        return c.json({ error: `Chutes.ai JSON parse error: ${String(e)}: ${txt}` }, 500);
+      }
       const text: string = data?.choices?.[0]?.message?.content ?? '';
       return c.json({ text, raw: data });
     }
