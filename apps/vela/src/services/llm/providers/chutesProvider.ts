@@ -16,9 +16,11 @@ interface ChutesProviderOptions {
 export class ChutesProvider implements LLMProvider {
   readonly name: LLMProviderName = 'chutes';
   private model: string;
+  private apiKey?: string;
 
   constructor(options?: ChutesProviderOptions) {
     this.model = options?.model || 'openai/gpt-oss-120b';
+    this.apiKey = options?.apiKey ?? undefined;
   }
 
   setModel(model: string): void {
@@ -48,7 +50,7 @@ export class ChutesProvider implements LLMProvider {
       messages,
       temperature: request.temperature ?? 0.7,
       maxTokens: request.maxTokens ?? 1024,
-      apiKey: request.apiKey,
+      apiKey: request.apiKey ?? this.apiKey,
     };
 
     const res = await fetch(getApiUrl('llm-chat'), {
