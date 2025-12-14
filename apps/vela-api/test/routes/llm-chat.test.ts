@@ -487,6 +487,223 @@ describe('LLM Chat Route', () => {
     });
   });
 
+  describe('Chutes provider', () => {
+    it('should return 400 when API key is missing', async () => {
+      const app = createTestApp();
+      const req = new Request('http://localhost/', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          provider: 'chutes',
+          prompt: 'Hello',
+        }),
+      });
+
+      const res = await app.request(req);
+      const json = await res.json();
+
+      expect(res.status).toBe(400);
+      expect(json.error).toContain('Missing API key for Chutes.ai provider');
+      expect(global.fetch).not.toHaveBeenCalled();
+    });
+
+    it('should make successful request to Chutes.ai API with default model and stream=false', async () => {
+      const mockResponse = {
+        choices: [
+          {
+            message: {
+              content: 'Chutes response',
+            },
+          },
+        ],
+      };
+
+      (global.fetch as any).mockResolvedValueOnce({
+        ok: true,
+        text: () => Promise.resolve(JSON.stringify(mockResponse)),
+      });
+
+      const app = createTestApp();
+      const req = new Request('http://localhost/', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          provider: 'chutes',
+          apiKey: 'test-key',
+          prompt: 'Hello',
+        }),
+      });
+
+      const res = await app.request(req);
+      const json = await res.json();
+
+      expect(res.status).toBe(200);
+      expect(json.text).toBe('Chutes response');
+      expect(json.raw).toEqual(mockResponse);
+
+      expect(global.fetch).toHaveBeenCalledWith(
+        'https://api.chutes.ai/v1/chat/completions',
+        expect.objectContaining({
+          method: 'POST',
+          headers: expect.objectContaining({
+            'Content-Type': 'application/json',
+            Authorization: 'Bearer test-key',
+          }),
+        }),
+      );
+
+      const [, init] = (global.fetch as any).mock.calls[0];
+      const body = JSON.parse(init.body);
+      expect(body).toEqual({
+        model: 'openai/gpt-oss-120b',
+        messages: [{ role: 'user', content: 'Hello' }],
+        temperature: 0.7,
+        max_tokens: 1024,
+        stream: false,
+      });
+    });
+
+    it('should honor model/temperature/maxTokens overrides', async () => {
+      const mockResponse = {
+        choices: [
+          {
+            message: {
+              content: 'ok',
+            },
+          },
+        ],
+      };
+
+      (global.fetch as any).mockResolvedValueOnce({
+        ok: true,
+        text: () => Promise.resolve(JSON.stringify(mockResponse)),
+      });
+
+      const app = createTestApp();
+      const req = new Request('http://localhost/', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          provider: 'chutes',
+          apiKey: 'test-key',
+          prompt: 'Hello',
+          model: 'openai/gpt-4.1-mini',
+          temperature: 0.12,
+          maxTokens: 42,
+        }),
+      });
+
+      const res = await app.request(req);
+      expect(res.status).toBe(200);
+
+      const [, init] = (global.fetch as any).mock.calls[0];
+      const body = JSON.parse(init.body);
+      expect(body).toEqual({
+        model: 'openai/gpt-4.1-mini',
+        messages: [{ role: 'user', content: 'Hello' }],
+        temperature: 0.12,
+        max_tokens: 42,
+        stream: false,
+      });
+    });
+
+    it('should format messages and prefer messages over prompt', async () => {
+      const mockResponse = {
+        choices: [
+          {
+            message: {
+              content: 'ok',
+            },
+          },
+        ],
+      };
+
+      (global.fetch as any).mockResolvedValueOnce({
+        ok: true,
+        text: () => Promise.resolve(JSON.stringify(mockResponse)),
+      });
+
+      const app = createTestApp();
+      const req = new Request('http://localhost/', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          provider: 'chutes',
+          apiKey: 'test-key',
+          system: 'You are helpful',
+          prompt: 'This should be ignored',
+          messages: [
+            { role: 'user', content: 'Hello' },
+            { role: 'assistant', content: 'Hi!' },
+            { role: 'user', content: 'How are you?' },
+          ],
+        }),
+      });
+
+      const res = await app.request(req);
+      expect(res.status).toBe(200);
+
+      const [, init] = (global.fetch as any).mock.calls[0];
+      const body = JSON.parse(init.body);
+      expect(body.messages).toEqual([
+        { role: 'system', content: 'You are helpful' },
+        { role: 'user', content: 'Hello' },
+        { role: 'assistant', content: 'Hi!' },
+        { role: 'user', content: 'How are you?' },
+      ]);
+    });
+
+    it('should handle Chutes.ai upstream error', async () => {
+      (global.fetch as any).mockResolvedValueOnce({
+        ok: false,
+        status: 401,
+        text: () => Promise.resolve('Unauthorized'),
+      });
+
+      const app = createTestApp();
+      const req = new Request('http://localhost/', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          provider: 'chutes',
+          apiKey: 'test-key',
+          prompt: 'Hello',
+        }),
+      });
+
+      const res = await app.request(req);
+      const json = await res.json();
+
+      expect(res.status).toBe(500);
+      expect(json.error).toContain('Chutes.ai error 401: Unauthorized');
+    });
+
+    it('should handle Chutes.ai JSON parse error', async () => {
+      (global.fetch as any).mockResolvedValueOnce({
+        ok: true,
+        text: () => Promise.resolve('not json'),
+      });
+
+      const app = createTestApp();
+      const req = new Request('http://localhost/', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          provider: 'chutes',
+          apiKey: 'test-key',
+          prompt: 'Hello',
+        }),
+      });
+
+      const res = await app.request(req);
+      const json = await res.json();
+
+      expect(res.status).toBe(500);
+      expect(json.error).toContain('Chutes.ai JSON parse error');
+      expect(json.error).toContain('not json');
+    });
+  });
+
   describe('Messages handling', () => {
     it('should process messages array for Google provider', async () => {
       const mockResponse = {
