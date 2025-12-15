@@ -195,7 +195,7 @@ llmChat.post('/', async (c) => {
       }
 
       const model = input.model || 'openai/gpt-oss-120b';
-      const endpoint = 'https://api.chutes.ai/v1/chat/completions';
+      const endpoint = 'https://llm.chutes.ai/v1/chat/completions';
 
       const messages: { role: 'system' | 'user' | 'assistant'; content: string }[] = [];
       const pushMsg = (m: { role: 'system' | 'user' | 'assistant'; content: string }) =>

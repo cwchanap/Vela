@@ -542,7 +542,7 @@ describe('LLM Chat Route', () => {
       expect(json.raw).toEqual(mockResponse);
 
       expect(global.fetch).toHaveBeenCalledWith(
-        'https://api.chutes.ai/v1/chat/completions',
+        'https://llm.chutes.ai/v1/chat/completions',
         expect.objectContaining({
           method: 'POST',
           headers: expect.objectContaining({
