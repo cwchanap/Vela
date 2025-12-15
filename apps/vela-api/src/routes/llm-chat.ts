@@ -9,6 +9,9 @@ type ChutesChatCompletionResponse = {
   }>;
 };
 
+const truncateForError = (txt: string, max = 1000) =>
+  txt.length > max ? `${txt.slice(0, max)}...` : txt;
+
 const llmChat = new Hono<{ Bindings: Env }>();
 
 llmChat.post('/', async (c) => {
@@ -100,7 +103,14 @@ llmChat.post('/', async (c) => {
         return c.json({ error: `Google error ${res.status}: ${txt}` }, 500);
       }
 
-      const data = JSON.parse(txt);
+      let data: any;
+      try {
+        data = JSON.parse(txt);
+      } catch (e) {
+        const truncated = truncateForError(txt);
+        console.error('Google JSON parse error:', e, truncated);
+        return c.json({ error: `Google JSON parse error: ${String(e)}: ${truncated}` }, 500);
+      }
       const text: string = data?.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
       return c.json({ text, raw: data });
     }
@@ -159,7 +169,14 @@ llmChat.post('/', async (c) => {
         return c.json({ error: `OpenRouter error ${res.status}: ${txt}` }, 500);
       }
 
-      const data = JSON.parse(txt);
+      let data: any;
+      try {
+        data = JSON.parse(txt);
+      } catch (e) {
+        const truncated = truncateForError(txt);
+        console.error('OpenRouter JSON parse error:', e, truncated);
+        return c.json({ error: `OpenRouter JSON parse error: ${String(e)}: ${truncated}` }, 500);
+      }
       const text: string = data?.choices?.[0]?.message?.content ?? '';
       return c.json({ text, raw: data });
     }
@@ -221,7 +238,9 @@ llmChat.post('/', async (c) => {
       try {
         data = JSON.parse(txt) as ChutesChatCompletionResponse;
       } catch (e) {
-        return c.json({ error: `Chutes.ai JSON parse error: ${String(e)}: ${txt}` }, 500);
+        const truncated = truncateForError(txt);
+        console.error('Chutes.ai JSON parse error:', e, truncated);
+        return c.json({ error: `Chutes.ai JSON parse error: ${String(e)}: ${truncated}` }, 500);
       }
       const text: string = data?.choices?.[0]?.message?.content ?? '';
       return c.json({ text, raw: data });
