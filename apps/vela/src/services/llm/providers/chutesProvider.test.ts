@@ -55,6 +55,33 @@ describe('ChutesProvider', () => {
   });
 
   describe('generate', () => {
+    it('should throw error when apiKey is missing', async () => {
+      const provider = new ChutesProvider();
+
+      const request: LLMRequest = {
+        prompt: 'Test',
+      };
+
+      await expect(provider.generate(request)).rejects.toThrow(
+        'Missing API key: request.apiKey is required',
+      );
+      expect(mockFetch).not.toHaveBeenCalled();
+    });
+
+    it('should throw error when apiKey is blank', async () => {
+      const provider = new ChutesProvider();
+
+      const request: LLMRequest = {
+        prompt: 'Test',
+        apiKey: '   ',
+      };
+
+      await expect(provider.generate(request)).rejects.toThrow(
+        'Missing API key: request.apiKey is required',
+      );
+      expect(mockFetch).not.toHaveBeenCalled();
+    });
+
     it('should make successful API call with prompt', async () => {
       const provider = new ChutesProvider();
       const mockResponse = { text: 'Hello, world!', raw: {} };
@@ -85,6 +112,26 @@ describe('ChutesProvider', () => {
           apiKey: 'test-api-key',
         }),
       });
+    });
+
+    it('should trim apiKey before sending request', async () => {
+      const provider = new ChutesProvider();
+      const mockResponse = { text: 'Hello, world!' };
+
+      mockFetch.mockResolvedValue({
+        ok: true,
+        text: vi.fn().mockResolvedValue(JSON.stringify(mockResponse)),
+      });
+
+      const request: LLMRequest = {
+        prompt: 'Say hello',
+        apiKey: '  test-api-key  ',
+      };
+
+      await provider.generate(request);
+
+      const callBody = JSON.parse(mockFetch.mock.calls[0][1].body);
+      expect(callBody.apiKey).toBe('test-api-key');
     });
 
     it('should use custom model from request', async () => {
