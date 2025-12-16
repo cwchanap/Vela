@@ -2,7 +2,6 @@ import type { LLMProvider, LLMProviderName, LLMRequest, LLMResponse, ChatMessage
 import { getApiUrl } from 'src/utils/api';
 
 interface ChutesProviderOptions {
-  apiKey?: string;
   model?: string;
 }
 
@@ -16,11 +15,9 @@ interface ChutesProviderOptions {
 export class ChutesProvider implements LLMProvider {
   readonly name: LLMProviderName = 'chutes';
   private model: string;
-  private apiKey: string | undefined;
 
   constructor(options?: ChutesProviderOptions) {
     this.model = options?.model || 'openai/gpt-oss-120b';
-    this.apiKey = options?.apiKey;
   }
 
   setModel(model: string): void {
@@ -34,6 +31,11 @@ export class ChutesProvider implements LLMProvider {
   async generate(request: LLMRequest): Promise<LLMResponse> {
     const messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }> = [];
     const pushMsg = (m: ChatMessage) => messages.push({ role: m.role, content: m.content });
+
+    const apiKey = typeof request.apiKey === 'string' ? request.apiKey.trim() : '';
+    if (!apiKey) {
+      throw new Error('Missing API key: request.apiKey is required');
+    }
 
     if (request.system) messages.push({ role: 'system', content: request.system });
     if (request.messages && request.messages.length > 0) {
@@ -50,7 +52,7 @@ export class ChutesProvider implements LLMProvider {
       messages,
       temperature: request.temperature ?? 0.7,
       maxTokens: request.maxTokens ?? 1024,
-      apiKey: request.apiKey ?? this.apiKey,
+      apiKey,
     };
 
     const res = await fetch(getApiUrl('llm-chat'), {
