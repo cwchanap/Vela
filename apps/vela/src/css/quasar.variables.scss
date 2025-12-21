@@ -12,14 +12,15 @@
 // to match your app's branding.
 // Tip: Use the "Theme Builder" on Quasar's documentation website.
 
-$primary: #1976d2;
-$secondary: #26a69a;
-$accent: #9c27b0;
+// Duolingo-inspired vibrant color palette
+$primary: #1cb0f6; // Vibrant blue - main brand color
+$secondary: #58cc02; // Success green - XP, correct answers
+$accent: #ff9600; // Orange - streaks, warnings
 
-$dark: #1d1d1d;
-$dark-page: #121212;
+$dark: #1e1e1e;
+$dark-page: #131f24; // Slightly blue-tinted dark for better contrast
 
-$positive: #21ba45;
-$negative: #c10015;
-$info: #31ccec;
-$warning: #f2c037;
+$positive: #58cc02; // Same as secondary - success states
+$negative: #ff4b4b; // Error red - mistakes, alerts
+$info: #1cb0f6; // Same as primary
+$warning: #ff9600; // Same as accent - warnings, streaks

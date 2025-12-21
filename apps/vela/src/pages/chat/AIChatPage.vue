@@ -1,175 +1,180 @@
 <template>
-  <q-page class="column q-pa-md" style="min-height: calc(100vh - 50px)" data-testid="ai-chat-page">
-    <div class="row items-center q-mb-md">
-      <div class="text-h5">AI Chat</div>
-      <q-space />
-      <q-btn
-        flat
-        dense
-        icon="add_comment"
-        label="New Chat"
-        @click="onNewChat"
-        data-testid="llm-chat-new"
-        class="q-mr-sm"
-      />
-      <q-btn
-        flat
-        dense
-        icon="history"
-        label="History"
-        @click="openHistory"
-        data-testid="llm-chat-history"
-      />
-    </div>
-
-    <div
-      class="col column q-pa-md rounded-borders chat-container"
-      style="min-height: 300px; overflow-y: auto; flex: 1"
-      ref="messagesEl"
-    >
-      <template v-if="chat.messages.length === 0">
-        <div class="text-grey-7">
-          Start a conversation below. Ask anything about Japanese learning.
-        </div>
-      </template>
-      <div v-else class="column q-gutter-sm">
-        <q-chat-message
-          v-for="m in chat.messages"
-          :key="m.id"
-          :sent="m.type === 'user'"
-          :bg-color="m.type === 'user' ? 'primary' : 'secondary'"
-          :text-color="'white'"
-          :name="m.type === 'user' ? 'You' : 'AI'"
-          :stamp="formatTime(m.timestamp)"
-          :class="m.type === 'ai' ? 'ai-message' : 'user-message'"
-        >
-          <div
-            v-if="m.type === 'ai'"
-            class="message-content markdown-content"
-            v-html="renderMarkdown(m.content)"
-          />
-          <div v-else class="message-content" v-text="m.content" />
-        </q-chat-message>
-      </div>
-
-      <div v-if="chat.isTyping" class="row items-center q-mt-sm">
-        <q-spinner size="20px" class="q-mr-sm" />
-        <span>AI is typing…</span>
-      </div>
-    </div>
-
-    <q-input
-      outlined
-      dense
-      v-model="input"
-      :disable="chat.isLoading"
-      placeholder="Type your message..."
-      data-testid="llm-chat-input"
-      @keyup.enter="onSend"
-      class="q-mt-md"
-    >
-      <template #append>
-        <q-btn
-          color="primary"
-          :loading="chat.isLoading"
-          round
-          dense
-          icon="send"
-          @click="onSend"
-          data-testid="llm-chat-send"
-        />
-      </template>
-    </q-input>
-
-    <!-- History Dialog -->
-    <q-dialog v-model="showHistory">
-      <q-card style="min-width: 500px; max-width: 90vw">
-        <q-card-section class="row items-center">
-          <div class="text-h6">Chat History</div>
-          <q-space />
-          <q-btn icon="close" flat round dense v-close-popup />
-        </q-card-section>
-
-        <q-separator />
-
-        <q-card-section>
-          <div v-if="threadsLoading" class="row items-center">
-            <q-spinner class="q-mr-sm" />
-            <span>Loading threads…</span>
-          </div>
-          <div v-else-if="threads.length === 0" class="text-grey-7">
-            No previous conversations found.
-          </div>
-          <q-list v-else bordered separator>
-            <q-item
-              v-for="t in threads"
-              :key="t.ThreadId"
-              clickable
-              v-ripple
-              @click="selectThread(t)"
-              data-testid="llm-chat-thread-item"
-            >
-              <q-item-section>
-                <q-item-label>{{ t.title }}</q-item-label>
-                <q-item-label caption>
-                  {{ new Date(t.lastTimestamp).toLocaleString() }} • {{ t.messageCount }} messages
-                </q-item-label>
-              </q-item-section>
-              <q-item-section side>
-                <q-btn
-                  flat
-                  dense
-                  round
-                  icon="delete"
-                  color="negative"
-                  @click.stop="confirmDelete(t)"
-                  data-testid="llm-chat-delete-thread"
-                >
-                  <q-tooltip>Delete conversation</q-tooltip>
-                </q-btn>
-              </q-item-section>
-            </q-item>
-          </q-list>
-        </q-card-section>
-
-        <q-separator />
-
-        <q-card-actions align="right">
-          <q-btn flat label="Close" v-close-popup />
-        </q-card-actions>
-      </q-card>
-    </q-dialog>
-
-    <!-- Delete Confirmation Dialog -->
-    <q-dialog v-model="showDeleteConfirm">
-      <q-card style="min-width: 350px">
-        <q-card-section>
-          <div class="text-h6">Delete Conversation?</div>
-        </q-card-section>
-
-        <q-card-section>
-          <div class="text-body2">
-            Are you sure you want to delete this conversation?
-            <div class="q-mt-sm text-caption text-grey-7">"{{ threadToDelete?.title }}"</div>
-            <div class="q-mt-sm text-negative text-weight-medium">
-              This action cannot be undone.
-            </div>
-          </div>
-        </q-card-section>
-
-        <q-card-actions align="right">
-          <q-btn flat label="Cancel" v-close-popup :disable="isDeleting" />
+  <q-page class="chat-page" data-testid="ai-chat-page">
+    <div class="chat-wrapper">
+      <div class="chat-header">
+        <h1 class="chat-title">AI Chat</h1>
+        <div class="chat-actions">
           <q-btn
             flat
-            label="Delete"
-            color="negative"
-            @click="deleteThread"
-            :loading="isDeleting"
-            data-testid="llm-chat-confirm-delete"
+            dense
+            icon="add_comment"
+            label="New Chat"
+            color="primary"
+            @click="onNewChat"
+            data-testid="llm-chat-new"
+            class="q-mr-sm"
           />
-        </q-card-actions>
-      </q-card>
-    </q-dialog>
+          <q-btn
+            flat
+            dense
+            icon="history"
+            label="History"
+            color="primary"
+            @click="openHistory"
+            data-testid="llm-chat-history"
+          />
+        </div>
+      </div>
+
+      <div
+        class="col column q-pa-md rounded-borders chat-container"
+        style="min-height: 300px; overflow-y: auto; flex: 1"
+        ref="messagesEl"
+      >
+        <template v-if="chat.messages.length === 0">
+          <div class="text-grey-7">
+            Start a conversation below. Ask anything about Japanese learning.
+          </div>
+        </template>
+        <div v-else class="column q-gutter-sm">
+          <q-chat-message
+            v-for="m in chat.messages"
+            :key="m.id"
+            :sent="m.type === 'user'"
+            :bg-color="m.type === 'user' ? 'primary' : 'secondary'"
+            :text-color="'white'"
+            :name="m.type === 'user' ? 'You' : 'AI'"
+            :stamp="formatTime(m.timestamp)"
+            :class="m.type === 'ai' ? 'ai-message' : 'user-message'"
+          >
+            <div
+              v-if="m.type === 'ai'"
+              class="message-content markdown-content"
+              v-html="renderMarkdown(m.content)"
+            />
+            <div v-else class="message-content" v-text="m.content" />
+          </q-chat-message>
+        </div>
+
+        <div v-if="chat.isTyping" class="row items-center q-mt-sm">
+          <q-spinner size="20px" class="q-mr-sm" />
+          <span>AI is typing…</span>
+        </div>
+      </div>
+
+      <q-input
+        outlined
+        dense
+        v-model="input"
+        :disable="chat.isLoading"
+        placeholder="Type your message..."
+        data-testid="llm-chat-input"
+        @keyup.enter="onSend"
+        class="q-mt-md"
+      >
+        <template #append>
+          <q-btn
+            color="primary"
+            :loading="chat.isLoading"
+            round
+            dense
+            icon="send"
+            @click="onSend"
+            data-testid="llm-chat-send"
+          />
+        </template>
+      </q-input>
+
+      <!-- History Dialog -->
+      <q-dialog v-model="showHistory">
+        <q-card style="min-width: 500px; max-width: 90vw">
+          <q-card-section class="row items-center">
+            <div class="text-h6">Chat History</div>
+            <q-space />
+            <q-btn icon="close" flat round dense v-close-popup />
+          </q-card-section>
+
+          <q-separator />
+
+          <q-card-section>
+            <div v-if="threadsLoading" class="row items-center">
+              <q-spinner class="q-mr-sm" />
+              <span>Loading threads…</span>
+            </div>
+            <div v-else-if="threads.length === 0" class="text-grey-7">
+              No previous conversations found.
+            </div>
+            <q-list v-else bordered separator>
+              <q-item
+                v-for="t in threads"
+                :key="t.ThreadId"
+                clickable
+                v-ripple
+                @click="selectThread(t)"
+                data-testid="llm-chat-thread-item"
+              >
+                <q-item-section>
+                  <q-item-label>{{ t.title }}</q-item-label>
+                  <q-item-label caption>
+                    {{ new Date(t.lastTimestamp).toLocaleString() }} • {{ t.messageCount }} messages
+                  </q-item-label>
+                </q-item-section>
+                <q-item-section side>
+                  <q-btn
+                    flat
+                    dense
+                    round
+                    icon="delete"
+                    color="negative"
+                    @click.stop="confirmDelete(t)"
+                    data-testid="llm-chat-delete-thread"
+                  >
+                    <q-tooltip>Delete conversation</q-tooltip>
+                  </q-btn>
+                </q-item-section>
+              </q-item>
+            </q-list>
+          </q-card-section>
+
+          <q-separator />
+
+          <q-card-actions align="right">
+            <q-btn flat label="Close" v-close-popup />
+          </q-card-actions>
+        </q-card>
+      </q-dialog>
+
+      <!-- Delete Confirmation Dialog -->
+      <q-dialog v-model="showDeleteConfirm">
+        <q-card style="min-width: 350px">
+          <q-card-section>
+            <div class="text-h6">Delete Conversation?</div>
+          </q-card-section>
+
+          <q-card-section>
+            <div class="text-body2">
+              Are you sure you want to delete this conversation?
+              <div class="q-mt-sm text-caption text-grey-7">"{{ threadToDelete?.title }}"</div>
+              <div class="q-mt-sm text-negative text-weight-medium">
+                This action cannot be undone.
+              </div>
+            </div>
+          </q-card-section>
+
+          <q-card-actions align="right">
+            <q-btn flat label="Cancel" v-close-popup :disable="isDeleting" />
+            <q-btn
+              flat
+              label="Delete"
+              color="negative"
+              @click="deleteThread"
+              :loading="isDeleting"
+              data-testid="llm-chat-confirm-delete"
+            />
+          </q-card-actions>
+        </q-card>
+      </q-dialog>
+    </div>
   </q-page>
 </template>
 
@@ -544,19 +549,50 @@ onMounted(() => {
 </script>
 
 <style scoped lang="scss">
+.chat-page {
+  min-height: 100vh;
+  padding: 24px;
+  background: var(--bg-page);
+  display: flex;
+  flex-direction: column;
+}
+
+.chat-wrapper {
+  max-width: 900px;
+  margin: 0 auto;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+}
+
+.chat-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+
+.chat-title {
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin: 0;
+}
+
+.chat-actions {
+  display: flex;
+  gap: 8px;
+}
+
 .rounded-borders {
-  border-radius: 8px;
+  border-radius: var(--border-radius-lg);
 }
 
 .chat-container {
-  background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
-  box-shadow: inset 0 2px 8px rgba(0, 0, 0, 0.06);
-}
-
-// Dark mode chat container
-body.body--dark .chat-container {
-  background: linear-gradient(135deg, #1e1e1e 0%, #2d2d2d 100%);
-  box-shadow: inset 0 2px 8px rgba(0, 0, 0, 0.3);
+  background: var(--bg-card);
+  box-shadow: var(--shadow-card);
+  border-radius: var(--border-radius-lg);
 }
 
 .message-content {
@@ -567,16 +603,16 @@ body.body--dark .chat-container {
   white-space: normal;
 }
 
-// AI message with gradient background
+// AI message with solid green (chat color)
 :deep(.ai-message .q-message-text) {
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%) !important;
-  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
+  background: var(--color-chat) !important;
+  box-shadow: 0 4px 12px rgba(88, 204, 2, 0.2);
 }
 
 // User message with solid primary color
 :deep(.user-message .q-message-text) {
-  background: #1976d2 !important;
-  box-shadow: 0 4px 12px rgba(25, 118, 210, 0.3);
+  background: var(--color-primary) !important;
+  box-shadow: 0 4px 12px rgba(28, 176, 246, 0.2);
 }
 
 // Enhance message bubble appearance

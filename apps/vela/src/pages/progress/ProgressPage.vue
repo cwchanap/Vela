@@ -2,9 +2,9 @@
   <q-page class="progress-page">
     <div class="progress-container">
       <!-- Page Header -->
-      <div class="page-header q-mb-lg">
-        <div class="text-h4 q-mb-sm">Learning Progress</div>
-        <div class="text-subtitle1 text-grey-7">Track your Japanese learning journey</div>
+      <div class="page-header">
+        <h1 class="page-title">Learning Progress</h1>
+        <p class="page-subtitle">Track your Japanese learning journey</p>
       </div>
 
       <!-- Main Progress Dashboard -->
@@ -117,17 +117,32 @@ onMounted(async () => {
 
 <style lang="scss" scoped>
 .progress-page {
-  padding: 1.5rem;
+  min-height: 100vh;
+  padding: 24px;
+  background: var(--bg-page);
 }
 
 .progress-container {
-  max-width: 1400px;
+  max-width: 1200px;
   margin: 0 auto;
   width: 100%;
 }
 
 .page-header {
-  text-align: center;
+  margin-bottom: 32px;
+}
+
+.page-title {
+  font-size: 2rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin: 0 0 8px 0;
+}
+
+.page-subtitle {
+  font-size: 1rem;
+  color: var(--text-secondary);
+  margin: 0;
 }
 
 .dashboard-section {
@@ -155,14 +170,11 @@ onMounted(async () => {
   height: 100%;
 }
 
-@media (max-width: 1280px) {
-  .progress-page {
-    padding: 1rem;
-  }
-
-  .progress-container {
-    max-width: 1200px;
-  }
+// Card styling
+:deep(.q-card) {
+  background: var(--bg-card);
+  border-radius: var(--border-radius-lg);
+  box-shadow: var(--shadow-card);
 }
 
 @media (max-width: 1024px) {
@@ -179,14 +191,10 @@ onMounted(async () => {
 
 @media (max-width: 768px) {
   .progress-page {
-    padding: 0.75rem;
+    padding: 16px;
   }
 
-  .page-header {
-    margin-bottom: 1rem;
-  }
-
-  .text-h4 {
+  .page-title {
     font-size: 1.75rem;
   }
 
@@ -196,12 +204,6 @@ onMounted(async () => {
 
   .sidebar-content > .q-card:first-child {
     margin-bottom: 1rem !important;
-  }
-}
-
-@media (max-width: 600px) {
-  .text-h4 {
-    font-size: 1.5rem;
   }
 }
 </style>

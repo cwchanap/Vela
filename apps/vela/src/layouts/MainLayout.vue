@@ -1,6 +1,6 @@
 <template>
   <q-layout view="hHh LpR fFf">
-    <q-header elevated :class="['bg-primary', isDashboard ? 'text-black' : 'text-white']">
+    <q-header elevated class="bg-primary text-white main-header">
       <q-toolbar>
         <q-btn
           v-if="$q.screen.lt.md"
@@ -23,11 +23,11 @@
         >
           <q-tooltip>Toggle collapse</q-tooltip>
         </q-btn>
-        <q-toolbar-title>
-          <q-avatar>
+        <q-toolbar-title class="app-title">
+          <q-avatar size="32px" class="q-mr-sm">
             <img src="https://cdn.quasar.dev/logo-v2/svg/logo-mono-white.svg" />
           </q-avatar>
-          Vela
+          <span class="title-text">Vela</span>
         </q-toolbar-title>
 
         <q-space />
@@ -38,38 +38,37 @@
             dense
             flat
             :icon="themeStore.isDark ? 'light_mode' : 'dark_mode'"
-            :color="headerIconColor"
             data-testid="btn-toggle-theme"
             @click="themeStore.toggle()"
           >
             <q-tooltip>{{ themeStore.isDark ? 'Light mode' : 'Dark mode' }}</q-tooltip>
           </q-btn>
 
-          <q-btn round dense flat icon="notifications" :color="headerIconColor">
-            <q-badge color="red" :text-color="badgeTextColor" floating> 2 </q-badge>
+          <q-btn round dense flat icon="notifications">
+            <q-badge color="negative" floating> 2 </q-badge>
             <q-tooltip>Notifications</q-tooltip>
           </q-btn>
 
-          <q-btn round flat :color="headerIconColor">
-            <q-avatar size="26px">
+          <q-btn round flat>
+            <q-avatar size="28px">
               <img :src="user.avatar_url || 'https://cdn.quasar.dev/img/boy-avatar.png'" />
             </q-avatar>
             <q-tooltip>Account</q-tooltip>
-            <q-menu class="account-menu" content-class="account-menu__content">
-              <q-list dense style="min-width: 100px" class="q-px-none q-py-xs">
+            <q-menu class="account-menu">
+              <q-list dense style="min-width: 140px">
                 <q-item
                   v-for="item in userNavigation"
                   :key="item.name"
                   v-ripple
                   clickable
                   dense
-                  class="q-px-none q-py-xs"
-                  :to="item.path"
+                  :to="item.name !== 'Logout' ? item.path : undefined"
                   @click="item.name === 'Logout' && handleLogout()"
                 >
-                  <q-item-section class="q-pl-none">
-                    <span>{{ item.name }}</span>
+                  <q-item-section avatar>
+                    <q-icon :name="item.icon" size="sm" />
                   </q-item-section>
+                  <q-item-section>{{ item.name }}</q-item-section>
                 </q-item>
               </q-list>
             </q-menu>
@@ -83,30 +82,36 @@
       show-if-above
       bordered
       :mini="drawerMini"
-      :width="240"
-      :mini-width="64"
+      :width="220"
+      :mini-width="72"
       behavior="desktop"
       :breakpoint="0"
+      class="nav-drawer"
       data-testid="left-drawer"
     >
       <q-scroll-area class="fit">
-        <q-list>
-          <q-item-label header>Navigation</q-item-label>
+        <q-list class="nav-list">
           <q-item
             v-for="link in mainNavigation"
             :key="link.name"
             v-ripple
             clickable
             :to="link.path"
-            exact
+            :exact="link.path === '/'"
+            class="nav-item"
+            :class="{ 'nav-item--active': isActiveRoute(link.path) }"
           >
             <q-item-section avatar>
-              <q-icon :name="link.icon" />
+              <q-icon :name="link.icon" :color="isActiveRoute(link.path) ? 'primary' : undefined" />
             </q-item-section>
             <q-item-section v-if="!drawerMini">
-              <q-item-label>{{ link.name }}</q-item-label>
+              <q-item-label :class="{ 'text-primary text-weight-bold': isActiveRoute(link.path) }">
+                {{ link.name }}
+              </q-item-label>
             </q-item-section>
-            <q-tooltip v-if="drawerMini">{{ link.name }}</q-tooltip>
+            <q-tooltip v-if="drawerMini" anchor="center right" self="center left">
+              {{ link.name }}
+            </q-tooltip>
           </q-item>
         </q-list>
       </q-scroll-area>
@@ -119,7 +124,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, watch, computed } from 'vue';
+import { ref, onMounted, watch } from 'vue';
 import { useAuthStore } from 'src/stores/auth';
 import { useThemeStore } from 'src/stores/theme';
 import { storeToRefs } from 'pinia';
@@ -136,22 +141,13 @@ const { user, isInitialized } = storeToRefs(authStore);
 const router = useRouter();
 const route = useRoute();
 
-const isDashboard = computed(() => route.name === 'home');
-
-// Header colors that respect both dashboard state and dark mode
-const headerIconColor = computed(() => {
-  // In dark mode, always use white/no specific color (uses default white from Quasar)
-  if (themeStore.isDark) return undefined;
-  // In light mode dashboard, use black
-  return isDashboard.value ? 'black' : undefined;
-});
-
-const badgeTextColor = computed(() => {
-  // In dark mode, always use white
-  if (themeStore.isDark) return 'white';
-  // In light mode dashboard, use black
-  return isDashboard.value ? 'black' : 'white';
-});
+// Check if route is active (handles nested routes)
+const isActiveRoute = (path: string) => {
+  if (path === '/') {
+    return route.path === '/';
+  }
+  return route.path.startsWith(path);
+};
 
 const toggleLeftDrawer = () => {
   leftDrawerOpen.value = !leftDrawerOpen.value;
@@ -184,56 +180,53 @@ watch(
 </script>
 
 <style lang="scss">
-// Page container background - respects dark mode
+// Page container background - uses CSS variables
 .q-page-container {
-  background-color: #f0f2f5;
+  background-color: var(--bg-page);
 }
 
-body.body--dark .q-page-container {
-  background-color: #121212;
+// Header styling
+.main-header {
+  .app-title {
+    display: flex;
+    align-items: center;
+  }
+
+  .title-text {
+    font-weight: 700;
+    font-size: 1.25rem;
+    letter-spacing: -0.5px;
+  }
 }
 
-/* Force header content to black on dashboard (when we apply text-black dynamically) */
-.q-header.text-black,
-.q-header.text-black * {
-  color: #000 !important;
-  fill: #000 !important;
+// Navigation drawer styling
+.nav-drawer {
+  background: var(--bg-card);
 }
 
-/* In dark mode, override the forced black text on dashboard header */
-body.body--dark .q-header.text-black,
-body.body--dark .q-header.text-black * {
-  color: #fff !important;
-  fill: #fff !important;
+.nav-list {
+  padding: 12px 8px;
 }
 
-/* Compact spacing for user avatar dropdown */
-.account-menu .q-item {
-  min-height: 34px;
-  padding-left: 0 !important;
-  padding-right: 8px;
-  text-align: center;
+.nav-item {
+  border-radius: 12px;
+  margin-bottom: 4px;
+  min-height: 48px;
+
+  &:hover {
+    background: rgba(28, 176, 246, 0.08);
+  }
+
+  &.nav-item--active {
+    background: rgba(28, 176, 246, 0.12);
+  }
 }
-.account-menu .q-item .q-item__section:first-child {
-  padding-left: 0 !important;
-  margin-left: 0 !important;
-}
-.account-menu .q-item .q-item__section--main {
-  padding-left: 0 !important;
-  margin-left: 0 !important;
-  justify-content: center;
-}
-.account-menu .q-item .q-item__section--main .row {
-  gap: 0 !important;
-}
-.account-menu .q-list {
-  padding-top: 4px;
-  padding-bottom: 4px;
-  padding-left: 0 !important;
-  padding-right: 0 !important;
-}
-/* Remove any container padding from the q-menu content */
-.account-menu__content {
-  padding: 0 !important;
+
+// Account menu styling
+.account-menu {
+  .q-item {
+    min-height: 40px;
+    padding: 8px 16px;
+  }
 }
 </style>
