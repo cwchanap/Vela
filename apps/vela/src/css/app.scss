@@ -1,34 +1,65 @@
-// Modern Japanese Learning App Global Styles
+// Vela Japanese Learning App - Duolingo-Inspired Global Styles
 
-// Custom CSS Variables for consistent theming
+// ============================================
+// COLOR SYSTEM - Duolingo-inspired solid colors
+// ============================================
 :root {
-  --gradient-primary: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  --gradient-secondary: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
-  --gradient-success: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
-  --gradient-warm: linear-gradient(135deg, #fa709a 0%, #fee140 100%);
-  --gradient-cool: linear-gradient(135deg, #a8edea 0%, #fed6e3 100%);
+  // Primary palette (matches quasar.variables.scss)
+  --color-primary: #1cb0f6; // Vibrant blue
+  --color-success: #58cc02; // Green - XP, correct
+  --color-streak: #ff9600; // Orange - streaks
+  --color-error: #ff4b4b; // Red - errors
+  --color-purple: #ce82ff; // Purple - time, writing
 
+  // Semantic colors for features
+  --color-level: #1cb0f6; // Blue - levels
+  --color-xp: #58cc02; // Green - XP/success
+  --color-vocab: #1cb0f6; // Blue - vocabulary
+  --color-grammar: #ff9600; // Orange - grammar/sentence
+  --color-chat: #58cc02; // Green - chat
+  --color-writing: #ce82ff; // Purple - writing
+
+  // Shadow system (Duolingo-style depth)
+  --shadow-card: 0 2px 4px rgba(0, 0, 0, 0.08);
+  --shadow-card-hover: 0 4px 12px rgba(0, 0, 0, 0.15);
+  --shadow-button: 0 4px 0 rgba(0, 0, 0, 0.1);
   --shadow-soft: 0 4px 20px rgba(0, 0, 0, 0.1);
   --shadow-medium: 0 8px 30px rgba(0, 0, 0, 0.12);
-  --shadow-strong: 0 15px 40px rgba(0, 0, 0, 0.15);
 
+  // Border radius
   --border-radius-sm: 8px;
   --border-radius-md: 12px;
   --border-radius-lg: 16px;
   --border-radius-xl: 24px;
+  --border-radius-full: 50%;
 
-  --glass-bg: rgba(255, 255, 255, 0.25);
-  --glass-border: rgba(255, 255, 255, 0.18);
-  --glass-backdrop: blur(16px);
+  // Glassmorphism (hybrid approach - subtle)
+  --glass-bg: rgba(255, 255, 255, 0.85);
+  --glass-bg-subtle: rgba(255, 255, 255, 0.6);
+  --glass-border: rgba(0, 0, 0, 0.08);
+  --glass-backdrop: blur(10px);
+
+  // Background colors
+  --bg-page: #f7f7f7;
+  --bg-card: #ffffff;
+  --text-primary: #3c3c3c;
+  --text-secondary: #777777;
 }
 
 // Dark mode CSS variables
 body.body--dark {
-  --glass-bg: rgba(255, 255, 255, 0.08);
-  --glass-border: rgba(255, 255, 255, 0.12);
+  --glass-bg: rgba(30, 30, 30, 0.9);
+  --glass-bg-subtle: rgba(30, 30, 30, 0.7);
+  --glass-border: rgba(255, 255, 255, 0.1);
+  --shadow-card: 0 2px 4px rgba(0, 0, 0, 0.3);
+  --shadow-card-hover: 0 4px 12px rgba(0, 0, 0, 0.4);
   --shadow-soft: 0 4px 20px rgba(0, 0, 0, 0.3);
   --shadow-medium: 0 8px 30px rgba(0, 0, 0, 0.4);
-  --shadow-strong: 0 15px 40px rgba(0, 0, 0, 0.5);
+
+  --bg-page: #131f24;
+  --bg-card: #1e1e1e;
+  --text-primary: #ffffff;
+  --text-secondary: #afafaf;
 }
 
 // Global smooth transitions
@@ -59,20 +90,35 @@ body.body--dark {
   }
 }
 
-// Modern gradient text
-.gradient-text {
-  background: var(--gradient-primary);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
+// ============================================
+// TYPOGRAPHY UTILITIES
+// ============================================
+
+// Primary colored text (solid, not gradient)
+.text-primary-color {
+  color: var(--color-primary) !important;
   font-weight: 600;
+}
+
+.text-success-color {
+  color: var(--color-success) !important;
+}
+
+.text-streak-color {
+  color: var(--color-streak) !important;
+}
+
+// Legacy gradient text (kept for compatibility)
+.gradient-text {
+  color: var(--color-primary);
+  font-weight: 700;
 }
 
 // Animated background for auth pages
 .animated-bg {
-  background: var(--gradient-primary);
-  background-size: 400% 400%;
-  animation: gradientShift 15s ease infinite;
+  background: linear-gradient(135deg, #1cb0f6 0%, #0095d9 100%);
+  background-size: 200% 200%;
+  animation: gradientShift 8s ease infinite;
 }
 
 @keyframes gradientShift {
@@ -142,13 +188,15 @@ body.body--dark {
   }
 }
 
-// Custom scrollbar
+// ============================================
+// SCROLLBAR
+// ============================================
 ::-webkit-scrollbar {
   width: 8px;
 }
 
 ::-webkit-scrollbar-track {
-  background: rgba(255, 255, 255, 0.1);
+  background: rgba(0, 0, 0, 0.05);
   border-radius: 4px;
 }
 
@@ -157,36 +205,169 @@ body.body--dark ::-webkit-scrollbar-track {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: var(--gradient-primary);
+  background: var(--color-primary);
   border-radius: 4px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: var(--gradient-secondary);
+  background: #0095d9;
 }
 
-// Typography improvements
-.text-gradient-primary {
-  background: var(--gradient-primary);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
+// ============================================
+// STAT BADGES (Duolingo-style compact stats)
+// ============================================
+.stat-badge {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 16px;
+  background: var(--bg-card);
+  border-radius: var(--border-radius-md);
+  box-shadow: var(--shadow-card);
+  transition:
+    transform 0.2s,
+    box-shadow 0.2s;
+
+  &:hover {
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-card-hover);
+  }
+
+  .stat-icon {
+    font-size: 24px;
+    &.streak {
+      color: var(--color-streak);
+    }
+    &.xp {
+      color: var(--color-xp);
+    }
+    &.level {
+      color: var(--color-level);
+    }
+    &.time {
+      color: var(--color-purple);
+    }
+  }
+
+  .stat-value {
+    font-size: 1.25rem;
+    font-weight: 700;
+    color: var(--text-primary);
+  }
+
+  .stat-label {
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+  }
 }
 
-.text-gradient-warm {
-  background: var(--gradient-warm);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
+// ============================================
+// ACTION CARDS (Hybrid glass + solid icons)
+// ============================================
+.action-card {
+  background: var(--glass-bg);
+  backdrop-filter: var(--glass-backdrop);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--border-radius-lg);
+  padding: 24px;
+  text-align: center;
+  box-shadow: var(--shadow-card);
+  transition:
+    transform 0.2s,
+    box-shadow 0.2s;
+  cursor: pointer;
+
+  &:hover {
+    transform: translateY(-4px);
+    box-shadow: var(--shadow-card-hover);
+  }
+
+  .action-icon {
+    width: 64px;
+    height: 64px;
+    border-radius: var(--border-radius-full);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin: 0 auto 16px;
+    color: white;
+    font-size: 28px;
+
+    &.vocab {
+      background: var(--color-vocab);
+    }
+    &.grammar {
+      background: var(--color-grammar);
+    }
+    &.chat {
+      background: var(--color-chat);
+    }
+    &.writing {
+      background: var(--color-writing);
+    }
+  }
+
+  .action-title {
+    font-size: 1.1rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin-bottom: 4px;
+  }
+
+  .action-desc {
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+  }
 }
 
-// Improved text contrast for light mode
+// ============================================
+// PROGRESS RING (Daily goal hero)
+// ============================================
+.daily-goal-hero {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 32px;
+  background: var(--glass-bg);
+  backdrop-filter: var(--glass-backdrop);
+  border-radius: var(--border-radius-xl);
+  box-shadow: var(--shadow-card);
+
+  .goal-content {
+    text-align: center;
+  }
+
+  .goal-count {
+    font-size: 2.5rem;
+    font-weight: 700;
+    color: var(--color-primary);
+  }
+
+  .goal-label {
+    font-size: 0.9rem;
+    color: var(--text-secondary);
+    margin-top: 4px;
+  }
+
+  .start-btn {
+    margin-top: 24px;
+    padding: 12px 32px;
+    font-size: 1rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+}
+
+// ============================================
+// TEXT UTILITIES
+// ============================================
 .text-grey {
-  color: #555 !important;
+  color: var(--text-secondary) !important;
 }
 
 .text-caption {
-  color: #555 !important;
+  color: var(--text-secondary) !important;
 }
 
 // Page transitions

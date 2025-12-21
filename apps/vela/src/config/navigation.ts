@@ -1,37 +1,32 @@
+// Consolidated navigation - Duolingo-inspired simplicity
 export const mainNavigation = [
   {
     name: 'Home',
-    icon: 'fas fa-tachometer-alt',
+    icon: 'home',
     path: '/',
     requiresAuth: true,
   },
   {
-    name: 'Vocabulary',
-    icon: 'fas fa-book',
-    path: '/vocabulary',
-    requiresAuth: true,
-  },
-  {
-    name: 'Games',
-    icon: 'fas fa-gamepad',
+    name: 'Learn',
+    icon: 'school',
     path: '/games',
     requiresAuth: true,
   },
   {
     name: 'Chat',
-    icon: 'fas fa-comments',
+    icon: 'chat',
     path: '/chat',
     requiresAuth: true,
   },
   {
     name: 'Progress',
-    icon: 'fas fa-chart-line',
+    icon: 'bar_chart',
     path: '/progress',
     requiresAuth: true,
   },
   {
-    name: 'My Dictionaries',
-    icon: 'fas fa-bookmark',
+    name: 'My Words',
+    icon: 'bookmark',
     path: '/my-dictionaries',
     requiresAuth: true,
   },
@@ -40,17 +35,17 @@ export const mainNavigation = [
 export const userNavigation = [
   {
     name: 'Profile',
-    icon: 'fas fa-user',
+    icon: 'person',
     path: '/profile',
   },
   {
     name: 'Settings',
-    icon: 'fas fa-cog',
+    icon: 'settings',
     path: '/settings',
   },
   {
     name: 'Logout',
-    icon: 'fas fa-sign-out-alt',
+    icon: 'logout',
     path: '/logout',
   },
 ];
