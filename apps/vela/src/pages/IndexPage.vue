@@ -155,7 +155,25 @@
       </div>
 
       <!-- Achievement Teaser -->
-      <div class="achievement-teaser" v-if="achievements.length > 0">
+      <div class="achievement-teaser loading" v-if="achievementsLoading">
+        <div class="teaser-content">
+          <q-spinner size="24px" class="teaser-spinner" />
+          <span class="teaser-text">Loading achievements…</span>
+        </div>
+      </div>
+
+      <div class="achievement-teaser error" v-else-if="achievementsError">
+        <div class="teaser-content">
+          <q-icon name="error_outline" class="teaser-icon error" />
+          <span class="teaser-text">{{ achievementsError }}</span>
+        </div>
+        <q-btn flat dense color="primary" @click="fetchAchievements">
+          Retry
+          <q-icon name="refresh" size="xs" />
+        </q-btn>
+      </div>
+
+      <div class="achievement-teaser" v-else-if="achievements.length > 0">
         <div class="teaser-content">
           <q-icon name="emoji_events" class="teaser-icon" />
           <span class="teaser-text">{{ achievements.length }} achievements unlocked</span>
@@ -182,10 +200,11 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import { useRouter } from 'vue-router';
 import { useAuthStore } from '../stores/auth';
 import type { UserPreferences } from '../types/shared';
+import { getApiUrl } from '../utils/api';
 
 interface Achievement {
   id: string;
@@ -222,8 +241,61 @@ const dailyProgress = computed(() => {
   return Math.min((minutesToday.value / dailyGoalMinutes.value) * 100, 100);
 });
 
-// Mock achievements - in real app, this would come from API
 const achievements = ref<Achievement[]>([]);
+const achievementsLoading = ref(false);
+const achievementsError = ref<string | null>(null);
+const achievementsAbort = ref<AbortController | null>(null);
+
+const mapAchievement = (raw: any): Achievement | null => {
+  if (!raw || typeof raw !== 'object') return null;
+  const id = String(raw.id ?? raw.achievement_id ?? '');
+  if (!id) return null;
+  return {
+    id,
+    title: String(raw.name ?? raw.title ?? raw.id ?? 'Achievement'),
+    description: String(raw.description ?? ''),
+    icon: String(raw.icon ?? 'emoji_events'),
+    color: String(raw.color ?? 'primary'),
+  };
+};
+
+const fetchAchievements = async () => {
+  const userId = authStore.user?.id;
+  if (!userId) {
+    achievements.value = [];
+    return;
+  }
+
+  achievementsLoading.value = true;
+  achievementsError.value = null;
+
+  const controller = new AbortController();
+  achievementsAbort.value = controller;
+
+  try {
+    const res = await fetch(getApiUrl(`progress/analytics?user_id=${userId}`), {
+      signal: controller.signal,
+    });
+    if (!res.ok) {
+      throw new Error(res.statusText || 'Failed to load achievements');
+    }
+    const data = await res.json();
+    const list: Achievement[] =
+      Array.isArray(data?.achievements) && data.achievements.length > 0
+        ? (data.achievements.map(mapAchievement).filter(Boolean) as Achievement[])
+        : Array.isArray(data?.userStats?.achievements)
+          ? (data.userStats.achievements.map(mapAchievement).filter(Boolean) as Achievement[])
+          : [];
+    achievements.value = list;
+  } catch (err) {
+    if ((err as any)?.name === 'AbortError') return;
+    console.error('Failed to fetch achievements:', err);
+    achievementsError.value = err instanceof Error ? err.message : 'Failed to load achievements';
+  } finally {
+    achievementsLoading.value = false;
+    achievementsAbort.value = null;
+  }
+};
 
 const navigateTo = (path: string) => {
   void router.push(path);
@@ -242,6 +314,14 @@ onMounted(async () => {
   // Redirect to login if not authenticated
   if (!authStore.isAuthenticated) {
     void router.push('/auth/login');
+  }
+
+  void fetchAchievements();
+});
+
+onBeforeUnmount(() => {
+  if (achievementsAbort.value) {
+    achievementsAbort.value.abort();
   }
 });
 </script>
