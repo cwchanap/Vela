@@ -45,7 +45,9 @@
           </q-btn>
 
           <q-btn round dense flat icon="notifications">
-            <q-badge color="negative" floating> 2 </q-badge>
+            <q-badge v-if="notificationCount > 0" color="negative" floating>
+              {{ notificationCount }}
+            </q-badge>
             <q-tooltip>Notifications</q-tooltip>
           </q-btn>
 
@@ -135,6 +137,7 @@ import { useQuasar } from 'quasar';
 const $q = useQuasar();
 const leftDrawerOpen = ref(false);
 const drawerMini = ref(false);
+const notificationCount = ref(0);
 const authStore = useAuthStore();
 const themeStore = useThemeStore();
 const { user, isInitialized } = storeToRefs(authStore);
@@ -146,7 +149,7 @@ const isActiveRoute = (path: string) => {
   if (path === '/') {
     return route.path === '/';
   }
-  return route.path.startsWith(path);
+  return route.path === path || route.path.startsWith(`${path}/`);
 };
 
 const toggleLeftDrawer = () => {
