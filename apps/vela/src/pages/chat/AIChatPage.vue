@@ -41,7 +41,7 @@
             v-for="m in chat.messages"
             :key="m.id"
             :sent="m.type === 'user'"
-            :bg-color="m.type === 'user' ? 'primary' : 'chat'"
+            :bg-color="m.type === 'user' ? 'primary' : 'secondary'"
             :text-color="'white'"
             :name="m.type === 'user' ? 'You' : 'AI'"
             :stamp="formatTime(m.timestamp)"
