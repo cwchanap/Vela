@@ -70,14 +70,14 @@
           </div>
           <div class="challenge-progress">
             <q-linear-progress
-              :value="0.33"
+              :value="challengeProgress"
               color="warning"
               track-color="grey-4"
               rounded
               size="8px"
               class="q-mb-sm"
             />
-            <span class="progress-text">1/3 completed</span>
+            <span class="progress-text">{{ challengeText }}</span>
           </div>
         </div>
       </div>
@@ -86,11 +86,25 @@
 </template>
 
 <script setup lang="ts">
+import { computed, ref } from 'vue';
 import { useRouter } from 'vue-router';
 import { useQuasar } from 'quasar';
 
 const router = useRouter();
 const $q = useQuasar();
+
+// Replace with real data source (store/API) when available
+const gamesCompletedToday = ref(0);
+const dailyChallengeGoal = ref(3);
+
+const challengeProgress = computed(() => {
+  if (!dailyChallengeGoal.value) return 0;
+  return Math.min(gamesCompletedToday.value / dailyChallengeGoal.value, 1);
+});
+
+const challengeText = computed(
+  () => `${gamesCompletedToday.value}/${dailyChallengeGoal.value} completed`,
+);
 
 function navigateToGame(gameType: string) {
   void router.push(`/games/${gameType}`);

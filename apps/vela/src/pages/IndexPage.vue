@@ -77,7 +77,14 @@
       </div>
 
       <div class="actions-grid">
-        <div class="action-card" @click="navigateTo('/games/vocabulary')">
+        <div
+          class="action-card"
+          role="button"
+          tabindex="0"
+          @click="navigateTo('/games/vocabulary')"
+          @keydown.enter="navigateTo('/games/vocabulary')"
+          @keydown.space.prevent="navigateTo('/games/vocabulary')"
+        >
           <div class="action-icon vocab">
             <q-icon name="quiz" />
           </div>
@@ -89,7 +96,14 @@
           </q-btn>
         </div>
 
-        <div class="action-card" @click="navigateTo('/games/sentence')">
+        <div
+          class="action-card"
+          role="button"
+          tabindex="0"
+          @click="navigateTo('/games/sentence')"
+          @keydown.enter="navigateTo('/games/sentence')"
+          @keydown.space.prevent="navigateTo('/games/sentence')"
+        >
           <div class="action-icon grammar">
             <q-icon name="reorder" />
           </div>
@@ -101,7 +115,14 @@
           </q-btn>
         </div>
 
-        <div class="action-card" @click="navigateTo('/chat')">
+        <div
+          class="action-card"
+          role="button"
+          tabindex="0"
+          @click="navigateTo('/chat')"
+          @keydown.enter="navigateTo('/chat')"
+          @keydown.space.prevent="navigateTo('/chat')"
+        >
           <div class="action-icon chat">
             <q-icon name="chat" />
           </div>
@@ -113,7 +134,14 @@
           </q-btn>
         </div>
 
-        <div class="action-card" @click="navigateTo('/my-dictionaries')">
+        <div
+          class="action-card"
+          role="button"
+          tabindex="0"
+          @click="navigateTo('/my-dictionaries')"
+          @keydown.enter="navigateTo('/my-dictionaries')"
+          @keydown.space.prevent="navigateTo('/my-dictionaries')"
+        >
           <div class="action-icon writing">
             <q-icon name="bookmark" />
           </div>
@@ -174,6 +202,8 @@ const preferences = computed((): UserPreferences => {
   return (
     authStore.user?.preferences || {
       dailyGoal: 30,
+      dailyLessonGoal: 5,
+      lessonDurationMinutes: 6,
       difficulty: 'Beginner',
       notifications: true,
       todayStudyTime: 0,
@@ -392,6 +422,11 @@ onMounted(async () => {
   transition:
     transform 0.2s,
     box-shadow 0.2s;
+}
+
+.action-card:focus-visible {
+  outline: 3px solid var(--color-primary);
+  outline-offset: 4px;
 }
 
 .action-card:hover {
