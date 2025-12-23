@@ -41,7 +41,7 @@
             v-for="m in chat.messages"
             :key="m.id"
             :sent="m.type === 'user'"
-            :bg-color="m.type === 'user' ? 'primary' : 'secondary'"
+            :bg-color="m.type === 'user' ? 'primary' : 'chat'"
             :text-color="'white'"
             :name="m.type === 'user' ? 'You' : 'AI'"
             :stamp="formatTime(m.timestamp)"
@@ -603,16 +603,15 @@ onMounted(() => {
   white-space: normal;
 }
 
-// AI message with solid green (chat color)
-:deep(.ai-message .q-message-text) {
-  background: var(--color-chat) !important;
-  box-shadow: 0 4px 12px rgba(88, 204, 2, 0.2);
-}
-
 // User message with solid primary color
 :deep(.user-message .q-message-text) {
   background: var(--color-primary) !important;
   box-shadow: 0 4px 12px rgba(28, 176, 246, 0.2);
+}
+
+// AI message with chat color (using Quasar 'chat' palette)
+:deep(.ai-message .q-message-text) {
+  box-shadow: 0 4px 12px rgba(88, 204, 2, 0.2);
 }
 
 // Enhance message bubble appearance

@@ -1,6 +1,8 @@
 // Shared types used across the application
 export interface UserPreferences {
   dailyGoal: number;
+  dailyLessonGoal?: number;
+  lessonDurationMinutes?: number;
   difficulty: 'Beginner' | 'Intermediate' | 'Advanced';
   notifications: boolean;
   todayStudyTime?: number;
