@@ -67,12 +67,12 @@
 
         <div class="row items-center">
           <div class="col-4 text-weight-medium">Daily Lesson Goal:</div>
-          <div class="col">{{ preferences.dailyLessonGoal || 5 }} lessons</div>
+          <div class="col">{{ preferences.dailyLessonGoal ?? 5 }} lessons</div>
         </div>
 
         <div class="row items-center">
           <div class="col-4 text-weight-medium">Lesson Duration:</div>
-          <div class="col">{{ preferences.lessonDurationMinutes || 6 }} minutes</div>
+          <div class="col">{{ preferences.lessonDurationMinutes ?? 6 }} minutes</div>
         </div>
 
         <div class="row items-center">
