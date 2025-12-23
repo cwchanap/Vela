@@ -18,8 +18,8 @@
             class="progress-ring"
           >
             <div class="ring-content">
-              <div class="ring-value">{{ lessonsCompleted }}/{{ dailyLessonGoal }}</div>
-              <div class="ring-label">lessons today</div>
+              <div class="ring-value">{{ minutesToday }}/{{ dailyGoalMinutes }}</div>
+              <div class="ring-label">minutes today</div>
             </div>
           </q-circular-progress>
         </div>
@@ -65,7 +65,7 @@
         <div class="stat-badge">
           <q-icon name="schedule" class="stat-icon time" />
           <div class="stat-info">
-            <span class="stat-value">{{ todayStudyTime }}</span>
+            <span class="stat-value">{{ minutesToday }}</span>
             <span class="stat-label">min today</span>
           </div>
         </div>
@@ -182,15 +182,14 @@ const preferences = computed((): UserPreferences => {
 });
 
 const todayStudyTime = computed(() => preferences.value.todayStudyTime || 0);
-
-// Lesson-based progress (Duolingo style)
-const dailyLessonGoal = computed(() => 5); // Default 5 lessons per day
-const lessonsCompleted = computed(() =>
-  Math.min(Math.floor(todayStudyTime.value / 6), dailyLessonGoal.value),
-); // ~6 min per lesson
+const minutesToday = computed(() => Math.round(todayStudyTime.value));
+const dailyGoalMinutes = computed(() => preferences.value.dailyGoal || 30);
 
 const dailyProgress = computed(() => {
-  return Math.min((lessonsCompleted.value / dailyLessonGoal.value) * 100, 100);
+  if (!dailyGoalMinutes.value) {
+    return 0;
+  }
+  return Math.min((minutesToday.value / dailyGoalMinutes.value) * 100, 100);
 });
 
 // Mock achievements - in real app, this would come from API
