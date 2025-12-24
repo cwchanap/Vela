@@ -49,6 +49,26 @@
               {{ notificationCount }}
             </q-badge>
             <q-tooltip>Notifications</q-tooltip>
+            <q-menu class="notification-menu">
+              <q-list dense style="min-width: 220px">
+                <q-item v-if="notificationCount === 0">
+                  <q-item-section>You're all caught up.</q-item-section>
+                </q-item>
+                <q-item
+                  v-for="item in notificationItems"
+                  :key="item.id"
+                  clickable
+                  v-ripple
+                  v-close-popup
+                  :to="item.to"
+                >
+                  <q-item-section avatar>
+                    <q-icon :name="item.icon" size="sm" />
+                  </q-item-section>
+                  <q-item-section>{{ item.label }}</q-item-section>
+                </q-item>
+              </q-list>
+            </q-menu>
           </q-btn>
 
           <q-btn round flat>
@@ -126,7 +146,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, watch } from 'vue';
+import { ref, onMounted, watch, computed } from 'vue';
 import { useAuthStore } from 'src/stores/auth';
 import { useThemeStore } from 'src/stores/theme';
 import { storeToRefs } from 'pinia';
@@ -137,12 +157,40 @@ import { useQuasar } from 'quasar';
 const $q = useQuasar();
 const leftDrawerOpen = ref(false);
 const drawerMini = ref(false);
-const notificationCount = ref(0);
+interface NotificationItem {
+  id: string;
+  label: string;
+  icon: string;
+  to?: string;
+}
+
 const authStore = useAuthStore();
 const themeStore = useThemeStore();
 const { user, isInitialized } = storeToRefs(authStore);
 const router = useRouter();
 const route = useRoute();
+
+const notificationItems = computed<NotificationItem[]>(() => {
+  const prefs = user.value?.preferences;
+  if (!prefs) return [];
+
+  const items: NotificationItem[] = [];
+  const missingPreferences =
+    prefs.dailyGoal == null || prefs.dailyLessonGoal == null || prefs.lessonDurationMinutes == null;
+
+  if (missingPreferences) {
+    items.push({
+      id: 'learning-preferences',
+      label: 'Complete your learning preferences',
+      icon: 'tune',
+      to: '/auth/profile',
+    });
+  }
+
+  return items;
+});
+
+const notificationCount = computed(() => notificationItems.value.length);
 
 // Check if route is active (handles nested routes)
 const normalizePath = (p: string): string => {
@@ -226,11 +274,11 @@ watch(
   min-height: 48px;
 
   &:hover {
-    background: rgba(28, 176, 246, 0.08);
+    background: var(--nav-item-hover-bg);
   }
 
   &.nav-item--active {
-    background: rgba(28, 176, 246, 0.12);
+    background: var(--nav-item-active-bg);
   }
 }
 

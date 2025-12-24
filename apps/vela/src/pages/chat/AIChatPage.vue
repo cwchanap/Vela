@@ -606,12 +606,12 @@ onMounted(() => {
 // User message with solid primary color
 :deep(.user-message .q-message-text) {
   background: var(--color-primary) !important;
-  box-shadow: 0 4px 12px rgba(28, 176, 246, 0.2);
+  box-shadow: var(--shadow-chat-user);
 }
 
 // AI message with chat color (using Quasar 'chat' palette)
 :deep(.ai-message .q-message-text) {
-  box-shadow: 0 4px 12px rgba(88, 204, 2, 0.2);
+  box-shadow: var(--shadow-chat-ai);
 }
 
 // Enhance message bubble appearance

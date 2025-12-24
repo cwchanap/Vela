@@ -233,9 +233,9 @@ const preferences = computed((): UserPreferences => {
   );
 });
 
-const todayStudyTime = computed(() => preferences.value.todayStudyTime || 0);
+const todayStudyTime = computed(() => preferences.value.todayStudyTime ?? 0);
 const minutesToday = computed(() => Math.round(todayStudyTime.value));
-const dailyGoalMinutes = computed(() => preferences.value.dailyGoal || 30);
+const dailyGoalMinutes = computed(() => preferences.value.dailyGoal ?? 30);
 
 const dailyProgress = computed(() => {
   if (!dailyGoalMinutes.value) {

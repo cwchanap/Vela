@@ -7,7 +7,13 @@
       </div>
 
       <div class="games-grid">
-        <div class="game-card" @click="navigateToGame('vocabulary')">
+        <div
+          class="game-card"
+          role="button"
+          tabindex="0"
+          @click="navigateToGame('vocabulary')"
+          @keydown="handleGameCardKeydown('vocabulary', $event)"
+        >
           <div class="game-icon vocab">
             <q-icon name="quiz" />
           </div>
@@ -21,7 +27,13 @@
           </q-btn>
         </div>
 
-        <div class="game-card" @click="navigateToGame('sentence')">
+        <div
+          class="game-card"
+          role="button"
+          tabindex="0"
+          @click="navigateToGame('sentence')"
+          @keydown="handleGameCardKeydown('sentence', $event)"
+        >
           <div class="game-icon grammar">
             <q-icon name="reorder" />
           </div>
@@ -110,6 +122,13 @@ const challengeText = computed(
 function navigateToGame(gameType: string) {
   void router.push(`/games/${gameType}`);
 }
+
+const handleGameCardKeydown = (gameType: string, event: KeyboardEvent) => {
+  if (event.key === 'Enter' || event.key === ' ') {
+    event.preventDefault();
+    navigateToGame(gameType);
+  }
+};
 </script>
 
 <style scoped>
@@ -162,6 +181,11 @@ function navigateToGame(gameType: string) {
   transition:
     transform 0.2s,
     box-shadow 0.2s;
+}
+
+.game-card:focus-visible {
+  outline: 3px solid var(--color-primary);
+  outline-offset: 4px;
 }
 
 .game-card:hover {

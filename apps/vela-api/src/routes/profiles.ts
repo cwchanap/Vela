@@ -4,6 +4,16 @@ import { z } from 'zod';
 import type { Env } from '../types';
 import { profiles as profilesDB } from '../dynamodb';
 
+const DEFAULT_DAILY_LESSON_GOAL = 5;
+const DEFAULT_LESSON_DURATION_MINUTES = 6;
+
+const PreferencesSchema = z
+  .object({
+    dailyLessonGoal: z.coerce.number().int().min(1).max(50),
+    lessonDurationMinutes: z.coerce.number().int().min(1).max(120),
+  })
+  .catchall(z.unknown());
+
 // Validation schemas
 const UserIdQuerySchema = z.object({
   user_id: z.string().min(1, 'user_id is required'),
@@ -14,8 +24,43 @@ const UpdateProfileSchema = z.object({
   username: z.string().optional(),
   avatar_url: z.string().optional(),
   native_language: z.string().optional(),
-  preferences: z.record(z.string(), z.unknown()).optional(),
+  preferences: PreferencesSchema.optional(),
 });
+
+const isPlainObject = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value);
+
+const normalizeRequiredPreferenceNumber = (
+  value: unknown,
+  fallback: number,
+  min: number,
+  max: number,
+) => {
+  const parsedValue = typeof value === 'number' ? value : Number(value);
+  if (!Number.isFinite(parsedValue)) return fallback;
+  const normalized = Math.trunc(parsedValue);
+  if (normalized < min || normalized > max) return fallback;
+  return normalized;
+};
+
+const normalizePreferences = (preferences: unknown) => {
+  const base = isPlainObject(preferences) ? preferences : {};
+  return {
+    ...base,
+    dailyLessonGoal: normalizeRequiredPreferenceNumber(
+      base.dailyLessonGoal,
+      DEFAULT_DAILY_LESSON_GOAL,
+      1,
+      50,
+    ),
+    lessonDurationMinutes: normalizeRequiredPreferenceNumber(
+      base.lessonDurationMinutes,
+      DEFAULT_LESSON_DURATION_MINUTES,
+      1,
+      120,
+    ),
+  };
+};
 
 const createProfilesRoute = (env: Env) => {
   console.debug('Creating profiles route with env:', env ? 'provided' : 'not provided');
@@ -36,6 +81,7 @@ const createProfilesRoute = (env: Env) => {
       // If profile doesn't exist, create it
       if (!profile) {
         console.log('Profile not found for user_id, creating new one:', user_id);
+        const defaultPreferences = normalizePreferences({});
         profile = {
           user_id,
           email: null,
@@ -45,11 +91,35 @@ const createProfilesRoute = (env: Env) => {
           current_level: 1,
           total_experience: 0,
           learning_streak: 0,
-          preferences: {},
+          preferences: defaultPreferences,
           created_at: new Date().toISOString(),
           updated_at: new Date().toISOString(),
         };
         await profilesDB.create(profile);
+      } else {
+        const rawPreferences = profile.preferences;
+        const normalizedPreferences = normalizePreferences(rawPreferences);
+        const parsedPreferences = PreferencesSchema.safeParse(normalizedPreferences);
+
+        if (!parsedPreferences.success) {
+          console.error('Invalid preferences data for user_id:', user_id);
+          return c.json({ error: 'Invalid preferences data' }, 500);
+        }
+
+        const shouldUpdate =
+          !isPlainObject(rawPreferences) ||
+          rawPreferences.dailyLessonGoal !== parsedPreferences.data.dailyLessonGoal ||
+          rawPreferences.lessonDurationMinutes !== parsedPreferences.data.lessonDurationMinutes;
+
+        if (shouldUpdate) {
+          const updatedProfile = await profilesDB.update(user_id, {
+            preferences: parsedPreferences.data,
+            updated_at: new Date().toISOString(),
+          });
+          profile = updatedProfile || profile;
+        } else {
+          profile.preferences = parsedPreferences.data;
+        }
       }
 
       return c.json({ profile });
@@ -93,6 +163,7 @@ const createProfilesRoute = (env: Env) => {
       try {
         const { user_id, email, username } = c.req.valid('json');
 
+        const defaultPreferences = normalizePreferences({});
         const profile = {
           user_id,
           email: email || null,
@@ -101,7 +172,7 @@ const createProfilesRoute = (env: Env) => {
           current_level: 1,
           total_experience: 0,
           learning_streak: 0,
-          preferences: {},
+          preferences: defaultPreferences,
           created_at: new Date().toISOString(),
           updated_at: new Date().toISOString(),
         };
