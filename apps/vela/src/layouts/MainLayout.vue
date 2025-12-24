@@ -64,8 +64,8 @@
                   v-ripple
                   clickable
                   dense
-                  :to="'path' in item ? item.path : undefined"
-                  @click="item.action === 'logout' && handleLogout()"
+                  :to="item.type === 'route' ? item.path : undefined"
+                  @click="item.type === 'action' && item.action === 'logout' && handleLogout()"
                 >
                   <q-item-section avatar>
                     <q-icon :name="item.icon" size="sm" />
@@ -145,11 +145,20 @@ const router = useRouter();
 const route = useRoute();
 
 // Check if route is active (handles nested routes)
+const normalizePath = (p: string): string => {
+  if (!p) return '/';
+  const withLeadingSlash = p.startsWith('/') ? p : `/${p}`;
+  if (withLeadingSlash === '/') return '/';
+  return withLeadingSlash.replace(/\/+$/, '');
+};
+
 const isActiveRoute = (path: string) => {
-  if (path === '/') {
-    return route.path === '/';
+  const current = normalizePath(route.path);
+  const target = normalizePath(path);
+  if (target === '/') {
+    return current === '/';
   }
-  return route.path === path || route.path.startsWith(`${path}/`);
+  return current === target || current.startsWith(`${target}/`);
 };
 
 const toggleLeftDrawer = () => {

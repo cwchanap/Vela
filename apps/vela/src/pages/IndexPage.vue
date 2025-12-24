@@ -202,6 +202,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import { useRouter } from 'vue-router';
+import { useQuasar } from 'quasar';
 import { useAuthStore } from '../stores/auth';
 import type { UserPreferences } from '../types/shared';
 import { DEFAULT_DAILY_LESSON_GOAL, DEFAULT_LESSON_DURATION_MINUTES } from '../types/shared';
@@ -216,6 +217,7 @@ interface Achievement {
 }
 
 const router = useRouter();
+const $q = useQuasar();
 const authStore = useAuthStore();
 
 const preferences = computed((): UserPreferences => {
@@ -248,15 +250,33 @@ const achievementsError = ref<string | null>(null);
 const achievementsAbort = ref<AbortController | null>(null);
 
 const mapAchievement = (raw: any): Achievement | null => {
-  if (!raw || typeof raw !== 'object') return null;
-  const id = String(raw.id ?? raw.achievement_id ?? '');
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+
+  const rawId = (raw as any).id ?? (raw as any).achievement_id;
+  const id =
+    typeof rawId === 'string' || typeof rawId === 'number' || typeof rawId === 'boolean'
+      ? String(rawId).trim()
+      : '';
   if (!id) return null;
+
+  const rawTitle = (raw as any).name ?? (raw as any).title ?? rawId;
+  const title = typeof rawTitle === 'string' && rawTitle.trim() ? rawTitle : 'Achievement';
+
+  const rawDescription = (raw as any).description;
+  const description = typeof rawDescription === 'string' ? rawDescription : '';
+
+  const rawIcon = (raw as any).icon;
+  const icon = typeof rawIcon === 'string' && rawIcon.trim() ? rawIcon : 'emoji_events';
+
+  const rawColor = (raw as any).color;
+  const color = typeof rawColor === 'string' && rawColor.trim() ? rawColor : 'primary';
+
   return {
     id,
-    title: String(raw.name ?? raw.title ?? raw.id ?? 'Achievement'),
-    description: String(raw.description ?? ''),
-    icon: String(raw.icon ?? 'emoji_events'),
-    color: String(raw.color ?? 'primary'),
+    title,
+    description,
+    icon,
+    color,
   };
 };
 
@@ -269,6 +289,10 @@ const fetchAchievements = async () => {
 
   achievementsLoading.value = true;
   achievementsError.value = null;
+
+  if (achievementsAbort.value) {
+    achievementsAbort.value.abort();
+  }
 
   const controller = new AbortController();
   achievementsAbort.value = controller;
@@ -294,13 +318,24 @@ const fetchAchievements = async () => {
     console.error('Failed to fetch achievements:', err);
     achievementsError.value = err instanceof Error ? err.message : 'Failed to load achievements';
   } finally {
-    achievementsLoading.value = false;
-    achievementsAbort.value = null;
+    if (achievementsAbort.value === controller) {
+      achievementsLoading.value = false;
+      achievementsAbort.value = null;
+    }
   }
 };
 
-const navigateTo = (path: string) => {
-  void router.push(path);
+const navigateTo = async (path: string) => {
+  try {
+    await router.push(path);
+  } catch (err) {
+    console.error('Navigation failed:', err);
+    $q.notify({
+      type: 'negative',
+      message: 'Navigation failed. Please try again.',
+      timeout: 2000,
+    });
+  }
 };
 
 const navigateToLearn = () => {

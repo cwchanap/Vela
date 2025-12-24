@@ -110,7 +110,10 @@ body.body--dark {
 
 // Legacy gradient text (kept for compatibility)
 .gradient-text {
-  color: var(--color-primary);
+  background: linear-gradient(90deg, var(--color-primary), var(--color-success));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
   font-weight: 700;
 }
 
