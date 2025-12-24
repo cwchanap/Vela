@@ -46,6 +46,6 @@ export const userNavigation = [
   {
     name: 'Logout',
     icon: 'logout',
-    path: '/logout',
+    action: 'logout',
   },
 ];

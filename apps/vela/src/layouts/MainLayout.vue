@@ -64,8 +64,8 @@
                   v-ripple
                   clickable
                   dense
-                  :to="item.name !== 'Logout' ? item.path : undefined"
-                  @click="item.name === 'Logout' && handleLogout()"
+                  :to="'path' in item ? item.path : undefined"
+                  @click="item.action === 'logout' && handleLogout()"
                 >
                   <q-item-section avatar>
                     <q-icon :name="item.icon" size="sm" />

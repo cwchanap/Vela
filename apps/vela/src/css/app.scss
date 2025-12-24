@@ -12,12 +12,12 @@
   --color-purple: #ce82ff; // Purple - time, writing
 
   // Semantic colors for features
-  --color-level: #1cb0f6; // Blue - levels
-  --color-xp: #58cc02; // Green - XP/success
-  --color-vocab: #1cb0f6; // Blue - vocabulary
-  --color-grammar: #ff9600; // Orange - grammar/sentence
-  --color-chat: #58cc02; // Green - chat
-  --color-writing: #ce82ff; // Purple - writing
+  --color-level: var(--color-primary); // Blue - levels
+  --color-xp: var(--color-success); // Green - XP/success
+  --color-vocab: var(--color-primary); // Blue - vocabulary
+  --color-grammar: var(--color-streak); // Orange - grammar/sentence
+  --color-chat: var(--color-success); // Green - chat
+  --color-writing: var(--color-purple); // Purple - writing
 
   // Shadow system (Duolingo-style depth)
   --shadow-card: 0 2px 4px rgba(0, 0, 0, 0.08);
