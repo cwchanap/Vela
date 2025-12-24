@@ -1,7 +1,19 @@
 // Shared types used across the application
+// Canonical defaults for optional UserPreferences fields
+export const DEFAULT_DAILY_LESSON_GOAL = 5;
+export const DEFAULT_LESSON_DURATION_MINUTES = 6;
+
 export interface UserPreferences {
   dailyGoal: number;
+  /**
+   * Optional daily lesson count goal.
+   * When undefined, use DEFAULT_DAILY_LESSON_GOAL.
+   */
   dailyLessonGoal?: number;
+  /**
+   * Optional preferred lesson duration in minutes.
+   * When undefined, use DEFAULT_LESSON_DURATION_MINUTES.
+   */
   lessonDurationMinutes?: number;
   difficulty: 'Beginner' | 'Intermediate' | 'Advanced';
   notifications: boolean;
