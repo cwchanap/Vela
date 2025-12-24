@@ -279,7 +279,7 @@ function navigateToGame(gameType: string) {
 }
 
 /* Responsive */
-@media (max-width: 700px) {
+@media (max-width: 768px) {
   .games-page {
     padding: 16px;
   }
