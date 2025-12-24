@@ -273,7 +273,8 @@ const fetchAchievements = async () => {
   achievementsAbort.value = controller;
 
   try {
-    const res = await fetch(getApiUrl(`progress/analytics?user_id=${userId}`), {
+    const params = new URLSearchParams({ user_id: encodeURIComponent(userId) });
+    const res = await fetch(getApiUrl(`progress/analytics?${params.toString()}`), {
       signal: controller.signal,
     });
     if (!res.ok) {

@@ -361,8 +361,8 @@ const startEdit = () => {
   editForm.username = authStore.user?.username || '';
   editForm.native_language = authStore.user?.native_language || 'en';
   editForm.dailyGoal = preferences.value.dailyGoal || 30;
-  editForm.dailyLessonGoal = preferences.value.dailyLessonGoal || 5;
-  editForm.lessonDurationMinutes = preferences.value.lessonDurationMinutes || 6;
+  editForm.dailyLessonGoal = preferences.value.dailyLessonGoal ?? 5;
+  editForm.lessonDurationMinutes = preferences.value.lessonDurationMinutes ?? 6;
   editForm.difficulty = preferences.value.difficulty || 'Beginner';
   editForm.notifications = preferences.value.notifications !== false;
   const fallbackAvatar: string = avatarOptions[0] ?? '';
