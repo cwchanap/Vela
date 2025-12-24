@@ -21,9 +21,9 @@ test.describe('Navigation', () => {
     await page.goto('/');
     await waitForPageLoad(page);
 
-    // Look for games navigation link
+    // Look for games navigation link (now labeled "Learn")
     const gamesLink = page
-      .locator('text=Games')
+      .locator('text=Learn')
       .or(page.locator('[href*="/games"]'))
       .or(page.locator('[data-cy="games-link"]'));
 

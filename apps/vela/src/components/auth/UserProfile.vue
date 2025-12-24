@@ -62,7 +62,17 @@
 
         <div class="row items-center">
           <div class="col-4 text-weight-medium">Daily Goal:</div>
-          <div class="col">{{ preferences.dailyGoal || 'Not set' }} minutes</div>
+          <div class="col">{{ preferences.dailyGoal ?? 'Not set' }} minutes</div>
+        </div>
+
+        <div class="row items-center">
+          <div class="col-4 text-weight-medium">Daily Lesson Goal:</div>
+          <div class="col">{{ preferences.dailyLessonGoal ?? 5 }} lessons</div>
+        </div>
+
+        <div class="row items-center">
+          <div class="col-4 text-weight-medium">Lesson Duration:</div>
+          <div class="col">{{ preferences.lessonDurationMinutes ?? 6 }} minutes</div>
         </div>
 
         <div class="row items-center">
@@ -130,6 +140,30 @@
           outlined
           :rules="[
             (val) => !val || (val > 0 && val <= 480) || 'Goal must be between 1-480 minutes',
+          ]"
+        />
+
+        <q-input
+          v-model.number="editForm.dailyLessonGoal"
+          label="Daily Lesson Goal (lessons) *"
+          type="number"
+          outlined
+          :rules="[
+            (val) =>
+              (val !== null && val !== undefined && val !== '') || 'Daily lesson goal is required',
+            (val) => (val > 0 && val <= 50) || 'Goal must be between 1-50 lessons',
+          ]"
+        />
+
+        <q-input
+          v-model.number="editForm.lessonDurationMinutes"
+          label="Lesson Duration (minutes) *"
+          type="number"
+          outlined
+          :rules="[
+            (val) =>
+              (val !== null && val !== undefined && val !== '') || 'Lesson duration is required',
+            (val) => (val > 0 && val <= 120) || 'Duration must be between 1-120 minutes',
           ]"
         />
 
@@ -242,6 +276,7 @@ import { ref, computed, reactive, onMounted } from 'vue';
 import { useRouter } from 'vue-router';
 import { useQuasar } from 'quasar';
 import { useAuthStore } from '../../stores/auth';
+import { DEFAULT_DAILY_LESSON_GOAL, DEFAULT_LESSON_DURATION_MINUTES } from '../../types/shared';
 
 // Composables
 const router = useRouter();
@@ -258,6 +293,8 @@ const editForm = reactive({
   username: '',
   native_language: 'en',
   dailyGoal: 30,
+  dailyLessonGoal: DEFAULT_DAILY_LESSON_GOAL,
+  lessonDurationMinutes: DEFAULT_LESSON_DURATION_MINUTES,
   difficulty: 'Beginner',
   notifications: true,
   avatar_url: '',
@@ -273,6 +310,8 @@ const preferences = computed(() => {
   return (
     authStore.user?.preferences || {
       dailyGoal: 30,
+      dailyLessonGoal: DEFAULT_DAILY_LESSON_GOAL,
+      lessonDurationMinutes: DEFAULT_LESSON_DURATION_MINUTES,
       difficulty: 'Beginner',
       notifications: true,
     }
@@ -328,7 +367,10 @@ const startEdit = () => {
   // Populate form with current values
   editForm.username = authStore.user?.username || '';
   editForm.native_language = authStore.user?.native_language || 'en';
-  editForm.dailyGoal = preferences.value.dailyGoal || 30;
+  editForm.dailyGoal = preferences.value.dailyGoal ?? 30;
+  editForm.dailyLessonGoal = preferences.value.dailyLessonGoal ?? DEFAULT_DAILY_LESSON_GOAL;
+  editForm.lessonDurationMinutes =
+    preferences.value.lessonDurationMinutes ?? DEFAULT_LESSON_DURATION_MINUTES;
   editForm.difficulty = preferences.value.difficulty || 'Beginner';
   editForm.notifications = preferences.value.notifications !== false;
   const fallbackAvatar: string = avatarOptions[0] ?? '';
@@ -355,6 +397,8 @@ const handleSave = async () => {
     avatar_url: avatarToSave,
     preferences: {
       dailyGoal: editForm.dailyGoal,
+      dailyLessonGoal: editForm.dailyLessonGoal,
+      lessonDurationMinutes: editForm.lessonDurationMinutes,
       difficulty: editForm.difficulty,
       notifications: editForm.notifications,
     },

@@ -1,289 +1,212 @@
 <template>
-  <q-page class="modern-dashboard-page">
+  <q-page class="dashboard-page">
     <div class="dashboard-container">
-      <!-- Modern Welcome Header with Animations -->
-      <div class="modern-welcome-header q-mb-xl">
-        <div class="welcome-content glass-card">
-          <div class="welcome-text">
-            <h1 class="welcome-title gradient-text">
-              Welcome back, {{ authStore.userName }}!
-              <span class="wave-emoji floating">👋</span>
-            </h1>
-            <p class="welcome-subtitle">Ready to continue your Japanese learning journey?</p>
+      <!-- Hero Section: Daily Progress Ring -->
+      <div class="daily-goal-hero">
+        <div class="hero-content">
+          <h1 class="hero-greeting">Welcome back, {{ authStore.userName }}!</h1>
+          <p class="hero-subtitle">Let's continue your Japanese journey</p>
+        </div>
+
+        <div class="progress-ring-wrapper">
+          <q-circular-progress
+            :value="dailyProgress"
+            size="180px"
+            :thickness="0.1"
+            color="primary"
+            track-color="grey-3"
+            class="progress-ring"
+          >
+            <div class="ring-content">
+              <div class="ring-value">{{ minutesToday }}/{{ dailyGoalMinutes }}</div>
+              <div class="ring-label">minutes today</div>
+            </div>
+          </q-circular-progress>
+        </div>
+
+        <q-btn
+          unelevated
+          rounded
+          color="primary"
+          size="lg"
+          class="start-learning-btn"
+          @click="navigateToLearn"
+        >
+          <q-icon name="play_arrow" size="sm" class="q-mr-sm" />
+          Start Learning
+        </q-btn>
+      </div>
+
+      <!-- Stats Row -->
+      <div class="stats-row">
+        <div class="stat-badge">
+          <q-icon name="local_fire_department" class="stat-icon streak" />
+          <div class="stat-info">
+            <span class="stat-value">{{ authStore.userStreak }}</span>
+            <span class="stat-label">day streak</span>
           </div>
-          <div class="welcome-decoration">
-            <div class="floating-circle circle-1"></div>
-            <div class="floating-circle circle-2"></div>
-            <div class="floating-circle circle-3"></div>
+        </div>
+
+        <div class="stat-badge">
+          <q-icon name="star" class="stat-icon xp" />
+          <div class="stat-info">
+            <span class="stat-value">{{ authStore.userExperience }}</span>
+            <span class="stat-label">total XP</span>
+          </div>
+        </div>
+
+        <div class="stat-badge level-badge">
+          <div class="level-circle">{{ authStore.userLevel }}</div>
+          <div class="stat-info">
+            <span class="stat-label">Level</span>
+          </div>
+        </div>
+
+        <div class="stat-badge">
+          <q-icon name="schedule" class="stat-icon time" />
+          <div class="stat-info">
+            <span class="stat-value">{{ minutesToday }}</span>
+            <span class="stat-label">min today</span>
           </div>
         </div>
       </div>
 
-      <!-- Modern Stats Grid with Glassmorphism -->
-      <div class="stats-grid q-mb-xl">
-        <div class="stat-card modern-card glass-card" data-aos="fade-up" data-aos-delay="100">
-          <div class="stat-content">
-            <div class="stat-icon-wrapper level-gradient">
-              <q-icon name="trending_up" size="2.5rem" class="text-white" />
-            </div>
-            <div class="stat-info">
-              <div class="stat-number gradient-text">{{ authStore.userLevel }}</div>
-              <div class="stat-label">Current Level</div>
-            </div>
+      <!-- Quick Actions Grid -->
+      <div class="section-header">
+        <h2 class="section-title">Continue Learning</h2>
+      </div>
+
+      <div class="actions-grid">
+        <div
+          class="action-card"
+          role="button"
+          tabindex="0"
+          aria-label="Navigate to Vocabulary game"
+          @click="navigateTo('/games/vocabulary')"
+          @keydown="handleActionKeydown('/games/vocabulary', $event)"
+        >
+          <div class="action-icon vocab">
+            <q-icon name="quiz" />
           </div>
+          <div class="action-title">Vocabulary</div>
+          <div class="action-desc">Learn new words</div>
+          <q-btn flat dense color="primary" class="action-btn">
+            Play
+            <q-icon name="chevron_right" size="xs" />
+          </q-btn>
         </div>
 
-        <div class="stat-card modern-card glass-card" data-aos="fade-up" data-aos-delay="200">
-          <div class="stat-content">
-            <div class="stat-icon-wrapper xp-gradient">
-              <q-icon name="stars" size="2.5rem" class="text-white" />
-            </div>
-            <div class="stat-info">
-              <div class="stat-number gradient-text">{{ authStore.userExperience }}</div>
-              <div class="stat-label">Total XP</div>
-            </div>
+        <div
+          class="action-card"
+          role="button"
+          tabindex="0"
+          aria-label="Navigate to Sentence game"
+          @click="navigateTo('/games/sentence')"
+          @keydown="handleActionKeydown('/games/sentence', $event)"
+        >
+          <div class="action-icon grammar">
+            <q-icon name="reorder" />
           </div>
+          <div class="action-title">Sentences</div>
+          <div class="action-desc">Build sentences</div>
+          <q-btn flat dense color="primary" class="action-btn">
+            Play
+            <q-icon name="chevron_right" size="xs" />
+          </q-btn>
         </div>
 
-        <div class="stat-card modern-card glass-card" data-aos="fade-up" data-aos-delay="300">
-          <div class="stat-content">
-            <div class="stat-icon-wrapper streak-gradient">
-              <q-icon name="local_fire_department" size="2.5rem" class="text-white" />
-            </div>
-            <div class="stat-info">
-              <div class="stat-number gradient-text">{{ authStore.userStreak }}</div>
-              <div class="stat-label">Day Streak</div>
-            </div>
+        <div
+          class="action-card"
+          role="button"
+          tabindex="0"
+          aria-label="Open AI Tutor chat"
+          @click="navigateTo('/chat')"
+          @keydown="handleActionKeydown('/chat', $event)"
+        >
+          <div class="action-icon chat">
+            <q-icon name="chat" />
           </div>
+          <div class="action-title">AI Tutor</div>
+          <div class="action-desc">Get help</div>
+          <q-btn flat dense color="primary" class="action-btn">
+            Chat
+            <q-icon name="chevron_right" size="xs" />
+          </q-btn>
         </div>
 
-        <div class="stat-card modern-card glass-card" data-aos="fade-up" data-aos-delay="400">
-          <div class="stat-content">
-            <div class="stat-icon-wrapper time-gradient">
-              <q-icon name="schedule" size="2.5rem" class="text-white" />
-            </div>
-            <div class="stat-info">
-              <div class="stat-number gradient-text">{{ todayStudyTime }}</div>
-              <div class="stat-label">Minutes Today</div>
-            </div>
+        <div
+          class="action-card"
+          role="button"
+          tabindex="0"
+          aria-label="View saved vocabulary"
+          @click="navigateTo('/my-dictionaries')"
+          @keydown="handleActionKeydown('/my-dictionaries', $event)"
+        >
+          <div class="action-icon writing">
+            <q-icon name="bookmark" />
           </div>
+          <div class="action-title">My Words</div>
+          <div class="action-desc">Saved vocabulary</div>
+          <q-btn flat dense color="primary" class="action-btn">
+            View
+            <q-icon name="chevron_right" size="xs" />
+          </q-btn>
         </div>
       </div>
 
-      <!-- Modern Quick Actions Section -->
-      <div class="main-content-grid">
-        <div class="quick-start-section">
-          <div class="modern-card glass-card section-card">
-            <div class="section-header q-mb-lg">
-              <h2 class="section-title gradient-text">Quick Start</h2>
-              <p class="section-subtitle">
-                Choose an activity to continue your Japanese learning journey
-              </p>
-            </div>
-
-            <div class="action-cards-grid">
-              <div
-                class="action-card modern-card glass-card"
-                @click="handleComingSoon('Vocabulary Game')"
-                data-aos="zoom-in"
-                data-aos-delay="100"
-              >
-                <div class="action-content">
-                  <div class="action-icon-wrapper vocab-gradient">
-                    <q-icon name="quiz" size="3rem" class="text-black" />
-                  </div>
-                  <div class="action-info">
-                    <h3 class="action-title">Vocabulary Game</h3>
-                    <p class="action-description">
-                      Learn new Japanese words with interactive flashcards
-                    </p>
-                    <div class="coming-soon-badge glass-card">
-                      <q-icon name="schedule" size="sm" class="q-mr-xs" />
-                      Coming Soon
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              <div
-                class="action-card modern-card glass-card"
-                @click="handleComingSoon('Sentence Game')"
-                data-aos="zoom-in"
-                data-aos-delay="200"
-              >
-                <div class="action-content">
-                  <div class="action-icon-wrapper grammar-gradient">
-                    <q-icon name="reorder" size="3rem" class="text-black" />
-                  </div>
-                  <div class="action-info">
-                    <h3 class="action-title">Sentence Game</h3>
-                    <p class="action-description">
-                      Practice grammar with sentence building exercises
-                    </p>
-                    <div class="coming-soon-badge glass-card">
-                      <q-icon name="schedule" size="sm" class="q-mr-xs" />
-                      Coming Soon
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              <div
-                class="action-card modern-card glass-card"
-                @click="handleComingSoon('AI Tutor')"
-                data-aos="zoom-in"
-                data-aos-delay="300"
-              >
-                <div class="action-content">
-                  <div class="action-icon-wrapper ai-gradient">
-                    <q-icon name="psychology" size="3rem" class="text-black" />
-                  </div>
-                  <div class="action-info">
-                    <h3 class="action-title">AI Tutor</h3>
-                    <p class="action-description">
-                      Get personalized help from your AI learning assistant
-                    </p>
-                    <div class="coming-soon-badge glass-card">
-                      <q-icon name="schedule" size="sm" class="q-mr-xs" />
-                      Coming Soon
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              <div
-                class="action-card modern-card glass-card"
-                @click="handleComingSoon('Drawing Practice')"
-                data-aos="zoom-in"
-                data-aos-delay="400"
-              >
-                <div class="action-content">
-                  <div class="action-icon-wrapper writing-gradient">
-                    <q-icon name="draw" size="3rem" class="text-black" />
-                  </div>
-                  <div class="action-info">
-                    <h3 class="action-title">Writing Practice</h3>
-                    <p class="action-description">
-                      Practice writing Japanese characters with stroke order
-                    </p>
-                    <div class="coming-soon-badge glass-card">
-                      <q-icon name="schedule" size="sm" class="q-mr-xs" />
-                      Coming Soon
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
+      <!-- Achievement Teaser -->
+      <div class="achievement-teaser loading" v-if="achievementsLoading">
+        <div class="teaser-content">
+          <q-spinner size="24px" class="teaser-spinner" />
+          <span class="teaser-text">Loading achievements…</span>
         </div>
+      </div>
 
-        <!-- Modern Sidebar -->
-        <div class="sidebar-section">
-          <!-- Daily Goal Card -->
-          <div
-            class="modern-card glass-card section-card"
-            data-aos="fade-left"
-            data-aos-delay="200"
-          >
-            <div class="section-header q-mb-lg">
-              <h3 class="section-title gradient-text">Daily Goal</h3>
-              <p class="section-subtitle">Track your learning progress</p>
-            </div>
-
-            <div class="progress-circle-container">
-              <div class="progress-wrapper">
-                <q-circular-progress
-                  :value="dailyProgress"
-                  size="140px"
-                  :thickness="0.12"
-                  color="primary"
-                  track-color="rgba(255,255,255,0.2)"
-                  class="modern-progress"
-                  show-value
-                >
-                  <div class="progress-text">
-                    <div class="progress-percentage gradient-text">
-                      {{ Math.round(dailyProgress) }}%
-                    </div>
-                    <div class="progress-label">Complete</div>
-                  </div>
-                </q-circular-progress>
-              </div>
-
-              <div class="progress-stats q-mt-lg">
-                <div class="stat-row">
-                  <span class="stat-label">Today:</span>
-                  <span class="stat-value">{{ todayStudyTime }} min</span>
-                </div>
-                <div class="stat-row">
-                  <span class="stat-label">Goal:</span>
-                  <span class="stat-value">{{ dailyGoal }} min</span>
-                </div>
-                <div class="stat-row">
-                  <span class="stat-label">Remaining:</span>
-                  <span class="stat-value">{{ Math.max(0, dailyGoal - todayStudyTime) }} min</span>
-                </div>
-              </div>
-
-              <q-btn
-                unelevated
-                no-caps
-                label="Start Learning"
-                class="modern-btn start-btn q-mt-lg"
-                @click="handleComingSoon('Learning Session')"
-              >
-                <q-icon name="play_arrow" size="sm" class="q-ml-xs" />
-              </q-btn>
-            </div>
-          </div>
-
-          <!-- Modern Achievements Card -->
-          <div
-            class="modern-card glass-card section-card q-mt-lg"
-            data-aos="fade-left"
-            data-aos-delay="300"
-          >
-            <div class="section-header q-mb-lg">
-              <h3 class="section-title text-dark">Achievements</h3>
-              <p class="section-subtitle">Your learning milestones</p>
-            </div>
-
-            <div v-if="achievements.length === 0" class="empty-achievements">
-              <div class="empty-icon-wrapper">
-                <q-icon name="emoji_events" size="3rem" class="empty-icon floating" />
-              </div>
-              <h4 class="empty-title">No achievements yet</h4>
-              <p class="empty-subtitle">Start learning to earn your first achievement!</p>
-            </div>
-
-            <div v-else class="achievements-list">
-              <div
-                v-for="achievement in achievements"
-                :key="achievement.id"
-                class="achievement-item glass-card"
-              >
-                <div class="achievement-icon-wrapper">
-                  <q-icon :name="achievement.icon" size="lg" :class="`text-${achievement.color}`" />
-                </div>
-                <div class="achievement-content">
-                  <div class="achievement-title">{{ achievement.title }}</div>
-                  <div class="achievement-description">{{ achievement.description }}</div>
-                </div>
-              </div>
-            </div>
-          </div>
+      <div class="achievement-teaser error" v-else-if="achievementsError">
+        <div class="teaser-content">
+          <q-icon name="error_outline" class="teaser-icon error" />
+          <span class="teaser-text">{{ achievementsError }}</span>
         </div>
+        <q-btn flat dense color="primary" @click="fetchAchievements">
+          Retry
+          <q-icon name="refresh" size="xs" />
+        </q-btn>
+      </div>
+
+      <div class="achievement-teaser" v-else-if="achievements.length > 0">
+        <div class="teaser-content">
+          <q-icon name="emoji_events" class="teaser-icon" />
+          <span class="teaser-text">{{ achievements.length }} achievements unlocked</span>
+        </div>
+        <q-btn flat dense color="primary" @click="navigateTo('/progress')">
+          View all
+          <q-icon name="chevron_right" size="xs" />
+        </q-btn>
+      </div>
+
+      <!-- Empty state for achievements -->
+      <div class="achievement-teaser empty" v-else>
+        <div class="teaser-content">
+          <q-icon name="emoji_events" class="teaser-icon empty" />
+          <span class="teaser-text">Complete lessons to earn achievements!</span>
+        </div>
+        <q-btn flat dense color="primary" @click="navigateToLearn">
+          Start now
+          <q-icon name="chevron_right" size="xs" />
+        </q-btn>
       </div>
     </div>
   </q-page>
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import { useRouter } from 'vue-router';
 import { useQuasar } from 'quasar';
 import { useAuthStore } from '../stores/auth';
 import type { UserPreferences } from '../types/shared';
+import { DEFAULT_DAILY_LESSON_GOAL, DEFAULT_LESSON_DURATION_MINUTES } from '../types/shared';
+import { getApiUrl } from '../utils/api';
 
 interface Achievement {
   id: string;
@@ -301,6 +224,8 @@ const preferences = computed((): UserPreferences => {
   return (
     authStore.user?.preferences || {
       dailyGoal: 30,
+      dailyLessonGoal: DEFAULT_DAILY_LESSON_GOAL,
+      lessonDurationMinutes: DEFAULT_LESSON_DURATION_MINUTES,
       difficulty: 'Beginner',
       notifications: true,
       todayStudyTime: 0,
@@ -308,23 +233,120 @@ const preferences = computed((): UserPreferences => {
   );
 });
 
-const dailyGoal = computed(() => preferences.value.dailyGoal);
-const todayStudyTime = computed(() => preferences.value.todayStudyTime || 0);
+const todayStudyTime = computed(() => preferences.value.todayStudyTime ?? 0);
+const minutesToday = computed(() => Math.round(todayStudyTime.value));
+const dailyGoalMinutes = computed(() => preferences.value.dailyGoal ?? 30);
 
 const dailyProgress = computed(() => {
-  if (dailyGoal.value === 0) return 0;
-  return Math.min((todayStudyTime.value / dailyGoal.value) * 100, 100);
+  if (!dailyGoalMinutes.value) {
+    return 0;
+  }
+  return Math.min((minutesToday.value / dailyGoalMinutes.value) * 100, 100);
 });
 
-// Mock achievements - in real app, this would come from API
 const achievements = ref<Achievement[]>([]);
+const achievementsLoading = ref(false);
+const achievementsError = ref<string | null>(null);
+const achievementsAbort = ref<AbortController | null>(null);
 
-const handleComingSoon = (feature: string) => {
-  $q.notify({
-    type: 'info',
-    message: `${feature} is coming soon! Stay tuned for updates.`,
-    timeout: 3000,
-  });
+const mapAchievement = (raw: any): Achievement | null => {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+
+  const rawId = (raw as any).id ?? (raw as any).achievement_id;
+  const id =
+    typeof rawId === 'string' || typeof rawId === 'number' || typeof rawId === 'boolean'
+      ? String(rawId).trim()
+      : '';
+  if (!id) return null;
+
+  const rawTitle = (raw as any).name ?? (raw as any).title ?? rawId;
+  const title = typeof rawTitle === 'string' && rawTitle.trim() ? rawTitle : 'Achievement';
+
+  const rawDescription = (raw as any).description;
+  const description = typeof rawDescription === 'string' ? rawDescription : '';
+
+  const rawIcon = (raw as any).icon;
+  const icon = typeof rawIcon === 'string' && rawIcon.trim() ? rawIcon : 'emoji_events';
+
+  const rawColor = (raw as any).color;
+  const color = typeof rawColor === 'string' && rawColor.trim() ? rawColor : 'primary';
+
+  return {
+    id,
+    title,
+    description,
+    icon,
+    color,
+  };
+};
+
+const fetchAchievements = async () => {
+  const userId = authStore.user?.id;
+  if (!userId) {
+    achievements.value = [];
+    return;
+  }
+
+  achievementsLoading.value = true;
+  achievementsError.value = null;
+
+  if (achievementsAbort.value) {
+    achievementsAbort.value.abort();
+  }
+
+  const controller = new AbortController();
+  achievementsAbort.value = controller;
+
+  try {
+    const params = new URLSearchParams({ user_id: userId });
+    const res = await fetch(getApiUrl(`progress/analytics?${params.toString()}`), {
+      signal: controller.signal,
+    });
+    if (!res.ok) {
+      throw new Error(res.statusText || 'Failed to load achievements');
+    }
+    const data = await res.json();
+    const list: Achievement[] =
+      Array.isArray(data?.achievements) && data.achievements.length > 0
+        ? (data.achievements.map(mapAchievement).filter(Boolean) as Achievement[])
+        : Array.isArray(data?.userStats?.achievements)
+          ? (data.userStats.achievements.map(mapAchievement).filter(Boolean) as Achievement[])
+          : [];
+    achievements.value = list;
+  } catch (err) {
+    if ((err as any)?.name === 'AbortError') return;
+    console.error('Failed to fetch achievements:', err);
+    achievementsError.value = err instanceof Error ? err.message : 'Failed to load achievements';
+  } finally {
+    if (achievementsAbort.value === controller) {
+      achievementsLoading.value = false;
+      achievementsAbort.value = null;
+    }
+  }
+};
+
+const navigateTo = async (path: string) => {
+  try {
+    await router.push(path);
+  } catch (err) {
+    console.error('Navigation failed:', err);
+    $q.notify({
+      type: 'negative',
+      message: 'Navigation failed. Please try again.',
+      timeout: 2000,
+    });
+  }
+};
+
+const navigateToLearn = () => {
+  void router.push('/games');
+};
+
+const handleActionKeydown = (path: string, event: KeyboardEvent) => {
+  if (event.key === 'Enter' || event.key === ' ') {
+    event.preventDefault();
+    navigateTo(path);
+  }
 };
 
 onMounted(async () => {
@@ -337,519 +359,348 @@ onMounted(async () => {
   if (!authStore.isAuthenticated) {
     void router.push('/auth/login');
   }
+
+  void fetchAchievements();
+});
+
+onBeforeUnmount(() => {
+  if (achievementsAbort.value) {
+    achievementsAbort.value.abort();
+  }
 });
 </script>
 
 <style scoped>
-/* Modern Dashboard Styles */
-.modern-dashboard-page {
+/* Dashboard Layout */
+.dashboard-page {
   min-height: 100vh;
-  padding: 2rem;
-  background: transparent;
+  padding: 24px;
+  background: var(--bg-page);
 }
 
 .dashboard-container {
-  max-width: 1400px;
+  max-width: 800px;
   margin: 0 auto;
 }
 
-/* Modern Welcome Header */
-.modern-welcome-header {
-  position: relative;
-  margin-bottom: 3rem;
-}
-
-.welcome-content {
-  position: relative;
-  padding: 3rem 2rem;
+/* Hero Section - Daily Goal */
+.daily-goal-hero {
+  background: var(--bg-card);
+  border-radius: var(--border-radius-xl);
+  padding: 32px;
   text-align: center;
-  overflow: hidden;
-  border: 1px solid var(--glass-border);
+  box-shadow: var(--shadow-card);
+  margin-bottom: 24px;
 }
 
-.welcome-title {
-  font-size: 3rem;
-  font-weight: 800;
-  margin: 0 0 1rem 0;
-  letter-spacing: -1px;
+.hero-content {
+  margin-bottom: 24px;
 }
 
-.wave-emoji {
-  display: inline-block;
-  animation-delay: 1s;
+.hero-greeting {
+  font-size: 1.75rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin: 0 0 8px 0;
 }
 
-.welcome-subtitle {
-  font-size: 1.2rem;
-  color: #333;
+.hero-subtitle {
+  font-size: 1rem;
+  color: var(--text-secondary);
   margin: 0;
-  font-weight: 300;
 }
 
-body.body--dark .welcome-subtitle {
-  color: #e0e0e0;
+.progress-ring-wrapper {
+  margin-bottom: 24px;
 }
 
-/* Floating decorative circles */
-.welcome-decoration {
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  pointer-events: none;
-  overflow: hidden;
+.progress-ring {
+  margin: 0 auto;
 }
 
-.floating-circle {
-  position: absolute;
-  border-radius: 50%;
-  background: var(--gradient-warm);
-  opacity: 0.1;
-  animation: float 6s ease-in-out infinite;
+.ring-content {
+  text-align: center;
 }
 
-.circle-1 {
-  width: 80px;
-  height: 80px;
-  top: 20%;
-  left: 10%;
-  animation-delay: 0s;
+.ring-value {
+  font-size: 2rem;
+  font-weight: 700;
+  color: var(--color-primary);
+  line-height: 1.2;
 }
 
-.circle-2 {
-  width: 120px;
-  height: 120px;
-  top: 60%;
-  right: 15%;
-  animation-delay: 2s;
+.ring-label {
+  font-size: 0.85rem;
+  color: var(--text-secondary);
 }
 
-.circle-3 {
-  width: 60px;
-  height: 60px;
-  bottom: 20%;
-  left: 80%;
-  animation-delay: 4s;
+.start-learning-btn {
+  padding: 14px 32px;
+  font-size: 1rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
 }
 
-/* Stats Grid */
-.stats-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-  gap: 1.5rem;
-  margin-bottom: 3rem;
-}
-
-.stat-card {
-  border: 1px solid var(--glass-border);
-  cursor: default;
-}
-
-.stat-content {
-  padding: 1.5rem;
+/* Stats Row */
+.stats-row {
   display: flex;
-  align-items: center;
-  gap: 1rem;
-}
-
-.stat-icon-wrapper {
-  width: 80px;
-  height: 80px;
-  border-radius: var(--border-radius-md);
-  display: flex;
-  align-items: center;
+  gap: 12px;
+  margin-bottom: 32px;
+  flex-wrap: wrap;
   justify-content: center;
-  box-shadow: var(--shadow-soft);
 }
 
-.level-gradient {
-  background: var(--gradient-success);
+.stat-badge {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 16px;
+  background: var(--bg-card);
+  border-radius: var(--border-radius-md);
+  box-shadow: var(--shadow-card);
+  min-width: 140px;
+  justify-content: center;
 }
-.xp-gradient {
-  background: var(--gradient-warm);
+
+.stat-badge .stat-icon {
+  font-size: 28px;
 }
-.streak-gradient {
-  background: linear-gradient(135deg, #ff6b6b 0%, #ffa500 100%);
+
+.stat-badge .stat-icon.streak {
+  color: var(--color-streak);
 }
-.time-gradient {
-  background: var(--gradient-primary);
+
+.stat-badge .stat-icon.xp {
+  color: var(--color-xp);
+}
+
+.stat-badge .stat-icon.time {
+  color: var(--color-purple);
 }
 
 .stat-info {
-  flex: 1;
-}
-
-.stat-number {
-  font-size: 2.5rem;
-  font-weight: 800;
-  line-height: 1;
-  margin-bottom: 0.25rem;
-}
-
-.stat-label {
-  font-size: 0.9rem;
-  color: #555;
-  font-weight: 500;
-}
-
-body.body--dark .stat-label {
-  color: #b8b8b8;
-}
-
-/* Main Content Grid */
-.main-content-grid {
-  display: grid;
-  grid-template-columns: 1fr 350px;
-  gap: 2rem;
-  align-items: start;
-}
-
-/* Section Cards */
-.section-card {
-  padding: 2rem;
-  border: 1px solid var(--glass-border);
-}
-
-.section-header {
-  text-align: center;
-}
-
-.section-title {
-  font-size: 1.8rem;
-  font-weight: 700;
-  margin: 0 0 0.5rem 0;
-}
-
-.section-subtitle {
-  color: #555;
-  margin: 0;
-  font-size: 1rem;
-}
-
-body.body--dark .section-subtitle {
-  color: #b8b8b8;
-}
-
-/* Action Cards Grid */
-.action-cards-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-  gap: 1.5rem;
-}
-
-.action-card {
-  border: 1px solid var(--glass-border);
-  cursor: pointer;
-  position: relative;
-  overflow: hidden;
-}
-
-.action-card::before {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: -100%;
-  width: 100%;
-  height: 100%;
-  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.1), transparent);
-  transition: left 0.5s;
-}
-
-.action-card:hover::before {
-  left: 100%;
-}
-
-.action-content {
-  padding: 2rem;
-  text-align: center;
-}
-
-.action-icon-wrapper {
-  width: 80px;
-  height: 80px;
-  margin: 0 auto 1.5rem;
-  border-radius: var(--border-radius-md);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  box-shadow: var(--shadow-medium);
-}
-
-.vocab-gradient {
-  background: var(--gradient-primary);
-}
-.grammar-gradient {
-  background: var(--gradient-secondary);
-}
-.ai-gradient {
-  background: var(--gradient-success);
-}
-.writing-gradient {
-  background: var(--gradient-warm);
-}
-
-.action-title {
-  font-size: 1.3rem;
-  font-weight: 600;
-  margin: 0 0 0.75rem 0;
-  color: #000;
-}
-
-body.body--dark .action-title {
-  color: #fff;
-}
-
-.action-description {
-  color: #555;
-  font-size: 0.9rem;
-  line-height: 1.5;
-  margin: 0 0 1.5rem 0;
-}
-
-body.body--dark .action-description {
-  color: #b8b8b8;
-}
-
-.coming-soon-badge {
-  display: inline-flex;
-  align-items: center;
-  padding: 0.5rem 1rem;
-  border-radius: var(--border-radius-xl);
-  font-size: 0.8rem;
-  font-weight: 500;
-  color: #555;
-  border: 1px solid var(--glass-border);
-}
-
-body.body--dark .coming-soon-badge {
-  color: #b8b8b8;
-}
-
-/* Sidebar Styles */
-.sidebar-section {
   display: flex;
   flex-direction: column;
-}
-
-/* Progress Circle */
-.progress-circle-container {
-  text-align: center;
-}
-
-.progress-wrapper {
-  position: relative;
-  display: inline-block;
-}
-
-.progress-text {
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-}
-
-.progress-percentage {
-  font-size: 1.5rem;
-  font-weight: 700;
-  line-height: 1;
-}
-
-.progress-label {
-  font-size: 0.8rem;
-  color: #555;
-  margin-top: 0.25rem;
-}
-
-body.body--dark .progress-label {
-  color: #b8b8b8;
-}
-
-.progress-stats {
-  background: rgba(255, 255, 255, 0.1);
-  border-radius: var(--border-radius-sm);
-  padding: 1rem;
-  border: 1px solid var(--glass-border);
-}
-
-body.body--dark .progress-stats {
-  background: rgba(255, 255, 255, 0.05);
-}
-
-.stat-row {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 0.5rem;
-}
-
-.stat-row:last-child {
-  margin-bottom: 0;
-}
-
-.stat-label {
-  color: #555;
-  font-size: 0.9rem;
-}
-
-body.body--dark .stat-row .stat-label {
-  color: #b8b8b8;
+  align-items: flex-start;
 }
 
 .stat-value {
-  font-weight: 600;
-  color: #000;
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  line-height: 1.2;
 }
 
-body.body--dark .stat-value {
-  color: #fff;
+.stat-label {
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  text-transform: lowercase;
 }
 
-.start-btn {
-  width: 100%;
-  background: var(--gradient-primary);
-  color: #fff;
-  font-weight: 600;
-  padding: 0.75rem 1.5rem;
-  border-radius: var(--border-radius-md);
+.level-badge .stat-info {
+  align-items: center;
 }
 
-body.body--dark .start-btn {
-  color: #fff;
-}
-
-/* Empty Achievements */
-.empty-achievements {
-  text-align: center;
-  padding: 2rem 1rem;
-}
-
-.empty-icon-wrapper {
-  margin-bottom: 1rem;
-}
-
-.empty-icon {
-  color: #777;
-}
-
-body.body--dark .empty-icon {
-  color: #888;
-}
-
-.empty-title {
-  color: #333;
+.level-circle {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: var(--color-level);
+  color: white;
   font-size: 1.1rem;
-  font-weight: 600;
-  margin: 0 0 0.5rem 0;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
-body.body--dark .empty-title {
-  color: #e0e0e0;
+/* Section Header */
+.section-header {
+  margin-bottom: 16px;
 }
 
-.empty-subtitle {
-  color: #555;
-  font-size: 0.9rem;
+.section-title {
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: var(--text-primary);
   margin: 0;
 }
 
-body.body--dark .empty-subtitle {
-  color: #b8b8b8;
+/* Actions Grid */
+.actions-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 16px;
+  margin-bottom: 24px;
 }
 
-/* Achievement Items */
-.achievements-list {
-  display: flex;
-  flex-direction: column;
-  gap: 1rem;
+.action-card {
+  background: var(--glass-bg);
+  backdrop-filter: var(--glass-backdrop);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--border-radius-lg);
+  padding: 20px;
+  text-align: center;
+  cursor: pointer;
+  transition:
+    transform 0.2s,
+    box-shadow 0.2s;
 }
 
-.achievement-item {
+.action-card:focus-visible {
+  outline: 3px solid var(--color-primary);
+  outline-offset: 4px;
+}
+
+.action-card:hover {
+  transform: translateY(-4px);
+  box-shadow: var(--shadow-card-hover);
+}
+
+.action-icon {
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
   display: flex;
   align-items: center;
-  padding: 1rem;
-  border: 1px solid var(--glass-border);
-  border-radius: var(--border-radius-sm);
-}
-
-.achievement-icon-wrapper {
-  margin-right: 1rem;
-}
-
-.achievement-content {
-  flex: 1;
-}
-
-.achievement-title {
-  font-weight: 600;
+  justify-content: center;
+  margin: 0 auto 12px;
+  font-size: 24px;
   color: white;
-  margin-bottom: 0.25rem;
 }
 
-.achievement-description {
+.action-icon.vocab {
+  background: var(--color-vocab);
+}
+
+.action-icon.grammar {
+  background: var(--color-grammar);
+}
+
+.action-icon.chat {
+  background: var(--color-chat);
+}
+
+.action-icon.writing {
+  background: var(--color-writing);
+}
+
+.action-title {
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 4px;
+}
+
+.action-desc {
   font-size: 0.8rem;
-  color: #555;
+  color: var(--text-secondary);
+  margin-bottom: 12px;
 }
 
-body.body--dark .achievement-description {
-  color: #b8b8b8;
+.action-btn {
+  font-weight: 600;
+  text-transform: none;
 }
 
-/* Responsive Design */
-@media (max-width: 1200px) {
-  .main-content-grid {
-    grid-template-columns: 1fr;
-    grid-template-rows: auto auto;
-  }
-
-  .sidebar-section {
-    grid-row: 1;
-  }
+/* Achievement Teaser */
+.achievement-teaser {
+  background: var(--bg-card);
+  border-radius: var(--border-radius-md);
+  padding: 16px 20px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  box-shadow: var(--shadow-card);
 }
 
-@media (max-width: 768px) {
-  .modern-dashboard-page {
-    padding: 1rem;
-  }
-
-  .welcome-content {
-    padding: 2rem 1rem;
-  }
-
-  .welcome-title {
-    font-size: 2rem;
-  }
-
-  .stats-grid {
-    grid-template-columns: 1fr;
-    gap: 1rem;
-  }
-
-  .action-cards-grid {
-    grid-template-columns: 1fr;
-  }
-
-  .section-card {
-    padding: 1.5rem;
-  }
+.achievement-teaser.empty {
+  background: var(--glass-bg-subtle);
+  border: 1px dashed var(--glass-border);
+  box-shadow: none;
 }
 
-@media (max-width: 480px) {
-  .welcome-title {
+.teaser-content {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.teaser-icon {
+  font-size: 24px;
+  color: var(--color-streak);
+}
+
+.teaser-icon.empty {
+  color: var(--text-secondary);
+}
+
+.teaser-text {
+  font-size: 0.9rem;
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+.achievement-teaser.empty .teaser-text {
+  color: var(--text-secondary);
+}
+
+/* Responsive */
+@media (max-width: 600px) {
+  .dashboard-page {
+    padding: 16px;
+  }
+
+  .daily-goal-hero {
+    padding: 24px 16px;
+  }
+
+  .hero-greeting {
     font-size: 1.5rem;
   }
 
-  .stat-content {
-    padding: 1rem;
+  .stats-row {
+    gap: 8px;
   }
 
-  .stat-icon-wrapper {
-    width: 60px;
-    height: 60px;
+  .stat-badge {
+    min-width: 120px;
+    padding: 10px 12px;
   }
 
-  .action-content {
-    padding: 1.5rem;
+  .stat-badge .stat-icon {
+    font-size: 24px;
+  }
+
+  .stat-value {
+    font-size: 1.1rem;
+  }
+
+  .actions-grid {
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+  }
+
+  .action-card {
+    padding: 16px;
+  }
+
+  .action-icon {
+    width: 48px;
+    height: 48px;
+    font-size: 20px;
+  }
+}
+
+@media (max-width: 400px) {
+  .stats-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .stat-badge {
+    min-width: auto;
   }
 }
 </style>

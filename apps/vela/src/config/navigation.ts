@@ -1,56 +1,78 @@
+// Consolidated navigation - Duolingo-inspired simplicity
+// Icons use Quasar's default Material Icons set (name strings like 'home', 'chat')
+
+export type RouteNavigationItem = {
+  type: 'route';
+  name: string;
+  icon: string;
+  path: string;
+  requiresAuth?: boolean;
+};
+
+export type ActionNavigationItem = {
+  type: 'action';
+  name: string;
+  icon: string;
+  action: 'logout';
+};
+
+export type NavigationItem = RouteNavigationItem | ActionNavigationItem;
+
 export const mainNavigation = [
   {
+    type: 'route',
     name: 'Home',
-    icon: 'fas fa-tachometer-alt',
+    icon: 'home',
     path: '/',
     requiresAuth: true,
   },
   {
-    name: 'Vocabulary',
-    icon: 'fas fa-book',
-    path: '/vocabulary',
-    requiresAuth: true,
-  },
-  {
-    name: 'Games',
-    icon: 'fas fa-gamepad',
+    type: 'route',
+    name: 'Learn',
+    icon: 'school',
     path: '/games',
     requiresAuth: true,
   },
   {
+    type: 'route',
     name: 'Chat',
-    icon: 'fas fa-comments',
+    icon: 'chat',
     path: '/chat',
     requiresAuth: true,
   },
   {
+    type: 'route',
     name: 'Progress',
-    icon: 'fas fa-chart-line',
+    icon: 'bar_chart',
     path: '/progress',
     requiresAuth: true,
   },
   {
-    name: 'My Dictionaries',
-    icon: 'fas fa-bookmark',
+    type: 'route',
+    name: 'My Words',
+    icon: 'bookmark',
     path: '/my-dictionaries',
     requiresAuth: true,
   },
-];
+] satisfies RouteNavigationItem[];
 
 export const userNavigation = [
   {
+    type: 'route',
     name: 'Profile',
-    icon: 'fas fa-user',
+    icon: 'person',
     path: '/profile',
   },
   {
+    type: 'route',
     name: 'Settings',
-    icon: 'fas fa-cog',
+    icon: 'settings',
     path: '/settings',
   },
   {
+    type: 'action',
     name: 'Logout',
-    icon: 'fas fa-sign-out-alt',
-    path: '/logout',
+    icon: 'logout',
+    action: 'logout',
   },
-];
+] satisfies NavigationItem[];
