@@ -85,7 +85,7 @@
                   clickable
                   dense
                   :to="item.type === 'route' ? item.path : undefined"
-                  @click="item.type === 'action' && item.action === 'logout' && handleLogout()"
+                  @click="onUserItemClick(item)"
                 >
                   <q-item-section avatar>
                     <q-icon :name="item.icon" size="sm" />
@@ -224,6 +224,12 @@ const toggleMini = () => {
 const handleLogout = async () => {
   await authStore.signOut();
   void router.push('/auth/login');
+};
+
+const onUserItemClick = (item: (typeof userNavigation)[0]) => {
+  if (item.type === 'action' && item.action === 'logout') {
+    handleLogout();
+  }
 };
 
 // Open drawer by default on desktop, closed on mobile
