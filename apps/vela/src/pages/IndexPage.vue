@@ -82,8 +82,7 @@
           role="button"
           tabindex="0"
           @click="navigateTo('/games/vocabulary')"
-          @keydown.enter="navigateTo('/games/vocabulary')"
-          @keydown.space.prevent="navigateTo('/games/vocabulary')"
+          @keydown="handleActionKeydown('/games/vocabulary', $event)"
         >
           <div class="action-icon vocab">
             <q-icon name="quiz" />
@@ -101,8 +100,7 @@
           role="button"
           tabindex="0"
           @click="navigateTo('/games/sentence')"
-          @keydown.enter="navigateTo('/games/sentence')"
-          @keydown.space.prevent="navigateTo('/games/sentence')"
+          @keydown="handleActionKeydown('/games/sentence', $event)"
         >
           <div class="action-icon grammar">
             <q-icon name="reorder" />
@@ -120,8 +118,7 @@
           role="button"
           tabindex="0"
           @click="navigateTo('/chat')"
-          @keydown.enter="navigateTo('/chat')"
-          @keydown.space.prevent="navigateTo('/chat')"
+          @keydown="handleActionKeydown('/chat', $event)"
         >
           <div class="action-icon chat">
             <q-icon name="chat" />
@@ -139,8 +136,7 @@
           role="button"
           tabindex="0"
           @click="navigateTo('/my-dictionaries')"
-          @keydown.enter="navigateTo('/my-dictionaries')"
-          @keydown.space.prevent="navigateTo('/my-dictionaries')"
+          @keydown="handleActionKeydown('/my-dictionaries', $event)"
         >
           <div class="action-icon writing">
             <q-icon name="bookmark" />
@@ -304,6 +300,13 @@ const navigateTo = (path: string) => {
 
 const navigateToLearn = () => {
   void router.push('/games');
+};
+
+const handleActionKeydown = (path: string, event: KeyboardEvent) => {
+  if (event.key === 'Enter' || event.key === ' ') {
+    event.preventDefault();
+    navigateTo(path);
+  }
 };
 
 onMounted(async () => {

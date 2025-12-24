@@ -16,7 +16,7 @@
       <div class="row q-col-gutter-lg">
         <!-- Progress Chart Section -->
         <div class="col-12 col-lg-8">
-          <q-card class="full-height">
+          <q-card class="full-height progress-card">
             <q-card-section>
               <div class="text-h6 q-mb-md">Progress Over Time</div>
               <div class="chart-wrapper">
@@ -36,7 +36,7 @@
         <div class="col-12 col-lg-4">
           <div class="sidebar-content">
             <!-- Skill Categories -->
-            <q-card class="q-mb-lg">
+            <q-card class="q-mb-lg progress-card">
               <q-card-section>
                 <div class="text-h6 q-mb-md">Skill Categories</div>
                 <div class="skills-list">
@@ -52,7 +52,7 @@
             </q-card>
 
             <!-- Recent Achievements -->
-            <q-card>
+            <q-card class="progress-card">
               <q-card-section>
                 <div class="text-h6 q-mb-md">Recent Achievements</div>
                 <div v-if="recentAchievements.length === 0" class="text-grey-7 text-center q-py-md">
@@ -170,8 +170,8 @@ onMounted(async () => {
   height: 100%;
 }
 
-// Card styling
-:deep(.q-card) {
+// Card styling scoped to progress cards
+.progress-card {
   background: var(--bg-card);
   border-radius: var(--border-radius-lg);
   box-shadow: var(--shadow-card);

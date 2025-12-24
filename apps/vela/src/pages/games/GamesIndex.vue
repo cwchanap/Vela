@@ -35,7 +35,7 @@
           </q-btn>
         </div>
 
-        <div class="game-card coming-soon" @click="showComingSoon('Listening')">
+        <div class="game-card coming-soon" aria-disabled="true">
           <div class="game-icon listening">
             <q-icon name="headphones" />
           </div>
@@ -46,7 +46,7 @@
           <q-chip color="grey-6" text-color="white" size="sm"> Coming Soon </q-chip>
         </div>
 
-        <div class="game-card coming-soon" @click="showComingSoon('Writing')">
+        <div class="game-card coming-soon" aria-disabled="true">
           <div class="game-icon writing">
             <q-icon name="draw" />
           </div>
@@ -88,10 +88,8 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue';
 import { useRouter } from 'vue-router';
-import { useQuasar } from 'quasar';
 
 const router = useRouter();
-const $q = useQuasar();
 
 // Replace with real data source (store/API) when available
 const gamesCompletedToday = ref(0);
@@ -108,14 +106,6 @@ const challengeText = computed(
 
 function navigateToGame(gameType: string) {
   void router.push(`/games/${gameType}`);
-}
-
-function showComingSoon(feature: string) {
-  $q.notify({
-    type: 'info',
-    message: `${feature} is coming soon!`,
-    timeout: 2000,
-  });
 }
 </script>
 
@@ -178,7 +168,8 @@ function showComingSoon(feature: string) {
 
 .game-card.coming-soon {
   opacity: 0.7;
-  cursor: default;
+  cursor: not-allowed;
+  pointer-events: none;
 }
 
 .game-card.coming-soon:hover {
