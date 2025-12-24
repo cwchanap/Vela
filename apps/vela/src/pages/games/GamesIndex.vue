@@ -96,8 +96,11 @@ const gamesCompletedToday = ref(0);
 const dailyChallengeGoal = ref(3);
 
 const challengeProgress = computed(() => {
-  if (!dailyChallengeGoal.value) return 0;
-  return Math.min(gamesCompletedToday.value / dailyChallengeGoal.value, 1);
+  const goal = dailyChallengeGoal.value || 0;
+  if (goal <= 0) return 0;
+  const ratio = gamesCompletedToday.value / goal;
+  if (!Number.isFinite(ratio)) return 0;
+  return Math.min(ratio, 1);
 });
 
 const challengeText = computed(

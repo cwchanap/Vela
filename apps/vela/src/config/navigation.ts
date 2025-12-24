@@ -1,4 +1,5 @@
 // Consolidated navigation - Duolingo-inspired simplicity
+// Icons use Quasar's default Material Icons set (name strings like 'home', 'chat')
 export const mainNavigation = [
   {
     name: 'Home',

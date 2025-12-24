@@ -81,6 +81,7 @@
           class="action-card"
           role="button"
           tabindex="0"
+          aria-label="Navigate to Vocabulary game"
           @click="navigateTo('/games/vocabulary')"
           @keydown="handleActionKeydown('/games/vocabulary', $event)"
         >
@@ -99,6 +100,7 @@
           class="action-card"
           role="button"
           tabindex="0"
+          aria-label="Navigate to Sentence game"
           @click="navigateTo('/games/sentence')"
           @keydown="handleActionKeydown('/games/sentence', $event)"
         >
@@ -117,6 +119,7 @@
           class="action-card"
           role="button"
           tabindex="0"
+          aria-label="Open AI Tutor chat"
           @click="navigateTo('/chat')"
           @keydown="handleActionKeydown('/chat', $event)"
         >
@@ -135,6 +138,7 @@
           class="action-card"
           role="button"
           tabindex="0"
+          aria-label="View saved vocabulary"
           @click="navigateTo('/my-dictionaries')"
           @keydown="handleActionKeydown('/my-dictionaries', $event)"
         >
@@ -200,6 +204,7 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import { useRouter } from 'vue-router';
 import { useAuthStore } from '../stores/auth';
 import type { UserPreferences } from '../types/shared';
+import { DEFAULT_DAILY_LESSON_GOAL, DEFAULT_LESSON_DURATION_MINUTES } from '../types/shared';
 import { getApiUrl } from '../utils/api';
 
 interface Achievement {
@@ -217,8 +222,8 @@ const preferences = computed((): UserPreferences => {
   return (
     authStore.user?.preferences || {
       dailyGoal: 30,
-      dailyLessonGoal: 5,
-      lessonDurationMinutes: 6,
+      dailyLessonGoal: DEFAULT_DAILY_LESSON_GOAL,
+      lessonDurationMinutes: DEFAULT_LESSON_DURATION_MINUTES,
       difficulty: 'Beginner',
       notifications: true,
       todayStudyTime: 0,

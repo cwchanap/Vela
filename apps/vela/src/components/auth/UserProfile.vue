@@ -270,6 +270,7 @@ import { ref, computed, reactive, onMounted } from 'vue';
 import { useRouter } from 'vue-router';
 import { useQuasar } from 'quasar';
 import { useAuthStore } from '../../stores/auth';
+import { DEFAULT_DAILY_LESSON_GOAL, DEFAULT_LESSON_DURATION_MINUTES } from '../../types/shared';
 
 // Composables
 const router = useRouter();
@@ -286,8 +287,8 @@ const editForm = reactive({
   username: '',
   native_language: 'en',
   dailyGoal: 30,
-  dailyLessonGoal: 5,
-  lessonDurationMinutes: 6,
+  dailyLessonGoal: DEFAULT_DAILY_LESSON_GOAL,
+  lessonDurationMinutes: DEFAULT_LESSON_DURATION_MINUTES,
   difficulty: 'Beginner',
   notifications: true,
   avatar_url: '',
@@ -303,8 +304,8 @@ const preferences = computed(() => {
   return (
     authStore.user?.preferences || {
       dailyGoal: 30,
-      dailyLessonGoal: 5,
-      lessonDurationMinutes: 6,
+      dailyLessonGoal: DEFAULT_DAILY_LESSON_GOAL,
+      lessonDurationMinutes: DEFAULT_LESSON_DURATION_MINUTES,
       difficulty: 'Beginner',
       notifications: true,
     }
@@ -361,8 +362,9 @@ const startEdit = () => {
   editForm.username = authStore.user?.username || '';
   editForm.native_language = authStore.user?.native_language || 'en';
   editForm.dailyGoal = preferences.value.dailyGoal || 30;
-  editForm.dailyLessonGoal = preferences.value.dailyLessonGoal ?? 5;
-  editForm.lessonDurationMinutes = preferences.value.lessonDurationMinutes ?? 6;
+  editForm.dailyLessonGoal = preferences.value.dailyLessonGoal ?? DEFAULT_DAILY_LESSON_GOAL;
+  editForm.lessonDurationMinutes =
+    preferences.value.lessonDurationMinutes ?? DEFAULT_LESSON_DURATION_MINUTES;
   editForm.difficulty = preferences.value.difficulty || 'Beginner';
   editForm.notifications = preferences.value.notifications !== false;
   const fallbackAvatar: string = avatarOptions[0] ?? '';
