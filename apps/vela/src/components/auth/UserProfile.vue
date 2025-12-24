@@ -62,7 +62,7 @@
 
         <div class="row items-center">
           <div class="col-4 text-weight-medium">Daily Goal:</div>
-          <div class="col">{{ preferences.dailyGoal || 'Not set' }} minutes</div>
+          <div class="col">{{ preferences.dailyGoal ?? 'Not set' }} minutes</div>
         </div>
 
         <div class="row items-center">
@@ -145,19 +145,25 @@
 
         <q-input
           v-model.number="editForm.dailyLessonGoal"
-          label="Daily Lesson Goal (lessons)"
+          label="Daily Lesson Goal (lessons) *"
           type="number"
           outlined
-          :rules="[(val) => !val || (val > 0 && val <= 50) || 'Goal must be between 1-50 lessons']"
+          :rules="[
+            (val) =>
+              (val !== null && val !== undefined && val !== '') || 'Daily lesson goal is required',
+            (val) => (val > 0 && val <= 50) || 'Goal must be between 1-50 lessons',
+          ]"
         />
 
         <q-input
           v-model.number="editForm.lessonDurationMinutes"
-          label="Lesson Duration (minutes)"
+          label="Lesson Duration (minutes) *"
           type="number"
           outlined
           :rules="[
-            (val) => !val || (val > 0 && val <= 120) || 'Duration must be between 1-120 minutes',
+            (val) =>
+              (val !== null && val !== undefined && val !== '') || 'Lesson duration is required',
+            (val) => (val > 0 && val <= 120) || 'Duration must be between 1-120 minutes',
           ]"
         />
 
@@ -361,7 +367,7 @@ const startEdit = () => {
   // Populate form with current values
   editForm.username = authStore.user?.username || '';
   editForm.native_language = authStore.user?.native_language || 'en';
-  editForm.dailyGoal = preferences.value.dailyGoal || 30;
+  editForm.dailyGoal = preferences.value.dailyGoal ?? 30;
   editForm.dailyLessonGoal = preferences.value.dailyLessonGoal ?? DEFAULT_DAILY_LESSON_GOAL;
   editForm.lessonDurationMinutes =
     preferences.value.lessonDurationMinutes ?? DEFAULT_LESSON_DURATION_MINUTES;
