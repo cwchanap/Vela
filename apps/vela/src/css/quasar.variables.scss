@@ -16,11 +16,12 @@
 $primary: #1cb0f6; // Vibrant blue - main brand color
 $secondary: #58cc02; // Success green - XP, correct answers
 $accent: #ff9600; // Orange - streaks, warnings
+$error-color: #ff4b4b; // Error red - mistakes, alerts
 
 $dark: #1e1e1e;
 $dark-page: #131f24; // Slightly blue-tinted dark for better contrast
 
-$positive: #58cc02; // Same as secondary - success states
-$negative: #ff4b4b; // Error red - mistakes, alerts
-$info: #1cb0f6; // Same as primary
-$warning: #ff9600; // Same as accent - warnings, streaks
+$positive: $secondary; // Success states
+$negative: $error-color; // Error red - mistakes, alerts
+$info: $primary; // Information states
+$warning: $accent; // Warnings, streaks
