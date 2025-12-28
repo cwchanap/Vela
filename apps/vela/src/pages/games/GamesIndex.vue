@@ -124,7 +124,7 @@ function navigateToGame(gameType: string) {
 }
 
 const handleGameCardKeydown = (gameType: string, event: KeyboardEvent) => {
-  if (event.key === 'Enter' || event.key === ' ') {
+  if (event.key === 'Enter' || event.key === ' ' || event.code === 'Space') {
     event.preventDefault();
     navigateToGame(gameType);
   }

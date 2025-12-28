@@ -3,16 +3,18 @@ import { zValidator } from '@hono/zod-validator';
 import { z } from 'zod';
 import type { Env } from '../types';
 import { profiles as profilesDB } from '../dynamodb';
-
-const DEFAULT_DAILY_LESSON_GOAL = 5;
-const DEFAULT_LESSON_DURATION_MINUTES = 6;
+import { DEFAULT_DAILY_LESSON_GOAL, DEFAULT_LESSON_DURATION_MINUTES } from '@vela/common';
 
 const PreferencesSchema = z
   .object({
-    dailyLessonGoal: z.coerce.number().int().min(1).max(50),
-    lessonDurationMinutes: z.coerce.number().int().min(1).max(120),
+    dailyGoal: z.coerce.number().int().min(1).max(1440).optional(),
+    dailyLessonGoal: z.coerce.number().int().min(1).max(50).optional(),
+    lessonDurationMinutes: z.coerce.number().int().min(1).max(120).optional(),
+    difficulty: z.enum(['Beginner', 'Intermediate', 'Advanced']).optional(),
+    notifications: z.boolean().optional(),
+    todayStudyTime: z.coerce.number().optional(),
   })
-  .catchall(z.unknown());
+  .strict();
 
 // Validation schemas
 const UserIdQuerySchema = z.object({
@@ -35,11 +37,18 @@ const normalizeRequiredPreferenceNumber = (
   fallback: number,
   min: number,
   max: number,
+  fieldName: string,
 ) => {
   const parsedValue = typeof value === 'number' ? value : Number(value);
-  if (!Number.isFinite(parsedValue)) return fallback;
+  if (!Number.isFinite(parsedValue)) {
+    console.warn(`Invalid ${fieldName}: ${value}. Using fallback: ${fallback}`);
+    return fallback;
+  }
   const normalized = Math.trunc(parsedValue);
-  if (normalized < min || normalized > max) return fallback;
+  if (normalized < min || normalized > max) {
+    console.warn(`Out of range ${fieldName}: ${normalized}. Using fallback: ${fallback}`);
+    return fallback;
+  }
   return normalized;
 };
 
@@ -52,12 +61,14 @@ const normalizePreferences = (preferences: unknown) => {
       DEFAULT_DAILY_LESSON_GOAL,
       1,
       50,
+      'dailyLessonGoal',
     ),
     lessonDurationMinutes: normalizeRequiredPreferenceNumber(
       base.lessonDurationMinutes,
       DEFAULT_LESSON_DURATION_MINUTES,
       1,
       120,
+      'lessonDurationMinutes',
     ),
   };
 };

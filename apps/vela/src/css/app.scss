@@ -25,10 +25,25 @@
   --shadow-button: 0 4px 0 rgba(0, 0, 0, 0.1);
   --shadow-soft: 0 4px 20px rgba(0, 0, 0, 0.1);
   --shadow-medium: 0 8px 30px rgba(0, 0, 0, 0.12);
-  --shadow-chat-user: 0 4px 12px color-mix(in srgb, var(--color-primary) 20%, transparent);
-  --shadow-chat-ai: 0 4px 12px color-mix(in srgb, var(--color-chat) 20%, transparent);
-  --nav-item-hover-bg: color-mix(in srgb, var(--color-primary) 8%, transparent);
-  --nav-item-active-bg: color-mix(in srgb, var(--color-primary) 12%, transparent);
+  --shadow-chat-user: 0 4px 12px rgba(28, 176, 246, 0.2);
+  @supports (color: color-mix(in srgb, red, blue)) {
+    --shadow-chat-user: 0 4px 12px color-mix(in srgb, var(--color-primary) 20%, transparent);
+  }
+
+  --shadow-chat-ai: 0 4px 12px rgba(88, 204, 2, 0.2);
+  @supports (color: color-mix(in srgb, red, blue)) {
+    --shadow-chat-ai: 0 4px 12px color-mix(in srgb, var(--color-chat) 20%, transparent);
+  }
+
+  --nav-item-hover-bg: rgba(28, 176, 246, 0.08);
+  @supports (color: color-mix(in srgb, red, blue)) {
+    --nav-item-hover-bg: color-mix(in srgb, var(--color-primary) 8%, transparent);
+  }
+
+  --nav-item-active-bg: rgba(28, 176, 246, 0.12);
+  @supports (color: color-mix(in srgb, red, blue)) {
+    --nav-item-active-bg: color-mix(in srgb, var(--color-primary) 12%, transparent);
+  }
 
   // Border radius
   --border-radius-sm: 8px;

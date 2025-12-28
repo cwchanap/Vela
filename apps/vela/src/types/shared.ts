@@ -1,7 +1,6 @@
 // Shared types used across the application
 // Canonical defaults for optional UserPreferences fields
-export const DEFAULT_DAILY_LESSON_GOAL = 5;
-export const DEFAULT_LESSON_DURATION_MINUTES = 6;
+export { DEFAULT_DAILY_LESSON_GOAL, DEFAULT_LESSON_DURATION_MINUTES } from '@vela/common';
 
 export interface UserPreferences {
   dailyGoal: number;

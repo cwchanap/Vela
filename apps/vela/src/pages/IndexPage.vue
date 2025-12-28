@@ -201,7 +201,7 @@
 
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
-import { useRouter } from 'vue-router';
+import { useRouter, isNavigationFailure, NavigationFailureType } from 'vue-router';
 import { useQuasar } from 'quasar';
 import { useAuthStore } from '../stores/auth';
 import type { UserPreferences } from '../types/shared';
@@ -253,10 +253,13 @@ const mapAchievement = (raw: any): Achievement | null => {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
 
   const rawId = (raw as any).id ?? (raw as any).achievement_id;
-  const id =
-    typeof rawId === 'string' || typeof rawId === 'number' || typeof rawId === 'boolean'
-      ? String(rawId).trim()
-      : '';
+  let id: string | null = null;
+  if (typeof rawId === 'string') {
+    const trimmed = rawId.trim();
+    id = trimmed || null;
+  } else if (typeof rawId === 'number' && Number.isFinite(rawId)) {
+    id = String(rawId);
+  }
   if (!id) return null;
 
   const rawTitle = (raw as any).name ?? (raw as any).title ?? rawId;
@@ -306,12 +309,12 @@ const fetchAchievements = async () => {
       throw new Error(res.statusText || 'Failed to load achievements');
     }
     const data = await res.json();
-    const list: Achievement[] =
-      Array.isArray(data?.achievements) && data.achievements.length > 0
-        ? (data.achievements.map(mapAchievement).filter(Boolean) as Achievement[])
-        : Array.isArray(data?.userStats?.achievements)
-          ? (data.userStats.achievements.map(mapAchievement).filter(Boolean) as Achievement[])
-          : [];
+    let list: Achievement[] = [];
+    if (Array.isArray(data?.achievements) && data.achievements.length > 0) {
+      list = data.achievements.map(mapAchievement).filter(Boolean) as Achievement[];
+    } else if (Array.isArray(data?.userStats?.achievements)) {
+      list = data.userStats.achievements.map(mapAchievement).filter(Boolean) as Achievement[];
+    }
     achievements.value = list;
   } catch (err) {
     if ((err as any)?.name === 'AbortError') return;
@@ -329,6 +332,9 @@ const navigateTo = async (path: string) => {
   try {
     await router.push(path);
   } catch (err) {
+    if (isNavigationFailure(err, NavigationFailureType.duplicated)) {
+      return;
+    }
     console.error('Navigation failed:', err);
     $q.notify({
       type: 'negative',
@@ -343,7 +349,7 @@ const navigateToLearn = () => {
 };
 
 const handleActionKeydown = (path: string, event: KeyboardEvent) => {
-  if (event.key === 'Enter' || event.key === ' ') {
+  if (event.key === 'Enter' || event.key === ' ' || event.code === 'Space') {
     event.preventDefault();
     navigateTo(path);
   }
