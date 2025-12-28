@@ -117,20 +117,9 @@ const createProfilesRoute = (env: Env) => {
           return c.json({ error: 'Invalid preferences data' }, 500);
         }
 
-        const shouldUpdate =
-          !isPlainObject(rawPreferences) ||
-          rawPreferences.dailyLessonGoal !== parsedPreferences.data.dailyLessonGoal ||
-          rawPreferences.lessonDurationMinutes !== parsedPreferences.data.lessonDurationMinutes;
-
-        if (shouldUpdate) {
-          const updatedProfile = await profilesDB.update(user_id, {
-            preferences: parsedPreferences.data,
-            updated_at: new Date().toISOString(),
-          });
-          profile = updatedProfile || profile;
-        } else {
-          profile.preferences = parsedPreferences.data;
-        }
+        // Return normalized preferences in-memory without persisting to DB
+        // to ensure GET is idempotent.
+        profile.preferences = parsedPreferences.data;
       }
 
       return c.json({ profile });
@@ -145,6 +134,11 @@ const createProfilesRoute = (env: Env) => {
     try {
       const profileData = c.req.valid('json');
       const { user_id, ...updates } = profileData;
+
+      // Normalize preferences if they are being updated
+      if (updates.preferences) {
+        updates.preferences = normalizePreferences(updates.preferences);
+      }
 
       // Add updated_at timestamp
       const updatedProfile = await profilesDB.update(user_id, {
