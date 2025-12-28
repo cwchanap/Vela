@@ -10,3 +10,6 @@ export { createQueryClient, QUERY_STALE_TIME, QUERY_GC_TIME } from './config';
 
 // Export query key factories
 export { authKeys, gameKeys, progressKeys, savedSentencesKeys } from './keys';
+
+// Export shared constants
+export { DEFAULT_DAILY_LESSON_GOAL, DEFAULT_LESSON_DURATION_MINUTES } from './constants';

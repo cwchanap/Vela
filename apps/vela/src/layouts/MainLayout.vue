@@ -176,7 +176,7 @@ const notificationItems = computed<NotificationItem[]>(() => {
 
   const items: NotificationItem[] = [];
   const missingPreferences =
-    prefs.dailyGoal == null || prefs.dailyLessonGoal == null || prefs.lessonDurationMinutes == null;
+    prefs.dailyGoal == null && prefs.dailyLessonGoal == null && prefs.lessonDurationMinutes == null;
 
   if (missingPreferences) {
     items.push({
@@ -194,10 +194,31 @@ const notificationCount = computed(() => notificationItems.value.length);
 
 // Check if route is active (handles nested routes)
 const normalizePath = (p: string): string => {
-  if (!p) return '/';
-  const withLeadingSlash = p.startsWith('/') ? p : `/${p}`;
-  if (withLeadingSlash === '/') return '/';
-  return withLeadingSlash.replace(/\/+$/, '');
+  if (!p) {
+    return '/';
+  }
+  const raw = p.trim();
+  if (!raw) {
+    return '/';
+  }
+  let pathname = raw;
+  // Use URL to normalize relative segments, multiple slashes, and strip query/hash when possible
+  try {
+    const url = new URL(raw, 'http://example.com');
+    pathname = url.pathname;
+  } catch {
+    // Fallback: strip query/hash manually if URL parsing fails
+    pathname = raw.split(/[?#]/)[0];
+  }
+  // Ensure leading slash
+  let normalized = pathname.startsWith('/') ? pathname : `/${pathname}`;
+  // Collapse multiple consecutive slashes to a single slash
+  normalized = normalized.replace(/\/{2,}/g, '/');
+  // Remove trailing slashes except for root
+  if (normalized === '/') {
+    return '/';
+  }
+  return normalized.replace(/\/+$/, '');
 };
 
 const isActiveRoute = (path: string) => {

@@ -1,0 +1,2 @@
+export const DEFAULT_DAILY_LESSON_GOAL = 5;
+export const DEFAULT_LESSON_DURATION_MINUTES = 6;
