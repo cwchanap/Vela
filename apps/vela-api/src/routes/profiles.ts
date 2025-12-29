@@ -3,18 +3,25 @@ import { zValidator } from '@hono/zod-validator';
 import { z } from 'zod';
 import type { Env } from '../types';
 import { profiles as profilesDB } from '../dynamodb';
-import { DEFAULT_DAILY_LESSON_GOAL, DEFAULT_LESSON_DURATION_MINUTES } from '@vela/common';
 
-const PreferencesSchema = z
-  .object({
-    dailyGoal: z.coerce.number().int().min(1).max(1440).optional(),
-    dailyLessonGoal: z.coerce.number().int().min(1).max(50).optional(),
-    lessonDurationMinutes: z.coerce.number().int().min(1).max(120).optional(),
-    difficulty: z.enum(['Beginner', 'Intermediate', 'Advanced']).optional(),
-    notifications: z.boolean().optional(),
-    todayStudyTime: z.coerce.number().optional(),
-  })
-  .strict();
+const DEFAULT_DAILY_LESSON_GOAL = 5;
+const DEFAULT_LESSON_DURATION_MINUTES = 6;
+
+const PreferencesShape = {
+  dailyGoal: z.coerce.number().int().min(1).max(1440).optional(),
+  dailyLessonGoal: z.coerce.number().int().min(1).max(50).optional(),
+  lessonDurationMinutes: z.coerce.number().int().min(1).max(120).optional(),
+  difficulty: z.enum(['Beginner', 'Intermediate', 'Advanced']).optional(),
+  notifications: z.boolean().optional(),
+  todayStudyTime: z.coerce.number().optional(),
+} satisfies z.ZodRawShape;
+
+// Strict on writes (PUT) to prevent arbitrary/unexpected keys being stored.
+const PreferencesSchema = z.object(PreferencesShape).strict();
+
+// Lenient on reads (GET) to prevent legacy keys in DynamoDB from causing 500s.
+// This strips unknown keys while still validating known keys.
+const PreferencesReadSchema = z.object(PreferencesShape).strip();
 
 // Validation schemas
 const UserIdQuerySchema = z.object({
@@ -110,7 +117,7 @@ const createProfilesRoute = (env: Env) => {
       } else {
         const rawPreferences = profile.preferences;
         const normalizedPreferences = normalizePreferences(rawPreferences);
-        const parsedPreferences = PreferencesSchema.safeParse(normalizedPreferences);
+        const parsedPreferences = PreferencesReadSchema.safeParse(normalizedPreferences);
 
         if (!parsedPreferences.success) {
           console.error('Invalid preferences data for user_id:', user_id);
