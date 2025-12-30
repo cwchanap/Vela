@@ -30,6 +30,7 @@
           color="primary"
           size="lg"
           class="start-learning-btn"
+          aria-label="Start a new learning session"
           @click="navigateToLearn"
         >
           <q-icon name="play_arrow" size="sm" class="q-mr-sm" />
@@ -317,7 +318,7 @@ const fetchAchievements = async () => {
     }
     achievements.value = list;
   } catch (err) {
-    if ((err as any)?.name === 'AbortError') return;
+    if (err instanceof DOMException && err.name === 'AbortError') return;
     console.error('Failed to fetch achievements:', err);
     achievementsError.value = err instanceof Error ? err.message : 'Failed to load achievements';
   } finally {
@@ -349,7 +350,7 @@ const navigateToLearn = () => {
 };
 
 const handleActionKeydown = (path: string, event: KeyboardEvent) => {
-  if (event.key === 'Enter' || event.key === ' ' || event.code === 'Space') {
+  if (event.key === 'Enter' || event.key === ' ') {
     event.preventDefault();
     navigateTo(path);
   }
