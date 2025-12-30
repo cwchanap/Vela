@@ -209,7 +209,7 @@ const normalizePath = (p: string): string => {
     pathname = url.pathname;
   } catch {
     // Fallback: strip query/hash manually if URL parsing fails
-    pathname = raw.split(/[?#]/)[0];
+    pathname = raw.split(/[?#]/)[0] || '/';
   }
   // Ensure leading slash
   let normalized = pathname.startsWith('/') ? pathname : `/${pathname}`;
