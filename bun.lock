@@ -62,6 +62,7 @@
     "apps/vela-api": {
       "name": "vela-api",
       "dependencies": {
+        "@aws-sdk/client-cognito-identity-provider": "^3.886.0",
         "@aws-sdk/client-dynamodb": "^3.886.0",
         "@aws-sdk/client-s3": "^3.917.0",
         "@aws-sdk/credential-providers": "3.940.0",
