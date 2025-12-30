@@ -175,8 +175,9 @@ const notificationItems = computed<NotificationItem[]>(() => {
   if (!prefs) return [];
 
   const items: NotificationItem[] = [];
+  // Show notification if ANY learning preference is missing (not just when all are missing)
   const missingPreferences =
-    prefs.dailyGoal == null && prefs.dailyLessonGoal == null && prefs.lessonDurationMinutes == null;
+    prefs.dailyGoal == null || prefs.dailyLessonGoal == null || prefs.lessonDurationMinutes == null;
 
   if (missingPreferences) {
     items.push({

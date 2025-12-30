@@ -16,8 +16,9 @@ const PreferencesShape = {
   todayStudyTime: z.coerce.number().optional(),
 } satisfies z.ZodRawShape;
 
-// Strict on writes (PUT) to prevent arbitrary/unexpected keys being stored.
-const PreferencesSchema = z.object(PreferencesShape).strict();
+// Strip unknown keys on writes (PUT) to prevent arbitrary/unexpected keys being stored
+// while still accepting legacy data with extra fields.
+const PreferencesSchema = z.object(PreferencesShape).strip();
 
 // Lenient on reads (GET) to prevent legacy keys in DynamoDB from causing 500s.
 // This strips unknown keys while still validating known keys.
@@ -145,6 +146,16 @@ const createProfilesRoute = (env: Env) => {
       // Normalize preferences if they are being updated
       if (updates.preferences) {
         updates.preferences = normalizePreferences(updates.preferences);
+
+        // Validate the normalized preferences before persisting
+        const parsedPreferences = PreferencesSchema.safeParse(updates.preferences);
+
+        if (!parsedPreferences.success) {
+          console.error('Invalid preferences data for user_id:', user_id, parsedPreferences.error);
+          return c.json({ error: 'Invalid preferences data' }, 400);
+        }
+
+        updates.preferences = parsedPreferences.data;
       }
 
       // Add updated_at timestamp
