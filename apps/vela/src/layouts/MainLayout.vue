@@ -202,7 +202,7 @@ const normalizePath = (p: string): string => {
   if (!raw) {
     return '/';
   }
-  let pathname = raw;
+  let pathname: string;
   // Use URL to normalize relative segments, multiple slashes, and strip query/hash when possible
   try {
     const url = new URL(raw, 'http://example.com');

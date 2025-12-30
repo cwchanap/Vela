@@ -40,6 +40,11 @@ const UpdateProfileSchema = z.object({
 const isPlainObject = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
 
+/**
+ * Validates and normalizes a numeric preference value.
+ * Ensures the value is a finite number within the specified range [min, max].
+ * If invalid or out of range, returns the fallback value.
+ */
 const normalizeRequiredPreferenceNumber = (
   value: unknown,
   fallback: number,
