@@ -7,6 +7,12 @@ export const QUERY_STALE_TIME = 5 * 60 * 1000; // 5 minutes - data is considered
 export const QUERY_GC_TIME = 10 * 60 * 1000; // 10 minutes - unused data stays in cache
 
 /**
+ * Shared defaults for user preferences
+ */
+export const DEFAULT_DAILY_LESSON_GOAL = 10;
+export const DEFAULT_LESSON_DURATION_MINUTES = 15;
+
+/**
  * Creates a configured QueryClient instance with shared defaults
  * Can be used by both the web app and browser extension
  */
