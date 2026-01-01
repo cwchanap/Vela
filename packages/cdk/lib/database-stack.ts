@@ -16,6 +16,7 @@ export class DatabaseStack extends Stack {
   public readonly dailyProgressTable: Table;
   public readonly savedSentencesTable: Table;
   public readonly ttsSettingsTable: Table;
+  public readonly userVocabularyProgressTable: Table;
 
   public readonly vpc: ec2.Vpc;
   public readonly dbSecurityGroup: ec2.SecurityGroup;
@@ -157,6 +158,39 @@ export class DatabaseStack extends Stack {
       },
     });
 
+    // SRS (Spaced Repetition System) User Vocabulary Progress table
+    // Tracks individual word mastery using SM-2 algorithm
+    const userVocabularyProgressTable = new Table(this, 'VelaUserVocabularyProgressTable', {
+      tableName: 'vela-user-vocabulary-progress',
+      partitionKey: {
+        name: 'user_id',
+        type: AttributeType.STRING,
+      },
+      sortKey: {
+        name: 'vocabulary_id',
+        type: AttributeType.STRING,
+      },
+      billingMode: BillingMode.PAY_PER_REQUEST,
+      removalPolicy: RemovalPolicy.DESTROY,
+      pointInTimeRecoverySpecification: {
+        pointInTimeRecoveryEnabled: true,
+      },
+    });
+
+    // Add GSI for querying due items by next_review_date
+    // This allows efficient queries like "get all due items for user"
+    userVocabularyProgressTable.addGlobalSecondaryIndex({
+      indexName: 'NextReviewDateIndex',
+      partitionKey: {
+        name: 'user_id',
+        type: AttributeType.STRING,
+      },
+      sortKey: {
+        name: 'next_review_date',
+        type: AttributeType.STRING,
+      },
+    });
+
     const vpc = new ec2.Vpc(this, 'VelaVPC', {
       maxAzs: 2,
       natGateways: 1,
@@ -213,6 +247,7 @@ export class DatabaseStack extends Stack {
     this.dailyProgressTable = dailyProgressTable;
     this.savedSentencesTable = savedSentencesTable;
     this.ttsSettingsTable = ttsSettingsTable;
+    this.userVocabularyProgressTable = userVocabularyProgressTable;
 
     this.vpc = vpc;
     this.dbSecurityGroup = dbSecurityGroup;

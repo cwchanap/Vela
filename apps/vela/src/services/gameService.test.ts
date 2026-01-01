@@ -201,6 +201,51 @@ describe('gameService', () => {
 
       expect(questions).toHaveLength(0);
     });
+
+    it('should include JLPT level filter in URL when provided', async () => {
+      mockFetch.mockResolvedValue({
+        ok: true,
+        json: vi.fn().mockResolvedValue({ vocabulary: mockVocabulary }),
+      });
+
+      await gameService.getVocabularyQuestions(5, [5, 4]);
+
+      expect(mockFetch).toHaveBeenCalledWith('/api/games/vocabulary?limit=5&jlpt=5,4', {
+        headers: {
+          'content-type': 'application/json',
+        },
+      });
+    });
+
+    it('should not include JLPT filter when empty array provided', async () => {
+      mockFetch.mockResolvedValue({
+        ok: true,
+        json: vi.fn().mockResolvedValue({ vocabulary: mockVocabulary }),
+      });
+
+      await gameService.getVocabularyQuestions(5, []);
+
+      expect(mockFetch).toHaveBeenCalledWith('/api/games/vocabulary?limit=5', {
+        headers: {
+          'content-type': 'application/json',
+        },
+      });
+    });
+
+    it('should handle single JLPT level filter', async () => {
+      mockFetch.mockResolvedValue({
+        ok: true,
+        json: vi.fn().mockResolvedValue({ vocabulary: mockVocabulary }),
+      });
+
+      await gameService.getVocabularyQuestions(10, [5]);
+
+      expect(mockFetch).toHaveBeenCalledWith('/api/games/vocabulary?limit=10&jlpt=5', {
+        headers: {
+          'content-type': 'application/json',
+        },
+      });
+    });
   });
 
   describe('getSentenceQuestions', () => {
@@ -491,6 +536,64 @@ describe('gameService', () => {
 
       // At least 2 different orders should appear (with high probability)
       expect(uniqueOrders.size).toBeGreaterThan(1);
+    });
+  });
+
+  describe('getSentenceQuestionsWithJlpt', () => {
+    const mockSentences: Sentence[] = [
+      {
+        id: 'sentence-1',
+        japanese_sentence: '私は猫が好きです',
+        english_translation: 'I like cats',
+        difficulty_level: 1,
+        category: 'basic',
+        words_array: ['私は', '猫が', '好きです'],
+        created_at: '2024-01-01T00:00:00Z',
+      },
+    ];
+
+    it('should include JLPT level filter in URL when provided', async () => {
+      mockFetch.mockResolvedValue({
+        ok: true,
+        json: vi.fn().mockResolvedValue({ sentences: mockSentences }),
+      });
+
+      await gameService.getSentenceQuestionsWithJlpt(5, [5, 4]);
+
+      expect(mockFetch).toHaveBeenCalledWith('/api/games/sentences?limit=5&jlpt=5,4', {
+        headers: {
+          'content-type': 'application/json',
+        },
+      });
+    });
+
+    it('should not include JLPT filter when empty array provided', async () => {
+      mockFetch.mockResolvedValue({
+        ok: true,
+        json: vi.fn().mockResolvedValue({ sentences: mockSentences }),
+      });
+
+      await gameService.getSentenceQuestionsWithJlpt(5, []);
+
+      expect(mockFetch).toHaveBeenCalledWith('/api/games/sentences?limit=5', {
+        headers: {
+          'content-type': 'application/json',
+        },
+      });
+    });
+
+    it('should return scrambled sentence questions', async () => {
+      mockFetch.mockResolvedValue({
+        ok: true,
+        json: vi.fn().mockResolvedValue({ sentences: mockSentences }),
+      });
+
+      const questions = await gameService.getSentenceQuestionsWithJlpt(1, [5]);
+
+      expect(questions).toHaveLength(1);
+      expect(questions[0]).toHaveProperty('sentence');
+      expect(questions[0]).toHaveProperty('scrambled');
+      expect(questions[0]).toHaveProperty('correctAnswer');
     });
   });
 

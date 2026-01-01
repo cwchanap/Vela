@@ -58,9 +58,13 @@ async function getSentenceQuestions(count = 5): Promise<SentenceQuestion[]> {
   }
 }
 
-async function getVocabularyQuestions(count = 10): Promise<Question[]> {
+async function getVocabularyQuestions(count = 10, jlptLevels?: number[]): Promise<Question[]> {
   try {
-    const data = await httpJson(getApiUrl(`games/vocabulary?limit=${count}`));
+    let url = `games/vocabulary?limit=${count}`;
+    if (jlptLevels && jlptLevels.length > 0) {
+      url += `&jlpt=${jlptLevels.join(',')}`;
+    }
+    const data = await httpJson(getApiUrl(url));
     const vocabulary: Vocabulary[] = data.vocabulary || [];
 
     // Create multiple choice questions
@@ -86,7 +90,37 @@ async function getVocabularyQuestions(count = 10): Promise<Question[]> {
   }
 }
 
+async function getSentenceQuestionsWithJlpt(
+  count = 5,
+  jlptLevels?: number[],
+): Promise<SentenceQuestion[]> {
+  try {
+    let url = `games/sentences?limit=${count}`;
+    if (jlptLevels && jlptLevels.length > 0) {
+      url += `&jlpt=${jlptLevels.join(',')}`;
+    }
+    const data = await httpJson(getApiUrl(url));
+    const sentences: Sentence[] = data.sentences || [];
+
+    return sentences.map((sentence) => {
+      const tokens =
+        Array.isArray(sentence.words_array) && sentence.words_array.length > 0
+          ? [...sentence.words_array]
+          : sentence.japanese_sentence.split('');
+      return {
+        sentence,
+        scrambled: shuffle([...tokens]),
+        correctAnswer: tokens.join(' '),
+      };
+    });
+  } catch (error) {
+    console.error('Error fetching sentences:', error);
+    return [];
+  }
+}
+
 export const gameService = {
   getVocabularyQuestions,
   getSentenceQuestions,
+  getSentenceQuestionsWithJlpt,
 };

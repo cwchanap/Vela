@@ -58,6 +58,7 @@ export class ApiStack extends Stack {
         DAILY_PROGRESS_TABLE_NAME: database.dailyProgressTable.tableName,
         SAVED_SENTENCES_TABLE_NAME: database.savedSentencesTable.tableName,
         TTS_SETTINGS_TABLE_NAME: database.ttsSettingsTable.tableName,
+        USER_VOCABULARY_PROGRESS_TABLE_NAME: database.userVocabularyProgressTable.tableName,
         TTS_AUDIO_BUCKET_NAME: ttsAudioBucketName,
         AURORA_DB_CLUSTER_ARN: database.dbClusterArn,
         AURORA_DB_ENDPOINT: database.dbClusterEndpoint,
@@ -78,6 +79,7 @@ export class ApiStack extends Stack {
     database.dailyProgressTable.grantReadWriteData(apiLambda);
     database.savedSentencesTable.grantReadWriteData(apiLambda);
     database.ttsSettingsTable.grantReadWriteData(apiLambda);
+    database.userVocabularyProgressTable.grantReadWriteData(apiLambda);
 
     apiLambda.addToRolePolicy(
       new PolicyStatement({
