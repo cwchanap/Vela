@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia';
-import type { Vocabulary, Sentence } from 'src/types/database';
+import type { Vocabulary, Sentence, JLPTLevel } from 'src/types/database';
 
 export interface SentenceQuestion {
   sentence: Sentence;
@@ -21,6 +21,10 @@ export interface GameState {
   sentenceQuestions: SentenceQuestion[];
   currentSentenceQuestionIndex: number;
   sentenceGameActive: boolean;
+  /** Selected JLPT levels for filtering (null = all levels) */
+  jlptLevels: JLPTLevel[] | null;
+  /** Whether to use SRS mode (review due items first) */
+  srsMode: boolean;
 }
 
 export const useGameStore = defineStore('game', {
@@ -32,8 +36,22 @@ export const useGameStore = defineStore('game', {
     sentenceQuestions: [],
     currentSentenceQuestionIndex: 0,
     sentenceGameActive: false,
+    jlptLevels: null,
+    srsMode: false,
   }),
+  getters: {
+    /** Get the selected JLPT levels as an array (empty if all levels) */
+    selectedJlptLevels: (state): JLPTLevel[] => state.jlptLevels ?? [],
+  },
   actions: {
+    /** Set JLPT level filter for games */
+    setJlptLevels(levels: JLPTLevel[] | null) {
+      this.jlptLevels = levels && levels.length > 0 ? levels : null;
+    },
+    /** Toggle SRS mode on/off */
+    setSrsMode(enabled: boolean) {
+      this.srsMode = enabled;
+    },
     startSentenceGame(questions: SentenceQuestion[]) {
       this.score = 0;
       this.sentenceQuestions = questions;

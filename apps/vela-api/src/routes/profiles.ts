@@ -6,6 +6,7 @@ import { profiles as profilesDB } from '../dynamodb';
 
 const DEFAULT_DAILY_LESSON_GOAL = 5;
 const DEFAULT_LESSON_DURATION_MINUTES = 6;
+const DEFAULT_DAILY_GOAL = 30;
 
 const PreferencesShape = {
   dailyGoal: z.coerce.number().int().min(1).max(1440).optional(),
@@ -69,6 +70,13 @@ const normalizePreferences = (preferences: unknown) => {
   const base = isPlainObject(preferences) ? preferences : {};
   return {
     ...base,
+    dailyGoal: normalizeRequiredPreferenceNumber(
+      base.dailyGoal,
+      DEFAULT_DAILY_GOAL,
+      1,
+      1440,
+      'dailyGoal',
+    ),
     dailyLessonGoal: normalizeRequiredPreferenceNumber(
       base.dailyLessonGoal,
       DEFAULT_DAILY_LESSON_GOAL,
@@ -82,6 +90,13 @@ const normalizePreferences = (preferences: unknown) => {
       1,
       120,
       'lessonDurationMinutes',
+    ),
+    todayStudyTime: normalizeRequiredPreferenceNumber(
+      base.todayStudyTime,
+      0,
+      0,
+      1440, // Max minutes in a day
+      'todayStudyTime',
     ),
   };
 };

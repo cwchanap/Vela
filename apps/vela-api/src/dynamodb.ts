@@ -68,6 +68,8 @@ const TABLE_NAMES = {
     process.env.SAVED_SENTENCES_TABLE_NAME ||
     'vela-saved-sentences',
   TTS_SETTINGS: process.env.TTS_SETTINGS_TABLE_NAME || 'vela-tts-settings',
+  USER_VOCABULARY_PROGRESS:
+    process.env.USER_VOCABULARY_PROGRESS_TABLE_NAME || 'vela-user-vocabulary-progress',
 };
 
 // Helper function to handle DynamoDB errors
@@ -172,6 +174,70 @@ export const vocabulary = {
       handleDynamoError(error);
     }
   },
+
+  /**
+   * Get vocabulary items filtered by JLPT level(s)
+   * @param jlptLevels - Array of JLPT levels to filter (1-5, where 5=N5 easiest)
+   * @param limit - Maximum number of items to return
+   */
+  async getByJlptLevel(jlptLevels: number[], limit: number = 10) {
+    try {
+      // Build filter expression for multiple JLPT levels
+      const filterParts = jlptLevels.map((_, i) => `jlpt_level = :level${i}`);
+      const filterExpression = filterParts.join(' OR ');
+      const expressionAttributeValues = jlptLevels.reduce(
+        (acc, level, i) => {
+          acc[`:level${i}`] = level;
+          return acc;
+        },
+        {} as Record<string, number>,
+      );
+
+      const command = new ScanCommand({
+        TableName: TABLE_NAMES.VOCABULARY,
+        FilterExpression: filterExpression,
+        ExpressionAttributeValues: expressionAttributeValues,
+        Limit: limit * 3, // Scan more to account for filtering
+      });
+
+      const response = await docClient.send(command);
+      const items = response.Items || [];
+
+      // Return up to limit items, shuffled for variety
+      return items.slice(0, limit).sort(() => Math.random() - 0.5);
+    } catch (error) {
+      handleDynamoError(error);
+    }
+    return [];
+  },
+
+  /**
+   * Get random vocabulary items, optionally filtered by JLPT level
+   * @param limit - Number of items to return
+   * @param jlptLevels - Optional array of JLPT levels to filter
+   */
+  async getRandom(limit: number = 10, jlptLevels?: number[]) {
+    try {
+      let items: any[];
+
+      if (jlptLevels && jlptLevels.length > 0) {
+        items = (await this.getByJlptLevel(jlptLevels, limit * 2)) || [];
+      } else {
+        const command = new ScanCommand({
+          TableName: TABLE_NAMES.VOCABULARY,
+          Limit: limit * 3,
+        });
+        const response = await docClient.send(command);
+        items = response.Items || [];
+      }
+
+      // Shuffle and return requested limit
+      return items.sort(() => Math.random() - 0.5).slice(0, limit);
+    } catch (error) {
+      handleDynamoError(error);
+    }
+    return [];
+  },
 };
 
 // Sentences operations
@@ -200,6 +266,65 @@ export const sentences = {
     } catch (error) {
       handleDynamoError(error);
     }
+  },
+
+  /**
+   * Get sentences filtered by JLPT level(s)
+   * @param jlptLevels - Array of JLPT levels to filter (1-5, where 5=N5 easiest)
+   * @param limit - Maximum number of items to return
+   */
+  async getByJlptLevel(jlptLevels: number[], limit: number = 5) {
+    try {
+      const filterParts = jlptLevels.map((_, i) => `jlpt_level = :level${i}`);
+      const filterExpression = filterParts.join(' OR ');
+      const expressionAttributeValues = jlptLevels.reduce(
+        (acc, level, i) => {
+          acc[`:level${i}`] = level;
+          return acc;
+        },
+        {} as Record<string, number>,
+      );
+
+      const command = new ScanCommand({
+        TableName: TABLE_NAMES.SENTENCES,
+        FilterExpression: filterExpression,
+        ExpressionAttributeValues: expressionAttributeValues,
+        Limit: limit * 3,
+      });
+
+      const response = await docClient.send(command);
+      const items = response.Items || [];
+
+      return items.slice(0, limit).sort(() => Math.random() - 0.5);
+    } catch (error) {
+      handleDynamoError(error);
+    }
+    return [];
+  },
+
+  /**
+   * Get random sentences, optionally filtered by JLPT level
+   */
+  async getRandom(limit: number = 5, jlptLevels?: number[]) {
+    try {
+      let items: any[];
+
+      if (jlptLevels && jlptLevels.length > 0) {
+        items = (await this.getByJlptLevel(jlptLevels, limit * 2)) || [];
+      } else {
+        const command = new ScanCommand({
+          TableName: TABLE_NAMES.SENTENCES,
+          Limit: limit * 3,
+        });
+        const response = await docClient.send(command);
+        items = response.Items || [];
+      }
+
+      return items.sort(() => Math.random() - 0.5).slice(0, limit);
+    } catch (error) {
+      handleDynamoError(error);
+    }
+    return [];
   },
 };
 
@@ -422,4 +547,210 @@ export const ttsSettings = {
   },
 };
 
+// Types for User Vocabulary Progress (SRS tracking)
+export interface UserVocabularyProgress {
+  user_id: string;
+  vocabulary_id: string;
+  next_review_date: string;
+  ease_factor: number;
+  interval: number;
+  repetitions: number;
+  last_quality?: number;
+  last_reviewed_at?: string;
+  first_learned_at: string;
+  total_reviews: number;
+  correct_count: number;
+}
+
+// User Vocabulary Progress operations (SRS)
+export const userVocabularyProgress = {
+  /**
+   * Get a specific progress record for a user-vocabulary pair
+   */
+  async get(userId: string, vocabularyId: string): Promise<UserVocabularyProgress | undefined> {
+    try {
+      const command = new GetCommand({
+        TableName: TABLE_NAMES.USER_VOCABULARY_PROGRESS,
+        Key: { user_id: userId, vocabulary_id: vocabularyId },
+      });
+      const response = await docClient.send(command);
+      return response.Item as UserVocabularyProgress | undefined;
+    } catch (error) {
+      handleDynamoError(error);
+    }
+  },
+
+  /**
+   * Get all progress records for a user
+   */
+  async getByUser(userId: string): Promise<UserVocabularyProgress[]> {
+    try {
+      const command = new QueryCommand({
+        TableName: TABLE_NAMES.USER_VOCABULARY_PROGRESS,
+        KeyConditionExpression: 'user_id = :userId',
+        ExpressionAttributeValues: { ':userId': userId },
+      });
+      const response = await docClient.send(command);
+      return (response.Items as UserVocabularyProgress[]) || [];
+    } catch (error) {
+      handleDynamoError(error);
+    }
+    return [];
+  },
+
+  /**
+   * Get due items for a user (items where next_review_date <= now)
+   * Note: This scans all user items and filters in application code
+   * since DynamoDB doesn't support filtering on sort key with <= efficiently
+   */
+  async getDueItems(userId: string, now?: Date): Promise<UserVocabularyProgress[]> {
+    try {
+      const currentDate = now ?? new Date();
+      const items = await this.getByUser(userId);
+      return items
+        .filter((item) => new Date(item.next_review_date) <= currentDate)
+        .sort(
+          (a, b) => new Date(a.next_review_date).getTime() - new Date(b.next_review_date).getTime(),
+        );
+    } catch (error) {
+      handleDynamoError(error);
+    }
+    return [];
+  },
+
+  /**
+   * Create or update a progress record
+   */
+  async put(progress: UserVocabularyProgress): Promise<UserVocabularyProgress> {
+    try {
+      const command = new PutCommand({
+        TableName: TABLE_NAMES.USER_VOCABULARY_PROGRESS,
+        Item: progress,
+      });
+      await docClient.send(command);
+      return progress;
+    } catch (error) {
+      handleDynamoError(error);
+    }
+    return progress;
+  },
+
+  /**
+   * Update progress after a review
+   */
+  async updateAfterReview(
+    userId: string,
+    vocabularyId: string,
+    updates: {
+      next_review_date: string;
+      ease_factor: number;
+      interval: number;
+      repetitions: number;
+      last_quality: number;
+    },
+  ): Promise<UserVocabularyProgress | undefined> {
+    try {
+      const command = new UpdateCommand({
+        TableName: TABLE_NAMES.USER_VOCABULARY_PROGRESS,
+        Key: { user_id: userId, vocabulary_id: vocabularyId },
+        UpdateExpression:
+          'SET next_review_date = :nrd, ease_factor = :ef, #interval = :i, repetitions = :r, ' +
+          'last_quality = :lq, last_reviewed_at = :lra, total_reviews = total_reviews + :one, ' +
+          'correct_count = correct_count + :correct',
+        ExpressionAttributeNames: {
+          '#interval': 'interval', // interval is a reserved word
+        },
+        ExpressionAttributeValues: {
+          ':nrd': updates.next_review_date,
+          ':ef': updates.ease_factor,
+          ':i': updates.interval,
+          ':r': updates.repetitions,
+          ':lq': updates.last_quality,
+          ':lra': new Date().toISOString(),
+          ':one': 1,
+          ':correct': updates.last_quality >= 3 ? 1 : 0,
+        },
+        ReturnValues: 'ALL_NEW',
+      });
+      const response = await docClient.send(command);
+      return response.Attributes as UserVocabularyProgress | undefined;
+    } catch (error) {
+      handleDynamoError(error);
+    }
+  },
+
+  /**
+   * Initialize progress for a new vocabulary item
+   */
+  async initializeProgress(
+    userId: string,
+    vocabularyId: string,
+    nextReviewDate: string,
+  ): Promise<UserVocabularyProgress> {
+    const progress: UserVocabularyProgress = {
+      user_id: userId,
+      vocabulary_id: vocabularyId,
+      next_review_date: nextReviewDate,
+      ease_factor: 2.5, // SM-2 default
+      interval: 0,
+      repetitions: 0,
+      first_learned_at: new Date().toISOString(),
+      total_reviews: 0,
+      correct_count: 0,
+    };
+    return this.put(progress);
+  },
+
+  /**
+   * Delete a progress record
+   */
+  async delete(userId: string, vocabularyId: string): Promise<void> {
+    try {
+      const command = new DeleteCommand({
+        TableName: TABLE_NAMES.USER_VOCABULARY_PROGRESS,
+        Key: { user_id: userId, vocabulary_id: vocabularyId },
+      });
+      await docClient.send(command);
+    } catch (error) {
+      handleDynamoError(error);
+    }
+  },
+
+  /**
+   * Get statistics for a user's SRS progress
+   */
+  async getStats(userId: string): Promise<{
+    total_items: number;
+    due_items: number;
+    mastered_items: number;
+    average_ease_factor: number;
+  }> {
+    try {
+      const items = await this.getByUser(userId);
+      const now = new Date();
+      const dueItems = items.filter((item) => new Date(item.next_review_date) <= now);
+      // Items with interval >= 21 days are considered "mastered"
+      const masteredItems = items.filter((item) => item.interval >= 21);
+      const avgEaseFactor =
+        items.length > 0
+          ? items.reduce((sum, item) => sum + item.ease_factor, 0) / items.length
+          : 0;
+
+      return {
+        total_items: items.length,
+        due_items: dueItems.length,
+        mastered_items: masteredItems.length,
+        average_ease_factor: Math.round(avgEaseFactor * 100) / 100,
+      };
+    } catch (error) {
+      handleDynamoError(error);
+    }
+    return {
+      total_items: 0,
+      due_items: 0,
+      mastered_items: 0,
+      average_ease_factor: 0,
+    };
+  },
+};
 export { docClient, TABLE_NAMES };

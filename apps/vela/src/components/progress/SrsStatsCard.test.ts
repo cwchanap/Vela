@@ -1,0 +1,203 @@
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { mount, flushPromises } from '@vue/test-utils';
+import { Quasar } from 'quasar';
+import SrsStatsCard from './SrsStatsCard.vue';
+import * as srsServiceModule from 'src/services/srsService';
+
+// Mock aws-amplify/auth
+vi.mock('aws-amplify/auth', () => ({
+  fetchAuthSession: vi.fn(),
+}));
+
+// Mock srsService
+vi.mock('src/services/srsService', () => ({
+  srsService: {
+    getStats: vi.fn(),
+  },
+}));
+
+// Mock auth store
+const mockAuthStore = {
+  isAuthenticated: false,
+  user: null,
+};
+
+vi.mock('src/stores/auth', () => ({
+  useAuthStore: () => mockAuthStore,
+}));
+
+import { fetchAuthSession } from 'aws-amplify/auth';
+
+describe('SrsStatsCard', () => {
+  const mockStats = {
+    total_items: 100,
+    due_today: 15,
+    mastery_breakdown: {
+      new: 20,
+      learning: 50,
+      reviewing: 0,
+      mastered: 30,
+    },
+    average_ease_factor: 2.5,
+    total_reviews: 200,
+    accuracy_rate: 0.85,
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockAuthStore.isAuthenticated = false;
+    mockAuthStore.user = null;
+  });
+
+  function createWrapper() {
+    return mount(SrsStatsCard, {
+      global: {
+        plugins: [Quasar],
+        stubs: {
+          QBanner: {
+            template:
+              '<div class="q-banner"><slot /><slot name="avatar" /><slot name="action" /></div>',
+          },
+          QLinearProgress: true,
+        },
+      },
+    });
+  }
+
+  it('shows sign-in message when not authenticated', () => {
+    mockAuthStore.isAuthenticated = false;
+    const wrapper = createWrapper();
+    expect(wrapper.text()).toContain('Sign in to track your spaced repetition progress');
+  });
+
+  it('fetches stats when authenticated', async () => {
+    mockAuthStore.isAuthenticated = true;
+    mockAuthStore.user = { id: 'user-123' } as any;
+    vi.mocked(fetchAuthSession).mockResolvedValue({
+      tokens: { accessToken: { toString: () => 'test-token' } },
+    } as any);
+    vi.mocked(srsServiceModule.srsService.getStats).mockResolvedValue(mockStats);
+
+    createWrapper();
+    await flushPromises();
+
+    expect(srsServiceModule.srsService.getStats).toHaveBeenCalledWith('test-token');
+  });
+
+  it('displays stats correctly', async () => {
+    mockAuthStore.isAuthenticated = true;
+    mockAuthStore.user = { id: 'user-123' } as any;
+    vi.mocked(fetchAuthSession).mockResolvedValue({
+      tokens: { accessToken: { toString: () => 'test-token' } },
+    } as any);
+    vi.mocked(srsServiceModule.srsService.getStats).mockResolvedValue(mockStats);
+
+    const wrapper = createWrapper();
+    await flushPromises();
+
+    expect(wrapper.text()).toContain('100'); // total_words
+    expect(wrapper.text()).toContain('30'); // mastered
+    expect(wrapper.text()).toContain('50'); // learning
+    expect(wrapper.text()).toContain('20'); // new_words
+  });
+
+  it('shows due items alert when items are due', async () => {
+    mockAuthStore.isAuthenticated = true;
+    mockAuthStore.user = { id: 'user-123' } as any;
+    vi.mocked(fetchAuthSession).mockResolvedValue({
+      tokens: { accessToken: { toString: () => 'test-token' } },
+    } as any);
+    vi.mocked(srsServiceModule.srsService.getStats).mockResolvedValue(mockStats);
+
+    const wrapper = createWrapper();
+    await flushPromises();
+
+    expect(wrapper.text()).toContain('15 words due for review');
+  });
+
+  it('calculates mastery percentage correctly', async () => {
+    mockAuthStore.isAuthenticated = true;
+    mockAuthStore.user = { id: 'user-123' } as any;
+    vi.mocked(fetchAuthSession).mockResolvedValue({
+      tokens: { accessToken: { toString: () => 'test-token' } },
+    } as any);
+    vi.mocked(srsServiceModule.srsService.getStats).mockResolvedValue(mockStats);
+
+    const wrapper = createWrapper();
+    await flushPromises();
+
+    // 30 mastered out of 100 total = 30%
+    expect(wrapper.text()).toContain('30%');
+  });
+
+  it('shows empty state when no words', async () => {
+    mockAuthStore.isAuthenticated = true;
+    mockAuthStore.user = { id: 'user-123' } as any;
+    vi.mocked(fetchAuthSession).mockResolvedValue({
+      tokens: { accessToken: { toString: () => 'test-token' } },
+    } as any);
+    vi.mocked(srsServiceModule.srsService.getStats).mockResolvedValue({
+      total_items: 0,
+      due_today: 0,
+      mastery_breakdown: {
+        new: 0,
+        learning: 0,
+        reviewing: 0,
+        mastered: 0,
+      },
+      average_ease_factor: 0,
+      total_reviews: 0,
+      accuracy_rate: 0,
+    });
+
+    const wrapper = createWrapper();
+    await flushPromises();
+
+    expect(wrapper.text()).toContain('Start learning vocabulary to build your SRS progress');
+  });
+
+  it('displays average ease factor', async () => {
+    mockAuthStore.isAuthenticated = true;
+    mockAuthStore.user = { id: 'user-123' } as any;
+    vi.mocked(fetchAuthSession).mockResolvedValue({
+      tokens: { accessToken: { toString: () => 'test-token' } },
+    } as any);
+    vi.mocked(srsServiceModule.srsService.getStats).mockResolvedValue(mockStats);
+
+    const wrapper = createWrapper();
+    await flushPromises();
+
+    expect(wrapper.text()).toContain('2.50');
+  });
+
+  it('eventually displays stats after loading', async () => {
+    mockAuthStore.isAuthenticated = true;
+    mockAuthStore.user = { id: 'user-123' } as any;
+    vi.mocked(fetchAuthSession).mockResolvedValue({
+      tokens: { accessToken: { toString: () => 'test-token' } },
+    } as any);
+    vi.mocked(srsServiceModule.srsService.getStats).mockResolvedValue(mockStats);
+
+    const wrapper = createWrapper();
+    await flushPromises();
+
+    // After loading, should show stats not loading
+    expect(wrapper.text()).not.toContain('Loading SRS stats');
+    expect(wrapper.text()).toContain('100'); // total_words
+  });
+
+  it('handles fetch error gracefully', async () => {
+    mockAuthStore.isAuthenticated = true;
+    mockAuthStore.user = { id: 'user-123' } as any;
+    vi.mocked(fetchAuthSession).mockResolvedValue({
+      tokens: { accessToken: { toString: () => 'test-token' } },
+    } as any);
+    vi.mocked(srsServiceModule.srsService.getStats).mockRejectedValue(new Error('API Error'));
+
+    const wrapper = createWrapper();
+    await flushPromises();
+
+    // Should show empty state on error
+    expect(wrapper.text()).toContain('Start learning vocabulary');
+  });
+});

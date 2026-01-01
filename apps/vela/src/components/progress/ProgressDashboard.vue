@@ -105,6 +105,13 @@
       </q-card>
     </div>
 
+    <!-- Spaced Repetition Stats Section -->
+    <div class="row q-gutter-md q-mb-lg">
+      <div class="col-12 col-md-6">
+        <SrsStatsCard />
+      </div>
+    </div>
+
     <!-- Skill Categories Section -->
     <div class="row q-gutter-md q-mb-lg">
       <q-card class="col-12">
@@ -194,6 +201,7 @@ import ProgressChart from './ProgressChart.vue';
 import SkillCategoryCard from './SkillCategoryCard.vue';
 import AchievementItem from './AchievementItem.vue';
 import AchievementDialog from './AchievementDialog.vue';
+import SrsStatsCard from './SrsStatsCard.vue';
 
 const progressStore = useProgressStore();
 const authStore = useAuthStore();

@@ -7,6 +7,7 @@ import { progress } from './routes/progress';
 import { profiles as createProfilesRoute } from './routes/profiles';
 import auth from './routes/auth';
 import myDictionaries from './routes/my-dictionaries';
+import srsRouter from './routes/srs';
 import createTTSRoute from './routes/tts';
 import { dsqlHealth } from './routes/dsql-health';
 import type { Env } from './types';
@@ -207,5 +208,8 @@ app.route('/api/auth', auth);
 
 // Mount the my dictionaries routes
 app.route('/api/my-dictionaries', myDictionaries);
+
+// Mount the SRS (Spaced Repetition System) routes
+app.route('/api/srs', srsRouter);
 
 export const handler = handle(app);
