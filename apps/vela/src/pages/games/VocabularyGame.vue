@@ -1,7 +1,7 @@
 <template>
   <q-page class="flex flex-center column">
     <!-- Game Over Screen -->
-    <div v-if="!gameStore.gameActive && gameStore.score > 0" class="text-center">
+    <div v-if="!gameStore.gameActive" class="text-center">
       <h2>Game Over!</h2>
       <p>Your score: {{ gameStore.score }}</p>
       <q-btn @click="startGame" label="Play Again" color="primary" class="q-mr-sm" />
@@ -20,7 +20,7 @@
     </div>
 
     <!-- Game Setup Screen -->
-    <div v-else class="game-setup q-pa-md">
+    <div v-if="showSetup" class="game-setup q-pa-md">
       <q-card class="q-pa-md" style="max-width: 450px">
         <q-card-section>
           <div class="text-h5 q-mb-md">Vocabulary Quiz</div>
@@ -106,14 +106,14 @@ async function getAccessToken(): Promise<string | null> {
 
 // Fetch due count when auth or JLPT levels change
 onMounted(async () => {
-  await fetchDueCount();
+  await fetchDueCount(selectedJlptLevels.value);
 });
 
 watch([() => authStore.isAuthenticated, selectedJlptLevels], async () => {
-  await fetchDueCount();
+  await fetchDueCount(selectedJlptLevels.value);
 });
 
-async function fetchDueCount() {
+async function fetchDueCount(jlptLevels?: JLPTLevel[]) {
   const token = await getAccessToken();
   if (!token) {
     dueCount.value = 0;
@@ -121,7 +121,7 @@ async function fetchDueCount() {
   }
 
   try {
-    const stats = await srsService.getStats(token);
+    const stats = await srsService.getStats(token, jlptLevels);
     dueCount.value = stats.due_today;
   } catch (error) {
     console.error('Failed to fetch SRS stats:', error);
@@ -131,6 +131,7 @@ async function fetchDueCount() {
 
 async function startGame() {
   isLoading.value = true;
+  showSetup.value = false;
 
   try {
     const token = await getAccessToken();
@@ -143,26 +144,64 @@ async function startGame() {
         if (dueResponse.items.length > 0) {
           // Convert due items to questions format
           const vocabulary = dueResponse.items.map((item) => item.vocabulary);
-          const questions = vocabulary.map((word) => {
-            const otherWords = vocabulary.filter((v) => v.id !== word.id);
-            const options = otherWords
-              .sort(() => 0.5 - Math.random())
-              .slice(0, 3)
-              .map((v) => v.english_translation);
-            options.push(word.english_translation);
 
-            return {
-              word,
-              options: options.sort(() => 0.5 - Math.random()),
-              correctAnswer: word.english_translation,
-            };
-          });
+          // Validate minimum vocabulary count
+          if (vocabulary.length < 4) {
+            Notify.create({
+              type: 'warning',
+              message: `You need at least 4 vocabulary words to play. Currently have ${vocabulary.length} due words. Falling back to random vocabulary.`,
+              position: 'top',
+              timeout: 5000,
+            });
+            // Fall through to random questions below
+          } else {
+            // Fetch additional random vocabulary to ensure we have enough distractors
+            const additionalVocab = await gameService.getVocabularyQuestions(10, jlptFilter);
 
-          gameStore.startGame(questions);
-          gameStartTime.value = new Date();
-          correctAnswers.value = 0;
-          totalQuestions.value = questions.length;
-          return;
+            const questions = vocabulary.map((word) => {
+              const otherWords = vocabulary.filter((v) => v.id !== word.id);
+              let distractors = otherWords
+                .sort(() => 0.5 - Math.random())
+                .slice(0, 3)
+                .map((v) => v.english_translation);
+
+              // If we don't have enough distractors, fetch from additional vocabulary
+              if (distractors.length < 3) {
+                const needed = 3 - distractors.length;
+                const availableDistractors = additionalVocab
+                  .filter((q) => q.word.id !== word.id)
+                  .map((q) => q.word.english_translation)
+                  .filter((trans) => !distractors.includes(trans));
+
+                distractors = [
+                  ...distractors,
+                  ...availableDistractors.sort(() => 0.5 - Math.random()).slice(0, needed),
+                ];
+              }
+
+              // Ensure we have exactly 3 unique distractors
+              const uniqueDistractors = [...new Set(distractors)].slice(0, 3);
+
+              // If still not enough, show error and fall back
+              if (uniqueDistractors.length < 3) {
+                throw new Error('Insufficient vocabulary for generating questions');
+              }
+
+              const options = [...uniqueDistractors, word.english_translation];
+
+              return {
+                word,
+                options: options.sort(() => 0.5 - Math.random()),
+                correctAnswer: word.english_translation,
+              };
+            });
+
+            gameStore.startGame(questions);
+            gameStartTime.value = new Date();
+            correctAnswers.value = 0;
+            totalQuestions.value = questions.length;
+            return;
+          }
         }
       } catch (error) {
         console.error('Failed to fetch due items, falling back to random:', error);
@@ -263,7 +302,7 @@ watch(
       );
 
       // Refresh due count after game
-      await fetchDueCount();
+      await fetchDueCount(selectedJlptLevels.value);
 
       // Reset tracking variables
       gameStartTime.value = null;

@@ -47,7 +47,7 @@ These features work together to enable personalized, efficient learning paths ba
 
 - **GUD-001**: Follow TDD approach - write tests before implementation
 - **GUD-002**: Use Zod schemas for all new API request/response validation
-- **GUD-003**: Use existing test patterns from gameService.test.ts and API route tests
+- **GUD-003**: Use existing test patterns from gameService.test.ts and colocated API route tests in src/
 - **PAT-001**: Follow existing DynamoDB operation patterns in dynamodb.ts
 - **PAT-002**: Follow existing Hono route patterns in routes/ directory
 - **PAT-003**: Use Vitest for unit tests, Playwright for E2E tests
@@ -88,6 +88,40 @@ These features work together to enable personalized, efficient learning paths ba
 | TASK-012 | Add getByJlptLevel() and getRandom(limit, jlptLevels?) methods to vocabulary and sentences operations in dynamodb.ts               | ✅        | 2024-12-30 |
 | TASK-013 | Update VocabularyQuerySchema in apps/vela-api/src/routes/games.ts to accept optional jlpt query parameter (comma-separated levels) | ✅        | 2024-12-30 |
 | TASK-014 | Update /games/vocabulary and /games/sentences route handlers to filter by JLPT level                                               | ✅        | 2024-12-30 |
+
+### Implementation Phase 3.5: Legacy Vocabulary Data Migration (Pending)
+
+- GOAL-003.5: Backfill jlpt_level for existing vocabulary items to ensure filtered queries return complete results
+
+| Task        | Description                                                                                                                                                                                                                                                                                                   | Completed | Date |
+| ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------- | ---- |
+| TASK-014.5  | Audit existing vocabulary data: Query vela-vocabulary table to count items with missing/null jlpt_level, identify patterns (e.g., by word length, character types, source), and generate report with sample items                                                                                             |           |      |
+| TASK-014.6  | Choose backfill strategy: Evaluate options (manual tagging for high-frequency words, bulk import from JLPT-structured sources like Tatoeba/JMdict, heuristic mapping based on character complexity and frequency, or explicit NULL handling with fallback to "All" mode) and document decision with rationale |           |      |
+| TASK-014.7  | Implement backfill script: Create apps/vela-api/scripts/backfill-jlpt-levels.ts with batch update logic, error handling, and progress logging. Include dry-run mode to preview changes before execution                                                                                                       |           |      |
+| TASK-014.8  | Execute backfill: Run script in dry-run mode first, review output, then execute actual updates in batches (e.g., 100 items per batch) to avoid DynamoDB throttling. Monitor CloudWatch metrics for write capacity                                                                                             |           |      |
+| TASK-014.9  | Validate migration: Run post-migration audit to verify jlpt_level coverage (target: >95% of vocabulary items tagged), sample random items for accuracy, test filtered queries return expected counts per JLPT level                                                                                           |           |      |
+| TASK-014.10 | Document migration results: Record total items processed, items tagged per JLPT level, items remaining uncategorized, and any manual follow-up required. Update ASSUMPTION-001 in plan with actual migration outcome                                                                                          |           |      |
+
+**Migration Constraints & Timeline:**
+
+- **Owner**: Backend Developer (assign TBD)
+- **Timeline Estimate**: 1-2 weeks depending on strategy and data volume
+- **Completion Requirement**: Must complete before Phase 6 (Game Integration) deployment to ensure JLPT filtering works correctly in production
+- **Fallback Behavior**: If migration is delayed, Phase 6 must implement graceful degradation: show warning when JLPT filter selected, default to "All" mode, exclude items with null jlpt_level from filtered queries (as documented in RISK-001 mitigation)
+- **Validation Checks**:
+  - Pre-migration: Count of items with null jlpt_level
+  - Post-migration: Count of items tagged per level (N5-N1), percentage of total vocabulary covered
+  - Query validation: `GET /api/games/vocabulary?jlpt_level=5` returns expected N5 count
+  - Spot-check: Random sample of 50 items verified for correct JLPT assignment
+
+**Backfill Strategy Options:**
+
+1. **Manual Tagging**: High accuracy for common words, time-intensive for large datasets. Recommended for top 1000 most frequent words.
+2. **Bulk Import from External Sources**: Use JLPT-structured datasets (JMdict, Tatoeba, WaniKani API) to map existing vocabulary to levels. Fast but requires data matching logic.
+3. **Heuristic Mapping**: Algorithmic assignment based on character complexity (kanji count, joyo grade), word frequency, and difficulty metrics. Lower accuracy but scalable.
+4. **Explicit NULL Handling**: Leave uncategorized items as null, exclude from filtered queries, allow users to review and tag manually via admin interface. Lowest effort but reduces feature effectiveness.
+
+**Recommended Approach**: Hybrid strategy - bulk import for high-coverage mapping (target 80-90%), heuristic mapping for remaining items, manual review of edge cases. Document uncategorized items for future curation.
 
 ### Implementation Phase 4: SRS Progress API Routes (Backend) ✅ COMPLETED
 
@@ -196,7 +230,7 @@ These features work together to enable personalized, efficient learning paths ba
 - **FILE-001**: apps/vela-api/src/utils/srs.ts - SM-2 algorithm implementation
 - **FILE-002**: apps/vela-api/src/utils/srs.test.ts - SM-2 algorithm tests
 - **FILE-003**: apps/vela-api/src/routes/srs.ts - SRS API routes
-- **FILE-004**: apps/vela-api/test/routes/srs.test.ts - SRS route tests
+- **FILE-004**: apps/vela-api/src/routes/srs.test.ts - SRS route tests
 - **FILE-005**: apps/vela/src/services/srsService.ts - Frontend SRS service
 - **FILE-006**: apps/vela/src/services/srsService.test.ts - Frontend SRS service tests
 - **FILE-007**: apps/vela/src/components/games/JlptLevelSelector.vue - JLPT selection component
@@ -212,7 +246,7 @@ These features work together to enable personalized, efficient learning paths ba
 - **FILE-014**: apps/vela-api/src/index.ts - Mount SRS routes
 - **FILE-015**: apps/vela-api/src/routes/games.ts - Add JLPT filter to vocabulary endpoint
 - **FILE-016**: apps/vela-api/src/routes/profiles.ts - Add target_jlpt_level field
-- **FILE-017**: apps/vela-api/test/routes/games.test.ts - Add JLPT filter tests
+- **FILE-017**: apps/vela-api/src/routes/games.test.ts - Add JLPT filter tests
 - **FILE-018**: apps/vela/src/types/database.ts - Add UserVocabularyProgress, update Vocabulary
 - **FILE-019**: apps/vela/src/services/gameService.ts - Add JLPT level parameter
 - **FILE-020**: apps/vela/src/services/gameService.test.ts - Add JLPT filter tests
