@@ -193,18 +193,34 @@ export const vocabulary = {
         {} as Record<string, number>,
       );
 
-      const command = new ScanCommand({
-        TableName: TABLE_NAMES.VOCABULARY,
-        FilterExpression: filterExpression,
-        ExpressionAttributeValues: expressionAttributeValues,
-        Limit: limit * 3, // Scan more to account for filtering
-      });
+      const allItems: any[] = [];
+      let lastEvaluatedKey: any = undefined;
+      const hardCap = 1000; // Prevent excessive scanning
 
-      const response = await docClient.send(command);
-      const items = response.Items || [];
+      // Paginate scan until we have enough matching items or reach hard cap
+      while (allItems.length < limit && allItems.length < hardCap) {
+        const command = new ScanCommand({
+          TableName: TABLE_NAMES.VOCABULARY,
+          FilterExpression: filterExpression,
+          ExpressionAttributeValues: expressionAttributeValues,
+          ExclusiveStartKey: lastEvaluatedKey,
+        });
 
-      // Return up to limit items, shuffled for variety
-      return items.slice(0, limit).sort(() => Math.random() - 0.5);
+        const response = await docClient.send(command);
+        const items = response.Items || [];
+
+        // Collect all matching items from this page
+        allItems.push(...items);
+
+        // Check if we have more items to scan
+        lastEvaluatedKey = response.LastEvaluatedKey;
+        if (!lastEvaluatedKey) {
+          break;
+        }
+      }
+
+      // Shuffle all collected items and return up to limit
+      return allItems.sort(() => Math.random() - 0.5).slice(0, limit);
     } catch (error) {
       handleDynamoError(error);
     }
@@ -221,7 +237,7 @@ export const vocabulary = {
       let items: any[];
 
       if (jlptLevels && jlptLevels.length > 0) {
-        items = (await this.getByJlptLevel(jlptLevels, limit * 2)) || [];
+        items = (await this.getByJlptLevel(jlptLevels, limit)) || [];
       } else {
         const command = new ScanCommand({
           TableName: TABLE_NAMES.VOCABULARY,
@@ -285,17 +301,34 @@ export const sentences = {
         {} as Record<string, number>,
       );
 
-      const command = new ScanCommand({
-        TableName: TABLE_NAMES.SENTENCES,
-        FilterExpression: filterExpression,
-        ExpressionAttributeValues: expressionAttributeValues,
-        Limit: limit * 3,
-      });
+      const allItems: any[] = [];
+      let lastEvaluatedKey: any = undefined;
+      const hardCap = 1000; // Prevent excessive scanning
 
-      const response = await docClient.send(command);
-      const items = response.Items || [];
+      // Paginate scan until we have enough matching items or reach hard cap
+      while (allItems.length < limit && allItems.length < hardCap) {
+        const command = new ScanCommand({
+          TableName: TABLE_NAMES.SENTENCES,
+          FilterExpression: filterExpression,
+          ExpressionAttributeValues: expressionAttributeValues,
+          ExclusiveStartKey: lastEvaluatedKey,
+        });
 
-      return items.slice(0, limit).sort(() => Math.random() - 0.5);
+        const response = await docClient.send(command);
+        const items = response.Items || [];
+
+        // Collect all matching items from this page
+        allItems.push(...items);
+
+        // Check if we have more items to scan
+        lastEvaluatedKey = response.LastEvaluatedKey;
+        if (!lastEvaluatedKey) {
+          break;
+        }
+      }
+
+      // Shuffle all collected items and return up to limit
+      return allItems.sort(() => Math.random() - 0.5).slice(0, limit);
     } catch (error) {
       handleDynamoError(error);
     }
@@ -310,7 +343,7 @@ export const sentences = {
       let items: any[];
 
       if (jlptLevels && jlptLevels.length > 0) {
-        items = (await this.getByJlptLevel(jlptLevels, limit * 2)) || [];
+        items = (await this.getByJlptLevel(jlptLevels, limit)) || [];
       } else {
         const command = new ScanCommand({
           TableName: TABLE_NAMES.SENTENCES,
@@ -655,8 +688,8 @@ export const userVocabularyProgress = {
         Key: { user_id: userId, vocabulary_id: vocabularyId },
         UpdateExpression:
           'SET next_review_date = :nrd, ease_factor = :ef, #interval = :i, repetitions = :r, ' +
-          'last_quality = :lq, last_reviewed_at = :lra, total_reviews = total_reviews + :one, ' +
-          'correct_count = correct_count + :correct',
+          'last_quality = :lq, last_reviewed_at = :lra, total_reviews = if_not_exists(total_reviews, :zero) + :one, ' +
+          'correct_count = if_not_exists(correct_count, :zero) + :correct',
         ExpressionAttributeNames: {
           '#interval': 'interval', // interval is a reserved word
         },
@@ -667,6 +700,7 @@ export const userVocabularyProgress = {
           ':r': updates.repetitions,
           ':lq': updates.last_quality,
           ':lra': new Date().toISOString(),
+          ':zero': 0,
           ':one': 1,
           ':correct': updates.last_quality >= 3 ? 1 : 0,
         },

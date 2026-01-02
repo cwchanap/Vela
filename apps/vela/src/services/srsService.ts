@@ -119,9 +119,14 @@ async function getDueItems(
 /**
  * Get SRS statistics for the current user
  * @param accessToken - User's access token
+ * @param jlptLevels - Optional JLPT level filter
  */
-async function getStats(accessToken: string): Promise<SRSStats> {
-  return httpJson<SRSStats>(getApiUrl('srs/stats'), accessToken);
+async function getStats(accessToken: string, jlptLevels?: JLPTLevel[]): Promise<SRSStats> {
+  let url = getApiUrl('srs/stats');
+  if (jlptLevels && jlptLevels.length > 0) {
+    url += `?jlpt=${jlptLevels.join(',')}`;
+  }
+  return httpJson<SRSStats>(url, accessToken);
 }
 
 /**

@@ -9,10 +9,8 @@ test.describe('SRS (Spaced Repetition System)', () => {
       await page.goto('/games/vocabulary');
       await waitForPageLoad(page);
 
-      // Should show JLPT level selector - check for any level button
-      await expect(
-        page.getByTestId('jlpt-level-5').or(page.getByText('All Levels').first()),
-      ).toBeVisible();
+      // Should show JLPT level selector - check for N5 level button using testid only
+      await expect(page.getByTestId('jlpt-level-5')).toBeVisible();
     });
 
     test('should display SRS mode toggle', async ({ authenticatedPage: page }) => {
