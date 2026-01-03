@@ -64,6 +64,32 @@ describe('SrsStatsCard', () => {
     });
   }
 
+  async function createAuthenticatedWrapper(mockStatsResponse = mockStats) {
+    mockAuthStore.isAuthenticated = true;
+    mockAuthStore.user = { id: 'user-123' } as any;
+    vi.mocked(fetchAuthSession).mockResolvedValue({
+      tokens: { accessToken: { toString: () => 'test-token' } },
+    } as any);
+    vi.mocked(srsServiceModule.srsService.getStats).mockResolvedValue(mockStatsResponse);
+
+    const wrapper = createWrapper();
+    await flushPromises();
+    return wrapper;
+  }
+
+  async function createAuthenticatedWrapperWithError(error: Error) {
+    mockAuthStore.isAuthenticated = true;
+    mockAuthStore.user = { id: 'user-123' } as any;
+    vi.mocked(fetchAuthSession).mockResolvedValue({
+      tokens: { accessToken: { toString: () => 'test-token' } },
+    } as any);
+    vi.mocked(srsServiceModule.srsService.getStats).mockRejectedValue(error);
+
+    const wrapper = createWrapper();
+    await flushPromises();
+    return wrapper;
+  }
+
   it('shows sign-in message when not authenticated', () => {
     mockAuthStore.isAuthenticated = false;
     const wrapper = createWrapper();
@@ -71,29 +97,13 @@ describe('SrsStatsCard', () => {
   });
 
   it('fetches stats when authenticated', async () => {
-    mockAuthStore.isAuthenticated = true;
-    mockAuthStore.user = { id: 'user-123' } as any;
-    vi.mocked(fetchAuthSession).mockResolvedValue({
-      tokens: { accessToken: { toString: () => 'test-token' } },
-    } as any);
-    vi.mocked(srsServiceModule.srsService.getStats).mockResolvedValue(mockStats);
-
-    createWrapper();
-    await flushPromises();
+    await createAuthenticatedWrapper();
 
     expect(srsServiceModule.srsService.getStats).toHaveBeenCalledWith('test-token');
   });
 
   it('displays stats correctly', async () => {
-    mockAuthStore.isAuthenticated = true;
-    mockAuthStore.user = { id: 'user-123' } as any;
-    vi.mocked(fetchAuthSession).mockResolvedValue({
-      tokens: { accessToken: { toString: () => 'test-token' } },
-    } as any);
-    vi.mocked(srsServiceModule.srsService.getStats).mockResolvedValue(mockStats);
-
-    const wrapper = createWrapper();
-    await flushPromises();
+    const wrapper = await createAuthenticatedWrapper();
 
     expect(wrapper.text()).toContain('100'); // total_words
     expect(wrapper.text()).toContain('30'); // mastered
@@ -102,41 +112,20 @@ describe('SrsStatsCard', () => {
   });
 
   it('shows due items alert when items are due', async () => {
-    mockAuthStore.isAuthenticated = true;
-    mockAuthStore.user = { id: 'user-123' } as any;
-    vi.mocked(fetchAuthSession).mockResolvedValue({
-      tokens: { accessToken: { toString: () => 'test-token' } },
-    } as any);
-    vi.mocked(srsServiceModule.srsService.getStats).mockResolvedValue(mockStats);
-
-    const wrapper = createWrapper();
-    await flushPromises();
+    const wrapper = await createAuthenticatedWrapper();
 
     expect(wrapper.text()).toContain('15 words due for review');
   });
 
   it('calculates mastery percentage correctly', async () => {
-    mockAuthStore.isAuthenticated = true;
-    mockAuthStore.user = { id: 'user-123' } as any;
-    vi.mocked(fetchAuthSession).mockResolvedValue({
-      tokens: { accessToken: { toString: () => 'test-token' } },
-    } as any);
-    vi.mocked(srsServiceModule.srsService.getStats).mockResolvedValue(mockStats);
-
-    const wrapper = createWrapper();
-    await flushPromises();
+    const wrapper = await createAuthenticatedWrapper();
 
     // 30 mastered out of 100 total = 30%
     expect(wrapper.text()).toContain('30%');
   });
 
   it('shows empty state when no words', async () => {
-    mockAuthStore.isAuthenticated = true;
-    mockAuthStore.user = { id: 'user-123' } as any;
-    vi.mocked(fetchAuthSession).mockResolvedValue({
-      tokens: { accessToken: { toString: () => 'test-token' } },
-    } as any);
-    vi.mocked(srsServiceModule.srsService.getStats).mockResolvedValue({
+    const emptyStats = {
       total_items: 0,
       due_today: 0,
       mastery_breakdown: {
@@ -148,38 +137,20 @@ describe('SrsStatsCard', () => {
       average_ease_factor: 0,
       total_reviews: 0,
       accuracy_rate: 0,
-    });
-
-    const wrapper = createWrapper();
-    await flushPromises();
+    };
+    const wrapper = await createAuthenticatedWrapper(emptyStats);
 
     expect(wrapper.text()).toContain('Start learning vocabulary to build your SRS progress');
   });
 
   it('displays average ease factor', async () => {
-    mockAuthStore.isAuthenticated = true;
-    mockAuthStore.user = { id: 'user-123' } as any;
-    vi.mocked(fetchAuthSession).mockResolvedValue({
-      tokens: { accessToken: { toString: () => 'test-token' } },
-    } as any);
-    vi.mocked(srsServiceModule.srsService.getStats).mockResolvedValue(mockStats);
-
-    const wrapper = createWrapper();
-    await flushPromises();
+    const wrapper = await createAuthenticatedWrapper();
 
     expect(wrapper.text()).toContain('2.50');
   });
 
   it('eventually displays stats after loading', async () => {
-    mockAuthStore.isAuthenticated = true;
-    mockAuthStore.user = { id: 'user-123' } as any;
-    vi.mocked(fetchAuthSession).mockResolvedValue({
-      tokens: { accessToken: { toString: () => 'test-token' } },
-    } as any);
-    vi.mocked(srsServiceModule.srsService.getStats).mockResolvedValue(mockStats);
-
-    const wrapper = createWrapper();
-    await flushPromises();
+    const wrapper = await createAuthenticatedWrapper();
 
     // After loading, should show stats not loading
     expect(wrapper.text()).not.toContain('Loading SRS stats');
@@ -187,15 +158,7 @@ describe('SrsStatsCard', () => {
   });
 
   it('handles fetch error gracefully', async () => {
-    mockAuthStore.isAuthenticated = true;
-    mockAuthStore.user = { id: 'user-123' } as any;
-    vi.mocked(fetchAuthSession).mockResolvedValue({
-      tokens: { accessToken: { toString: () => 'test-token' } },
-    } as any);
-    vi.mocked(srsServiceModule.srsService.getStats).mockRejectedValue(new Error('API Error'));
-
-    const wrapper = createWrapper();
-    await flushPromises();
+    const wrapper = await createAuthenticatedWrapperWithError(new Error('API Error'));
 
     // Should show empty state on error
     expect(wrapper.text()).toContain('Start learning vocabulary');

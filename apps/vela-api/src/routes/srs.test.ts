@@ -161,10 +161,25 @@ describe('SRS Routes', () => {
     });
 
     it('should respect limit query parameter', async () => {
-      mockUserVocabularyProgress.getDueItems.mockResolvedValue([]);
+      const mockDueItems = Array.from({ length: 10 }, (_, i) => ({
+        user_id: 'test-user-123',
+        vocabulary_id: `vocab-${i + 1}`,
+        next_review_date: '2024-12-29T00:00:00Z',
+        ease_factor: 2.5,
+        interval: 1,
+        repetitions: 1,
+      }));
 
-      await app.request('/due?limit=5');
+      mockUserVocabularyProgress.getDueItems.mockResolvedValue(mockDueItems);
 
+      const res = await app.request('/due?limit=5');
+
+      expect(res.status).toBe(200);
+      const data = await res.json();
+      expect(data.items).toHaveLength(5);
+      expect(data.items[0].vocabulary_id).toBe('vocab-1');
+      expect(data.items[4].vocabulary_id).toBe('vocab-5');
+      expect(data.total_due).toBe(10);
       expect(mockUserVocabularyProgress.getDueItems).toHaveBeenCalledWith('test-user-123');
     });
   });

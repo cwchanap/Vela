@@ -447,6 +447,9 @@ async function seedVocabulary() {
     batches.push(items.slice(i, i + 25));
   }
 
+  const MAX_RETRIES = 5;
+  const INITIAL_DELAY_MS = 100;
+
   for (const batch of batches) {
     const putRequests = batch.map((item) => ({
       PutRequest: {
@@ -454,20 +457,58 @@ async function seedVocabulary() {
       },
     }));
 
-    try {
-      await docClient.send(
-        new BatchWriteCommand({
-          RequestItems: {
-            [VOCABULARY_TABLE]: putRequests,
-          },
-        }),
-      );
-      console.log(`Added ${batch.length} vocabulary items`);
-    } catch (error) {
-      console.error('Error adding batch:', error);
+    let unprocessedItems = putRequests;
+    let attempt = 0;
+    let success = false;
 
-      // Fallback to individual puts
-      for (const item of batch) {
+    // Retry loop for batch writes
+    while (attempt < MAX_RETRIES && unprocessedItems.length > 0) {
+      attempt++;
+      const delay = INITIAL_DELAY_MS * Math.pow(2, attempt - 1);
+
+      if (attempt > 1) {
+        console.log(
+          `Retry attempt ${attempt}/${MAX_RETRIES} for ${unprocessedItems.length} unprocessed items (delay: ${delay}ms)`,
+        );
+        await new Promise((resolve) => setTimeout(resolve, delay));
+      }
+
+      try {
+        const response = await docClient.send(
+          new BatchWriteCommand({
+            RequestItems: {
+              [VOCABULARY_TABLE]: unprocessedItems,
+            },
+          }),
+        );
+
+        // Check for unprocessed items
+        unprocessedItems = (response.UnprocessedItems?.[VOCABULARY_TABLE] ||
+          []) as typeof putRequests;
+
+        if (unprocessedItems.length === 0) {
+          success = true;
+          console.log(`Added ${batch.length} vocabulary items`);
+          break;
+        }
+      } catch (error) {
+        console.error(`Error on attempt ${attempt}/${MAX_RETRIES}:`, error);
+
+        // If this is the last attempt, fall back to individual puts
+        if (attempt >= MAX_RETRIES) {
+          console.log(
+            `Max retries reached, falling back to individual puts for ${unprocessedItems.length} items`,
+          );
+        }
+      }
+    }
+
+    // Fallback to individual puts for any remaining unprocessed items
+    if (!success && unprocessedItems.length > 0) {
+      console.log(`Falling back to individual puts for ${unprocessedItems.length} items`);
+
+      for (const request of unprocessedItems) {
+        const item = request.PutRequest.Item as VocabularyItem;
         try {
           await docClient.send(
             new PutCommand({

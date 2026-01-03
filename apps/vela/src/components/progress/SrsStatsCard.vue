@@ -38,7 +38,7 @@
         </div>
 
         <!-- Stats Grid -->
-        <div class="stats-grid">
+        <div v-if="stats.total_items > 0" class="stats-grid">
           <div class="stat-item">
             <div class="stat-value text-primary">{{ stats.total_items }}</div>
             <div class="stat-label">Total Words</div>
@@ -79,7 +79,7 @@
         </div>
 
         <!-- Empty State -->
-        <div v-if="stats.total_items === 0" class="text-center q-py-md text-grey-7">
+        <div v-else class="text-center q-py-md text-grey-7">
           <q-icon name="school" size="48px" class="q-mb-sm" />
           <div>Start learning vocabulary to build your SRS progress!</div>
           <q-btn
