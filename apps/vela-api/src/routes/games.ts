@@ -5,19 +5,26 @@ import type { Env } from '../types';
 import { vocabulary as vocabularyDB, sentences as sentencesDB } from '../dynamodb';
 
 // Validation schemas
+
+// Shared JLPT field definition with validation
+const jlptField = z
+  .string()
+  .optional()
+  .transform((val) => {
+    if (!val) return undefined;
+    // Parse comma-separated JLPT levels (e.g., "5,4,3" for N5, N4, N3)
+    const levels = val.split(',').map((level) => parseInt(level.trim()));
+    // Validate that all levels are between 1 and 5
+    const validLevels = levels.filter((level) => !isNaN(level) && level >= 1 && level <= 5);
+    return validLevels.length > 0 ? validLevels : undefined;
+  });
+
 const VocabularyQuerySchema = z.object({
   limit: z
     .string()
     .optional()
     .transform((val) => (val ? parseInt(val) : 10)),
-  jlpt: z
-    .string()
-    .optional()
-    .transform((val) => {
-      if (!val) return undefined;
-      // Parse comma-separated JLPT levels (e.g., "5,4,3" for N5, N4, N3)
-      return val.split(',').map((level) => parseInt(level.trim()));
-    }),
+  jlpt: jlptField,
 });
 
 const SentencesQuerySchema = z.object({
@@ -25,13 +32,7 @@ const SentencesQuerySchema = z.object({
     .string()
     .optional()
     .transform((val) => (val ? parseInt(val) : 5)),
-  jlpt: z
-    .string()
-    .optional()
-    .transform((val) => {
-      if (!val) return undefined;
-      return val.split(',').map((level) => parseInt(level.trim()));
-    }),
+  jlpt: jlptField,
 });
 
 const games = new Hono<{ Bindings: Env }>();

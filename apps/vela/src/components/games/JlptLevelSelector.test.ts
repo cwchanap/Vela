@@ -24,7 +24,7 @@ describe('JlptLevelSelector', () => {
 
     const buttons = wrapper.findAll('[data-testid^="jlpt-level-"]');
     // 5 levels + "all" button = 6 buttons
-    expect(buttons.length).toBeGreaterThanOrEqual(5);
+    expect(buttons.length).toBe(6);
   });
 
   it('displays "All Levels" option', () => {
