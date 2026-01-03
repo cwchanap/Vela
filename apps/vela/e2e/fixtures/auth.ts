@@ -18,9 +18,9 @@ export const test = base.extend<{
     // Wait for the auth form to be visible
     await page.waitForSelector('.auth-form', { timeout: 10000 });
 
-    // Fill in login form - using role selectors for better precision
-    await page.getByRole('textbox', { name: 'Email' }).fill(TEST_USER.email);
-    await page.getByRole('textbox', { name: 'Password' }).fill(TEST_USER.password);
+    // Fill in login form - using label selectors for better reliability
+    await page.getByLabel('Email').fill(TEST_USER.email);
+    await page.getByLabel('Password').fill(TEST_USER.password);
 
     // Submit login form by clicking the Sign In button
     await page.getByRole('button', { name: 'Sign In' }).click();

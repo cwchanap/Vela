@@ -30,6 +30,9 @@ export const SRS_DEFAULTS = {
 
 /**
  * Represents an item being tracked in the SRS system
+ *
+ * DB-facing type: Uses snake_case to match database column names.
+ * This represents the raw database row structure.
  */
 export interface SRSItem {
   vocabulary_id: string;
@@ -56,6 +59,9 @@ export interface SRSInput {
 
 /**
  * Result of the SRS calculation
+ *
+ * Application-facing type: Uses camelCase to match JavaScript/TypeScript conventions.
+ * This represents the transformed application object used in business logic.
  */
 export interface SRSResult {
   /** New ease factor */
@@ -120,6 +126,24 @@ export function calculateNextReview(input: SRSInput, now?: Date): SRSResult {
     interval: newInterval,
     repetitions: newRepetitions,
     nextReviewDate: nextReviewDate.toISOString(),
+  };
+}
+
+/**
+ * Convert a DB-facing SRSItem (snake_case) to an application-facing object (camelCase)
+ *
+ * This mapper function documents the DB boundary and transforms between conventions.
+ * Use this when transitioning data from the database layer to the application layer.
+ *
+ * @param item - DB-facing SRS item with snake_case fields
+ * @returns Application-facing object with camelCase fields
+ */
+export function srsItemToResult(item: SRSItem): SRSResult {
+  return {
+    easeFactor: item.ease_factor,
+    interval: item.interval,
+    repetitions: item.repetitions,
+    nextReviewDate: item.next_review_date,
   };
 }
 

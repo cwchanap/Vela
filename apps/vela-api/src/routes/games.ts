@@ -12,11 +12,27 @@ const jlptField = z
   .optional()
   .transform((val) => {
     if (!val) return undefined;
-    // Parse comma-separated JLPT levels (e.g., "5,4,3" for N5, N4, N3)
-    const levels = val.split(',').map((level) => parseInt(level.trim()));
-    // Validate that all levels are between 1 and 5
-    const validLevels = levels.filter((level) => !isNaN(level) && level >= 1 && level <= 5);
-    return validLevels.length > 0 ? validLevels : undefined;
+
+    // Parse comma-separated JLPT levels
+    const levels = val.split(',').map((level) => level.trim());
+
+    // Convert to integers and validate each value
+    const parsedLevels: number[] = [];
+    for (const level of levels) {
+      const parsed = parseInt(level, 10);
+
+      // Validate: must be a finite integer between 1-5
+      if (!Number.isFinite(parsed) || parsed < 1 || parsed > 5) {
+        throw new Error(`Invalid JLPT level "${level}". Must be an integer between 1 and 5.`);
+      }
+
+      parsedLevels.push(parsed);
+    }
+
+    // Remove duplicates while preserving order
+    const uniqueLevels = [...new Set(parsedLevels)];
+
+    return uniqueLevels.length > 0 ? uniqueLevels : undefined;
   });
 
 const VocabularyQuerySchema = z.object({
