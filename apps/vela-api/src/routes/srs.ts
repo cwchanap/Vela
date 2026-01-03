@@ -10,6 +10,9 @@ const srsRouter = new Hono<AuthContext>();
 // Apply auth middleware to all routes
 srsRouter.use('*', requireAuth);
 
+// Constants
+const BATCH_REVIEW_MAX = 100;
+
 // Validation schemas
 const reviewSchema = z.object({
   vocabulary_id: z.string().min(1),
@@ -178,12 +181,14 @@ srsRouter.delete('/progress/:vocabularyId', async (c) => {
  * Record multiple reviews at once
  */
 const batchReviewSchema = z.object({
-  reviews: z.array(
-    z.object({
-      vocabulary_id: z.string().min(1),
-      quality: z.number().int().min(0).max(5),
-    }),
-  ),
+  reviews: z
+    .array(
+      z.object({
+        vocabulary_id: z.string().min(1),
+        quality: z.number().int().min(0).max(5),
+      }),
+    )
+    .max(BATCH_REVIEW_MAX),
 });
 
 srsRouter.post('/batch-review', zValidator('json', batchReviewSchema), async (c) => {
