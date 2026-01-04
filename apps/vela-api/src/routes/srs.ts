@@ -196,8 +196,14 @@ srsRouter.post('/batch-review', zValidator('json', batchReviewSchema), async (c)
   const { reviews } = c.req.valid('json');
 
   try {
+    // Deduplicate reviews: keep only the last review for each vocabulary_id
+    // to avoid race conditions from concurrent updates on the same item
+    const deduplicatedReviews = Array.from(
+      new Map(reviews.map((review) => [review.vocabulary_id, review])).values(),
+    );
+
     const results = await Promise.all(
-      reviews.map(async ({ vocabulary_id, quality }) => {
+      deduplicatedReviews.map(async ({ vocabulary_id, quality }) => {
         let progress = await userVocabularyProgress.get(userId, vocabulary_id);
 
         if (!progress) {

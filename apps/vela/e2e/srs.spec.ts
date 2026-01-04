@@ -28,11 +28,11 @@ test.describe('SRS (Spaced Repetition System)', () => {
       // Click on N5 button using data-testid
       const n5Button = page.getByTestId('jlpt-level-5');
 
-      if (await n5Button.isVisible()) {
-        await n5Button.click();
-        // Button should be highlighted (has bg-primary class when selected)
-        await expect(n5Button).toHaveClass(/bg-primary/);
-      }
+      // Assert the button is visible before interacting - test will fail if button is missing
+      await expect(n5Button).toBeVisible();
+      await n5Button.click();
+      // Verify button is selected (has bg-primary class)
+      await expect(n5Button).toHaveClass(/bg-primary/);
     });
 
     test('should start quiz and display game interface', async ({ authenticatedPage: page }) => {
@@ -43,18 +43,25 @@ test.describe('SRS (Spaced Repetition System)', () => {
       const startButton = page.getByRole('button', { name: /Start Quiz|Review/ });
       await startButton.click();
 
-      // Wait for quiz to load - either game interface or loading state
-      await page.waitForTimeout(2000);
+      // Wait for one of the expected states: question card, game over, or back to setup
+      // Using Promise.race to wait for the first visible state
+      const questionCard = page.getByTestId('vocabulary-card');
+      const gameOverScreen = page.getByRole('heading', { name: /Game Over|Score/i });
+      const setupButton = page.getByRole('button', { name: /Start Quiz/ });
 
-      // Should show either:
-      // 1. Active game with question (if vocabulary loaded)
-      // 2. Game over screen (if quiz ended quickly)
-      // 3. Setup screen (if no vocabulary found)
-      const hasQuestion = await page.locator('.vocabulary-card, .q-card').first().isVisible();
-      const hasSetup = await page.getByRole('button', { name: /Start Quiz/ }).isVisible();
+      // Wait for at least one state to become visible with a reasonable timeout
+      await Promise.race([
+        questionCard.waitFor({ state: 'visible', timeout: 5000 }),
+        gameOverScreen.waitFor({ state: 'visible', timeout: 5000 }),
+        setupButton.waitFor({ state: 'visible', timeout: 5000 }),
+      ]);
 
-      // At least one of these should be visible
-      expect(hasQuestion || hasSetup).toBeTruthy();
+      // Verify at least one expected state is visible
+      const hasQuestion = await questionCard.isVisible().catch(() => false);
+      const hasGameOver = await gameOverScreen.isVisible().catch(() => false);
+      const hasSetup = await setupButton.isVisible().catch(() => false);
+
+      expect(hasQuestion || hasGameOver || hasSetup).toBeTruthy();
     });
   });
 
