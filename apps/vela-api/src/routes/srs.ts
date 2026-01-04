@@ -35,12 +35,24 @@ srsRouter.get('/due', zValidator('query', limitSchema), async (c) => {
     const dueItems = await userVocabularyProgress.getDueItems(userId);
     const limitedItems = dueItems.slice(0, limit);
 
-    // Optionally fetch vocabulary details for each due item
+    // Fetch vocabulary details for each due item and structure as expected by frontend
     const itemsWithDetails = await Promise.all(
       limitedItems.map(async (progress) => {
         const vocabDetails = await vocabulary.getById(progress.vocabulary_id);
         return {
-          ...progress,
+          progress: {
+            user_id: progress.user_id,
+            vocabulary_id: progress.vocabulary_id,
+            next_review_date: progress.next_review_date,
+            ease_factor: progress.ease_factor,
+            interval: progress.interval,
+            repetitions: progress.repetitions,
+            last_quality: progress.last_quality,
+            last_reviewed_at: progress.last_reviewed_at,
+            first_learned_at: progress.first_learned_at,
+            total_reviews: progress.total_reviews,
+            correct_count: progress.correct_count,
+          },
           vocabulary: vocabDetails || null,
         };
       }),
@@ -48,7 +60,7 @@ srsRouter.get('/due', zValidator('query', limitSchema), async (c) => {
 
     return c.json({
       items: itemsWithDetails,
-      total_due: dueItems.length,
+      total: dueItems.length,
     });
   } catch (error) {
     console.error('Error fetching due items:', error);
@@ -111,7 +123,7 @@ srsRouter.post('/review', zValidator('json', reviewSchema), async (c) => {
       last_quality: quality,
     });
 
-    return c.json(updatedProgress);
+    return c.json({ progress: updatedProgress });
   } catch (error) {
     console.error('Error recording review:', error);
     return c.json({ error: 'Failed to record review' }, 500);
@@ -130,10 +142,10 @@ srsRouter.get('/progress/:vocabularyId', async (c) => {
     const progress = await userVocabularyProgress.get(userId, vocabularyId);
 
     if (!progress) {
-      return c.json({ error: 'Progress not found' }, 404);
+      return c.json({ progress: null }, 404);
     }
 
-    return c.json(progress);
+    return c.json({ progress });
   } catch (error) {
     console.error('Error fetching progress:', error);
     return c.json({ error: 'Failed to fetch progress' }, 500);

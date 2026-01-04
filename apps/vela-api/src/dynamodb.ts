@@ -755,35 +755,65 @@ export const userVocabularyProgress = {
    */
   async getStats(userId: string): Promise<{
     total_items: number;
-    due_items: number;
-    mastered_items: number;
+    due_today: number;
+    mastery_breakdown: {
+      new: number;
+      learning: number;
+      reviewing: number;
+      mastered: number;
+    };
     average_ease_factor: number;
+    total_reviews: number;
+    accuracy_rate: number;
   }> {
     try {
       const items = await this.getByUser(userId);
       const now = new Date();
       const dueItems = items.filter((item) => new Date(item.next_review_date) <= now);
-      // Items with interval >= 21 days are considered "mastered"
-      const masteredItems = items.filter((item) => item.interval >= 21);
+
+      // Calculate mastery breakdown
+      const newItems = items.filter((item) => item.interval === 0);
+      const learningItems = items.filter((item) => item.interval > 0 && item.interval < 21);
+      const reviewingItems = items.filter((item) => item.interval >= 21 && item.interval < 60);
+      const masteredItems = items.filter((item) => item.interval >= 60);
+
       const avgEaseFactor =
         items.length > 0
           ? items.reduce((sum, item) => sum + item.ease_factor, 0) / items.length
           : 0;
 
+      const totalReviews = items.reduce((sum, item) => sum + item.total_reviews, 0);
+      const correctCount = items.reduce((sum, item) => sum + item.correct_count, 0);
+      const accuracyRate = totalReviews > 0 ? Math.round((correctCount / totalReviews) * 100) : 0;
+
       return {
         total_items: items.length,
-        due_items: dueItems.length,
-        mastered_items: masteredItems.length,
+        due_today: dueItems.length,
+        mastery_breakdown: {
+          new: newItems.length,
+          learning: learningItems.length,
+          reviewing: reviewingItems.length,
+          mastered: masteredItems.length,
+        },
         average_ease_factor: Math.round(avgEaseFactor * 100) / 100,
+        total_reviews: totalReviews,
+        accuracy_rate: accuracyRate,
       };
     } catch (error) {
       handleDynamoError(error);
     }
     return {
       total_items: 0,
-      due_items: 0,
-      mastered_items: 0,
+      due_today: 0,
+      mastery_breakdown: {
+        new: 0,
+        learning: 0,
+        reviewing: 0,
+        mastered: 0,
+      },
       average_ease_factor: 0,
+      total_reviews: 0,
+      accuracy_rate: 0,
     };
   },
 };
