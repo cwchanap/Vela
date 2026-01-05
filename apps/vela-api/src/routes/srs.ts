@@ -21,6 +21,7 @@ const reviewSchema = z.object({
 
 const limitSchema = z.object({
   limit: z.coerce.number().int().min(1).max(100).default(20),
+  jlpt: z.coerce.number().int().min(1).max(5).optional(),
 });
 
 /**
@@ -29,15 +30,14 @@ const limitSchema = z.object({
  */
 srsRouter.get('/due', zValidator('query', limitSchema), async (c) => {
   const userId = c.get('userId') as string;
-  const { limit } = c.req.valid('query');
+  const { limit, jlpt } = c.req.valid('query');
 
   try {
     const dueItems = await userVocabularyProgress.getDueItems(userId);
-    const limitedItems = dueItems.slice(0, limit);
 
-    // Fetch vocabulary details for each due item and structure as expected by frontend
+    // Fetch vocabulary details for all due items to enable JLPT filtering
     const itemsWithDetails = await Promise.all(
-      limitedItems.map(async (progress) => {
+      dueItems.map(async (progress) => {
         const vocabDetails = await vocabulary.getById(progress.vocabulary_id);
         return {
           progress: {
@@ -58,9 +58,20 @@ srsRouter.get('/due', zValidator('query', limitSchema), async (c) => {
       }),
     );
 
+    // Filter by JLPT level if specified
+    let filteredItems = itemsWithDetails;
+    if (jlpt) {
+      filteredItems = itemsWithDetails.filter((item) => {
+        return item.vocabulary && item.vocabulary.jlpt_level === jlpt;
+      });
+    }
+
+    // Apply limit after filtering
+    const limitedItems = filteredItems.slice(0, limit);
+
     return c.json({
-      items: itemsWithDetails,
-      total: dueItems.length,
+      items: limitedItems,
+      total: filteredItems.length,
     });
   } catch (error) {
     console.error('Error fetching due items:', error);
@@ -71,12 +82,68 @@ srsRouter.get('/due', zValidator('query', limitSchema), async (c) => {
 /**
  * GET /api/srs/stats
  * Get SRS statistics for the authenticated user
+ * Optional query parameter: jlpt (1-5) to filter by JLPT level
  */
 srsRouter.get('/stats', async (c) => {
   const userId = c.get('userId') as string;
+  const jlpt = c.req.query('jlpt');
+  const jlptLevel = jlpt ? parseInt(jlpt, 10) : null;
 
   try {
-    const stats = await userVocabularyProgress.getStats(userId);
+    // Get all progress items for the user
+    const allItems = await userVocabularyProgress.getByUser(userId);
+
+    let filteredItems = allItems;
+
+    // If JLPT filter is specified, fetch vocabulary details and filter
+    if (jlptLevel && jlptLevel >= 1 && jlptLevel <= 5) {
+      const itemsWithVocab = await Promise.all(
+        allItems.map(async (progress) => {
+          const vocabDetails = await vocabulary.getById(progress.vocabulary_id);
+          return { progress, vocabulary: vocabDetails };
+        }),
+      );
+
+      filteredItems = itemsWithVocab
+        .filter((item) => item.vocabulary && item.vocabulary.jlpt_level === jlptLevel)
+        .map((item) => item.progress);
+    }
+
+    // Calculate stats on filtered items
+    const now = new Date();
+    const dueItems = filteredItems.filter((item) => new Date(item.next_review_date) <= now);
+
+    // Calculate mastery breakdown
+    const newItems = filteredItems.filter((item) => item.interval === 0);
+    const learningItems = filteredItems.filter((item) => item.interval > 0 && item.interval < 21);
+    const reviewingItems = filteredItems.filter(
+      (item) => item.interval >= 21 && item.interval < 60,
+    );
+    const masteredItems = filteredItems.filter((item) => item.interval >= 60);
+
+    const avgEaseFactor =
+      filteredItems.length > 0
+        ? filteredItems.reduce((sum, item) => sum + item.ease_factor, 0) / filteredItems.length
+        : 0;
+
+    const totalReviews = filteredItems.reduce((sum, item) => sum + item.total_reviews, 0);
+    const correctCount = filteredItems.reduce((sum, item) => sum + item.correct_count, 0);
+    const accuracyRate = totalReviews > 0 ? Math.round((correctCount / totalReviews) * 100) : 0;
+
+    const stats = {
+      total_items: filteredItems.length,
+      due_today: dueItems.length,
+      mastery_breakdown: {
+        new: newItems.length,
+        learning: learningItems.length,
+        reviewing: reviewingItems.length,
+        mastered: masteredItems.length,
+      },
+      average_ease_factor: Math.round(avgEaseFactor * 100) / 100,
+      total_reviews: totalReviews,
+      accuracy_rate: accuracyRate,
+    };
+
     return c.json(stats);
   } catch (error) {
     console.error('Error fetching SRS stats:', error);
@@ -216,31 +283,45 @@ srsRouter.post('/batch-review', zValidator('json', batchReviewSchema), async (c)
 
     const results = await Promise.all(
       deduplicatedReviews.map(async ({ vocabulary_id, quality }) => {
-        let progress = await userVocabularyProgress.get(userId, vocabulary_id);
+        try {
+          let progress = await userVocabularyProgress.get(userId, vocabulary_id);
 
-        if (!progress) {
-          const initialDate = new Date().toISOString();
-          progress = await userVocabularyProgress.initializeProgress(
-            userId,
+          if (!progress) {
+            const initialDate = new Date().toISOString();
+            progress = await userVocabularyProgress.initializeProgress(
+              userId,
+              vocabulary_id,
+              initialDate,
+            );
+          }
+
+          const srsResult = calculateNextReview({
+            quality,
+            easeFactor: progress.ease_factor,
+            interval: progress.interval,
+            repetitions: progress.repetitions,
+          });
+
+          await userVocabularyProgress.updateAfterReview(userId, vocabulary_id, {
+            next_review_date: srsResult.nextReviewDate,
+            ease_factor: srsResult.easeFactor,
+            interval: srsResult.interval,
+            repetitions: srsResult.repetitions,
+            last_quality: quality,
+          });
+
+          return {
             vocabulary_id,
-            initialDate,
-          );
+            success: true,
+          };
+        } catch (error) {
+          console.error(`Error reviewing vocabulary ${vocabulary_id}:`, error);
+          return {
+            vocabulary_id,
+            success: false,
+            error: error instanceof Error ? error.message : 'Unknown error',
+          };
         }
-
-        const srsResult = calculateNextReview({
-          quality,
-          easeFactor: progress.ease_factor,
-          interval: progress.interval,
-          repetitions: progress.repetitions,
-        });
-
-        return userVocabularyProgress.updateAfterReview(userId, vocabulary_id, {
-          next_review_date: srsResult.nextReviewDate,
-          ease_factor: srsResult.easeFactor,
-          interval: srsResult.interval,
-          repetitions: srsResult.repetitions,
-          last_quality: quality,
-        });
       }),
     );
 
