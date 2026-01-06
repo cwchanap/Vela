@@ -19,9 +19,38 @@ const reviewSchema = z.object({
   quality: z.number().int().min(0).max(5),
 });
 
+// Shared JLPT field definition with validation (same as games routes)
+const jlptField = z
+  .string()
+  .optional()
+  .transform((val) => {
+    if (!val) return undefined;
+
+    // Parse comma-separated JLPT levels
+    const levels = val.split(',').map((level) => level.trim());
+
+    // Convert to integers and validate each value
+    const parsedLevels: number[] = [];
+    for (const level of levels) {
+      const parsed = parseInt(level, 10);
+
+      // Validate: must be a finite integer between 1-5
+      if (!Number.isFinite(parsed) || parsed < 1 || parsed > 5) {
+        throw new Error(`Invalid JLPT level "${level}". Must be an integer between 1 and 5.`);
+      }
+
+      parsedLevels.push(parsed);
+    }
+
+    // Remove duplicates while preserving order
+    const uniqueLevels = [...new Set(parsedLevels)];
+
+    return uniqueLevels.length > 0 ? uniqueLevels : undefined;
+  });
+
 const limitSchema = z.object({
   limit: z.coerce.number().int().min(1).max(100).default(20),
-  jlpt: z.coerce.number().int().min(1).max(5).optional(),
+  jlpt: jlptField,
 });
 
 /**
@@ -62,7 +91,7 @@ srsRouter.get('/due', zValidator('query', limitSchema), async (c) => {
     let filteredItems = itemsWithDetails;
     if (jlpt) {
       filteredItems = itemsWithDetails.filter((item) => {
-        return item.vocabulary && item.vocabulary.jlpt_level === jlpt;
+        return item.vocabulary && jlpt.includes(item.vocabulary.jlpt_level);
       });
     }
 

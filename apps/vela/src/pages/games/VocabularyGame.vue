@@ -142,8 +142,10 @@ async function startGame() {
       try {
         const dueResponse = await srsService.getDueItems(token, 10, jlptFilter);
         if (dueResponse.items.length > 0) {
-          // Convert due items to questions format
-          const vocabulary = dueResponse.items.map((item) => item.vocabulary);
+          // Convert due items to questions format, filtering out null vocabulary
+          const vocabulary = dueResponse.items
+            .map((item) => item.vocabulary)
+            .filter((vocab) => vocab !== null) as Vocabulary[];
 
           // Validate minimum vocabulary count
           if (vocabulary.length < 4) {
