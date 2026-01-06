@@ -53,6 +53,10 @@ const limitSchema = z.object({
   jlpt: jlptField,
 });
 
+const statsSchema = z.object({
+  jlpt: jlptField,
+});
+
 /**
  * GET /api/srs/due
  * Get vocabulary items due for review
@@ -111,12 +115,12 @@ srsRouter.get('/due', zValidator('query', limitSchema), async (c) => {
 /**
  * GET /api/srs/stats
  * Get SRS statistics for the authenticated user
- * Optional query parameter: jlpt (1-5) to filter by JLPT level
+ * Optional query parameter: jlpt (1-5) to filter by JLPT level(s)
+ * Multiple levels can be specified as comma-separated values (e.g., "1,2,3")
  */
-srsRouter.get('/stats', async (c) => {
+srsRouter.get('/stats', zValidator('query', statsSchema), async (c) => {
   const userId = c.get('userId') as string;
-  const jlpt = c.req.query('jlpt');
-  const jlptLevel = jlpt ? parseInt(jlpt, 10) : null;
+  const { jlpt } = c.req.valid('query');
 
   try {
     // Get all progress items for the user
@@ -125,7 +129,7 @@ srsRouter.get('/stats', async (c) => {
     let filteredItems = allItems;
 
     // If JLPT filter is specified, fetch vocabulary details and filter
-    if (jlptLevel && jlptLevel >= 1 && jlptLevel <= 5) {
+    if (jlpt && jlpt.length > 0) {
       const itemsWithVocab = await Promise.all(
         allItems.map(async (progress) => {
           const vocabDetails = await vocabulary.getById(progress.vocabulary_id);
@@ -134,7 +138,7 @@ srsRouter.get('/stats', async (c) => {
       );
 
       filteredItems = itemsWithVocab
-        .filter((item) => item.vocabulary && item.vocabulary.jlpt_level === jlptLevel)
+        .filter((item) => item.vocabulary && jlpt.includes(item.vocabulary.jlpt_level))
         .map((item) => item.progress);
     }
 
