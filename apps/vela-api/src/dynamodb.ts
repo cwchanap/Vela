@@ -618,13 +618,25 @@ export const userVocabularyProgress = {
    */
   async getByUser(userId: string): Promise<UserVocabularyProgress[]> {
     try {
-      const command = new QueryCommand({
-        TableName: TABLE_NAMES.USER_VOCABULARY_PROGRESS,
-        KeyConditionExpression: 'user_id = :userId',
-        ExpressionAttributeValues: { ':userId': userId },
-      });
-      const response = await docClient.send(command);
-      return (response.Items as UserVocabularyProgress[]) || [];
+      let items: UserVocabularyProgress[] = [];
+      let lastEvaluatedKey: any = undefined;
+
+      do {
+        const command = new QueryCommand({
+          TableName: TABLE_NAMES.USER_VOCABULARY_PROGRESS,
+          KeyConditionExpression: 'user_id = :userId',
+          ExpressionAttributeValues: { ':userId': userId },
+          ExclusiveStartKey: lastEvaluatedKey,
+        });
+
+        const response = await docClient.send(command);
+        if (response.Items) {
+          items.push(...(response.Items as UserVocabularyProgress[]));
+        }
+        lastEvaluatedKey = response.LastEvaluatedKey;
+      } while (lastEvaluatedKey);
+
+      return items;
     } catch (error) {
       handleDynamoError(error);
     }
