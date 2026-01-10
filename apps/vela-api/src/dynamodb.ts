@@ -2,6 +2,7 @@ import { DynamoDBClient, type DynamoDBClientConfig } from '@aws-sdk/client-dynam
 import {
   DynamoDBDocumentClient,
   GetCommand,
+  BatchGetCommand,
   PutCommand,
   UpdateCommand,
   QueryCommand,
@@ -172,6 +173,44 @@ export const vocabulary = {
       return response.Item;
     } catch (error) {
       handleDynamoError(error);
+    }
+  },
+
+  /**
+   * Get multiple vocabulary items by IDs in a single batch operation
+   * @param ids - Array of vocabulary IDs to fetch
+   * @returns Map of vocabulary items keyed by ID (undefined for missing items)
+   */
+  async getByIds(ids: string[]): Promise<Record<string, any>> {
+    try {
+      if (ids.length === 0) {
+        return {};
+      }
+
+      // BatchGetCommand can handle up to 100 items in one request
+      const command = new BatchGetCommand({
+        RequestItems: {
+          [TABLE_NAMES.VOCABULARY]: {
+            Keys: ids.map((id) => ({ id })),
+          },
+        },
+      });
+
+      const response = await docClient.send(command);
+      const items = response.Responses?.[TABLE_NAMES.VOCABULARY] || [];
+
+      // Convert array of items to a map keyed by ID
+      const vocabMap: Record<string, any> = {};
+      for (const item of items) {
+        if (item && item.id) {
+          vocabMap[item.id] = item;
+        }
+      }
+
+      return vocabMap;
+    } catch (error) {
+      handleDynamoError(error);
+      return {};
     }
   },
 

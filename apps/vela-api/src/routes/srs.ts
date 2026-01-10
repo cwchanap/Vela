@@ -68,34 +68,40 @@ srsRouter.get('/due', zValidator('query', limitSchema), async (c) => {
   try {
     const dueItems = await userVocabularyProgress.getDueItems(userId);
 
-    // Fetch vocabulary details for all due items to enable JLPT filtering
-    const itemsWithDetails = await Promise.all(
-      dueItems.map(async (progress) => {
-        const vocabDetails = await vocabulary.getById(progress.vocabulary_id);
-        return {
-          progress: {
-            user_id: progress.user_id,
-            vocabulary_id: progress.vocabulary_id,
-            next_review_date: progress.next_review_date,
-            ease_factor: progress.ease_factor,
-            interval: progress.interval,
-            repetitions: progress.repetitions,
-            last_quality: progress.last_quality,
-            last_reviewed_at: progress.last_reviewed_at,
-            first_learned_at: progress.first_learned_at,
-            total_reviews: progress.total_reviews,
-            correct_count: progress.correct_count,
-          },
-          vocabulary: vocabDetails || null,
-        };
-      }),
-    );
+    // Collect all vocabulary IDs for batch fetch
+    const vocabIds = dueItems.map((item) => item.vocabulary_id);
 
-    // Filter by JLPT level if specified
+    // Fetch all vocabulary details in a single batch operation
+    const vocabMap = await vocabulary.getByIds(vocabIds);
+
+    // Build items with details by looking up each vocab in the batched map
+    const itemsWithDetails = dueItems.map((progress) => {
+      const vocabDetails = vocabMap[progress.vocabulary_id] || null;
+      return {
+        progress: {
+          user_id: progress.user_id,
+          vocabulary_id: progress.vocabulary_id,
+          next_review_date: progress.next_review_date,
+          ease_factor: progress.ease_factor,
+          interval: progress.interval,
+          repetitions: progress.repetitions,
+          last_quality: progress.last_quality,
+          last_reviewed_at: progress.last_reviewed_at,
+          first_learned_at: progress.first_learned_at,
+          total_reviews: progress.total_reviews,
+          correct_count: progress.correct_count,
+        },
+        vocabulary: vocabDetails,
+      };
+    });
+
+    // Filter by JLPT level if specified (safely access jlpt_level)
     let filteredItems = itemsWithDetails;
     if (jlpt) {
       filteredItems = itemsWithDetails.filter((item) => {
-        return item.vocabulary && jlpt.includes(item.vocabulary.jlpt_level);
+        return (
+          item.vocabulary && item.vocabulary.jlpt_level && jlpt.includes(item.vocabulary.jlpt_level)
+        );
       });
     }
 
@@ -130,16 +136,17 @@ srsRouter.get('/stats', zValidator('query', statsSchema), async (c) => {
 
     // If JLPT filter is specified, fetch vocabulary details and filter
     if (jlpt && jlpt.length > 0) {
-      const itemsWithVocab = await Promise.all(
-        allItems.map(async (progress) => {
-          const vocabDetails = await vocabulary.getById(progress.vocabulary_id);
-          return { progress, vocabulary: vocabDetails };
-        }),
-      );
+      // Collect all vocabulary IDs for batch fetch
+      const vocabIds = allItems.map((item) => item.vocabulary_id);
 
-      filteredItems = itemsWithVocab
-        .filter((item) => item.vocabulary && jlpt.includes(item.vocabulary.jlpt_level))
-        .map((item) => item.progress);
+      // Fetch all vocabulary details in a single batch operation
+      const vocabMap = await vocabulary.getByIds(vocabIds);
+
+      // Build items with vocab details and filter by JLPT level
+      filteredItems = allItems.filter((progress) => {
+        const vocabDetails = vocabMap[progress.vocabulary_id];
+        return vocabDetails && vocabDetails.jlpt_level && jlpt.includes(vocabDetails.jlpt_level);
+      });
     }
 
     // Calculate stats on filtered items
