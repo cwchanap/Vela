@@ -102,6 +102,50 @@ describe('SRS SM-2 Algorithm', () => {
         expect(result.interval).toBeGreaterThan(6);
         expect(result.easeFactor).toBeGreaterThan(2.5);
       });
+
+      it('should use NEW ease factor for interval calculation on subsequent reviews', () => {
+        // This test verifies the P1 bug fix: ease factor is calculated BEFORE interval
+        // For quality 3 (hard answer) with easeFactor 2.5:
+        // - New ease factor should be: 2.5 + (0.1 - (5-3) * (0.08 + (5-3) * 0.02))
+        //   = 2.5 + (0.1 - 2 * (0.08 + 2 * 0.02))
+        //   = 2.5 + (0.1 - 2 * 0.12)
+        //   = 2.5 + (0.1 - 0.24)
+        //   = 2.5 - 0.14 = 2.36
+        // - Interval should use NEW ease factor: 6 * 2.36 = 14 (rounded)
+        // - OLD buggy behavior would use OLD ease factor: 6 * 2.5 = 15
+
+        const result = calculateNextReview({
+          quality: 3, // Hard answer, should decrease ease factor
+          easeFactor: 2.5,
+          interval: 6,
+          repetitions: 2, // Third review (subsequent)
+        });
+
+        expect(result.repetitions).toBe(3);
+        expect(result.easeFactor).toBeCloseTo(2.36, 2);
+        // With NEW ease factor (2.36): 6 * 2.36 = 14.16 → 14
+        // With OLD ease factor (2.5): 6 * 2.5 = 15
+        expect(result.interval).toBe(14);
+      });
+
+      it('should increase interval significantly for easy answers', () => {
+        // For quality 5 (easy answer) with easeFactor 2.5:
+        // - New ease factor should be: 2.5 + 0.1 = 2.6
+        // - Interval should be: 6 * 2.6 = 15.6 → 16 (rounded)
+
+        const result = calculateNextReview({
+          quality: 5, // Easy answer, should increase ease factor
+          easeFactor: 2.5,
+          interval: 6,
+          repetitions: 2, // Third review (subsequent)
+        });
+
+        expect(result.repetitions).toBe(3);
+        expect(result.easeFactor).toBeCloseTo(2.6, 2);
+        // With NEW ease factor (2.6): 6 * 2.6 = 15.6 → 16
+        // With OLD ease factor (2.5): 6 * 2.5 = 15
+        expect(result.interval).toBe(16);
+      });
     });
 
     describe('ease factor bounds', () => {

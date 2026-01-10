@@ -18,6 +18,7 @@ const mockUserVocabularyProgress = {
 
 const mockVocabulary = {
   getById: vi.fn(),
+  getByIds: vi.fn(),
   getRandom: vi.fn(),
 };
 
@@ -182,6 +183,26 @@ describe('SRS Routes', () => {
       expect(data.total_due).toBe(10);
       expect(mockUserVocabularyProgress.getDueItems).toHaveBeenCalledWith('test-user-123');
     });
+
+    it('should handle multiple due items with limit', async () => {
+      const mockDueItems = Array.from({ length: 25 }, (_, i) => ({
+        user_id: 'test-user-123',
+        vocabulary_id: `vocab-${i + 1}`,
+        next_review_date: '2024-12-29T00:00:00Z',
+        ease_factor: 2.5,
+        interval: 1,
+        repetitions: 1,
+      }));
+
+      mockUserVocabularyProgress.getDueItems.mockResolvedValue(mockDueItems);
+
+      const res = await app.request('/due?limit=20');
+
+      expect(res.status).toBe(200);
+      const data = await res.json();
+      expect(data.items).toHaveLength(20);
+      expect(data.total_due).toBe(25);
+    });
   });
 
   describe('GET /stats', () => {
@@ -202,6 +223,26 @@ describe('SRS Routes', () => {
       expect(data.total_items).toBe(50);
       expect(data.due_items).toBe(10);
       expect(data.mastered_items).toBe(20);
+    });
+
+    it('should handle stats with accuracy calculation', async () => {
+      const mockStats = {
+        total_items: 100,
+        due_items: 25,
+        mastered_items: 30,
+        average_ease_factor: 2.7,
+        total_reviews: 500,
+        accuracy_rate: 85,
+      };
+
+      mockUserVocabularyProgress.getStats.mockResolvedValue(mockStats);
+
+      const res = await app.request('/stats');
+
+      expect(res.status).toBe(200);
+      const data = await res.json();
+      expect(data.total_items).toBe(100);
+      expect(data.accuracy_rate).toBe(85);
     });
   });
 
