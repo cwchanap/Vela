@@ -93,7 +93,14 @@ export function calculateNextReview(input: SRSInput, now?: Date): SRSResult {
     newRepetitions = 0;
     newInterval = SRS_DEFAULTS.INITIAL_INTERVAL;
   } else {
-    // Correct answer - proceed with SM-2 algorithm
+    // Correct answer - calculate new ease factor first
+    // EF' = EF + (0.1 - (5 - q) * (0.08 + (5 - q) * 0.02))
+    // Where q is quality (0-5) and EF is ease factor
+    newEaseFactor = easeFactor + (0.1 - (5 - quality) * (0.08 + (5 - quality) * 0.02));
+
+    // Ensure ease factor doesn't go below minimum
+    newEaseFactor = Math.max(newEaseFactor, SRS_DEFAULTS.MIN_EASE_FACTOR);
+
     newRepetitions = repetitions + 1;
 
     if (newRepetitions === 1) {
@@ -103,18 +110,11 @@ export function calculateNextReview(input: SRSInput, now?: Date): SRSResult {
       // Second successful review
       newInterval = SRS_DEFAULTS.SECOND_INTERVAL;
     } else {
-      // Subsequent reviews: interval = previous interval * ease factor
-      newInterval = Math.round(interval * easeFactor);
+      // Subsequent reviews: interval = previous interval * NEW ease factor
+      // This ensures the interval immediately reflects the current quality rating
+      newInterval = Math.round(interval * newEaseFactor);
     }
   }
-
-  // Calculate new ease factor using SM-2 formula:
-  // EF' = EF + (0.1 - (5 - q) * (0.08 + (5 - q) * 0.02))
-  // Where q is quality (0-5) and EF is ease factor
-  newEaseFactor = easeFactor + (0.1 - (5 - quality) * (0.08 + (5 - quality) * 0.02));
-
-  // Ensure ease factor doesn't go below minimum
-  newEaseFactor = Math.max(newEaseFactor, SRS_DEFAULTS.MIN_EASE_FACTOR);
 
   // Calculate next review date
   const currentDate = now ?? new Date();
