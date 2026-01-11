@@ -684,18 +684,39 @@ export const userVocabularyProgress = {
 
   /**
    * Get due items for a user (items where next_review_date <= now)
-   * Note: This scans all user items and filters in application code
-   * since DynamoDB doesn't support filtering on sort key with <= efficiently
+   * Uses the NextReviewDateIndex GSI for efficient querying
    */
   async getDueItems(userId: string, now?: Date): Promise<UserVocabularyProgress[]> {
     try {
       const currentDate = now ?? new Date();
-      const items = await this.getByUser(userId);
-      return items
-        .filter((item) => new Date(item.next_review_date) <= currentDate)
-        .sort(
-          (a, b) => new Date(a.next_review_date).getTime() - new Date(b.next_review_date).getTime(),
-        );
+      const currentTimestamp = currentDate.toISOString();
+
+      let items: UserVocabularyProgress[] = [];
+      let lastEvaluatedKey: any = undefined;
+
+      do {
+        const command = new QueryCommand({
+          TableName: TABLE_NAMES.USER_VOCABULARY_PROGRESS,
+          IndexName: 'NextReviewDateIndex',
+          KeyConditionExpression: 'user_id = :userId AND next_review_date <= :now',
+          ExpressionAttributeValues: {
+            ':userId': userId,
+            ':now': currentTimestamp,
+          },
+          ExclusiveStartKey: lastEvaluatedKey,
+        });
+
+        const response = await docClient.send(command);
+        if (response.Items) {
+          items.push(...(response.Items as UserVocabularyProgress[]));
+        }
+        lastEvaluatedKey = response.LastEvaluatedKey;
+      } while (lastEvaluatedKey);
+
+      // Sort by next_review_date (most overdue first)
+      return items.sort(
+        (a, b) => new Date(a.next_review_date).getTime() - new Date(b.next_review_date).getTime(),
+      );
     } catch (error) {
       handleDynamoError(error);
     }
