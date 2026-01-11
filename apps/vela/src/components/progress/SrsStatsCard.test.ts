@@ -149,6 +149,28 @@ describe('SrsStatsCard', () => {
     expect(wrapper.text()).toContain('2.50');
   });
 
+  it('does not show empty state when progress exists but average_ease_factor is 0', async () => {
+    const statsWithZeroEaseFactor = {
+      total_items: 10,
+      due_today: 0,
+      mastery_breakdown: {
+        new: 10,
+        learning: 0,
+        reviewing: 0,
+        mastered: 0,
+      },
+      average_ease_factor: 0,
+      total_reviews: 0,
+      accuracy_rate: 0,
+    };
+    const wrapper = await createAuthenticatedWrapper(statsWithZeroEaseFactor);
+
+    // Should show stats, not empty state
+    expect(wrapper.text()).not.toContain('Start learning vocabulary to build your SRS progress');
+    expect(wrapper.text()).toContain('10'); // total_words
+    expect(wrapper.text()).toContain('0.00'); // ease factor
+  });
+
   it('eventually displays stats after loading', async () => {
     const wrapper = await createAuthenticatedWrapper();
 

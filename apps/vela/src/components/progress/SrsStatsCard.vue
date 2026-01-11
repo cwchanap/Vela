@@ -73,7 +73,7 @@
         </div>
 
         <!-- Average Ease Factor -->
-        <div v-if="stats.average_ease_factor" class="q-mt-md text-caption text-grey-7">
+        <div v-if="hasProgress" class="q-mt-md text-caption text-grey-7">
           <q-icon name="trending_up" size="xs" class="q-mr-xs" />
           Average ease factor: {{ stats.average_ease_factor.toFixed(2) }}
         </div>
@@ -124,6 +124,8 @@ const masteryPercentage = computed(() => {
   if (stats.value.total_items === 0) return 0;
   return Math.round((stats.value.mastery_breakdown.mastered / stats.value.total_items) * 100);
 });
+
+const hasProgress = computed(() => stats.value.total_items > 0);
 
 async function getAccessToken(): Promise<string | null> {
   try {
