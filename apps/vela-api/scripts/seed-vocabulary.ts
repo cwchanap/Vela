@@ -6,12 +6,16 @@ import { DynamoDBClient, type DynamoDBClientConfig } from '@aws-sdk/client-dynam
 import { DynamoDBDocumentClient, PutCommand, BatchWriteCommand } from '@aws-sdk/lib-dynamodb';
 import { randomUUID } from 'crypto';
 import { readFileSync } from 'fs';
-import { join } from 'path';
+import { join, dirname } from 'path';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 
 // Load .env file manually
 function loadEnv() {
   try {
-    const envPath = join(import.meta.dir, '../.env');
+    const envPath = join(__dirname, '../.env');
     const content = readFileSync(envPath, 'utf-8');
     for (const line of content.split('\n')) {
       const trimmed = line.trim();
@@ -67,7 +71,7 @@ const VOCABULARY_TABLE = process.env.VOCABULARY_TABLE_NAME || 'vela-vocabulary';
 
 interface VocabularyItem {
   id: string;
-  japanese: string;
+  japanese_word: string;
   hiragana: string;
   romaji: string;
   english_translation: string;
@@ -81,7 +85,7 @@ interface VocabularyItem {
 const sampleVocabulary: Omit<VocabularyItem, 'id' | 'created_at' | 'updated_at'>[] = [
   // N5 (Beginner) - Most basic vocabulary
   {
-    japanese: '食べる',
+    japanese_word: '食べる',
     hiragana: 'たべる',
     romaji: 'taberu',
     english_translation: 'to eat',
@@ -89,7 +93,7 @@ const sampleVocabulary: Omit<VocabularyItem, 'id' | 'created_at' | 'updated_at'>
     category: 'verb',
   },
   {
-    japanese: '飲む',
+    japanese_word: '飲む',
     hiragana: 'のむ',
     romaji: 'nomu',
     english_translation: 'to drink',
@@ -97,7 +101,7 @@ const sampleVocabulary: Omit<VocabularyItem, 'id' | 'created_at' | 'updated_at'>
     category: 'verb',
   },
   {
-    japanese: '行く',
+    japanese_word: '行く',
     hiragana: 'いく',
     romaji: 'iku',
     english_translation: 'to go',
@@ -105,7 +109,7 @@ const sampleVocabulary: Omit<VocabularyItem, 'id' | 'created_at' | 'updated_at'>
     category: 'verb',
   },
   {
-    japanese: '来る',
+    japanese_word: '来る',
     hiragana: 'くる',
     romaji: 'kuru',
     english_translation: 'to come',
@@ -113,7 +117,7 @@ const sampleVocabulary: Omit<VocabularyItem, 'id' | 'created_at' | 'updated_at'>
     category: 'verb',
   },
   {
-    japanese: '見る',
+    japanese_word: '見る',
     hiragana: 'みる',
     romaji: 'miru',
     english_translation: 'to see',
@@ -121,7 +125,7 @@ const sampleVocabulary: Omit<VocabularyItem, 'id' | 'created_at' | 'updated_at'>
     category: 'verb',
   },
   {
-    japanese: '書く',
+    japanese_word: '書く',
     hiragana: 'かく',
     romaji: 'kaku',
     english_translation: 'to write',
@@ -129,7 +133,7 @@ const sampleVocabulary: Omit<VocabularyItem, 'id' | 'created_at' | 'updated_at'>
     category: 'verb',
   },
   {
-    japanese: '読む',
+    japanese_word: '読む',
     hiragana: 'よむ',
     romaji: 'yomu',
     english_translation: 'to read',
@@ -137,7 +141,7 @@ const sampleVocabulary: Omit<VocabularyItem, 'id' | 'created_at' | 'updated_at'>
     category: 'verb',
   },
   {
-    japanese: '聞く',
+    japanese_word: '聞く',
     hiragana: 'きく',
     romaji: 'kiku',
     english_translation: 'to listen',
@@ -145,7 +149,7 @@ const sampleVocabulary: Omit<VocabularyItem, 'id' | 'created_at' | 'updated_at'>
     category: 'verb',
   },
   {
-    japanese: '話す',
+    japanese_word: '話す',
     hiragana: 'はなす',
     romaji: 'hanasu',
     english_translation: 'to speak',
@@ -153,7 +157,7 @@ const sampleVocabulary: Omit<VocabularyItem, 'id' | 'created_at' | 'updated_at'>
     category: 'verb',
   },
   {
-    japanese: '買う',
+    japanese_word: '買う',
     hiragana: 'かう',
     romaji: 'kau',
     english_translation: 'to buy',
@@ -161,7 +165,7 @@ const sampleVocabulary: Omit<VocabularyItem, 'id' | 'created_at' | 'updated_at'>
     category: 'verb',
   },
   {
-    japanese: '水',
+    japanese_word: '水',
     hiragana: 'みず',
     romaji: 'mizu',
     english_translation: 'water',
@@ -169,7 +173,7 @@ const sampleVocabulary: Omit<VocabularyItem, 'id' | 'created_at' | 'updated_at'>
     category: 'noun',
   },
   {
-    japanese: '本',
+    japanese_word: '本',
     hiragana: 'ほん',
     romaji: 'hon',
     english_translation: 'book',
@@ -177,7 +181,7 @@ const sampleVocabulary: Omit<VocabularyItem, 'id' | 'created_at' | 'updated_at'>
     category: 'noun',
   },
   {
-    japanese: '学校',
+    japanese_word: '学校',
     hiragana: 'がっこう',
     romaji: 'gakkou',
     english_translation: 'school',
@@ -185,7 +189,7 @@ const sampleVocabulary: Omit<VocabularyItem, 'id' | 'created_at' | 'updated_at'>
     category: 'noun',
   },
   {
-    japanese: '電車',
+    japanese_word: '電車',
     hiragana: 'でんしゃ',
     romaji: 'densha',
     english_translation: 'train',
@@ -193,7 +197,7 @@ const sampleVocabulary: Omit<VocabularyItem, 'id' | 'created_at' | 'updated_at'>
     category: 'noun',
   },
   {
-    japanese: '大きい',
+    japanese_word: '大きい',
     hiragana: 'おおきい',
     romaji: 'ookii',
     english_translation: 'big',
@@ -203,7 +207,7 @@ const sampleVocabulary: Omit<VocabularyItem, 'id' | 'created_at' | 'updated_at'>
 
   // N4 (Elementary) - Basic vocabulary
   {
-    japanese: '働く',
+    japanese_word: '働く',
     hiragana: 'はたらく',
     romaji: 'hataraku',
     english_translation: 'to work',
@@ -211,7 +215,7 @@ const sampleVocabulary: Omit<VocabularyItem, 'id' | 'created_at' | 'updated_at'>
     category: 'verb',
   },
   {
-    japanese: '疲れる',
+    japanese_word: '疲れる',
     hiragana: 'つかれる',
     romaji: 'tsukareru',
     english_translation: 'to get tired',
@@ -219,7 +223,7 @@ const sampleVocabulary: Omit<VocabularyItem, 'id' | 'created_at' | 'updated_at'>
     category: 'verb',
   },
   {
-    japanese: '覚える',
+    japanese_word: '覚える',
     hiragana: 'おぼえる',
     romaji: 'oboeru',
     english_translation: 'to remember',
@@ -227,7 +231,7 @@ const sampleVocabulary: Omit<VocabularyItem, 'id' | 'created_at' | 'updated_at'>
     category: 'verb',
   },
   {
-    japanese: '忘れる',
+    japanese_word: '忘れる',
     hiragana: 'わすれる',
     romaji: 'wasureru',
     english_translation: 'to forget',
@@ -235,7 +239,7 @@ const sampleVocabulary: Omit<VocabularyItem, 'id' | 'created_at' | 'updated_at'>
     category: 'verb',
   },
   {
-    japanese: '届く',
+    japanese_word: '届く',
     hiragana: 'とどく',
     romaji: 'todoku',
     english_translation: 'to reach',
@@ -243,7 +247,7 @@ const sampleVocabulary: Omit<VocabularyItem, 'id' | 'created_at' | 'updated_at'>
     category: 'verb',
   },
   {
-    japanese: '経験',
+    japanese_word: '経験',
     hiragana: 'けいけん',
     romaji: 'keiken',
     english_translation: 'experience',
@@ -251,7 +255,7 @@ const sampleVocabulary: Omit<VocabularyItem, 'id' | 'created_at' | 'updated_at'>
     category: 'noun',
   },
   {
-    japanese: '趣味',
+    japanese_word: '趣味',
     hiragana: 'しゅみ',
     romaji: 'shumi',
     english_translation: 'hobby',
@@ -259,7 +263,7 @@ const sampleVocabulary: Omit<VocabularyItem, 'id' | 'created_at' | 'updated_at'>
     category: 'noun',
   },
   {
-    japanese: '約束',
+    japanese_word: '約束',
     hiragana: 'やくそく',
     romaji: 'yakusoku',
     english_translation: 'promise',
@@ -267,7 +271,7 @@ const sampleVocabulary: Omit<VocabularyItem, 'id' | 'created_at' | 'updated_at'>
     category: 'noun',
   },
   {
-    japanese: '準備',
+    japanese_word: '準備',
     hiragana: 'じゅんび',
     romaji: 'junbi',
     english_translation: 'preparation',
@@ -275,7 +279,7 @@ const sampleVocabulary: Omit<VocabularyItem, 'id' | 'created_at' | 'updated_at'>
     category: 'noun',
   },
   {
-    japanese: '複雑',
+    japanese_word: '複雑',
     hiragana: 'ふくざつ',
     romaji: 'fukuzatsu',
     english_translation: 'complicated',
@@ -285,7 +289,7 @@ const sampleVocabulary: Omit<VocabularyItem, 'id' | 'created_at' | 'updated_at'>
 
   // N3 (Intermediate)
   {
-    japanese: '確認',
+    japanese_word: '確認',
     hiragana: 'かくにん',
     romaji: 'kakunin',
     english_translation: 'confirmation',
@@ -293,7 +297,7 @@ const sampleVocabulary: Omit<VocabularyItem, 'id' | 'created_at' | 'updated_at'>
     category: 'noun',
   },
   {
-    japanese: '説明',
+    japanese_word: '説明',
     hiragana: 'せつめい',
     romaji: 'setsumei',
     english_translation: 'explanation',
@@ -301,7 +305,7 @@ const sampleVocabulary: Omit<VocabularyItem, 'id' | 'created_at' | 'updated_at'>
     category: 'noun',
   },
   {
-    japanese: '連絡',
+    japanese_word: '連絡',
     hiragana: 'れんらく',
     romaji: 'renraku',
     english_translation: 'contact',
@@ -309,7 +313,7 @@ const sampleVocabulary: Omit<VocabularyItem, 'id' | 'created_at' | 'updated_at'>
     category: 'noun',
   },
   {
-    japanese: '影響',
+    japanese_word: '影響',
     hiragana: 'えいきょう',
     romaji: 'eikyou',
     english_translation: 'influence',
@@ -317,7 +321,7 @@ const sampleVocabulary: Omit<VocabularyItem, 'id' | 'created_at' | 'updated_at'>
     category: 'noun',
   },
   {
-    japanese: '状況',
+    japanese_word: '状況',
     hiragana: 'じょうきょう',
     romaji: 'joukyou',
     english_translation: 'situation',
@@ -325,7 +329,7 @@ const sampleVocabulary: Omit<VocabularyItem, 'id' | 'created_at' | 'updated_at'>
     category: 'noun',
   },
   {
-    japanese: '提案',
+    japanese_word: '提案',
     hiragana: 'ていあん',
     romaji: 'teian',
     english_translation: 'proposal',
@@ -333,7 +337,7 @@ const sampleVocabulary: Omit<VocabularyItem, 'id' | 'created_at' | 'updated_at'>
     category: 'noun',
   },
   {
-    japanese: '適当',
+    japanese_word: '適当',
     hiragana: 'てきとう',
     romaji: 'tekitou',
     english_translation: 'suitable',
@@ -341,7 +345,7 @@ const sampleVocabulary: Omit<VocabularyItem, 'id' | 'created_at' | 'updated_at'>
     category: 'adjective',
   },
   {
-    japanese: '重要',
+    japanese_word: '重要',
     hiragana: 'じゅうよう',
     romaji: 'juuyou',
     english_translation: 'important',
@@ -351,7 +355,7 @@ const sampleVocabulary: Omit<VocabularyItem, 'id' | 'created_at' | 'updated_at'>
 
   // N2 (Upper Intermediate)
   {
-    japanese: '概念',
+    japanese_word: '概念',
     hiragana: 'がいねん',
     romaji: 'gainen',
     english_translation: 'concept',
@@ -359,7 +363,7 @@ const sampleVocabulary: Omit<VocabularyItem, 'id' | 'created_at' | 'updated_at'>
     category: 'noun',
   },
   {
-    japanese: '傾向',
+    japanese_word: '傾向',
     hiragana: 'けいこう',
     romaji: 'keikou',
     english_translation: 'tendency',
@@ -367,7 +371,7 @@ const sampleVocabulary: Omit<VocabularyItem, 'id' | 'created_at' | 'updated_at'>
     category: 'noun',
   },
   {
-    japanese: '把握',
+    japanese_word: '把握',
     hiragana: 'はあく',
     romaji: 'haaku',
     english_translation: 'grasp',
@@ -375,7 +379,7 @@ const sampleVocabulary: Omit<VocabularyItem, 'id' | 'created_at' | 'updated_at'>
     category: 'noun',
   },
   {
-    japanese: '推測',
+    japanese_word: '推測',
     hiragana: 'すいそく',
     romaji: 'suisoku',
     english_translation: 'guess',
@@ -383,7 +387,7 @@ const sampleVocabulary: Omit<VocabularyItem, 'id' | 'created_at' | 'updated_at'>
     category: 'noun',
   },
   {
-    japanese: '妥当',
+    japanese_word: '妥当',
     hiragana: 'だとう',
     romaji: 'datou',
     english_translation: 'appropriate',
@@ -393,7 +397,7 @@ const sampleVocabulary: Omit<VocabularyItem, 'id' | 'created_at' | 'updated_at'>
 
   // N1 (Advanced)
   {
-    japanese: '概況',
+    japanese_word: '概況',
     hiragana: 'がいきょう',
     romaji: 'gaikyou',
     english_translation: 'overview',
@@ -401,7 +405,7 @@ const sampleVocabulary: Omit<VocabularyItem, 'id' | 'created_at' | 'updated_at'>
     category: 'noun',
   },
   {
-    japanese: '網羅',
+    japanese_word: '網羅',
     hiragana: 'もうら',
     romaji: 'moura',
     english_translation: 'comprehensive coverage',
@@ -409,7 +413,7 @@ const sampleVocabulary: Omit<VocabularyItem, 'id' | 'created_at' | 'updated_at'>
     category: 'noun',
   },
   {
-    japanese: '顕著',
+    japanese_word: '顕著',
     hiragana: 'けんちょ',
     romaji: 'kencho',
     english_translation: 'prominent',
@@ -417,7 +421,7 @@ const sampleVocabulary: Omit<VocabularyItem, 'id' | 'created_at' | 'updated_at'>
     category: 'adjective',
   },
   {
-    japanese: '膨大',
+    japanese_word: '膨大',
     hiragana: 'ぼうだい',
     romaji: 'boudai',
     english_translation: 'enormous',
@@ -516,9 +520,9 @@ async function seedVocabulary() {
               Item: item,
             }),
           );
-          console.log(`Added: ${item.japanese} (${item.english_translation})`);
+          console.log(`Added: ${item.japanese_word} (${item.english_translation})`);
         } catch (itemError) {
-          console.error(`Failed to add ${item.japanese}:`, itemError);
+          console.error(`Failed to add ${item.japanese_word}:`, itemError);
         }
       }
     }
