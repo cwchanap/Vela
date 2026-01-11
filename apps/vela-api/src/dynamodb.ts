@@ -277,6 +277,11 @@ export const vocabulary = {
    */
   async getByJlptLevel(jlptLevels: number[], limit: number = 10) {
     try {
+      // Guard clause: return empty array if no levels specified
+      if (jlptLevels.length === 0) {
+        return [];
+      }
+
       // Build filter expression for multiple JLPT levels
       const filterParts = jlptLevels.map((_, i) => `jlpt_level = :level${i}`);
       const filterExpression = filterParts.join(' OR ');
@@ -398,6 +403,11 @@ export const sentences = {
    */
   async getByJlptLevel(jlptLevels: number[], limit: number = 5) {
     try {
+      // Guard clause: return empty array if no levels specified
+      if (jlptLevels.length === 0) {
+        return [];
+      }
+
       const filterParts = jlptLevels.map((_, i) => `jlpt_level = :level${i}`);
       const filterExpression = filterParts.join(' OR ');
       const expressionAttributeValues = jlptLevels.reduce(

@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { savedSentences, userVocabularyProgress } from '../src/dynamodb';
+import { savedSentences, userVocabularyProgress, vocabulary, sentences } from '../src/dynamodb';
 
 const mocks = vi.hoisted(() => ({
   send: vi.fn(),
@@ -108,6 +108,64 @@ describe('DynamoDB Operations', () => {
 
       const result = await userVocabularyProgress.getByUser(mockUserId);
       expect(result).toEqual([]);
+    });
+  });
+
+  describe('Vocabulary getByJlptLevel', () => {
+    it('should return empty array when jlptLevels is empty', async () => {
+      const result = await vocabulary.getByJlptLevel([], 10);
+
+      // Should not call the database
+      expect(mocks.send).not.toHaveBeenCalled();
+      // Should return empty array
+      expect(result).toEqual([]);
+    });
+
+    it('should call scan with filter when jlptLevels has values', async () => {
+      const mockItems = [
+        { id: 'vocab-1', word: '日本語', jlpt_level: 5 },
+        { id: 'vocab-2', word: '勉強', jlpt_level: 5 },
+      ];
+      mocks.send.mockResolvedValue({
+        Items: mockItems,
+      });
+
+      const result = await vocabulary.getByJlptLevel([5], 10);
+
+      // Should call scan with filter
+      expect(mocks.send).toHaveBeenCalled();
+      // Should return items (shuffled but containing all items)
+      expect(result).toHaveLength(2);
+      expect(result).toEqual(expect.arrayContaining(mockItems));
+    });
+  });
+
+  describe('Sentences getByJlptLevel', () => {
+    it('should return empty array when jlptLevels is empty', async () => {
+      const result = await sentences.getByJlptLevel([], 5);
+
+      // Should not call the database
+      expect(mocks.send).not.toHaveBeenCalled();
+      // Should return empty array
+      expect(result).toEqual([]);
+    });
+
+    it('should call scan with filter when jlptLevels has values', async () => {
+      const mockItems = [
+        { id: 'sent-1', sentence: '日本語を勉強します。', jlpt_level: 5 },
+        { id: 'sent-2', sentence: 'これは本です。', jlpt_level: 4 },
+      ];
+      mocks.send.mockResolvedValue({
+        Items: mockItems,
+      });
+
+      const result = await sentences.getByJlptLevel([4, 5], 5);
+
+      // Should call scan with filter
+      expect(mocks.send).toHaveBeenCalled();
+      // Should return items (shuffled but containing all items)
+      expect(result).toHaveLength(2);
+      expect(result).toEqual(expect.arrayContaining(mockItems));
     });
   });
 });
