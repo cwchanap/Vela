@@ -177,7 +177,7 @@ export const vocabulary = {
   },
 
   /**
-   * Get multiple vocabulary items by IDs in a single batch operation
+   * Get multiple vocabulary items by IDs with automatic chunking and retry for UnprocessedKeys
    * @param ids - Array of vocabulary IDs to fetch
    * @returns Map of vocabulary items keyed by ID (undefined for missing items)
    */
@@ -188,20 +188,66 @@ export const vocabulary = {
       }
 
       // BatchGetCommand can handle up to 100 items in one request
-      const command = new BatchGetCommand({
-        RequestItems: {
-          [TABLE_NAMES.VOCABULARY]: {
-            Keys: ids.map((id) => ({ id })),
-          },
-        },
-      });
+      const BATCH_SIZE = 100;
+      const MAX_RETRY_ATTEMPTS = 3;
+      const INITIAL_RETRY_DELAY_MS = 100;
 
-      const response = await docClient.send(command);
-      const items = response.Responses?.[TABLE_NAMES.VOCABULARY] || [];
+      // Aggregate all items across all batch requests
+      const allItems: any[] = [];
+
+      // Helper function to process a single batch with retry logic for UnprocessedKeys
+      const processBatchWithRetry = async (keys: any[]): Promise<void> => {
+        let remainingKeys = [...keys];
+        let attempt = 0;
+
+        while (remainingKeys.length > 0 && attempt < MAX_RETRY_ATTEMPTS) {
+          const command = new BatchGetCommand({
+            RequestItems: {
+              [TABLE_NAMES.VOCABULARY]: {
+                Keys: remainingKeys.slice(0, BATCH_SIZE),
+              },
+            },
+          });
+
+          const response = await docClient.send(command);
+          const items = response.Responses?.[TABLE_NAMES.VOCABULARY] || [];
+          allItems.push(...items);
+
+          // Check for UnprocessedKeys and retry them
+          if (response.UnprocessedKeys && response.UnprocessedKeys[TABLE_NAMES.VOCABULARY]) {
+            remainingKeys = response.UnprocessedKeys[TABLE_NAMES.VOCABULARY].Keys || [];
+
+            if (remainingKeys.length > 0) {
+              attempt++;
+              if (attempt < MAX_RETRY_ATTEMPTS) {
+                // Exponential backoff
+                const delay = INITIAL_RETRY_DELAY_MS * Math.pow(2, attempt - 1);
+                await new Promise((resolve) => setTimeout(resolve, delay));
+              }
+            }
+          } else {
+            // No unprocessed keys, we're done with this batch
+            remainingKeys = [];
+          }
+        }
+
+        if (remainingKeys.length > 0) {
+          console.warn(
+            `Failed to process ${remainingKeys.length} vocabulary items after ${MAX_RETRY_ATTEMPTS} attempts`,
+          );
+        }
+      };
+
+      // Process all IDs in chunks
+      for (let i = 0; i < ids.length; i += BATCH_SIZE) {
+        const chunk = ids.slice(i, i + BATCH_SIZE);
+        const keys = chunk.map((id) => ({ id }));
+        await processBatchWithRetry(keys);
+      }
 
       // Convert array of items to a map keyed by ID
       const vocabMap: Record<string, any> = {};
-      for (const item of items) {
+      for (const item of allItems) {
         if (item && item.id) {
           vocabMap[item.id] = item;
         }
@@ -210,8 +256,8 @@ export const vocabulary = {
       return vocabMap;
     } catch (error) {
       handleDynamoError(error);
-      return {};
     }
+    return {};
   },
 
   /**
@@ -742,6 +788,7 @@ export const userVocabularyProgress = {
 
   /**
    * Update progress after a review
+   * Returns undefined if the item doesn't exist (condition check fails)
    */
   async updateAfterReview(
     userId: string,
@@ -758,6 +805,7 @@ export const userVocabularyProgress = {
       const command = new UpdateCommand({
         TableName: TABLE_NAMES.USER_VOCABULARY_PROGRESS,
         Key: { user_id: userId, vocabulary_id: vocabularyId },
+        ConditionExpression: 'attribute_exists(user_id)',
         UpdateExpression:
           'SET next_review_date = :nrd, ease_factor = :ef, #interval = :i, repetitions = :r, ' +
           'last_quality = :lq, last_reviewed_at = :lra, total_reviews = if_not_exists(total_reviews, :zero) + :one, ' +
@@ -780,7 +828,12 @@ export const userVocabularyProgress = {
       });
       const response = await docClient.send(command);
       return response.Attributes as UserVocabularyProgress | undefined;
-    } catch (error) {
+    } catch (error: any) {
+      // Return undefined for conditional check failures (item doesn't exist)
+      if (error.name === 'ConditionalCheckFailedException') {
+        return undefined;
+      }
+      // For other errors, handle them as before
       handleDynamoError(error);
     }
   },

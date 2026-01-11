@@ -31,15 +31,28 @@ const jlptField = z
 
     // Convert to integers and validate each value
     const parsedLevels: number[] = [];
+    const invalidLevels: string[] = [];
     for (const level of levels) {
+      if (!level) continue;
       const parsed = parseInt(level, 10);
 
       // Validate: must be a finite integer between 1-5
       if (!Number.isFinite(parsed) || parsed < 1 || parsed > 5) {
-        throw new Error(`Invalid JLPT level "${level}". Must be an integer between 1 and 5.`);
+        invalidLevels.push(level);
+      } else {
+        parsedLevels.push(parsed);
       }
+    }
 
-      parsedLevels.push(parsed);
+    // If there are invalid levels, throw a proper Zod validation error
+    if (invalidLevels.length > 0) {
+      throw new z.ZodError([
+        {
+          code: z.ZodIssueCode.custom,
+          path: [],
+          message: `Invalid JLPT level(s): ${invalidLevels.join(', ')}. Must be integers between 1 and 5.`,
+        },
+      ]);
     }
 
     // Remove duplicates while preserving order
@@ -68,49 +81,100 @@ srsRouter.get('/due', zValidator('query', limitSchema), async (c) => {
   try {
     const dueItems = await userVocabularyProgress.getDueItems(userId);
 
-    // Collect all vocabulary IDs for batch fetch
-    const vocabIds = dueItems.map((item) => item.vocabulary_id);
+    if (dueItems.length === 0) {
+      return c.json({
+        items: [],
+        total: 0,
+      });
+    }
 
-    // Fetch all vocabulary details in a single batch operation
-    const vocabMap = await vocabulary.getByIds(vocabIds);
+    // If no JLPT filter, fetch just enough items to satisfy the limit
+    if (!jlpt || jlpt.length === 0) {
+      const limitedDueItems = dueItems.slice(0, limit);
+      const vocabIds = limitedDueItems.map((item) => item.vocabulary_id);
 
-    // Build items with details by looking up each vocab in the batched map
-    const itemsWithDetails = dueItems.map((progress) => {
-      const vocabDetails = vocabMap[progress.vocabulary_id] || null;
-      return {
-        progress: {
-          user_id: progress.user_id,
-          vocabulary_id: progress.vocabulary_id,
-          next_review_date: progress.next_review_date,
-          ease_factor: progress.ease_factor,
-          interval: progress.interval,
-          repetitions: progress.repetitions,
-          last_quality: progress.last_quality,
-          last_reviewed_at: progress.last_reviewed_at,
-          first_learned_at: progress.first_learned_at,
-          total_reviews: progress.total_reviews,
-          correct_count: progress.correct_count,
-        },
-        vocabulary: vocabDetails,
-      };
-    });
+      const vocabMap = await vocabulary.getByIds(vocabIds);
 
-    // Filter by JLPT level if specified (safely access jlpt_level)
-    let filteredItems = itemsWithDetails;
-    if (jlpt) {
-      filteredItems = itemsWithDetails.filter((item) => {
+      const itemsWithDetails = limitedDueItems.map((progress) => {
+        const vocabDetails = vocabMap[progress.vocabulary_id] || null;
+        return {
+          progress: {
+            user_id: progress.user_id,
+            vocabulary_id: progress.vocabulary_id,
+            next_review_date: progress.next_review_date,
+            ease_factor: progress.ease_factor,
+            interval: progress.interval,
+            repetitions: progress.repetitions,
+            last_quality: progress.last_quality,
+            last_reviewed_at: progress.last_reviewed_at,
+            first_learned_at: progress.first_learned_at,
+            total_reviews: progress.total_reviews,
+            correct_count: progress.correct_count,
+          },
+          vocabulary: vocabDetails,
+        };
+      });
+
+      return c.json({
+        items: itemsWithDetails,
+        total: dueItems.length,
+      });
+    }
+
+    // With JLPT filter: fetch in batches until we have enough matching items
+    const CHUNK_SIZE = 50;
+    const BATCHES_TO_FETCH = Math.ceil((limit * 2) / CHUNK_SIZE); // Fetch up to 2x limit to find matches
+    let allItems: any[] = [];
+
+    for (let i = 0; i < BATCHES_TO_FETCH; i++) {
+      const start = i * CHUNK_SIZE;
+      const chunk = dueItems.slice(start, start + CHUNK_SIZE);
+
+      if (chunk.length === 0) break;
+
+      const vocabIds = chunk.map((item) => item.vocabulary_id);
+      const vocabMap = await vocabulary.getByIds(vocabIds);
+
+      const itemsWithDetails = chunk.map((progress) => {
+        const vocabDetails = vocabMap[progress.vocabulary_id] || null;
+        return {
+          progress: {
+            user_id: progress.user_id,
+            vocabulary_id: progress.vocabulary_id,
+            next_review_date: progress.next_review_date,
+            ease_factor: progress.ease_factor,
+            interval: progress.interval,
+            repetitions: progress.repetitions,
+            last_quality: progress.last_quality,
+            last_reviewed_at: progress.last_reviewed_at,
+            first_learned_at: progress.first_learned_at,
+            total_reviews: progress.total_reviews,
+            correct_count: progress.correct_count,
+          },
+          vocabulary: vocabDetails,
+        };
+      });
+
+      // Filter by JLPT level
+      const filteredChunk = itemsWithDetails.filter((item) => {
         return (
           item.vocabulary && item.vocabulary.jlpt_level && jlpt.includes(item.vocabulary.jlpt_level)
         );
       });
+
+      allItems.push(...filteredChunk);
+
+      // Stop if we have enough items
+      if (allItems.length >= limit) break;
     }
 
-    // Apply limit after filtering
-    const limitedItems = filteredItems.slice(0, limit);
+    // Calculate total matching items (need to fetch all to get accurate count)
+    // For efficiency, we estimate or could fetch in full if needed
+    const totalEstimated = Math.min(dueItems.length, allItems.length * 2);
 
     return c.json({
-      items: limitedItems,
-      total: filteredItems.length,
+      items: allItems.slice(0, limit),
+      total: totalEstimated,
     });
   } catch (error) {
     console.error('Error fetching due items:', error);
@@ -222,7 +286,7 @@ srsRouter.post('/review', zValidator('json', reviewSchema), async (c) => {
     });
 
     // Update progress in database
-    const updatedProgress = await userVocabularyProgress.updateAfterReview(userId, vocabulary_id, {
+    let updatedProgress = await userVocabularyProgress.updateAfterReview(userId, vocabulary_id, {
       next_review_date: srsResult.nextReviewDate,
       ease_factor: srsResult.easeFactor,
       interval: srsResult.interval,
@@ -230,9 +294,42 @@ srsRouter.post('/review', zValidator('json', reviewSchema), async (c) => {
       last_quality: quality,
     });
 
+    // Handle case where updateAfterReview returned undefined (item missing or race condition)
+    if (!updatedProgress) {
+      // Attempt recovery: get current state and try once more
+      const currentProgress = await userVocabularyProgress.get(userId, vocabulary_id);
+      if (currentProgress) {
+        // Item exists, retry the update
+        updatedProgress = await userVocabularyProgress.updateAfterReview(userId, vocabulary_id, {
+          next_review_date: srsResult.nextReviewDate,
+          ease_factor: srsResult.easeFactor,
+          interval: srsResult.interval,
+          repetitions: srsResult.repetitions,
+          last_quality: quality,
+        });
+      } else {
+        // Item doesn't exist, return 404
+        return c.json({ error: 'Progress not found for vocabulary item' }, 404);
+      }
+    }
+
+    // If still undefined after recovery attempt, return conflict error
+    if (!updatedProgress) {
+      return c.json({ error: 'Failed to update progress due to race condition' }, 409);
+    }
+
     return c.json({ progress: updatedProgress });
   } catch (error) {
     console.error('Error recording review:', error);
+    // Handle ConditionalCheckFailedException specifically
+    if (
+      error &&
+      typeof error === 'object' &&
+      'name' in error &&
+      error.name === 'ConditionalCheckFailedException'
+    ) {
+      return c.json({ error: 'Failed to update progress: item does not exist' }, 409);
+    }
     return c.json({ error: 'Failed to record review' }, 500);
   }
 });
