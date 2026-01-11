@@ -82,6 +82,16 @@ function handleDynamoError(error: any): never {
   throw new Error(`DynamoDB operation failed: ${error.message}`);
 }
 
+// Fisher-Yates shuffle algorithm for uniform random shuffling
+function shuffleArray<T>(array: T[]): T[] {
+  const result = [...array];
+  for (let i = result.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [result[i], result[j]] = [result[j], result[i]];
+  }
+  return result;
+}
+
 // Profiles operations
 export const profiles = {
   async get(userId: string) {
@@ -280,7 +290,9 @@ export const vocabulary = {
 
       const allItems: any[] = [];
       let lastEvaluatedKey: any = undefined;
-      const hardCap = 1000; // Prevent excessive scanning
+      // Hard cap to prevent excessive scanning - log warning when approaching limit
+      const hardCap = 1000;
+      const warningThreshold = 800; // Warn when we're close to cap
 
       // Paginate scan until we have enough matching items or reach hard cap
       while (allItems.length < limit && allItems.length < hardCap) {
@@ -297,6 +309,16 @@ export const vocabulary = {
         // Collect all matching items from this page
         allItems.push(...items);
 
+        // Log warning if approaching hard cap
+        if (
+          allItems.length >= warningThreshold &&
+          allItems.length < warningThreshold + items.length
+        ) {
+          console.warn(
+            `[getByJlptLevel] Approaching hard cap: scanned ${allItems.length} items for JLPT levels [${jlptLevels.join(', ')}]. Consider increasing hardCap or implementing GSI for more efficient querying.`,
+          );
+        }
+
         // Check if we have more items to scan
         lastEvaluatedKey = response.LastEvaluatedKey;
         if (!lastEvaluatedKey) {
@@ -305,7 +327,7 @@ export const vocabulary = {
       }
 
       // Shuffle all collected items and return up to limit
-      return allItems.sort(() => Math.random() - 0.5).slice(0, limit);
+      return shuffleArray(allItems).slice(0, limit);
     } catch (error) {
       handleDynamoError(error);
     }
@@ -333,7 +355,7 @@ export const vocabulary = {
       }
 
       // Shuffle and return requested limit
-      return items.sort(() => Math.random() - 0.5).slice(0, limit);
+      return shuffleArray(items).slice(0, limit);
     } catch (error) {
       handleDynamoError(error);
     }
@@ -388,7 +410,9 @@ export const sentences = {
 
       const allItems: any[] = [];
       let lastEvaluatedKey: any = undefined;
-      const hardCap = 1000; // Prevent excessive scanning
+      // Hard cap to prevent excessive scanning - log warning when approaching limit
+      const hardCap = 1000;
+      const warningThreshold = 800; // Warn when we're close to cap
 
       // Paginate scan until we have enough matching items or reach hard cap
       while (allItems.length < limit && allItems.length < hardCap) {
@@ -405,6 +429,16 @@ export const sentences = {
         // Collect all matching items from this page
         allItems.push(...items);
 
+        // Log warning if approaching hard cap
+        if (
+          allItems.length >= warningThreshold &&
+          allItems.length < warningThreshold + items.length
+        ) {
+          console.warn(
+            `[getByJlptLevel] Approaching hard cap: scanned ${allItems.length} sentences for JLPT levels [${jlptLevels.join(', ')}]. Consider increasing hardCap or implementing GSI for more efficient querying.`,
+          );
+        }
+
         // Check if we have more items to scan
         lastEvaluatedKey = response.LastEvaluatedKey;
         if (!lastEvaluatedKey) {
@@ -413,7 +447,7 @@ export const sentences = {
       }
 
       // Shuffle all collected items and return up to limit
-      return allItems.sort(() => Math.random() - 0.5).slice(0, limit);
+      return shuffleArray(allItems).slice(0, limit);
     } catch (error) {
       handleDynamoError(error);
     }
@@ -438,7 +472,7 @@ export const sentences = {
         items = response.Items || [];
       }
 
-      return items.sort(() => Math.random() - 0.5).slice(0, limit);
+      return shuffleArray(items).slice(0, limit);
     } catch (error) {
       handleDynamoError(error);
     }

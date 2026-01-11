@@ -82,13 +82,16 @@ const authStore = useAuthStore();
 const gameStartTime = ref<Date | null>(null);
 const correctAnswers = ref(0);
 const totalQuestions = ref(0);
-const showSetup = ref(false);
+const showSetup = ref(true);
 const isLoading = ref(false);
 
 // JLPT and SRS settings
 const selectedJlptLevels = ref<JLPTLevel[]>([]);
 const srsMode = ref(false);
 const dueCount = ref(0);
+
+// Queue SRS reviews to ensure they're recorded even if user navigates away
+const srsReviewQueue = ref<Array<{ vocabularyId: string; quality: number }>>([]);
 
 const currentQuestion = computed(() => {
   return gameStore.questions[gameStore.currentQuestionIndex];
@@ -246,16 +249,14 @@ async function handleAnswer(selectedAnswer: string) {
   // Update individual word progress
   progressStore.updateProgress(currentQuestion.value.word.id, isCorrect);
 
-  // Record SRS review if user is authenticated
+  // Queue SRS review if user is authenticated
   const token = await getAccessToken();
   if (token) {
-    try {
-      const quality = srsService.qualityFromCorrectness(isCorrect);
-      await srsService.recordReview(token, currentQuestion.value.word.id, quality);
-    } catch (error) {
-      console.error('Failed to record SRS review:', error);
-      // Don't block game flow if SRS recording fails
-    }
+    const quality = srsService.qualityFromCorrectness(isCorrect);
+    srsReviewQueue.value.push({
+      vocabularyId: currentQuestion.value.word.id,
+      quality,
+    });
   }
 
   gameStore.answerQuestion(isCorrect);
@@ -295,6 +296,26 @@ watch(
       // Game just ended
       const durationSeconds = Math.round((Date.now() - gameStartTime.value.getTime()) / 1000);
 
+      // Record SRS reviews in batch
+      if (srsReviewQueue.value.length > 0) {
+        const token = await getAccessToken();
+        if (token) {
+          try {
+            await srsService.recordBatchReview(
+              token,
+              srsReviewQueue.value.map((r) => ({
+                vocabulary_id: r.vocabularyId,
+                quality: r.quality,
+              })),
+            );
+            console.log(`Successfully recorded ${srsReviewQueue.value.length} SRS reviews`);
+          } catch (error) {
+            console.error('Failed to record SRS batch reviews:', error);
+            // Don't block session recording if SRS fails
+          }
+        }
+      }
+
       await progressStore.recordGameSession(
         'vocabulary',
         gameStore.score,
@@ -310,6 +331,7 @@ watch(
       gameStartTime.value = null;
       correctAnswers.value = 0;
       totalQuestions.value = 0;
+      srsReviewQueue.value = [];
     }
   },
 );
