@@ -225,6 +225,7 @@ async function startGame() {
         position: 'top',
         timeout: 5000,
       });
+      showSetup.value = true;
       return;
     }
 

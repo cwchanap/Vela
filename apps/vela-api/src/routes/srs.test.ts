@@ -81,24 +81,33 @@ function createTestApp() {
       return c.json({ error: 'Invalid quality rating' }, 400);
     }
 
-    const progress = await mockUserVocabularyProgress.get(userId, body.vocabulary_id);
+    let progress = await mockUserVocabularyProgress.get(userId, body.vocabulary_id);
 
     if (!progress) {
-      await mockUserVocabularyProgress.initializeProgress(
+      progress = await mockUserVocabularyProgress.initializeProgress(
         userId,
         body.vocabulary_id,
         new Date().toISOString(),
       );
     }
 
+    // Call mocked calculateNextReview (imported at top from vi.mock)
+    const { calculateNextReview } = await import('../utils/srs');
+    const srsResult = calculateNextReview({
+      quality: body.quality,
+      easeFactor: progress.ease_factor,
+      interval: progress.interval,
+      repetitions: progress.repetitions,
+    });
+
     const updatedProgress = await mockUserVocabularyProgress.updateAfterReview(
       userId,
       body.vocabulary_id,
       {
-        next_review_date: '2024-12-31T00:00:00Z',
-        ease_factor: 2.5,
-        interval: 1,
-        repetitions: 1,
+        next_review_date: srsResult.nextReviewDate,
+        ease_factor: srsResult.easeFactor,
+        interval: srsResult.interval,
+        repetitions: srsResult.repetitions,
         last_quality: body.quality,
       },
     );
