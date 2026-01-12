@@ -125,12 +125,16 @@ srsRouter.get('/due', zValidator('query', limitSchema), async (c) => {
     const CHUNK_SIZE = 50;
     const BATCHES_TO_FETCH = Math.ceil((limit * 2) / CHUNK_SIZE); // Fetch up to 2x limit to find matches
     let allItems: any[] = [];
+    let exhaustedBatches = false;
 
     for (let i = 0; i < BATCHES_TO_FETCH; i++) {
       const start = i * CHUNK_SIZE;
       const chunk = dueItems.slice(start, start + CHUNK_SIZE);
 
-      if (chunk.length === 0) break;
+      if (chunk.length === 0) {
+        exhaustedBatches = true;
+        break;
+      }
 
       const vocabIds = chunk.map((item) => item.vocabulary_id);
       const vocabMap = await vocabulary.getByIds(vocabIds);
@@ -168,13 +172,23 @@ srsRouter.get('/due', zValidator('query', limitSchema), async (c) => {
       if (allItems.length >= limit) break;
     }
 
-    // Calculate total matching items (need to fetch all to get accurate count)
-    // For efficiency, we estimate or could fetch in full if needed
-    const totalEstimated = Math.min(dueItems.length, allItems.length * 2);
+    // Calculate total matching items
+    let totalMatching: number;
+    if (exhaustedBatches) {
+      // We've checked all due items, so use actual count
+      totalMatching = allItems.length;
+    } else {
+      // We haven't exhausted batches, provide conservative estimate
+      // Use the ratio of matching items we've found so far
+      const matchingRatio = allItems.length / (BATCHES_TO_FETCH * CHUNK_SIZE);
+      totalMatching = Math.round(dueItems.length * matchingRatio);
+      // Ensure estimate is at least what we've found
+      totalMatching = Math.max(totalMatching, allItems.length);
+    }
 
     return c.json({
       items: allItems.slice(0, limit),
-      total: totalEstimated,
+      total: totalMatching,
     });
   } catch (error) {
     console.error('Error fetching due items:', error);
