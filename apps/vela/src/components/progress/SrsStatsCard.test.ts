@@ -182,7 +182,8 @@ describe('SrsStatsCard', () => {
   it('handles fetch error gracefully', async () => {
     const wrapper = await createAuthenticatedWrapperWithError(new Error('API Error'));
 
-    // Should show empty state on error
-    expect(wrapper.text()).toContain('Start learning vocabulary');
+    // Should show error state with error message and retry button
+    expect(wrapper.text()).toContain('Failed to load your SRS stats');
+    expect(wrapper.text()).toContain('Retry');
   });
 });

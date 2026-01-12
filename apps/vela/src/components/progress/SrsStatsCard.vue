@@ -18,6 +18,13 @@
         <div>Sign in to track your spaced repetition progress</div>
       </div>
 
+      <!-- Error State -->
+      <div v-else-if="error" class="text-center q-py-md">
+        <q-icon name="error_outline" size="48px" class="q-mb-sm text-negative" />
+        <div class="text-negative q-mb-sm">{{ error }}</div>
+        <q-btn flat color="primary" label="Retry" @click="fetchStats" />
+      </div>
+
       <!-- Stats Display -->
       <div v-else>
         <!-- Due Items Alert -->
@@ -104,6 +111,7 @@ import { srsService, type SRSStats } from 'src/services/srsService';
 const authStore = useAuthStore();
 
 const loading = ref(false);
+const error = ref<string | null>(null);
 const stats = ref<SRSStats>({
   total_items: 0,
   due_today: 0,
@@ -141,10 +149,12 @@ async function fetchStats() {
   if (!token) return;
 
   loading.value = true;
+  error.value = null;
   try {
     stats.value = await srsService.getStats(token);
-  } catch (error) {
-    console.error('Failed to fetch SRS stats:', error);
+  } catch (err) {
+    console.error('Failed to fetch SRS stats:', err);
+    error.value = 'Failed to load your SRS stats. Please try again.';
   } finally {
     loading.value = false;
   }
@@ -163,7 +173,7 @@ watch(isAuthenticated, (newValue) => {
 });
 
 // Expose for testing
-defineExpose({ fetchStats, stats, loading });
+defineExpose({ fetchStats, stats, loading, error });
 </script>
 
 <style scoped lang="scss">

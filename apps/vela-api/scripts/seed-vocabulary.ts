@@ -454,6 +454,9 @@ async function seedVocabulary() {
   const MAX_RETRIES = 5;
   const INITIAL_DELAY_MS = 100;
 
+  // Track successful writes
+  let successfulItems: VocabularyItem[] = [];
+
   for (const batch of batches) {
     const putRequests = batch.map((item) => ({
       PutRequest: {
@@ -492,6 +495,8 @@ async function seedVocabulary() {
 
         if (unprocessedItems.length === 0) {
           success = true;
+          // Track successful batch writes
+          successfulItems.push(...batch);
           console.log(`Added ${batch.length} vocabulary items`);
           break;
         }
@@ -520,6 +525,8 @@ async function seedVocabulary() {
               Item: item,
             }),
           );
+          // Track successful individual puts
+          successfulItems.push(item);
           console.log(`Added: ${item.japanese_word} (${item.english_translation})`);
         } catch (itemError) {
           console.error(`Failed to add ${item.japanese_word}:`, itemError);
@@ -528,13 +535,13 @@ async function seedVocabulary() {
     }
   }
 
-  console.log(`\nSeeding complete! Added ${items.length} vocabulary items.`);
+  console.log(`\nSeeding complete! Added ${successfulItems.length} vocabulary items.`);
   console.log('\nBreakdown by JLPT level:');
-  console.log(`  N5: ${items.filter((i) => i.jlpt_level === 5).length} items`);
-  console.log(`  N4: ${items.filter((i) => i.jlpt_level === 4).length} items`);
-  console.log(`  N3: ${items.filter((i) => i.jlpt_level === 3).length} items`);
-  console.log(`  N2: ${items.filter((i) => i.jlpt_level === 2).length} items`);
-  console.log(`  N1: ${items.filter((i) => i.jlpt_level === 1).length} items`);
+  console.log(`  N5: ${successfulItems.filter((i) => i.jlpt_level === 5).length} items`);
+  console.log(`  N4: ${successfulItems.filter((i) => i.jlpt_level === 4).length} items`);
+  console.log(`  N3: ${successfulItems.filter((i) => i.jlpt_level === 3).length} items`);
+  console.log(`  N2: ${successfulItems.filter((i) => i.jlpt_level === 2).length} items`);
+  console.log(`  N1: ${successfulItems.filter((i) => i.jlpt_level === 1).length} items`);
 }
 
 seedVocabulary().catch(console.error);
