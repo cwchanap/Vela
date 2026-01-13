@@ -16,24 +16,22 @@ const jlptField = z
     // Parse comma-separated JLPT levels
     const levels = val.split(',').map((level) => level.trim());
 
-    // Convert to integers and validate each value
-    const parsedLevels: number[] = [];
-    for (const level of levels) {
-      const parsed = parseInt(level, 10);
-
-      // Validate: must be a finite integer between 1-5
-      if (!Number.isFinite(parsed) || parsed < 1 || parsed > 5) {
-        throw new Error(`Invalid JLPT level "${level}". Must be an integer between 1 and 5.`);
-      }
-
-      parsedLevels.push(parsed);
-    }
+    // Convert to integers
+    const parsedLevels = levels.map((level) => parseInt(level, 10));
 
     // Remove duplicates while preserving order
     const uniqueLevels = [...new Set(parsedLevels)];
 
     return uniqueLevels.length > 0 ? uniqueLevels : undefined;
-  });
+  })
+  .pipe(
+    z
+      .array(z.number().int().min(1).max(5))
+      .optional()
+      .refine((val) => !val || val.length > 0, {
+        message: 'JLPT levels array must contain at least one value if provided',
+      }),
+  );
 
 const VocabularyQuerySchema = z.object({
   limit: z
