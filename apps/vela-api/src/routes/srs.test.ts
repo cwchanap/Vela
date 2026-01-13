@@ -127,11 +127,8 @@ function createTestApp() {
 
     const progress = await mockUserVocabularyProgress.get(userId, vocabularyId);
 
-    if (!progress) {
-      return c.json({ error: 'Progress not found' }, 404);
-    }
-
-    return c.json(progress);
+    // Return 200 with progress: null for new vocabulary items
+    return c.json({ progress });
   });
 
   app.delete('/progress/:vocabularyId', async (c) => {
@@ -496,16 +493,18 @@ describe('SRS Routes', () => {
 
       expect(res.status).toBe(200);
       const data = await res.json();
-      expect(data.vocabulary_id).toBe('vocab-1');
-      expect(data.interval).toBe(6);
+      expect(data.progress.vocabulary_id).toBe('vocab-1');
+      expect(data.progress.interval).toBe(6);
     });
 
-    it('should return 404 for non-existent progress', async () => {
+    it('should return 200 with progress: null for non-existent progress', async () => {
       mockUserVocabularyProgress.get.mockResolvedValue(undefined);
 
       const res = await app.request('/progress/vocab-unknown');
 
-      expect(res.status).toBe(404);
+      expect(res.status).toBe(200);
+      const data = await res.json();
+      expect(data.progress).toBeUndefined();
     });
   });
 
