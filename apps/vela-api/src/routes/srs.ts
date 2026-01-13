@@ -365,10 +365,7 @@ srsRouter.get('/progress/:vocabularyId', async (c) => {
   try {
     const progress = await userVocabularyProgress.get(userId, vocabularyId);
 
-    if (!progress) {
-      return c.json({ progress: null }, 404);
-    }
-
+    // Return 200 with progress: null for new vocabulary items
     return c.json({ progress });
   } catch (error) {
     console.error('Error fetching progress:', error);
