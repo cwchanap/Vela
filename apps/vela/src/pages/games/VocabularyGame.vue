@@ -20,7 +20,7 @@
     </div>
 
     <!-- Game Setup Screen -->
-    <div v-if="showSetup" class="game-setup q-pa-md">
+    <div v-else-if="showSetup" class="game-setup q-pa-md">
       <q-card class="q-pa-md" style="max-width: 450px">
         <q-card-section>
           <div class="text-h5 q-mb-md">Vocabulary Quiz</div>

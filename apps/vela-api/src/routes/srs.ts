@@ -453,13 +453,21 @@ srsRouter.post('/batch-review', zValidator('json', batchReviewSchema), async (c)
             repetitions: progress.repetitions,
           });
 
-          await userVocabularyProgress.updateAfterReview(userId, vocabulary_id, {
-            next_review_date: srsResult.nextReviewDate,
-            ease_factor: srsResult.easeFactor,
-            interval: srsResult.interval,
-            repetitions: srsResult.repetitions,
-            last_quality: quality,
-          });
+          const updatedProgress = await userVocabularyProgress.updateAfterReview(
+            userId,
+            vocabulary_id,
+            {
+              next_review_date: srsResult.nextReviewDate,
+              ease_factor: srsResult.easeFactor,
+              interval: srsResult.interval,
+              repetitions: srsResult.repetitions,
+              last_quality: quality,
+            },
+          );
+
+          if (!updatedProgress) {
+            throw new Error(`Failed to update progress for vocabulary ${vocabulary_id}`);
+          }
 
           return {
             vocabulary_id,
