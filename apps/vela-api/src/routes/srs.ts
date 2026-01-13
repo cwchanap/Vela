@@ -278,6 +278,12 @@ srsRouter.post('/review', zValidator('json', reviewSchema), async (c) => {
   const { vocabulary_id, quality } = c.req.valid('json');
 
   try {
+    // Validate that vocabulary exists before creating/progress
+    const vocab = await vocabulary.getById(vocabulary_id);
+    if (!vocab) {
+      return c.json({ error: 'Vocabulary not found' }, 404);
+    }
+
     // Get existing progress or create new
     let progress = await userVocabularyProgress.get(userId, vocabulary_id);
 
@@ -432,9 +438,31 @@ srsRouter.post('/batch-review', zValidator('json', batchReviewSchema), async (c)
       new Map(reviews.map((review) => [review.vocabulary_id, review])).values(),
     );
 
+    // Validate all vocabulary IDs exist in batch
+    const vocabIds = deduplicatedReviews.map((r) => r.vocabulary_id);
+    const vocabMap = await vocabulary.getByIds(vocabIds);
+
+    // Filter out reviews for non-existent vocabularies
+    const validReviews = deduplicatedReviews.filter((review) => vocabMap[review.vocabulary_id]);
+
+    // Log if any reviews were rejected
+    if (validReviews.length !== deduplicatedReviews.length) {
+      const invalidCount = deduplicatedReviews.length - validReviews.length;
+      console.warn(`[SRS] Rejected ${invalidCount} reviews for non-existent vocabularies`);
+    }
+
     const results = await Promise.all(
       deduplicatedReviews.map(async ({ vocabulary_id, quality }) => {
         try {
+          // Skip reviews for non-existent vocabularies (already filtered, but keep for error reporting)
+          if (!vocabMap[vocabulary_id]) {
+            return {
+              vocabulary_id,
+              success: false,
+              error: 'Vocabulary not found',
+            };
+          }
+
           let progress = await userVocabularyProgress.get(userId, vocabulary_id);
 
           if (!progress) {
@@ -484,9 +512,15 @@ srsRouter.post('/batch-review', zValidator('json', batchReviewSchema), async (c)
       }),
     );
 
+    // Separate successful and failed results for clearer response
+    const successful = results.filter((r) => r.success);
+    const failed = results.filter((r) => !r.success);
+
     return c.json({
       success: true,
-      updated: results.length,
+      processed: results.length,
+      successful: successful.length,
+      failed: failed.length,
       results,
     });
   } catch (error) {
