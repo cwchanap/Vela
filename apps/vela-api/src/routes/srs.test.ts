@@ -136,6 +136,77 @@ function createTestApp() {
     return c.json({ success: true, message: 'Progress deleted' });
   });
 
+  app.post('/batch-review', async (c) => {
+    const userId = c.get('userId') as string;
+    const body = await c.req.json();
+
+    if (!body.reviews || !Array.isArray(body.reviews) || body.reviews.length > 100) {
+      return c.json({ error: 'Invalid reviews format or exceeds batch limit' }, 400);
+    }
+
+    // Deduplicate reviews
+    const deduplicatedReviews = Array.from(
+      new Map(body.reviews.map((review: any) => [review.vocabulary_id, review])).values(),
+    );
+
+    const results = await Promise.all(
+      deduplicatedReviews.map(async ({ vocabulary_id, quality }: any) => {
+        try {
+          let progress = await mockUserVocabularyProgress.get(userId, vocabulary_id);
+
+          if (!progress) {
+            progress = await mockUserVocabularyProgress.initializeProgress(
+              userId,
+              vocabulary_id,
+              new Date().toISOString(),
+            );
+          }
+
+          const { calculateNextReview } = await import('../utils/srs');
+          const srsResult = calculateNextReview({
+            quality,
+            easeFactor: progress.ease_factor,
+            interval: progress.interval,
+            repetitions: progress.repetitions,
+          });
+
+          const updatedProgress = await mockUserVocabularyProgress.updateAfterReview(
+            userId,
+            vocabulary_id,
+            {
+              next_review_date: srsResult.nextReviewDate,
+              ease_factor: srsResult.easeFactor,
+              interval: srsResult.interval,
+              repetitions: srsResult.repetitions,
+              last_quality: quality,
+            },
+          );
+
+          if (!updatedProgress) {
+            throw new Error(`Failed to update progress for vocabulary ${vocabulary_id}`);
+          }
+
+          return {
+            vocabulary_id,
+            success: true,
+          };
+        } catch (error: any) {
+          return {
+            vocabulary_id,
+            success: false,
+            error: error instanceof Error ? error.message : 'Unknown error',
+          };
+        }
+      }),
+    );
+
+    return c.json({
+      success: true,
+      updated: results.length,
+      results,
+    });
+  });
+
   return app;
 }
 
@@ -395,6 +466,219 @@ describe('SRS Routes', () => {
 
       expect(res.status).toBe(200);
       expect(mockUserVocabularyProgress.delete).toHaveBeenCalledWith('test-user-123', 'vocab-1');
+    });
+  });
+
+  describe('POST /batch-review', () => {
+    beforeEach(() => {
+      // Mock batch-review endpoint in test app
+      // @ts-ignore - Adding batch-review route dynamically
+      app.post('/batch-review', async (c: any) => {
+        const userId = c.get('userId');
+        const body = await c.req.json();
+
+        if (!body.reviews || !Array.isArray(body.reviews) || body.reviews.length > 100) {
+          return c.json({ error: 'Invalid reviews format or exceeds batch limit' }, 400);
+        }
+
+        // Deduplicate reviews
+        const deduplicatedReviews = Array.from(
+          new Map(body.reviews.map((review: any) => [review.vocabulary_id, review])).values(),
+        );
+
+        const results = await Promise.all(
+          deduplicatedReviews.map(async ({ vocabulary_id, quality }: any) => {
+            try {
+              let progress = await mockUserVocabularyProgress.get(userId, vocabulary_id);
+
+              if (!progress) {
+                progress = await mockUserVocabularyProgress.initializeProgress(
+                  userId,
+                  vocabulary_id,
+                  new Date().toISOString(),
+                );
+              }
+
+              const { calculateNextReview } = await import('../utils/srs');
+              const srsResult = calculateNextReview({
+                quality,
+                easeFactor: progress.ease_factor,
+                interval: progress.interval,
+                repetitions: progress.repetitions,
+              });
+
+              const updatedProgress = await mockUserVocabularyProgress.updateAfterReview(
+                userId,
+                vocabulary_id,
+                {
+                  next_review_date: srsResult.nextReviewDate,
+                  ease_factor: srsResult.easeFactor,
+                  interval: srsResult.interval,
+                  repetitions: srsResult.repetitions,
+                  last_quality: quality,
+                },
+              );
+
+              if (!updatedProgress) {
+                throw new Error(`Failed to update progress for vocabulary ${vocabulary_id}`);
+              }
+
+              return {
+                vocabulary_id,
+                success: true,
+              };
+            } catch (error: any) {
+              return {
+                vocabulary_id,
+                success: false,
+                error: error instanceof Error ? error.message : 'Unknown error',
+              };
+            }
+          }),
+        );
+
+        return c.json({
+          success: true,
+          updated: results.length,
+          results,
+        });
+      });
+    });
+
+    it('should process multiple reviews successfully', async () => {
+      const mockProgress = {
+        user_id: 'test-user-123',
+        vocabulary_id: 'vocab-1',
+        next_review_date: '2024-12-31T00:00:00Z',
+        ease_factor: 2.5,
+        interval: 1,
+        repetitions: 1,
+        last_quality: 4,
+        total_reviews: 1,
+        correct_count: 1,
+      };
+
+      mockUserVocabularyProgress.get.mockResolvedValue({
+        user_id: 'test-user-123',
+        vocabulary_id: 'vocab-1',
+        next_review_date: '2024-12-30T00:00:00Z',
+        ease_factor: 2.5,
+        interval: 0,
+        repetitions: 0,
+        first_learned_at: '2024-12-30T00:00:00Z',
+        total_reviews: 0,
+        correct_count: 0,
+      });
+      mockUserVocabularyProgress.updateAfterReview.mockResolvedValue(mockProgress);
+
+      const res = await app.request('/batch-review', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          reviews: [
+            { vocabulary_id: 'vocab-1', quality: 4 },
+            { vocabulary_id: 'vocab-2', quality: 3 },
+          ],
+        }),
+      });
+
+      expect(res.status).toBe(200);
+      const data = await res.json();
+      expect(data.success).toBe(true);
+      expect(data.updated).toBe(2);
+      expect(data.results).toHaveLength(2);
+      expect(data.results[0].success).toBe(true);
+      expect(data.results[1].success).toBe(true);
+    });
+
+    it('should handle failed updates gracefully', async () => {
+      mockUserVocabularyProgress.get.mockResolvedValue({
+        user_id: 'test-user-123',
+        vocabulary_id: 'vocab-1',
+        next_review_date: '2024-12-30T00:00:00Z',
+        ease_factor: 2.5,
+        interval: 0,
+        repetitions: 0,
+        first_learned_at: '2024-12-30T00:00:00Z',
+        total_reviews: 0,
+        correct_count: 0,
+      });
+      // Mock updateAfterReview returning undefined (simulating failure)
+      mockUserVocabularyProgress.updateAfterReview.mockResolvedValue(undefined);
+
+      const res = await app.request('/batch-review', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          reviews: [{ vocabulary_id: 'vocab-1', quality: 4 }],
+        }),
+      });
+
+      expect(res.status).toBe(200);
+      const data = await res.json();
+      expect(data.success).toBe(true);
+      expect(data.updated).toBe(1);
+      expect(data.results).toHaveLength(1);
+      expect(data.results[0].success).toBe(false);
+      expect(data.results[0].error).toContain('Failed to update progress');
+    });
+
+    it('should deduplicate reviews with same vocabulary_id', async () => {
+      const mockProgress = {
+        user_id: 'test-user-123',
+        vocabulary_id: 'vocab-1',
+        next_review_date: '2024-12-31T00:00:00Z',
+        ease_factor: 2.5,
+        interval: 1,
+        repetitions: 1,
+        last_quality: 4,
+        total_reviews: 1,
+        correct_count: 1,
+      };
+
+      mockUserVocabularyProgress.get.mockResolvedValue({
+        user_id: 'test-user-123',
+        vocabulary_id: 'vocab-1',
+        next_review_date: '2024-12-30T00:00:00Z',
+        ease_factor: 2.5,
+        interval: 0,
+        repetitions: 0,
+        first_learned_at: '2024-12-30T00:00:00Z',
+        total_reviews: 0,
+        correct_count: 0,
+      });
+      mockUserVocabularyProgress.updateAfterReview.mockResolvedValue(mockProgress);
+
+      const res = await app.request('/batch-review', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          reviews: [
+            { vocabulary_id: 'vocab-1', quality: 4 },
+            { vocabulary_id: 'vocab-1', quality: 5 },
+          ],
+        }),
+      });
+
+      expect(res.status).toBe(200);
+      const data = await res.json();
+      expect(data.updated).toBe(1); // Should only process one due to deduplication
+      expect(data.results).toHaveLength(1);
+    });
+
+    it('should reject batch size exceeding limit', async () => {
+      const reviews = Array.from({ length: 101 }, (_, i) => ({
+        vocabulary_id: `vocab-${i}`,
+        quality: 4,
+      }));
+
+      const res = await app.request('/batch-review', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reviews }),
+      });
+
+      expect(res.status).toBe(400);
     });
   });
 });
