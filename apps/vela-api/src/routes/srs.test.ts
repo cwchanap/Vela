@@ -647,5 +647,67 @@ describe('SRS Routes', () => {
       expect(data.results[1].success).toBe(false);
       expect(data.results[1].error).toBe('Vocabulary not found');
     });
+
+    it('should process large batches with concurrency limiting', async () => {
+      // Create a batch of 20 items to verify concurrency control
+      const reviews = Array.from({ length: 20 }, (_, i) => ({
+        vocabulary_id: `vocab-${i}`,
+        quality: 4,
+      }));
+
+      // Mock vocabulary for all items
+      const vocabMap: Record<string, any> = {};
+      for (let i = 0; i < 20; i++) {
+        vocabMap[`vocab-${i}`] = { id: `vocab-${i}`, word: `test${i}` };
+      }
+      mockVocabulary.getByIds.mockResolvedValue(vocabMap);
+
+      // Mock progress for all items
+      mockUserVocabularyProgress.get.mockImplementation(
+        async (_userId: any, vocabularyId: any) => ({
+          user_id: 'test-user-123',
+          vocabulary_id: vocabularyId,
+          next_review_date: '2024-12-30T00:00:00Z',
+          ease_factor: 2.5,
+          interval: 0,
+          repetitions: 0,
+          first_learned_at: '2024-12-30T00:00:00Z',
+          total_reviews: 0,
+          correct_count: 0,
+        }),
+      );
+
+      // Track calls to verify they were made
+      let callCount = 0;
+      mockUserVocabularyProgress.updateAfterReview.mockImplementation(async () => {
+        callCount++;
+        return {
+          user_id: 'test-user-123',
+          vocabulary_id: 'test',
+          next_review_date: '2024-12-31T00:00:00Z',
+          ease_factor: 2.6,
+          interval: 1,
+          repetitions: 1,
+          last_quality: 4,
+          total_reviews: 1,
+          correct_count: 1,
+        };
+      });
+
+      const res = await app.request('/batch-review', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reviews }),
+      });
+
+      expect(res.status).toBe(200);
+      const data = await res.json();
+      expect(data.success).toBe(true);
+      expect(data.processed).toBe(20);
+      expect(data.successful).toBe(20);
+      expect(data.failed).toBe(0);
+      // Verify all 20 updates were called
+      expect(callCount).toBe(20);
+    });
   });
 });
