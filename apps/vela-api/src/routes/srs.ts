@@ -12,6 +12,58 @@ srsRouter.use('*', requireAuth);
 
 // Constants
 const BATCH_REVIEW_MAX = 100;
+const CONCURRENCY_LIMIT = 10; // Max concurrent reviews to prevent DynamoDB throttling
+
+/**
+ * Process items with concurrency control to prevent overwhelming downstream services
+ * @param items - Items to process
+ * @param processFn - Async function to process each item
+ * @param concurrency - Maximum number of concurrent operations
+ * @returns Array of results in the same order as input items
+ */
+async function processWithConcurrency<T, R>(
+  items: T[],
+  processFn: (...args: [T]) => Promise<R>,
+  concurrency: number,
+): Promise<R[]> {
+  const results: R[] = new Array(items.length);
+  const executing: Array<{ promise: Promise<R>; index: number }> = [];
+
+  for (let i = 0; i < items.length; i++) {
+    const index = i;
+
+    // Create a promise for this item
+    const promise = processFn(items[i])
+      .then((result) => {
+        results[index] = result;
+        return result;
+      })
+      .catch((error) => {
+        results[index] = error as R;
+        throw error;
+      });
+
+    executing.push({ promise, index });
+
+    // If we've reached the concurrency limit, wait for at least one to complete
+    if (executing.length >= concurrency) {
+      const racePromise = Promise.race(
+        executing.map((e) => e.promise.then(() => e.index).catch(() => e.index)),
+      );
+      const completedIndex = await racePromise;
+      // Remove the completed promise from executing array
+      const idx = executing.findIndex((e) => e.index === completedIndex);
+      if (idx !== -1) {
+        executing.splice(idx, 1);
+      }
+    }
+  }
+
+  // Wait for all remaining promises to complete
+  await Promise.all(executing.map((e) => e.promise.catch(() => {})));
+
+  return results;
+}
 
 // Validation schemas
 const reviewSchema = z.object({
@@ -448,65 +500,77 @@ srsRouter.post('/batch-review', zValidator('json', batchReviewSchema), async (c)
       console.warn(`[SRS] Rejected ${invalidCount} reviews for non-existent vocabularies`);
     }
 
-    const results = await Promise.all(
-      deduplicatedReviews.map(async ({ vocabulary_id, quality }) => {
-        try {
-          // Skip reviews for non-existent vocabularies (already filtered, but keep for error reporting)
-          if (!vocabMap[vocabulary_id]) {
-            return {
-              vocabulary_id,
-              success: false,
-              error: 'Vocabulary not found',
-            };
-          }
-
-          let progress = await userVocabularyProgress.get(userId, vocabulary_id);
-
-          if (!progress) {
-            const initialDate = new Date().toISOString();
-            progress = await userVocabularyProgress.initializeProgress(
-              userId,
-              vocabulary_id,
-              initialDate,
-            );
-          }
-
-          const srsResult = calculateNextReview({
-            quality,
-            easeFactor: progress.ease_factor,
-            interval: progress.interval,
-            repetitions: progress.repetitions,
-          });
-
-          const updatedProgress = await userVocabularyProgress.updateAfterReview(
-            userId,
-            vocabulary_id,
-            {
-              next_review_date: srsResult.nextReviewDate,
-              ease_factor: srsResult.easeFactor,
-              interval: srsResult.interval,
-              repetitions: srsResult.repetitions,
-              last_quality: quality,
-            },
-          );
-
-          if (!updatedProgress) {
-            throw new Error(`Failed to update progress for vocabulary ${vocabulary_id}`);
-          }
-
-          return {
-            vocabulary_id,
-            success: true,
-          };
-        } catch (error) {
-          console.error(`Error reviewing vocabulary ${vocabulary_id}:`, error);
+    // Process reviews with concurrency control to prevent DynamoDB throttling
+    const processReview = async ({
+      vocabulary_id,
+      quality,
+    }: {
+      vocabulary_id: string;
+      quality: number;
+    }) => {
+      try {
+        // Skip reviews for non-existent vocabularies (already filtered, but keep for error reporting)
+        if (!vocabMap[vocabulary_id]) {
           return {
             vocabulary_id,
             success: false,
-            error: error instanceof Error ? error.message : 'Unknown error',
+            error: 'Vocabulary not found',
           };
         }
-      }),
+
+        let progress = await userVocabularyProgress.get(userId, vocabulary_id);
+
+        if (!progress) {
+          const initialDate = new Date().toISOString();
+          progress = await userVocabularyProgress.initializeProgress(
+            userId,
+            vocabulary_id,
+            initialDate,
+          );
+        }
+
+        const srsResult = calculateNextReview({
+          quality,
+          easeFactor: progress.ease_factor,
+          interval: progress.interval,
+          repetitions: progress.repetitions,
+        });
+
+        const updatedProgress = await userVocabularyProgress.updateAfterReview(
+          userId,
+          vocabulary_id,
+          {
+            next_review_date: srsResult.nextReviewDate,
+            ease_factor: srsResult.easeFactor,
+            interval: srsResult.interval,
+            repetitions: srsResult.repetitions,
+            last_quality: quality,
+          },
+        );
+
+        if (!updatedProgress) {
+          throw new Error(`Failed to update progress for vocabulary ${vocabulary_id}`);
+        }
+
+        return {
+          vocabulary_id,
+          success: true,
+        };
+      } catch (error) {
+        console.error(`Error reviewing vocabulary ${vocabulary_id}:`, error);
+        return {
+          vocabulary_id,
+          success: false,
+          error: error instanceof Error ? error.message : 'Unknown error',
+        };
+      }
+    };
+
+    // Process all reviews with concurrency limit
+    const results = await processWithConcurrency(
+      deduplicatedReviews,
+      processReview,
+      CONCURRENCY_LIMIT,
     );
 
     // Separate successful and failed results for clearer response
