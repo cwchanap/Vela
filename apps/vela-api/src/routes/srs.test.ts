@@ -497,7 +497,7 @@ describe('SRS Routes', () => {
       expect(data.progress.interval).toBe(6);
     });
 
-    it('should return 200 with progress: null for non-existent progress', async () => {
+    it('should return 200 with progress: undefined for non-existent progress', async () => {
       mockUserVocabularyProgress.get.mockResolvedValue(undefined);
 
       const res = await app.request('/progress/vocab-unknown');
