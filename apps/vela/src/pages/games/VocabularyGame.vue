@@ -134,7 +134,6 @@ async function fetchDueCount(jlptLevels?: JLPTLevel[]) {
 
 async function startGame() {
   isLoading.value = true;
-  showSetup.value = false;
 
   try {
     const token = await getAccessToken();
@@ -205,6 +204,7 @@ async function startGame() {
             gameStartTime.value = new Date();
             correctAnswers.value = 0;
             totalQuestions.value = questions.length;
+            showSetup.value = false;
             return;
           }
         }
@@ -225,7 +225,6 @@ async function startGame() {
         position: 'top',
         timeout: 5000,
       });
-      showSetup.value = true;
       return;
     }
 
@@ -233,6 +232,15 @@ async function startGame() {
     gameStartTime.value = new Date();
     correctAnswers.value = 0;
     totalQuestions.value = questions.length;
+    showSetup.value = false;
+  } catch (error) {
+    console.error('Failed to start game:', error);
+    Notify.create({
+      type: 'negative',
+      message: 'Failed to start game. Please try again.',
+      position: 'top',
+      timeout: 5000,
+    });
   } finally {
     isLoading.value = false;
   }
