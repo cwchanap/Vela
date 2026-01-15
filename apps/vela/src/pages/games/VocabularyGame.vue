@@ -62,6 +62,7 @@
 <script setup lang="ts">
 import { computed, ref, watch, onMounted } from 'vue';
 import { fetchAuthSession } from 'aws-amplify/auth';
+import { useRoute } from 'vue-router';
 import { useGameStore } from 'src/stores/games';
 import { useProgressStore } from 'src/stores/progress';
 import { useAuthStore } from 'src/stores/auth';
@@ -78,6 +79,7 @@ import type { Vocabulary, JLPTLevel } from 'src/types/database';
 const gameStore = useGameStore();
 const progressStore = useProgressStore();
 const authStore = useAuthStore();
+const route = useRoute();
 
 const gameStartTime = ref<Date | null>(null);
 const correctAnswers = ref(0);
@@ -109,6 +111,11 @@ async function getAccessToken(): Promise<string | null> {
 
 // Fetch due count when auth or JLPT levels change
 onMounted(async () => {
+  const srsModeQuery = route.query.srsMode;
+  if (srsModeQuery === 'true' || srsModeQuery === '1' || srsModeQuery === true) {
+    srsMode.value = true;
+  }
+
   await fetchDueCount(selectedJlptLevels.value);
 });
 

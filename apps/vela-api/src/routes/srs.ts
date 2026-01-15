@@ -23,7 +23,7 @@ const CONCURRENCY_LIMIT = 10; // Max concurrent reviews to prevent DynamoDB thro
  */
 async function processWithConcurrency<T, R>(
   items: T[],
-  processFn: (...args: [T]) => Promise<R>,
+  processFn: any,
   concurrency: number,
 ): Promise<R[]> {
   const results: R[] = new Array(items.length);
@@ -33,12 +33,12 @@ async function processWithConcurrency<T, R>(
     const index = i;
 
     // Create a promise for this item
-    const promise = processFn(items[i])
-      .then((result) => {
+    const promise: Promise<R> = (processFn as any)(items[i])
+      .then((result: R) => {
         results[index] = result;
         return result;
       })
-      .catch((error) => {
+      .catch((error: unknown) => {
         results[index] = error as R;
         throw error;
       });
@@ -173,18 +173,16 @@ srsRouter.get('/due', zValidator('query', limitSchema), async (c) => {
       });
     }
 
-    // With JLPT filter: fetch in batches until we have enough matching items
+    // With JLPT filter: scan due items until we have enough matching items or exhaust due items
     const CHUNK_SIZE = 50;
-    const BATCHES_TO_FETCH = Math.ceil((limit * 2) / CHUNK_SIZE); // Fetch up to 2x limit to find matches
     let allItems: any[] = [];
-    let exhaustedBatches = false;
+    let scannedDueItemsCount = 0;
 
-    for (let i = 0; i < BATCHES_TO_FETCH; i++) {
-      const start = i * CHUNK_SIZE;
-      const chunk = dueItems.slice(start, start + CHUNK_SIZE);
+    while (allItems.length < limit && scannedDueItemsCount < dueItems.length) {
+      const chunk = dueItems.slice(scannedDueItemsCount, scannedDueItemsCount + CHUNK_SIZE);
+      scannedDueItemsCount += chunk.length;
 
       if (chunk.length === 0) {
-        exhaustedBatches = true;
         break;
       }
 
@@ -219,20 +217,18 @@ srsRouter.get('/due', zValidator('query', limitSchema), async (c) => {
       });
 
       allItems.push(...filteredChunk);
-
-      // Stop if we have enough items
-      if (allItems.length >= limit) break;
     }
+
+    const exhaustedDueItems = scannedDueItemsCount >= dueItems.length;
 
     // Calculate total matching items
     let totalMatching: number;
-    if (exhaustedBatches) {
+    if (exhaustedDueItems) {
       // We've checked all due items, so use actual count
       totalMatching = allItems.length;
     } else {
-      // We haven't exhausted batches, provide conservative estimate
-      // Use the ratio of matching items we've found so far
-      const matchingRatio = allItems.length / (BATCHES_TO_FETCH * CHUNK_SIZE);
+      // We haven't exhausted due items, provide conservative estimate
+      const matchingRatio = scannedDueItemsCount > 0 ? allItems.length / scannedDueItemsCount : 0;
       totalMatching = Math.round(dueItems.length * matchingRatio);
       // Ensure estimate is at least what we've found
       totalMatching = Math.max(totalMatching, allItems.length);
@@ -567,11 +563,16 @@ srsRouter.post('/batch-review', zValidator('json', batchReviewSchema), async (c)
     };
 
     // Process all reviews with concurrency limit
-    const results = await processWithConcurrency(
-      deduplicatedReviews,
-      processReview,
-      CONCURRENCY_LIMIT,
-    );
+    type BatchReviewResult = {
+      vocabulary_id: string;
+      success: boolean;
+      error?: string;
+    };
+
+    const results = await processWithConcurrency<
+      (typeof deduplicatedReviews)[number],
+      BatchReviewResult
+    >(deduplicatedReviews, processReview, CONCURRENCY_LIMIT);
 
     // Separate successful and failed results for clearer response
     const successful = results.filter((r) => r.success);

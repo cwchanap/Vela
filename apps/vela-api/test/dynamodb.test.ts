@@ -138,6 +138,28 @@ describe('DynamoDB Operations', () => {
       expect(result).toHaveLength(2);
       expect(result).toEqual(expect.arrayContaining(mockItems));
     });
+
+    it('should stop scanning when scan hard cap is reached', async () => {
+      // Simulate sparse matches where DynamoDB scans many items but returns none.
+      // The implementation should stop once total scanned reaches 1000.
+      mocks.send
+        .mockResolvedValueOnce({
+          Items: [],
+          ScannedCount: 600,
+          LastEvaluatedKey: { id: 'lek-1' },
+        })
+        .mockResolvedValueOnce({
+          Items: [],
+          ScannedCount: 400,
+          LastEvaluatedKey: { id: 'lek-2' },
+        });
+
+      const result = await vocabulary.getByJlptLevel([1], 10);
+
+      expect(result).toEqual([]);
+      // Should not scan indefinitely; should stop after hitting hard cap.
+      expect(mocks.send).toHaveBeenCalledTimes(2);
+    });
   });
 
   describe('Sentences getByJlptLevel', () => {
@@ -166,6 +188,25 @@ describe('DynamoDB Operations', () => {
       // Should return items (shuffled but containing all items)
       expect(result).toHaveLength(2);
       expect(result).toEqual(expect.arrayContaining(mockItems));
+    });
+
+    it('should stop scanning when scan hard cap is reached', async () => {
+      mocks.send
+        .mockResolvedValueOnce({
+          Items: [],
+          ScannedCount: 700,
+          LastEvaluatedKey: { id: 'lek-1' },
+        })
+        .mockResolvedValueOnce({
+          Items: [],
+          ScannedCount: 300,
+          LastEvaluatedKey: { id: 'lek-2' },
+        });
+
+      const result = await sentences.getByJlptLevel([1], 5);
+
+      expect(result).toEqual([]);
+      expect(mocks.send).toHaveBeenCalledTimes(2);
     });
   });
 });
