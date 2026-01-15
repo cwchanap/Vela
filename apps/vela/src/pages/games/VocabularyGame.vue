@@ -112,7 +112,7 @@ async function getAccessToken(): Promise<string | null> {
 // Fetch due count when auth or JLPT levels change
 onMounted(async () => {
   const srsModeQuery = route.query.srsMode;
-  if (srsModeQuery === 'true' || srsModeQuery === '1' || srsModeQuery === true) {
+  if (srsModeQuery === 'true' || srsModeQuery === '1') {
     srsMode.value = true;
   }
 
