@@ -295,32 +295,37 @@ export const vocabulary = {
 
       const allItems: any[] = [];
       let lastEvaluatedKey: any = undefined;
+      let scannedCount = 0;
       // Hard cap to prevent excessive scanning - log warning when approaching limit
       const hardCap = 1000;
       const warningThreshold = 800; // Warn when we're close to cap
 
       // Paginate scan until we have enough matching items or reach hard cap
-      while (allItems.length < limit && allItems.length < hardCap) {
+      while (allItems.length < limit && scannedCount < hardCap) {
+        const remainingScanBudget = hardCap - scannedCount;
         const command = new ScanCommand({
           TableName: TABLE_NAMES.VOCABULARY,
           FilterExpression: filterExpression,
           ExpressionAttributeValues: expressionAttributeValues,
           ExclusiveStartKey: lastEvaluatedKey,
+          Limit: remainingScanBudget,
         });
 
         const response = await docClient.send(command);
         const items = response.Items || [];
+        const scannedThisPageRaw =
+          typeof response.ScannedCount === 'number' ? response.ScannedCount : items.length;
+        const scannedThisPage = Math.min(scannedThisPageRaw, remainingScanBudget);
 
         // Collect all matching items from this page
         allItems.push(...items);
 
+        scannedCount += scannedThisPage;
+
         // Log warning if approaching hard cap
-        if (
-          allItems.length >= warningThreshold &&
-          allItems.length < warningThreshold + items.length
-        ) {
+        if (scannedCount >= warningThreshold && scannedCount - scannedThisPage < warningThreshold) {
           console.warn(
-            `[getByJlptLevel] Approaching hard cap: scanned ${allItems.length} items for JLPT levels [${jlptLevels.join(', ')}]. Consider increasing hardCap or implementing GSI for more efficient querying.`,
+            `[getByJlptLevel] Approaching hard cap: scanned ${scannedCount} items for JLPT levels [${jlptLevels.join(', ')}]. Consider increasing hardCap or implementing GSI for more efficient querying.`,
           );
         }
 
@@ -420,32 +425,37 @@ export const sentences = {
 
       const allItems: any[] = [];
       let lastEvaluatedKey: any = undefined;
+      let scannedCount = 0;
       // Hard cap to prevent excessive scanning - log warning when approaching limit
       const hardCap = 1000;
       const warningThreshold = 800; // Warn when we're close to cap
 
       // Paginate scan until we have enough matching items or reach hard cap
-      while (allItems.length < limit && allItems.length < hardCap) {
+      while (allItems.length < limit && scannedCount < hardCap) {
+        const remainingScanBudget = hardCap - scannedCount;
         const command = new ScanCommand({
           TableName: TABLE_NAMES.SENTENCES,
           FilterExpression: filterExpression,
           ExpressionAttributeValues: expressionAttributeValues,
           ExclusiveStartKey: lastEvaluatedKey,
+          Limit: remainingScanBudget,
         });
 
         const response = await docClient.send(command);
         const items = response.Items || [];
+        const scannedThisPageRaw =
+          typeof response.ScannedCount === 'number' ? response.ScannedCount : items.length;
+        const scannedThisPage = Math.min(scannedThisPageRaw, remainingScanBudget);
 
         // Collect all matching items from this page
         allItems.push(...items);
 
+        scannedCount += scannedThisPage;
+
         // Log warning if approaching hard cap
-        if (
-          allItems.length >= warningThreshold &&
-          allItems.length < warningThreshold + items.length
-        ) {
+        if (scannedCount >= warningThreshold && scannedCount - scannedThisPage < warningThreshold) {
           console.warn(
-            `[getByJlptLevel] Approaching hard cap: scanned ${allItems.length} sentences for JLPT levels [${jlptLevels.join(', ')}]. Consider increasing hardCap or implementing GSI for more efficient querying.`,
+            `[getByJlptLevel] Approaching hard cap: scanned ${scannedCount} sentences for JLPT levels [${jlptLevels.join(', ')}]. Consider increasing hardCap or implementing GSI for more efficient querying.`,
           );
         }
 
