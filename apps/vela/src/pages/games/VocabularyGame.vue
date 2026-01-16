@@ -75,6 +75,7 @@ import GameTimer from 'src/components/games/GameTimer.vue';
 import JlptLevelSelector from 'src/components/games/JlptLevelSelector.vue';
 import { Notify } from 'quasar';
 import type { Vocabulary, JLPTLevel } from 'src/types/database';
+import { shuffleArray } from 'src/utils/array';
 
 const gameStore = useGameStore();
 const progressStore = useProgressStore();
@@ -171,8 +172,7 @@ async function startGame() {
 
             const questions = vocabulary.map((word) => {
               const otherWords = vocabulary.filter((v) => v.id !== word.id);
-              let distractors = otherWords
-                .sort(() => 0.5 - Math.random())
+              let distractors = shuffleArray(otherWords)
                 .slice(0, 3)
                 .map((v) => v.english_translation);
 
@@ -186,7 +186,7 @@ async function startGame() {
 
                 distractors = [
                   ...distractors,
-                  ...availableDistractors.sort(() => 0.5 - Math.random()).slice(0, needed),
+                  ...shuffleArray(availableDistractors).slice(0, needed),
                 ];
               }
 
@@ -202,7 +202,7 @@ async function startGame() {
 
               return {
                 word,
-                options: options.sort(() => 0.5 - Math.random()),
+                options: shuffleArray(options),
                 correctAnswer: word.english_translation,
               };
             });

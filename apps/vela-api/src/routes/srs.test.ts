@@ -1,5 +1,6 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, beforeAll } from 'vitest';
 import { Hono } from 'hono';
+import type { AuthContext } from '../middleware/auth';
 
 // Create a test version of the SRS router without auth dependency
 // This allows us to test the route logic independently
@@ -42,9 +43,11 @@ vi.mock('../utils/srs', () => ({
   },
 }));
 
+let processWithConcurrency: typeof import('./srs').processWithConcurrency;
+
 // Create a test app that injects userId without real auth
-function createTestApp() {
-  const app = new Hono();
+function createTestApp(): Hono<AuthContext> {
+  const app = new Hono<AuthContext>();
 
   // Mock auth middleware that sets userId
   app.use('*', async (c, next) => {
@@ -232,8 +235,40 @@ function createTestApp() {
   return app;
 }
 
+describe('processWithConcurrency', () => {
+  it('returns results in input order when promises resolve out of order', async () => {
+    if (!processWithConcurrency) {
+      ({ processWithConcurrency } = await import('./srs'));
+    }
+    vi.useFakeTimers();
+
+    const delays = [30, 10, 20];
+    const resultsPromise = processWithConcurrency(
+      delays,
+      (delay) =>
+        new Promise<number>((resolve) => {
+          setTimeout(() => resolve(delay), delay);
+        }),
+      2,
+    );
+
+    await vi.runAllTimersAsync();
+
+    const results = await resultsPromise;
+    expect(results).toEqual(delays);
+
+    vi.useRealTimers();
+  });
+});
+
 describe('SRS Routes', () => {
-  let app: Hono;
+  let app: Hono<AuthContext>;
+
+  beforeAll(async () => {
+    if (!processWithConcurrency) {
+      ({ processWithConcurrency } = await import('./srs'));
+    }
+  });
 
   beforeEach(() => {
     vi.clearAllMocks();
