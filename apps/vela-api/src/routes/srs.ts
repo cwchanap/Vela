@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import { zValidator } from '@hono/zod-validator';
 import { z } from 'zod';
-import { userVocabularyProgress, vocabulary } from '../dynamodb';
+import { userVocabularyProgress, vocabulary, type UserVocabularyProgress } from '../dynamodb';
 import { calculateNextReview } from '../utils/srs';
 import { requireAuth, type AuthContext } from '../middleware/auth';
 
@@ -21,9 +21,19 @@ const CONCURRENCY_LIMIT = 10; // Max concurrent reviews to prevent DynamoDB thro
  * @param concurrency - Maximum number of concurrent operations
  * @returns Array of results in the same order as input items
  */
-async function processWithConcurrency<T, R>(
+type VocabularyItem = {
+  jlpt_level?: number | null;
+} & Record<string, unknown>;
+
+type DueItem = {
+  progress: UserVocabularyProgress;
+  vocabulary: VocabularyItem | null;
+};
+
+export async function processWithConcurrency<T, R>(
   items: T[],
-  processFn: any,
+  // eslint-disable-next-line no-unused-vars
+  processFn: (item: T) => Promise<R>,
   concurrency: number,
 ): Promise<R[]> {
   const results: R[] = new Array(items.length);
@@ -33,7 +43,7 @@ async function processWithConcurrency<T, R>(
     const index = i;
 
     // Create a promise for this item
-    const promise: Promise<R> = (processFn as any)(items[i])
+    const promise: Promise<R> = processFn(items[i])
       .then((result: R) => {
         results[index] = result;
         return result;
@@ -175,7 +185,7 @@ srsRouter.get('/due', zValidator('query', limitSchema), async (c) => {
 
     // With JLPT filter: scan due items until we have enough matching items or exhaust due items
     const CHUNK_SIZE = 50;
-    let allItems: any[] = [];
+    let allItems: DueItem[] = [];
     let scannedDueItemsCount = 0;
 
     while (allItems.length < limit && scannedDueItemsCount < dueItems.length) {
@@ -189,7 +199,7 @@ srsRouter.get('/due', zValidator('query', limitSchema), async (c) => {
       const vocabIds = chunk.map((item) => item.vocabulary_id);
       const vocabMap = await vocabulary.getByIds(vocabIds);
 
-      const itemsWithDetails = chunk.map((progress) => {
+      const itemsWithDetails: DueItem[] = chunk.map((progress) => {
         const vocabDetails = vocabMap[progress.vocabulary_id] || null;
         return {
           progress: {
