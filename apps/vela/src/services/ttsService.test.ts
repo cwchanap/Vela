@@ -282,7 +282,9 @@ describe('ttsService', () => {
     it('should throw error for authentication failures', async () => {
       vi.mocked(fetchAuthSession).mockRejectedValue(new Error('Auth failed'));
 
-      await expect(getAudioUrl('vocab-1')).rejects.toThrow('Auth failed');
+      await expect(getAudioUrl('vocab-1')).rejects.toThrow(
+        'Authentication required. Please sign in.',
+      );
     });
 
     it('should validate vocabularyId input', async () => {
