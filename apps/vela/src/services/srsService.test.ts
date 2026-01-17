@@ -239,14 +239,15 @@ describe('srsService', () => {
 
   describe('getProgress', () => {
     it('should fetch progress for a specific vocabulary', async () => {
+      const vocabularyId = 'vocab/1';
       mockFetch.mockResolvedValue({
         ok: true,
         json: vi.fn().mockResolvedValue({ progress: mockProgress }),
       });
 
-      const result = await srsService.getProgress(mockAccessToken, 'vocab-1');
+      const result = await srsService.getProgress(mockAccessToken, vocabularyId);
 
-      expect(mockFetch).toHaveBeenCalledWith('/api/srs/progress/vocab-1', {
+      expect(mockFetch).toHaveBeenCalledWith('/api/srs/progress/vocab%2F1', {
         headers: {
           'content-type': 'application/json',
           Authorization: `Bearer ${mockAccessToken}`,
@@ -269,14 +270,15 @@ describe('srsService', () => {
 
   describe('deleteProgress', () => {
     it('should delete progress for a vocabulary', async () => {
+      const vocabularyId = 'vocab/1';
       mockFetch.mockResolvedValue({
         ok: true,
         json: vi.fn().mockResolvedValue({ success: true }),
       });
 
-      const result = await srsService.deleteProgress(mockAccessToken, 'vocab-1');
+      const result = await srsService.deleteProgress(mockAccessToken, vocabularyId);
 
-      expect(mockFetch).toHaveBeenCalledWith('/api/srs/progress/vocab-1', {
+      expect(mockFetch).toHaveBeenCalledWith('/api/srs/progress/vocab%2F1', {
         method: 'DELETE',
         headers: {
           'content-type': 'application/json',

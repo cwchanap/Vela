@@ -105,10 +105,10 @@ describe('SrsStatsCard', () => {
   it('displays stats correctly', async () => {
     const wrapper = await createAuthenticatedWrapper();
 
-    expect(wrapper.text()).toContain('100'); // total_words
-    expect(wrapper.text()).toContain('30'); // mastered
-    expect(wrapper.text()).toContain('50'); // learning
-    expect(wrapper.text()).toContain('20'); // new_words
+    expect(wrapper.text()).toContain('100'); // total_items
+    expect(wrapper.text()).toContain('30'); // mastery_breakdown.mastered
+    expect(wrapper.text()).toContain('50'); // mastery_breakdown.learning
+    expect(wrapper.text()).toContain('20'); // mastery_breakdown.new
   });
 
   it('shows due items alert when items are due', async () => {
@@ -167,7 +167,7 @@ describe('SrsStatsCard', () => {
 
     // Should show stats, not empty state
     expect(wrapper.text()).not.toContain('Start learning vocabulary to build your SRS progress');
-    expect(wrapper.text()).toContain('10'); // total_words
+    expect(wrapper.text()).toContain('10'); // total_items
     expect(wrapper.text()).toContain('0.00'); // ease factor
   });
 
@@ -176,7 +176,7 @@ describe('SrsStatsCard', () => {
 
     // After loading, should show stats not loading
     expect(wrapper.text()).not.toContain('Loading SRS stats');
-    expect(wrapper.text()).toContain('100'); // total_words
+    expect(wrapper.text()).toContain('100'); // total_items
   });
 
   it('handles fetch error gracefully', async () => {

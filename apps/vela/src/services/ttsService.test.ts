@@ -254,9 +254,10 @@ describe('ttsService', () => {
       expect(result).toBe('https://example.com/audio/word.mp3');
     });
 
-    it('should return null when audio does not exist', async () => {
+    it('should return null when audio does not exist (404)', async () => {
       mockFetch.mockResolvedValue({
         ok: false,
+        status: 404,
         json: vi.fn().mockResolvedValue({ error: 'Audio not found' }),
       });
 
@@ -265,31 +266,46 @@ describe('ttsService', () => {
       expect(result).toBeNull();
     });
 
-    it('should return null on network error', async () => {
-      mockFetch.mockRejectedValue(new Error('Network error'));
+    it('should throw error for non-404 error responses', async () => {
+      mockFetch.mockResolvedValue({
+        ok: false,
+        status: 500,
+        statusText: 'Internal Server Error',
+        json: vi.fn(),
+      });
 
-      const result = await getAudioUrl('vocab-1');
-
-      expect(result).toBeNull();
+      await expect(getAudioUrl('vocab-1')).rejects.toThrow(
+        'Failed to fetch audio URL: 500 Internal Server Error',
+      );
     });
 
-    it('should return null when authentication fails', async () => {
+    it('should throw error for authentication failures', async () => {
       vi.mocked(fetchAuthSession).mockRejectedValue(new Error('Auth failed'));
 
-      const result = await getAudioUrl('vocab-1');
-
-      expect(result).toBeNull();
+      await expect(getAudioUrl('vocab-1')).rejects.toThrow('Auth failed');
     });
 
-    it('should construct correct URL with vocabulary ID', async () => {
+    it('should validate vocabularyId input', async () => {
+      await expect(getAudioUrl('')).rejects.toThrow(
+        'vocabularyId is required and must be a non-empty string',
+      );
+      await expect(getAudioUrl(null as any)).rejects.toThrow(
+        'vocabularyId is required and must be a non-empty string',
+      );
+      await expect(getAudioUrl(undefined as any)).rejects.toThrow(
+        'vocabularyId is required and must be a non-empty string',
+      );
+    });
+
+    it('should URL encode vocabulary IDs with special characters', async () => {
       mockFetch.mockResolvedValue({
         ok: true,
         json: vi.fn().mockResolvedValue({ audioUrl: 'https://example.com/audio.mp3' }),
       });
 
-      await getAudioUrl('custom-vocab-456');
+      await getAudioUrl('vocab/1');
 
-      expect(mockFetch).toHaveBeenCalledWith('/api/tts/audio/custom-vocab-456', expect.any(Object));
+      expect(mockFetch).toHaveBeenCalledWith('/api/tts/audio/vocab%2F1', expect.any(Object));
     });
 
     it('should use GET method (default)', async () => {

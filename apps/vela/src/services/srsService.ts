@@ -167,7 +167,11 @@ async function recordBatchReview(
  * @param vocabularyId - The vocabulary ID
  */
 async function getProgress(accessToken: string, vocabularyId: string): Promise<ProgressResponse> {
-  return httpJson<ProgressResponse>(getApiUrl(`srs/progress/${vocabularyId}`), accessToken);
+  if (!vocabularyId || typeof vocabularyId !== 'string') {
+    throw new Error('vocabularyId is required and must be a non-empty string');
+  }
+  const encodedVocabularyId = encodeURIComponent(vocabularyId);
+  return httpJson<ProgressResponse>(getApiUrl(`srs/progress/${encodedVocabularyId}`), accessToken);
 }
 
 /**
@@ -179,9 +183,17 @@ async function deleteProgress(
   accessToken: string,
   vocabularyId: string,
 ): Promise<{ success: boolean }> {
-  return httpJson<{ success: boolean }>(getApiUrl(`srs/progress/${vocabularyId}`), accessToken, {
-    method: 'DELETE',
-  });
+  if (!vocabularyId || typeof vocabularyId !== 'string') {
+    throw new Error('vocabularyId is required and must be a non-empty string');
+  }
+  const encodedVocabularyId = encodeURIComponent(vocabularyId);
+  return httpJson<{ success: boolean }>(
+    getApiUrl(`srs/progress/${encodedVocabularyId}`),
+    accessToken,
+    {
+      method: 'DELETE',
+    },
+  );
 }
 
 /**

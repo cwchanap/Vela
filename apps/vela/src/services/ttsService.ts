@@ -74,25 +74,32 @@ export async function generatePronunciation(
 
 /**
  * Get audio URL for a vocabulary item (if it exists)
+ * Returns null if audio doesn't exist (404), throws error for other failures
  */
 export async function getAudioUrl(vocabularyId: string): Promise<string | null> {
-  try {
-    const headers = await getAuthHeader();
+  if (!vocabularyId || typeof vocabularyId !== 'string') {
+    throw new Error('vocabularyId is required and must be a non-empty string');
+  }
 
-    const response = await fetch(getApiUrl(`tts/audio/${vocabularyId}`), {
-      headers,
-    });
+  const headers = await getAuthHeader();
+  const encodedVocabularyId = encodeURIComponent(vocabularyId);
 
-    if (!response.ok) {
-      return null;
-    }
+  const response = await fetch(getApiUrl(`tts/audio/${encodedVocabularyId}`), {
+    headers,
+  });
 
-    const data = await response.json();
-    return data.audioUrl;
-  } catch (error) {
-    console.error('Error fetching audio URL:', error);
+  // 404 means audio hasn't been generated yet - this is expected
+  if (response.status === 404) {
     return null;
   }
+
+  // Other errors should be surfaced
+  if (!response.ok) {
+    throw new Error(`Failed to fetch audio URL: ${response.status} ${response.statusText}`);
+  }
+
+  const data = await response.json();
+  return data.audioUrl;
 }
 
 /**
