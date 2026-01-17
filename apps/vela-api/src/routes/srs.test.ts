@@ -44,6 +44,7 @@ vi.mock('../utils/srs', () => ({
 }));
 
 let processWithConcurrency: typeof import('./srs').processWithConcurrency;
+const TEST_CONCURRENCY_LIMIT = 5;
 
 // Create a test app that injects userId without real auth
 function createTestApp(): Hono<AuthContext> {
@@ -159,8 +160,9 @@ function createTestApp(): Hono<AuthContext> {
     const vocabIds = deduplicatedReviews.map((r: any) => r.vocabulary_id);
     const vocabMap = await mockVocabulary.getByIds(vocabIds);
 
-    const results = await Promise.all(
-      deduplicatedReviews.map(async ({ vocabulary_id, quality }: any) => {
+    const results = await processWithConcurrency(
+      deduplicatedReviews,
+      async ({ vocabulary_id, quality }: any) => {
         try {
           // Skip reviews for non-existent vocabularies
           if (!vocabMap[vocabulary_id]) {
@@ -216,7 +218,8 @@ function createTestApp(): Hono<AuthContext> {
             error: error instanceof Error ? error.message : 'Unknown error',
           };
         }
-      }),
+      },
+      TEST_CONCURRENCY_LIMIT,
     );
 
     // Separate successful and failed results for clearer response
@@ -684,6 +687,7 @@ describe('SRS Routes', () => {
     });
 
     it('should process large batches with concurrency limiting', async () => {
+      vi.useFakeTimers();
       // Create a batch of 20 items to verify concurrency control
       const reviews = Array.from({ length: 20 }, (_, i) => ({
         vocabulary_id: `vocab-${i}`,
@@ -714,8 +718,14 @@ describe('SRS Routes', () => {
 
       // Track calls to verify they were made
       let callCount = 0;
+      let activeCount = 0;
+      let maxActive = 0;
       mockUserVocabularyProgress.updateAfterReview.mockImplementation(async () => {
+        activeCount += 1;
+        maxActive = Math.max(maxActive, activeCount);
         callCount++;
+        await new Promise((resolve) => setTimeout(resolve, 10));
+        activeCount -= 1;
         return {
           user_id: 'test-user-123',
           vocabulary_id: 'test',
@@ -743,6 +753,7 @@ describe('SRS Routes', () => {
       expect(data.failed).toBe(0);
       // Verify all 20 updates were called
       expect(callCount).toBe(20);
+      expect(maxActive).toBeLessThanOrEqual(TEST_CONCURRENCY_LIMIT);
     });
   });
 });

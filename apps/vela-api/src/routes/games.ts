@@ -34,18 +34,12 @@ const jlptField = z
   );
 
 const VocabularyQuerySchema = z.object({
-  limit: z
-    .string()
-    .optional()
-    .transform((val) => (val ? parseInt(val) : 10)),
+  limit: z.coerce.number().int().positive().default(10),
   jlpt: jlptField,
 });
 
 const SentencesQuerySchema = z.object({
-  limit: z
-    .string()
-    .optional()
-    .transform((val) => (val ? parseInt(val) : 5)),
+  limit: z.coerce.number().int().positive().default(5),
   jlpt: jlptField,
 });
 
