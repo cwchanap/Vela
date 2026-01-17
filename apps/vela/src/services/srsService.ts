@@ -1,5 +1,6 @@
 import type { UserVocabularyProgress, Vocabulary, JLPTLevel } from 'src/types/database';
 import { getApiUrl } from 'src/utils/api';
+import { fetchAuthSession } from 'aws-amplify/auth';
 
 /**
  * SRS statistics returned from the API
@@ -68,18 +69,37 @@ export interface ProgressResponse {
 }
 
 /**
+ * Get Authorization header with JWT token
+ */
+async function getAuthHeader(): Promise<Record<string, string>> {
+  try {
+    const session = await fetchAuthSession();
+    const idToken = session.tokens?.idToken?.toString();
+
+    if (!idToken) {
+      throw new Error('No authentication token available');
+    }
+
+    return {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${idToken}`,
+    };
+  } catch (error) {
+    console.error('Failed to get auth token:', error);
+    throw new Error('Authentication required. Please sign in.');
+  }
+}
+
+/**
  * Helper to make authenticated JSON requests
  */
-async function httpJson<T>(
-  input: RequestInfo,
-  accessToken: string,
-  init?: RequestInit,
-): Promise<T> {
+async function httpJson<T>(input: RequestInfo, init?: RequestInit): Promise<T> {
+  const headers = await getAuthHeader();
+
   const res = await fetch(input, {
     ...init,
     headers: {
-      'content-type': 'application/json',
-      Authorization: `Bearer ${accessToken}`,
+      ...headers,
       ...(init?.headers || {}),
     },
   });
@@ -100,47 +120,36 @@ async function httpJson<T>(
 
 /**
  * Get vocabulary items due for review
- * @param accessToken - User's access token
  * @param limit - Maximum number of items to return (default 20)
  * @param jlptLevels - Optional JLPT level filter
  */
-async function getDueItems(
-  accessToken: string,
-  limit = 20,
-  jlptLevels?: JLPTLevel[],
-): Promise<DueItemsResponse> {
+async function getDueItems(limit = 20, jlptLevels?: JLPTLevel[]): Promise<DueItemsResponse> {
   let url = getApiUrl(`srs/due?limit=${limit}`);
   if (jlptLevels && jlptLevels.length > 0) {
     url += `&jlpt=${jlptLevels.join(',')}`;
   }
-  return httpJson<DueItemsResponse>(url, accessToken);
+  return httpJson<DueItemsResponse>(url);
 }
 
 /**
  * Get SRS statistics for the current user
- * @param accessToken - User's access token
  * @param jlptLevels - Optional JLPT level filter
  */
-async function getStats(accessToken: string, jlptLevels?: JLPTLevel[]): Promise<SRSStats> {
+async function getStats(jlptLevels?: JLPTLevel[]): Promise<SRSStats> {
   let url = getApiUrl('srs/stats');
   if (jlptLevels && jlptLevels.length > 0) {
     url += `?jlpt=${jlptLevels.join(',')}`;
   }
-  return httpJson<SRSStats>(url, accessToken);
+  return httpJson<SRSStats>(url);
 }
 
 /**
  * Record a review result for a vocabulary item
- * @param accessToken - User's access token
  * @param vocabularyId - The vocabulary ID being reviewed
  * @param quality - Quality rating (0-5)
  */
-async function recordReview(
-  accessToken: string,
-  vocabularyId: string,
-  quality: number,
-): Promise<ReviewResponse> {
-  return httpJson<ReviewResponse>(getApiUrl('srs/review'), accessToken, {
+async function recordReview(vocabularyId: string, quality: number): Promise<ReviewResponse> {
+  return httpJson<ReviewResponse>(getApiUrl('srs/review'), {
     method: 'POST',
     body: JSON.stringify({ vocabulary_id: vocabularyId, quality }),
   });
@@ -148,14 +157,10 @@ async function recordReview(
 
 /**
  * Record multiple reviews at once
- * @param accessToken - User's access token
  * @param reviews - Array of review inputs
  */
-async function recordBatchReview(
-  accessToken: string,
-  reviews: ReviewInput[],
-): Promise<BatchReviewResponse> {
-  return httpJson<BatchReviewResponse>(getApiUrl('srs/batch-review'), accessToken, {
+async function recordBatchReview(reviews: ReviewInput[]): Promise<BatchReviewResponse> {
+  return httpJson<BatchReviewResponse>(getApiUrl('srs/batch-review'), {
     method: 'POST',
     body: JSON.stringify({ reviews }),
   });
@@ -163,37 +168,28 @@ async function recordBatchReview(
 
 /**
  * Get progress for a specific vocabulary item
- * @param accessToken - User's access token
  * @param vocabularyId - The vocabulary ID
  */
-async function getProgress(accessToken: string, vocabularyId: string): Promise<ProgressResponse> {
+async function getProgress(vocabularyId: string): Promise<ProgressResponse> {
   if (!vocabularyId || typeof vocabularyId !== 'string') {
     throw new Error('vocabularyId is required and must be a non-empty string');
   }
   const encodedVocabularyId = encodeURIComponent(vocabularyId);
-  return httpJson<ProgressResponse>(getApiUrl(`srs/progress/${encodedVocabularyId}`), accessToken);
+  return httpJson<ProgressResponse>(getApiUrl(`srs/progress/${encodedVocabularyId}`));
 }
 
 /**
  * Delete progress for a specific vocabulary item (reset)
- * @param accessToken - User's access token
  * @param vocabularyId - The vocabulary ID
  */
-async function deleteProgress(
-  accessToken: string,
-  vocabularyId: string,
-): Promise<{ success: boolean }> {
+async function deleteProgress(vocabularyId: string): Promise<{ success: boolean }> {
   if (!vocabularyId || typeof vocabularyId !== 'string') {
     throw new Error('vocabularyId is required and must be a non-empty string');
   }
   const encodedVocabularyId = encodeURIComponent(vocabularyId);
-  return httpJson<{ success: boolean }>(
-    getApiUrl(`srs/progress/${encodedVocabularyId}`),
-    accessToken,
-    {
-      method: 'DELETE',
-    },
-  );
+  return httpJson<{ success: boolean }>(getApiUrl(`srs/progress/${encodedVocabularyId}`), {
+    method: 'DELETE',
+  });
 }
 
 /**

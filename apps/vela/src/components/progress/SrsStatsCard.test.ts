@@ -2,17 +2,12 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { mount, flushPromises } from '@vue/test-utils';
 import { Quasar } from 'quasar';
 import SrsStatsCard from './SrsStatsCard.vue';
-import * as srsServiceModule from 'src/services/srsService';
-
-// Mock aws-amplify/auth
-vi.mock('aws-amplify/auth', () => ({
-  fetchAuthSession: vi.fn(),
-}));
 
 // Mock srsService
+const mockGetStats = vi.fn();
 vi.mock('src/services/srsService', () => ({
   srsService: {
-    getStats: vi.fn(),
+    getStats: mockGetStats,
   },
 }));
 
@@ -25,8 +20,6 @@ const mockAuthStore = {
 vi.mock('src/stores/auth', () => ({
   useAuthStore: () => mockAuthStore,
 }));
-
-import { fetchAuthSession } from 'aws-amplify/auth';
 
 describe('SrsStatsCard', () => {
   const mockStats = {
@@ -47,6 +40,7 @@ describe('SrsStatsCard', () => {
     vi.clearAllMocks();
     mockAuthStore.isAuthenticated = false;
     mockAuthStore.user = null;
+    mockGetStats.mockClear();
   });
 
   function createWrapper() {
@@ -67,10 +61,7 @@ describe('SrsStatsCard', () => {
   async function createAuthenticatedWrapper(mockStatsResponse = mockStats) {
     mockAuthStore.isAuthenticated = true;
     mockAuthStore.user = { id: 'user-123' } as any;
-    vi.mocked(fetchAuthSession).mockResolvedValue({
-      tokens: { accessToken: { toString: () => 'test-token' } },
-    } as any);
-    vi.mocked(srsServiceModule.srsService.getStats).mockResolvedValue(mockStatsResponse);
+    mockGetStats.mockResolvedValue(mockStatsResponse);
 
     const wrapper = createWrapper();
     await flushPromises();
@@ -80,10 +71,7 @@ describe('SrsStatsCard', () => {
   async function createAuthenticatedWrapperWithError(error: Error) {
     mockAuthStore.isAuthenticated = true;
     mockAuthStore.user = { id: 'user-123' } as any;
-    vi.mocked(fetchAuthSession).mockResolvedValue({
-      tokens: { accessToken: { toString: () => 'test-token' } },
-    } as any);
-    vi.mocked(srsServiceModule.srsService.getStats).mockRejectedValue(error);
+    mockGetStats.mockRejectedValue(error);
 
     const wrapper = createWrapper();
     await flushPromises();
@@ -99,7 +87,7 @@ describe('SrsStatsCard', () => {
   it('fetches stats when authenticated', async () => {
     await createAuthenticatedWrapper();
 
-    expect(srsServiceModule.srsService.getStats).toHaveBeenCalledWith('test-token');
+    expect(mockGetStats).toHaveBeenCalledWith();
   });
 
   it('displays stats correctly', async () => {
