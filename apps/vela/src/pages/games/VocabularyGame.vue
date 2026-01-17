@@ -1,26 +1,7 @@
 <template>
   <q-page class="flex flex-center column">
-    <!-- Game Over Screen -->
-    <div v-if="!gameStore.gameActive" class="text-center">
-      <h2>Game Over!</h2>
-      <p>Your score: {{ gameStore.score }}</p>
-      <q-btn @click="startGame" label="Play Again" color="primary" class="q-mr-sm" />
-      <q-btn @click="showSetup = true" label="Change Settings" color="secondary" outline />
-    </div>
-
-    <!-- Active Game -->
-    <div v-else-if="gameStore.gameActive && currentQuestion">
-      <game-timer />
-      <vocabulary-card
-        :question="currentQuestion"
-        @answer="handleAnswer"
-        @pronounce="handlePronounce"
-      />
-      <score-display :score="gameStore.score" />
-    </div>
-
-    <!-- Game Setup Screen -->
-    <div v-else-if="showSetup" class="game-setup q-pa-md">
+    <!-- Game Setup Screen - check this first so it shows when "Change Settings" is clicked -->
+    <div v-if="showSetup" class="game-setup q-pa-md">
       <q-card class="q-pa-md" style="max-width: 450px">
         <q-card-section>
           <div class="text-h5 q-mb-md">Vocabulary Quiz</div>
@@ -56,12 +37,30 @@
         </q-card-actions>
       </q-card>
     </div>
+
+    <!-- Active Game -->
+    <div v-else-if="gameStore.gameActive && currentQuestion">
+      <game-timer />
+      <vocabulary-card
+        :question="currentQuestion"
+        @answer="handleAnswer"
+        @pronounce="handlePronounce"
+      />
+      <score-display :score="gameStore.score" />
+    </div>
+
+    <!-- Game Over Screen - only show when game is inactive and not showing setup -->
+    <div v-else-if="!gameStore.gameActive" class="text-center">
+      <h2>Game Over!</h2>
+      <p>Your score: {{ gameStore.score }}</p>
+      <q-btn @click="startGame" label="Play Again" color="primary" class="q-mr-sm" />
+      <q-btn @click="showSetup = true" label="Change Settings" color="secondary" outline />
+    </div>
   </q-page>
 </template>
 
 <script setup lang="ts">
 import { computed, ref, watch, onMounted } from 'vue';
-import { fetchAuthSession } from 'aws-amplify/auth';
 import { useRoute } from 'vue-router';
 import { useGameStore } from 'src/stores/games';
 import { useProgressStore } from 'src/stores/progress';
@@ -100,16 +99,6 @@ const currentQuestion = computed(() => {
   return gameStore.questions[gameStore.currentQuestionIndex];
 });
 
-// Helper to get access token
-async function getAccessToken(): Promise<string | null> {
-  try {
-    const session = await fetchAuthSession();
-    return session.tokens?.accessToken?.toString() ?? null;
-  } catch {
-    return null;
-  }
-}
-
 // Fetch due count when auth or JLPT levels change
 onMounted(async () => {
   const srsModeQuery = route.query.srsMode;
@@ -125,14 +114,13 @@ watch([() => authStore.isAuthenticated, selectedJlptLevels], async () => {
 });
 
 async function fetchDueCount(jlptLevels?: JLPTLevel[]) {
-  const token = await getAccessToken();
-  if (!token) {
+  if (!authStore.isAuthenticated) {
     dueCount.value = 0;
     return;
   }
 
   try {
-    const stats = await srsService.getStats(token, jlptLevels);
+    const stats = await srsService.getStats(jlptLevels);
     dueCount.value = stats.due_today;
   } catch (error) {
     console.error('Failed to fetch SRS stats:', error);
@@ -144,13 +132,12 @@ async function startGame() {
   isLoading.value = true;
 
   try {
-    const token = await getAccessToken();
     const jlptFilter = selectedJlptLevels.value.length > 0 ? selectedJlptLevels.value : undefined;
 
     // If SRS mode is enabled and user is authenticated, try to get due items first
-    if (srsMode.value && token && dueCount.value > 0) {
+    if (srsMode.value && authStore.isAuthenticated && dueCount.value > 0) {
       try {
-        const dueResponse = await srsService.getDueItems(token, 10, jlptFilter);
+        const dueResponse = await srsService.getDueItems(10, jlptFilter);
         if (dueResponse.items.length > 0) {
           // Convert due items to questions format, filtering out null vocabulary
           const vocabulary = dueResponse.items
@@ -266,8 +253,7 @@ async function handleAnswer(selectedAnswer: string) {
   progressStore.updateProgress(currentQuestion.value.word.id, isCorrect);
 
   // Queue SRS review if user is authenticated
-  const token = await getAccessToken();
-  if (token) {
+  if (authStore.isAuthenticated) {
     const quality = srsService.qualityFromCorrectness(isCorrect);
     srsReviewQueue.value.push({
       vocabularyId: currentQuestion.value.word.id,
@@ -314,21 +300,17 @@ watch(
 
       // Record SRS reviews in batch
       if (srsReviewQueue.value.length > 0) {
-        const token = await getAccessToken();
-        if (token) {
-          try {
-            await srsService.recordBatchReview(
-              token,
-              srsReviewQueue.value.map((r) => ({
-                vocabulary_id: r.vocabularyId,
-                quality: r.quality,
-              })),
-            );
-            console.log(`Successfully recorded ${srsReviewQueue.value.length} SRS reviews`);
-          } catch (error) {
-            console.error('Failed to record SRS batch reviews:', error);
-            // Don't block session recording if SRS fails
-          }
+        try {
+          await srsService.recordBatchReview(
+            srsReviewQueue.value.map((r) => ({
+              vocabulary_id: r.vocabularyId,
+              quality: r.quality,
+            })),
+          );
+          console.log(`Successfully recorded ${srsReviewQueue.value.length} SRS reviews`);
+        } catch (error) {
+          console.error('Failed to record SRS batch reviews:', error);
+          // Don't block session recording if SRS fails
         }
       }
 

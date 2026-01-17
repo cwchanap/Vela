@@ -104,7 +104,6 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, watch } from 'vue';
-import { fetchAuthSession } from 'aws-amplify/auth';
 import { useAuthStore } from 'src/stores/auth';
 import { srsService, type SRSStats } from 'src/services/srsService';
 
@@ -135,23 +134,13 @@ const masteryPercentage = computed(() => {
 
 const hasProgress = computed(() => stats.value.total_items > 0);
 
-async function getAccessToken(): Promise<string | null> {
-  try {
-    const session = await fetchAuthSession();
-    return session.tokens?.accessToken?.toString() ?? null;
-  } catch {
-    return null;
-  }
-}
-
 async function fetchStats() {
-  const token = await getAccessToken();
-  if (!token) return;
+  if (!isAuthenticated.value) return;
 
   loading.value = true;
   error.value = null;
   try {
-    stats.value = await srsService.getStats(token);
+    stats.value = await srsService.getStats();
   } catch (err) {
     console.error('Failed to fetch SRS stats:', err);
     error.value = 'Failed to load your SRS stats. Please try again.';

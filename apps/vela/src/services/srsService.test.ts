@@ -2,9 +2,15 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { srsService } from './srsService';
 import type { UserVocabularyProgress, Vocabulary } from 'src/types/database';
 
-// Mock the API utility
+// Mock API utility
 vi.mock('src/utils/api', () => ({
   getApiUrl: vi.fn((endpoint: string) => `/api/${endpoint}`),
+}));
+
+// Mock fetchAuthSession
+const mockFetchAuthSession = vi.fn();
+vi.mock('aws-amplify/auth', () => ({
+  fetchAuthSession: () => mockFetchAuthSession(),
 }));
 
 // Mock fetch
@@ -15,13 +21,23 @@ describe('srsService', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockFetch.mockClear();
+
+    // Mock default auth session with ID token
+    mockFetchAuthSession.mockResolvedValue({
+      tokens: {
+        idToken: {
+          toString: () => 'mock-id-token',
+          payload: {},
+        },
+      },
+    });
   });
 
   afterEach(() => {
     vi.restoreAllMocks();
   });
 
-  const mockAccessToken = 'mock-access-token';
+  const mockIdToken = 'mock-id-token';
 
   const mockVocabulary: Vocabulary = {
     id: 'vocab-1',
@@ -61,12 +77,12 @@ describe('srsService', () => {
         json: vi.fn().mockResolvedValue(mockResponse),
       });
 
-      const result = await srsService.getDueItems(mockAccessToken);
+      const result = await srsService.getDueItems();
 
       expect(mockFetch).toHaveBeenCalledWith('/api/srs/due?limit=20', {
         headers: {
-          'content-type': 'application/json',
-          Authorization: `Bearer ${mockAccessToken}`,
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${mockIdToken}`,
         },
       });
       expect(result).toEqual(mockResponse);
@@ -80,12 +96,12 @@ describe('srsService', () => {
         json: vi.fn().mockResolvedValue(mockResponse),
       });
 
-      await srsService.getDueItems(mockAccessToken, 10);
+      await srsService.getDueItems(10);
 
       expect(mockFetch).toHaveBeenCalledWith('/api/srs/due?limit=10', {
         headers: {
-          'content-type': 'application/json',
-          Authorization: `Bearer ${mockAccessToken}`,
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${mockIdToken}`,
         },
       });
     });
@@ -98,12 +114,12 @@ describe('srsService', () => {
         json: vi.fn().mockResolvedValue(mockResponse),
       });
 
-      await srsService.getDueItems(mockAccessToken, 20, [5, 4]);
+      await srsService.getDueItems(20, [5, 4]);
 
       expect(mockFetch).toHaveBeenCalledWith('/api/srs/due?limit=20&jlpt=5,4', {
         headers: {
-          'content-type': 'application/json',
-          Authorization: `Bearer ${mockAccessToken}`,
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${mockIdToken}`,
         },
       });
     });
@@ -115,7 +131,13 @@ describe('srsService', () => {
         json: vi.fn().mockResolvedValue({ error: 'Invalid token' }),
       });
 
-      await expect(srsService.getDueItems(mockAccessToken)).rejects.toThrow('Invalid token');
+      await expect(srsService.getDueItems()).rejects.toThrow('Invalid token');
+    });
+
+    it('should throw error when auth fails', async () => {
+      mockFetchAuthSession.mockRejectedValue(new Error('Not authenticated'));
+
+      await expect(srsService.getDueItems()).rejects.toThrow('Authentication required');
     });
   });
 
@@ -140,15 +162,45 @@ describe('srsService', () => {
         json: vi.fn().mockResolvedValue(mockStats),
       });
 
-      const result = await srsService.getStats(mockAccessToken);
+      const result = await srsService.getStats();
 
       expect(mockFetch).toHaveBeenCalledWith('/api/srs/stats', {
         headers: {
-          'content-type': 'application/json',
-          Authorization: `Bearer ${mockAccessToken}`,
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${mockIdToken}`,
         },
       });
       expect(result).toEqual(mockStats);
+    });
+
+    it('should filter stats by JLPT levels', async () => {
+      const mockStats = {
+        total_items: 50,
+        due_today: 5,
+        mastery_breakdown: {
+          new: 25,
+          learning: 15,
+          reviewing: 8,
+          mastered: 2,
+        },
+        average_ease_factor: 2.3,
+        total_reviews: 200,
+        accuracy_rate: 0.9,
+      };
+
+      mockFetch.mockResolvedValue({
+        ok: true,
+        json: vi.fn().mockResolvedValue(mockStats),
+      });
+
+      await srsService.getStats([5, 4]);
+
+      expect(mockFetch).toHaveBeenCalledWith('/api/srs/stats?jlpt=5,4', {
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${mockIdToken}`,
+        },
+      });
     });
 
     it('should throw error when fetching stats fails', async () => {
@@ -158,7 +210,7 @@ describe('srsService', () => {
         json: vi.fn().mockRejectedValue(new Error('Parse error')),
       });
 
-      await expect(srsService.getStats(mockAccessToken)).rejects.toThrow('Server Error');
+      await expect(srsService.getStats()).rejects.toThrow('Server Error');
     });
   });
 
@@ -178,13 +230,13 @@ describe('srsService', () => {
         json: vi.fn().mockResolvedValue(mockResult),
       });
 
-      const result = await srsService.recordReview(mockAccessToken, 'vocab-1', 4);
+      const result = await srsService.recordReview('vocab-1', 4);
 
       expect(mockFetch).toHaveBeenCalledWith('/api/srs/review', {
         method: 'POST',
         headers: {
-          'content-type': 'application/json',
-          Authorization: `Bearer ${mockAccessToken}`,
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${mockIdToken}`,
         },
         body: JSON.stringify({ vocabulary_id: 'vocab-1', quality: 4 }),
       });
@@ -198,9 +250,7 @@ describe('srsService', () => {
         json: vi.fn().mockResolvedValue({ error: 'Invalid quality rating' }),
       });
 
-      await expect(srsService.recordReview(mockAccessToken, 'vocab-1', 6)).rejects.toThrow(
-        'Invalid quality rating',
-      );
+      await expect(srsService.recordReview('vocab-1', 6)).rejects.toThrow('Invalid quality rating');
     });
   });
 
@@ -223,13 +273,13 @@ describe('srsService', () => {
         json: vi.fn().mockResolvedValue(mockResult),
       });
 
-      const result = await srsService.recordBatchReview(mockAccessToken, reviews);
+      const result = await srsService.recordBatchReview(reviews);
 
       expect(mockFetch).toHaveBeenCalledWith('/api/srs/batch-review', {
         method: 'POST',
         headers: {
-          'content-type': 'application/json',
-          Authorization: `Bearer ${mockAccessToken}`,
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${mockIdToken}`,
         },
         body: JSON.stringify({ reviews }),
       });
@@ -245,12 +295,12 @@ describe('srsService', () => {
         json: vi.fn().mockResolvedValue({ progress: mockProgress }),
       });
 
-      const result = await srsService.getProgress(mockAccessToken, vocabularyId);
+      const result = await srsService.getProgress(vocabularyId);
 
       expect(mockFetch).toHaveBeenCalledWith('/api/srs/progress/vocab%2F1', {
         headers: {
-          'content-type': 'application/json',
-          Authorization: `Bearer ${mockAccessToken}`,
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${mockIdToken}`,
         },
       });
       expect(result).toEqual({ progress: mockProgress });
@@ -262,9 +312,18 @@ describe('srsService', () => {
         json: vi.fn().mockResolvedValue({ progress: null }),
       });
 
-      const result = await srsService.getProgress(mockAccessToken, 'new-vocab');
+      const result = await srsService.getProgress('new-vocab');
 
       expect(result.progress).toBeNull();
+    });
+
+    it('should throw error for invalid vocabularyId', async () => {
+      await expect(srsService.getProgress('')).rejects.toThrow(
+        'vocabularyId is required and must be a non-empty string',
+      );
+      await expect(srsService.getProgress(null as any)).rejects.toThrow(
+        'vocabularyId is required and must be a non-empty string',
+      );
     });
   });
 
@@ -276,16 +335,25 @@ describe('srsService', () => {
         json: vi.fn().mockResolvedValue({ success: true }),
       });
 
-      const result = await srsService.deleteProgress(mockAccessToken, vocabularyId);
+      const result = await srsService.deleteProgress(vocabularyId);
 
       expect(mockFetch).toHaveBeenCalledWith('/api/srs/progress/vocab%2F1', {
         method: 'DELETE',
         headers: {
-          'content-type': 'application/json',
-          Authorization: `Bearer ${mockAccessToken}`,
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${mockIdToken}`,
         },
       });
       expect(result.success).toBe(true);
+    });
+
+    it('should throw error for invalid vocabularyId', async () => {
+      await expect(srsService.deleteProgress('')).rejects.toThrow(
+        'vocabularyId is required and must be a non-empty string',
+      );
+      await expect(srsService.deleteProgress(null as any)).rejects.toThrow(
+        'vocabularyId is required and must be a non-empty string',
+      );
     });
   });
 
