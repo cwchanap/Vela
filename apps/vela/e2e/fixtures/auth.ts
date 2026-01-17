@@ -1,10 +1,19 @@
 import { test as base, expect, Page } from '@playwright/test';
 
-// Test user credentials: override via environment for flexibility
-// Default to test account from project.instructions.md
+const requireTestEnv = (name: string): string => {
+  const value = process.env[name];
+  if (!value) {
+    throw new Error(
+      `Missing ${name} for Playwright tests. Set it in your environment or .env file.`,
+    );
+  }
+  return value;
+};
+
+// Test user credentials: required via environment for flexibility
 export const TEST_USER = {
-  email: process.env.TEST_EMAIL || 'test@cwchanap.dev',
-  password: process.env.TEST_PASSWORD || 'password123',
+  email: requireTestEnv('TEST_EMAIL'),
+  password: requireTestEnv('TEST_PASSWORD'),
 };
 
 // Extend base test with authentication fixture

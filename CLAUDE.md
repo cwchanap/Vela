@@ -482,10 +482,12 @@ StaticWebStack → depends on [auth, database, storage, api]
 
 ### Test Account Credentials
 
-For testing authenticated features:
+For testing authenticated features, test credentials must be provided via environment variables (configured in `.env` or `.env.local`):
 
-- Email: `test@cwchanap.dev`
-- Password: `password123`
+- `TEST_EMAIL` - Email for test account
+- `TEST_PASSWORD` - Password for test account
+
+These environment variables are required by Playwright end-to-end tests and are defined in `.env.example`. The tests will fail with a clear error message if these variables are not set.
 
 ### Environment Variables
 
