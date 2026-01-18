@@ -64,7 +64,7 @@ These features work together to enable personalized, efficient learning paths ba
 | TASK-002 | Create apps/vela-api/src/utils/srs.ts implementing SM-2 algorithm with functions: calculateNextReview(quality, easeFactor, interval, repetitions) returning { easeFactor, interval, repetitions, nextReviewDate } | ✅        | 2024-12-30 |
 | TASK-003 | Add tests for isDue(nextReviewDate: string) and calculateDueItems(items: SRSItem[]) helper functions                                                                                                              | ✅        | 2024-12-30 |
 | TASK-004 | Implement isDue() and calculateDueItems() helper functions in srs.ts                                                                                                                                              | ✅        | 2024-12-30 |
-| TASK-005 | Run tests with pnpm --filter vela-api test src/utils/srs.test.ts - all tests must pass                                                                                                                            | ✅        | 2024-12-30 |
+| TASK-005 | Run tests with bun --filter vela-api test src/utils/srs.test.ts - all tests must pass                                                                                                                             | ✅        | 2024-12-30 |
 
 ### Implementation Phase 2: User Vocabulary Progress Table (Infrastructure + Backend) ✅ COMPLETED
 
@@ -193,19 +193,19 @@ These features work together to enable personalized, efficient learning paths ba
 | TASK-041 | Add E2E test: Complete vocabulary game, verify SRS review is recorded via API                                             |           |      |
 | TASK-042 | Add E2E test: Check progress page displays SRS statistics correctly                                                       |           |      |
 | TASK-043 | Add E2E test: Start Review Due mode from progress page, verify due vocabulary is loaded                                   |           |      |
-| TASK-044 | Run full E2E test suite with pnpm --filter vela test - all tests must pass                                                |           |      |
+| TASK-044 | Run full E2E test suite with bun --filter vela test - all tests must pass                                                 |           |      |
 
 ### Implementation Phase 10: Documentation & Cleanup
 
 - GOAL-010: Update documentation and deploy infrastructure changes
 
-| Task     | Description                                                                                | Completed | Date |
-| -------- | ------------------------------------------------------------------------------------------ | --------- | ---- |
-| TASK-045 | Update apps/vela-api/README.md: Document new SRS endpoints with request/response examples  |           |      |
-| TASK-046 | Update AGENTS.md: Add SRS and JLPT features to database schema section                     |           |      |
-| TASK-047 | Deploy CDK changes with pnpm --filter cdk cdk:deploy to create new DynamoDB table and GSIs |           |      |
-| TASK-048 | Verify all unit tests pass: pnpm test from root                                            |           |      |
-| TASK-049 | Verify all E2E tests pass: pnpm --filter vela test                                         |           |      |
+| Task     | Description                                                                               | Completed | Date |
+| -------- | ----------------------------------------------------------------------------------------- | --------- | ---- |
+| TASK-045 | Update apps/vela-api/README.md: Document new SRS endpoints with request/response examples |           |      |
+| TASK-046 | Update AGENTS.md: Add SRS and JLPT features to database schema section                    |           |      |
+| TASK-047 | Deploy CDK changes with bun --filter cdk cdk:deploy to create new DynamoDB table and GSIs |           |      |
+| TASK-048 | Verify all unit tests pass: bun test from root                                            |           |      |
+| TASK-049 | Verify all E2E tests pass: bun --filter vela test                                         |           |      |
 
 ## 3. Alternatives
 

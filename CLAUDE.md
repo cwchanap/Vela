@@ -16,79 +16,79 @@ This is a **Turborepo monorepo** containing:
 
 ### Monorepo Commands (run from root)
 
-- `pnpm dev` - Start all development servers using Turbo
-- `pnpm build` - Build all packages using Turbo
-- `pnpm lint` - Lint all packages using Turbo
-- `pnpm lint:fix` - Lint and fix all packages using Turbo
-- `pnpm format` - Format all packages using Turbo
-- `pnpm test` - Run tests for all packages using Turbo
-- `pnpm clean` - Clean all build artifacts using Turbo
-- `pnpm install` - Install dependencies for all packages
-- `pnpm prepare` - Set up Husky pre-commit hooks
+- `bun dev` - Start all development servers using Turbo
+- `bun build` - Build all packages using Turbo
+- `bun lint` - Lint all packages using Turbo
+- `bun lint:fix` - Lint and fix all packages using Turbo
+- `bun format` - Format all packages using Turbo
+- `bun test` - Run tests for all packages using Turbo
+- `bun clean` - Clean all build artifacts using Turbo
+- `bun install` - Install dependencies for all packages
+- `bun prepare` - Set up Husky pre-commit hooks
 
 ### Vela App Commands (from apps/vela/)
 
-- `pnpm dev` or `quasar dev` - Start Quasar development server with hot reload
-- `pnpm build` or `quasar build` - Build for production
-- `pnpm postinstall` - Run after install (runs `quasar prepare`)
-- `pnpm test` - Run all Playwright end-to-end tests
-- `pnpm test:unit` - Run Vitest unit tests with Quasar test runner
-- `pnpm test:headed` - Run Playwright tests in headed mode
-- `pnpm test:ui` - Run Playwright tests with UI mode
-- `pnpm test:debug` - Run Playwright tests in debug mode
-- `pnpm test:report` - Show Playwright test report
+- `bun dev` or `quasar dev` - Start Quasar development server with hot reload
+- `bun build` or `quasar build` - Build for production
+- `bun postinstall` - Run after install (runs `quasar prepare`)
+- `bun test` - Run all Playwright end-to-end tests
+- `bun test:unit` - Run Vitest unit tests with Quasar test runner
+- `bun test:headed` - Run Playwright tests in headed mode
+- `bun test:ui` - Run Playwright tests with UI mode
+- `bun test:debug` - Run Playwright tests in debug mode
+- `bun test:report` - Show Playwright test report
 
 To run a single Playwright test file:
 
 ```bash
-pnpm test tests/auth.spec.ts
+bun test tests/auth.spec.ts
 ```
 
 To run a single Vitest test file:
 
 ```bash
-pnpm test:unit src/components/auth/AuthForm.test.ts
+bun test:unit src/components/auth/AuthForm.test.ts
 ```
 
 ### Vela API Commands (from apps/vela-api/)
 
-- `pnpm dev` - Start API development server with tsx watch (runs on port 9005)
-- `pnpm build` - Bundle API for deployment
-- `pnpm test` - Run API tests with Vitest
-- `pnpm test:watch` - Run API tests in watch mode
-- `pnpm test:coverage` - Run API tests with coverage
+- `bun dev` - Start API development server with tsx watch (runs on port 9005)
+- `bun build` - Bundle API for deployment
+- `bun test` - Run API tests with Vitest
+- `bun test:watch` - Run API tests in watch mode
+- `bun test:coverage` - Run API tests with coverage
 
 To run a single Vitest test file:
 
 ```bash
-pnpm test src/routes/auth.test.ts
+bun test src/routes/auth.test.ts
 ```
 
 ### Vela Extension Commands (from apps/vela-ext/)
 
-- `pnpm dev` or `wxt` - Start WXT development server for Chrome
-- `pnpm dev:firefox` or `wxt -b firefox` - Start WXT development server for Firefox
-- `pnpm build` or `wxt build` - Build extension for Chrome
-- `pnpm build:firefox` or `wxt build -b firefox` - Build extension for Firefox
-- `pnpm zip` or `wxt zip` - Create distribution zip for Chrome
-- `pnpm zip:firefox` or `wxt zip -b firefox` - Create distribution zip for Firefox
-- `pnpm compile` - Type check without emitting (vue-tsc)
-- `pnpm postinstall` - Prepare WXT (runs after install)
+- `bun dev` or `wxt` - Start WXT development server for Chrome
+- `bun dev:firefox` or `wxt -b firefox` - Start WXT development server for Firefox
+- `bun build` or `wxt build` - Build extension for Chrome
+- `bun build:firefox` or `wxt build -b firefox` - Build extension for Firefox
+- `bun zip` or `wxt zip` - Create distribution zip for Chrome
+- `bun zip:firefox` or `wxt zip -b firefox` - Create distribution zip for Firefox
+- `bun compile` - Type check without emitting (vue-tsc)
+- `bun postinstall` - Prepare WXT (runs after install)
 
 Root-level extension commands:
 
-- `pnpm dev:vela-ext` - Start extension dev server from root
-- `pnpm build:vela-ext` - Build extension from root
-- `pnpm zip:vela-ext` - Create extension zip from root
+- `bun dev:vela-ext` - Start extension dev server from root
+- `bun build:vela-ext` - Build extension from root
+- `bun zip:vela-ext` - Create extension zip from root
 
 ### AWS CDK Commands (from packages/cdk/)
 
-- `pnpm cdk:synth` - Synthesize CloudFormation template
-- `pnpm cdk:deploy` - Deploy infrastructure to AWS
-- `pnpm cdk:diff` - Check differences between deployed and local stacks
-- `pnpm cdk:destroy` - Destroy deployed infrastructure
-- `pnpm lambda:build` - Build Lambda function bundle via esbuild
-- `pnpm build:frontend` - Inject environment variables and build frontend
+- `bun cdk:synth` - Synthesize CloudFormation template
+- `bun cdk:deploy` - Deploy infrastructure to AWS
+- `bun cdk:diff` - Check differences between deployed and local stacks
+- `bun cdk:destroy` - Destroy deployed infrastructure
+- `bun lambda:build` - Build Lambda function bundle via esbuild
+- `bun build:frontend` - Inject environment variables and build frontend
 
 ## Project Architecture
 
@@ -142,7 +142,7 @@ Root-level extension commands:
 - **Linting**: ESLint with TypeScript and Vue support (flat config)
 - **Formatting**: Prettier
 - **Git Hooks**: Husky with lint-staged
-- **Package Manager**: pnpm with workspaces
+- **Package Manager**: Bun with workspaces
 
 ### Core Application Structure (Vela App)
 
@@ -469,8 +469,8 @@ StaticWebStack → depends on [auth, database, storage, api]
 
 ### Working with Multiple Packages
 
-1. **Root Level**: Use `pnpm <script>` to run tasks across all packages
-2. **Package Specific**: Navigate to specific package directory for targeted commands or use `pnpm --filter`
+1. **Root Level**: Use `bun <script>` to run tasks across all packages
+2. **Package Specific**: Navigate to specific package directory for targeted commands or use `bun --filter`
 3. **Dependencies**: Turborepo handles task dependencies (e.g., `build` depends on `^build`)
 
 ### Testing Strategy
@@ -505,7 +505,7 @@ Each package handles environment variables differently:
 
 - Always run monorepo commands from the root directory when possible
 - Individual package commands should be run from their respective directories
-- Turborepo caches build outputs - use `pnpm clean` if you encounter cache issues
+- Turborepo caches build outputs - use `bun clean` if you encounter cache issues
 - The lint configuration uses ESLint flat config format (modern ESLint v9+ style)
 - Pre-commit hooks run linting and formatting automatically via Husky
 - Before starting dev servers, check if they're already running to avoid port conflicts

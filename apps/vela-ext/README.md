@@ -14,7 +14,7 @@ Browser extension for saving Japanese sentences to your Vela dictionary.
 1. Install dependencies:
 
    ```bash
-   pnpm install
+   bun install
    ```
 
 2. Configure environment variables (optional):
@@ -28,14 +28,14 @@ Browser extension for saving Japanese sentences to your Vela dictionary.
 3. Start development:
 
    ```bash
-   pnpm dev              # Chrome
-   pnpm dev:firefox      # Firefox
+   bun dev              # Chrome
+   bun dev:firefox      # Firefox
    ```
 
 4. Build for production:
    ```bash
-   pnpm build            # Chrome
-   pnpm build:firefox    # Firefox
+   bun build            # Chrome
+   bun build:firefox    # Firefox
    ```
 
 ## Usage
