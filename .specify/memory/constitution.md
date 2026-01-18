@@ -100,7 +100,7 @@ The following technology choices are canonical for Vela:
 | Auth            | AWS Cognito                                     | Email/password, JWT validation      |
 | CDN             | CloudFront                                      | Custom domain: vela.cwchanap.dev    |
 | Extension       | WXT, Vue 3                                      | Chrome/Firefox support              |
-| Package Manager | pnpm 9+                                         | Workspaces enabled                  |
+| Package Manager | Bun 1.1+                                        | Workspaces enabled                  |
 | Node.js         | v20 LTS                                         | Lambda runtime constraint           |
 
 Technology changes outside this table require Constitution amendment.

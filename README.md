@@ -11,13 +11,12 @@ A monorepo containing the Vela Japanese Learning App and its AWS CDK infrastruct
 
 ### Prerequisites
 
-- Node.js (18+ recommended)
-- pnpm 9+
+- Bun 1.1+
 
 ### Installation
 
 ```bash
-pnpm install
+bun install
 ```
 
 ### Development
@@ -25,7 +24,7 @@ pnpm install
 To start the Vela app in development mode:
 
 ```bash
-pnpm dev
+bun dev
 ```
 
 This will run the development server for the Vela app.
@@ -35,7 +34,7 @@ This will run the development server for the Vela app.
 To build all packages:
 
 ```bash
-pnpm build
+bun build
 ```
 
 ### Infrastructure
@@ -44,26 +43,26 @@ pnpm build
 
 ```bash
 # Synthesize CloudFormation template
-pnpm cdk:synth
+bun cdk:synth
 
 # Deploy infrastructure
-pnpm cdk:deploy
+bun cdk:deploy
 
 # Check differences
-pnpm cdk:diff
+bun cdk:diff
 
 # Destroy infrastructure
-pnpm cdk:destroy
+bun cdk:destroy
 ```
 
 ### Code Quality
 
 ```bash
 # Lint all packages
-pnpm lint
+bun lint
 
 # Format all packages
-pnpm format
+bun format
 ```
 
 ## Packages

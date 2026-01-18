@@ -1,11 +1,11 @@
 {
   "permissions": {
     "allow": [
-      "Bash(pnpm --filter vela-api test)",
-      "Bash(pnpm lint:*)",
-      "Bash(pnpm format:*)",
-      "Bash(pnpm clean:*)",
-      "Bash(pnpm exec lint-staged:*)",
+      "Bash(bun --filter vela-api test)",
+      "Bash(bun lint:*)",
+      "Bash(bun format:*)",
+      "Bash(bun clean:*)",
+      "Bash(bun exec lint-staged:*)",
       "mcp__chrome-devtools__list_pages",
       "mcp__chrome-devtools__navigate_page",
       "mcp__chrome-devtools__take_snapshot",
