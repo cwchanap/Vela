@@ -1,4 +1,5 @@
 import { AuroraDSQLClient } from '@aws/aurora-dsql-node-postgres-connector';
+import type { Client } from 'pg';
 import { fromNodeProviderChain } from '@aws-sdk/credential-providers';
 
 export interface DsqlHealthResult {
@@ -29,7 +30,7 @@ export async function checkDsqlHealth(): Promise<DsqlHealthResult> {
     user,
     customCredentialsProvider: fromNodeProviderChain(),
     connectionTimeoutMillis: 5_000,
-  });
+  } as unknown as ConstructorParameters<typeof AuroraDSQLClient>[0]) as Client;
 
   try {
     await client.connect();

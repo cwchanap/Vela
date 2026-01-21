@@ -4,8 +4,8 @@ import { llmChat } from '../../src/routes/llm-chat';
 import { corsMiddleware } from '../../src/middleware/cors';
 import type { Env } from '../../src/types';
 
-// Mock fetch globally
-global.fetch = vi.fn();
+// Mock fetch globally (Bun's fetch type includes preconnect, so cast to keep TS happy)
+global.fetch = vi.fn() as unknown as typeof fetch;
 
 // Create a test app that includes the environment
 function createTestApp(env: Env = {}) {
