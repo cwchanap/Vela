@@ -4,7 +4,9 @@ import { Quasar } from 'quasar';
 import SrsStatsCard from './SrsStatsCard.vue';
 
 // Mock srsService
-const mockGetStats = vi.fn();
+const { mockGetStats } = vi.hoisted(() => ({
+  mockGetStats: vi.fn(),
+}));
 vi.mock('src/services/srsService', () => ({
   srsService: {
     getStats: mockGetStats,
