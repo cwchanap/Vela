@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, beforeAll } from 'vitest';
+import { describe, test, expect, vi, beforeEach, beforeAll } from 'bun:test';
 import { Hono } from 'hono';
 import type { AuthContext } from '../middleware/auth';
 
@@ -239,11 +239,10 @@ function createTestApp(): Hono<AuthContext> {
 }
 
 describe('processWithConcurrency', () => {
-  it('returns results in input order when promises resolve out of order', async () => {
+  test('returns results in input order when promises resolve out of order', async () => {
     if (!processWithConcurrency) {
       ({ processWithConcurrency } = await import('./srs'));
     }
-    vi.useFakeTimers();
 
     const delays = [30, 10, 20];
     const resultsPromise = processWithConcurrency(
@@ -255,12 +254,8 @@ describe('processWithConcurrency', () => {
       2,
     );
 
-    await vi.runAllTimersAsync();
-
     const results = await resultsPromise;
     expect(results).toEqual(delays);
-
-    vi.useRealTimers();
   });
 });
 
@@ -279,7 +274,7 @@ describe('SRS Routes', () => {
   });
 
   describe('GET /due', () => {
-    it('should return due items for authenticated user', async () => {
+    test('should return due items for authenticated user', async () => {
       const mockDueItems = [
         {
           user_id: 'test-user-123',
@@ -301,7 +296,7 @@ describe('SRS Routes', () => {
       expect(data.items[0].vocabulary_id).toBe('vocab-1');
     });
 
-    it('should respect limit query parameter', async () => {
+    test('should respect limit query parameter', async () => {
       const mockDueItems = Array.from({ length: 10 }, (_, i) => ({
         user_id: 'test-user-123',
         vocabulary_id: `vocab-${i + 1}`,
@@ -324,7 +319,7 @@ describe('SRS Routes', () => {
       expect(mockUserVocabularyProgress.getDueItems).toHaveBeenCalledWith('test-user-123');
     });
 
-    it('should handle multiple due items with limit', async () => {
+    test('should handle multiple due items with limit', async () => {
       const mockDueItems = Array.from({ length: 25 }, (_, i) => ({
         user_id: 'test-user-123',
         vocabulary_id: `vocab-${i + 1}`,
@@ -346,7 +341,7 @@ describe('SRS Routes', () => {
   });
 
   describe('GET /stats', () => {
-    it('should return SRS statistics for authenticated user', async () => {
+    test('should return SRS statistics for authenticated user', async () => {
       const mockStats = {
         total_items: 50,
         due_items: 10,
@@ -365,7 +360,7 @@ describe('SRS Routes', () => {
       expect(data.mastered_items).toBe(20);
     });
 
-    it('should handle stats with accuracy calculation', async () => {
+    test('should handle stats with accuracy calculation', async () => {
       const mockStats = {
         total_items: 100,
         due_items: 25,
@@ -387,7 +382,7 @@ describe('SRS Routes', () => {
   });
 
   describe('POST /review', () => {
-    it('should update progress after a review', async () => {
+    test('should update progress after a review', async () => {
       // Mock vocabulary exists
       mockVocabulary.getById.mockResolvedValue({
         id: 'vocab-1',
@@ -435,7 +430,7 @@ describe('SRS Routes', () => {
       expect(data.repetitions).toBe(1);
     });
 
-    it('should initialize progress for new vocabulary item', async () => {
+    test('should initialize progress for new vocabulary item', async () => {
       // Mock vocabulary exists
       mockVocabulary.getById.mockResolvedValue({
         id: 'vocab-new',
@@ -481,7 +476,7 @@ describe('SRS Routes', () => {
       expect(mockUserVocabularyProgress.initializeProgress).toHaveBeenCalled();
     });
 
-    it('should reject invalid quality rating', async () => {
+    test('should reject invalid quality rating', async () => {
       const res = await app.request('/review', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -494,7 +489,7 @@ describe('SRS Routes', () => {
       expect(res.status).toBe(400);
     });
 
-    it('should reject review for non-existent vocabulary', async () => {
+    test('should reject review for non-existent vocabulary', async () => {
       mockVocabulary.getById.mockResolvedValue(undefined);
 
       const res = await app.request('/review', {
@@ -512,7 +507,7 @@ describe('SRS Routes', () => {
   });
 
   describe('GET /progress/:vocabularyId', () => {
-    it('should return progress for a specific vocabulary item', async () => {
+    test('should return progress for a specific vocabulary item', async () => {
       const mockProgress = {
         user_id: 'test-user-123',
         vocabulary_id: 'vocab-1',
@@ -535,7 +530,7 @@ describe('SRS Routes', () => {
       expect(data.progress.interval).toBe(6);
     });
 
-    it('should return 200 with progress: undefined for non-existent progress', async () => {
+    test('should return 200 with progress: undefined for non-existent progress', async () => {
       mockUserVocabularyProgress.get.mockResolvedValue(undefined);
 
       const res = await app.request('/progress/vocab-unknown');
@@ -547,7 +542,7 @@ describe('SRS Routes', () => {
   });
 
   describe('DELETE /progress/:vocabularyId', () => {
-    it('should delete progress for a vocabulary item', async () => {
+    test('should delete progress for a vocabulary item', async () => {
       mockUserVocabularyProgress.delete.mockResolvedValue(undefined);
 
       const res = await app.request('/progress/vocab-1', {
@@ -560,7 +555,7 @@ describe('SRS Routes', () => {
   });
 
   describe('POST /batch-review', () => {
-    it('should process multiple reviews successfully', async () => {
+    test('should process multiple reviews successfully', async () => {
       // Mock vocabulary exists for both items
       mockVocabulary.getByIds.mockResolvedValue({
         'vocab-1': { id: 'vocab-1', word: 'test1' },
@@ -617,7 +612,7 @@ describe('SRS Routes', () => {
       expect(data.results).toHaveLength(2);
     });
 
-    it('should reject batch size exceeding limit', async () => {
+    test('should reject batch size exceeding limit', async () => {
       const reviews = Array.from({ length: 101 }, (_, i) => ({
         vocabulary_id: `vocab-${i}`,
         quality: 4,
@@ -632,7 +627,7 @@ describe('SRS Routes', () => {
       expect(res.status).toBe(400);
     });
 
-    it('should filter out reviews for non-existent vocabularies in batch', async () => {
+    test('should filter out reviews for non-existent vocabularies in batch', async () => {
       // Mock getByIds to return only one vocabulary
       mockVocabulary.getByIds.mockResolvedValue({
         'vocab-1': { id: 'vocab-1', word: 'test' },
@@ -686,8 +681,7 @@ describe('SRS Routes', () => {
       expect(data.results[1].error).toBe('Vocabulary not found');
     });
 
-    it('should process large batches with concurrency limiting', async () => {
-      vi.useFakeTimers();
+    test('should process large batches with concurrency limiting', async () => {
       // Create a batch of 20 items to verify concurrency control
       const reviews = Array.from({ length: 20 }, (_, i) => ({
         vocabulary_id: `vocab-${i}`,

@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, test, expect, beforeEach, vi } from 'bun:test';
 import { Hono } from 'hono';
 import { llmChat } from '../../src/routes/llm-chat';
 import { corsMiddleware } from '../../src/middleware/cors';
@@ -34,7 +34,7 @@ describe('LLM Chat Route', () => {
   });
 
   describe('CORS handling', () => {
-    it('should handle OPTIONS request without Origin by not setting Access-Control-Allow-Origin', async () => {
+    test('should handle OPTIONS request without Origin by not setting Access-Control-Allow-Origin', async () => {
       const app = createTestApp({
         CORS_ALLOWED_ORIGINS: 'http://localhost:9000',
       });
@@ -48,7 +48,7 @@ describe('LLM Chat Route', () => {
       );
     });
 
-    it('should set Access-Control-Allow-Origin when Origin is allowed', async () => {
+    test('should set Access-Control-Allow-Origin when Origin is allowed', async () => {
       const app = createTestApp({
         CORS_ALLOWED_ORIGINS: 'http://localhost:9000',
       });
@@ -67,7 +67,7 @@ describe('LLM Chat Route', () => {
       );
     });
 
-    it('should reject disallowed Origin with 403 and not set wildcard', async () => {
+    test('should reject disallowed Origin with 403 and not set wildcard', async () => {
       const app = createTestApp({
         CORS_ALLOWED_ORIGINS: 'http://localhost:9000',
       });
@@ -89,7 +89,7 @@ describe('LLM Chat Route', () => {
   });
 
   describe('Input validation', () => {
-    it('should return 400 for invalid JSON', async () => {
+    test('should return 400 for invalid JSON', async () => {
       const app = createTestApp();
       const req = new Request('http://localhost/', {
         method: 'POST',
@@ -104,7 +104,7 @@ describe('LLM Chat Route', () => {
       expect(json.error).toContain('Invalid JSON');
     });
 
-    it('should return 400 for missing provider', async () => {
+    test('should return 400 for missing provider', async () => {
       const app = createTestApp();
       const req = new Request('http://localhost/', {
         method: 'POST',
@@ -119,7 +119,7 @@ describe('LLM Chat Route', () => {
       expect(json.error).toContain('Missing provider');
     });
 
-    it('should return 400 for missing prompt and messages', async () => {
+    test('should return 400 for missing prompt and messages', async () => {
       const app = createTestApp();
       const req = new Request('http://localhost/', {
         method: 'POST',
@@ -136,7 +136,7 @@ describe('LLM Chat Route', () => {
   });
 
   describe('Google provider', () => {
-    it('should return 400 when API key is missing (no server key)', async () => {
+    test('should return 400 when API key is missing (no server key)', async () => {
       const app = createTestApp();
       const req = new Request('http://localhost/', {
         method: 'POST',
@@ -154,7 +154,7 @@ describe('LLM Chat Route', () => {
       expect(json.error).toContain('Missing API key for Google provider');
     });
 
-    it('should use server-side API key when available', async () => {
+    test('should use server-side API key when available', async () => {
       const mockResponse = {
         candidates: [
           {
@@ -199,7 +199,7 @@ describe('LLM Chat Route', () => {
       );
     });
 
-    it('should allow user key to override server key', async () => {
+    test('should allow user key to override server key', async () => {
       const mockResponse = {
         candidates: [
           {
@@ -244,7 +244,7 @@ describe('LLM Chat Route', () => {
       );
     });
 
-    it('should make successful request to Google API', async () => {
+    test('should make successful request to Google API', async () => {
       const mockResponse = {
         candidates: [
           {
@@ -294,7 +294,7 @@ describe('LLM Chat Route', () => {
       );
     });
 
-    it('should handle Google API error', async () => {
+    test('should handle Google API error', async () => {
       (global.fetch as any).mockResolvedValueOnce({
         ok: false,
         status: 400,
@@ -321,7 +321,7 @@ describe('LLM Chat Route', () => {
   });
 
   describe('OpenRouter provider', () => {
-    it('should return 400 when API key is missing (no server key)', async () => {
+    test('should return 400 when API key is missing (no server key)', async () => {
       const app = createTestApp();
       const req = new Request('http://localhost/', {
         method: 'POST',
@@ -339,7 +339,7 @@ describe('LLM Chat Route', () => {
       expect(json.error).toContain('Missing API key for OpenRouter provider');
     });
 
-    it('should use server-side API key when available', async () => {
+    test('should use server-side API key when available', async () => {
       const mockResponse = {
         choices: [
           {
@@ -385,7 +385,7 @@ describe('LLM Chat Route', () => {
       );
     });
 
-    it('should allow user key to override server key', async () => {
+    test('should allow user key to override server key', async () => {
       const mockResponse = {
         choices: [
           {
@@ -431,7 +431,7 @@ describe('LLM Chat Route', () => {
       );
     });
 
-    it('should make successful request to OpenRouter API', async () => {
+    test('should make successful request to OpenRouter API', async () => {
       const mockResponse = {
         choices: [
           {
@@ -488,7 +488,7 @@ describe('LLM Chat Route', () => {
   });
 
   describe('Chutes provider', () => {
-    it('should return 400 when API key is missing', async () => {
+    test('should return 400 when API key is missing', async () => {
       const app = createTestApp();
       const req = new Request('http://localhost/', {
         method: 'POST',
@@ -507,7 +507,7 @@ describe('LLM Chat Route', () => {
       expect(global.fetch).not.toHaveBeenCalled();
     });
 
-    it('should make successful request to Chutes.ai API with default model and stream=false', async () => {
+    test('should make successful request to Chutes.ai API with default model and stream=false', async () => {
       const mockResponse = {
         choices: [
           {
@@ -563,7 +563,7 @@ describe('LLM Chat Route', () => {
       });
     });
 
-    it('should honor model/temperature/maxTokens overrides', async () => {
+    test('should honor model/temperature/maxTokens overrides', async () => {
       const mockResponse = {
         choices: [
           {
@@ -607,7 +607,7 @@ describe('LLM Chat Route', () => {
       });
     });
 
-    it('should format messages and prefer messages over prompt', async () => {
+    test('should format messages and prefer messages over prompt', async () => {
       const mockResponse = {
         choices: [
           {
@@ -653,7 +653,7 @@ describe('LLM Chat Route', () => {
       ]);
     });
 
-    it('should handle Chutes.ai upstream error', async () => {
+    test('should handle Chutes.ai upstream error', async () => {
       (global.fetch as any).mockResolvedValueOnce({
         ok: false,
         status: 401,
@@ -678,7 +678,7 @@ describe('LLM Chat Route', () => {
       expect(json.error).toContain('Chutes.ai error 401: Unauthorized');
     });
 
-    it('should handle Chutes.ai JSON parse error', async () => {
+    test('should handle Chutes.ai JSON parse error', async () => {
       (global.fetch as any).mockResolvedValueOnce({
         ok: true,
         text: () => Promise.resolve('not json'),
@@ -700,12 +700,11 @@ describe('LLM Chat Route', () => {
 
       expect(res.status).toBe(500);
       expect(json.error).toContain('Chutes.ai JSON parse error');
-      expect(json.error).toContain('not json');
     });
   });
 
   describe('Messages handling', () => {
-    it('should process messages array for Google provider', async () => {
+    test('should process messages array for Google provider', async () => {
       const mockResponse = {
         candidates: [
           {

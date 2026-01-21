@@ -1,0 +1,18 @@
+[test]
+# Always enable coverage
+coverage = true
+
+# Exclude test files from coverage
+coverageSkipTestFiles = true
+
+# Set coverage threshold
+coverageThreshold = 0.8
+
+# Use both text and lcov reporters
+coverageReporter = ["text", "lcov"]
+
+# Ignore patterns from coverage
+coveragePathIgnorePatterns = [
+  "**/*.test.ts",
+  "**/*.spec.ts"
+]

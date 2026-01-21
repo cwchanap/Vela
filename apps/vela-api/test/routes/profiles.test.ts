@@ -1,13 +1,13 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, test, expect, beforeEach, vi } from 'bun:test';
 import { Hono } from 'hono';
 import type { Env } from '../../src/types';
 import { profiles } from '../../src/routes/profiles';
 
-const mockProfilesDb = vi.hoisted(() => ({
+const mockProfilesDb = {
   get: vi.fn(),
   create: vi.fn(),
   update: vi.fn(),
-}));
+};
 
 vi.mock('../../src/dynamodb', () => ({
   profiles: mockProfilesDb,
@@ -32,7 +32,7 @@ describe('Profiles Route', () => {
     vi.clearAllMocks();
   });
 
-  it('GET / should not 500 when stored preferences include legacy keys', async () => {
+  test('GET / should not 500 when stored preferences include legacy keys', async () => {
     mockProfilesDb.get.mockResolvedValueOnce({
       user_id: 'user-1',
       email: 'user@example.com',
