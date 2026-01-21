@@ -1,6 +1,5 @@
 import { describe, test, expect, beforeEach, vi } from 'bun:test';
 import { Hono } from 'hono';
-import { chatHistory } from '../../src/routes/chat-history';
 import { corsMiddleware } from '../../src/middleware/cors';
 import type { ChatHistoryItem, Env } from '../../src/types';
 
@@ -9,6 +8,13 @@ let mockPutCommand: any;
 let mockQueryCommand: any;
 let mockScanCommand: any;
 let mockSend: any;
+let chatHistory: typeof import('../../src/routes/chat-history').chatHistory;
+const globalMock = globalThis as typeof globalThis & {
+  __dynamoMockSend?: ReturnType<typeof vi.fn>;
+  __dynamoMockPutCommand?: ReturnType<typeof vi.fn>;
+  __dynamoMockQueryCommand?: ReturnType<typeof vi.fn>;
+  __dynamoMockScanCommand?: ReturnType<typeof vi.fn>;
+};
 
 vi.mock('@aws-sdk/client-dynamodb', () => ({
   DynamoDBClient: vi.fn().mockImplementation(() => ({})),
@@ -17,31 +23,49 @@ vi.mock('@aws-sdk/client-dynamodb', () => ({
 vi.mock('@aws-sdk/lib-dynamodb', () => ({
   DynamoDBDocumentClient: {
     from: vi.fn().mockImplementation(() => ({
-      send: (...args: any[]) => mockSend(...args),
+      send: (...args: any[]) => globalMock.__dynamoMockSend?.(...args),
     })),
   },
+  GetCommand: vi.fn().mockImplementation((input: any) => ({ input })),
+  BatchGetCommand: vi.fn().mockImplementation((input: any) => ({ input })),
+  UpdateCommand: vi.fn().mockImplementation((input: any) => ({ input })),
+  DeleteCommand: vi.fn().mockImplementation((input: any) => ({ input })),
   PutCommand: vi.fn().mockImplementation((input: any) => {
-    if (!mockPutCommand) mockPutCommand = vi.fn();
-    mockPutCommand(input);
+    if (!globalMock.__dynamoMockPutCommand) {
+      globalMock.__dynamoMockPutCommand = vi.fn();
+    }
+    globalMock.__dynamoMockPutCommand(input);
     return { input };
   }),
   QueryCommand: vi.fn().mockImplementation((input: any) => {
-    if (!mockQueryCommand) mockQueryCommand = vi.fn();
-    mockQueryCommand(input);
+    if (!globalMock.__dynamoMockQueryCommand) {
+      globalMock.__dynamoMockQueryCommand = vi.fn();
+    }
+    globalMock.__dynamoMockQueryCommand(input);
     return { input };
   }),
   ScanCommand: vi.fn().mockImplementation((input: any) => {
-    if (!mockScanCommand) mockScanCommand = vi.fn();
-    mockScanCommand(input);
+    if (!globalMock.__dynamoMockScanCommand) {
+      globalMock.__dynamoMockScanCommand = vi.fn();
+    }
+    globalMock.__dynamoMockScanCommand(input);
     return { input };
   }),
+  BatchWriteCommand: vi.fn().mockImplementation((input: any) => ({ input })),
 }));
+
+({ chatHistory } = await import('../../src/routes/chat-history'));
 
 // Initialize mockSend after mocks are set up
 beforeEach(() => {
   mockSend = vi.fn();
   mockPutCommand = vi.fn();
   mockQueryCommand = vi.fn();
+  mockScanCommand = vi.fn();
+  globalMock.__dynamoMockSend = mockSend;
+  globalMock.__dynamoMockPutCommand = mockPutCommand;
+  globalMock.__dynamoMockQueryCommand = mockQueryCommand;
+  globalMock.__dynamoMockScanCommand = mockScanCommand;
 });
 
 // Create a test app that includes the environment

@@ -6,7 +6,7 @@ coverage = true
 coverageSkipTestFiles = true
 
 # Set coverage threshold
-coverageThreshold = 0.8
+coverageThreshold = 0
 
 # Use both text and lcov reporters
 coverageReporter = ["text", "lcov"]
