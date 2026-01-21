@@ -1,10 +1,64 @@
 import { describe, test, expect, beforeEach, vi } from 'bun:test';
 
+let mockSend: ReturnType<typeof vi.fn>;
+let mockScanCommand: ReturnType<typeof vi.fn>;
+let vocabulary: typeof import('../src/dynamodb').vocabulary;
+let sentences: typeof import('../src/dynamodb').sentences;
+const globalMock = globalThis as typeof globalThis & {
+  __dynamoMockSend?: ReturnType<typeof vi.fn>;
+  __dynamoMockPutCommand?: ReturnType<typeof vi.fn>;
+  __dynamoMockQueryCommand?: ReturnType<typeof vi.fn>;
+  __dynamoMockScanCommand?: ReturnType<typeof vi.fn>;
+};
+
+vi.mock('@aws-sdk/client-dynamodb', () => ({
+  DynamoDBClient: vi.fn().mockImplementation(() => ({})),
+}));
+
+vi.mock('@aws-sdk/lib-dynamodb', () => ({
+  DynamoDBDocumentClient: {
+    from: vi.fn().mockImplementation(() => ({
+      send: (...args: any[]) => globalMock.__dynamoMockSend?.(...args),
+    })),
+  },
+  ScanCommand: vi.fn().mockImplementation((input: any) => {
+    if (!globalMock.__dynamoMockScanCommand) {
+      globalMock.__dynamoMockScanCommand = vi.fn();
+    }
+    globalMock.__dynamoMockScanCommand(input);
+    return { input };
+  }),
+  PutCommand: vi.fn().mockImplementation((input: any) => {
+    if (!globalMock.__dynamoMockPutCommand) {
+      globalMock.__dynamoMockPutCommand = vi.fn();
+    }
+    globalMock.__dynamoMockPutCommand(input);
+    return { input };
+  }),
+  QueryCommand: vi.fn().mockImplementation((input: any) => {
+    if (!globalMock.__dynamoMockQueryCommand) {
+      globalMock.__dynamoMockQueryCommand = vi.fn();
+    }
+    globalMock.__dynamoMockQueryCommand(input);
+    return { input };
+  }),
+  GetCommand: vi.fn(),
+  BatchGetCommand: vi.fn(),
+  UpdateCommand: vi.fn(),
+  DeleteCommand: vi.fn(),
+}));
+
+({ vocabulary, sentences } = await import('../src/dynamodb'));
+
 describe('DynamoDB Operations', () => {
   const mockUserId = 'test-user-123';
 
   beforeEach(() => {
     vi.clearAllMocks();
+    mockSend = vi.fn();
+    mockScanCommand = vi.fn();
+    globalMock.__dynamoMockSend = mockSend;
+    globalMock.__dynamoMockScanCommand = mockScanCommand;
   });
 
   describe('Saved Sentences', () => {
@@ -90,16 +144,9 @@ describe('DynamoDB Operations', () => {
 
   describe('Vocabulary getByJlptLevel', () => {
     test('should not call database when jlptLevels is empty', async () => {
-      const mockGetByLevel = vi.fn().mockImplementation(async (levels: number[]) => {
-        if (levels.length === 0) {
-          return [];
-        }
-        return [];
-      });
+      const result = await vocabulary.getByJlptLevel([], 10);
 
-      const result = await mockGetByLevel([], 10);
-
-      expect(mockGetByLevel).toHaveBeenCalledWith([], 10);
+      expect(mockSend).not.toHaveBeenCalled();
       expect(result).toEqual([]);
     });
 
@@ -108,17 +155,21 @@ describe('DynamoDB Operations', () => {
         { id: 'vocab-1', word: '日本語', jlpt_level: 5 },
         { id: 'vocab-2', word: '勉強', jlpt_level: 5 },
       ];
-      const mockGetByLevel = vi.fn().mockResolvedValue(mockItems);
 
-      const result = await mockGetByLevel([5], 10);
+      mockSend.mockResolvedValueOnce({
+        Items: mockItems,
+        ScannedCount: mockItems.length,
+        LastEvaluatedKey: undefined,
+      });
 
-      expect(mockGetByLevel).toHaveBeenCalledWith([5], 10);
+      const result = await vocabulary.getByJlptLevel([5], 10);
+
+      expect(mockSend).toHaveBeenCalledTimes(1);
       expect(result).toHaveLength(2);
     });
 
     test('should respect hard cap when scanning', async () => {
-      const _mockGetByLevel = vi
-        .fn()
+      mockSend
         .mockResolvedValueOnce({
           Items: [],
           ScannedCount: 600,
@@ -130,19 +181,18 @@ describe('DynamoDB Operations', () => {
           LastEvaluatedKey: { id: 'lek-2' },
         });
 
-      await _mockGetByLevel([1], 10);
+      const result = await vocabulary.getByJlptLevel([1], 10);
 
-      expect(_mockGetByLevel).toHaveBeenCalledTimes(2);
+      expect(mockSend).toHaveBeenCalledTimes(2);
+      expect(result).toEqual([]);
     });
   });
 
   describe('Sentences getByJlptLevel', () => {
     test('should not call database when jlptLevels is empty', async () => {
-      const mockGetByLevel = vi.fn().mockResolvedValue([]);
+      const result = await sentences.getByJlptLevel([], 5);
 
-      const result = await mockGetByLevel([], 5);
-
-      expect(mockGetByLevel).not.toHaveBeenCalled();
+      expect(mockSend).not.toHaveBeenCalled();
       expect(result).toEqual([]);
     });
 
@@ -151,17 +201,21 @@ describe('DynamoDB Operations', () => {
         { id: 'sent-1', sentence: '日本語を勉強します。', jlpt_level: 5 },
         { id: 'sent-2', sentence: 'これは本です。', jlpt_level: 4 },
       ];
-      const mockGetByLevel = vi.fn().mockResolvedValue(mockItems);
 
-      const result = await mockGetByLevel([4], 5);
+      mockSend.mockResolvedValueOnce({
+        Items: mockItems,
+        ScannedCount: mockItems.length,
+        LastEvaluatedKey: undefined,
+      });
 
-      expect(mockGetByLevel).toHaveBeenCalledWith([4], 5);
+      const result = await sentences.getByJlptLevel([4], 5);
+
+      expect(mockSend).toHaveBeenCalledTimes(1);
       expect(result).toHaveLength(2);
     });
 
     test('should respect hard cap when scanning', async () => {
-      const _mockGetByLevel = vi
-        .fn()
+      mockSend
         .mockResolvedValueOnce({
           Items: [],
           ScannedCount: 700,
@@ -173,9 +227,10 @@ describe('DynamoDB Operations', () => {
           LastEvaluatedKey: { id: 'lek-2' },
         });
 
-      await _mockGetByLevel([1], 5);
+      const result = await sentences.getByJlptLevel([1], 5);
 
-      expect(_mockGetByLevel).toHaveBeenCalledTimes(2);
+      expect(mockSend).toHaveBeenCalledTimes(2);
+      expect(result).toEqual([]);
     });
   });
 });

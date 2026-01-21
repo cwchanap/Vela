@@ -17,8 +17,10 @@ import {
   type ThreadIdQuery,
 } from '../validation';
 import { docClient, TABLE_NAMES } from '../dynamodb';
-import { PutCommand, QueryCommand, ScanCommand, BatchWriteCommand } from '@aws-sdk/lib-dynamodb';
+import * as DynamoDbLib from '@aws-sdk/lib-dynamodb';
 import type { ZodIssue, ZodTypeAny } from 'zod';
+
+const { PutCommand, QueryCommand, ScanCommand, BatchWriteCommand } = DynamoDbLib;
 
 const chatHistory = new Hono<{ Bindings: Env }>();
 
@@ -228,7 +230,7 @@ async function dynamodb_deleteThread(env: Env, thread_id: string): Promise<void>
 
     // Paginate through all scan results to get ALL messages in the thread
     do {
-      const scanCommand: ScanCommand = new ScanCommand({
+      const scanCommand = new ScanCommand({
         TableName: TABLE_NAMES.CHAT_HISTORY,
         FilterExpression: 'ThreadId = :threadId',
         ExpressionAttributeValues: {
