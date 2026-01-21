@@ -1,10 +1,10 @@
-import { describe, it, expect } from 'vitest';
+import { describe, test, expect } from 'bun:test';
 import { calculateNextReview, isDue, calculateDueItems, SRS_DEFAULTS, type SRSItem } from './srs';
 
 describe('SRS SM-2 Algorithm', () => {
   describe('calculateNextReview', () => {
     describe('initial state (first review)', () => {
-      it('should set interval to 1 day for quality >= 3 on first correct review', () => {
+      test('should set interval to 1 day for quality >= 3 on first correct review', () => {
         const result = calculateNextReview({
           quality: 4,
           easeFactor: SRS_DEFAULTS.EASE_FACTOR,
@@ -16,7 +16,7 @@ describe('SRS SM-2 Algorithm', () => {
         expect(result.repetitions).toBe(1);
       });
 
-      it('should reset to initial state for quality < 3 (incorrect answer)', () => {
+      test('should reset to initial state for quality < 3 (incorrect answer)', () => {
         const result = calculateNextReview({
           quality: 1,
           easeFactor: 2.5,
@@ -30,7 +30,7 @@ describe('SRS SM-2 Algorithm', () => {
     });
 
     describe('quality ratings 0-5', () => {
-      it('should handle quality 0 (complete blackout) - reset', () => {
+      test('should handle quality 0 (complete blackout) - reset', () => {
         const result = calculateNextReview({
           quality: 0,
           easeFactor: 2.5,
@@ -42,7 +42,7 @@ describe('SRS SM-2 Algorithm', () => {
         expect(result.interval).toBe(1);
       });
 
-      it('should handle quality 1 (incorrect, remembered upon seeing answer)', () => {
+      test('should handle quality 1 (incorrect, remembered upon seeing answer)', () => {
         const result = calculateNextReview({
           quality: 1,
           easeFactor: 2.5,
@@ -54,7 +54,7 @@ describe('SRS SM-2 Algorithm', () => {
         expect(result.interval).toBe(1);
       });
 
-      it('should handle quality 2 (incorrect, easy to recall)', () => {
+      test('should handle quality 2 (incorrect, easy to recall)', () => {
         const result = calculateNextReview({
           quality: 2,
           easeFactor: 2.5,
@@ -66,7 +66,7 @@ describe('SRS SM-2 Algorithm', () => {
         expect(result.interval).toBe(1);
       });
 
-      it('should handle quality 3 (correct with serious difficulty)', () => {
+      test('should handle quality 3 (correct with serious difficulty)', () => {
         const result = calculateNextReview({
           quality: 3,
           easeFactor: 2.5,
@@ -78,7 +78,7 @@ describe('SRS SM-2 Algorithm', () => {
         expect(result.interval).toBeGreaterThan(6);
       });
 
-      it('should handle quality 4 (correct with hesitation)', () => {
+      test('should handle quality 4 (correct with hesitation)', () => {
         const result = calculateNextReview({
           quality: 4,
           easeFactor: 2.5,
@@ -90,7 +90,7 @@ describe('SRS SM-2 Algorithm', () => {
         expect(result.interval).toBeGreaterThan(6);
       });
 
-      it('should handle quality 5 (perfect response)', () => {
+      test('should handle quality 5 (perfect response)', () => {
         const result = calculateNextReview({
           quality: 5,
           easeFactor: 2.5,
@@ -103,7 +103,7 @@ describe('SRS SM-2 Algorithm', () => {
         expect(result.easeFactor).toBeGreaterThan(2.5);
       });
 
-      it('should use NEW ease factor for interval calculation on subsequent reviews', () => {
+      test('should use NEW ease factor for interval calculation on subsequent reviews', () => {
         // This test verifies the P1 bug fix: ease factor is calculated BEFORE interval
         // For quality 3 (hard answer) with easeFactor 2.5:
         // - New ease factor should be: 2.5 + (0.1 - (5-3) * (0.08 + (5-3) * 0.02))
@@ -128,7 +128,7 @@ describe('SRS SM-2 Algorithm', () => {
         expect(result.interval).toBe(14);
       });
 
-      it('should increase interval significantly for easy answers', () => {
+      test('should increase interval significantly for easy answers', () => {
         // For quality 5 (easy answer) with easeFactor 2.5:
         // - New ease factor should be: 2.5 + 0.1 = 2.6
         // - Interval should be: 6 * 2.6 = 15.6 → 16 (rounded)
@@ -149,7 +149,7 @@ describe('SRS SM-2 Algorithm', () => {
     });
 
     describe('ease factor bounds', () => {
-      it('should never go below minimum ease factor of 1.3', () => {
+      test('should never go below minimum ease factor of 1.3', () => {
         let result = calculateNextReview({
           quality: 0,
           easeFactor: 1.5,
@@ -169,7 +169,7 @@ describe('SRS SM-2 Algorithm', () => {
         expect(result.easeFactor).toBe(SRS_DEFAULTS.MIN_EASE_FACTOR);
       });
 
-      it('should allow ease factor to increase without upper bound', () => {
+      test('should allow ease factor to increase without upper bound', () => {
         const result = calculateNextReview({
           quality: 5,
           easeFactor: 3.0,
@@ -182,7 +182,7 @@ describe('SRS SM-2 Algorithm', () => {
     });
 
     describe('interval progression', () => {
-      it('should follow SM-2 interval progression: 1 -> 6 -> (6 * EF)', () => {
+      test('should follow SM-2 interval progression: 1 -> 6 -> (6 * EF)', () => {
         const first = calculateNextReview({
           quality: 4,
           easeFactor: 2.5,
@@ -211,7 +211,7 @@ describe('SRS SM-2 Algorithm', () => {
         expect(third.repetitions).toBe(3);
       });
 
-      it('should calculate correct next review date', () => {
+      test('should calculate correct next review date', () => {
         const now = new Date('2024-12-30T10:00:00Z');
 
         const result = calculateNextReview(
@@ -230,7 +230,7 @@ describe('SRS SM-2 Algorithm', () => {
     });
 
     describe('edge cases', () => {
-      it('should handle very long intervals', () => {
+      test('should handle very long intervals', () => {
         const result = calculateNextReview({
           quality: 5,
           easeFactor: 2.5,
@@ -242,7 +242,7 @@ describe('SRS SM-2 Algorithm', () => {
         expect(typeof result.nextReviewDate).toBe('string');
       });
 
-      it('should handle minimum valid inputs', () => {
+      test('should handle minimum valid inputs', () => {
         const result = calculateNextReview({
           quality: 0,
           easeFactor: SRS_DEFAULTS.MIN_EASE_FACTOR,
@@ -259,22 +259,22 @@ describe('SRS SM-2 Algorithm', () => {
   describe('isDue', () => {
     const mockNow = new Date('2024-12-30T12:00:00Z');
 
-    it('should return true for past dates', () => {
+    test('should return true for past dates', () => {
       expect(isDue('2024-12-29T12:00:00Z', mockNow)).toBe(true);
       expect(isDue('2024-12-01T00:00:00Z', mockNow)).toBe(true);
       expect(isDue('2023-01-01T00:00:00Z', mockNow)).toBe(true);
     });
 
-    it('should return true for current date/time', () => {
+    test('should return true for current date/time', () => {
       expect(isDue('2024-12-30T12:00:00Z', mockNow)).toBe(true);
     });
 
-    it('should return false for future dates', () => {
+    test('should return false for future dates', () => {
       expect(isDue('2024-12-31T12:00:00Z', mockNow)).toBe(false);
       expect(isDue('2025-01-01T00:00:00Z', mockNow)).toBe(false);
     });
 
-    it('should handle date-only strings (assumes start of day)', () => {
+    test('should handle date-only strings (assumes start of day)', () => {
       expect(isDue('2024-12-29', mockNow)).toBe(true);
       expect(isDue('2024-12-30', mockNow)).toBe(true);
       expect(isDue('2024-12-31', mockNow)).toBe(false);
@@ -319,7 +319,7 @@ describe('SRS SM-2 Algorithm', () => {
       },
     ];
 
-    it('should filter only due items', () => {
+    test('should filter only due items', () => {
       const dueItems = calculateDueItems(mockItems, mockNow);
 
       expect(dueItems).toHaveLength(3);
@@ -329,7 +329,7 @@ describe('SRS SM-2 Algorithm', () => {
       expect(dueItems.map((i) => i.vocabulary_id)).not.toContain('vocab-2');
     });
 
-    it('should sort by overdue time (most overdue first)', () => {
+    test('should sort by overdue time (most overdue first)', () => {
       const dueItems = calculateDueItems(mockItems, mockNow);
 
       expect(dueItems[0].vocabulary_id).toBe('vocab-3');
@@ -337,7 +337,7 @@ describe('SRS SM-2 Algorithm', () => {
       expect(dueItems[2].vocabulary_id).toBe('vocab-4');
     });
 
-    it('should return empty array when no items are due', () => {
+    test('should return empty array when no items are due', () => {
       const futureItems: SRSItem[] = [
         {
           vocabulary_id: 'vocab-1',
@@ -353,7 +353,7 @@ describe('SRS SM-2 Algorithm', () => {
       expect(dueItems).toHaveLength(0);
     });
 
-    it('should handle empty input array', () => {
+    test('should handle empty input array', () => {
       const dueItems = calculateDueItems([], mockNow);
       expect(dueItems).toHaveLength(0);
     });

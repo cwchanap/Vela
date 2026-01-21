@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, test, expect, beforeEach, vi } from 'bun:test';
 import { Hono } from 'hono';
 import { chatHistory } from '../../src/routes/chat-history';
 import { corsMiddleware } from '../../src/middleware/cors';
@@ -71,7 +71,7 @@ describe('Chat History Route', () => {
   });
 
   describe('CORS handling', () => {
-    it('should handle OPTIONS request', async () => {
+    test('should handle OPTIONS request', async () => {
       const app = createTestApp({
         CORS_ALLOWED_ORIGINS: 'http://localhost:9000',
       });
@@ -87,7 +87,7 @@ describe('Chat History Route', () => {
   });
 
   describe('POST /save', () => {
-    it('should save a chat message', async () => {
+    test('should save a chat message', async () => {
       const chatItem: ChatHistoryItem = {
         ThreadId: 'thread-123',
         Timestamp: Date.now(),
@@ -123,7 +123,7 @@ describe('Chat History Route', () => {
       );
     });
 
-    it('should handle DynamoDB errors', async () => {
+    test('should handle DynamoDB errors', async () => {
       mockSend.mockRejectedValueOnce(new Error('DynamoDB error'));
 
       const app = createTestApp({
@@ -150,7 +150,7 @@ describe('Chat History Route', () => {
       expect(json.error).toContain('DynamoDB error');
     });
 
-    it('should handle missing AWS credentials', async () => {
+    test('should handle missing AWS credentials', async () => {
       const app = createTestApp({}); // No AWS credentials
 
       const req = new Request('http://localhost/save', {
@@ -174,7 +174,7 @@ describe('Chat History Route', () => {
   });
 
   describe('GET /threads', () => {
-    it('should return thread summaries for a user', async () => {
+    test('should return thread summaries for a user', async () => {
       const mockItems: ChatHistoryItem[] = [
         {
           ThreadId: 'thread-1',
@@ -222,7 +222,7 @@ describe('Chat History Route', () => {
       expect(json.threads[1].messageCount).toBe(2);
     });
 
-    it('should return 400 when user_id is missing', async () => {
+    test('should return 400 when user_id is missing', async () => {
       const app = createTestApp({
         AWS_ACCESS_KEY_ID: 'test-key',
         AWS_SECRET_ACCESS_KEY: 'test-secret',
@@ -237,7 +237,7 @@ describe('Chat History Route', () => {
   });
 
   describe('GET /messages', () => {
-    it('should return messages for a thread', async () => {
+    test('should return messages for a thread', async () => {
       const mockItems: ChatHistoryItem[] = [
         {
           ThreadId: 'thread-123',
@@ -277,7 +277,7 @@ describe('Chat History Route', () => {
       expect(json.items[1].message).toBe('Assistant response');
     });
 
-    it('should return 400 when thread_id is missing', async () => {
+    test('should return 400 when thread_id is missing', async () => {
       const app = createTestApp({
         AWS_ACCESS_KEY_ID: 'test-key',
         AWS_SECRET_ACCESS_KEY: 'test-secret',

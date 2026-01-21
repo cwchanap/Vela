@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, test, expect } from 'bun:test';
 import { Hono } from 'hono';
 import { corsMiddleware } from '../../src/middleware/cors';
 import type { Env } from '../../src/types';
@@ -28,7 +28,7 @@ function createTestApp(env: Env = {}) {
 
 describe('CORS Middleware', () => {
   describe('OPTIONS preflight requests', () => {
-    it('should handle OPTIONS request without Origin header', async () => {
+    test('should handle OPTIONS request without Origin header', async () => {
       const app = createTestApp({
         CORS_ALLOWED_ORIGINS: 'http://localhost:9000',
       });
@@ -45,7 +45,7 @@ describe('CORS Middleware', () => {
       );
     });
 
-    it('should handle OPTIONS request with allowed Origin', async () => {
+    test('should handle OPTIONS request with allowed Origin', async () => {
       const app = createTestApp({
         CORS_ALLOWED_ORIGINS: 'http://localhost:9000,https://example.com',
       });
@@ -68,7 +68,7 @@ describe('CORS Middleware', () => {
       );
     });
 
-    it('should return 204 for OPTIONS request with disallowed Origin', async () => {
+    test('should return 204 for OPTIONS request with disallowed Origin', async () => {
       const app = createTestApp({
         CORS_ALLOWED_ORIGINS: 'http://localhost:9000',
       });
@@ -87,7 +87,7 @@ describe('CORS Middleware', () => {
   });
 
   describe('GET requests', () => {
-    it('should allow GET request without Origin', async () => {
+    test('should allow GET request without Origin', async () => {
       const app = createTestApp({
         CORS_ALLOWED_ORIGINS: 'http://localhost:9000',
       });
@@ -100,7 +100,7 @@ describe('CORS Middleware', () => {
       expect(res.headers.get('Access-Control-Allow-Origin')).toBeNull();
     });
 
-    it('should allow GET request with allowed Origin', async () => {
+    test('should allow GET request with allowed Origin', async () => {
       const app = createTestApp({
         CORS_ALLOWED_ORIGINS: 'http://localhost:9000,https://example.com',
       });
@@ -119,7 +119,7 @@ describe('CORS Middleware', () => {
       expect(res.headers.get('Access-Control-Allow-Credentials')).toBe('true');
     });
 
-    it('should reject GET request with disallowed Origin', async () => {
+    test('should reject GET request with disallowed Origin', async () => {
       const app = createTestApp({
         CORS_ALLOWED_ORIGINS: 'http://localhost:9000',
       });
@@ -139,7 +139,7 @@ describe('CORS Middleware', () => {
   });
 
   describe('POST requests', () => {
-    it('should allow POST request without Origin', async () => {
+    test('should allow POST request without Origin', async () => {
       const app = createTestApp({
         CORS_ALLOWED_ORIGINS: 'http://localhost:9000',
       });
@@ -152,7 +152,7 @@ describe('CORS Middleware', () => {
       expect(res.headers.get('Access-Control-Allow-Origin')).toBeNull();
     });
 
-    it('should allow POST request with allowed Origin', async () => {
+    test('should allow POST request with allowed Origin', async () => {
       const app = createTestApp({
         CORS_ALLOWED_ORIGINS: 'http://localhost:9000',
       });
@@ -171,7 +171,7 @@ describe('CORS Middleware', () => {
       expect(res.headers.get('Access-Control-Allow-Credentials')).toBe('true');
     });
 
-    it('should reject POST request with disallowed Origin', async () => {
+    test('should reject POST request with disallowed Origin', async () => {
       const app = createTestApp({
         CORS_ALLOWED_ORIGINS: 'http://localhost:9000',
       });
@@ -191,7 +191,7 @@ describe('CORS Middleware', () => {
   });
 
   describe('PUT requests', () => {
-    it('should allow PUT request with allowed Origin', async () => {
+    test('should allow PUT request with allowed Origin', async () => {
       const app = createTestApp({
         CORS_ALLOWED_ORIGINS: 'http://localhost:9000',
       });
@@ -209,7 +209,7 @@ describe('CORS Middleware', () => {
       expect(res.headers.get('Access-Control-Allow-Origin')).toBe('http://localhost:9000');
     });
 
-    it('should reject PUT request with disallowed Origin', async () => {
+    test('should reject PUT request with disallowed Origin', async () => {
       const app = createTestApp({
         CORS_ALLOWED_ORIGINS: 'http://localhost:9000',
       });
@@ -228,7 +228,7 @@ describe('CORS Middleware', () => {
   });
 
   describe('DELETE requests', () => {
-    it('should allow DELETE request with allowed Origin', async () => {
+    test('should allow DELETE request with allowed Origin', async () => {
       const app = createTestApp({
         CORS_ALLOWED_ORIGINS: 'http://localhost:9000',
       });
@@ -246,7 +246,7 @@ describe('CORS Middleware', () => {
       expect(res.headers.get('Access-Control-Allow-Origin')).toBe('http://localhost:9000');
     });
 
-    it('should reject DELETE request with disallowed Origin', async () => {
+    test('should reject DELETE request with disallowed Origin', async () => {
       const app = createTestApp({
         CORS_ALLOWED_ORIGINS: 'http://localhost:9000',
       });
@@ -265,7 +265,7 @@ describe('CORS Middleware', () => {
   });
 
   describe('Multiple allowed origins', () => {
-    it('should allow requests from multiple allowed origins', async () => {
+    test('should allow requests from multiple allowed origins', async () => {
       const app = createTestApp({
         CORS_ALLOWED_ORIGINS: 'http://localhost:9000,http://127.0.0.1:9000,https://example.com',
       });
@@ -286,7 +286,7 @@ describe('CORS Middleware', () => {
       }
     });
 
-    it('should reject request from unlisted origin', async () => {
+    test('should reject request from unlisted origin', async () => {
       const app = createTestApp({
         CORS_ALLOWED_ORIGINS: 'http://localhost:9000,http://127.0.0.1:9000',
       });
@@ -305,7 +305,10 @@ describe('CORS Middleware', () => {
   });
 
   describe('Environment configuration', () => {
-    it('should handle empty CORS_ALLOWED_ORIGINS', async () => {
+    test('should handle empty CORS_ALLOWED_ORIGINS', async () => {
+      // Clear any cached process.env values
+      delete process.env.CORS_ALLOWED_ORIGINS;
+
       const app = createTestApp({
         CORS_ALLOWED_ORIGINS: '',
       });
@@ -322,7 +325,7 @@ describe('CORS Middleware', () => {
       expect(json.error).toContain('CORS policy violation: Origin not allowed');
     });
 
-    it('should handle undefined CORS_ALLOWED_ORIGINS', async () => {
+    test('should handle undefined CORS_ALLOWED_ORIGINS', async () => {
       const app = createTestApp({});
       const req = new Request('http://localhost/test', {
         method: 'GET',
@@ -337,7 +340,7 @@ describe('CORS Middleware', () => {
       expect(json.error).toContain('CORS policy violation: Origin not allowed');
     });
 
-    it('should handle whitespace in allowed origins', async () => {
+    test('should handle whitespace in allowed origins', async () => {
       const app = createTestApp({
         CORS_ALLOWED_ORIGINS: '  http://localhost:9000  ,  https://example.com  ',
       });
@@ -355,7 +358,7 @@ describe('CORS Middleware', () => {
       expect(res.headers.get('Access-Control-Allow-Origin')).toBe('http://localhost:9000');
     });
 
-    it('should fallback to process.env.CORS_ALLOWED_ORIGINS when c.env is not available', async () => {
+    test('should fallback to process.env.CORS_ALLOWED_ORIGINS when c.env is not available', async () => {
       // Set process.env for this test
       const originalEnv = process.env.CORS_ALLOWED_ORIGINS;
       process.env.CORS_ALLOWED_ORIGINS = 'http://fallback-origin.com';
@@ -390,7 +393,7 @@ describe('CORS Middleware', () => {
   });
 
   describe('Consistency between OPTIONS and POST', () => {
-    it('should return same status code (403) for disallowed origin on POST and 204 on OPTIONS', async () => {
+    test('should return same status code (403) for disallowed origin on POST and 204 on OPTIONS', async () => {
       const app = createTestApp({
         CORS_ALLOWED_ORIGINS: 'http://localhost:9000',
       });

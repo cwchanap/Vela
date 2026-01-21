@@ -2,28 +2,20 @@
   "name": "vela-api",
   "type": "module",
   "scripts": {
-    "dev": "NODE_ENV=development bun --watch src/index.ts",
-    "build": "esbuild --bundle --outfile=./dist/index.js --platform=node --target=node20 ./src/index.ts",
-    "zip": "zip -j lambda.zip dist/index.js",
-    "update": "aws lambda update-function-code --zip-file fileb://lambda.zip --function-name vela-api",
-    "deploy": "run-s build zip update",
-    "lint": "eslint \"src/**/*.{ts,js}\"",
-    "lint:fix": "eslint \"src/**/*.{ts,js}\" --fix",
-    "format": "prettier --write \"**/*.{js,ts,json,md}\" --ignore-path ../../.gitignore",
+    "dev": "NODE_ENV=development bun run src/dev.ts",
+    "build": "NODE_ENV=production bun build src/index.ts --outdir dist --target bun --minify --sourcemap",
     "test": "bun run test:unit",
-    "test:unit": "vitest run",
-    "test:watch": "vitest --watch",
-    "test:coverage": "vitest --coverage"
+    "test:unit": "bun test",
+    "test:watch": "bun test --watch",
+    "test:coverage": "bun test --coverage",
+    "compile": "tsc --noEmit",
+    "postinstall": "bun run compile"
   },
   "devDependencies": {
-    "@types/aws-lambda": "^8.10.143",
-    "@vitest/coverage-v8": "^1.6.0",
-    "esbuild": "^0.21.4",
-    "nodemon": "^3.1.10",
-    "npm-run-all2": "^6.2.0",
-    "vite": "^7.1.5",
-    "vitest": "^1.6.0",
-    "@types/pg": "8.15.6"
+    "@types/bun": "latest",
+    "bun-types": "1.1.10",
+    "hono": "^4.6.4",
+    "typescript": "^5.6.3"
   },
   "dependencies": {
     "@aws-sdk/client-cognito-identity-provider": "^3.886.0",
