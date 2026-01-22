@@ -5,7 +5,7 @@
     "moduleResolution": "Bundler",
     "strict": true,
     "skipLibCheck": true,
-    "types": ["node", "bun", "vitest"],
+    "types": ["node", "bun"],
     "jsx": "react-jsx",
     "jsxImportSource": "hono/jsx"
   }
