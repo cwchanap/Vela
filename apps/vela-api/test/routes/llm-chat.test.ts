@@ -1,10 +1,11 @@
-import { describe, test, expect, beforeEach, vi } from 'bun:test';
+import { describe, test, expect, beforeEach, afterAll, vi } from 'bun:test';
 import { Hono } from 'hono';
 import { llmChat } from '../../src/routes/llm-chat';
 import { corsMiddleware } from '../../src/middleware/cors';
 import type { Env } from '../../src/types';
 
 // Mock fetch globally (Bun's fetch type includes preconnect, so cast to keep TS happy)
+const originalFetch = global.fetch;
 global.fetch = vi.fn() as unknown as typeof fetch;
 
 // Create a test app that includes the environment
@@ -31,6 +32,11 @@ function createTestApp(env: Env = {}) {
 describe('LLM Chat Route', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+  });
+
+  afterAll(() => {
+    global.fetch = originalFetch;
+    vi.restoreAllMocks();
   });
 
   describe('CORS handling', () => {
