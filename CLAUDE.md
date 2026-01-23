@@ -31,30 +31,30 @@ This is a **Turborepo monorepo** containing:
 - `bun dev` or `quasar dev` - Start Quasar development server with hot reload
 - `bun build` or `quasar build` - Build for production
 - `bun postinstall` - Run after install (runs `quasar prepare`)
-- `bun test` - Run all Playwright end-to-end tests
-- `bun test:unit` - Run Vitest unit tests with Quasar test runner
-- `bun test:headed` - Run Playwright tests in headed mode
-- `bun test:ui` - Run Playwright tests with UI mode
-- `bun test:debug` - Run Playwright tests in debug mode
-- `bun test:report` - Show Playwright test report
+- `vitest run` - Run frontend unit tests (Vitest)
+- `bun run test:e2e` - Run Playwright end-to-end tests
+- `bun run test:headed` - Run Playwright tests in headed mode
+- `bun run test:ui` - Run Playwright tests with UI mode
+- `bun run test:debug` - Run Playwright tests in debug mode
+- `bun run test:report` - Show Playwright test report
 
 To run a single Playwright test file:
 
 ```bash
-bun test tests/auth.spec.ts
+bun run test:e2e tests/auth.spec.ts
 ```
 
 To run a single Vitest test file:
 
 ```bash
-bun test:unit src/components/auth/AuthForm.test.ts
+vitest run src/components/auth/AuthForm.test.ts
 ```
 
 ### Vela API Commands (from apps/vela-api/)
 
 - `bun dev` - Start API development server with tsx watch (runs on port 9005)
 - `bun build` - Bundle API for deployment
-- `bun test` - Run API tests with Vitest
+- `bun test` - Run API tests with Bun's built-in test runner
 - `bun test:watch` - Run API tests in watch mode
 - `bun test:coverage` - Run API tests with coverage
 

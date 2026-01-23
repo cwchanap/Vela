@@ -11,6 +11,7 @@ describe('shuffleArray', () => {
     const result = shuffleArray(original);
 
     expect(result).not.toBe(original);
+    expect(result).toHaveLength(original.length);
     expect(original).toEqual([1, 2, 3, 4]);
     expect(result.slice().sort()).toEqual(original.slice().sort());
   });
