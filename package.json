@@ -18,6 +18,7 @@
     "lint": "turbo lint",
     "lint:fix": "turbo lint:fix",
     "format": "turbo format",
+    "test:unit": "turbo test:unit",
     "test": "turbo test:unit",
     "test:e2e": "turbo test:e2e",
     "clean": "turbo clean",
