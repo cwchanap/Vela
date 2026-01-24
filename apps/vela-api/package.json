@@ -2,7 +2,7 @@
   "name": "vela-api",
   "type": "module",
   "scripts": {
-    "dev": "NODE_ENV=development bun run src/dev.ts",
+    "dev": "NODE_ENV=development bun --watch src/index.ts",
     "build": "NODE_ENV=production bun build src/index.ts --outdir dist --target bun --minify --sourcemap",
     "test": "bun run test:unit",
     "test:unit": "bun test",
