@@ -2,8 +2,12 @@ import { describe, test, expect, beforeEach, vi } from 'bun:test';
 
 let mockSend: ReturnType<typeof vi.fn>;
 let mockScanCommand: ReturnType<typeof vi.fn>;
+let mockPutCommand: ReturnType<typeof vi.fn>;
+let mockQueryCommand: ReturnType<typeof vi.fn>;
 let vocabulary: typeof import('../src/dynamodb').vocabulary;
 let sentences: typeof import('../src/dynamodb').sentences;
+let savedSentences: typeof import('../src/dynamodb').savedSentences;
+let userVocabularyProgress: typeof import('../src/dynamodb').userVocabularyProgress;
 const globalMock = globalThis as typeof globalThis & {
   __dynamoMockSend?: ReturnType<typeof vi.fn>;
   __dynamoMockPutCommand?: ReturnType<typeof vi.fn>;
@@ -48,7 +52,8 @@ vi.mock('@aws-sdk/lib-dynamodb', () => ({
   DeleteCommand: vi.fn(),
 }));
 
-({ vocabulary, sentences } = await import('../src/dynamodb'));
+({ vocabulary, sentences, savedSentences, userVocabularyProgress } =
+  await import('../src/dynamodb'));
 
 describe('DynamoDB Operations', () => {
   const mockUserId = 'test-user-123';
@@ -57,87 +62,125 @@ describe('DynamoDB Operations', () => {
     vi.clearAllMocks();
     mockSend = vi.fn();
     mockScanCommand = vi.fn();
+    mockPutCommand = vi.fn();
+    mockQueryCommand = vi.fn();
     globalMock.__dynamoMockSend = mockSend;
     globalMock.__dynamoMockScanCommand = mockScanCommand;
+    globalMock.__dynamoMockPutCommand = mockPutCommand;
+    globalMock.__dynamoMockQueryCommand = mockQueryCommand;
   });
 
   describe('Saved Sentences', () => {
     test('should create a saved sentence with all parameters', async () => {
-      const mockCreate = vi.fn().mockResolvedValue({
-        user_id: 'test-user-123',
-        sentence: 'これは日本語の文章です。',
-        source_url: 'https://example.com',
-        context: 'Test Page Title',
-        sentence_id: 'test-id-1',
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      });
+      mockSend.mockResolvedValue({});
 
-      const result = await mockCreate(
+      const result = await savedSentences.create(
         mockUserId,
         'これは日本語の文章です。',
         'https://example.com',
         'Test Page Title',
       );
 
-      expect(mockCreate).toHaveBeenCalledWith(
-        mockUserId,
-        'これは日本語の文章です。',
-        'https://example.com',
-        'Test Page Title',
+      expect(mockPutCommand).toHaveBeenCalled();
+      expect(mockPutCommand).toHaveBeenCalledWith(
+        expect.objectContaining({
+          TableName: 'vela-saved-sentences',
+          Item: expect.objectContaining({
+            user_id: mockUserId,
+            sentence: 'これは日本語の文章です。',
+            source_url: 'https://example.com',
+            context: 'Test Page Title',
+          }),
+        }),
       );
       expect(result).toBeDefined();
+      expect(result.user_id).toBe(mockUserId);
+      expect(result.sentence).toBe('これは日本語の文章です。');
+      expect(result.source_url).toBe('https://example.com');
+      expect(result.context).toBe('Test Page Title');
+      expect(result.sentence_id).toBeDefined();
+      expect(result.created_at).toBeDefined();
+      expect(result.updated_at).toBeDefined();
     });
 
     test('should create a saved sentence with minimal parameters', async () => {
-      const mockCreate = vi.fn().mockResolvedValue({
-        user_id: 'test-user-123',
-        sentence: 'mock sentence',
-        sentence_id: 'test-id-1',
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      });
+      mockSend.mockResolvedValue({});
 
-      const result = await mockCreate(mockUserId, 'mock sentence');
+      const result = await savedSentences.create(mockUserId, 'mock sentence');
 
-      expect(mockCreate).toHaveBeenCalledWith(mockUserId, 'mock sentence');
+      expect(mockPutCommand).toHaveBeenCalled();
+      expect(mockPutCommand).toHaveBeenCalledWith(
+        expect.objectContaining({
+          TableName: 'vela-saved-sentences',
+          Item: expect.objectContaining({
+            user_id: mockUserId,
+            sentence: 'mock sentence',
+            source_url: undefined,
+            context: undefined,
+          }),
+        }),
+      );
       expect(result).toBeDefined();
+      expect(result.user_id).toBe(mockUserId);
+      expect(result.sentence).toBe('mock sentence');
+      expect(result.source_url).toBeUndefined();
+      expect(result.context).toBeUndefined();
+      expect(result.sentence_id).toBeDefined();
     });
 
     test('should generate unique sentence IDs', async () => {
-      let callCount = 0;
-      const mockCreate = vi.fn().mockImplementation(() => ({
-        user_id: mockUserId,
-        sentence: 'test',
-        sentence_id: `id-${callCount++}`,
-      }));
+      mockSend.mockResolvedValue({});
 
-      await mockCreate(mockUserId, 'mock sentence');
-      await mockCreate(mockUserId, 'mock sentence');
+      const result1 = await savedSentences.create(mockUserId, 'mock sentence');
+      const result2 = await savedSentences.create(mockUserId, 'mock sentence');
 
-      expect(mockCreate).toHaveBeenCalledTimes(2);
+      expect(mockPutCommand).toHaveBeenCalledTimes(2);
+      expect(result1.sentence_id).toBeDefined();
+      expect(result2.sentence_id).toBeDefined();
+      expect(result1.sentence_id).not.toBe(result2.sentence_id);
     });
   });
 
   describe('User Vocabulary Progress', () => {
     test('should call getByUser', async () => {
-      const mockGetByUser = vi.fn().mockResolvedValue([
+      const mockItems = [
         { vocabulary_id: 'vocab-1', user_id: mockUserId, interval: 1 },
         { vocabulary_id: 'vocab-2', user_id: mockUserId, interval: 5 },
-      ]);
+      ];
 
-      const result = await mockGetByUser(mockUserId);
+      mockSend.mockResolvedValue({
+        Items: mockItems,
+        Count: mockItems.length,
+        LastEvaluatedKey: undefined,
+      });
 
-      expect(mockGetByUser).toHaveBeenCalledWith(mockUserId);
+      const result = await userVocabularyProgress.getByUser(mockUserId);
+
+      expect(mockQueryCommand).toHaveBeenCalled();
+      expect(mockQueryCommand).toHaveBeenCalledWith(
+        expect.objectContaining({
+          TableName: 'vela-user-vocabulary-progress',
+          KeyConditionExpression: 'user_id = :userId',
+          ExpressionAttributeValues: {
+            ':userId': mockUserId,
+          },
+        }),
+      );
       expect(result).toHaveLength(2);
+      expect(result[0].vocabulary_id).toBe('vocab-1');
+      expect(result[1].vocabulary_id).toBe('vocab-2');
     });
 
     test('should handle empty results gracefully', async () => {
-      const mockGetByUser = vi.fn().mockResolvedValue([]);
+      mockSend.mockResolvedValue({
+        Items: [],
+        Count: 0,
+        LastEvaluatedKey: undefined,
+      });
 
-      const result = await mockGetByUser(mockUserId);
+      const result = await userVocabularyProgress.getByUser(mockUserId);
 
-      expect(mockGetByUser).toHaveBeenCalledWith(mockUserId);
+      expect(mockQueryCommand).toHaveBeenCalled();
       expect(result).toEqual([]);
     });
   });
