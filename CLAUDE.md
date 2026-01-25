@@ -31,7 +31,7 @@ This is a **Turborepo monorepo** containing:
 - `bun dev` or `quasar dev` - Start Quasar development server with hot reload
 - `bun build` or `quasar build` - Build for production
 - `bun postinstall` - Run after install (runs `quasar prepare`)
-- `vitest run` - Run frontend unit tests (Vitest)
+- `bun run vitest run` - Run frontend unit tests (Vitest)
 - `bun run test:e2e` - Run Playwright end-to-end tests
 - `bun run test:headed` - Run Playwright tests in headed mode
 - `bun run test:ui` - Run Playwright tests with UI mode
@@ -47,7 +47,7 @@ bun run test:e2e tests/auth.spec.ts
 To run a single Vitest test file:
 
 ```bash
-vitest run src/components/auth/AuthForm.test.ts
+bun run vitest run src/components/auth/AuthForm.test.ts
 ```
 
 ### Vela API Commands (from apps/vela-api/)
@@ -58,10 +58,10 @@ vitest run src/components/auth/AuthForm.test.ts
 - `bun test:watch` - Run API tests in watch mode
 - `bun test:coverage` - Run API tests with coverage
 
-To run a single Vitest test file:
+To run a single Bun test file:
 
 ```bash
-bun test src/routes/auth.test.ts
+bun test test/routes/profiles.test.ts
 ```
 
 ### Vela Extension Commands (from apps/vela-ext/)
@@ -112,7 +112,7 @@ Root-level extension commands:
 - **Database Client**: AWS SDK v3 for DynamoDB, S3, Cognito
 - **Validation**: Zod with @hono/zod-validator
 - **Auth**: aws-jwt-verify for Cognito JWT validation
-- **Testing**: Vitest
+- **Testing**: Bun's built-in test runner
 - **Development**: tsx watch for hot reload (port 9005)
 
 #### Vela Extension (Browser Extension)
@@ -476,7 +476,7 @@ StaticWebStack → depends on [auth, database, storage, api]
 ### Testing Strategy
 
 - **Vela App**: Playwright for end-to-end testing with multiple test modes (headed, UI, debug), Vitest for unit tests
-- **Vela API**: Vitest for unit testing with coverage support
+- **Vela API**: Bun's built-in test runner for unit testing with coverage support
 - **Vela Extension**: Type checking via vue-tsc (no runtime tests currently)
 - **CDK**: No specific tests configured currently
 
