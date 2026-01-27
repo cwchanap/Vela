@@ -1,11 +1,22 @@
 import { AuroraDSQLClient } from '@aws/aurora-dsql-node-postgres-connector';
-import type { Client } from 'pg';
 import { fromNodeProviderChain } from '@aws-sdk/credential-providers';
 
 export interface DsqlHealthResult {
   status: 'ok' | 'error';
   details?: string;
   error?: string;
+}
+
+/**
+ * Wrapper interface for Aurora DSQL client.
+ * The Aurora DSQL client implements methods compatible with pg Client,
+ * including connect(), query(), and end().
+ */
+export interface DsqlClient {
+  connect(): Promise<void>;
+  // eslint-disable-next-line no-unused-vars
+  query(queryText: string, values?: any[]): Promise<any>;
+  end(): Promise<void>;
 }
 
 export async function checkDsqlHealth(): Promise<DsqlHealthResult> {
@@ -30,7 +41,7 @@ export async function checkDsqlHealth(): Promise<DsqlHealthResult> {
     user,
     customCredentialsProvider: fromNodeProviderChain(),
     connectionTimeoutMillis: 5_000,
-  } as unknown as ConstructorParameters<typeof AuroraDSQLClient>[0]) as Client;
+  } as unknown as ConstructorParameters<typeof AuroraDSQLClient>[0]) as unknown as DsqlClient;
 
   try {
     await client.connect();

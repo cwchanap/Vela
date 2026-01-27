@@ -46,5 +46,5 @@ bun run format
 ## Prerequisites
 
 - AWS CLI configured
-- AWS CDK CLI available (`bunx aws-cdk <command>`)
+- AWS CDK CLI available (`bunx aws-cdk@2.172.0 <command>`)
 - Appropriate AWS permissions for deploying resources

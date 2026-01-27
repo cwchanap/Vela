@@ -11,7 +11,7 @@ A monorepo containing the Vela Japanese Learning App and its AWS CDK infrastruct
 
 ### Prerequisites
 
-- Bun 1.1+
+- Bun 1.3.1+
 
 ### Installation
 
@@ -34,7 +34,7 @@ This will run the development server for the Vela app.
 To build all packages:
 
 ```bash
-bun build
+bun run build
 ```
 
 ### Infrastructure
