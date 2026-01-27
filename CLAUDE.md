@@ -16,21 +16,21 @@ This is a **Turborepo monorepo** containing:
 
 ### Monorepo Commands (run from root)
 
-- `bun dev` - Start all development servers using Turbo
-- `bun build` - Build all packages using Turbo
-- `bun lint` - Lint all packages using Turbo
-- `bun lint:fix` - Lint and fix all packages using Turbo
-- `bun format` - Format all packages using Turbo
-- `bun test` - Run tests for all packages using Turbo
-- `bun clean` - Clean all build artifacts using Turbo
-- `bun install` - Install dependencies for all packages
-- `bun prepare` - Set up Husky pre-commit hooks
+- `bun run dev` - Start all development servers using Turbo
+- `bun run build` - Build all packages using Turbo
+- `bun run lint` - Lint all packages using Turbo
+- `bun run lint:fix` - Lint and fix all packages using Turbo
+- `bun run format` - Format all packages using Turbo
+- `bun run test` - Run tests for all packages using Turbo
+- `bun run clean` - Clean all build artifacts using Turbo
+- `bun install` - Install dependencies for all packages (native Bun command)
+- `bun run prepare` - Set up Husky pre-commit hooks
 
 ### Vela App Commands (from apps/vela/)
 
 - `bun dev` or `quasar dev` - Start Quasar development server with hot reload
-- `bun build` or `quasar build` - Build for production
-- `bun postinstall` - Run after install (runs `quasar prepare`)
+- `bun run build` or `quasar build` - Build for production
+- `bun run postinstall` - Run after install (runs `quasar prepare`)
 - `bun vitest run` - Run frontend unit tests (Vitest)
 - `bun run test:e2e` - Run Playwright end-to-end tests
 - `bun run test:headed` - Run Playwright tests in headed mode
@@ -53,22 +53,22 @@ bun vitest run src/components/auth/AuthForm.test.ts
 ### Vela API Commands (from apps/vela-api/)
 
 - `bun dev` - Start API development server with tsx watch (runs on port 9005)
-- `bun build` - Bundle API for deployment
-- `bun test` - Run API tests with Bun's built-in test runner
-- `bun test:watch` - Run API tests in watch mode
-- `bun test:coverage` - Run API tests with coverage
+- `bun run build` - Bundle API for deployment
+- `bun run test` - Run API tests with Bun's built-in test runner
+- `bun run test:watch` - Run API tests in watch mode
+- `bun run test:coverage` - Run API tests with coverage
 
 To run a single Bun test file:
 
 ```bash
-bun test test/routes/profiles.test.ts
+bun run test test/routes/profiles.test.ts
 ```
 
 ### Vela Extension Commands (from apps/vela-ext/)
 
 - `bun dev` or `wxt` - Start WXT development server for Chrome
 - `bun dev:firefox` or `wxt -b firefox` - Start WXT development server for Firefox
-- `bun build` or `wxt build` - Build extension for Chrome
+- `bun run build` or `wxt build` - Build extension for Chrome
 - `bun build:firefox` or `wxt build -b firefox` - Build extension for Firefox
 - `bun zip` or `wxt zip` - Create distribution zip for Chrome
 - `bun zip:firefox` or `wxt zip -b firefox` - Create distribution zip for Firefox

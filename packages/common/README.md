@@ -96,13 +96,13 @@ app.use(VueQueryPlugin, { queryClient });
 
 ```bash
 # Build package
-bun build
+bun run build
 
 # Watch mode for development
-bun dev
+bun run dev
 
 # Lint
-bun lint
+bun run lint
 ```
 
 ## Dependencies

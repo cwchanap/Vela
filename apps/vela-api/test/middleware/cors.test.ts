@@ -306,23 +306,35 @@ describe('CORS Middleware', () => {
 
   describe('Environment configuration', () => {
     test('should handle empty CORS_ALLOWED_ORIGINS', async () => {
-      // Clear any cached process.env values
-      delete process.env.CORS_ALLOWED_ORIGINS;
+      // Capture original env value
+      const originalEnv = process.env.CORS_ALLOWED_ORIGINS;
 
-      const app = createTestApp({
-        CORS_ALLOWED_ORIGINS: '',
-      });
-      const req = new Request('http://localhost/test', {
-        method: 'GET',
-        headers: {
-          Origin: 'http://localhost:9000',
-        },
-      });
-      const res = await app.request(req);
-      const json = await res.json();
+      try {
+        // Clear any cached process.env values
+        delete process.env.CORS_ALLOWED_ORIGINS;
 
-      expect(res.status).toBe(403);
-      expect(json.error).toContain('CORS policy violation: Origin not allowed');
+        const app = createTestApp({
+          CORS_ALLOWED_ORIGINS: '',
+        });
+        const req = new Request('http://localhost/test', {
+          method: 'GET',
+          headers: {
+            Origin: 'http://localhost:9000',
+          },
+        });
+        const res = await app.request(req);
+        const json = await res.json();
+
+        expect(res.status).toBe(403);
+        expect(json.error).toContain('CORS policy violation: Origin not allowed');
+      } finally {
+        // Restore original env
+        if (originalEnv !== undefined) {
+          process.env.CORS_ALLOWED_ORIGINS = originalEnv;
+        } else {
+          delete process.env.CORS_ALLOWED_ORIGINS;
+        }
+      }
     });
 
     test('should handle undefined CORS_ALLOWED_ORIGINS', async () => {
