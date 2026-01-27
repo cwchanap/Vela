@@ -470,7 +470,7 @@ StaticWebStack → depends on [auth, database, storage, api]
 ### Working with Multiple Packages
 
 1. **Root Level**: Use `bun <script>` to run tasks across all packages
-2. **Package Specific**: Navigate to specific package directory for targeted commands or use `bun --filter`
+2. **Package Specific**: Navigate to specific package directory for targeted commands (e.g., `cd apps/vela && bun run dev`) or use Turborepo filtering (e.g., `turbo run dev --filter=vela`)
 3. **Dependencies**: Turborepo handles task dependencies (e.g., `build` depends on `^build`)
 
 ### Testing Strategy
@@ -505,7 +505,7 @@ Each package handles environment variables differently:
 
 - Always run monorepo commands from the root directory when possible
 - Individual package commands should be run from their respective directories
-- Turborepo caches build outputs - use `bun clean` if you encounter cache issues
+- Turborepo caches build outputs - use `bun run clean` if you encounter cache issues
 - The lint configuration uses ESLint flat config format (modern ESLint v9+ style)
 - Pre-commit hooks run linting and formatting automatically via Husky
 - Before starting dev servers, check if they're already running to avoid port conflicts
