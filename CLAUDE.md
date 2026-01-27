@@ -31,7 +31,7 @@ This is a **Turborepo monorepo** containing:
 - `bun dev` or `quasar dev` - Start Quasar development server with hot reload
 - `bun build` or `quasar build` - Build for production
 - `bun postinstall` - Run after install (runs `quasar prepare`)
-- `bun run vitest run` - Run frontend unit tests (Vitest)
+- `bun vitest run` - Run frontend unit tests (Vitest)
 - `bun run test:e2e` - Run Playwright end-to-end tests
 - `bun run test:headed` - Run Playwright tests in headed mode
 - `bun run test:ui` - Run Playwright tests with UI mode
@@ -47,7 +47,7 @@ bun run test:e2e tests/auth.spec.ts
 To run a single Vitest test file:
 
 ```bash
-bun run vitest run src/components/auth/AuthForm.test.ts
+bun vitest run src/components/auth/AuthForm.test.ts
 ```
 
 ### Vela API Commands (from apps/vela-api/)
