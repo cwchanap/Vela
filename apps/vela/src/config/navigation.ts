@@ -28,6 +28,13 @@ export const mainNavigation = [
   },
   {
     type: 'route',
+    name: 'Review',
+    icon: 'style',
+    path: '/flashcards',
+    requiresAuth: true,
+  },
+  {
+    type: 'route',
     name: 'Learn',
     icon: 'school',
     path: '/games',
