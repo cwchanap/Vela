@@ -79,6 +79,20 @@ const routes: RouteRecordRaw[] = [
     ],
   },
 
+  // Flashcard Review route
+  {
+    path: '/flashcards',
+    component: () => import('layouts/MainLayout.vue'),
+    meta: { requiresAuth: true },
+    children: [
+      {
+        path: '',
+        name: 'flashcards',
+        component: () => import('pages/FlashcardReview.vue'),
+      },
+    ],
+  },
+
   // Game routes
   {
     path: '/games',
