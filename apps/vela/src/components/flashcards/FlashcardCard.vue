@@ -268,12 +268,14 @@ function handlePronounce() {
   display: none;
 }
 
-/* Dark mode adjustments */
-body.body--dark .flashcard {
+/* Dark mode adjustments - using :deep() to pierce scoped styles */
+:deep(body.body--dark) .flashcard,
+:global(body.body--dark) .flashcard {
   background: var(--bg-card);
 }
 
-body.body--dark .example-section {
+:deep(body.body--dark) .example-section,
+:global(body.body--dark) .example-section {
   background: rgba(255, 255, 255, 0.05);
 }
 </style>
