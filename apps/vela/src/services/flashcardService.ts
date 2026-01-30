@@ -53,7 +53,7 @@ async function getVocabularyForSRS(
 
   return {
     vocabulary,
-    totalDue: response.total,
+    totalDue: vocabulary.length,
   };
 }
 

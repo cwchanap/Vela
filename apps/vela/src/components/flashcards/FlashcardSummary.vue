@@ -39,7 +39,7 @@
           <div class="breakdown-row">
             <span class="breakdown-label">Again</span>
             <q-linear-progress
-              :value="stats.againCount / stats.cardsReviewed || 0"
+              :value="getRatio(stats.againCount)"
               color="negative"
               class="breakdown-bar"
             />
@@ -48,7 +48,7 @@
           <div class="breakdown-row">
             <span class="breakdown-label">Hard</span>
             <q-linear-progress
-              :value="stats.hardCount / stats.cardsReviewed || 0"
+              :value="getRatio(stats.hardCount)"
               color="warning"
               class="breakdown-bar"
             />
@@ -57,7 +57,7 @@
           <div class="breakdown-row">
             <span class="breakdown-label">Good</span>
             <q-linear-progress
-              :value="stats.goodCount / stats.cardsReviewed || 0"
+              :value="getRatio(stats.goodCount)"
               color="primary"
               class="breakdown-bar"
             />
@@ -66,7 +66,7 @@
           <div class="breakdown-row">
             <span class="breakdown-label">Easy</span>
             <q-linear-progress
-              :value="stats.easyCount / stats.cardsReviewed || 0"
+              :value="getRatio(stats.easyCount)"
               color="positive"
               class="breakdown-bar"
             />
@@ -147,6 +147,16 @@ const encouragementMessage = computed(() => {
   if (props.accuracy >= 50) return 'Good effort! Practice makes perfect!';
   return 'Keep practicing! Every review helps!';
 });
+
+/**
+ * Calculate a safe ratio for progress bars
+ * Returns 0 if cardsReviewed is 0 or if result is not finite
+ */
+function getRatio(count: number): number {
+  if (props.stats.cardsReviewed === 0) return 0;
+  const ratio = count / props.stats.cardsReviewed;
+  return Number.isFinite(ratio) ? ratio : 0;
+}
 </script>
 
 <style scoped>

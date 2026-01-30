@@ -16,6 +16,8 @@ describe('FlashcardSummary', () => {
     startTime: new Date('2024-01-01T10:00:00Z'),
     endTime: new Date('2024-01-01T10:05:30Z'),
   };
+  // Note: againCount + hardCount + goodCount + easyCount = 10 (matches cardsReviewed)
+  // correctCount = goodCount + easyCount = 7, incorrectCount = againCount + hardCount = 3
 
   const mountComponent = (props = {}) => {
     return mount(FlashcardSummary, {
