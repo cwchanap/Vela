@@ -239,7 +239,9 @@ export const useFlashcardStore = defineStore('flashcards', {
         }
       } else {
         // Reverse mode - use the isCorrect from validation
-        if (card.isCorrect) {
+        if (card.isCorrect === null) {
+          // Skip correctness counts if answer was not validated
+        } else if (card.isCorrect) {
           this.stats.correctCount++;
         } else {
           this.stats.incorrectCount++;

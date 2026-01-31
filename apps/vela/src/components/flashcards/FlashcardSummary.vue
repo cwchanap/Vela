@@ -43,7 +43,7 @@
               color="negative"
               class="breakdown-bar"
             />
-            <span class="breakdown-count">{{ stats.againCount }}</span>
+            <span class="breakdown-count" data-testid="again-count">{{ stats.againCount }}</span>
           </div>
           <div class="breakdown-row">
             <span class="breakdown-label">Hard</span>
@@ -52,7 +52,7 @@
               color="warning"
               class="breakdown-bar"
             />
-            <span class="breakdown-count">{{ stats.hardCount }}</span>
+            <span class="breakdown-count" data-testid="hard-count">{{ stats.hardCount }}</span>
           </div>
           <div class="breakdown-row">
             <span class="breakdown-label">Good</span>
@@ -61,7 +61,7 @@
               color="primary"
               class="breakdown-bar"
             />
-            <span class="breakdown-count">{{ stats.goodCount }}</span>
+            <span class="breakdown-count" data-testid="good-count">{{ stats.goodCount }}</span>
           </div>
           <div class="breakdown-row">
             <span class="breakdown-label">Easy</span>
@@ -70,7 +70,7 @@
               color="positive"
               class="breakdown-bar"
             />
-            <span class="breakdown-count">{{ stats.easyCount }}</span>
+            <span class="breakdown-count" data-testid="easy-count">{{ stats.easyCount }}</span>
           </div>
         </div>
       </div>
@@ -79,11 +79,15 @@
       <div class="correctness-summary q-mb-lg">
         <div class="correctness-item correct">
           <q-icon name="check_circle" color="positive" size="24px" />
-          <span class="text-positive text-weight-medium">{{ stats.correctCount }} Correct</span>
+          <span class="text-positive text-weight-medium" data-testid="correct-count">
+            {{ stats.correctCount }} Correct
+          </span>
         </div>
         <div class="correctness-item incorrect">
           <q-icon name="cancel" color="negative" size="24px" />
-          <span class="text-negative text-weight-medium">{{ stats.incorrectCount }} Incorrect</span>
+          <span class="text-negative text-weight-medium" data-testid="incorrect-count">
+            {{ stats.incorrectCount }} Incorrect
+          </span>
         </div>
       </div>
     </q-card-section>

@@ -71,6 +71,17 @@
       @setup="handleBackToSetup"
     />
 
+    <!-- Fallback State -->
+    <div v-else class="text-center q-pa-md">
+      <div class="text-subtitle1 q-mb-md">No session active.</div>
+      <q-btn
+        label="Back to Setup"
+        color="primary"
+        @click="handleBackToSetup"
+        data-testid="btn-back-to-setup"
+      />
+    </div>
+
     <!-- Loading State -->
     <div v-if="isLoading" class="loading-overlay">
       <q-spinner-dots color="primary" size="50px" />
@@ -80,7 +91,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch } from 'vue';
+import { ref, computed, watch, onMounted } from 'vue';
 import { Notify } from 'quasar';
 import { useFlashcardStore, type StudyMode, type CardDirection } from 'src/stores/flashcards';
 import { useAuthStore } from 'src/stores/auth';
@@ -107,6 +118,7 @@ const answerSubmitted = ref(false);
 
 // Queue for SRS reviews to be submitted at end of session
 const reviewQueue = ref<Array<{ vocabulary_id: string; quality: number }>>([]);
+const pendingReviewsKey = 'pendingFlashcardReviews';
 
 // Show rating buttons after card is flipped (JP→EN) or after answer is submitted (EN→JP)
 const showRatingButtons = computed(() => {
@@ -124,6 +136,68 @@ function getAlternateAnswers(): string[] {
   if (!vocab) return [];
 
   return [vocab.hiragana, vocab.katakana, vocab.romaji].filter(Boolean) as string[];
+}
+
+function isReviewInput(value: unknown): value is {
+  vocabulary_id: string;
+  quality: number;
+} {
+  if (!value || typeof value !== 'object') return false;
+  const record = value as Record<string, unknown>;
+  return typeof record.vocabulary_id === 'string' && typeof record.quality === 'number';
+}
+
+function readPendingReviews(): Array<{ vocabulary_id: string; quality: number }> {
+  const stored = localStorage.getItem(pendingReviewsKey);
+  if (!stored) return [];
+
+  try {
+    const parsed = JSON.parse(stored) as unknown;
+    if (!Array.isArray(parsed)) {
+      console.warn('Invalid pending flashcard reviews data. Clearing.');
+      localStorage.removeItem(pendingReviewsKey);
+      return [];
+    }
+    const filtered = parsed.filter(isReviewInput);
+    if (filtered.length !== parsed.length) {
+      console.warn('Some pending flashcard reviews were invalid and removed.');
+    }
+    return filtered;
+  } catch (error) {
+    console.error('Failed to parse pending flashcard reviews:', error);
+    localStorage.removeItem(pendingReviewsKey);
+    return [];
+  }
+}
+
+function mergeReviews(
+  ...lists: Array<Array<{ vocabulary_id: string; quality: number }>>
+): Array<{ vocabulary_id: string; quality: number }> {
+  const merged = new Map<string, { vocabulary_id: string; quality: number }>();
+  lists.forEach((list) => {
+    list.forEach((review) => {
+      merged.set(`${review.vocabulary_id}:${review.quality}`, review);
+    });
+  });
+  return Array.from(merged.values());
+}
+
+async function retryPendingReviews() {
+  if (!authStore.isAuthenticated) return;
+  const pendingReviews = readPendingReviews();
+  if (pendingReviews.length === 0) return;
+
+  try {
+    await flashcardService.recordBatchReview(pendingReviews);
+    localStorage.removeItem(pendingReviewsKey);
+  } catch (error) {
+    console.error('Failed to sync pending reviews:', error);
+    Notify.create({
+      type: 'negative',
+      message: 'Failed to sync pending reviews. We will retry later.',
+      position: 'top',
+    });
+  }
 }
 
 async function handleStart(config: {
@@ -260,17 +334,30 @@ async function handlePronounce(vocabulary: Vocabulary) {
 }
 
 async function submitReviews() {
-  if (reviewQueue.value.length === 0) return;
+  if (!authStore.isAuthenticated) return;
+  const pendingReviews = readPendingReviews();
+  const reviewsToSend = mergeReviews(pendingReviews, reviewQueue.value);
+  if (reviewsToSend.length === 0) return;
 
   try {
-    await flashcardService.recordBatchReview(reviewQueue.value);
-    console.log(`Successfully recorded ${reviewQueue.value.length} reviews`);
+    await flashcardService.recordBatchReview(reviewsToSend);
+    console.log(`Successfully recorded ${reviewsToSend.length} reviews`);
+    reviewQueue.value = [];
+    localStorage.removeItem(pendingReviewsKey);
   } catch (error) {
     console.error('Failed to record reviews:', error);
-    // Don't show error to user - reviews are best-effort
+    try {
+      localStorage.setItem(pendingReviewsKey, JSON.stringify(reviewsToSend));
+    } catch (storageError) {
+      console.error('Failed to persist pending reviews:', storageError);
+    }
+    reviewQueue.value = reviewsToSend;
+    Notify.create({
+      type: 'negative',
+      message: 'Failed to sync reviews. We will retry later.',
+      position: 'top',
+    });
   }
-
-  reviewQueue.value = [];
 }
 
 async function handleRestart() {
@@ -342,6 +429,19 @@ watch(
     }
   },
 );
+
+watch(
+  () => authStore.isAuthenticated,
+  (isAuthenticated) => {
+    if (isAuthenticated) {
+      void retryPendingReviews();
+    }
+  },
+);
+
+onMounted(() => {
+  void retryPendingReviews();
+});
 </script>
 
 <style scoped>
@@ -389,7 +489,7 @@ watch(
   z-index: 1000;
 }
 
-body.body--dark .loading-overlay {
+:deep(body.body--dark) .loading-overlay {
   background: rgba(0, 0, 0, 0.9);
 }
 </style>
