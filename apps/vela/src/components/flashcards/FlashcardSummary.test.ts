@@ -67,17 +67,17 @@ describe('FlashcardSummary', () => {
     expect(wrapper.text()).toContain('Hard');
     expect(wrapper.text()).toContain('Good');
     expect(wrapper.text()).toContain('Easy');
-    expect(wrapper.text()).toContain('2'); // againCount
-    expect(wrapper.text()).toContain('1'); // hardCount
-    expect(wrapper.text()).toContain('4'); // goodCount
-    expect(wrapper.text()).toContain('3'); // easyCount
+    expect(wrapper.find('[data-testid="again-count"]').text()).toBe('2');
+    expect(wrapper.find('[data-testid="hard-count"]').text()).toBe('1');
+    expect(wrapper.find('[data-testid="good-count"]').text()).toBe('4');
+    expect(wrapper.find('[data-testid="easy-count"]').text()).toBe('3');
   });
 
   it('should display correct and incorrect counts', () => {
     const wrapper = mountComponent();
 
-    expect(wrapper.text()).toContain('7 Correct');
-    expect(wrapper.text()).toContain('3 Incorrect');
+    expect(wrapper.find('[data-testid="correct-count"]').text()).toBe('7 Correct');
+    expect(wrapper.find('[data-testid="incorrect-count"]').text()).toBe('3 Incorrect');
   });
 
   it('should emit restart event when Study Again clicked', async () => {

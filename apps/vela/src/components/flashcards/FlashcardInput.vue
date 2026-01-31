@@ -77,9 +77,17 @@ function handleSubmit() {
   if (!answer.value.trim() || submitted.value) return;
 
   const normalizedAnswer = answer.value.trim().toLowerCase();
+  const primaryAnswer = (props.correctAnswer || '').toString().trim();
+
+  if (!primaryAnswer) {
+    submitted.value = true;
+    isCorrect.value = false;
+    emit('submit', answer.value, false);
+    return;
+  }
 
   // Build list of valid answers
-  const validAnswers = [props.correctAnswer, ...(props.alternateAnswers || [])]
+  const validAnswers = [primaryAnswer, ...(props.alternateAnswers || [])]
     .filter(Boolean)
     .map((a) => a.toLowerCase().trim());
 
