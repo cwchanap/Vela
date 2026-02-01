@@ -131,6 +131,9 @@ const isLoading = ref(false);
 
 const isAuthenticated = computed(() => authStore.isAuthenticated);
 
+// Monotonically increasing request ID to prevent race conditions
+let requestId = 0;
+
 const startButtonLabel = computed(() => {
   if (studyMode.value === 'srs') {
     if (dueCount.value > 0) {
@@ -147,13 +150,24 @@ async function fetchDueCount() {
     return;
   }
 
+  // Capture current request ID and increment for next request
+  const currentRequestId = ++requestId;
+
   try {
     const jlptFilter = jlptLevels.value.length > 0 ? jlptLevels.value : undefined;
     const stats = await flashcardService.getStats(jlptFilter);
-    dueCount.value = stats.due_today;
+
+    // Only update if this is still the latest request (prevents race conditions)
+    if (currentRequestId === requestId) {
+      dueCount.value = stats.due_today;
+    }
   } catch (error) {
     console.error('Failed to fetch due count:', error);
-    dueCount.value = 0;
+
+    // Only update if this is still the latest request (prevents race conditions)
+    if (currentRequestId === requestId) {
+      dueCount.value = 0;
+    }
   }
 }
 

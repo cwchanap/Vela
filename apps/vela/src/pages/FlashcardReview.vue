@@ -176,7 +176,8 @@ function mergeReviews(
   const merged = new Map<string, { vocabulary_id: string; quality: number }>();
   lists.forEach((list) => {
     list.forEach((review) => {
-      merged.set(`${review.vocabulary_id}:${review.quality}`, review);
+      // Use vocabulary_id as key for deduplication (latest rating wins)
+      merged.set(review.vocabulary_id, review);
     });
   });
   return Array.from(merged.values());
