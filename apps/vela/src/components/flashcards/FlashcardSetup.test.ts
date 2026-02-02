@@ -63,7 +63,7 @@ describe('FlashcardSetup.vue - Race Condition Fix', () => {
     expect(getStatsSpy).toHaveBeenCalled();
   });
 
-  it('should handle error by setting dueCount to 0', async () => {
+  it('should handle error by showing error message', async () => {
     const _authStore = useAuthStore();
 
     getStatsSpy.mockRejectedValue(new Error('Network error'));
@@ -105,7 +105,8 @@ describe('FlashcardSetup.vue - Race Condition Fix', () => {
     component.fetchDueCount();
     await new Promise((resolve) => setTimeout(resolve, 50));
 
-    expect(component.dueCount).toBe(0);
+    expect(component.dueCountError).toBe('Unable to check due items. Please try again.');
+    expect(wrapper.text()).toContain('Unable to check due items');
   });
 
   it('should use requestId to prevent race conditions (logic verification)', async () => {

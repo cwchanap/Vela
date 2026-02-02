@@ -273,12 +273,7 @@ function handleFlip() {
 
 function handleAnswerSubmit(_answer: string, isCorrect: boolean) {
   answerSubmitted.value = true;
-
-  // Store correctness in the card
-  const card = flashcardStore.cards[flashcardStore.currentIndex];
-  if (card) {
-    card.isCorrect = isCorrect;
-  }
+  flashcardStore.setCardCorrectness(isCorrect);
 }
 
 async function handleRate(rating: QualityRating) {
@@ -351,6 +346,13 @@ async function submitReviews() {
       localStorage.setItem(pendingReviewsKey, JSON.stringify(reviewsToSend));
     } catch (storageError) {
       console.error('Failed to persist pending reviews:', storageError);
+      Notify.create({
+        type: 'negative',
+        message:
+          'Warning: Reviews could not be saved locally. Please do not close this page until sync completes.',
+        position: 'top',
+        timeout: 10000, // Longer timeout for important message
+      });
     }
     reviewQueue.value = reviewsToSend;
     Notify.create({
