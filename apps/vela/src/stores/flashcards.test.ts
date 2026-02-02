@@ -339,6 +339,24 @@ describe('flashcards store', () => {
       });
     });
 
+    describe('setCardCorrectness', () => {
+      it('should set correctness for current card', () => {
+        const store = useFlashcardStore();
+        store.startSession(mockVocabulary);
+
+        store.setCardCorrectness(true);
+        expect(store.cards[0].isCorrect).toBe(true);
+
+        store.setCardCorrectness(false);
+        expect(store.cards[0].isCorrect).toBe(false);
+      });
+
+      it('should do nothing when no cards', () => {
+        const store = useFlashcardStore();
+        store.setCardCorrectness(true); // Should not throw
+      });
+    });
+
     describe('rateCard', () => {
       it('should update card rating and move to next', () => {
         const store = useFlashcardStore();

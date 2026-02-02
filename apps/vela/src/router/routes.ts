@@ -89,6 +89,7 @@ const routes: RouteRecordRaw[] = [
         path: '',
         name: 'flashcards',
         component: () => import('pages/FlashcardReview.vue'),
+        meta: { requiresAuth: true },
       },
     ],
   },

@@ -44,10 +44,11 @@ export interface ReviewResponse {
 
 /**
  * Review input for batch review
+ * Quality must be 0-5 per SM-2 algorithm
  */
 export interface ReviewInput {
   vocabulary_id: string;
-  quality: number;
+  quality: 0 | 1 | 2 | 3 | 4 | 5;
 }
 
 /**

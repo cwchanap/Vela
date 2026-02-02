@@ -68,11 +68,17 @@
 
       <!-- Due Count Info -->
       <div v-if="studyMode === 'srs' && isAuthenticated" class="due-info q-mb-md">
-        <q-icon name="schedule" color="primary" class="q-mr-xs" />
-        <span v-if="dueCount > 0" class="text-primary text-weight-medium">
-          {{ dueCount }} words due for review
-        </span>
-        <span v-else class="text-grey"> No words due for review </span>
+        <div v-if="dueCountError" class="text-negative">
+          <q-icon name="error" class="q-mr-xs" />
+          <span>{{ dueCountError }}</span>
+        </div>
+        <div v-else>
+          <q-icon name="schedule" color="primary" class="q-mr-xs" />
+          <span v-if="dueCount > 0" class="text-primary text-weight-medium">
+            {{ dueCount }} words due for review
+          </span>
+          <span v-else class="text-grey"> No words due for review </span>
+        </div>
       </div>
 
       <!-- Not Authenticated Warning -->
@@ -127,6 +133,7 @@ const cardDirection = ref<CardDirection>('jp-to-en');
 const jlptLevels = ref<JLPTLevel[]>([]);
 const showFurigana = ref(true);
 const dueCount = ref(0);
+const dueCountError = ref<string | null>(null);
 const isLoading = ref(false);
 
 const isAuthenticated = computed(() => authStore.isAuthenticated);
@@ -147,11 +154,13 @@ const startButtonLabel = computed(() => {
 async function fetchDueCount() {
   if (!isAuthenticated.value) {
     dueCount.value = 0;
+    dueCountError.value = null;
     return;
   }
 
   // Capture current request ID and increment for next request
   const currentRequestId = ++requestId;
+  dueCountError.value = null;
 
   try {
     const jlptFilter = jlptLevels.value.length > 0 ? jlptLevels.value : undefined;
@@ -160,13 +169,15 @@ async function fetchDueCount() {
     // Only update if this is still the latest request (prevents race conditions)
     if (currentRequestId === requestId) {
       dueCount.value = stats.due_today;
+      dueCountError.value = null;
     }
   } catch (error) {
     console.error('Failed to fetch due count:', error);
 
     // Only update if this is still the latest request (prevents race conditions)
     if (currentRequestId === requestId) {
-      dueCount.value = 0;
+      dueCountError.value = 'Unable to check due items. Please try again.';
+      // Don't reset dueCount to 0 - keep previous value or show error
     }
   }
 }
@@ -189,11 +200,12 @@ watch([() => authStore.isAuthenticated, jlptLevels], () => {
   fetchDueCount();
 });
 
-// Expose loading state for parent
+// Expose methods for parent and tests
 defineExpose({
   setLoading: (loading: boolean) => {
     isLoading.value = loading;
   },
+  fetchDueCount,
 });
 </script>
 

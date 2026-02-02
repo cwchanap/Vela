@@ -2,13 +2,14 @@ import { defineStore } from 'pinia';
 import type { Vocabulary, JLPTLevel } from 'src/types/database';
 
 /**
- * Quality ratings for SRS (Anki-style mapping)
+ * Quality ratings for SRS review (custom 4-point scale)
+ * Note: These values (1, 3, 4, 5) are mapped to SM-2 quality ratings (0-5) by the backend
  */
 export const QUALITY_RATINGS = {
-  AGAIN: 1, // Forgot completely
-  HARD: 3, // Correct but with difficulty
-  GOOD: 4, // Correct with some hesitation
-  EASY: 5, // Perfect recall
+  AGAIN: 1, // Forgot completely - backend maps to SM-2 rating 0-1
+  HARD: 3, // Correct but with difficulty - backend maps to SM-2 rating 3
+  GOOD: 4, // Correct with some hesitation - backend maps to SM-2 rating 4
+  EASY: 5, // Perfect recall - backend maps to SM-2 rating 5
 } as const;
 
 export type QualityRating = (typeof QUALITY_RATINGS)[keyof typeof QUALITY_RATINGS];
@@ -216,6 +217,14 @@ export const useFlashcardStore = defineStore('flashcards', {
       card.userAnswer = userAnswer;
 
       return isCorrect;
+    },
+
+    /** Set correctness for the current card */
+    setCardCorrectness(isCorrect: boolean) {
+      const card = this.cards[this.currentIndex];
+      if (card) {
+        card.isCorrect = isCorrect;
+      }
     },
 
     /** Rate the current card and move to next */
