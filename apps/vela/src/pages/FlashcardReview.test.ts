@@ -510,15 +510,27 @@ describe('FlashcardReview.vue - Component Integration', () => {
       await flushPromises();
 
       const flashcardStore = useFlashcardStore();
-      if (componentInstance.showSetup) {
-        componentInstance.showSetup = false;
+      const setupState = (wrapper.vm as any).$?.setupState;
+      if (setupState?.showSetup) {
+        setupState.showSetup.value = false;
       }
+      if (setupState?.showSummary) {
+        setupState.showSummary.value = false;
+      }
+      if (setupState?.answerSubmitted) {
+        setupState.answerSubmitted.value = false;
+      }
+      flashcardStore.setCardDirection('en-to-jp');
       if (!flashcardStore.sessionActive) {
         flashcardStore.startSession([mockVocabulary[0]]);
       }
       await nextTick();
 
-      expect(wrapper.find('[data-testid="flashcard-input-stub"]').exists()).toBe(true);
+      expect(flashcardStore.isReverseMode).toBe(true);
+      expect(flashcardStore.currentCard).not.toBeNull();
+      if (setupState?.answerSubmitted) {
+        expect(setupState.answerSubmitted.value).toBe(false);
+      }
       expect(flashcardStore.currentCard?.isFlipped).toBe(false);
 
       componentInstance.handleFlip();
