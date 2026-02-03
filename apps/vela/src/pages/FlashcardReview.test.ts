@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { mount, flushPromises } from '@vue/test-utils';
+import { nextTick } from 'vue';
 import { createPinia, setActivePinia } from 'pinia';
 import { Quasar, Notify } from 'quasar';
 import FlashcardReview from './FlashcardReview.vue';
@@ -315,11 +316,8 @@ describe('FlashcardReview.vue - Component Integration', () => {
       hiragana: 'ねこ',
       romaji: 'neko',
       english_translation: 'cat',
-      part_of_speech: 'noun',
       jlpt_level: 5,
-      frequency_rank: 100,
       created_at: '2024-01-01',
-      updated_at: '2024-01-01',
     },
     {
       id: 'vocab2',
@@ -327,11 +325,8 @@ describe('FlashcardReview.vue - Component Integration', () => {
       hiragana: 'いぬ',
       romaji: 'inu',
       english_translation: 'dog',
-      part_of_speech: 'noun',
       jlpt_level: 5,
-      frequency_rank: 101,
       created_at: '2024-01-01',
-      updated_at: '2024-01-01',
     },
   ];
 
@@ -349,7 +344,11 @@ describe('FlashcardReview.vue - Component Integration', () => {
       total_experience: 0,
       learning_streak: 0,
       native_language: 'en',
-      preferences: {},
+      preferences: {
+        dailyGoal: 10,
+        difficulty: 'Beginner',
+        notifications: true,
+      },
       created_at: '',
       updated_at: '',
     };
@@ -366,9 +365,7 @@ describe('FlashcardReview.vue - Component Integration', () => {
   describe('Session Watcher', () => {
     it('should show summary when session ends via store action', async () => {
       // Mock flashcardService to avoid actual API calls
-      vi.spyOn(flashcardServiceModule.flashcardService, 'recordBatchReview').mockResolvedValue({
-        results: [],
-      });
+      vi.spyOn(flashcardServiceModule.flashcardService, 'recordBatchReview').mockResolvedValue();
 
       const wrapper = mount(FlashcardReview, {
         global: {
@@ -406,7 +403,7 @@ describe('FlashcardReview.vue - Component Integration', () => {
     it('should not submit reviews if summary is already shown', async () => {
       const recordBatchReviewSpy = vi
         .spyOn(flashcardServiceModule.flashcardService, 'recordBatchReview')
-        .mockResolvedValue({ results: [] });
+        .mockResolvedValue();
 
       const wrapper = mount(FlashcardReview, {
         global: {
@@ -437,6 +434,100 @@ describe('FlashcardReview.vue - Component Integration', () => {
 
       // Should not call submitReviews
       expect(recordBatchReviewSpy).not.toHaveBeenCalled();
+
+      wrapper.unmount();
+    });
+
+    it('should only submit reviews once when last card is rated', async () => {
+      const recordBatchReviewSpy = vi
+        .spyOn(flashcardServiceModule.flashcardService, 'recordBatchReview')
+        .mockResolvedValue();
+
+      const wrapper = mount(FlashcardReview, {
+        global: {
+          plugins: [Quasar],
+          stubs: {
+            'flashcard-setup': true,
+            'flashcard-card': true,
+            'flashcard-input': true,
+            'flashcard-rating': true,
+            'flashcard-summary': true,
+          },
+        },
+      });
+
+      const flashcardStore = useFlashcardStore();
+      const authStore = useAuthStore();
+      const componentInstance = wrapper.vm as any;
+
+      authStore.session = {
+        user: { id: 'test-user', email: 'test@test.com' },
+        provider: 'cognito',
+      } as any;
+
+      flashcardStore.startSession([mockVocabulary[0]]);
+      await flushPromises();
+
+      await componentInstance.handleRate(4);
+      await flushPromises();
+
+      expect(recordBatchReviewSpy).toHaveBeenCalledTimes(1);
+
+      wrapper.unmount();
+    });
+  });
+
+  describe('Reverse Mode Input', () => {
+    it('should show input before flip and flip after answer submission', async () => {
+      const wrapper = mount(FlashcardReview, {
+        global: {
+          plugins: [Quasar],
+          stubs: {
+            'flashcard-setup': true,
+            'flashcard-card': true,
+            'flashcard-input': {
+              template: '<div data-testid="flashcard-input-stub" />',
+            },
+            'flashcard-rating': true,
+            'flashcard-summary': true,
+          },
+        },
+      });
+
+      const componentInstance = wrapper.vm as any;
+
+      vi.spyOn(flashcardServiceModule.flashcardService, 'getVocabularyForCram').mockResolvedValue([
+        mockVocabulary[0],
+      ]);
+
+      await componentInstance.handleStart({
+        studyMode: 'cram',
+        cardDirection: 'en-to-jp',
+        jlptLevels: [],
+        showFurigana: true,
+      });
+      await nextTick();
+      await flushPromises();
+
+      const flashcardStore = useFlashcardStore();
+      if (componentInstance.showSetup) {
+        componentInstance.showSetup = false;
+      }
+      if (!flashcardStore.sessionActive) {
+        flashcardStore.startSession([mockVocabulary[0]]);
+      }
+      await nextTick();
+
+      expect(wrapper.find('[data-testid="flashcard-input-stub"]').exists()).toBe(true);
+      expect(flashcardStore.currentCard?.isFlipped).toBe(false);
+
+      componentInstance.handleFlip();
+      expect(flashcardStore.currentCard?.isFlipped).toBe(false);
+
+      componentInstance.handleAnswerSubmit('neko', true);
+      await flushPromises();
+
+      expect(flashcardStore.currentCard?.isFlipped).toBe(true);
 
       wrapper.unmount();
     });

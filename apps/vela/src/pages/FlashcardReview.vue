@@ -40,11 +40,9 @@
         @pronounce="handlePronounce"
       />
 
-      <!-- Input for Reverse Mode (shown after flip) -->
+      <!-- Input for Reverse Mode (shown before flip) -->
       <div
-        v-if="
-          flashcardStore.isReverseMode && flashcardStore.currentCard?.isFlipped && !answerSubmitted
-        "
+        v-if="flashcardStore.isReverseMode && flashcardStore.currentCard && !answerSubmitted"
         class="input-section q-mt-lg"
       >
         <flashcard-input
@@ -115,6 +113,7 @@ const showSetup = ref(true);
 const showSummary = ref(false);
 const isLoading = ref(false);
 const answerSubmitted = ref(false);
+const isSubmittingReviews = ref(false);
 
 // Queue for SRS reviews to be submitted at end of session
 const reviewQueue = ref<Array<{ vocabulary_id: string; quality: number }>>([]);
@@ -252,6 +251,7 @@ async function handleStart(config: {
     // Start session
     flashcardStore.startSession(vocabulary);
     reviewQueue.value = [];
+    isSubmittingReviews.value = false;
     showSetup.value = false;
     showSummary.value = false;
   } catch (error) {
@@ -268,12 +268,18 @@ async function handleStart(config: {
 }
 
 function handleFlip() {
+  if (flashcardStore.isReverseMode && !answerSubmitted.value) {
+    return;
+  }
   flashcardStore.flipCard();
 }
 
 function handleAnswerSubmit(_answer: string, isCorrect: boolean) {
   answerSubmitted.value = true;
   flashcardStore.setCardCorrectness(isCorrect);
+  if (flashcardStore.isReverseMode && !flashcardStore.currentCard?.isFlipped) {
+    flashcardStore.flipCard();
+  }
 }
 
 async function handleRate(rating: QualityRating) {
@@ -331,9 +337,12 @@ async function handlePronounce(vocabulary: Vocabulary) {
 
 async function submitReviews() {
   if (!authStore.isAuthenticated) return;
+  if (isSubmittingReviews.value) return;
   const pendingReviews = readPendingReviews();
   const reviewsToSend = mergeReviews(pendingReviews, reviewQueue.value);
   if (reviewsToSend.length === 0) return;
+
+  isSubmittingReviews.value = true;
 
   try {
     await flashcardService.recordBatchReview(reviewsToSend);
@@ -360,6 +369,8 @@ async function submitReviews() {
       message: 'Failed to sync reviews. We will retry later.',
       position: 'top',
     });
+  } finally {
+    isSubmittingReviews.value = false;
   }
 }
 
