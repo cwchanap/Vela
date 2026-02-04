@@ -1,5 +1,5 @@
 import type { Vocabulary, JLPTLevel } from 'src/types/database';
-import { srsService, type DueItemsResponse } from './srsService';
+import { srsService, type DueItemsResponse, type ReviewInput } from './srsService';
 import { getApiUrl } from 'src/utils/api';
 
 /**
@@ -99,11 +99,9 @@ async function recordReview(vocabularyId: string, quality: number): Promise<void
 
 /**
  * Record multiple reviews at once
- * @param reviews - Array of { vocabulary_id, quality }
+ * @param reviews - Array of review inputs with quality constrained to 0-5
  */
-async function recordBatchReview(
-  reviews: Array<{ vocabulary_id: string; quality: number }>,
-): Promise<void> {
+async function recordBatchReview(reviews: ReviewInput[]): Promise<void> {
   if (reviews.length === 0) return;
   await srsService.recordBatchReview(reviews);
 }
