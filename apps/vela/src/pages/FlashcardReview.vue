@@ -201,16 +201,37 @@ async function retryPendingReviews() {
   const pendingReviews = readPendingReviews();
   if (pendingReviews.length === 0) return;
 
-  try {
-    await flashcardService.recordBatchReview(pendingReviews);
+  // Chunk reviews to stay within backend batch limit
+  const chunks = chunkArray(pendingReviews, BATCH_SIZE);
+  let successCount = 0;
+  let hasError = false;
+
+  for (const chunk of chunks) {
+    try {
+      await flashcardService.recordBatchReview(chunk);
+      successCount += chunk.length;
+    } catch (error) {
+      hasError = true;
+      console.error('Failed to sync batch:', error);
+      // Save remaining chunks (including current failed chunk)
+      const remainingReviews = pendingReviews.slice(successCount);
+      try {
+        localStorage.setItem(pendingReviewsKey.value, JSON.stringify(remainingReviews));
+      } catch (storageError) {
+        console.error('Failed to persist pending reviews:', storageError);
+      }
+      Notify.create({
+        type: 'negative',
+        message: 'Failed to sync some pending reviews. We will retry later.',
+        position: 'top',
+      });
+      return;
+    }
+  }
+
+  // All chunks succeeded
+  if (!hasError) {
     localStorage.removeItem(pendingReviewsKey.value);
-  } catch (error) {
-    console.error('Failed to sync pending reviews:', error);
-    Notify.create({
-      type: 'negative',
-      message: 'Failed to sync pending reviews. We will retry later.',
-      position: 'top',
-    });
   }
 }
 
@@ -349,6 +370,19 @@ async function handlePronounce(vocabulary: Vocabulary) {
   }
 }
 
+const BATCH_SIZE = 100;
+
+/**
+ * Chunk an array into smaller arrays of specified size
+ */
+function chunkArray<T>(array: T[], size: number): T[][] {
+  const chunks: T[][] = [];
+  for (let i = 0; i < array.length; i += size) {
+    chunks.push(array.slice(i, i + size));
+  }
+  return chunks;
+}
+
 async function submitReviews() {
   if (!authStore.isAuthenticated) return;
   if (isSubmittingReviews.value) return;
@@ -359,8 +393,16 @@ async function submitReviews() {
   isSubmittingReviews.value = true;
 
   try {
-    await flashcardService.recordBatchReview(reviewsToSend);
-    console.log(`Successfully recorded ${reviewsToSend.length} reviews`);
+    // Chunk reviews to stay within backend batch limit
+    const chunks = chunkArray(reviewsToSend, BATCH_SIZE);
+    let successCount = 0;
+
+    for (const chunk of chunks) {
+      await flashcardService.recordBatchReview(chunk);
+      successCount += chunk.length;
+    }
+
+    console.log(`Successfully recorded ${successCount} reviews in ${chunks.length} batch(es)`);
     reviewQueue.value = [];
     localStorage.removeItem(pendingReviewsKey.value);
   } catch (error) {
