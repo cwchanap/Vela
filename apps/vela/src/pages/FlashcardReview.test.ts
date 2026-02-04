@@ -9,21 +9,58 @@ import { useAuthStore } from '../stores/auth';
 import * as flashcardServiceModule from '../services/flashcardService';
 import type { Vocabulary } from '../types/database';
 
-describe('FlashcardReview.vue - mergeReviews deduplication', () => {
-  it('should deduplicate by vocabulary_id (latest rating wins)', () => {
-    const mergeReviews = (
-      ...lists: Array<Array<{ vocabulary_id: string; quality: number }>>
-    ): Array<{ vocabulary_id: string; quality: number }> => {
-      const merged = new Map<string, { vocabulary_id: string; quality: number }>();
-      lists.forEach((list) => {
-        list.forEach((review) => {
-          // Use vocabulary_id as key for deduplication (latest rating wins)
-          merged.set(review.vocabulary_id, review);
-        });
-      });
-      return Array.from(merged.values());
-    };
+describe('chunkArray helper', () => {
+  const chunkArray = <T>(array: T[], size: number): T[][] => {
+    const chunks: T[][] = [];
+    for (let i = 0; i < array.length; i += size) {
+      chunks.push(array.slice(i, i + size));
+    }
+    return chunks;
+  };
 
+  it('should return empty array for empty input', () => {
+    const result = chunkArray([], 100);
+    expect(result).toEqual([]);
+  });
+
+  it('should return single chunk when array is smaller than chunk size', () => {
+    const input = [1, 2, 3];
+    const result = chunkArray(input, 100);
+    expect(result).toEqual([[1, 2, 3]]);
+  });
+
+  it('should split into multiple chunks when array exceeds chunk size', () => {
+    const input = Array.from({ length: 250 }, (_, i) => i);
+    const result = chunkArray(input, 100);
+    expect(result).toHaveLength(3);
+    expect(result[0]).toHaveLength(100);
+    expect(result[1]).toHaveLength(100);
+    expect(result[2]).toHaveLength(50);
+  });
+
+  it('should create exactly sized chunks for multiples of chunk size', () => {
+    const input = Array.from({ length: 300 }, (_, i) => i);
+    const result = chunkArray(input, 100);
+    expect(result).toHaveLength(3);
+    expect(result.every((chunk) => chunk.length === 100)).toBe(true);
+  });
+});
+
+describe('FlashcardReview.vue - mergeReviews deduplication', () => {
+  const mergeReviews = (
+    ...lists: Array<Array<{ vocabulary_id: string; quality: number }>>
+  ): Array<{ vocabulary_id: string; quality: number }> => {
+    const merged = new Map<string, { vocabulary_id: string; quality: number }>();
+    lists.forEach((list) => {
+      list.forEach((review) => {
+        // Use vocabulary_id as key for deduplication (latest rating wins)
+        merged.set(review.vocabulary_id, review);
+      });
+    });
+    return Array.from(merged.values());
+  };
+
+  it('should deduplicate by vocabulary_id (latest rating wins)', () => {
     const list1 = [
       { vocabulary_id: 'vocab1', quality: 3 },
       { vocabulary_id: 'vocab2', quality: 4 },
