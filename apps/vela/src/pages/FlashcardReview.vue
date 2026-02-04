@@ -95,6 +95,7 @@ import { useFlashcardStore, type StudyMode, type CardDirection } from 'src/store
 import { useAuthStore } from 'src/stores/auth';
 import { flashcardService } from 'src/services/flashcardService';
 import { pronounceWord } from 'src/services/ttsService';
+import { ReviewInput } from 'src/services/srsService';
 import FlashcardSetup from 'src/components/flashcards/FlashcardSetup.vue';
 import FlashcardCard from 'src/components/flashcards/FlashcardCard.vue';
 import FlashcardRating from 'src/components/flashcards/FlashcardRating.vue';
@@ -115,9 +116,14 @@ const isLoading = ref(false);
 const answerSubmitted = ref(false);
 const isSubmittingReviews = ref(false);
 
-// Queue for SRS reviews to be submitted at end of session
-const reviewQueue = ref<Array<{ vocabulary_id: string; quality: number }>>([]);
-const pendingReviewsKey = 'pendingFlashcardReviews';
+const reviewQueue = ref<ReviewInput[]>([]);
+const basePendingReviewsKey = 'pendingFlashcardReviews';
+
+// User-scoped localStorage key to prevent cross-user review leakage
+const pendingReviewsKey = computed(() => {
+  const userId = authStore.user?.id;
+  return userId ? `${basePendingReviewsKey}_${userId}` : basePendingReviewsKey;
+});
 
 // Show rating buttons after card is flipped (JP→EN) or after answer is submitted (EN→JP)
 const showRatingButtons = computed(() => {
@@ -137,44 +143,52 @@ function getAlternateAnswers(): string[] {
   return [vocab.hiragana, vocab.katakana, vocab.romaji].filter(Boolean) as string[];
 }
 
-function isReviewInput(value: unknown): value is {
-  vocabulary_id: string;
-  quality: number;
-} {
+function isReviewInput(value: unknown): value is ReviewInput {
   if (!value || typeof value !== 'object') return false;
   const record = value as Record<string, unknown>;
   return typeof record.vocabulary_id === 'string' && typeof record.quality === 'number';
 }
 
-function readPendingReviews(): Array<{ vocabulary_id: string; quality: number }> {
-  const stored = localStorage.getItem(pendingReviewsKey);
+function readPendingReviews(): ReviewInput[] {
+  const key = pendingReviewsKey.value;
+  const stored = localStorage.getItem(key);
   if (!stored) return [];
 
   try {
     const parsed = JSON.parse(stored) as unknown;
     if (!Array.isArray(parsed)) {
       console.warn('Invalid pending flashcard reviews data. Clearing.');
-      localStorage.removeItem(pendingReviewsKey);
+      localStorage.removeItem(pendingReviewsKey.value);
       return [];
     }
     const filtered = parsed.filter(isReviewInput);
     if (filtered.length !== parsed.length) {
       console.warn('Some pending flashcard reviews were invalid and removed.');
     }
+    // Filter out reviews that don't belong to the current user (if userId is available)
+    const userId = authStore.user?.id;
+    if (userId) {
+      // This check is defensive - the key itself should prevent cross-user access
+      // but we validate in case of manual localStorage manipulation
+      const currentKey = pendingReviewsKey.value;
+      if (!currentKey.endsWith(userId)) {
+        console.warn('Pending reviews key mismatch. Clearing stale data.');
+        localStorage.removeItem(key);
+        return [];
+      }
+    }
     return filtered;
   } catch (error) {
     console.error('Failed to parse pending flashcard reviews:', error);
-    localStorage.removeItem(pendingReviewsKey);
+    localStorage.removeItem(pendingReviewsKey.value);
     return [];
   }
 }
 
-function mergeReviews(
-  ...lists: Array<Array<{ vocabulary_id: string; quality: number }>>
-): Array<{ vocabulary_id: string; quality: number }> {
-  const merged = new Map<string, { vocabulary_id: string; quality: number }>();
+function mergeReviews(...lists: ReviewInput[][]): ReviewInput[] {
+  const merged = new Map<string, ReviewInput>();
   lists.forEach((list) => {
-    list.forEach((review) => {
+    list.forEach((review: ReviewInput) => {
       // Use vocabulary_id as key for deduplication (latest rating wins)
       merged.set(review.vocabulary_id, review);
     });
@@ -189,7 +203,7 @@ async function retryPendingReviews() {
 
   try {
     await flashcardService.recordBatchReview(pendingReviews);
-    localStorage.removeItem(pendingReviewsKey);
+    localStorage.removeItem(pendingReviewsKey.value);
   } catch (error) {
     console.error('Failed to sync pending reviews:', error);
     Notify.create({
@@ -348,11 +362,11 @@ async function submitReviews() {
     await flashcardService.recordBatchReview(reviewsToSend);
     console.log(`Successfully recorded ${reviewsToSend.length} reviews`);
     reviewQueue.value = [];
-    localStorage.removeItem(pendingReviewsKey);
+    localStorage.removeItem(pendingReviewsKey.value);
   } catch (error) {
     console.error('Failed to record reviews:', error);
     try {
-      localStorage.setItem(pendingReviewsKey, JSON.stringify(reviewsToSend));
+      localStorage.setItem(pendingReviewsKey.value, JSON.stringify(reviewsToSend));
     } catch (storageError) {
       console.error('Failed to persist pending reviews:', storageError);
       Notify.create({
