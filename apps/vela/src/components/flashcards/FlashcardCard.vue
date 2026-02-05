@@ -1,7 +1,15 @@
 <template>
   <div class="flashcard-container">
     <!-- Card wrapper for flip animation -->
-    <div class="flashcard-wrapper" :class="{ 'is-flipped': isFlipped }" @click="handleCardClick">
+    <div
+      class="flashcard-wrapper"
+      :class="{ 'is-flipped': isFlipped }"
+      @click="handleCardClick"
+      @keydown.enter.prevent="handleCardClick"
+      @keydown.space.prevent="handleCardClick"
+      tabindex="0"
+      role="button"
+    >
       <!-- Front of card -->
       <div class="flashcard-face flashcard-front">
         <q-card class="flashcard">
@@ -267,15 +275,15 @@ function handlePronounce() {
 .flashcard-wrapper.is-flipped .flip-hint {
   display: none;
 }
+</style>
 
-/* Dark mode adjustments - using :deep() to pierce scoped styles */
-:deep(body.body--dark) .flashcard,
-:global(body.body--dark) .flashcard {
+<style>
+/* Dark mode adjustments - unscoped to properly target elements */
+body.body--dark .flashcard {
   background: var(--bg-card);
 }
 
-:deep(body.body--dark) .example-section,
-:global(body.body--dark) .example-section {
+body.body--dark .example-section {
   background: rgba(255, 255, 255, 0.05);
 }
 </style>

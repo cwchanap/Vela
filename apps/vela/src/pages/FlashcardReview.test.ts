@@ -37,6 +37,12 @@ describe('chunkArray helper', () => {
     expect(result).toHaveLength(3);
     expect(result.every((chunk) => chunk.length === 100)).toBe(true);
   });
+
+  it('should throw error for non-positive chunk size', () => {
+    expect(() => chunkArray([1, 2, 3], 0)).toThrow('Chunk size must be a positive integer');
+    expect(() => chunkArray([1, 2, 3], -1)).toThrow('Chunk size must be a positive integer');
+    expect(() => chunkArray([1, 2, 3], -100)).toThrow('Chunk size must be a positive integer');
+  });
 });
 
 describe('FlashcardReview.vue - mergeReviews deduplication', () => {
