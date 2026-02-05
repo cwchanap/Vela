@@ -186,7 +186,7 @@ async function fetchDueCount() {
 }
 
 function handleStart() {
-  if (dueCountError.value) {
+  if (studyMode.value === 'srs' && dueCountError.value) {
     fetchDueCount();
     return;
   }

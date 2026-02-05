@@ -185,4 +185,67 @@ describe('FlashcardSetup.vue - Race Condition Fix', () => {
     expect(component.dueCount).toBe(0);
     expect(getStatsSpy).not.toHaveBeenCalled();
   });
+
+  it('should allow cram mode to start even when due count fetch failed', async () => {
+    const _authStore = useAuthStore();
+
+    // Set up error state
+    getStatsSpy.mockRejectedValue(new Error('Network error'));
+
+    // Set authenticated
+    _authStore.user = {
+      id: 'test-user',
+      email: 'test@test.com',
+      current_level: 1,
+      total_experience: 0,
+      learning_streak: 0,
+      native_language: 'en',
+      preferences: {},
+      created_at: '',
+      updated_at: '',
+    };
+    _authStore.session = {
+      idToken: 'test-token',
+      accessToken: 'test-access',
+      refreshToken: 'test-refresh',
+      userSub: 'test-user',
+      email: 'test@test.com',
+    };
+
+    const wrapper = mount(FlashcardSetup, {
+      global: {
+        plugins: [Quasar],
+        stubs: {
+          'jlpt-level-selector': true,
+        },
+      },
+    });
+
+    const component = wrapper.vm as any;
+
+    // Wait for error to be set
+    component.fetchDueCount();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    expect(component.dueCountError).toBe('Unable to check due items. Please try again.');
+
+    // Switch to cram mode
+    component.studyMode = 'cram';
+    await wrapper.vm.$nextTick();
+
+    // Call handleStart - in cram mode, it should emit start even with dueCountError
+    component.handleStart();
+    await wrapper.vm.$nextTick();
+
+    // Should emit start event (not retry fetch)
+    const emitted = wrapper.emitted();
+    expect(emitted).toHaveProperty('start');
+    expect(emitted.start).toHaveLength(1);
+    expect(emitted.start![0][0]).toMatchObject({
+      studyMode: 'cram',
+      cardDirection: expect.any(String),
+      jlptLevels: expect.any(Array),
+      showFurigana: expect.any(Boolean),
+    });
+  });
 });
