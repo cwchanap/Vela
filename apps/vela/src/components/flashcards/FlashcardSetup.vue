@@ -186,6 +186,11 @@ async function fetchDueCount() {
 }
 
 function handleStart() {
+  if (dueCountError.value) {
+    fetchDueCount();
+    return;
+  }
+
   emit('start', {
     studyMode: studyMode.value,
     cardDirection: cardDirection.value,

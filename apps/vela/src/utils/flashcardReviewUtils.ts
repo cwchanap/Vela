@@ -8,6 +8,9 @@ import type { ReviewInput } from 'src/services/srsService';
  * Chunk an array into smaller arrays of specified size
  */
 export function chunkArray<T>(array: T[], size: number): T[][] {
+  if (size <= 0) {
+    throw new Error('Chunk size must be a positive integer');
+  }
   const chunks: T[][] = [];
   for (let i = 0; i < array.length; i += size) {
     chunks.push(array.slice(i, i + size));
