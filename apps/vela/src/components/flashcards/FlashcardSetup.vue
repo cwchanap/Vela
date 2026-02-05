@@ -99,7 +99,7 @@
         color="primary"
         size="lg"
         :loading="isLoading"
-        :disable="studyMode === 'srs' && dueCount === 0"
+        :disable="studyMode === 'srs' && dueCount === 0 && !dueCountError"
         data-testid="btn-start-session"
       />
     </q-card-actions>
@@ -143,6 +143,9 @@ let requestId = 0;
 
 const startButtonLabel = computed(() => {
   if (studyMode.value === 'srs') {
+    if (dueCountError.value) {
+      return 'Retry';
+    }
     if (dueCount.value > 0) {
       return `Review ${Math.min(dueCount.value, 20)} Words`;
     }

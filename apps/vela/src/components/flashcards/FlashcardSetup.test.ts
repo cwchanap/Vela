@@ -134,13 +134,6 @@ describe('FlashcardSetup.vue - Race Condition Fix', () => {
       userSub: 'test-user',
       email: 'test@test.com',
     };
-    _authStore.session = {
-      idToken: 'test-token',
-      accessToken: 'test-access',
-      refreshToken: 'test-refresh',
-      userSub: 'test-user',
-      email: 'test@test.com',
-    };
 
     getStatsSpy.mockResolvedValue({ due_today: 20 });
 
