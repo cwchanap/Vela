@@ -264,7 +264,7 @@ function handlePronounce() {
   opacity: 0.7;
 }
 
-.is-flipped .flip-hint {
+.flashcard-wrapper.is-flipped .flip-hint {
   display: none;
 }
 

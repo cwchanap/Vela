@@ -96,6 +96,7 @@ import { useAuthStore } from 'src/stores/auth';
 import { flashcardService } from 'src/services/flashcardService';
 import { pronounceWord } from 'src/services/ttsService';
 import { ReviewInput } from 'src/services/srsService';
+import { chunkArray, mergeReviews, parsePendingReviews } from 'src/utils/flashcardReviewUtils';
 import FlashcardSetup from 'src/components/flashcards/FlashcardSetup.vue';
 import FlashcardCard from 'src/components/flashcards/FlashcardCard.vue';
 import FlashcardRating from 'src/components/flashcards/FlashcardRating.vue';
@@ -143,57 +144,31 @@ function getAlternateAnswers(): string[] {
   return [vocab.hiragana, vocab.katakana, vocab.romaji].filter(Boolean) as string[];
 }
 
-function isReviewInput(value: unknown): value is ReviewInput {
-  if (!value || typeof value !== 'object') return false;
-  const record = value as Record<string, unknown>;
-  return typeof record.vocabulary_id === 'string' && typeof record.quality === 'number';
-}
-
 function readPendingReviews(): ReviewInput[] {
   const key = pendingReviewsKey.value;
   const stored = localStorage.getItem(key);
   if (!stored) return [];
 
-  try {
-    const parsed = JSON.parse(stored) as unknown;
-    if (!Array.isArray(parsed)) {
-      console.warn('Invalid pending flashcard reviews data. Clearing.');
-      localStorage.removeItem(pendingReviewsKey.value);
-      return [];
-    }
-    const filtered = parsed.filter(isReviewInput);
-    if (filtered.length !== parsed.length) {
-      console.warn('Some pending flashcard reviews were invalid and removed.');
-    }
-    // Filter out reviews that don't belong to the current user (if userId is available)
-    const userId = authStore.user?.id;
-    if (userId) {
-      // This check is defensive - the key itself should prevent cross-user access
-      // but we validate in case of manual localStorage manipulation
-      const currentKey = pendingReviewsKey.value;
-      if (!currentKey.endsWith(userId)) {
-        console.warn('Pending reviews key mismatch. Clearing stale data.');
-        localStorage.removeItem(key);
-        return [];
-      }
-    }
-    return filtered;
-  } catch (error) {
-    console.error('Failed to parse pending flashcard reviews:', error);
-    localStorage.removeItem(pendingReviewsKey.value);
+  const { reviews, hadErrors } = parsePendingReviews(stored, { logWarnings: true });
+
+  if (hadErrors && reviews.length === 0) {
+    localStorage.removeItem(key);
     return [];
   }
-}
 
-function mergeReviews(...lists: ReviewInput[][]): ReviewInput[] {
-  const merged = new Map<string, ReviewInput>();
-  lists.forEach((list) => {
-    list.forEach((review: ReviewInput) => {
-      // Use vocabulary_id as key for deduplication (latest rating wins)
-      merged.set(review.vocabulary_id, review);
-    });
-  });
-  return Array.from(merged.values());
+  // Filter out reviews that don't belong to the current user (if userId is available)
+  const userId = authStore.user?.id;
+  if (userId) {
+    // This check is defensive - the key itself should prevent cross-user access
+    // but we validate in case of manual localStorage manipulation
+    const currentKey = pendingReviewsKey.value;
+    if (!currentKey.endsWith(userId)) {
+      console.warn('Pending reviews key mismatch. Clearing stale data.');
+      localStorage.removeItem(key);
+      return [];
+    }
+  }
+  return reviews;
 }
 
 async function retryPendingReviews() {
@@ -372,17 +347,6 @@ async function handlePronounce(vocabulary: Vocabulary) {
 
 const BATCH_SIZE = 100;
 
-/**
- * Chunk an array into smaller arrays of specified size
- */
-function chunkArray<T>(array: T[], size: number): T[][] {
-  const chunks: T[][] = [];
-  for (let i = 0; i < array.length; i += size) {
-    chunks.push(array.slice(i, i + size));
-  }
-  return chunks;
-}
-
 async function submitReviews() {
   if (!authStore.isAuthenticated) return;
   if (isSubmittingReviews.value) return;
@@ -391,11 +355,11 @@ async function submitReviews() {
   if (reviewsToSend.length === 0) return;
 
   isSubmittingReviews.value = true;
+  let successCount = 0;
 
   try {
     // Chunk reviews to stay within backend batch limit
     const chunks = chunkArray(reviewsToSend, BATCH_SIZE);
-    let successCount = 0;
 
     for (const chunk of chunks) {
       await flashcardService.recordBatchReview(chunk);
@@ -407,8 +371,9 @@ async function submitReviews() {
     localStorage.removeItem(pendingReviewsKey.value);
   } catch (error) {
     console.error('Failed to record reviews:', error);
+    const remainingReviews = reviewsToSend.slice(successCount);
     try {
-      localStorage.setItem(pendingReviewsKey.value, JSON.stringify(reviewsToSend));
+      localStorage.setItem(pendingReviewsKey.value, JSON.stringify(remainingReviews));
     } catch (storageError) {
       console.error('Failed to persist pending reviews:', storageError);
       Notify.create({
@@ -419,7 +384,7 @@ async function submitReviews() {
         timeout: 10000, // Longer timeout for important message
       });
     }
-    reviewQueue.value = reviewsToSend;
+    reviewQueue.value = remainingReviews;
     Notify.create({
       type: 'negative',
       message: 'Failed to sync reviews. We will retry later.',

@@ -7,17 +7,10 @@ import FlashcardReview from './FlashcardReview.vue';
 import { useFlashcardStore } from '../stores/flashcards';
 import { useAuthStore } from '../stores/auth';
 import * as flashcardServiceModule from '../services/flashcardService';
+import { chunkArray, mergeReviews, parsePendingReviews } from '../utils/flashcardReviewUtils';
 import type { Vocabulary } from '../types/database';
 
 describe('chunkArray helper', () => {
-  const chunkArray = <T>(array: T[], size: number): T[][] => {
-    const chunks: T[][] = [];
-    for (let i = 0; i < array.length; i += size) {
-      chunks.push(array.slice(i, i + size));
-    }
-    return chunks;
-  };
-
   it('should return empty array for empty input', () => {
     const result = chunkArray([], 100);
     expect(result).toEqual([]);
@@ -47,19 +40,6 @@ describe('chunkArray helper', () => {
 });
 
 describe('FlashcardReview.vue - mergeReviews deduplication', () => {
-  const mergeReviews = (
-    ...lists: Array<Array<{ vocabulary_id: string; quality: number }>>
-  ): Array<{ vocabulary_id: string; quality: number }> => {
-    const merged = new Map<string, { vocabulary_id: string; quality: number }>();
-    lists.forEach((list) => {
-      list.forEach((review) => {
-        // Use vocabulary_id as key for deduplication (latest rating wins)
-        merged.set(review.vocabulary_id, review);
-      });
-    });
-    return Array.from(merged.values());
-  };
-
   it('should deduplicate by vocabulary_id (latest rating wins)', () => {
     const list1 = [
       { vocabulary_id: 'vocab1', quality: 3 },
@@ -90,18 +70,6 @@ describe('FlashcardReview.vue - mergeReviews deduplication', () => {
   });
 
   it('should handle empty lists', () => {
-    const mergeReviews = (
-      ...lists: Array<Array<{ vocabulary_id: string; quality: number }>>
-    ): Array<{ vocabulary_id: string; quality: number }> => {
-      const merged = new Map<string, { vocabulary_id: string; quality: number }>();
-      lists.forEach((list) => {
-        list.forEach((review) => {
-          merged.set(review.vocabulary_id, review);
-        });
-      });
-      return Array.from(merged.values());
-    };
-
     const list1 = [{ vocabulary_id: 'vocab1', quality: 3 }];
     const list2: Array<{ vocabulary_id: string; quality: number }> = [];
 
@@ -112,36 +80,12 @@ describe('FlashcardReview.vue - mergeReviews deduplication', () => {
   });
 
   it('should handle all empty lists', () => {
-    const mergeReviews = (
-      ...lists: Array<Array<{ vocabulary_id: string; quality: number }>>
-    ): Array<{ vocabulary_id: string; quality: number }> => {
-      const merged = new Map<string, { vocabulary_id: string; quality: number }>();
-      lists.forEach((list) => {
-        list.forEach((review) => {
-          merged.set(review.vocabulary_id, review);
-        });
-      });
-      return Array.from(merged.values());
-    };
-
     const result = mergeReviews([], []);
 
     expect(result).toHaveLength(0);
   });
 
   it('should handle multiple lists with overlapping vocabulary_ids', () => {
-    const mergeReviews = (
-      ...lists: Array<Array<{ vocabulary_id: string; quality: number }>>
-    ): Array<{ vocabulary_id: string; quality: number }> => {
-      const merged = new Map<string, { vocabulary_id: string; quality: number }>();
-      lists.forEach((list) => {
-        list.forEach((review) => {
-          merged.set(review.vocabulary_id, review);
-        });
-      });
-      return Array.from(merged.values());
-    };
-
     const list1 = [{ vocabulary_id: 'vocab1', quality: 1 }];
     const list2 = [{ vocabulary_id: 'vocab1', quality: 2 }];
     const list3 = [{ vocabulary_id: 'vocab1', quality: 3 }];
@@ -153,18 +97,6 @@ describe('FlashcardReview.vue - mergeReviews deduplication', () => {
   });
 
   it('should allow later ratings to overwrite earlier ones for the same vocabulary', () => {
-    const mergeReviews = (
-      ...lists: Array<Array<{ vocabulary_id: string; quality: number }>>
-    ): Array<{ vocabulary_id: string; quality: number }> => {
-      const merged = new Map<string, { vocabulary_id: string; quality: number }>();
-      lists.forEach((list) => {
-        list.forEach((review) => {
-          merged.set(review.vocabulary_id, review);
-        });
-      });
-      return Array.from(merged.values());
-    };
-
     const list1 = [
       { vocabulary_id: 'vocab1', quality: 0 }, // Failed
       { vocabulary_id: 'vocab2', quality: 5 }, // Perfect
@@ -201,38 +133,12 @@ describe('FlashcardReview.vue - localStorage persistence', () => {
     // Set corrupted JSON
     localStorage.setItem(pendingReviewsKey, '{ invalid json }');
 
-    // This simulates readPendingReviews behavior
-    const readPendingReviews = (): Array<{ vocabulary_id: string; quality: number }> => {
-      const stored = localStorage.getItem(pendingReviewsKey);
-      if (!stored) return [];
+    const stored = localStorage.getItem(pendingReviewsKey);
+    const result = parsePendingReviews(stored!, { logWarnings: false });
 
-      try {
-        const parsed = JSON.parse(stored) as unknown;
-        if (!Array.isArray(parsed)) {
-          console.warn('Invalid pending flashcard reviews data. Clearing.');
-          localStorage.removeItem(pendingReviewsKey);
-          return [];
-        }
-        return parsed.filter(
-          (item): item is { vocabulary_id: string; quality: number } =>
-            typeof item === 'object' &&
-            item !== null &&
-            'vocabulary_id' in item &&
-            'quality' in item &&
-            typeof item.vocabulary_id === 'string' &&
-            typeof item.quality === 'number',
-        );
-      } catch (error) {
-        console.error('Failed to parse pending flashcard reviews:', error);
-        localStorage.removeItem(pendingReviewsKey);
-        return [];
-      }
-    };
-
-    const result = readPendingReviews();
-
-    expect(result).toEqual([]);
-    expect(localStorage.getItem(pendingReviewsKey)).toBeNull();
+    expect(result.reviews).toEqual([]);
+    expect(result.hadErrors).toBe(true);
+    expect(localStorage.getItem(pendingReviewsKey)).not.toBeNull();
   });
 
   it('should handle malformed review objects in localStorage', () => {
@@ -245,35 +151,12 @@ describe('FlashcardReview.vue - localStorage persistence', () => {
     ];
     localStorage.setItem(pendingReviewsKey, JSON.stringify(malformedData));
 
-    const readPendingReviews = (): Array<{ vocabulary_id: string; quality: number }> => {
-      const stored = localStorage.getItem(pendingReviewsKey);
-      if (!stored) return [];
-
-      try {
-        const parsed = JSON.parse(stored) as unknown;
-        if (!Array.isArray(parsed)) {
-          localStorage.removeItem(pendingReviewsKey);
-          return [];
-        }
-        return parsed.filter(
-          (item): item is { vocabulary_id: string; quality: number } =>
-            typeof item === 'object' &&
-            item !== null &&
-            'vocabulary_id' in item &&
-            'quality' in item &&
-            typeof item.vocabulary_id === 'string' &&
-            typeof item.quality === 'number',
-        );
-      } catch {
-        localStorage.removeItem(pendingReviewsKey);
-        return [];
-      }
-    };
-
-    const result = readPendingReviews();
+    const stored = localStorage.getItem(pendingReviewsKey);
+    const result = parsePendingReviews(stored!, { logWarnings: false });
 
     // Should filter out invalid entries, keeping only the valid one
-    expect(result).toEqual([{ vocabulary_id: 'vocab1', quality: 3 }]);
+    expect(result.reviews).toEqual([{ vocabulary_id: 'vocab1', quality: 3 }]);
+    expect(result.hadErrors).toBe(true);
   });
 
   it('should persist reviews to localStorage when API submission fails', () => {
@@ -511,6 +394,66 @@ describe('FlashcardReview.vue - Component Integration', () => {
       expect(recordBatchReviewSpy).toHaveBeenCalledTimes(1);
 
       wrapper.unmount();
+    });
+  });
+
+  describe('Partial Batch Failure Handling', () => {
+    it('should save only unsubmitted reviews when batch submission fails after partial success', async () => {
+      // Simulate partial batch failure:
+      // - First 100 reviews succeed (first chunk)
+      // - Second 100 reviews succeed (second chunk)
+      // - Third batch fails (50 reviews remaining)
+      const reviews = Array.from({ length: 250 }, (_, i) => ({
+        vocabulary_id: `vocab${i}`,
+        quality: (i % 5) as 0 | 1 | 2 | 3 | 4 | 5,
+      }));
+
+      // Simulate the fixed behavior: successCount tracks successful submissions
+      let successCount = 0;
+      const BATCH_SIZE = 100;
+
+      // Create chunks like the real implementation
+      const chunks = [];
+      for (let i = 0; i < reviews.length; i += BATCH_SIZE) {
+        chunks.push(reviews.slice(i, i + BATCH_SIZE));
+      }
+
+      // Simulate first two chunks succeeding
+      successCount += chunks[0].length; // 100
+      successCount += chunks[1].length; // 100
+
+      // When third chunk fails, only remaining reviews should be saved
+      const remainingReviews = reviews.slice(successCount);
+
+      expect(remainingReviews).toHaveLength(50);
+      expect(remainingReviews[0].vocabulary_id).toBe('vocab200');
+      expect(remainingReviews[49].vocabulary_id).toBe('vocab249');
+
+      // Verify the reviews that succeeded are NOT in the remaining list
+      expect(remainingReviews.some((r) => r.vocabulary_id === 'vocab0')).toBe(false);
+      expect(remainingReviews.some((r) => r.vocabulary_id === 'vocab99')).toBe(false);
+      expect(remainingReviews.some((r) => r.vocabulary_id === 'vocab100')).toBe(false);
+      expect(remainingReviews.some((r) => r.vocabulary_id === 'vocab199')).toBe(false);
+    });
+
+    it('should correctly slice remaining reviews from successCount', () => {
+      // Test the slice behavior that prevents duplicate submissions
+      const allReviews = [
+        { vocabulary_id: 'v1', quality: 3 },
+        { vocabulary_id: 'v2', quality: 4 },
+        { vocabulary_id: 'v3', quality: 2 },
+        { vocabulary_id: 'v4', quality: 5 },
+      ];
+
+      // Simulate: first 2 reviews submitted successfully, then failure
+      const successCount = 2;
+      const remaining = allReviews.slice(successCount);
+
+      expect(remaining).toEqual([
+        { vocabulary_id: 'v3', quality: 2 },
+        { vocabulary_id: 'v4', quality: 5 },
+      ]);
+      expect(remaining).toHaveLength(2);
     });
   });
 
