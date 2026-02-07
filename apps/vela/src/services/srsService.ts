@@ -94,7 +94,7 @@ async function getAuthHeader(): Promise<Record<string, string>> {
 /**
  * Helper to make authenticated JSON requests
  */
-async function httpJson<T>(input: RequestInfo, init?: RequestInit): Promise<T> {
+export async function httpJson<T>(input: RequestInfo, init?: RequestInit): Promise<T> {
   const headers = await getAuthHeader();
 
   const res = await fetch(input, {
@@ -216,7 +216,7 @@ function qualityFromCorrectness(
   wasHesitant = false,
   wasClose = false,
   wasBlackout = false,
-): number {
+): ReviewInput['quality'] {
   if (isCorrect) {
     if (wasFast) return 5;
     if (wasHesitant) return 3;

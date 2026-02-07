@@ -75,7 +75,7 @@ import JlptLevelSelector from 'src/components/games/JlptLevelSelector.vue';
 import { Notify } from 'quasar';
 import type { Vocabulary, JLPTLevel } from 'src/types/database';
 import { shuffleArray } from 'src/utils/array';
-import type { QualityRating } from 'src/stores/flashcards';
+import type { ReviewInput } from 'src/services/srsService';
 
 const gameStore = useGameStore();
 const progressStore = useProgressStore();
@@ -94,7 +94,7 @@ const srsMode = ref(false);
 const dueCount = ref(0);
 
 // Queue SRS reviews to ensure they're recorded even if user navigates away
-const srsReviewQueue = ref<Array<{ vocabularyId: string; quality: QualityRating }>>([]);
+const srsReviewQueue = ref<Array<{ vocabularyId: string; quality: ReviewInput['quality'] }>>([]);
 
 const currentQuestion = computed(() => {
   return gameStore.questions[gameStore.currentQuestionIndex];
@@ -255,7 +255,7 @@ async function handleAnswer(selectedAnswer: string) {
 
   // Queue SRS review if user is authenticated
   if (authStore.isAuthenticated) {
-    const quality = srsService.qualityFromCorrectness(isCorrect) as QualityRating;
+    const quality = srsService.qualityFromCorrectness(isCorrect);
     srsReviewQueue.value.push({
       vocabularyId: currentQuestion.value.word.id,
       quality,

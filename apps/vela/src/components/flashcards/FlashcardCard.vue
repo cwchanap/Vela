@@ -9,6 +9,7 @@
       @keydown.space.prevent="handleCardClick"
       tabindex="0"
       role="button"
+      aria-label="Flip flashcard"
     >
       <!-- Front of card -->
       <div class="flashcard-face flashcard-front">
@@ -44,6 +45,7 @@
               class="pronounce-btn"
               @click.stop="handlePronounce"
               data-testid="btn-pronounce"
+              aria-label="Play pronunciation"
             >
               <q-tooltip>Listen to pronunciation</q-tooltip>
             </q-btn>
