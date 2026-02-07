@@ -469,6 +469,23 @@ describe('flashcards store', () => {
         expect(store.stats.cardsReviewed).toBe(0);
         expect(store.isLoading).toBe(false);
       });
+
+      it('should reset user preference fields to defaults', () => {
+        const store = useFlashcardStore();
+
+        // Change all preferences from their defaults
+        store.setStudyMode('cram');
+        store.setCardDirection('en-to-jp');
+        store.setJlptLevels([5, 4]);
+        store.setShowFurigana(false);
+
+        store.reset();
+
+        expect(store.studyMode).toBe('srs');
+        expect(store.cardDirection).toBe('jp-to-en');
+        expect(store.jlptLevels).toEqual([]);
+        expect(store.showFurigana).toBe(true);
+      });
     });
 
     describe('setLoading', () => {

@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { flashcardService } from './flashcardService';
 import { srsService } from './srsService';
 import type { Vocabulary, UserVocabularyProgress } from 'src/types/database';
+import type { ReviewInput } from './srsService';
 
 // Mock API utility
 vi.mock('src/utils/api', () => ({
@@ -227,7 +228,7 @@ describe('flashcardService', () => {
 
   describe('recordBatchReview', () => {
     it('should delegate to SRS service', async () => {
-      const reviews = [
+      const reviews: ReviewInput[] = [
         { vocabulary_id: 'vocab-1', quality: 4 },
         { vocabulary_id: 'vocab-2', quality: 3 },
       ];

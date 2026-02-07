@@ -7,7 +7,12 @@ import FlashcardReview from './FlashcardReview.vue';
 import { useFlashcardStore } from '../stores/flashcards';
 import { useAuthStore } from '../stores/auth';
 import * as flashcardServiceModule from '../services/flashcardService';
-import { chunkArray, mergeReviews, parsePendingReviews } from '../utils/flashcardReviewUtils';
+import {
+  chunkArray,
+  mergeReviews,
+  parsePendingReviews,
+  isReviewInput,
+} from '../utils/flashcardReviewUtils';
 import type { Vocabulary } from '../types/database';
 
 describe('chunkArray helper', () => {
@@ -120,6 +125,38 @@ describe('FlashcardReview.vue - mergeReviews deduplication', () => {
 
     const vocab2Review = result.find((r) => r.vocabulary_id === 'vocab2');
     expect(vocab2Review?.quality).toBe(1);
+  });
+});
+
+describe('isReviewInput type guard', () => {
+  it('should accept valid ReviewInput objects', () => {
+    expect(isReviewInput({ vocabulary_id: 'v1', quality: 0 })).toBe(true);
+    expect(isReviewInput({ vocabulary_id: 'v1', quality: 3 })).toBe(true);
+    expect(isReviewInput({ vocabulary_id: 'v1', quality: 5 })).toBe(true);
+  });
+
+  it('should reject fractional quality values', () => {
+    expect(isReviewInput({ vocabulary_id: 'v1', quality: 2.7 })).toBe(false);
+    expect(isReviewInput({ vocabulary_id: 'v1', quality: 0.5 })).toBe(false);
+    expect(isReviewInput({ vocabulary_id: 'v1', quality: 4.9 })).toBe(false);
+  });
+
+  it('should reject out-of-range quality values', () => {
+    expect(isReviewInput({ vocabulary_id: 'v1', quality: -1 })).toBe(false);
+    expect(isReviewInput({ vocabulary_id: 'v1', quality: 6 })).toBe(false);
+  });
+
+  it('should reject non-object values', () => {
+    expect(isReviewInput(null)).toBe(false);
+    expect(isReviewInput(undefined)).toBe(false);
+    expect(isReviewInput('string')).toBe(false);
+    expect(isReviewInput(42)).toBe(false);
+  });
+
+  it('should reject objects with missing fields', () => {
+    expect(isReviewInput({ vocabulary_id: 'v1' })).toBe(false);
+    expect(isReviewInput({ quality: 3 })).toBe(false);
+    expect(isReviewInput({})).toBe(false);
   });
 });
 
@@ -526,6 +563,97 @@ describe('FlashcardReview.vue - Component Integration', () => {
       await flushPromises();
 
       expect(flashcardStore.currentCard?.isFlipped).toBe(true);
+
+      wrapper.unmount();
+    });
+  });
+
+  describe('Cram Mode SRS Gating', () => {
+    it('should not queue SRS reviews in cram mode', async () => {
+      const recordBatchReviewSpy = vi
+        .spyOn(flashcardServiceModule.flashcardService, 'recordBatchReview')
+        .mockResolvedValue();
+
+      const wrapper = mount(FlashcardReview, {
+        global: {
+          plugins: [Quasar],
+          stubs: {
+            'flashcard-setup': true,
+            'flashcard-card': true,
+            'flashcard-input': true,
+            'flashcard-rating': true,
+            'flashcard-summary': true,
+          },
+        },
+      });
+
+      const flashcardStore = useFlashcardStore();
+      const authStore = useAuthStore();
+      const componentInstance = wrapper.vm as any;
+
+      authStore.session = {
+        user: { id: 'test-user', email: 'test@test.com' },
+        provider: 'cognito',
+      } as any;
+
+      // Start a cram session with a single card
+      flashcardStore.setStudyMode('cram');
+      flashcardStore.startSession([mockVocabulary[0]]);
+      componentInstance.showSetup = false;
+      await flushPromises();
+
+      // Rate the card — should NOT queue a review in cram mode
+      await componentInstance.handleRate(4);
+      await flushPromises();
+
+      // recordBatchReview should not be called (no reviews to submit)
+      expect(recordBatchReviewSpy).not.toHaveBeenCalled();
+
+      wrapper.unmount();
+    });
+
+    it('should queue SRS reviews in srs mode', async () => {
+      const recordBatchReviewSpy = vi
+        .spyOn(flashcardServiceModule.flashcardService, 'recordBatchReview')
+        .mockResolvedValue();
+
+      const wrapper = mount(FlashcardReview, {
+        global: {
+          plugins: [Quasar],
+          stubs: {
+            'flashcard-setup': true,
+            'flashcard-card': true,
+            'flashcard-input': true,
+            'flashcard-rating': true,
+            'flashcard-summary': true,
+          },
+        },
+      });
+
+      const flashcardStore = useFlashcardStore();
+      const authStore = useAuthStore();
+      const componentInstance = wrapper.vm as any;
+
+      authStore.session = {
+        user: { id: 'test-user', email: 'test@test.com' },
+        provider: 'cognito',
+      } as any;
+
+      // Start an SRS session with a single card
+      flashcardStore.setStudyMode('srs');
+      flashcardStore.startSession([mockVocabulary[0]]);
+      componentInstance.showSetup = false;
+      await flushPromises();
+
+      // Rate the card — should queue a review in SRS mode
+      await componentInstance.handleRate(4);
+      await flushPromises();
+
+      // recordBatchReview SHOULD be called with the queued review
+      expect(recordBatchReviewSpy).toHaveBeenCalledTimes(1);
+      expect(recordBatchReviewSpy).toHaveBeenCalledWith(
+        expect.arrayContaining([expect.objectContaining({ vocabulary_id: 'vocab1', quality: 4 })]),
+      );
 
       wrapper.unmount();
     });

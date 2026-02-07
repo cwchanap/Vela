@@ -41,6 +41,7 @@ export function isReviewInput(value: unknown): value is ReviewInput {
   return (
     typeof record.vocabulary_id === 'string' &&
     typeof record.quality === 'number' &&
+    Number.isInteger(record.quality) &&
     record.quality >= 0 &&
     record.quality <= 5
   );
