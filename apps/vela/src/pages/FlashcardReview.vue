@@ -95,7 +95,7 @@ import { useFlashcardStore, type StudyMode, type CardDirection } from 'src/store
 import { useAuthStore } from 'src/stores/auth';
 import { flashcardService } from 'src/services/flashcardService';
 import { pronounceWord } from 'src/services/ttsService';
-import { ReviewInput } from 'src/services/srsService';
+import type { ReviewInput } from 'src/services/srsService';
 import { chunkArray, mergeReviews, parsePendingReviews } from 'src/utils/flashcardReviewUtils';
 import FlashcardSetup from 'src/components/flashcards/FlashcardSetup.vue';
 import FlashcardCard from 'src/components/flashcards/FlashcardCard.vue';
@@ -297,8 +297,8 @@ async function handleRate(rating: QualityRating) {
 
   const vocabularyId = flashcardStore.currentCard.vocabulary.id;
 
-  // Queue the review for batch submission
-  if (authStore.isAuthenticated) {
+  // Queue the review for batch submission (only in SRS mode)
+  if (authStore.isAuthenticated && flashcardStore.studyMode === 'srs') {
     reviewQueue.value.push({
       vocabulary_id: vocabularyId,
       quality: rating,

@@ -287,8 +287,12 @@ export const useFlashcardStore = defineStore('flashcards', {
       this.stats.endTime = new Date();
     },
 
-    /** Reset the store to initial state */
+    /** Reset the store to initial state (including user preferences) */
     reset() {
+      this.studyMode = 'srs';
+      this.cardDirection = 'jp-to-en';
+      this.jlptLevels = [];
+      this.showFurigana = true;
       this.cards = [];
       this.currentIndex = 0;
       this.sessionActive = false;

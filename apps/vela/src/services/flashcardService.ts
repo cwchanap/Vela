@@ -93,7 +93,7 @@ function validateAnswer(userAnswer: string, vocabulary: Vocabulary): boolean {
  * @param vocabularyId - The vocabulary ID
  * @param quality - Quality rating (0-5)
  */
-async function recordReview(vocabularyId: string, quality: number): Promise<void> {
+async function recordReview(vocabularyId: string, quality: ReviewInput['quality']): Promise<void> {
   await srsService.recordReview(vocabularyId, quality);
 }
 
