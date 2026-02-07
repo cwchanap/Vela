@@ -1,5 +1,5 @@
 import type { Vocabulary, JLPTLevel } from 'src/types/database';
-import { srsService, type DueItemsResponse, type ReviewInput } from './srsService';
+import { srsService, type DueItemsResponse, type ReviewInput, httpJson } from './srsService';
 import { getApiUrl } from 'src/utils/api';
 
 /**
@@ -25,13 +25,7 @@ async function getVocabularyForCram(limit = 20, jlptLevels?: JLPTLevel[]): Promi
     url += `&jlpt=${jlptLevels.join(',')}`;
   }
 
-  const response = await fetch(url);
-
-  if (!response.ok) {
-    throw new Error('Failed to fetch vocabulary');
-  }
-
-  const data: VocabularyResponse = await response.json();
+  const data = await httpJson<VocabularyResponse>(url);
   return data.vocabulary;
 }
 

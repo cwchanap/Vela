@@ -179,14 +179,12 @@ async function retryPendingReviews() {
   // Chunk reviews to stay within backend batch limit
   const chunks = chunkArray(pendingReviews, BATCH_SIZE);
   let successCount = 0;
-  let hasError = false;
 
   for (const chunk of chunks) {
     try {
       await flashcardService.recordBatchReview(chunk);
       successCount += chunk.length;
     } catch (error) {
-      hasError = true;
       console.error('Failed to sync batch:', error);
       // Save remaining chunks (including current failed chunk)
       const remainingReviews = pendingReviews.slice(successCount);
@@ -205,9 +203,7 @@ async function retryPendingReviews() {
   }
 
   // All chunks succeeded
-  if (!hasError) {
-    localStorage.removeItem(pendingReviewsKey.value);
-  }
+  localStorage.removeItem(pendingReviewsKey.value);
 }
 
 async function handleStart(config: {

@@ -14,6 +14,7 @@ import {
   isReviewInput,
 } from '../utils/flashcardReviewUtils';
 import type { Vocabulary } from '../types/database';
+import type { ReviewInput } from '../services/srsService';
 
 describe('chunkArray helper', () => {
   it('should return empty array for empty input', () => {
@@ -52,12 +53,12 @@ describe('chunkArray helper', () => {
 
 describe('FlashcardReview.vue - mergeReviews deduplication', () => {
   it('should deduplicate by vocabulary_id (latest rating wins)', () => {
-    const list1 = [
+    const list1: ReviewInput[] = [
       { vocabulary_id: 'vocab1', quality: 3 },
       { vocabulary_id: 'vocab2', quality: 4 },
     ];
 
-    const list2 = [
+    const list2: ReviewInput[] = [
       { vocabulary_id: 'vocab1', quality: 5 }, // Should overwrite the first vocab1 entry
       { vocabulary_id: 'vocab3', quality: 2 },
     ];
@@ -81,8 +82,8 @@ describe('FlashcardReview.vue - mergeReviews deduplication', () => {
   });
 
   it('should handle empty lists', () => {
-    const list1 = [{ vocabulary_id: 'vocab1', quality: 3 }];
-    const list2: Array<{ vocabulary_id: string; quality: number }> = [];
+    const list1: ReviewInput[] = [{ vocabulary_id: 'vocab1', quality: 3 }];
+    const list2: ReviewInput[] = [];
 
     const result = mergeReviews(list1, list2);
 
@@ -97,9 +98,9 @@ describe('FlashcardReview.vue - mergeReviews deduplication', () => {
   });
 
   it('should handle multiple lists with overlapping vocabulary_ids', () => {
-    const list1 = [{ vocabulary_id: 'vocab1', quality: 1 }];
-    const list2 = [{ vocabulary_id: 'vocab1', quality: 2 }];
-    const list3 = [{ vocabulary_id: 'vocab1', quality: 3 }];
+    const list1: ReviewInput[] = [{ vocabulary_id: 'vocab1', quality: 1 }];
+    const list2: ReviewInput[] = [{ vocabulary_id: 'vocab1', quality: 2 }];
+    const list3: ReviewInput[] = [{ vocabulary_id: 'vocab1', quality: 3 }];
 
     const result = mergeReviews(list1, list2, list3);
 
@@ -108,12 +109,12 @@ describe('FlashcardReview.vue - mergeReviews deduplication', () => {
   });
 
   it('should allow later ratings to overwrite earlier ones for the same vocabulary', () => {
-    const list1 = [
+    const list1: ReviewInput[] = [
       { vocabulary_id: 'vocab1', quality: 0 }, // Failed
       { vocabulary_id: 'vocab2', quality: 5 }, // Perfect
     ];
 
-    const list2 = [
+    const list2: ReviewInput[] = [
       { vocabulary_id: 'vocab1', quality: 4 }, // Good - should overwrite
       { vocabulary_id: 'vocab2', quality: 1 }, // Hard - should overwrite
     ];
@@ -481,7 +482,7 @@ describe('FlashcardReview.vue - Component Integration', () => {
 
     it('should correctly slice remaining reviews from successCount', () => {
       // Test the slice behavior that prevents duplicate submissions
-      const allReviews = [
+      const allReviews: ReviewInput[] = [
         { vocabulary_id: 'v1', quality: 3 },
         { vocabulary_id: 'v2', quality: 4 },
         { vocabulary_id: 'v3', quality: 2 },
