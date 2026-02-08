@@ -89,7 +89,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, onMounted } from 'vue';
+import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue';
 import { Notify } from 'quasar';
 import { useFlashcardStore, type StudyMode, type CardDirection } from 'src/stores/flashcards';
 import { useAuthStore } from 'src/stores/auth';
@@ -472,6 +472,19 @@ watch(
 
 onMounted(() => {
   void retryPendingReviews();
+});
+
+onBeforeUnmount(() => {
+  // Persist any queued reviews to localStorage so they survive navigation/refresh
+  if (reviewQueue.value.length > 0 && authStore.isAuthenticated) {
+    const pendingReviews = readPendingReviews();
+    const merged = mergeReviews(pendingReviews, reviewQueue.value);
+    try {
+      localStorage.setItem(pendingReviewsKey.value, JSON.stringify(merged));
+    } catch (storageError) {
+      console.error('Failed to persist queued reviews on unmount:', storageError);
+    }
+  }
 });
 </script>
 
