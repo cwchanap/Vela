@@ -369,15 +369,15 @@ describe('flashcards store', () => {
         expect(store.currentIndex).toBe(1);
       });
 
-      it('should track correct count for HARD or better ratings', () => {
+      it('should track HARD rating as incorrect (only GOOD+ is correct)', () => {
         const store = useFlashcardStore();
         store.startSession(mockVocabulary);
         store.flipCard();
 
         store.rateCard(QUALITY_RATINGS.HARD);
 
-        expect(store.stats.correctCount).toBe(1);
-        expect(store.stats.incorrectCount).toBe(0);
+        expect(store.stats.correctCount).toBe(0);
+        expect(store.stats.incorrectCount).toBe(1);
       });
 
       it('should track incorrect count for AGAIN rating', () => {

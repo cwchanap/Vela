@@ -96,7 +96,12 @@ import { useAuthStore } from 'src/stores/auth';
 import { flashcardService } from 'src/services/flashcardService';
 import { pronounceWord } from 'src/services/ttsService';
 import type { ReviewInput } from 'src/services/srsService';
-import { chunkArray, mergeReviews, parsePendingReviews } from 'src/utils/flashcardReviewUtils';
+import {
+  chunkArray,
+  mergeReviews,
+  parsePendingReviews,
+  extractFailedReviews,
+} from 'src/utils/flashcardReviewUtils';
 import FlashcardSetup from 'src/components/flashcards/FlashcardSetup.vue';
 import FlashcardCard from 'src/components/flashcards/FlashcardCard.vue';
 import FlashcardRating from 'src/components/flashcards/FlashcardRating.vue';
@@ -156,18 +161,6 @@ function readPendingReviews(): ReviewInput[] {
     return [];
   }
 
-  // Filter out reviews that don't belong to the current user (if userId is available)
-  const userId = authStore.user?.id;
-  if (userId) {
-    // This check is defensive - the key itself should prevent cross-user access
-    // but we validate in case of manual localStorage manipulation
-    const currentKey = pendingReviewsKey.value;
-    if (!currentKey.endsWith(userId)) {
-      console.warn('Pending reviews key mismatch. Clearing stale data.');
-      localStorage.removeItem(key);
-      return [];
-    }
-  }
   return reviews;
 }
 
@@ -180,14 +173,19 @@ async function retryPendingReviews() {
   const chunks = chunkArray(pendingReviews, BATCH_SIZE);
   let successCount = 0;
 
+  const allFailedReviews: ReviewInput[] = [];
+
   for (const chunk of chunks) {
     try {
-      await flashcardService.recordBatchReview(chunk);
-      successCount += chunk.length;
+      const response = await flashcardService.recordBatchReview(chunk);
+      const failed = extractFailedReviews(chunk, response);
+      allFailedReviews.push(...failed);
+      successCount += chunk.length - failed.length;
     } catch (error) {
       console.error('Failed to sync batch:', error);
-      // Save remaining chunks (including current failed chunk)
-      const remainingReviews = pendingReviews.slice(successCount);
+      // Save remaining unprocessed chunks + any partial failures so far
+      const unprocessedReviews = pendingReviews.slice(successCount + allFailedReviews.length);
+      const remainingReviews = mergeReviews(allFailedReviews, chunk, unprocessedReviews);
       try {
         localStorage.setItem(pendingReviewsKey.value, JSON.stringify(remainingReviews));
       } catch (storageError) {
@@ -202,8 +200,16 @@ async function retryPendingReviews() {
     }
   }
 
-  // All chunks succeeded
-  localStorage.removeItem(pendingReviewsKey.value);
+  // Persist any partial failures for retry
+  if (allFailedReviews.length > 0) {
+    try {
+      localStorage.setItem(pendingReviewsKey.value, JSON.stringify(allFailedReviews));
+    } catch (storageError) {
+      console.error('Failed to persist partially failed reviews:', storageError);
+    }
+  } else {
+    localStorage.removeItem(pendingReviewsKey.value);
+  }
 }
 
 async function handleStart(config: {
@@ -294,11 +300,14 @@ async function handleRate(rating: QualityRating) {
   const vocabularyId = flashcardStore.currentCard.vocabulary.id;
 
   // Queue the review for batch submission (only in SRS mode)
+  // Use dedup: latest rating wins if same vocabulary_id appears again
   if (authStore.isAuthenticated && flashcardStore.studyMode === 'srs') {
-    reviewQueue.value.push({
-      vocabulary_id: vocabularyId,
-      quality: rating,
-    });
+    const existingIdx = reviewQueue.value.findIndex((r) => r.vocabulary_id === vocabularyId);
+    if (existingIdx >= 0) {
+      reviewQueue.value[existingIdx] = { vocabulary_id: vocabularyId, quality: rating };
+    } else {
+      reviewQueue.value.push({ vocabulary_id: vocabularyId, quality: rating });
+    }
   }
 
   // Rate card and move to next
@@ -356,15 +365,29 @@ async function submitReviews() {
   try {
     // Chunk reviews to stay within backend batch limit
     const chunks = chunkArray(reviewsToSend, BATCH_SIZE);
+    const allFailedReviews: ReviewInput[] = [];
 
     for (const chunk of chunks) {
-      await flashcardService.recordBatchReview(chunk);
-      successCount += chunk.length;
+      const response = await flashcardService.recordBatchReview(chunk);
+      const failed = extractFailedReviews(chunk, response);
+      allFailedReviews.push(...failed);
+      successCount += chunk.length - failed.length;
     }
 
     console.log(`Successfully recorded ${successCount} reviews in ${chunks.length} batch(es)`);
     reviewQueue.value = [];
-    localStorage.removeItem(pendingReviewsKey.value);
+
+    // Persist any partial failures for retry
+    if (allFailedReviews.length > 0) {
+      console.warn(`${allFailedReviews.length} reviews failed and will be retried later`);
+      try {
+        localStorage.setItem(pendingReviewsKey.value, JSON.stringify(allFailedReviews));
+      } catch (storageError) {
+        console.error('Failed to persist partially failed reviews:', storageError);
+      }
+    } else {
+      localStorage.removeItem(pendingReviewsKey.value);
+    }
   } catch (error) {
     console.error('Failed to record reviews:', error);
     const remainingReviews = reviewsToSend.slice(successCount);
@@ -532,8 +555,11 @@ onBeforeUnmount(() => {
   background: rgba(255, 255, 255, 0.9);
   z-index: 1000;
 }
+</style>
 
-:deep(body.body--dark) .loading-overlay {
+<style>
+/* Dark mode - unscoped to properly target body ancestor */
+body.body--dark .loading-overlay {
   background: rgba(0, 0, 0, 0.9);
 }
 </style>

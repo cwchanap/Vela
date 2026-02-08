@@ -239,9 +239,10 @@ export const useFlashcardStore = defineStore('flashcards', {
       this.stats.cardsReviewed++;
 
       // For JP to EN mode, rating determines correctness
+      // GOOD and EASY count as correct; AGAIN and HARD count as incorrect
       // For EN to JP mode, correctness was already determined by validateAnswer
       if (this.cardDirection === 'jp-to-en') {
-        if (rating >= QUALITY_RATINGS.HARD) {
+        if (rating >= QUALITY_RATINGS.GOOD) {
           this.stats.correctCount++;
         } else {
           this.stats.incorrectCount++;
