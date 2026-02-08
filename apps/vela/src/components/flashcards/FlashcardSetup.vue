@@ -99,7 +99,7 @@
         color="primary"
         size="lg"
         :loading="isLoading"
-        :disable="studyMode === 'srs' && dueCount === 0 && !dueCountError"
+        :disable="studyMode === 'srs' && (!isAuthenticated || (dueCount === 0 && !dueCountError))"
         data-testid="btn-start-session"
       />
     </q-card-actions>

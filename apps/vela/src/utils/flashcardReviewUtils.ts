@@ -2,7 +2,7 @@
  * Utility functions for flashcard review operations
  */
 
-import type { ReviewInput } from 'src/services/srsService';
+import type { ReviewInput, BatchReviewResponse } from 'src/services/srsService';
 
 /**
  * Chunk an array into smaller arrays of specified size
@@ -86,4 +86,15 @@ export function parsePendingReviews(
     }
     return { reviews: [], hadErrors: true };
   }
+}
+
+/**
+ * Extract reviews that failed from a batch response, cross-referencing with the original input
+ */
+export function extractFailedReviews(
+  sentReviews: ReviewInput[],
+  response: BatchReviewResponse,
+): ReviewInput[] {
+  const failedIds = new Set(response.results.filter((r) => !r.success).map((r) => r.vocabulary_id));
+  return sentReviews.filter((r) => failedIds.has(r.vocabulary_id));
 }
