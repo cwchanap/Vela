@@ -361,11 +361,11 @@ async function submitReviews() {
 
   isSubmittingReviews.value = true;
   let successCount = 0;
+  const allFailedReviews: ReviewInput[] = [];
 
   try {
     // Chunk reviews to stay within backend batch limit
     const chunks = chunkArray(reviewsToSend, BATCH_SIZE);
-    const allFailedReviews: ReviewInput[] = [];
 
     for (const chunk of chunks) {
       const response = await flashcardService.recordBatchReview(chunk);
@@ -390,9 +390,12 @@ async function submitReviews() {
     }
   } catch (error) {
     console.error('Failed to record reviews:', error);
+    // Combine: (1) per-item failures from earlier chunks (allFailedReviews)
+    //          (2) unprocessed items from the failed chunk onward (remainingReviews)
     const remainingReviews = reviewsToSend.slice(successCount);
+    const reviewsToRetry = mergeReviews(allFailedReviews, remainingReviews);
     try {
-      localStorage.setItem(pendingReviewsKey.value, JSON.stringify(remainingReviews));
+      localStorage.setItem(pendingReviewsKey.value, JSON.stringify(reviewsToRetry));
     } catch (storageError) {
       console.error('Failed to persist pending reviews:', storageError);
       Notify.create({
@@ -403,7 +406,7 @@ async function submitReviews() {
         timeout: 10000, // Longer timeout for important message
       });
     }
-    reviewQueue.value = remainingReviews;
+    reviewQueue.value = reviewsToRetry;
     Notify.create({
       type: 'negative',
       message: 'Failed to sync reviews. We will retry later.',

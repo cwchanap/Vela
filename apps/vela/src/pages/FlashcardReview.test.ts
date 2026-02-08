@@ -486,6 +486,74 @@ describe('FlashcardReview.vue - Component Integration', () => {
       expect(remainingReviews.some((r) => r.vocabulary_id === 'vocab199')).toBe(false);
     });
 
+    it('should preserve earlier failed reviews when later batch throws', () => {
+      // Scenario: First chunk has per-item failures, second chunk throws
+      // This tests the fix for the P1 bug where earlier failed reviews
+      // were dropped when a later batch threw an error.
+
+      const chunk1: ReviewInput[] = [
+        { vocabulary_id: 'vocab1', quality: 3 },
+        { vocabulary_id: 'vocab2', quality: 4 },
+        { vocabulary_id: 'vocab3', quality: 5 },
+      ];
+
+      const chunk2: ReviewInput[] = [
+        { vocabulary_id: 'vocab4', quality: 2 },
+        { vocabulary_id: 'vocab5', quality: 3 },
+      ];
+
+      // Simulate: chunk1 had 2 per-item failures (vocab2, vocab3 failed)
+      // Only vocab1 succeeded from chunk1
+      const allFailedReviews: ReviewInput[] = [
+        { vocabulary_id: 'vocab2', quality: 4 },
+        { vocabulary_id: 'vocab3', quality: 5 },
+      ];
+
+      // successCount = 1 (only vocab1 succeeded)
+      const successCount = 1;
+
+      // Chunk2 throws before any items succeed
+      // When catch block runs:
+      // - successCount = 1 (vocab1 succeeded)
+      // - allFailedReviews = [vocab2, vocab3] (failed in chunk1)
+      // - remainingReviews = allReviews.slice(1) = [vocab2, vocab3, vocab4, vocab5]
+
+      const allReviews = [...chunk1, ...chunk2];
+      const remainingReviews = allReviews.slice(successCount);
+
+      // Without the fix, only remainingReviews would be saved
+      // This would include vocab2, vocab3 (as duplicates) but not mark them as failed
+      expect(remainingReviews).toHaveLength(4);
+      expect(remainingReviews.map((r) => r.vocabulary_id)).toContain('vocab2');
+      expect(remainingReviews.map((r) => r.vocabulary_id)).toContain('vocab3');
+      expect(remainingReviews.map((r) => r.vocabulary_id)).toContain('vocab4');
+      expect(remainingReviews.map((r) => r.vocabulary_id)).toContain('vocab5');
+
+      // With the fix, mergeReviews combines allFailedReviews with remainingReviews
+      // This ensures vocab2 and vocab3 are definitely included (from allFailedReviews)
+      const reviewsToRetry = mergeReviews(allFailedReviews, remainingReviews);
+
+      // Should include all 4 unique items: vocab2, vocab3 (from allFailedReviews),
+      // and vocab4, vocab5 (from remainingReviews)
+      // Note: mergeReviews deduplicates, so vocab2/vocab3 appear once despite being in both arrays
+      expect(reviewsToRetry).toHaveLength(4);
+      expect(reviewsToRetry.some((r) => r.vocabulary_id === 'vocab2')).toBe(true);
+      expect(reviewsToRetry.some((r) => r.vocabulary_id === 'vocab3')).toBe(true);
+      expect(reviewsToRetry.some((r) => r.vocabulary_id === 'vocab4')).toBe(true);
+      expect(reviewsToRetry.some((r) => r.vocabulary_id === 'vocab5')).toBe(true);
+
+      // Should NOT include vocab1 (succeeded in chunk1)
+      expect(reviewsToRetry.some((r) => r.vocabulary_id === 'vocab1')).toBe(false);
+
+      // Verify the key fix: allFailedReviews are preserved
+      // Without mergeReviews, vocab2/vocab3 might be lost if they were at positions
+      // before where the error occurred
+      const vocab2Review = reviewsToRetry.find((r) => r.vocabulary_id === 'vocab2');
+      const vocab3Review = reviewsToRetry.find((r) => r.vocabulary_id === 'vocab3');
+      expect(vocab2Review?.quality).toBe(4);
+      expect(vocab3Review?.quality).toBe(5);
+    });
+
     it('should correctly slice remaining reviews from successCount', () => {
       // Test the slice behavior that prevents duplicate submissions
       const allReviews: ReviewInput[] = [
