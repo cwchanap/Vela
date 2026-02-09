@@ -1,6 +1,6 @@
 import type { UserVocabularyProgress, Vocabulary, JLPTLevel } from 'src/types/database';
 import { getApiUrl } from 'src/utils/api';
-import { fetchAuthSession } from 'aws-amplify/auth';
+import { httpJsonAuth as httpJson } from 'src/utils/httpClient';
 
 /**
  * SRS statistics returned from the API
@@ -67,56 +67,6 @@ export interface BatchReviewResponse {
  */
 export interface ProgressResponse {
   progress: UserVocabularyProgress | null;
-}
-
-/**
- * Get Authorization header with JWT token
- */
-async function getAuthHeader(): Promise<Record<string, string>> {
-  try {
-    const session = await fetchAuthSession();
-    const idToken = session.tokens?.idToken?.toString();
-
-    if (!idToken) {
-      throw new Error('No authentication token available');
-    }
-
-    return {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${idToken}`,
-    };
-  } catch (error) {
-    console.error('Failed to get auth token:', error);
-    throw new Error('Authentication required. Please sign in.');
-  }
-}
-
-/**
- * Helper to make authenticated JSON requests
- */
-export async function httpJson<T>(input: RequestInfo, init?: RequestInit): Promise<T> {
-  const headers = await getAuthHeader();
-
-  const res = await fetch(input, {
-    ...init,
-    headers: {
-      ...headers,
-      ...(init?.headers || {}),
-    },
-  });
-
-  if (!res.ok) {
-    let msg = res.statusText;
-    try {
-      const data = await res.json();
-      if (data?.error) msg = data.error as string;
-    } catch {
-      // ignore parse error
-    }
-    throw new Error(msg);
-  }
-
-  return res.json() as Promise<T>;
 }
 
 /**

@@ -1,58 +1,7 @@
+import { getValidAccessToken, refreshAccessToken } from './utils/storage';
+
 // Get API URL from environment or use default
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'https://vela.cwchanap.dev/api';
-
-/**
- * Get access token from storage
- */
-async function getAccessToken(): Promise<string> {
-  const result = await browser.storage.local.get('vela_auth_tokens');
-  const tokens = result.vela_auth_tokens;
-
-  if (!tokens || !tokens.accessToken) {
-    throw new Error('Not authenticated');
-  }
-
-  return tokens.accessToken;
-}
-
-/**
- * Refresh the access token using the refresh token
- */
-async function refreshAccessToken(): Promise<string> {
-  const result = await browser.storage.local.get('vela_auth_tokens');
-  const tokens = result.vela_auth_tokens;
-
-  if (!tokens || !tokens.refreshToken) {
-    throw new Error('No refresh token available');
-  }
-
-  try {
-    const refreshResponse = await fetch(`${API_BASE_URL}/auth/refresh`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ refreshToken: tokens.refreshToken }),
-    });
-
-    if (!refreshResponse.ok) {
-      throw new Error('Token refresh failed');
-    }
-
-    const data = await refreshResponse.json();
-    const newTokens = data.tokens;
-
-    // Save new tokens
-    await browser.storage.local.set({ vela_auth_tokens: newTokens });
-
-    return newTokens.accessToken;
-  } catch (error) {
-    // Refresh failed, clear auth data
-    console.error('Token refresh error:', error);
-    await browser.storage.local.remove(['vela_auth_tokens', 'vela_user_email']);
-    throw new Error('Session expired. Please log in again.');
-  }
-}
 
 export default defineBackground(() => {
   console.log('Vela extension background script loaded', { id: browser.runtime.id });
@@ -78,7 +27,7 @@ export default defineBackground(() => {
       }
 
       try {
-        let accessToken = await getAccessToken();
+        let accessToken = await getValidAccessToken();
 
         // Try to save the dictionary entry
         let response = await fetch(`${API_BASE_URL}/my-dictionaries`, {

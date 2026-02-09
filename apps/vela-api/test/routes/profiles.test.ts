@@ -13,6 +13,15 @@ vi.mock('../../src/dynamodb', () => ({
   profiles: mockProfilesDb,
 }));
 
+// Mock auth middleware to always pass in tests
+vi.mock('../../src/middleware/auth', () => ({
+  requireAuth: async (_c: any, next: any) => {
+    _c.set('userId', 'test-user');
+    await next();
+  },
+  AuthContext: {},
+}));
+
 function createTestApp(env: Env = {}) {
   const app = new Hono<{ Bindings: Env }>();
 

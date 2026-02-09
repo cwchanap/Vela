@@ -7,12 +7,10 @@ import {
   gameSessions as gameSessionsDB,
   dailyProgress as dailyProgressDB,
 } from '../dynamodb';
+import { requireAuth, type AuthContext } from '../middleware/auth';
+import { UserIdQuerySchema } from '../validation';
 
 // Validation schemas
-const UserIdQuerySchema = z.object({
-  user_id: z.string().min(1, 'user_id is required'),
-});
-
 const RecordGameSessionSchema = z.object({
   user_id: z.string().min(1, 'user_id is required'),
   game_type: z.string().min(1, 'game_type is required'),
@@ -23,7 +21,8 @@ const RecordGameSessionSchema = z.object({
   experience_gained: z.number(),
 });
 
-const progress = new Hono<{ Bindings: Env }>();
+const progress = new Hono<{ Bindings: Env } & AuthContext>();
+progress.use('*', requireAuth);
 
 /* ============
  * Routes

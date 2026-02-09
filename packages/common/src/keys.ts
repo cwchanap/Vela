@@ -39,3 +39,14 @@ export const savedSentencesKeys = {
   list: (limit?: number) => [...savedSentencesKeys.all, 'list', limit] as const,
   detail: (id: string) => [...savedSentencesKeys.all, 'detail', id] as const,
 };
+
+/**
+ * SRS (Spaced Repetition System) query keys
+ */
+export const srsKeys = {
+  all: ['srs'] as const,
+  due: (limit?: number, jlpt?: number[]) => [...srsKeys.all, 'due', limit, jlpt] as const,
+  stats: (jlpt?: number[]) => [...srsKeys.all, 'stats', jlpt] as const,
+  progress: (vocabularyId: string) => [...srsKeys.all, 'progress', vocabularyId] as const,
+  allProgress: () => [...srsKeys.all, 'all'] as const,
+};

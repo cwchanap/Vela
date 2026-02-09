@@ -85,7 +85,7 @@ describe('gameService', () => {
 
       expect(mockFetch).toHaveBeenCalledWith('/api/games/vocabulary?limit=5', {
         headers: {
-          'content-type': 'application/json',
+          'Content-Type': 'application/json',
         },
       });
       expect(questions).toHaveLength(5);
@@ -104,7 +104,7 @@ describe('gameService', () => {
 
       expect(mockFetch).toHaveBeenCalledWith('/api/games/vocabulary?limit=10', {
         headers: {
-          'content-type': 'application/json',
+          'Content-Type': 'application/json',
         },
       });
     });
@@ -212,7 +212,7 @@ describe('gameService', () => {
 
       expect(mockFetch).toHaveBeenCalledWith('/api/games/vocabulary?limit=5&jlpt=5,4', {
         headers: {
-          'content-type': 'application/json',
+          'Content-Type': 'application/json',
         },
       });
     });
@@ -227,7 +227,7 @@ describe('gameService', () => {
 
       expect(mockFetch).toHaveBeenCalledWith('/api/games/vocabulary?limit=5', {
         headers: {
-          'content-type': 'application/json',
+          'Content-Type': 'application/json',
         },
       });
     });
@@ -242,7 +242,7 @@ describe('gameService', () => {
 
       expect(mockFetch).toHaveBeenCalledWith('/api/games/vocabulary?limit=10&jlpt=5', {
         headers: {
-          'content-type': 'application/json',
+          'Content-Type': 'application/json',
         },
       });
     });
@@ -289,7 +289,7 @@ describe('gameService', () => {
 
       expect(mockFetch).toHaveBeenCalledWith('/api/games/sentences?limit=3', {
         headers: {
-          'content-type': 'application/json',
+          'Content-Type': 'application/json',
         },
       });
       expect(questions).toHaveLength(3);
@@ -308,7 +308,7 @@ describe('gameService', () => {
 
       expect(mockFetch).toHaveBeenCalledWith('/api/games/sentences?limit=5', {
         headers: {
-          'content-type': 'application/json',
+          'Content-Type': 'application/json',
         },
       });
     });
@@ -562,7 +562,7 @@ describe('gameService', () => {
 
       expect(mockFetch).toHaveBeenCalledWith('/api/games/sentences?limit=5&jlpt=5,4', {
         headers: {
-          'content-type': 'application/json',
+          'Content-Type': 'application/json',
         },
       });
     });
@@ -577,7 +577,7 @@ describe('gameService', () => {
 
       expect(mockFetch).toHaveBeenCalledWith('/api/games/sentences?limit=5', {
         headers: {
-          'content-type': 'application/json',
+          'Content-Type': 'application/json',
         },
       });
     });
@@ -610,7 +610,7 @@ describe('gameService', () => {
         expect.any(String),
         expect.objectContaining({
           headers: expect.objectContaining({
-            'content-type': 'application/json',
+            'Content-Type': 'application/json',
           }),
         }),
       );

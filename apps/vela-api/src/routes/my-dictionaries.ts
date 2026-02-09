@@ -40,6 +40,66 @@ async function getUserIdFromToken(authHeader: string | undefined): Promise<strin
   }
 }
 
+// eslint-disable-next-line no-unused-vars
+type TextExtractor = (jsonStr: string) => string | undefined;
+
+function createSSEStream(
+  upstreamBody: ReadableStream<Uint8Array> | null,
+  extractText: TextExtractor,
+  metadata: { provider: string; model: string; sentence: string },
+  skipDoneMarker?: string,
+): ReadableStream<string> {
+  return new ReadableStream({
+    async start(controller) {
+      try {
+        const reader = upstreamBody?.getReader();
+        const decoder = new TextDecoder();
+
+        if (!reader) {
+          controller.close();
+          return;
+        }
+
+        // Send initial metadata
+        controller.enqueue(`data: ${JSON.stringify({ type: 'metadata', ...metadata })}\n\n`);
+
+        let buffer = '';
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split('\n');
+          buffer = lines.pop() || '';
+
+          for (const line of lines) {
+            if (line.startsWith('data: ')) {
+              const jsonStr = line.slice(6).trim();
+              if (jsonStr === '' || (skipDoneMarker && jsonStr === skipDoneMarker)) continue;
+
+              try {
+                const text = extractText(jsonStr);
+                if (text) {
+                  controller.enqueue(`data: ${JSON.stringify({ type: 'chunk', text })}\n\n`);
+                }
+              } catch (e) {
+                console.debug('Skipping invalid JSON chunk:', e);
+              }
+            }
+          }
+        }
+
+        controller.enqueue(`data: ${JSON.stringify({ type: 'done' })}\n\n`);
+        controller.close();
+      } catch (error) {
+        controller.enqueue(`data: ${JSON.stringify({ type: 'error', error: String(error) })}\n\n`);
+        controller.close();
+      }
+    },
+  });
+}
+
 // Save a sentence
 app.post('/', async (c) => {
   try {
@@ -129,6 +189,7 @@ app.post('/analyze', async (c) => {
 
     const body = await c.req.json();
     const { sentence, provider, model, apiKey } = body;
+    const requestOrigin = c.req.header('Origin');
 
     if (!sentence || typeof sentence !== 'string' || sentence.trim().length === 0) {
       return c.json({ error: 'Sentence is required' }, 400);
@@ -156,7 +217,7 @@ Keep it concise and educational.`;
       }
 
       const llmModel = model || 'gemini-2.5-flash-lite';
-      const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${llmModel}:streamGenerateContent?alt=sse&key=${key}`;
+      const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${llmModel}:streamGenerateContent?alt=sse`;
 
       const requestBody = {
         contents: [{ role: 'user', parts: [{ text: userPrompt }] }],
@@ -169,7 +230,10 @@ Keep it concise and educational.`;
 
       const res = await fetch(endpoint, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'x-goog-api-key': key,
+        },
         body: JSON.stringify(requestBody),
       });
 
@@ -178,73 +242,15 @@ Keep it concise and educational.`;
         return c.json({ error: `Google API error ${res.status}: ${txt}` }, 500);
       }
 
-      // Set up SSE streaming
-      c.header('Content-Type', 'text/event-stream');
-      c.header('Cache-Control', 'no-cache');
-      c.header('Connection', 'keep-alive');
+      const extractGoogleText: TextExtractor = (jsonStr) => {
+        const data = JSON.parse(jsonStr);
+        return data?.candidates?.[0]?.content?.parts?.[0]?.text;
+      };
 
-      const stream = new ReadableStream({
-        async start(controller) {
-          try {
-            const reader = res.body?.getReader();
-            const decoder = new TextDecoder();
-
-            if (!reader) {
-              controller.close();
-              return;
-            }
-
-            // Send initial metadata
-            const metadata = JSON.stringify({
-              type: 'metadata',
-              provider,
-              model: llmModel,
-              sentence: sentence.trim(),
-            });
-            controller.enqueue(`data: ${metadata}\n\n`);
-
-            let buffer = '';
-
-            while (true) {
-              const { done, value } = await reader.read();
-              if (done) break;
-
-              buffer += decoder.decode(value, { stream: true });
-              const lines = buffer.split('\n');
-              buffer = lines.pop() || '';
-
-              for (const line of lines) {
-                if (line.startsWith('data: ')) {
-                  const jsonStr = line.slice(6);
-                  if (jsonStr.trim() === '') continue;
-
-                  try {
-                    const data = JSON.parse(jsonStr);
-                    const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
-                    if (text) {
-                      const payload = JSON.stringify({ type: 'chunk', text });
-                      controller.enqueue(`data: ${payload}\n\n`);
-                    }
-                  } catch (e) {
-                    // Skip invalid JSON
-                    console.debug('Skipping invalid JSON chunk:', e);
-                  }
-                }
-              }
-            }
-
-            // Send completion signal
-            controller.enqueue(`data: ${JSON.stringify({ type: 'done' })}\n\n`);
-            controller.close();
-          } catch (error) {
-            const errorPayload = JSON.stringify({
-              type: 'error',
-              error: String(error),
-            });
-            controller.enqueue(`data: ${errorPayload}\n\n`);
-            controller.close();
-          }
-        },
+      const stream = createSSEStream(res.body, extractGoogleText, {
+        provider,
+        model: llmModel,
+        sentence: sentence.trim(),
       });
 
       return new Response(stream, {
@@ -252,7 +258,7 @@ Keep it concise and educational.`;
           'Content-Type': 'text/event-stream',
           'Cache-Control': 'no-cache',
           Connection: 'keep-alive',
-          'Access-Control-Allow-Origin': '*',
+          ...(requestOrigin ? { 'Access-Control-Allow-Origin': requestOrigin } : {}),
         },
       });
     }
@@ -297,81 +303,24 @@ Keep it concise and educational.`;
         return c.json({ error: `OpenRouter API error ${res.status}: ${txt}` }, 500);
       }
 
-      // Set up SSE streaming
-      c.header('Content-Type', 'text/event-stream');
-      c.header('Cache-Control', 'no-cache');
-      c.header('Connection', 'keep-alive');
+      const extractOpenRouterText: TextExtractor = (jsonStr) => {
+        const data = JSON.parse(jsonStr);
+        return data?.choices?.[0]?.delta?.content;
+      };
 
-      const stream = new ReadableStream({
-        async start(controller) {
-          try {
-            const reader = res.body?.getReader();
-            const decoder = new TextDecoder();
-
-            if (!reader) {
-              controller.close();
-              return;
-            }
-
-            // Send initial metadata
-            const metadata = JSON.stringify({
-              type: 'metadata',
-              provider,
-              model: llmModel,
-              sentence: sentence.trim(),
-            });
-            controller.enqueue(`data: ${metadata}\n\n`);
-
-            let buffer = '';
-
-            while (true) {
-              const { done, value } = await reader.read();
-              if (done) break;
-
-              buffer += decoder.decode(value, { stream: true });
-              const lines = buffer.split('\n');
-              buffer = lines.pop() || '';
-
-              for (const line of lines) {
-                if (line.startsWith('data: ')) {
-                  const jsonStr = line.slice(6).trim();
-                  if (jsonStr === '' || jsonStr === '[DONE]') continue;
-
-                  try {
-                    const data = JSON.parse(jsonStr);
-                    const text = data?.choices?.[0]?.delta?.content;
-                    if (text) {
-                      const payload = JSON.stringify({ type: 'chunk', text });
-                      controller.enqueue(`data: ${payload}\n\n`);
-                    }
-                  } catch (e) {
-                    // Skip invalid JSON
-                    console.debug('Skipping invalid JSON chunk:', e);
-                  }
-                }
-              }
-            }
-
-            // Send completion signal
-            controller.enqueue(`data: ${JSON.stringify({ type: 'done' })}\n\n`);
-            controller.close();
-          } catch (error) {
-            const errorPayload = JSON.stringify({
-              type: 'error',
-              error: String(error),
-            });
-            controller.enqueue(`data: ${errorPayload}\n\n`);
-            controller.close();
-          }
-        },
-      });
+      const stream = createSSEStream(
+        res.body,
+        extractOpenRouterText,
+        { provider, model: llmModel, sentence: sentence.trim() },
+        '[DONE]',
+      );
 
       return new Response(stream, {
         headers: {
           'Content-Type': 'text/event-stream',
           'Cache-Control': 'no-cache',
           Connection: 'keep-alive',
-          'Access-Control-Allow-Origin': '*',
+          ...(requestOrigin ? { 'Access-Control-Allow-Origin': requestOrigin } : {}),
         },
       });
     }

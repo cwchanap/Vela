@@ -1,6 +1,7 @@
 import type { Question, SentenceQuestion } from 'src/stores/games';
 import type { Vocabulary, Sentence } from 'src/types/database';
 import { getApiUrl } from 'src/utils/api';
+import { httpJson } from 'src/utils/httpClient';
 
 function shuffle<T>(array: T[]): T[] {
   let currentIndex = array.length,
@@ -15,30 +16,11 @@ function shuffle<T>(array: T[]): T[] {
   return array;
 }
 
-async function httpJson(input: RequestInfo, init?: RequestInit) {
-  const res = await fetch(input, {
-    ...init,
-    headers: {
-      'content-type': 'application/json',
-      ...(init?.headers || {}),
-    },
-  });
-  if (!res.ok) {
-    let msg = res.statusText;
-    try {
-      const data = await res.json();
-      if (data?.error) msg = data.error as string;
-    } catch {
-      // ignore parse error
-    }
-    throw new Error(msg);
-  }
-  return res.json();
-}
-
 async function getSentenceQuestions(count = 5): Promise<SentenceQuestion[]> {
   try {
-    const data = await httpJson(getApiUrl(`games/sentences?limit=${count}`));
+    const data = await httpJson<{ sentences: Sentence[] }>(
+      getApiUrl(`games/sentences?limit=${count}`),
+    );
     const sentences: Sentence[] = data.sentences || [];
 
     return sentences.map((sentence) => {
@@ -64,7 +46,7 @@ async function getVocabularyQuestions(count = 10, jlptLevels?: number[]): Promis
     if (jlptLevels && jlptLevels.length > 0) {
       url += `&jlpt=${jlptLevels.join(',')}`;
     }
-    const data = await httpJson(getApiUrl(url));
+    const data = await httpJson<{ vocabulary: Vocabulary[] }>(getApiUrl(url));
     const vocabulary: Vocabulary[] = data.vocabulary || [];
 
     // Create multiple choice questions
@@ -99,7 +81,7 @@ async function getSentenceQuestionsWithJlpt(
     if (jlptLevels && jlptLevels.length > 0) {
       url += `&jlpt=${jlptLevels.join(',')}`;
     }
-    const data = await httpJson(getApiUrl(url));
+    const data = await httpJson<{ sentences: Sentence[] }>(getApiUrl(url));
     const sentences: Sentence[] = data.sentences || [];
 
     return sentences.map((sentence) => {

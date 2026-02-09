@@ -10,6 +10,44 @@ import {
   DeleteCommand,
 } from '@aws-sdk/lib-dynamodb';
 
+export interface Profile {
+  user_id: string;
+  email?: string | null;
+  username?: string | null;
+  avatar_url?: string | null;
+  native_language?: string;
+  current_level?: number;
+  total_experience?: number;
+  learning_streak?: number;
+  preferences?: Record<string, unknown>;
+  last_activity?: string;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface GameSession {
+  session_id?: string;
+  user_id: string;
+  game_type: string;
+  score: number;
+  duration_seconds: number;
+  questions_answered: number;
+  correct_answers: number;
+  experience_gained: number;
+  created_at?: string;
+}
+
+export interface DailyProgress {
+  user_id: string;
+  date: string;
+  vocabulary_studied: number;
+  sentences_completed: number;
+  time_spent_minutes: number;
+  experience_gained: number;
+  games_played: number;
+  accuracy_percentage: number;
+}
+
 // Create DynamoDB client
 const sanitize = (v?: string) => {
   if (!v) return undefined;
@@ -31,7 +69,7 @@ const clientConfig: DynamoDBClientConfig = {
 
 if (endpointSanitized) {
   // Only set endpoint when a valid value exists
-  (clientConfig as any).endpoint = endpointSanitized;
+  (clientConfig as Record<string, unknown>).endpoint = endpointSanitized;
 }
 
 // When using DynamoDB local, any credentials will do, but SDK still requires them
@@ -92,6 +130,74 @@ function shuffleArray<T>(array: T[]): T[] {
   return result;
 }
 
+/**
+ * Shared helper: scan a table filtered by JLPT level(s) with pagination and hard cap.
+ * Returns up to `limit` shuffled items matching the given JLPT levels.
+ */
+async function scanByJlptLevel(tableName: string, jlptLevels: number[], limit: number) {
+  // Guard clause: return empty array if no levels specified
+  if (jlptLevels.length === 0) {
+    return [];
+  }
+
+  // Build filter expression for multiple JLPT levels
+  const filterParts = jlptLevels.map((_, i) => `jlpt_level = :level${i}`);
+  const filterExpression = filterParts.join(' OR ');
+  const expressionAttributeValues = jlptLevels.reduce(
+    (acc, level, i) => {
+      acc[`:level${i}`] = level;
+      return acc;
+    },
+    {} as Record<string, number>,
+  );
+
+  const allItems: any[] = [];
+  let lastEvaluatedKey: any = undefined;
+  let scannedCount = 0;
+  // Hard cap to prevent excessive scanning - log warning when approaching limit
+  const hardCap = 1000;
+  const warningThreshold = 800; // Warn when we're close to cap
+
+  // Paginate scan until we have enough matching items or reach hard cap
+  while (allItems.length < limit && scannedCount < hardCap) {
+    const remainingScanBudget = hardCap - scannedCount;
+    const command = new ScanCommand({
+      TableName: tableName,
+      FilterExpression: filterExpression,
+      ExpressionAttributeValues: expressionAttributeValues,
+      ExclusiveStartKey: lastEvaluatedKey,
+      Limit: remainingScanBudget,
+    });
+
+    const response = await docClient.send(command);
+    const items = response.Items || [];
+    const scannedThisPageRaw =
+      typeof response.ScannedCount === 'number' ? response.ScannedCount : items.length;
+    const scannedThisPage = Math.min(scannedThisPageRaw, remainingScanBudget);
+
+    // Collect all matching items from this page
+    allItems.push(...items);
+
+    scannedCount += scannedThisPage;
+
+    // Log warning if approaching hard cap
+    if (scannedCount >= warningThreshold && scannedCount - scannedThisPage < warningThreshold) {
+      console.warn(
+        `[scanByJlptLevel] Approaching hard cap: scanned ${scannedCount} items in ${tableName} for JLPT levels [${jlptLevels.join(', ')}]. Consider increasing hardCap or implementing GSI for more efficient querying.`,
+      );
+    }
+
+    // Check if we have more items to scan
+    lastEvaluatedKey = response.LastEvaluatedKey;
+    if (!lastEvaluatedKey) {
+      break;
+    }
+  }
+
+  // Shuffle all collected items and return up to limit
+  return shuffleArray(allItems).slice(0, limit);
+}
+
 // Profiles operations
 export const profiles = {
   async get(userId: string) {
@@ -107,7 +213,7 @@ export const profiles = {
     }
   },
 
-  async create(profile: any) {
+  async create(profile: Profile) {
     try {
       const command = new PutCommand({
         TableName: TABLE_NAMES.PROFILES,
@@ -120,7 +226,7 @@ export const profiles = {
     }
   },
 
-  async update(userId: string, updates: any) {
+  async update(userId: string, updates: Partial<Omit<Profile, 'user_id'>>) {
     try {
       const updateExpression =
         'SET ' +
@@ -191,7 +297,7 @@ export const vocabulary = {
    * @param ids - Array of vocabulary IDs to fetch
    * @returns Map of vocabulary items keyed by ID (undefined for missing items)
    */
-  async getByIds(ids: string[]): Promise<Record<string, any>> {
+  async getByIds(ids: string[]): Promise<Record<string, Record<string, unknown>>> {
     try {
       if (ids.length === 0) {
         return {};
@@ -256,7 +362,7 @@ export const vocabulary = {
       }
 
       // Convert array of items to a map keyed by ID
-      const vocabMap: Record<string, any> = {};
+      const vocabMap: Record<string, Record<string, unknown>> = {};
       for (const item of allItems) {
         if (item && item.id) {
           vocabMap[item.id] = item;
@@ -277,67 +383,7 @@ export const vocabulary = {
    */
   async getByJlptLevel(jlptLevels: number[], limit: number = 10) {
     try {
-      // Guard clause: return empty array if no levels specified
-      if (jlptLevels.length === 0) {
-        return [];
-      }
-
-      // Build filter expression for multiple JLPT levels
-      const filterParts = jlptLevels.map((_, i) => `jlpt_level = :level${i}`);
-      const filterExpression = filterParts.join(' OR ');
-      const expressionAttributeValues = jlptLevels.reduce(
-        (acc, level, i) => {
-          acc[`:level${i}`] = level;
-          return acc;
-        },
-        {} as Record<string, number>,
-      );
-
-      const allItems: any[] = [];
-      let lastEvaluatedKey: any = undefined;
-      let scannedCount = 0;
-      // Hard cap to prevent excessive scanning - log warning when approaching limit
-      const hardCap = 1000;
-      const warningThreshold = 800; // Warn when we're close to cap
-
-      // Paginate scan until we have enough matching items or reach hard cap
-      while (allItems.length < limit && scannedCount < hardCap) {
-        const remainingScanBudget = hardCap - scannedCount;
-        const command = new ScanCommand({
-          TableName: TABLE_NAMES.VOCABULARY,
-          FilterExpression: filterExpression,
-          ExpressionAttributeValues: expressionAttributeValues,
-          ExclusiveStartKey: lastEvaluatedKey,
-          Limit: remainingScanBudget,
-        });
-
-        const response = await docClient.send(command);
-        const items = response.Items || [];
-        const scannedThisPageRaw =
-          typeof response.ScannedCount === 'number' ? response.ScannedCount : items.length;
-        const scannedThisPage = Math.min(scannedThisPageRaw, remainingScanBudget);
-
-        // Collect all matching items from this page
-        allItems.push(...items);
-
-        scannedCount += scannedThisPage;
-
-        // Log warning if approaching hard cap
-        if (scannedCount >= warningThreshold && scannedCount - scannedThisPage < warningThreshold) {
-          console.warn(
-            `[getByJlptLevel] Approaching hard cap: scanned ${scannedCount} items for JLPT levels [${jlptLevels.join(', ')}]. Consider increasing hardCap or implementing GSI for more efficient querying.`,
-          );
-        }
-
-        // Check if we have more items to scan
-        lastEvaluatedKey = response.LastEvaluatedKey;
-        if (!lastEvaluatedKey) {
-          break;
-        }
-      }
-
-      // Shuffle all collected items and return up to limit
-      return shuffleArray(allItems).slice(0, limit);
+      return await scanByJlptLevel(TABLE_NAMES.VOCABULARY, jlptLevels, limit);
     } catch (error) {
       handleDynamoError(error);
     }
@@ -408,66 +454,7 @@ export const sentences = {
    */
   async getByJlptLevel(jlptLevels: number[], limit: number = 5) {
     try {
-      // Guard clause: return empty array if no levels specified
-      if (jlptLevels.length === 0) {
-        return [];
-      }
-
-      const filterParts = jlptLevels.map((_, i) => `jlpt_level = :level${i}`);
-      const filterExpression = filterParts.join(' OR ');
-      const expressionAttributeValues = jlptLevels.reduce(
-        (acc, level, i) => {
-          acc[`:level${i}`] = level;
-          return acc;
-        },
-        {} as Record<string, number>,
-      );
-
-      const allItems: any[] = [];
-      let lastEvaluatedKey: any = undefined;
-      let scannedCount = 0;
-      // Hard cap to prevent excessive scanning - log warning when approaching limit
-      const hardCap = 1000;
-      const warningThreshold = 800; // Warn when we're close to cap
-
-      // Paginate scan until we have enough matching items or reach hard cap
-      while (allItems.length < limit && scannedCount < hardCap) {
-        const remainingScanBudget = hardCap - scannedCount;
-        const command = new ScanCommand({
-          TableName: TABLE_NAMES.SENTENCES,
-          FilterExpression: filterExpression,
-          ExpressionAttributeValues: expressionAttributeValues,
-          ExclusiveStartKey: lastEvaluatedKey,
-          Limit: remainingScanBudget,
-        });
-
-        const response = await docClient.send(command);
-        const items = response.Items || [];
-        const scannedThisPageRaw =
-          typeof response.ScannedCount === 'number' ? response.ScannedCount : items.length;
-        const scannedThisPage = Math.min(scannedThisPageRaw, remainingScanBudget);
-
-        // Collect all matching items from this page
-        allItems.push(...items);
-
-        scannedCount += scannedThisPage;
-
-        // Log warning if approaching hard cap
-        if (scannedCount >= warningThreshold && scannedCount - scannedThisPage < warningThreshold) {
-          console.warn(
-            `[getByJlptLevel] Approaching hard cap: scanned ${scannedCount} sentences for JLPT levels [${jlptLevels.join(', ')}]. Consider increasing hardCap or implementing GSI for more efficient querying.`,
-          );
-        }
-
-        // Check if we have more items to scan
-        lastEvaluatedKey = response.LastEvaluatedKey;
-        if (!lastEvaluatedKey) {
-          break;
-        }
-      }
-
-      // Shuffle all collected items and return up to limit
-      return shuffleArray(allItems).slice(0, limit);
+      return await scanByJlptLevel(TABLE_NAMES.SENTENCES, jlptLevels, limit);
     } catch (error) {
       handleDynamoError(error);
     }
@@ -502,7 +489,7 @@ export const sentences = {
 
 // Game sessions operations
 export const gameSessions = {
-  async create(session: any) {
+  async create(session: GameSession) {
     try {
       // Generate a session ID if not provided
       const sessionId =
@@ -541,7 +528,7 @@ export const dailyProgress = {
     }
   },
 
-  async create(progress: any) {
+  async create(progress: DailyProgress) {
     try {
       const command = new PutCommand({
         TableName: TABLE_NAMES.DAILY_PROGRESS,
@@ -554,7 +541,11 @@ export const dailyProgress = {
     }
   },
 
-  async update(userId: string, date: string, updates: any) {
+  async update(
+    userId: string,
+    date: string,
+    updates: Partial<Omit<DailyProgress, 'user_id' | 'date'>>,
+  ) {
     try {
       const updateExpression =
         'SET ' +

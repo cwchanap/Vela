@@ -41,6 +41,37 @@ export const LLMBridgeRequestSchema = z
     path: ['messages'],
   });
 
+// Shared JLPT field definition with validation
+export const jlptField = z
+  .string()
+  .optional()
+  .transform((val) => {
+    if (!val) return undefined;
+    const levels = val.split(',').map((level) => level.trim());
+    const parsedLevels: number[] = [];
+    const invalidLevels: string[] = [];
+    for (const level of levels) {
+      if (!level) continue;
+      const parsed = parseInt(level, 10);
+      if (!Number.isFinite(parsed) || parsed < 1 || parsed > 5) {
+        invalidLevels.push(level);
+      } else {
+        parsedLevels.push(parsed);
+      }
+    }
+    if (invalidLevels.length > 0) {
+      throw new z.ZodError([
+        {
+          code: z.ZodIssueCode.custom,
+          path: [],
+          message: `Invalid JLPT level(s): ${invalidLevels.join(', ')}. Must be integers between 1 and 5.`,
+        },
+      ]);
+    }
+    const uniqueLevels = [...new Set(parsedLevels)];
+    return uniqueLevels.length > 0 ? uniqueLevels : undefined;
+  });
+
 // Query Parameter Schemas
 export const UserIdQuerySchema = z.object({
   user_id: z.string().min(1, 'user_id is required'),

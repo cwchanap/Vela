@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { userVocabularyProgress, vocabulary, type UserVocabularyProgress } from '../dynamodb';
 import { calculateNextReview } from '../utils/srs';
 import { requireAuth, type AuthContext } from '../middleware/auth';
+import { jlptField } from '../validation';
 
 const srsRouter = new Hono<AuthContext>();
 
@@ -80,48 +81,6 @@ const reviewSchema = z.object({
   vocabulary_id: z.string().min(1),
   quality: z.number().int().min(0).max(5),
 });
-
-// Shared JLPT field definition with validation (same as games routes)
-const jlptField = z
-  .string()
-  .optional()
-  .transform((val) => {
-    if (!val) return undefined;
-
-    // Parse comma-separated JLPT levels
-    const levels = val.split(',').map((level) => level.trim());
-
-    // Convert to integers and validate each value
-    const parsedLevels: number[] = [];
-    const invalidLevels: string[] = [];
-    for (const level of levels) {
-      if (!level) continue;
-      const parsed = parseInt(level, 10);
-
-      // Validate: must be a finite integer between 1-5
-      if (!Number.isFinite(parsed) || parsed < 1 || parsed > 5) {
-        invalidLevels.push(level);
-      } else {
-        parsedLevels.push(parsed);
-      }
-    }
-
-    // If there are invalid levels, throw a proper Zod validation error
-    if (invalidLevels.length > 0) {
-      throw new z.ZodError([
-        {
-          code: z.ZodIssueCode.custom,
-          path: [],
-          message: `Invalid JLPT level(s): ${invalidLevels.join(', ')}. Must be integers between 1 and 5.`,
-        },
-      ]);
-    }
-
-    // Remove duplicates while preserving order
-    const uniqueLevels = [...new Set(parsedLevels)];
-
-    return uniqueLevels.length > 0 ? uniqueLevels : undefined;
-  });
 
 const limitSchema = z.object({
   limit: z.coerce.number().int().min(1).max(100).default(20),
