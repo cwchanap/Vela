@@ -115,43 +115,8 @@ const routes: RouteRecordRaw[] = [
         name: 'sentence-game',
         component: () => import('pages/games/SentenceGame.vue'),
       },
-      // {
-      //   path: 'results',
-      //   name: 'game-results',
-      //   component: () => import('pages/games/GameResults.vue'),
-      // },
     ],
   },
-
-  // Chat route (will be implemented in future tasks)
-  // {
-  //   path: '/chat',
-  //   name: 'ai-chat',
-  //   component: () => import('layouts/MainLayout.vue'),
-  //   meta: { requiresAuth: true },
-  //   children: [
-  //     {
-  //       path: '',
-  //       component: () => import('pages/chat/AIChatPage.vue'),
-  //     },
-  //   ],
-  // },
-
-  // Progress route (will be implemented in future tasks)
-  // {
-  //   path: '/progress',
-  //   name: 'progress',
-  //   component: () => import('layouts/MainLayout.vue'),
-  //   meta: { requiresAuth: true },
-  //   children: [
-  //     {
-  //       path: '',
-  //       component: () => import('pages/progress/ProgressPage.vue'),
-  //     },
-  //   ],
-  // },
-
-  // Dev utilities (removed LLM test page)
 
   // Always leave this as last one,
   // but you can also remove it

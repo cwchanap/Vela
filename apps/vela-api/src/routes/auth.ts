@@ -16,8 +16,12 @@ const cognitoClient = new CognitoIdentityProviderClient({
   region: process.env.AWS_REGION || 'us-east-1',
 });
 
-// Auto-confirm user endpoint
+// Auto-confirm user endpoint (development only)
 app.post('/auto-confirm', async (c) => {
+  if (process.env.NODE_ENV !== 'development') {
+    return c.json({ error: 'This endpoint is only available in development mode' }, 403);
+  }
+
   try {
     const { email } = await c.req.json();
 

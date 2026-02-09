@@ -196,10 +196,10 @@ async function dynamodb_listThreads(env: Env, user_id: string): Promise<ChatThre
 
 async function dynamodb_getMessages(env: Env, thread_id: string): Promise<ChatHistoryItem[]> {
   try {
-    // Scan messages by ThreadId (since we don't have a primary key on ThreadId)
-    const command = new ScanCommand({
+    // Query by ThreadId partition key for efficient lookup
+    const command = new QueryCommand({
       TableName: TABLE_NAMES.CHAT_HISTORY,
-      FilterExpression: 'ThreadId = :threadId',
+      KeyConditionExpression: 'ThreadId = :threadId',
       ExpressionAttributeValues: {
         ':threadId': thread_id,
       },
@@ -228,18 +228,18 @@ async function dynamodb_deleteThread(env: Env, thread_id: string): Promise<void>
     const allMessages: any[] = [];
     let lastEvaluatedKey: Record<string, any> | undefined;
 
-    // Paginate through all scan results to get ALL messages in the thread
+    // Paginate through all query results to get ALL messages in the thread
     do {
-      const scanCommand = new ScanCommand({
+      const queryCommand = new QueryCommand({
         TableName: TABLE_NAMES.CHAT_HISTORY,
-        FilterExpression: 'ThreadId = :threadId',
+        KeyConditionExpression: 'ThreadId = :threadId',
         ExpressionAttributeValues: {
           ':threadId': thread_id,
         },
         ExclusiveStartKey: lastEvaluatedKey,
       });
 
-      const response = await docClient.send(scanCommand);
+      const response = await docClient.send(queryCommand);
       const messages = response.Items || [];
       allMessages.push(...messages);
       lastEvaluatedKey = response.LastEvaluatedKey;

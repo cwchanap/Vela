@@ -3,36 +3,9 @@ import { zValidator } from '@hono/zod-validator';
 import { z } from 'zod';
 import type { Env } from '../types';
 import { vocabulary as vocabularyDB, sentences as sentencesDB } from '../dynamodb';
+import { jlptField } from '../validation';
 
 // Validation schemas
-
-// Shared JLPT field definition with validation
-const jlptField = z
-  .string()
-  .optional()
-  .transform((val) => {
-    if (!val) return undefined;
-
-    // Parse comma-separated JLPT levels
-    const levels = val.split(',').map((level) => level.trim());
-
-    // Convert to integers
-    const parsedLevels = levels.map((level) => parseInt(level, 10));
-
-    // Remove duplicates while preserving order
-    const uniqueLevels = [...new Set(parsedLevels)];
-
-    return uniqueLevels.length > 0 ? uniqueLevels : undefined;
-  })
-  .pipe(
-    z
-      .array(z.number().int().min(1).max(5))
-      .optional()
-      .refine((val) => !val || val.length > 0, {
-        message: 'JLPT levels array must contain at least one value if provided',
-      }),
-  );
-
 const VocabularyQuerySchema = z.object({
   limit: z.coerce.number().int().positive().default(10),
   jlpt: jlptField,

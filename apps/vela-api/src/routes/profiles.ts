@@ -3,6 +3,8 @@ import { zValidator } from '@hono/zod-validator';
 import { z } from 'zod';
 import type { Env } from '../types';
 import { profiles as profilesDB } from '../dynamodb';
+import { requireAuth, type AuthContext } from '../middleware/auth';
+import { UserIdQuerySchema } from '../validation';
 
 const DEFAULT_DAILY_LESSON_GOAL = 5;
 const DEFAULT_LESSON_DURATION_MINUTES = 6;
@@ -26,10 +28,6 @@ const PreferencesSchema = z.object(PreferencesShape).strip();
 const PreferencesReadSchema = z.object(PreferencesShape).strip();
 
 // Validation schemas
-const UserIdQuerySchema = z.object({
-  user_id: z.string().min(1, 'user_id is required'),
-});
-
 const UpdateProfileSchema = z.object({
   user_id: z.string().min(1, 'user_id is required'),
   username: z.string().optional(),
@@ -103,7 +101,8 @@ const normalizePreferences = (preferences: unknown) => {
 
 const createProfilesRoute = (env: Env) => {
   console.debug('Creating profiles route with env:', env ? 'provided' : 'not provided');
-  const profiles = new Hono<{ Bindings: Env }>();
+  const profiles = new Hono<{ Bindings: Env } & AuthContext>();
+  profiles.use('*', requireAuth);
 
   /* ============
    * Routes

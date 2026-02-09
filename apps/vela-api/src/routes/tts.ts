@@ -58,6 +58,10 @@ const VocabularyIdParamSchema = z.object({
 const createTTSRoute = (env: Env) => {
   const tts = new Hono<{ Bindings: Env } & AuthContext>();
 
+  // Instantiate S3 client once per route factory (reused across requests)
+  const region = env.AWS_REGION || process.env.AWS_REGION || 'us-east-1';
+  const s3Client = new S3Client({ region });
+
   /**
    * POST /api/tts/generate
    * Generate TTS audio for a vocabulary word using ElevenLabs
@@ -81,11 +85,7 @@ const createTTSRoute = (env: Env) => {
 
       const { api_key: apiKey, voice_id: voiceId, model } = settings;
 
-      // Initialize S3 client - use process.env in production
-      const region = env.AWS_REGION || process.env.AWS_REGION || 'us-east-1';
       const bucketName = env.TTS_AUDIO_BUCKET_NAME || process.env.TTS_AUDIO_BUCKET_NAME;
-
-      const s3Client = new S3Client({ region });
 
       if (!bucketName) {
         return c.json({ error: 'TTS audio bucket not configured' }, 500);
@@ -232,11 +232,7 @@ const createTTSRoute = (env: Env) => {
         const effectiveVoiceId = voiceId || DEFAULT_VOICE_ID;
         const effectiveModel = model || DEFAULT_MODEL;
 
-        // Initialize S3 client - use process.env in production
-        const region = env.AWS_REGION || process.env.AWS_REGION || 'us-east-1';
         const bucketName = env.TTS_AUDIO_BUCKET_NAME || process.env.TTS_AUDIO_BUCKET_NAME;
-
-        const s3Client = new S3Client({ region });
 
         if (!bucketName) {
           return c.json({ error: 'TTS audio bucket not configured' }, 500);
