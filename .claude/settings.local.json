@@ -21,7 +21,9 @@
       "Bash(bun run test)",
       "Bash(bun run:*)",
       "Bash(bun vitest run:*)",
-      "mcp__sequential-thinking__sequentialthinking"
+      "mcp__sequential-thinking__sequentialthinking",
+      "Bash(bun cdk:synth:*)",
+      "Bash(bun cdk:diff:*)"
     ],
     "deny": [],
     "ask": []

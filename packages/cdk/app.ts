@@ -22,7 +22,7 @@ const authStack = new AuthStack(app, 'AuthStack', {
 
 const databaseStack = new DatabaseStack(app, 'DatabaseStack', {
   env,
-  description: 'Vela database infrastructure (DynamoDB, Aurora, VPC)',
+  description: 'Vela database infrastructure (DynamoDB, Aurora DSQL)',
 });
 
 const storageStack = new StorageStack(app, 'StorageStack', {
