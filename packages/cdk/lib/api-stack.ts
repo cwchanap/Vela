@@ -2,7 +2,6 @@ import { Stack, StackProps, Duration } from 'aws-cdk-lib';
 import { Function, Runtime, Code } from 'aws-cdk-lib/aws-lambda';
 import { RestApi, LambdaIntegration, Cors } from 'aws-cdk-lib/aws-apigateway';
 import { PolicyStatement, Effect } from 'aws-cdk-lib/aws-iam';
-import * as ec2 from 'aws-cdk-lib/aws-ec2';
 import * as path from 'path';
 import { Construct } from 'constructs';
 import { AuthStack } from './auth-stack';
@@ -30,13 +29,6 @@ export class ApiStack extends Stack {
 
     const ttsAudioBucketName = getTtsAudioBucketName(this);
 
-    // Dedicated security group for the API Lambda so ApiStack no longer imports DatabaseStack's SG.
-    const apiSecurityGroup = new ec2.SecurityGroup(this, 'VelaApiSecurityGroup', {
-      vpc: database.vpc,
-      description: 'Security group for Vela API Lambda to access Aurora DSQL via VPC networking',
-      allowAllOutbound: true,
-    });
-
     const apiLambda = new Function(this, 'VelaApiFunction', {
       functionName: 'vela-api',
       runtime: Runtime.NODEJS_20_X,
@@ -44,11 +36,6 @@ export class ApiStack extends Stack {
       code: Code.fromAsset(path.join(__dirname, '../dist/lambda')),
       timeout: Duration.seconds(60),
       memorySize: 1024,
-      vpc: database.vpc,
-      vpcSubnets: {
-        subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS,
-      },
-      securityGroups: [apiSecurityGroup],
       environment: {
         DYNAMODB_TABLE_NAME: database.chatHistoryTable.tableName,
         PROFILES_TABLE_NAME: database.profilesTable.tableName,

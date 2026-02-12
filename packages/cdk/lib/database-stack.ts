@@ -1,6 +1,5 @@
 import { Stack, StackProps, RemovalPolicy, CfnResource } from 'aws-cdk-lib';
 import { Table, AttributeType, BillingMode } from 'aws-cdk-lib/aws-dynamodb';
-import * as ec2 from 'aws-cdk-lib/aws-ec2';
 import { Construct } from 'constructs';
 
 declare const process: any;
@@ -18,8 +17,6 @@ export class DatabaseStack extends Stack {
   public readonly ttsSettingsTable: Table;
   public readonly userVocabularyProgressTable: Table;
 
-  public readonly vpc: ec2.Vpc;
-  public readonly dbSecurityGroup: ec2.SecurityGroup;
   public readonly dbClusterArn: string;
   public readonly dbClusterEndpoint: string;
 
@@ -191,37 +188,6 @@ export class DatabaseStack extends Stack {
       },
     });
 
-    const vpc = new ec2.Vpc(this, 'VelaVPC', {
-      maxAzs: 2,
-      natGateways: 1,
-      subnetConfiguration: [
-        {
-          cidrMask: 24,
-          name: 'public',
-          subnetType: ec2.SubnetType.PUBLIC,
-        },
-        {
-          cidrMask: 24,
-          name: 'private-with-egress',
-          subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS,
-        },
-      ],
-    });
-
-    // Legacy security group that was previously imported by ApiStack for Lambda VPC networking.
-    // ApiStack now uses its own VelaApiSecurityGroup; this SG is retained for potential future use.
-    const dbSecurityGroup = new ec2.SecurityGroup(this, 'VelaDBSecurityGroup', {
-      vpc,
-      description: 'Security group for Aurora DSQL database',
-      allowAllOutbound: true,
-    });
-
-    dbSecurityGroup.addIngressRule(
-      ec2.Peer.ipv4('10.0.0.0/16'),
-      ec2.Port.tcp(5432),
-      'Allow PostgreSQL access from VPC',
-    );
-
     const dsqlCluster = new CfnResource(this, 'VelaAuroraDsqlCluster', {
       type: 'AWS::DSQL::Cluster',
       properties: {
@@ -249,8 +215,6 @@ export class DatabaseStack extends Stack {
     this.ttsSettingsTable = ttsSettingsTable;
     this.userVocabularyProgressTable = userVocabularyProgressTable;
 
-    this.vpc = vpc;
-    this.dbSecurityGroup = dbSecurityGroup;
     this.dbClusterArn = dbClusterArn;
     this.dbClusterEndpoint = dbClusterEndpoint;
   }
