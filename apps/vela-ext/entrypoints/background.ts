@@ -29,6 +29,18 @@ export default defineBackground(() => {
       try {
         let accessToken = await getValidAccessToken();
 
+        // Guard against missing/null token to prevent "Bearer undefined"
+        if (!accessToken) {
+          console.error('No valid access token available. User needs to log in.');
+          browser.notifications.create({
+            type: 'basic',
+            iconUrl: browser.runtime.getURL('/icon/128.png'),
+            title: 'Vela - Authentication Required',
+            message: 'Please log in to save sentences to your dictionary.',
+          });
+          return;
+        }
+
         // Try to save the dictionary entry
         let response = await fetch(`${API_BASE_URL}/my-dictionaries`, {
           method: 'POST',
@@ -46,6 +58,18 @@ export default defineBackground(() => {
         // If unauthorized, try to refresh token and retry once
         if (response.status === 401) {
           accessToken = await refreshAccessToken();
+
+          // Guard against missing token after refresh
+          if (!accessToken) {
+            console.error('Token refresh failed. User needs to log in.');
+            browser.notifications.create({
+              type: 'basic',
+              iconUrl: browser.runtime.getURL('/icon/128.png'),
+              title: 'Vela - Session Expired',
+              message: 'Please log in again to save sentences.',
+            });
+            return;
+          }
 
           // Retry the request with new token
           response = await fetch(`${API_BASE_URL}/my-dictionaries`, {

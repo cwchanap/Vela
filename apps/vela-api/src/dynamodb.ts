@@ -242,10 +242,10 @@ export const profiles = {
       );
       const expressionAttributeValues = Object.keys(updates).reduce(
         (acc, key) => {
-          acc[`:${key}`] = updates[key];
+          acc[`:${key}`] = (updates as Record<string, unknown>)[key];
           return acc;
         },
-        {} as Record<string, any>,
+        {} as Record<string, unknown>,
       );
 
       const command = new UpdateCommand({
@@ -546,6 +546,11 @@ export const dailyProgress = {
     date: string,
     updates: Partial<Omit<DailyProgress, 'user_id' | 'date'>>,
   ) {
+    // Guard against empty updates to prevent invalid UpdateExpression
+    if (Object.keys(updates).length === 0) {
+      return null;
+    }
+
     try {
       const updateExpression =
         'SET ' +
@@ -561,10 +566,10 @@ export const dailyProgress = {
       );
       const expressionAttributeValues = Object.keys(updates).reduce(
         (acc, key) => {
-          acc[`:${key}`] = updates[key];
+          acc[`:${key}`] = (updates as Record<string, unknown>)[key];
           return acc;
         },
-        {} as Record<string, any>,
+        {} as Record<string, unknown>,
       );
 
       const command = new UpdateCommand({

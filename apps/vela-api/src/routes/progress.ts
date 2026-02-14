@@ -30,7 +30,14 @@ progress.use('*', requireAuth);
 
 progress.get('/analytics', zValidator('query', UserIdQuerySchema), async (c) => {
   try {
+    // Use authenticated user's ID from context instead of trusting client-supplied user_id
+    const authenticatedUserId = c.get('userId');
     const { user_id } = c.req.valid('query');
+
+    // Authorization check: ensure client can only access their own progress
+    if (user_id !== authenticatedUserId) {
+      return c.json({ error: "Forbidden: Cannot access another user's progress" }, 403);
+    }
 
     // Get user profile for basic stats
     const profile = await profilesDB.get(user_id);
@@ -68,7 +75,14 @@ progress.get('/analytics', zValidator('query', UserIdQuerySchema), async (c) => 
 
 progress.post('/game-session', zValidator('json', RecordGameSessionSchema), async (c) => {
   try {
+    // Use authenticated user's ID from context instead of trusting client-supplied user_id
+    const authenticatedUserId = c.get('userId');
     const sessionData = c.req.valid('json');
+
+    // Authorization check: ensure client can only record sessions for themselves
+    if (sessionData.user_id !== authenticatedUserId) {
+      return c.json({ error: 'Forbidden: Cannot record game session for another user' }, 403);
+    }
 
     // Record game session
     const session = {

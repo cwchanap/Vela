@@ -52,8 +52,13 @@ export const jlptField = z
     const invalidLevels: string[] = [];
     for (const level of levels) {
       if (!level) continue;
+      // Strict check: ensure level is a pure integer string before parsing
+      if (!/^\d+$/.test(level)) {
+        invalidLevels.push(level);
+        continue;
+      }
       const parsed = parseInt(level, 10);
-      if (!Number.isFinite(parsed) || parsed < 1 || parsed > 5) {
+      if (parsed < 1 || parsed > 5) {
         invalidLevels.push(level);
       } else {
         parsedLevels.push(parsed);
