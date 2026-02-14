@@ -110,7 +110,15 @@ const createProfilesRoute = (env: Env) => {
 
   profiles.get('/', zValidator('query', UserIdQuerySchema), async (c) => {
     try {
+      // Use authenticated user's ID from context instead of trusting client-supplied user_id
+      const authenticatedUserId = c.get('userId');
       const { user_id } = c.req.valid('query');
+
+      // Authorization check: ensure client can only access their own profile
+      if (user_id !== authenticatedUserId) {
+        return c.json({ error: "Forbidden: Cannot access another user's profile" }, 403);
+      }
+
       console.log('Fetching profile for user_id:', user_id);
 
       // Try to get existing profile
@@ -159,8 +167,15 @@ const createProfilesRoute = (env: Env) => {
 
   profiles.put('/update', zValidator('json', UpdateProfileSchema), async (c) => {
     try {
+      // Use authenticated user's ID from context instead of trusting client-supplied user_id
+      const authenticatedUserId = c.get('userId');
       const profileData = c.req.valid('json');
       const { user_id, ...updates } = profileData;
+
+      // Authorization check: ensure client can only update their own profile
+      if (user_id !== authenticatedUserId) {
+        return c.json({ error: "Forbidden: Cannot update another user's profile" }, 403);
+      }
 
       // Normalize preferences if they are being updated
       if (updates.preferences) {
@@ -203,7 +218,14 @@ const createProfilesRoute = (env: Env) => {
     ),
     async (c) => {
       try {
+        // Use authenticated user's ID from context instead of trusting client-supplied user_id
+        const authenticatedUserId = c.get('userId');
         const { user_id, email, username } = c.req.valid('json');
+
+        // Authorization check: ensure client can only create their own profile
+        if (user_id !== authenticatedUserId) {
+          return c.json({ error: 'Forbidden: Cannot create profile for another user' }, 403);
+        }
 
         const defaultPreferences = normalizePreferences({});
         const profile = {

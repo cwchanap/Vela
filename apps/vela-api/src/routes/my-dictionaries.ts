@@ -90,6 +90,31 @@ function createSSEStream(
           }
         }
 
+        // Flush the TextDecoder and process any remaining buffered text
+        const remaining = decoder.decode(); // Decode without {stream: true} to flush
+        buffer += remaining;
+
+        // Process any final lines from the buffer
+        if (buffer.trim().length > 0) {
+          const finalLines = buffer.split('\n');
+          for (const line of finalLines) {
+            const trimmedLine = line.trim();
+            if (trimmedLine.length > 0 && trimmedLine.startsWith('data: ')) {
+              const jsonStr = trimmedLine.slice(6).trim();
+              if (jsonStr !== '' && !(skipDoneMarker && jsonStr === skipDoneMarker)) {
+                try {
+                  const text = extractText(jsonStr);
+                  if (text) {
+                    controller.enqueue(`data: ${JSON.stringify({ type: 'chunk', text })}\n\n`);
+                  }
+                } catch (e) {
+                  console.debug('Skipping invalid JSON chunk in flush:', e);
+                }
+              }
+            }
+          }
+        }
+
         controller.enqueue(`data: ${JSON.stringify({ type: 'done' })}\n\n`);
         controller.close();
       } catch (error) {
