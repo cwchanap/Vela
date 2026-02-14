@@ -43,7 +43,7 @@ describe('Profiles Route', () => {
 
   test('GET / should not 500 when stored preferences include legacy keys', async () => {
     mockProfilesDb.get.mockResolvedValueOnce({
-      user_id: 'user-1',
+      user_id: 'test-user',
       email: 'user@example.com',
       username: 'u1',
       avatar_url: null,
@@ -62,7 +62,7 @@ describe('Profiles Route', () => {
     });
 
     const app = createTestApp({});
-    const req = new Request('http://localhost/?user_id=user-1');
+    const req = new Request('http://localhost/?user_id=test-user');
     const res = await app.request(req);
     const json = await res.json();
 
