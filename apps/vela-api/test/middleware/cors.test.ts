@@ -338,18 +338,30 @@ describe('CORS Middleware', () => {
     });
 
     test('should handle undefined CORS_ALLOWED_ORIGINS', async () => {
-      const app = createTestApp({});
-      const req = new Request('http://localhost/test', {
-        method: 'GET',
-        headers: {
-          Origin: 'http://localhost:9000',
-        },
-      });
-      const res = await app.request(req);
-      const json = await res.json();
+      const originalEnv = process.env.CORS_ALLOWED_ORIGINS;
 
-      expect(res.status).toBe(403);
-      expect(json.error).toContain('CORS policy violation: Origin not allowed');
+      try {
+        delete process.env.CORS_ALLOWED_ORIGINS;
+
+        const app = createTestApp({});
+        const req = new Request('http://localhost/test', {
+          method: 'GET',
+          headers: {
+            Origin: 'http://localhost:9000',
+          },
+        });
+        const res = await app.request(req);
+        const json = await res.json();
+
+        expect(res.status).toBe(403);
+        expect(json.error).toContain('CORS policy violation: Origin not allowed');
+      } finally {
+        if (originalEnv !== undefined) {
+          process.env.CORS_ALLOWED_ORIGINS = originalEnv;
+        } else {
+          delete process.env.CORS_ALLOWED_ORIGINS;
+        }
+      }
     });
 
     test('should handle whitespace in allowed origins', async () => {

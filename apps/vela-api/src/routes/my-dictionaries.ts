@@ -8,6 +8,9 @@ import type { Env } from '../types';
 
 const app = new Hono<{ Bindings: Env }>();
 
+// Track whether CORS configuration warning has been logged (to log only once)
+let corsConfigWarningLogged = false;
+
 const cognitoClient = new CognitoIdentityProviderClient({
   region: process.env.AWS_REGION || 'us-east-1',
 });
@@ -56,6 +59,9 @@ function createSSEStream(
         const decoder = new TextDecoder();
 
         if (!reader) {
+          controller.enqueue(
+            `data: ${JSON.stringify({ type: 'error', error: 'No response body from upstream API' })}\n\n`,
+          );
           controller.close();
           return;
         }
@@ -215,6 +221,22 @@ app.post('/analyze', async (c) => {
     const body = await c.req.json();
     const { sentence, provider, model, apiKey } = body;
     const requestOrigin = c.req.header('Origin');
+    const corsConfig = c.env?.CORS_ALLOWED_ORIGINS || process.env.CORS_ALLOWED_ORIGINS;
+    const allowedOrigins = corsConfig?.split(',').map((o: string) => o.trim()) || [];
+    const validatedOrigin =
+      requestOrigin && allowedOrigins.includes(requestOrigin) ? requestOrigin : undefined;
+
+    // Warn if CORS_ALLOWED_ORIGINS is not configured or empty (disables SSE CORS)
+    // Only log the warning once to avoid spamming logs on every request
+    if (
+      !corsConfigWarningLogged &&
+      (!corsConfig || corsConfig.trim() === '' || allowedOrigins.length === 0)
+    ) {
+      console.warn(
+        'Warning: CORS_ALLOWED_ORIGINS is not configured or is empty. SSE CORS validation is disabled. Please set CORS_ALLOWED_ORIGINS environment variable.',
+      );
+      corsConfigWarningLogged = true;
+    }
 
     if (!sentence || typeof sentence !== 'string' || sentence.trim().length === 0) {
       return c.json({ error: 'Sentence is required' }, 400);
@@ -283,7 +305,7 @@ Keep it concise and educational.`;
           'Content-Type': 'text/event-stream',
           'Cache-Control': 'no-cache',
           Connection: 'keep-alive',
-          ...(requestOrigin ? { 'Access-Control-Allow-Origin': requestOrigin } : {}),
+          ...(validatedOrigin ? { 'Access-Control-Allow-Origin': validatedOrigin } : {}),
         },
       });
     }
@@ -345,7 +367,7 @@ Keep it concise and educational.`;
           'Content-Type': 'text/event-stream',
           'Cache-Control': 'no-cache',
           Connection: 'keep-alive',
-          ...(requestOrigin ? { 'Access-Control-Allow-Origin': requestOrigin } : {}),
+          ...(validatedOrigin ? { 'Access-Control-Allow-Origin': validatedOrigin } : {}),
         },
       });
     }
