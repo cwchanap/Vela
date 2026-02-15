@@ -274,10 +274,11 @@ chatHistory.post('/save', zValidator('json', ChatHistoryItemSchema), async (c) =
     const authenticatedUserId = c.get('userId');
     const body = c.req.valid('json');
 
-    // Always trust authenticated userId from middleware over client payload.
+    // Always trust server-side identity/timestamp over client payload.
     await dynamodb_saveMessage(c.env, {
       ...body,
       UserId: authenticatedUserId,
+      Timestamp: Date.now(),
     });
     return c.json({ ok: true });
   } catch (e) {
@@ -352,9 +353,9 @@ chatHistory.delete('/thread', createQueryValidator(ThreadIdQuerySchema), async (
       return c.json({ ok: true });
     }
 
-    // Check if the first message belongs to the authenticated user
-    const threadOwner = messages[0].UserId;
-    if (threadOwner !== userId) {
+    // Ensure all thread messages belong to the authenticated user.
+    // This prevents deleting mixed-owner/corrupted threads.
+    if (!messages.every((message) => message.UserId === userId)) {
       return c.json({ error: 'Forbidden: You do not own this thread' }, 403);
     }
 

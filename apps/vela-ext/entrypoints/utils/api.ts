@@ -32,12 +32,12 @@ export async function signIn(email: string, password: string): Promise<AuthToken
   return data.tokens;
 }
 
-export async function checkSession(accessToken: string): Promise<boolean> {
+export async function checkSession(idToken: string): Promise<boolean> {
   try {
     const response = await fetch(`${API_BASE_URL}/auth/session`, {
       method: 'GET',
       headers: {
-        Authorization: `Bearer ${accessToken}`,
+        Authorization: `Bearer ${idToken}`,
       },
     });
 
