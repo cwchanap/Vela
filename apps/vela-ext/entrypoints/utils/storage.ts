@@ -104,16 +104,22 @@ export async function refreshIdToken(): Promise<string> {
     throw new Error('No refresh token available');
   }
 
+  let newTokens: AuthTokens;
+
   try {
-    const newTokens = await refreshTokenAPI(tokens.refreshToken);
+    newTokens = await refreshTokenAPI(tokens.refreshToken);
     await saveAuthTokens(newTokens);
-    if (!newTokens.idToken) {
-      throw new Error('Missing ID token after refresh');
-    }
-    return newTokens.idToken;
   } catch (error) {
+    // Only clear auth data for network/API errors, not for missing ID token
     console.error('Token refresh error:', error);
     await clearAuthData();
     throw new Error('Session expired. Please log in again.');
   }
+
+  // Check for ID token outside the try-catch to avoid clearing auth data on missing token
+  if (!newTokens.idToken) {
+    throw new Error('Missing ID token after refresh');
+  }
+
+  return newTokens.idToken;
 }
