@@ -77,18 +77,18 @@ if (process.env.NODE_ENV === 'development') {
   }
 }
 
-// Initialize auth verifier
-const userPoolId = process.env.VITE_COGNITO_USER_POOL_ID;
-const clientId = process.env.VITE_COGNITO_USER_POOL_CLIENT_ID || process.env.COGNITO_CLIENT_ID;
+// Build env once and reuse
+const appEnv = buildEnv();
+
+// Initialize auth verifier using values from appEnv for consistency
+const userPoolId = appEnv.VITE_COGNITO_USER_POOL_ID;
+const clientId = appEnv.COGNITO_CLIENT_ID;
 
 if (userPoolId && clientId) {
   initializeAuthVerifier(userPoolId, clientId);
 } else {
   console.warn('⚠️ Cognito configuration missing. Authentication will fail for protected routes.');
 }
-
-// Build env once and reuse
-const appEnv = buildEnv();
 
 if (process.env.NODE_ENV === 'development') {
   console.log('Environment variables loaded:', {
