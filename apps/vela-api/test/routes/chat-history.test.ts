@@ -151,8 +151,11 @@ describe('Chat History Route', () => {
         expect.objectContaining({
           TableName: 'vela-chat-history',
           Item: expect.objectContaining({
-            ...chatItem,
+            ThreadId: chatItem.ThreadId,
+            message: chatItem.message,
+            is_user: chatItem.is_user,
             UserId: 'user-123',
+            Timestamp: expect.any(Number),
           }),
         }),
       );
@@ -323,6 +326,87 @@ describe('Chat History Route', () => {
 
       expect(res.status).toBe(400);
       expect(json.error).toContain('thread_id is required');
+    });
+  });
+
+  describe('DELETE /thread', () => {
+    test('should delete thread when all messages belong to authenticated user', async () => {
+      mockSend
+        .mockResolvedValueOnce({
+          Items: [
+            {
+              ThreadId: 'thread-123',
+              Timestamp: 1693440000000,
+              UserId: 'user-123',
+              message: 'hello',
+              is_user: true,
+            },
+          ],
+        })
+        .mockResolvedValueOnce({
+          Items: [
+            {
+              ThreadId: 'thread-123',
+              Timestamp: 1693440000000,
+              UserId: 'user-123',
+              message: 'hello',
+              is_user: true,
+            },
+          ],
+          LastEvaluatedKey: undefined,
+        })
+        .mockResolvedValueOnce({
+          UnprocessedItems: {},
+        });
+
+      const app = createTestApp({
+        AWS_ACCESS_KEY_ID: 'test-key',
+        AWS_SECRET_ACCESS_KEY: 'test-secret',
+      });
+
+      const req = new Request('http://localhost/thread?thread_id=thread-123', {
+        method: 'DELETE',
+      });
+      const res = await app.request(req);
+      const json = await res.json();
+
+      expect(res.status).toBe(200);
+      expect(json.ok).toBe(true);
+    });
+
+    test('should reject deletion when thread has mixed ownership', async () => {
+      mockSend.mockResolvedValueOnce({
+        Items: [
+          {
+            ThreadId: 'thread-123',
+            Timestamp: 1693440000000,
+            UserId: 'user-123',
+            message: 'hello',
+            is_user: true,
+          },
+          {
+            ThreadId: 'thread-123',
+            Timestamp: 1693440001000,
+            UserId: 'other-user',
+            message: 'intruder',
+            is_user: false,
+          },
+        ],
+      });
+
+      const app = createTestApp({
+        AWS_ACCESS_KEY_ID: 'test-key',
+        AWS_SECRET_ACCESS_KEY: 'test-secret',
+      });
+
+      const req = new Request('http://localhost/thread?thread_id=thread-123', {
+        method: 'DELETE',
+      });
+      const res = await app.request(req);
+      const json = await res.json();
+
+      expect(res.status).toBe(403);
+      expect(json.error).toContain('Forbidden');
     });
   });
 });
