@@ -14,12 +14,16 @@ import type { Env } from '../types';
 export const corsMiddleware = async (c: Context<{ Bindings: Env }>, next: Next) => {
   const origin = c.req.header('Origin');
 
+  const isExtensionOrigin =
+    typeof origin === 'string' &&
+    (origin.startsWith('chrome-extension://') || origin.startsWith('moz-extension://'));
+
   // Parse allowed origins from environment variable (comma-separated)
   // Fall back to process.env if c.env is not available (e.g., in production before env injection)
   const corsConfig = c.env?.CORS_ALLOWED_ORIGINS || process.env.CORS_ALLOWED_ORIGINS;
   const allowedOrigins = corsConfig?.split(',').map((o) => o.trim()) || [];
 
-  const isAllowedOrigin = origin && allowedOrigins.includes(origin);
+  const isAllowedOrigin = !!origin && (allowedOrigins.includes(origin) || isExtensionOrigin);
 
   if (origin && !isAllowedOrigin) {
     // Origin not allowed - return 403 for non-OPTIONS requests

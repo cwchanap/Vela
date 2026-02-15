@@ -13,6 +13,7 @@ import {
 import { Hub } from 'aws-amplify/utils';
 import type { Profile, ProfileInsert } from '../types/shared';
 import { config } from '../config';
+import { httpJsonAuth } from 'src/utils/httpClient';
 
 // Configure Amplify with Cognito
 const configureAmplify = () => {
@@ -97,7 +98,7 @@ class AuthService {
   /**
    * Sign up a new user with email and password
    */
-  async signUp({ email, password, username }: SignUpData): Promise<AuthResponse> {
+  async signUp({ email, password, username: _username }: SignUpData): Promise<AuthResponse> {
     if (!cognitoEnabled) {
       return {
         success: false,
@@ -126,12 +127,6 @@ class AuthService {
           console.warn('Auto-confirmation failed, but signup was successful:', confirmError);
           // Don't fail the signup if auto-confirmation fails
         }
-
-        // Create user profile
-        await this.createUserProfile(result.userId, {
-          email,
-          username: username || email.split('@')[0] || null,
-        });
       }
 
       return {
@@ -409,11 +404,8 @@ class AuthService {
     profileData: Partial<ProfileInsert>,
   ): Promise<void> {
     try {
-      await fetch(`${config.api.url}profiles/create`, {
+      await httpJsonAuth<{ success: boolean }>(`${config.api.url}profiles/create`, {
         method: 'POST',
-        headers: {
-          'content-type': 'application/json',
-        },
         body: JSON.stringify({
           user_id: userId,
           email: profileData.email,
@@ -430,13 +422,9 @@ class AuthService {
    */
   async getUserProfile(userId: string): Promise<Profile | null> {
     try {
-      const response = await fetch(`${config.api.url}profiles?user_id=${userId}`);
-      if (!response.ok) {
-        console.error('Error fetching user profile:', response.statusText);
-        return null;
-      }
-
-      const data = await response.json();
+      const data = await httpJsonAuth<{ profile: Profile }>(
+        `${config.api.url}profiles?user_id=${encodeURIComponent(userId)}`,
+      );
       return data.profile;
     } catch (error) {
       console.error('Error fetching user profile:', error);
@@ -449,21 +437,13 @@ class AuthService {
    */
   async updateUserProfile(userId: string, profileData: ProfileData): Promise<AuthResponse> {
     try {
-      const response = await fetch(`${config.api.url}profiles/update`, {
+      await httpJsonAuth<{ success: boolean }>(`${config.api.url}profiles/update`, {
         method: 'PUT',
-        headers: {
-          'content-type': 'application/json',
-        },
         body: JSON.stringify({
           user_id: userId,
           ...profileData,
         }),
       });
-
-      if (!response.ok) {
-        const errorData = await response.json();
-        return { success: false, error: errorData.error || 'Failed to update profile' };
-      }
 
       return { success: true };
     } catch (error) {

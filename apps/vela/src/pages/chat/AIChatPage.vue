@@ -185,10 +185,10 @@ import { storeToRefs } from 'pinia';
 import { useChatStore } from '../../stores/chat';
 import { useLLMSettingsStore } from '../../stores/llmSettings';
 import { useAuthStore } from '../../stores/auth';
-import { fetchAuthSession } from 'aws-amplify/auth';
 import { marked } from 'marked';
 import DOMPurify from 'dompurify';
 import { getApiUrl } from '../../utils/api';
+import { httpJsonAuth } from '../../utils/httpClient';
 // Chat history types for API calls
 interface ChatHistoryItemDTO {
   ThreadId: string;
@@ -323,11 +323,8 @@ const ensureChatId = () => {
 
 const saveToHistory = async (chat_id: string, message: string, is_user: boolean) => {
   try {
-    const response = await fetch(getApiUrl('chat-history/save'), {
+    await httpJsonAuth<{ ok: boolean }>(getApiUrl('chat-history/save'), {
       method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-      },
       body: JSON.stringify({
         ThreadId: chat_id,
         Timestamp: Date.now(),
@@ -336,10 +333,6 @@ const saveToHistory = async (chat_id: string, message: string, is_user: boolean)
         is_user,
       }),
     });
-
-    if (!response.ok) {
-      throw new Error('Failed to save message');
-    }
   } catch (e) {
     console.error('Failed to save chat message', e);
     $q.notify({ type: 'warning', message: 'Failed to save chat history' });
@@ -351,13 +344,9 @@ const openHistory = async () => {
   showHistory.value = true;
   try {
     const uid = getUserId();
-    const response = await fetch(
+    const data = await httpJsonAuth<{ threads?: ChatThreadSummaryDTO[] }>(
       getApiUrl(`chat-history/threads?user_id=${encodeURIComponent(uid)}`),
     );
-    if (!response.ok) {
-      throw new Error('Failed to load threads');
-    }
-    const data = await response.json();
     threads.value = data.threads || [];
   } catch (e) {
     console.error(e);
@@ -369,13 +358,9 @@ const openHistory = async () => {
 
 const selectThread = async (t: ChatThreadSummaryDTO) => {
   try {
-    const response = await fetch(
+    const data = await httpJsonAuth<{ items?: ChatHistoryItemDTO[] }>(
       getApiUrl(`chat-history/messages?thread_id=${encodeURIComponent(t.ThreadId)}`),
     );
-    if (!response.ok) {
-      throw new Error('Failed to load messages');
-    }
-    const data = await response.json();
     const items: ChatHistoryItemDTO[] = data.items || [];
 
     chat.setChatId(t.ThreadId);
@@ -487,30 +472,14 @@ const deleteThread = async () => {
 
   isDeleting.value = true;
   try {
-    // Get auth token for authorization
-    const session = await fetchAuthSession();
-    const accessToken = session.tokens?.accessToken?.toString();
-
-    if (!accessToken) {
-      throw new Error('Not authenticated');
-    }
-
-    const response = await fetch(
+    await httpJsonAuth<{ ok: boolean }>(
       getApiUrl(
         `chat-history/thread?thread_id=${encodeURIComponent(threadToDelete.value.ThreadId)}`,
       ),
       {
         method: 'DELETE',
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-        },
       },
     );
-
-    if (!response.ok) {
-      const errorData = await response.json().catch(() => ({ error: 'Failed to delete thread' }));
-      throw new Error(errorData.error || 'Failed to delete thread');
-    }
 
     // Remove from local list
     threads.value = threads.value.filter((t) => t.ThreadId !== threadToDelete.value!.ThreadId);

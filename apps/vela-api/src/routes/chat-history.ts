@@ -1,12 +1,7 @@
 import { Hono } from 'hono';
-import type { Context } from 'hono';
 import { zValidator } from '@hono/zod-validator';
-import { env } from 'hono/adapter';
-import {
-  GetUserCommand,
-  CognitoIdentityProviderClient,
-} from '@aws-sdk/client-cognito-identity-provider';
 import type { Env } from '../types';
+import { requireAuth, type AuthContext } from '../middleware/auth';
 import {
   ChatHistoryItemSchema,
   UserIdQuerySchema,
@@ -22,7 +17,7 @@ import type { ZodIssue, ZodTypeAny } from 'zod';
 
 const { PutCommand, QueryCommand, ScanCommand, BatchWriteCommand } = DynamoDbLib;
 
-const chatHistory = new Hono<{ Bindings: Env }>();
+const chatHistory = new Hono<{ Bindings: Env } & AuthContext>();
 
 const formatIssueMessage = (issue: ZodIssue) => {
   if (issue.code === 'invalid_type') {
@@ -49,45 +44,8 @@ const createQueryValidator = (schema: ZodTypeAny) =>
     }
   });
 
-// Create Cognito client with environment variables from context
-const createCognitoClient = (c: Context<{ Bindings: Env }>) => {
-  const { AWS_REGION = 'us-east-1' } = env<{ AWS_REGION: string }>(c);
-  return new CognitoIdentityProviderClient({
-    region: AWS_REGION,
-  });
-};
-
-// Helper to validate token and extract user ID from Cognito
-async function getUserIdFromToken(
-  authHeader: string | undefined,
-  c: Context<{ Bindings: Env }>,
-): Promise<string | null> {
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    return null;
-  }
-
-  try {
-    const accessToken = authHeader.substring(7);
-
-    // Validate token with Cognito to verify signature and prevent forgery
-    const getUserCommand = new GetUserCommand({
-      AccessToken: accessToken,
-    });
-
-    const cognitoClient = createCognitoClient(c);
-    const userResponse = await cognitoClient.send(getUserCommand);
-
-    // IMPORTANT: Return the Cognito sub to match what's stored in chat messages
-    // Messages are saved with UserId = auth.user.id which is the Cognito sub
-    // Note: Username is the login email, but we need the actual sub attribute
-    const userId = userResponse.UserAttributes?.find((attr) => attr.Name === 'sub')?.Value;
-
-    return userId || null;
-  } catch (error) {
-    console.error('Token validation error:', error);
-    return null;
-  }
-}
+// Apply auth middleware to all chat history routes.
+chatHistory.use('*', requireAuth);
 
 /* ========================
  * DynamoDB implementation
@@ -313,8 +271,14 @@ chatHistory.post('/save', zValidator('json', ChatHistoryItemSchema), async (c) =
     if (!hasAwsCredentials) {
       return c.json({ error: 'Missing AWS credentials' }, 500);
     }
+    const authenticatedUserId = c.get('userId');
     const body = c.req.valid('json');
-    await dynamodb_saveMessage(c.env, body);
+
+    // Always trust authenticated userId from middleware over client payload.
+    await dynamodb_saveMessage(c.env, {
+      ...body,
+      UserId: authenticatedUserId,
+    });
     return c.json({ ok: true });
   } catch (e) {
     console.error('chat-history save error', e);
@@ -329,7 +293,14 @@ chatHistory.get('/threads', createQueryValidator(UserIdQuerySchema), async (c) =
     if (!hasAwsCredentials) {
       return c.json({ error: 'Missing AWS credentials' }, 500);
     }
+    const authenticatedUserId = c.get('userId');
     const { user_id } = c.req.valid('query') as UserIdQuery;
+
+    // Ensure users can only read their own thread list.
+    if (user_id !== authenticatedUserId) {
+      return c.json({ error: "Forbidden: Cannot access another user's chat history" }, 403);
+    }
+
     const threads = await dynamodb_listThreads(c.env, user_id);
     return c.json({ threads });
   } catch (e) {
@@ -345,8 +316,15 @@ chatHistory.get('/messages', createQueryValidator(ThreadIdQuerySchema), async (c
     if (!hasAwsCredentials) {
       return c.json({ error: 'Missing AWS credentials' }, 500);
     }
+    const authenticatedUserId = c.get('userId');
     const { thread_id } = c.req.valid('query') as ThreadIdQuery;
     const items = await dynamodb_getMessages(c.env, thread_id);
+
+    // Verify ownership before returning messages.
+    if (items.length > 0 && items[0]?.UserId !== authenticatedUserId) {
+      return c.json({ error: 'Forbidden: You do not own this thread' }, 403);
+    }
+
     return c.json({ items });
   } catch (e) {
     console.error('chat-history messages error', e);
@@ -361,11 +339,7 @@ chatHistory.delete('/thread', createQueryValidator(ThreadIdQuerySchema), async (
     if (!hasAwsCredentials) {
       return c.json({ error: 'Missing AWS credentials' }, 500);
     }
-    // SECURITY: Authenticate the user
-    const userId = await getUserIdFromToken(c.req.header('Authorization'), c);
-    if (!userId) {
-      return c.json({ error: 'Unauthorized' }, 401);
-    }
+    const userId = c.get('userId');
 
     const { thread_id } = c.req.valid('query') as ThreadIdQuery;
 

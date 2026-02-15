@@ -55,6 +55,9 @@ export class ApiStack extends Stack {
         VITE_COGNITO_USER_POOL_CLIENT_ID: auth.userPoolClient.userPoolClientId,
         COGNITO_CLIENT_ID: auth.userPoolClient.userPoolClientId,
         DDB_REGION: Stack.of(this).region,
+        CORS_ALLOWED_ORIGINS:
+          process.env.CORS_ALLOWED_ORIGINS ||
+          'https://vela.cwchanap.dev,http://localhost:9000,http://127.0.0.1:9000',
       },
     });
 

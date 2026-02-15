@@ -354,16 +354,16 @@ async function handleAskAI(entry: MyDictionaryEntry) {
 
   try {
     const session = await fetchAuthSession();
-    const accessToken = session.tokens?.accessToken?.toString();
+    const idToken = session.tokens?.idToken?.toString();
 
-    if (!accessToken) {
+    if (!idToken) {
       throw new Error('Not authenticated');
     }
 
     const response = await fetch(`${config.api.url}my-dictionaries/analyze`, {
       method: 'POST',
       headers: {
-        Authorization: `Bearer ${accessToken}`,
+        Authorization: `Bearer ${idToken}`,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({

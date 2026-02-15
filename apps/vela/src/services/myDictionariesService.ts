@@ -1,5 +1,5 @@
-import { fetchAuthSession } from 'aws-amplify/auth';
 import { config } from 'src/config';
+import { httpJsonAuth } from 'src/utils/httpClient';
 
 export interface MyDictionaryEntry {
   user_id: string;
@@ -23,27 +23,12 @@ export interface SentenceAnalysis {
  */
 export async function getMyDictionaries(limit = 50): Promise<MyDictionaryEntry[]> {
   try {
-    const session = await fetchAuthSession();
-    const accessToken = session.tokens?.accessToken?.toString();
-
-    if (!accessToken) {
-      throw new Error('Not authenticated');
-    }
-
-    const response = await fetch(`${config.api.url}my-dictionaries?limit=${limit}`, {
-      method: 'GET',
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        'Content-Type': 'application/json',
+    const data = await httpJsonAuth<{ data?: MyDictionaryEntry[] }>(
+      `${config.api.url}my-dictionaries?limit=${limit}`,
+      {
+        method: 'GET',
       },
-    });
-
-    if (!response.ok) {
-      const error = await response.json();
-      throw new Error(error.error || 'Failed to fetch dictionary entries');
-    }
-
-    const data = await response.json();
+    );
     return data.data || [];
   } catch (error) {
     console.error('Error fetching dictionary entries:', error);
@@ -56,25 +41,9 @@ export async function getMyDictionaries(limit = 50): Promise<MyDictionaryEntry[]
  */
 export async function deleteDictionaryEntry(sentenceId: string): Promise<void> {
   try {
-    const session = await fetchAuthSession();
-    const accessToken = session.tokens?.accessToken?.toString();
-
-    if (!accessToken) {
-      throw new Error('Not authenticated');
-    }
-
-    const response = await fetch(`${config.api.url}my-dictionaries/${sentenceId}`, {
+    await httpJsonAuth<{ success: boolean }>(`${config.api.url}my-dictionaries/${sentenceId}`, {
       method: 'DELETE',
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        'Content-Type': 'application/json',
-      },
     });
-
-    if (!response.ok) {
-      const error = await response.json();
-      throw new Error(error.error || 'Failed to delete dictionary entry');
-    }
   } catch (error) {
     console.error('Error deleting dictionary entry:', error);
     throw error;

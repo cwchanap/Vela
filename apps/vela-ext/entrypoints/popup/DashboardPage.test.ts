@@ -8,21 +8,22 @@ const { mockGetMyDictionaries } = vi.hoisted(() => ({
   mockGetMyDictionaries: vi.fn(),
 }));
 
-const { mockGetValidAccessToken, mockRefreshAccessToken, mockGetUserEmail, mockClearAuthData } =
-  vi.hoisted(() => ({
-    mockGetValidAccessToken: vi.fn(),
-    mockRefreshAccessToken: vi.fn(),
+const { mockGetValidIdToken, mockRefreshIdToken, mockGetUserEmail, mockClearAuthData } = vi.hoisted(
+  () => ({
+    mockGetValidIdToken: vi.fn(),
+    mockRefreshIdToken: vi.fn(),
     mockGetUserEmail: vi.fn(),
     mockClearAuthData: vi.fn(),
-  }));
+  }),
+);
 
 vi.mock('../utils/api', () => ({
   getMyDictionaries: mockGetMyDictionaries,
 }));
 
 vi.mock('../utils/storage', () => ({
-  getValidAccessToken: mockGetValidAccessToken,
-  refreshAccessToken: mockRefreshAccessToken,
+  getValidIdToken: mockGetValidIdToken,
+  refreshIdToken: mockRefreshIdToken,
   getUserEmail: mockGetUserEmail,
   clearAuthData: mockClearAuthData,
 }));
@@ -76,8 +77,8 @@ describe('DashboardPage', () => {
 
     // Clear all mock functions
     mockGetMyDictionaries.mockClear();
-    mockGetValidAccessToken.mockClear();
-    mockRefreshAccessToken.mockClear();
+    mockGetValidIdToken.mockClear();
+    mockRefreshIdToken.mockClear();
     mockGetUserEmail.mockClear();
     mockClearAuthData.mockClear();
 
@@ -109,7 +110,7 @@ describe('DashboardPage', () => {
 
     // Set default mock implementations
     mockGetUserEmail.mockResolvedValue('test@example.com');
-    mockGetValidAccessToken.mockResolvedValue('valid-token');
+    mockGetValidIdToken.mockResolvedValue('valid-token');
     mockGetMyDictionaries.mockResolvedValue(mockEntries);
   });
 
@@ -138,7 +139,7 @@ describe('DashboardPage', () => {
       wrapper = mount(DashboardPage);
       await flushPromises();
 
-      expect(mockGetValidAccessToken).toHaveBeenCalled();
+      expect(mockGetValidIdToken).toHaveBeenCalled();
       expect(mockGetMyDictionaries).toHaveBeenCalledWith('valid-token');
     });
 
@@ -467,12 +468,12 @@ describe('DashboardPage', () => {
       mockGetMyDictionaries
         .mockRejectedValueOnce(new Error('Unauthorized'))
         .mockResolvedValueOnce(mockEntries);
-      mockRefreshAccessToken.mockResolvedValue('new-token');
+      mockRefreshIdToken.mockResolvedValue('new-token');
 
       wrapper = mount(DashboardPage);
       await flushPromises();
 
-      expect(mockRefreshAccessToken).toHaveBeenCalled();
+      expect(mockRefreshIdToken).toHaveBeenCalled();
       expect(mockGetMyDictionaries).toHaveBeenCalledTimes(2);
       expect(mockGetMyDictionaries).toHaveBeenLastCalledWith('new-token');
     });
@@ -481,12 +482,12 @@ describe('DashboardPage', () => {
       mockGetMyDictionaries
         .mockRejectedValueOnce(new Error('expired token'))
         .mockResolvedValueOnce(mockEntries);
-      mockRefreshAccessToken.mockResolvedValue('new-token');
+      mockRefreshIdToken.mockResolvedValue('new-token');
 
       wrapper = mount(DashboardPage);
       await flushPromises();
 
-      expect(mockRefreshAccessToken).toHaveBeenCalled();
+      expect(mockRefreshIdToken).toHaveBeenCalled();
       expect(mockGetMyDictionaries).toHaveBeenCalledTimes(2);
     });
 
@@ -513,7 +514,7 @@ describe('DashboardPage', () => {
 
     it('should show error when refresh token fails', async () => {
       mockGetMyDictionaries.mockRejectedValue(new Error('Unauthorized'));
-      mockRefreshAccessToken.mockResolvedValue(''); // Return empty token to simulate failure
+      mockRefreshIdToken.mockResolvedValue(''); // Return empty token to simulate failure
 
       wrapper = mount(DashboardPage);
       await flushPromises();

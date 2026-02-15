@@ -9,8 +9,9 @@ import {
   InitiateAuthCommandOutput,
 } from '@aws-sdk/client-cognito-identity-provider';
 import type { Env } from '../types';
+import { requireAuth, type AuthContext } from '../middleware/auth';
 
-const app = new Hono<{ Bindings: Env }>();
+const app = new Hono<{ Bindings: Env } & AuthContext>();
 
 const cognitoClient = new CognitoIdentityProviderClient({
   region: process.env.AWS_REGION || 'us-east-1',
@@ -219,39 +220,20 @@ app.post('/signout', async (c) => {
 });
 
 // Session check endpoint
-app.get('/session', async (c) => {
+app.get('/session', requireAuth, async (c) => {
   try {
-    const authHeader = c.req.header('Authorization');
-
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      return c.json({ authenticated: false, message: 'No access token provided' });
-    }
-
-    const accessToken = authHeader.substring(7);
-
-    const getUserCommand = new GetUserCommand({
-      AccessToken: accessToken,
-    });
-
-    const userResponse = await cognitoClient.send(getUserCommand);
+    const userId = c.get('userId');
+    const userEmail = c.get('userEmail');
 
     return c.json({
       authenticated: true,
       user: {
-        username: userResponse.Username,
-        email: userResponse.UserAttributes?.find((attr) => attr.Name === 'email')?.Value,
-        emailVerified:
-          userResponse.UserAttributes?.find((attr) => attr.Name === 'email_verified')?.Value ===
-          'true',
+        userId,
+        email: userEmail,
       },
     });
   } catch (error: any) {
     console.error('Session check error:', error);
-
-    if (error.name === 'NotAuthorizedException' || error.name === 'InvalidParameterException') {
-      return c.json({ authenticated: false, message: 'Invalid or expired token' });
-    }
-
     return c.json({ authenticated: false, message: 'Session check failed' }, 500);
   }
 });
