@@ -29,6 +29,15 @@ export class ApiStack extends Stack {
 
     const ttsAudioBucketName = getTtsAudioBucketName(this);
 
+    // Parse CORS allowed origins from environment or use defaults
+    const corsAllowedOrigins =
+      process.env.CORS_ALLOWED_ORIGINS ||
+      'https://vela.cwchanap.dev,http://localhost:9000,http://127.0.0.1:9000';
+    const allowedOriginsList = corsAllowedOrigins
+      .split(',')
+      .map((o: string) => o.trim())
+      .filter((o: string) => o.length > 0);
+
     const apiLambda = new Function(this, 'VelaApiFunction', {
       functionName: 'vela-api',
       runtime: Runtime.NODEJS_20_X,
@@ -55,9 +64,7 @@ export class ApiStack extends Stack {
         VITE_COGNITO_USER_POOL_CLIENT_ID: auth.userPoolClient.userPoolClientId,
         COGNITO_CLIENT_ID: auth.userPoolClient.userPoolClientId,
         DDB_REGION: Stack.of(this).region,
-        CORS_ALLOWED_ORIGINS:
-          process.env.CORS_ALLOWED_ORIGINS ||
-          'https://vela.cwchanap.dev,http://localhost:9000,http://127.0.0.1:9000',
+        CORS_ALLOWED_ORIGINS: corsAllowedOrigins,
       },
     });
 
@@ -109,7 +116,7 @@ export class ApiStack extends Stack {
       restApiName: 'Vela API',
       description: 'API for Vela Japanese Learning App',
       defaultCorsPreflightOptions: {
-        allowOrigins: Cors.ALL_ORIGINS,
+        allowOrigins: allowedOriginsList,
         allowMethods: Cors.ALL_METHODS,
         allowHeaders: [
           'Content-Type',
