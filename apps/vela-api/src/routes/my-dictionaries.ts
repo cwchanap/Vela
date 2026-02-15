@@ -198,7 +198,12 @@ app.delete('/:sentenceId', async (c) => {
 app.post('/analyze', async (c) => {
   try {
     const authenticatedUserId = c.get('userId');
-    if (!authenticatedUserId) {
+    const authenticatedUserEmail = c.get('userEmail');
+
+    // Keep backward compatibility for existing dictionary records keyed by email.
+    const dictionaryUserId = authenticatedUserEmail || authenticatedUserId;
+
+    if (!dictionaryUserId) {
       return c.json({ error: 'Unauthorized' }, 401);
     }
 

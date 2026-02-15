@@ -320,8 +320,8 @@ chatHistory.get('/messages', createQueryValidator(ThreadIdQuerySchema), async (c
     const { thread_id } = c.req.valid('query') as ThreadIdQuery;
     const items = await dynamodb_getMessages(c.env, thread_id);
 
-    // Verify ownership before returning messages.
-    if (items.length > 0 && items[0]?.UserId !== authenticatedUserId) {
+    // Verify ownership before returning messages - check all items belong to the authenticated user
+    if (items.length > 0 && !items.every((msg) => msg.UserId === authenticatedUserId)) {
       return c.json({ error: 'Forbidden: You do not own this thread' }, 403);
     }
 

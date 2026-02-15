@@ -29,6 +29,7 @@ export interface Env {
 
   // CORS configuration
   CORS_ALLOWED_ORIGINS?: string;
+  CORS_ALLOWED_EXTENSION_IDS?: string;
 }
 
 // Re-export types from validation schemas for backward compatibility
