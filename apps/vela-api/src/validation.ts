@@ -45,7 +45,7 @@ export const LLMBridgeRequestSchema = z
 export const jlptField = z
   .string()
   .optional()
-  .transform((val) => {
+  .transform((val, ctx) => {
     if (!val) return undefined;
     const levels = val.split(',').map((level) => level.trim());
     const parsedLevels: number[] = [];
@@ -65,13 +65,12 @@ export const jlptField = z
       }
     }
     if (invalidLevels.length > 0) {
-      throw new z.ZodError([
-        {
-          code: z.ZodIssueCode.custom,
-          path: [],
-          message: `Invalid JLPT level(s): ${invalidLevels.join(', ')}. Must be integers between 1 and 5.`,
-        },
-      ]);
+      ctx.addIssue({
+        code: 'custom',
+        path: [],
+        message: `Invalid JLPT level(s): ${invalidLevels.join(', ')}. Must be integers between 1 and 5.`,
+      });
+      return z.NEVER;
     }
     const uniqueLevels = [...new Set(parsedLevels)];
     return uniqueLevels.length > 0 ? uniqueLevels : undefined;

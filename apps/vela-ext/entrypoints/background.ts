@@ -27,11 +27,15 @@ export default defineBackground(() => {
       }
 
       try {
-        let idToken = await getValidIdToken();
+        let idToken: string;
 
-        // Guard against missing/null token to prevent "Bearer undefined"
-        if (!idToken) {
-          console.error('No valid access token available. User needs to log in.');
+        // Try to get valid ID token, handle auth errors specifically
+        try {
+          idToken = await getValidIdToken();
+        } catch (authError) {
+          // Handle authentication errors from getValidIdToken
+          const errorMessage = authError instanceof Error ? authError.message : String(authError);
+          console.error('Authentication error:', errorMessage);
           browser.notifications.create({
             type: 'basic',
             iconUrl: browser.runtime.getURL('/icon/128.png'),
@@ -57,11 +61,13 @@ export default defineBackground(() => {
 
         // If unauthorized, try to refresh token and retry once
         if (response.status === 401) {
-          idToken = await refreshIdToken();
-
-          // Guard against missing token after refresh
-          if (!idToken) {
-            console.error('Token refresh failed. User needs to log in.');
+          try {
+            idToken = await refreshIdToken();
+          } catch (refreshError) {
+            // Handle authentication errors from refreshIdToken
+            const errorMessage =
+              refreshError instanceof Error ? refreshError.message : String(refreshError);
+            console.error('Token refresh error:', errorMessage);
             browser.notifications.create({
               type: 'basic',
               iconUrl: browser.runtime.getURL('/icon/128.png'),
