@@ -131,7 +131,9 @@ class ProgressService {
     }
 
     try {
-      const analytics = await httpJsonAuth(getApiUrl(`progress/analytics?user_id=${userId}`));
+      const analytics = await httpJsonAuth<ProgressAnalytics>(
+        getApiUrl(`progress/analytics?user_id=${userId}`),
+      );
       return analytics;
     } catch (error) {
       console.error('Error fetching progress analytics:', error);

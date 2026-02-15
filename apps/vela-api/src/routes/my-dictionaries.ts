@@ -149,7 +149,14 @@ app.get('/', async (c) => {
       return c.json({ error: 'Unauthorized' }, 401);
     }
 
-    const limit = parseInt(c.req.query('limit') || '50', 10);
+    // Parse and validate limit with fallback to default (50) and max cap (100)
+    const DEFAULT_LIMIT = 50;
+    const MAX_LIMIT = 100;
+    const parsedLimit = parseInt(c.req.query('limit') || String(DEFAULT_LIMIT), 10);
+    const limit =
+      Number.isFinite(parsedLimit) && parsedLimit > 0
+        ? Math.min(parsedLimit, MAX_LIMIT)
+        : DEFAULT_LIMIT;
 
     const sentences = await myDictionaries.getByUser(dictionaryUserId, limit);
 
@@ -212,8 +219,6 @@ app.post('/analyze', async (c) => {
     const requestOrigin = c.req.header('Origin');
     const corsConfig = c.env?.CORS_ALLOWED_ORIGINS || process.env.CORS_ALLOWED_ORIGINS;
     const allowedOrigins = corsConfig?.split(',').map((o: string) => o.trim()) || [];
-    const validatedOrigin =
-      requestOrigin && allowedOrigins.includes(requestOrigin) ? requestOrigin : undefined;
 
     // Warn if CORS_ALLOWED_ORIGINS is not configured or empty (disables SSE CORS)
     // Only log the warning once to avoid spamming logs on every request
@@ -226,6 +231,19 @@ app.post('/analyze', async (c) => {
       );
       corsConfigWarningLogged = true;
     }
+
+    // Validate CORS origin: reject requests from unauthorized origins
+    if (requestOrigin && !allowedOrigins.includes(requestOrigin)) {
+      console.warn(
+        `CORS rejection: Origin '${requestOrigin}' is not in allowed origins. ` +
+          `Allowed origins: [${allowedOrigins.join(', ')}]. ` +
+          `CORS config warning logged: ${corsConfigWarningLogged}.`,
+      );
+      return c.json({ error: 'Origin not allowed' }, 403);
+    }
+
+    const validatedOrigin =
+      requestOrigin && allowedOrigins.includes(requestOrigin) ? requestOrigin : undefined;
 
     if (!sentence || typeof sentence !== 'string' || sentence.trim().length === 0) {
       return c.json({ error: 'Sentence is required' }, 400);

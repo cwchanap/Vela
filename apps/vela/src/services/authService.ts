@@ -8,6 +8,7 @@ import {
   confirmSignUp,
   resendSignUpCode,
   fetchAuthSession,
+  fetchUserAttributes,
   resetPassword,
 } from 'aws-amplify/auth';
 import { Hub } from 'aws-amplify/utils';
@@ -98,7 +99,7 @@ class AuthService {
   /**
    * Sign up a new user with email and password
    */
-  async signUp({ email, password, username: _username }: SignUpData): Promise<AuthResponse> {
+  async signUp({ email, password, username }: SignUpData): Promise<AuthResponse> {
     if (!cognitoEnabled) {
       return {
         success: false,
@@ -113,6 +114,8 @@ class AuthService {
         options: {
           userAttributes: {
             email,
+            // Store the provided username as a Cognito attribute for later retrieval
+            ...(username ? { preferred_username: username } : {}),
           },
           // Auto-confirm user since email verification is disabled
           autoSignIn: false, // Disable auto-signin to avoid verification issues
@@ -172,8 +175,17 @@ class AuthService {
       // Get current user to get the userId
       const currentUser = await getCurrentUser();
 
-      // Ensure profile exists
-      await this.ensureProfileForCurrentUser(currentUser.userId, email);
+      // Fetch user attributes to get the stored username
+      let username: string | null = null;
+      try {
+        const attributes = await fetchUserAttributes();
+        username = attributes.preferred_username || null;
+      } catch {
+        // Ignore attribute fetch errors
+      }
+
+      // Ensure profile exists with username
+      await this.ensureProfileForCurrentUser(currentUser.userId, email, username);
 
       return {
         success: true,
@@ -197,7 +209,17 @@ class AuthService {
             // Retry sign in
             await performSignIn();
             const currentUser = await getCurrentUser();
-            await this.ensureProfileForCurrentUser(currentUser.userId, email);
+
+            // Fetch user attributes to get the stored username
+            let username: string | null = null;
+            try {
+              const attributes = await fetchUserAttributes();
+              username = attributes.preferred_username || null;
+            } catch {
+              // Ignore attribute fetch errors
+            }
+
+            await this.ensureProfileForCurrentUser(currentUser.userId, email, username);
             return {
               success: true,
               user: { id: currentUser.userId, email },
@@ -476,8 +498,21 @@ class AuthService {
           const session = await fetchAuthSession();
 
           if (session.tokens?.accessToken) {
+            // Fetch user attributes to get the stored username
+            let username: string | null = null;
+            try {
+              const attributes = await fetchUserAttributes();
+              username = attributes.preferred_username || null;
+            } catch {
+              // Ignore attribute fetch errors
+            }
+
             // Ensure profile exists when user signs in
-            await this.ensureProfileForCurrentUser(user.userId, user.signInDetails?.loginId);
+            await this.ensureProfileForCurrentUser(
+              user.userId,
+              user.signInDetails?.loginId,
+              username,
+            );
 
             callback('SIGNED_IN', {
               user: { id: user.userId, email: user.signInDetails?.loginId || null },
@@ -500,11 +535,15 @@ class AuthService {
   /**
    * Ensure a user profile exists; create it if missing
    */
-  private async ensureProfileForCurrentUser(userId: string, email?: string | null): Promise<void> {
+  private async ensureProfileForCurrentUser(
+    userId: string,
+    email?: string | null,
+    username?: string | null,
+  ): Promise<void> {
     try {
       const existing = await this.getUserProfile(userId);
       if (!existing) {
-        await this.createUserProfile(userId, { email: email || null });
+        await this.createUserProfile(userId, { email: email || null, username: username || null });
       }
     } catch (error) {
       console.error('Error ensuring user profile:', error);

@@ -38,7 +38,12 @@ export async function httpJson<T = unknown>(input: RequestInfo, init?: RequestIn
     let msg = res.statusText;
     try {
       const data = await res.json();
-      if (data?.error) msg = data.error as string;
+      if (typeof data?.error === 'string') {
+        msg = data.error;
+      } else if (data?.error !== undefined && data?.error !== null) {
+        // Convert non-string error to readable string
+        msg = JSON.stringify(data.error);
+      }
     } catch {
       // ignore parse error
     }
@@ -94,7 +99,12 @@ export async function httpJsonAuth<T = unknown>(
     let msg = res.statusText;
     try {
       const data = await res.json();
-      if (data?.error) msg = data.error as string;
+      if (typeof data?.error === 'string') {
+        msg = data.error;
+      } else if (data?.error !== undefined && data?.error !== null) {
+        // Convert non-string error to readable string
+        msg = JSON.stringify(data.error);
+      }
     } catch {
       // ignore parse error
     }
