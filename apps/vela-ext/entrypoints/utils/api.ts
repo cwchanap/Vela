@@ -73,14 +73,14 @@ export async function refreshToken(refreshToken: string): Promise<AuthTokens> {
 
 // My Dictionaries API
 export async function saveDictionaryEntry(
-  accessToken: string,
+  idToken: string,
   params: SaveDictionaryEntryParams,
 ): Promise<void> {
   const response = await fetch(`${API_BASE_URL}/my-dictionaries`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      Authorization: `Bearer ${accessToken}`,
+      Authorization: `Bearer ${idToken}`,
     },
     body: JSON.stringify(params),
   });
@@ -91,11 +91,11 @@ export async function saveDictionaryEntry(
   }
 }
 
-export async function getMyDictionaries(accessToken: string, limit = 50) {
+export async function getMyDictionaries(idToken: string, limit = 50) {
   const response = await fetch(`${API_BASE_URL}/my-dictionaries?limit=${limit}`, {
     method: 'GET',
     headers: {
-      Authorization: `Bearer ${accessToken}`,
+      Authorization: `Bearer ${idToken}`,
     },
   });
 

@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import * as awsAmplifyAuth from 'aws-amplify/auth';
 import { progressService } from './progressService';
 import type {
   ProgressAnalytics,
@@ -22,15 +23,26 @@ vi.mock('src/utils/api', () => ({
   getApiUrl: vi.fn((endpoint: string) => `/api/${endpoint}`),
 }));
 
+vi.mock('aws-amplify/auth', () => ({
+  fetchAuthSession: vi.fn(),
+}));
+
 // Mock fetch
 const mockFetch = vi.fn();
-global.fetch = mockFetch;
+global.fetch = mockFetch as unknown as typeof global.fetch;
 
 describe('progressService', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockFetch.mockClear();
     mockAuthStore.user = { id: 'user-123', email: 'test@example.com' };
+    vi.mocked(awsAmplifyAuth.fetchAuthSession).mockResolvedValue({
+      tokens: {
+        idToken: {
+          toString: () => 'mock-id-token',
+        },
+      },
+    } as Awaited<ReturnType<typeof awsAmplifyAuth.fetchAuthSession>>);
   });
 
   afterEach(() => {
@@ -119,7 +131,8 @@ describe('progressService', () => {
 
       expect(mockFetch).toHaveBeenCalledWith('/api/progress/analytics?user_id=user-123', {
         headers: {
-          'content-type': 'application/json',
+          Authorization: 'Bearer mock-id-token',
+          'Content-Type': 'application/json',
         },
       });
       expect(result).toEqual(mockProgressAnalytics);
@@ -248,7 +261,8 @@ describe('progressService', () => {
       expect(mockFetch).toHaveBeenCalledWith('/api/progress/game-session', {
         method: 'POST',
         headers: {
-          'content-type': 'application/json',
+          Authorization: 'Bearer mock-id-token',
+          'Content-Type': 'application/json',
         },
         body: JSON.stringify({
           user_id: 'user-123',
@@ -370,7 +384,8 @@ describe('progressService', () => {
         expect.any(String),
         expect.objectContaining({
           headers: expect.objectContaining({
-            'content-type': 'application/json',
+            'Content-Type': 'application/json',
+            Authorization: 'Bearer mock-id-token',
           }),
         }),
       );
@@ -456,7 +471,7 @@ describe('progressService', () => {
         expect.any(String),
         expect.objectContaining({
           headers: expect.objectContaining({
-            'content-type': 'application/json',
+            'Content-Type': 'application/json',
           }),
         }),
       );
@@ -474,7 +489,8 @@ describe('progressService', () => {
       const headers = fetchCall?.[1]?.headers;
 
       expect(headers).toMatchObject({
-        'content-type': 'application/json',
+        'Content-Type': 'application/json',
+        Authorization: 'Bearer mock-id-token',
       });
     });
   });

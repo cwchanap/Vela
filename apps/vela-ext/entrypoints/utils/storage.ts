@@ -19,13 +19,17 @@ export async function saveAuthTokens(tokens: AuthTokens, email?: string): Promis
 }
 
 export async function getAuthTokens(): Promise<AuthTokens | null> {
-  const result = await browser.storage.local.get(STORAGE_KEYS.AUTH_TOKENS);
-  return result[STORAGE_KEYS.AUTH_TOKENS] || null;
+  const result = (await browser.storage.local.get(STORAGE_KEYS.AUTH_TOKENS)) as {
+    [STORAGE_KEYS.AUTH_TOKENS]?: AuthTokens;
+  };
+  return result[STORAGE_KEYS.AUTH_TOKENS] ?? null;
 }
 
 export async function getUserEmail(): Promise<string | null> {
-  const result = await browser.storage.local.get(STORAGE_KEYS.USER_EMAIL);
-  return result[STORAGE_KEYS.USER_EMAIL] || null;
+  const result = (await browser.storage.local.get(STORAGE_KEYS.USER_EMAIL)) as {
+    [STORAGE_KEYS.USER_EMAIL]?: string;
+  };
+  return result[STORAGE_KEYS.USER_EMAIL] ?? null;
 }
 
 export async function clearAuthData(): Promise<void> {
@@ -52,6 +56,23 @@ export async function getValidAccessToken(): Promise<string> {
 }
 
 /**
+ * Get valid ID token for protected API routes guarded by JWT middleware
+ */
+export async function getValidIdToken(): Promise<string> {
+  const tokens = await getAuthTokens();
+
+  if (!tokens) {
+    throw new Error('Not authenticated');
+  }
+
+  if (!tokens.idToken) {
+    throw new Error('No ID token available');
+  }
+
+  return tokens.idToken;
+}
+
+/**
  * Refresh the access token using the refresh token
  */
 export async function refreshAccessToken(): Promise<string> {
@@ -67,6 +88,30 @@ export async function refreshAccessToken(): Promise<string> {
     return newTokens.accessToken;
   } catch (error) {
     // Refresh failed, clear auth data
+    console.error('Token refresh error:', error);
+    await clearAuthData();
+    throw new Error('Session expired. Please log in again.');
+  }
+}
+
+/**
+ * Refresh auth tokens and return a valid ID token for protected API routes
+ */
+export async function refreshIdToken(): Promise<string> {
+  const tokens = await getAuthTokens();
+
+  if (!tokens || !tokens.refreshToken) {
+    throw new Error('No refresh token available');
+  }
+
+  try {
+    const newTokens = await refreshTokenAPI(tokens.refreshToken);
+    await saveAuthTokens(newTokens);
+    if (!newTokens.idToken) {
+      throw new Error('Missing ID token after refresh');
+    }
+    return newTokens.idToken;
+  } catch (error) {
     console.error('Token refresh error:', error);
     await clearAuthData();
     throw new Error('Session expired. Please log in again.');

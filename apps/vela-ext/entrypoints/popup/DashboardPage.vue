@@ -84,12 +84,7 @@
 <script setup lang="ts">
 import { ref, onMounted, watch, computed } from 'vue';
 import { getMyDictionaries } from '../utils/api';
-import {
-  getValidAccessToken,
-  refreshAccessToken,
-  getUserEmail,
-  clearAuthData,
-} from '../utils/storage';
+import { getValidIdToken, refreshIdToken, getUserEmail, clearAuthData } from '../utils/storage';
 
 const emit = defineEmits<{
   logout: [];
@@ -125,10 +120,10 @@ async function loadEntries() {
   error.value = '';
 
   try {
-    let accessToken = await getValidAccessToken();
+    let idToken = await getValidIdToken();
 
     try {
-      const data = await getMyDictionaries(accessToken);
+      const data = await getMyDictionaries(idToken);
       entries.value = data;
     } catch (apiError: any) {
       // If unauthorized, try to refresh token and retry once
@@ -136,14 +131,14 @@ async function loadEntries() {
         apiError.message?.includes('Unauthorized') ||
         apiError.message?.includes('expired token')
       ) {
-        accessToken = await refreshAccessToken();
+        idToken = await refreshIdToken();
 
         // Validate the refreshed token before proceeding
-        if (!accessToken) {
+        if (!idToken) {
           throw new Error('Session expired. Please log in again.');
         }
 
-        const data = await getMyDictionaries(accessToken);
+        const data = await getMyDictionaries(idToken);
         entries.value = data;
       } else {
         throw apiError;

@@ -1,47 +1,15 @@
 import { Hono } from 'hono';
-import {
-  GetUserCommand,
-  CognitoIdentityProviderClient,
-} from '@aws-sdk/client-cognito-identity-provider';
 import { myDictionaries } from '../dynamodb';
 import type { Env } from '../types';
+import { requireAuth, type AuthContext } from '../middleware/auth';
 
-const app = new Hono<{ Bindings: Env }>();
+const app = new Hono<{ Bindings: Env } & AuthContext>();
 
 // Track whether CORS configuration warning has been logged (to log only once)
 let corsConfigWarningLogged = false;
 
-const cognitoClient = new CognitoIdentityProviderClient({
-  region: process.env.AWS_REGION || 'us-east-1',
-});
-
-// Helper to validate token and extract user ID from Cognito
-async function getUserIdFromToken(authHeader: string | undefined): Promise<string | null> {
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    return null;
-  }
-
-  try {
-    const accessToken = authHeader.substring(7);
-
-    // IMPORTANT: Validate token with Cognito to verify signature and prevent forgery
-    const getUserCommand = new GetUserCommand({
-      AccessToken: accessToken,
-    });
-
-    const userResponse = await cognitoClient.send(getUserCommand);
-
-    // IMPORTANT: Return email to match existing saved_sentences table data
-    // The saved_sentences table was created with email as the user_id partition key
-    // (unlike chat_history which uses Cognito sub)
-    const email = userResponse.UserAttributes?.find((attr) => attr.Name === 'email')?.Value;
-
-    return email || null;
-  } catch (error) {
-    console.error('Token validation error:', error);
-    return null;
-  }
-}
+// Apply auth middleware to all routes in this router.
+app.use('*', requireAuth);
 
 // eslint-disable-next-line no-unused-vars
 type TextExtractor = (jsonStr: string) => string | undefined;
@@ -134,9 +102,13 @@ function createSSEStream(
 // Save a sentence
 app.post('/', async (c) => {
   try {
-    const userId = await getUserIdFromToken(c.req.header('Authorization'));
+    const authenticatedUserId = c.get('userId');
+    const authenticatedUserEmail = c.get('userEmail');
 
-    if (!userId) {
+    // Keep backward compatibility for existing dictionary records keyed by email.
+    const dictionaryUserId = authenticatedUserEmail || authenticatedUserId;
+
+    if (!dictionaryUserId) {
       return c.json({ error: 'Unauthorized' }, 401);
     }
 
@@ -147,7 +119,12 @@ app.post('/', async (c) => {
       return c.json({ error: 'Sentence is required' }, 400);
     }
 
-    const result = await myDictionaries.create(userId, sentence.trim(), sourceUrl, context);
+    const result = await myDictionaries.create(
+      dictionaryUserId,
+      sentence.trim(),
+      sourceUrl,
+      context,
+    );
 
     return c.json({
       success: true,
@@ -162,15 +139,19 @@ app.post('/', async (c) => {
 // Get user's saved sentences
 app.get('/', async (c) => {
   try {
-    const userId = await getUserIdFromToken(c.req.header('Authorization'));
+    const authenticatedUserId = c.get('userId');
+    const authenticatedUserEmail = c.get('userEmail');
 
-    if (!userId) {
+    // Keep backward compatibility for existing dictionary records keyed by email.
+    const dictionaryUserId = authenticatedUserEmail || authenticatedUserId;
+
+    if (!dictionaryUserId) {
       return c.json({ error: 'Unauthorized' }, 401);
     }
 
     const limit = parseInt(c.req.query('limit') || '50', 10);
 
-    const sentences = await myDictionaries.getByUser(userId, limit);
+    const sentences = await myDictionaries.getByUser(dictionaryUserId, limit);
 
     return c.json({
       success: true,
@@ -185,9 +166,13 @@ app.get('/', async (c) => {
 // Delete a saved sentence
 app.delete('/:sentenceId', async (c) => {
   try {
-    const userId = await getUserIdFromToken(c.req.header('Authorization'));
+    const authenticatedUserId = c.get('userId');
+    const authenticatedUserEmail = c.get('userEmail');
 
-    if (!userId) {
+    // Keep backward compatibility for existing dictionary records keyed by email.
+    const dictionaryUserId = authenticatedUserEmail || authenticatedUserId;
+
+    if (!dictionaryUserId) {
       return c.json({ error: 'Unauthorized' }, 401);
     }
 
@@ -197,7 +182,7 @@ app.delete('/:sentenceId', async (c) => {
       return c.json({ error: 'Sentence ID is required' }, 400);
     }
 
-    await myDictionaries.delete(userId, sentenceId);
+    await myDictionaries.delete(dictionaryUserId, sentenceId);
 
     return c.json({
       success: true,
@@ -212,9 +197,8 @@ app.delete('/:sentenceId', async (c) => {
 // Ask AI about a sentence (streaming)
 app.post('/analyze', async (c) => {
   try {
-    const userId = await getUserIdFromToken(c.req.header('Authorization'));
-
-    if (!userId) {
+    const authenticatedUserId = c.get('userId');
+    if (!authenticatedUserId) {
       return c.json({ error: 'Unauthorized' }, 401);
     }
 

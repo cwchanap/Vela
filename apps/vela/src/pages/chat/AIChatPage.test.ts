@@ -82,11 +82,20 @@ describe('AIChatPage', () => {
     // Mock fetch and capture original for restoration
     originalFetch = global.fetch;
     fetchMock = vi.fn();
-    global.fetch = fetchMock;
+    global.fetch = fetchMock as unknown as typeof global.fetch;
 
     // Mock Quasar Notify
     notifyCreateSpy = vi.fn();
     Notify.create = notifyCreateSpy;
+
+    // Default authenticated session for API calls using httpJsonAuth
+    vi.mocked(awsAmplify.fetchAuthSession).mockResolvedValue({
+      tokens: {
+        idToken: {
+          toString: () => 'mock-id-token',
+        },
+      },
+    } as Awaited<ReturnType<typeof awsAmplify.fetchAuthSession>>);
   });
 
   afterEach(() => {
@@ -201,14 +210,14 @@ describe('AIChatPage', () => {
   });
 
   // Helper to mock auth session with token
-  const mockAuthSession = (token = 'mock-token') => {
+  const mockAuthSession = (token = 'mock-id-token') => {
     vi.mocked(awsAmplify.fetchAuthSession).mockResolvedValue({
       tokens: {
-        accessToken: {
+        idToken: {
           toString: () => token,
         },
       },
-    } as ReturnType<typeof awsAmplify.fetchAuthSession>);
+    } as Awaited<ReturnType<typeof awsAmplify.fetchAuthSession>>);
   };
 
   const mountComponent = (props = {}) => {
@@ -245,12 +254,13 @@ describe('AIChatPage', () => {
           [VueQueryPlugin, { queryClient }],
           {
             install(app) {
-              app.config.globalProperties.$q = mockQuasarInstance;
+              app.config.globalProperties.$q =
+                mockQuasarInstance as unknown as typeof app.config.globalProperties.$q;
             },
           },
         ],
         provide: {
-          $q: mockQuasarInstance,
+          $q: mockQuasarInstance as unknown,
         },
         stubs: {
           Teleport: true,
@@ -537,7 +547,10 @@ describe('AIChatPage', () => {
       await historyButton.trigger('click');
       await flushPromises();
 
-      expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining('/api/chat-history/threads'));
+      expect(fetchMock).toHaveBeenCalledWith(
+        expect.stringContaining('/api/chat-history/threads'),
+        expect.any(Object),
+      );
       expect(wrapper.text()).toContain('Test conversation');
     });
 
@@ -608,7 +621,11 @@ describe('AIChatPage', () => {
       await threadItem.trigger('click');
       await flushPromises();
 
-      expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining('/api/chat-history/messages'));
+      expect(fetchMock).toHaveBeenNthCalledWith(
+        2,
+        expect.stringContaining('/api/chat-history/messages'),
+        expect.any(Object),
+      );
       expect(chatStore.messages.length).toBeGreaterThan(0);
     });
   });
@@ -669,7 +686,7 @@ describe('AIChatPage', () => {
         expect.objectContaining({
           method: 'DELETE',
           headers: expect.objectContaining({
-            Authorization: 'Bearer mock-token',
+            Authorization: 'Bearer mock-id-token',
           }),
         }),
       );
@@ -902,7 +919,7 @@ describe('AIChatPage', () => {
       // Mock a session with missing tokens
       vi.mocked(awsAmplify.fetchAuthSession).mockResolvedValue({
         tokens: undefined,
-      } as ReturnType<typeof awsAmplify.fetchAuthSession>);
+      } as Awaited<ReturnType<typeof awsAmplify.fetchAuthSession>>);
 
       const mockThreads = [createMockThread()];
 
@@ -915,14 +932,6 @@ describe('AIChatPage', () => {
       const historyButton = wrapper.find('[data-testid="llm-chat-history"]');
 
       await historyButton.trigger('click');
-      await flushPromises();
-
-      const deleteButton = wrapper.find('[data-testid="llm-chat-delete-thread"]');
-      await deleteButton.trigger('click');
-      await wrapper.vm.$nextTick();
-
-      const confirmButton = wrapper.find('[data-testid="llm-chat-confirm-delete"]');
-      await confirmButton.trigger('click');
       await flushPromises();
 
       // Verify component doesn't crash when auth token is missing

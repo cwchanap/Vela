@@ -1,4 +1,4 @@
-import { getValidAccessToken, refreshAccessToken } from './utils/storage';
+import { getValidIdToken, refreshIdToken } from './utils/storage';
 
 // Get API URL from environment or use default
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'https://vela.cwchanap.dev/api';
@@ -27,10 +27,10 @@ export default defineBackground(() => {
       }
 
       try {
-        let accessToken = await getValidAccessToken();
+        let idToken = await getValidIdToken();
 
         // Guard against missing/null token to prevent "Bearer undefined"
-        if (!accessToken) {
+        if (!idToken) {
           console.error('No valid access token available. User needs to log in.');
           browser.notifications.create({
             type: 'basic',
@@ -46,7 +46,7 @@ export default defineBackground(() => {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            Authorization: `Bearer ${accessToken}`,
+            Authorization: `Bearer ${idToken}`,
           },
           body: JSON.stringify({
             sentence: selectedText,
@@ -57,10 +57,10 @@ export default defineBackground(() => {
 
         // If unauthorized, try to refresh token and retry once
         if (response.status === 401) {
-          accessToken = await refreshAccessToken();
+          idToken = await refreshIdToken();
 
           // Guard against missing token after refresh
-          if (!accessToken) {
+          if (!idToken) {
             console.error('Token refresh failed. User needs to log in.');
             browser.notifications.create({
               type: 'basic',
@@ -76,7 +76,7 @@ export default defineBackground(() => {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
-              Authorization: `Bearer ${accessToken}`,
+              Authorization: `Bearer ${idToken}`,
             },
             body: JSON.stringify({
               sentence: selectedText,

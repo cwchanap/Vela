@@ -54,6 +54,14 @@ vi.mock('@aws-sdk/lib-dynamodb', () => ({
   BatchWriteCommand: vi.fn().mockImplementation((input: any) => ({ input })),
 }));
 
+vi.mock('../../src/middleware/auth', () => ({
+  requireAuth: async (c: any, next: () => Promise<void>) => {
+    c.set('userId', 'user-123');
+    c.set('userEmail', 'test@example.com');
+    await next();
+  },
+}));
+
 ({ chatHistory } = await import('../../src/routes/chat-history'));
 
 // Initialize mockSend after mocks are set up
@@ -142,7 +150,10 @@ describe('Chat History Route', () => {
       expect(mockPutCommand).toHaveBeenCalledWith(
         expect.objectContaining({
           TableName: 'vela-chat-history',
-          Item: expect.objectContaining(chatItem),
+          Item: expect.objectContaining({
+            ...chatItem,
+            UserId: 'user-123',
+          }),
         }),
       );
     });
@@ -266,14 +277,14 @@ describe('Chat History Route', () => {
         {
           ThreadId: 'thread-123',
           Timestamp: 1693440000000,
-          UserId: 'user-456',
+          UserId: 'user-123',
           message: 'First message',
           is_user: true,
         },
         {
           ThreadId: 'thread-123',
           Timestamp: 1693440001000,
-          UserId: 'user-456',
+          UserId: 'user-123',
           message: 'Assistant response',
           is_user: false,
         },

@@ -5,6 +5,7 @@ import { CognitoJwtVerifier } from 'aws-jwt-verify';
 export type AuthContext = {
   Variables: {
     userId: string;
+    userEmail: string | null;
   };
 };
 
@@ -34,7 +35,9 @@ export function initializeAuthVerifier(userPoolId: string, clientId: string) {
 /**
  * Extract userId from Cognito JWT token
  */
-async function getUserIdFromToken(token: string): Promise<string | null> {
+async function getUserClaimsFromToken(
+  token: string,
+): Promise<{ userId: string; userEmail: string | null } | null> {
   if (!verifier) {
     console.error('Auth verifier not initialized');
     return null;
@@ -42,8 +45,11 @@ async function getUserIdFromToken(token: string): Promise<string | null> {
 
   try {
     const payload = await verifier.verify(token);
-    // Cognito ID token has 'sub' claim which is the user ID
-    return payload.sub;
+    return {
+      // Cognito ID token has 'sub' claim which is the canonical user ID.
+      userId: payload.sub,
+      userEmail: typeof payload.email === 'string' ? payload.email : null,
+    };
   } catch (error) {
     console.error('Token verification failed:', error);
     return null;
@@ -63,14 +69,15 @@ export async function requireAuth(c: Context<AuthContext>, next: Next) {
 
   const token = authHeader.substring(7); // Remove "Bearer " prefix
 
-  const userId = await getUserIdFromToken(token);
+  const claims = await getUserClaimsFromToken(token);
 
-  if (!userId) {
+  if (!claims) {
     return c.json({ error: 'Unauthorized: Invalid or expired token' }, 401);
   }
 
-  // Store userId in context for downstream handlers
-  c.set('userId', userId);
+  // Store token claims in context for downstream handlers.
+  c.set('userId', claims.userId);
+  c.set('userEmail', claims.userEmail);
 
   await next();
 }

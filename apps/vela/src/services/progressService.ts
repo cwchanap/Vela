@@ -1,26 +1,6 @@
 import { useAuthStore } from 'src/stores/auth';
 import { getApiUrl } from 'src/utils/api';
-
-async function httpJson(input: RequestInfo, init?: RequestInit) {
-  const res = await fetch(input, {
-    ...init,
-    headers: {
-      'content-type': 'application/json',
-      ...(init?.headers || {}),
-    },
-  });
-  if (!res.ok) {
-    let msg = res.statusText;
-    try {
-      const data = await res.json();
-      if (data?.error) msg = data.error as string;
-    } catch {
-      // ignore parse error
-    }
-    throw new Error(msg);
-  }
-  return res.json();
-}
+import { httpJsonAuth } from 'src/utils/httpClient';
 
 export interface Achievement {
   id: string;
@@ -151,7 +131,7 @@ class ProgressService {
     }
 
     try {
-      const analytics = await httpJson(getApiUrl(`progress/analytics?user_id=${userId}`));
+      const analytics = await httpJsonAuth(getApiUrl(`progress/analytics?user_id=${userId}`));
       return analytics;
     } catch (error) {
       console.error('Error fetching progress analytics:', error);
@@ -204,7 +184,7 @@ class ProgressService {
     if (!userId) return;
 
     try {
-      await httpJson(getApiUrl('progress/game-session'), {
+      await httpJsonAuth(getApiUrl('progress/game-session'), {
         method: 'POST',
         body: JSON.stringify({
           user_id: userId,
