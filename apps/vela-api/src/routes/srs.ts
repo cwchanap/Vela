@@ -238,9 +238,14 @@ srsRouter.get('/stats', zValidator('query', statsSchema), async (c) => {
       const vocabMap = await vocabulary.getByIds(vocabIds);
 
       // Build items with vocab details and filter by JLPT level
+      const jlptLevels = jlpt; // Type-safe copy for closure
       filteredItems = allItems.filter((progress) => {
         const vocabDetails = vocabMap[progress.vocabulary_id];
-        return vocabDetails && vocabDetails.jlpt_level && jlpt.includes(vocabDetails.jlpt_level);
+        return (
+          vocabDetails &&
+          typeof vocabDetails.jlpt_level === 'number' &&
+          jlptLevels.includes(vocabDetails.jlpt_level)
+        );
       });
     }
 
