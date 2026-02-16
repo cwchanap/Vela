@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import { myDictionaries } from '../dynamodb';
 import type { Env } from '../types';
 import { requireAuth, type AuthContext } from '../middleware/auth';
+import { isAllowedOrigin } from '../middleware/cors';
 
 const app = new Hono<{ Bindings: Env } & AuthContext>();
 
@@ -220,6 +221,9 @@ app.post('/analyze', async (c) => {
     const corsConfig = c.env?.CORS_ALLOWED_ORIGINS || process.env.CORS_ALLOWED_ORIGINS;
     const allowedOrigins = corsConfig?.split(',').map((o: string) => o.trim()) || [];
 
+    // Use shared utility to check if origin is allowed (includes both web and extension origins)
+    const originCheck = isAllowedOrigin(requestOrigin, c.env);
+
     // Warn if CORS_ALLOWED_ORIGINS is not configured or empty (disables SSE CORS)
     // Only log the warning once to avoid spamming logs on every request
     if (
@@ -232,18 +236,19 @@ app.post('/analyze', async (c) => {
       corsConfigWarningLogged = true;
     }
 
-    // Validate CORS origin: reject requests from unauthorized origins
-    if (requestOrigin && !allowedOrigins.includes(requestOrigin)) {
+    // Validate CORS origin: only reject when allowedOrigins is configured (non-empty)
+    // and requestOrigin is present but not allowed
+    if (allowedOrigins.length > 0 && requestOrigin && !originCheck.isAllowed) {
       console.warn(
         `CORS rejection: Origin '${requestOrigin}' is not in allowed origins. ` +
-          `Allowed origins: [${allowedOrigins.join(', ')}]. ` +
+          `Allowed origins: [${allowedOrigins.join(',')}]. ` +
           `CORS config warning logged: ${corsConfigWarningLogged}.`,
       );
       return c.json({ error: 'Origin not allowed' }, 403);
     }
 
-    const validatedOrigin =
-      requestOrigin && allowedOrigins.includes(requestOrigin) ? requestOrigin : undefined;
+    // Set validated origin for CORS header (only set if origin is allowed)
+    const validatedOrigin = originCheck.allowedOrigin;
 
     if (!sentence || typeof sentence !== 'string' || sentence.trim().length === 0) {
       return c.json({ error: 'Sentence is required' }, 400);

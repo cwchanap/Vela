@@ -1,6 +1,6 @@
 import { describe, test, expect } from 'bun:test';
 import { Hono } from 'hono';
-import { corsMiddleware } from '../../src/middleware/cors';
+import { corsMiddleware, isAllowedOrigin } from '../../src/middleware/cors';
 import type { Env } from '../../src/types';
 
 // Create a test app with CORS middleware
@@ -447,6 +447,177 @@ describe('CORS Middleware', () => {
       expect(postRes.status).toBe(403);
       expect(json.error).toContain('CORS policy violation: Origin not allowed');
       expect(postRes.headers.get('Access-Control-Allow-Origin')).toBeNull();
+    });
+  });
+});
+
+describe('isAllowedOrigin utility', () => {
+  describe('Web origins', () => {
+    test('should return isAllowed=true for allowed web origin', () => {
+      const env: Env = { CORS_ALLOWED_ORIGINS: 'http://localhost:9000,https://example.com' };
+      const result = isAllowedOrigin('http://localhost:9000', env);
+
+      expect(result.isAllowed).toBe(true);
+      expect(result.isWebOrigin).toBe(true);
+      expect(result.allowedOrigin).toBe('http://localhost:9000');
+    });
+
+    test('should return isAllowed=false for disallowed web origin', () => {
+      const env: Env = { CORS_ALLOWED_ORIGINS: 'http://localhost:9000' };
+      const result = isAllowedOrigin('https://malicious.com', env);
+
+      expect(result.isAllowed).toBe(false);
+      expect(result.isWebOrigin).toBe(false);
+      expect(result.allowedOrigin).toBeUndefined();
+    });
+
+    test('should handle whitespace in CORS_ALLOWED_ORIGINS', () => {
+      const env: Env = {
+        CORS_ALLOWED_ORIGINS: '  http://localhost:9000  ,  https://example.com  ',
+      };
+      const result = isAllowedOrigin('http://localhost:9000', env);
+
+      expect(result.isAllowed).toBe(true);
+      expect(result.isWebOrigin).toBe(true);
+    });
+  });
+
+  describe('Extension origins', () => {
+    test('should return isAllowed=true for allowed Chrome extension origin', () => {
+      const env: Env = { CORS_ALLOWED_EXTENSION_IDS: 'abcdefg,hijklmn' };
+      const result = isAllowedOrigin('chrome-extension://abcdefg', env);
+
+      expect(result.isAllowed).toBe(true);
+      expect(result.isWebOrigin).toBe(false);
+      expect(result.allowedOrigin).toBe('chrome-extension://abcdefg');
+    });
+
+    test('should return isAllowed=true for allowed Firefox extension origin', () => {
+      const env: Env = { CORS_ALLOWED_EXTENSION_IDS: 'abcdefg,hijklmn' };
+      const result = isAllowedOrigin('moz-extension://hijklmn', env);
+
+      expect(result.isAllowed).toBe(true);
+      expect(result.isWebOrigin).toBe(false);
+      expect(result.allowedOrigin).toBe('moz-extension://hijklmn');
+    });
+
+    test('should return isAllowed=false for disallowed extension origin', () => {
+      const env: Env = { CORS_ALLOWED_EXTENSION_IDS: 'allowed-id' };
+      const result = isAllowedOrigin('chrome-extension://malicious-id', env);
+
+      expect(result.isAllowed).toBe(false);
+      expect(result.isWebOrigin).toBe(false);
+      expect(result.allowedOrigin).toBeUndefined();
+    });
+
+    test('should handle whitespace in CORS_ALLOWED_EXTENSION_IDS', () => {
+      const env: Env = { CORS_ALLOWED_EXTENSION_IDS: '  abcdefg  ,  hijklmn  ' };
+      const result = isAllowedOrigin('chrome-extension://abcdefg', env);
+
+      expect(result.isAllowed).toBe(true);
+    });
+  });
+
+  describe('Mixed origins', () => {
+    test('should allow web origin when both web and extension origins are configured', () => {
+      const env: Env = {
+        CORS_ALLOWED_ORIGINS: 'http://localhost:9000',
+        CORS_ALLOWED_EXTENSION_IDS: 'ext-id',
+      };
+      const result = isAllowedOrigin('http://localhost:9000', env);
+
+      expect(result.isAllowed).toBe(true);
+      expect(result.isWebOrigin).toBe(true);
+    });
+
+    test('should allow extension origin when both web and extension origins are configured', () => {
+      const env: Env = {
+        CORS_ALLOWED_ORIGINS: 'http://localhost:9000',
+        CORS_ALLOWED_EXTENSION_IDS: 'ext-id',
+      };
+      const result = isAllowedOrigin('moz-extension://ext-id', env);
+
+      expect(result.isAllowed).toBe(true);
+      expect(result.isWebOrigin).toBe(false);
+    });
+  });
+
+  describe('Edge cases', () => {
+    test('should return isAllowed=false when origin is undefined', () => {
+      const env: Env = { CORS_ALLOWED_ORIGINS: 'http://localhost:9000' };
+      const result = isAllowedOrigin(undefined, env);
+
+      expect(result.isAllowed).toBe(false);
+      expect(result.isWebOrigin).toBe(false);
+      expect(result.allowedOrigin).toBeUndefined();
+    });
+
+    test('should fallback to process.env when env is undefined', () => {
+      const originalEnv = process.env.CORS_ALLOWED_ORIGINS;
+      process.env.CORS_ALLOWED_ORIGINS = 'http://fallback.com';
+
+      try {
+        const result = isAllowedOrigin('http://fallback.com', undefined);
+        expect(result.isAllowed).toBe(true);
+      } finally {
+        if (originalEnv !== undefined) {
+          process.env.CORS_ALLOWED_ORIGINS = originalEnv;
+        } else {
+          delete process.env.CORS_ALLOWED_ORIGINS;
+        }
+      }
+    });
+
+    test('should return isAllowed=false when no CORS config exists anywhere', () => {
+      const originalOrigins = process.env.CORS_ALLOWED_ORIGINS;
+      const originalExtIds = process.env.CORS_ALLOWED_EXTENSION_IDS;
+
+      try {
+        delete process.env.CORS_ALLOWED_ORIGINS;
+        delete process.env.CORS_ALLOWED_EXTENSION_IDS;
+
+        const result = isAllowedOrigin('http://localhost:9000', {});
+        expect(result.isAllowed).toBe(false);
+      } finally {
+        if (originalOrigins !== undefined) {
+          process.env.CORS_ALLOWED_ORIGINS = originalOrigins;
+        }
+        if (originalExtIds !== undefined) {
+          process.env.CORS_ALLOWED_EXTENSION_IDS = originalExtIds;
+        }
+      }
+    });
+
+    test('should return isAllowed=false when CORS_ALLOWED_ORIGINS is empty string', () => {
+      const originalEnv = process.env.CORS_ALLOWED_ORIGINS;
+      delete process.env.CORS_ALLOWED_ORIGINS;
+
+      try {
+        // Empty string split returns [''] which after trim still has empty string, not matching any origin
+        const env: Env = { CORS_ALLOWED_ORIGINS: '' };
+        const result = isAllowedOrigin('http://localhost:9000', env);
+        // Empty string after split becomes [''] which doesn't match 'http://localhost:9000'
+        expect(result.isAllowed).toBe(false);
+      } finally {
+        if (originalEnv !== undefined) {
+          process.env.CORS_ALLOWED_ORIGINS = originalEnv;
+        }
+      }
+    });
+
+    test('should return isAllowed=false when CORS_ALLOWED_EXTENSION_IDS is empty', () => {
+      const originalEnv = process.env.CORS_ALLOWED_EXTENSION_IDS;
+      delete process.env.CORS_ALLOWED_EXTENSION_IDS;
+
+      try {
+        const env: Env = { CORS_ALLOWED_EXTENSION_IDS: '' };
+        const result = isAllowedOrigin('chrome-extension://some-id', env);
+        expect(result.isAllowed).toBe(false);
+      } finally {
+        if (originalEnv !== undefined) {
+          process.env.CORS_ALLOWED_EXTENSION_IDS = originalEnv;
+        }
+      }
     });
   });
 });
