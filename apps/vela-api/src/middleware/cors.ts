@@ -2,6 +2,55 @@ import type { Context, Next } from 'hono';
 import type { Env } from '../types';
 
 /**
+ * Utility function to check if an origin is allowed based on CORS configuration.
+ *
+ * This checks both CORS_ALLOWED_ORIGINS (web origins) and CORS_ALLOWED_EXTENSION_IDS
+ * (browser extension origins) to determine if the request origin is permitted.
+ *
+ * @param origin - The Origin header value from the request
+ * @param env - The environment object containing CORS configuration
+ * @returns An object with isAllowed flag, isWebOrigin flag, and the allowed origin string
+ */
+export function isAllowedOrigin(
+  origin: string | undefined,
+  env: Env | undefined,
+): { isAllowed: boolean; isWebOrigin: boolean; allowedOrigin?: string } {
+  if (!origin) {
+    return { isAllowed: false, isWebOrigin: false };
+  }
+
+  // Parse allowed web origins from environment variable
+  const corsConfig = env?.CORS_ALLOWED_ORIGINS || process.env.CORS_ALLOWED_ORIGINS;
+  const allowedOrigins = corsConfig?.split(',').map((o) => o.trim()) || [];
+
+  // Parse allowed extension IDs from environment variable
+  const extensionIdsConfig =
+    env?.CORS_ALLOWED_EXTENSION_IDS || process.env.CORS_ALLOWED_EXTENSION_IDS;
+  const allowedExtensionIds = extensionIdsConfig?.split(',').map((id: string) => id.trim()) || [];
+
+  // Build full extension origin URIs from the allowed extension IDs
+  const allowedExtensionOrigins = new Set<string>();
+  for (const extId of allowedExtensionIds) {
+    if (extId) {
+      allowedExtensionOrigins.add(`chrome-extension://${extId}`);
+      allowedExtensionOrigins.add(`moz-extension://${extId}`);
+    }
+  }
+
+  // Check if origin is a whitelisted extension origin
+  const isWhitelistedExtensionOrigin = allowedExtensionOrigins.has(origin);
+
+  // Check if origin is in the allowed web origins list
+  const isAllowedWebOrigin = allowedOrigins.includes(origin);
+
+  return {
+    isAllowed: isAllowedWebOrigin || isWhitelistedExtensionOrigin,
+    isWebOrigin: isAllowedWebOrigin,
+    allowedOrigin: isAllowedWebOrigin || isWhitelistedExtensionOrigin ? origin : undefined,
+  };
+}
+
+/**
  * Centralized CORS middleware for the Vela API
  *
  * This middleware:
