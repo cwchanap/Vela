@@ -2,7 +2,7 @@ import { Hono } from 'hono';
 import { zValidator } from '@hono/zod-validator';
 import { z } from 'zod';
 import type { Env } from '../types';
-import { profiles as profilesDB } from '../dynamodb';
+import { profiles as profilesDB, type Profile } from '../dynamodb';
 import { requireAuth, type AuthContext } from '../middleware/auth';
 import { UserIdQuerySchema } from '../validation';
 
@@ -128,7 +128,7 @@ const createProfilesRoute = (env: Env) => {
       if (!profile) {
         console.log('Profile not found for user_id, creating new one:', user_id);
         const defaultPreferences = normalizePreferences({});
-        profile = {
+        const newProfile: Profile = {
           user_id,
           email: null,
           username: null,
@@ -141,7 +141,8 @@ const createProfilesRoute = (env: Env) => {
           created_at: new Date().toISOString(),
           updated_at: new Date().toISOString(),
         };
-        await profilesDB.create(profile);
+        await profilesDB.create(newProfile);
+        profile = newProfile;
       } else {
         const rawPreferences = profile.preferences;
         const normalizedPreferences = normalizePreferences(rawPreferences);
