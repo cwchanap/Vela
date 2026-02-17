@@ -218,31 +218,25 @@ app.post('/analyze', async (c) => {
     const body = await c.req.json();
     const { sentence, provider, model, apiKey } = body;
     const requestOrigin = c.req.header('Origin');
-    const corsConfig = c.env?.CORS_ALLOWED_ORIGINS || process.env.CORS_ALLOWED_ORIGINS;
-    const allowedOrigins = corsConfig?.split(',').map((o: string) => o.trim()) || [];
 
     // Use shared utility to check if origin is allowed (includes both web and extension origins)
     const originCheck = isAllowedOrigin(requestOrigin, c.env);
 
-    // Warn if CORS_ALLOWED_ORIGINS is not configured or empty (disables SSE CORS)
+    // Warn if no CORS configuration is present (neither web origins nor extension IDs)
     // Only log the warning once to avoid spamming logs on every request
-    if (
-      !corsConfigWarningLogged &&
-      (!corsConfig || corsConfig.trim() === '' || allowedOrigins.length === 0)
-    ) {
+    if (!corsConfigWarningLogged && !originCheck.hasConfiguredOrigins) {
       console.warn(
-        'Warning: CORS_ALLOWED_ORIGINS is not configured or is empty. SSE CORS validation is disabled. Please set CORS_ALLOWED_ORIGINS environment variable.',
+        'Warning: No CORS configuration found (CORS_ALLOWED_ORIGINS and CORS_ALLOWED_EXTENSION_IDS are both empty). ' +
+          'SSE CORS validation is disabled. Please set at least one of these environment variables.',
       );
       corsConfigWarningLogged = true;
     }
 
-    // Validate CORS origin: only reject when allowedOrigins is configured (non-empty)
-    // and requestOrigin is present but not allowed
-    if (allowedOrigins.length > 0 && requestOrigin && !originCheck.isAllowed) {
+    // Validate CORS origin: only reject when CORS is configured and origin is not allowed
+    if (originCheck.hasConfiguredOrigins && requestOrigin && !originCheck.isAllowed) {
       console.warn(
-        `CORS rejection: Origin '${requestOrigin}' is not in allowed origins. ` +
-          `Allowed origins: [${allowedOrigins.join(',')}]. ` +
-          `CORS config warning logged: ${corsConfigWarningLogged}.`,
+        `CORS rejection: Origin '${requestOrigin}' is not allowed. ` +
+          `originCheck.isAllowed: ${originCheck.isAllowed}.`,
       );
       return c.json({ error: 'Origin not allowed' }, 403);
     }
