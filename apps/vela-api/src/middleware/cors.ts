@@ -9,32 +9,46 @@ import type { Env } from '../types';
  *
  * @param origin - The Origin header value from the request
  * @param env - The environment object containing CORS configuration
- * @returns An object with isAllowed flag, isWebOrigin flag, and the allowed origin string
+ * @returns An object with isAllowed flag, isWebOrigin flag, hasConfiguredOrigins flag, and the allowed origin string
  */
 export function isAllowedOrigin(
   origin: string | undefined,
   env: Env | undefined,
-): { isAllowed: boolean; isWebOrigin: boolean; allowedOrigin?: string } {
-  if (!origin) {
-    return { isAllowed: false, isWebOrigin: false };
-  }
-
+): {
+  isAllowed: boolean;
+  isWebOrigin: boolean;
+  hasConfiguredOrigins: boolean;
+  allowedOrigin?: string;
+} {
   // Parse allowed web origins from environment variable
   const corsConfig = env?.CORS_ALLOWED_ORIGINS || process.env.CORS_ALLOWED_ORIGINS;
-  const allowedOrigins = corsConfig?.split(',').map((o) => o.trim()) || [];
+  const allowedOrigins =
+    corsConfig
+      ?.split(',')
+      .map((o) => o.trim())
+      .filter(Boolean) || [];
 
   // Parse allowed extension IDs from environment variable
   const extensionIdsConfig =
     env?.CORS_ALLOWED_EXTENSION_IDS || process.env.CORS_ALLOWED_EXTENSION_IDS;
-  const allowedExtensionIds = extensionIdsConfig?.split(',').map((id: string) => id.trim()) || [];
+  const allowedExtensionIds =
+    extensionIdsConfig
+      ?.split(',')
+      .map((id: string) => id.trim())
+      .filter(Boolean) || [];
+
+  // Check if any CORS configuration is present (either web origins or extension IDs)
+  const hasConfiguredOrigins = allowedOrigins.length > 0 || allowedExtensionIds.length > 0;
+
+  if (!origin) {
+    return { isAllowed: false, isWebOrigin: false, hasConfiguredOrigins };
+  }
 
   // Build full extension origin URIs from the allowed extension IDs
   const allowedExtensionOrigins = new Set<string>();
   for (const extId of allowedExtensionIds) {
-    if (extId) {
-      allowedExtensionOrigins.add(`chrome-extension://${extId}`);
-      allowedExtensionOrigins.add(`moz-extension://${extId}`);
-    }
+    allowedExtensionOrigins.add(`chrome-extension://${extId}`);
+    allowedExtensionOrigins.add(`moz-extension://${extId}`);
   }
 
   // Check if origin is a whitelisted extension origin
@@ -46,6 +60,7 @@ export function isAllowedOrigin(
   return {
     isAllowed: isAllowedWebOrigin || isWhitelistedExtensionOrigin,
     isWebOrigin: isAllowedWebOrigin,
+    hasConfiguredOrigins,
     allowedOrigin: isAllowedWebOrigin || isWhitelistedExtensionOrigin ? origin : undefined,
   };
 }
