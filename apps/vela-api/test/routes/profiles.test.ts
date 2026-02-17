@@ -17,6 +17,7 @@ vi.mock('../../src/dynamodb', () => ({
 vi.mock('../../src/middleware/auth', () => ({
   requireAuth: async (_c: any, next: any) => {
     _c.set('userId', 'test-user');
+    _c.set('userEmail', 'user@example.com');
     await next();
   },
   AuthContext: {},
