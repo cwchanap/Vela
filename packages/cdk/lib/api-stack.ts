@@ -30,13 +30,22 @@ export class ApiStack extends Stack {
     const ttsAudioBucketName = getTtsAudioBucketName(this);
 
     // Parse CORS allowed origins from environment or use defaults
-    const corsAllowedOrigins =
-      process.env.CORS_ALLOWED_ORIGINS ||
+    const defaultAllowedOrigins =
       'https://vela.cwchanap.dev,http://localhost:9000,http://127.0.0.1:9000';
-    const allowedOriginsList = corsAllowedOrigins
+    const corsAllowedOrigins = process.env.CORS_ALLOWED_ORIGINS || defaultAllowedOrigins;
+    let allowedOriginsList = corsAllowedOrigins
       .split(',')
       .map((o: string) => o.trim())
       .filter((o: string) => o.length > 0);
+
+    // Fall back to defaults if parsing results in an empty array
+    if (allowedOriginsList.length === 0) {
+      console.warn('CORS_ALLOWED_ORIGINS parsed to empty array, falling back to defaults');
+      allowedOriginsList = defaultAllowedOrigins
+        .split(',')
+        .map((o: string) => o.trim())
+        .filter((o: string) => o.length > 0);
+    }
 
     const apiLambda = new Function(this, 'VelaApiFunction', {
       functionName: 'vela-api',
