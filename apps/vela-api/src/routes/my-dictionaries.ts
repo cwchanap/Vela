@@ -312,6 +312,9 @@ Keep it concise and educational.`;
           'Cache-Control': 'no-cache',
           Connection: 'keep-alive',
           ...(validatedOrigin ? { 'Access-Control-Allow-Origin': validatedOrigin } : {}),
+          ...(validatedOrigin && originCheck.isWebOrigin
+            ? { 'Access-Control-Allow-Credentials': 'true' }
+            : {}),
         },
       });
     }
@@ -374,6 +377,9 @@ Keep it concise and educational.`;
           'Cache-Control': 'no-cache',
           Connection: 'keep-alive',
           ...(validatedOrigin ? { 'Access-Control-Allow-Origin': validatedOrigin } : {}),
+          ...(validatedOrigin && originCheck.isWebOrigin
+            ? { 'Access-Control-Allow-Credentials': 'true' }
+            : {}),
         },
       });
     }
