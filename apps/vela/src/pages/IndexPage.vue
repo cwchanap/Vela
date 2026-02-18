@@ -208,6 +208,7 @@ import { useAuthStore } from '../stores/auth';
 import type { UserPreferences } from '../types/shared';
 import { DEFAULT_DAILY_LESSON_GOAL, DEFAULT_LESSON_DURATION_MINUTES } from '../types/shared';
 import { getApiUrl } from '../utils/api';
+import { httpJsonAuth } from '../utils/httpClient';
 
 interface Achievement {
   id: string;
@@ -303,13 +304,10 @@ const fetchAchievements = async () => {
 
   try {
     const params = new URLSearchParams({ user_id: userId });
-    const res = await fetch(getApiUrl(`progress/analytics?${params.toString()}`), {
-      signal: controller.signal,
-    });
-    if (!res.ok) {
-      throw new Error(res.statusText || 'Failed to load achievements');
-    }
-    const data = await res.json();
+    const data = await httpJsonAuth<{
+      achievements?: unknown[];
+      userStats?: { achievements?: unknown[] };
+    }>(getApiUrl(`progress/analytics?${params.toString()}`), { signal: controller.signal });
     let list: Achievement[] = [];
     if (Array.isArray(data?.achievements) && data.achievements.length > 0) {
       list = data.achievements.map(mapAchievement).filter(Boolean) as Achievement[];

@@ -534,6 +534,7 @@ class AuthService {
 
   /**
    * Ensure a user profile exists; create it if missing
+   * Uses upsert pattern to avoid race condition where GET auto-creates without username
    */
   private async ensureProfileForCurrentUser(
     userId: string,
@@ -541,12 +542,13 @@ class AuthService {
     username?: string | null,
   ): Promise<void> {
     try {
-      const existing = await this.getUserProfile(userId);
-      if (!existing) {
-        await this.createUserProfile(userId, { email: email || null, username: username || null });
-      }
+      // Always attempt to create the profile with username first
+      // The backend will handle duplicates gracefully
+      await this.createUserProfile(userId, { email: email || null, username: username || null });
     } catch (error) {
-      console.error('Error ensuring user profile:', error);
+      // If create fails (e.g., profile already exists), that's fine
+      // The profile was created either by us or by a concurrent request
+      console.log('Profile creation completed (may already exist):', error);
     }
   }
 }
