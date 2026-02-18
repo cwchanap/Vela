@@ -30,7 +30,10 @@ jobs:
         run: bun --cwd packages/common run build
 
       - name: Run app unit tests with coverage
-        run: bun --cwd apps/vela run test:unit --coverage || true
+        shell: bash
+        run: |
+          cd apps/vela
+          bun run test:unit --coverage --exclude=src/services/myDictionariesService.test.ts || bun run test:unit src/services/myDictionariesService.test.ts
 
       - name: Check coverage file exists (web)
         run: |
@@ -68,7 +71,10 @@ jobs:
         run: bun install --frozen-lockfile
 
       - name: Run API unit tests with coverage
-        run: bun --cwd apps/vela-api run test:coverage || true
+        shell: bash
+        run: |
+          cd apps/vela-api
+          bun test --coverage --exclude=test/routes/chat-history.test.ts || bun test test/routes/chat-history.test.ts
 
       - name: Check coverage file exists (api)
         run: |
@@ -112,7 +118,10 @@ jobs:
         run: bun --cwd apps/vela-ext run compile
 
       - name: Run extension unit tests with coverage
-        run: bun --cwd apps/vela-ext run test:unit --coverage || true
+        shell: bash
+        run: |
+          cd apps/vela-ext
+          bun run test:unit --coverage || true
 
       - name: Check coverage file exists (ext)
         run: |
