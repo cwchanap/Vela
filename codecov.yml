@@ -1,0 +1,38 @@
+coverage:
+  status:
+    project:
+      default:
+        target: auto
+        threshold: 1%
+        base: auto
+        informational: true
+    patch:
+      default:
+        target: auto
+        threshold: 1%
+        base: auto
+        informational: true
+
+ignore:
+  - '**/*.test.ts'
+  - '**/*.test.tsx'
+  - '**/test/**'
+  - '**/tests/**'
+  - '**/e2e/**'
+  - 'node_modules/**'
+
+comment:
+  layout: 'reach,diff,flags,files'
+  behavior: default
+  require_changes: false
+
+flags:
+  web:
+    paths:
+      - apps/vela/
+  api:
+    paths:
+      - apps/vela-api/
+  ext:
+    paths:
+      - apps/vela-ext/

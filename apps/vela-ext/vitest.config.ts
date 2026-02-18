@@ -12,6 +12,7 @@ export default defineConfig({
     environment: 'happy-dom',
     include: ['{components,entrypoints}/**/*.{test,spec}.ts'],
     coverage: {
+      provider: 'v8',
       reporter: ['text', 'json', 'html'],
     },
   },
