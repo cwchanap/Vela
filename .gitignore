@@ -49,5 +49,9 @@ cdk.out
 /playwright/.cache/
 test-results/
 
+# Coverage directories
+coverage/
+apps/*/coverage/
+
 # Specs folder (internal documentation)
 specs/
