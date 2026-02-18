@@ -228,6 +228,20 @@ const createProfilesRoute = (env: Env) => {
           return c.json({ error: 'Forbidden: Cannot create profile for another user' }, 403);
         }
 
+        // Check if profile already exists (upsert pattern)
+        const existingProfile = await profilesDB.get(user_id);
+
+        if (existingProfile) {
+          // Profile exists - update username if provided and currently null
+          if (username && !existingProfile.username) {
+            await profilesDB.update(user_id, {
+              username,
+              updated_at: new Date().toISOString(),
+            });
+          }
+          return c.json({ success: true, message: 'Profile already exists' });
+        }
+
         const defaultPreferences = normalizePreferences({});
         const profile = {
           user_id,
