@@ -16,10 +16,11 @@ coverage:
 ignore:
   - '**/*.test.ts'
   - '**/*.test.tsx'
+  - '**/*.spec.ts'
+  - '**/*.spec.tsx'
   - '**/test/**'
   - '**/tests/**'
   - '**/e2e/**'
-  - 'node_modules/**'
 
 comment:
   layout: 'reach,diff,flags,files'

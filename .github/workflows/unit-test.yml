@@ -33,7 +33,7 @@ jobs:
         shell: bash
         run: |
           cd apps/vela
-          bun run test:unit --coverage || true
+          bun run test:unit --coverage
 
       - name: Check coverage file exists (web)
         run: |
@@ -121,7 +121,7 @@ jobs:
         shell: bash
         run: |
           cd apps/vela-ext
-          bun run test:unit --coverage || true
+          bun run test:unit --coverage
 
       - name: Check coverage file exists (ext)
         run: |
