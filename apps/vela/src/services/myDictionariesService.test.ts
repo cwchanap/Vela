@@ -23,11 +23,11 @@ const mockFetch = vi.fn();
 global.fetch = mockFetch;
 
 describe('myDictionariesService', () => {
-  const mockAccessToken = 'mock-access-token-12345';
+  const mockIdToken = 'mock-id-token-12345';
   const mockSession = {
     tokens: {
-      accessToken: {
-        toString: () => mockAccessToken,
+      idToken: {
+        toString: () => mockIdToken,
       },
     },
   };
@@ -74,7 +74,7 @@ describe('myDictionariesService', () => {
       expect(mockFetch).toHaveBeenCalledWith('/api/my-dictionaries?limit=50', {
         method: 'GET',
         headers: {
-          Authorization: `Bearer ${mockAccessToken}`,
+          Authorization: `Bearer ${mockIdToken}`,
           'Content-Type': 'application/json',
         },
       });
@@ -92,7 +92,7 @@ describe('myDictionariesService', () => {
       expect(mockFetch).toHaveBeenCalledWith('/api/my-dictionaries?limit=50', {
         method: 'GET',
         headers: {
-          Authorization: `Bearer ${mockAccessToken}`,
+          Authorization: `Bearer ${mockIdToken}`,
           'Content-Type': 'application/json',
         },
       });
@@ -109,7 +109,7 @@ describe('myDictionariesService', () => {
       expect(mockFetch).toHaveBeenCalledWith('/api/my-dictionaries?limit=20', {
         method: 'GET',
         headers: {
-          Authorization: `Bearer ${mockAccessToken}`,
+          Authorization: `Bearer ${mockIdToken}`,
           'Content-Type': 'application/json',
         },
       });
@@ -131,17 +131,17 @@ describe('myDictionariesService', () => {
         tokens: undefined,
       } as any);
 
-      await expect(getMyDictionaries()).rejects.toThrow('Not authenticated');
+      await expect(getMyDictionaries()).rejects.toThrow('Authentication required');
     });
 
     it('should throw error when access token is missing', async () => {
       vi.mocked(fetchAuthSession).mockResolvedValue({
         tokens: {
-          accessToken: undefined,
+          idToken: undefined,
         },
       } as any);
 
-      await expect(getMyDictionaries()).rejects.toThrow('Not authenticated');
+      await expect(getMyDictionaries()).rejects.toThrow('Authentication required');
     });
 
     it('should throw error when API returns error status', async () => {
@@ -156,10 +156,11 @@ describe('myDictionariesService', () => {
     it('should throw generic error when API error message is missing', async () => {
       mockFetch.mockResolvedValue({
         ok: false,
+        statusText: 'OK',
         json: vi.fn().mockResolvedValue({}),
       });
 
-      await expect(getMyDictionaries()).rejects.toThrow('Failed to fetch dictionary entries');
+      await expect(getMyDictionaries()).rejects.toThrow('OK');
     });
 
     it('should handle network errors', async () => {
@@ -171,7 +172,7 @@ describe('myDictionariesService', () => {
     it('should handle session fetch errors', async () => {
       vi.mocked(fetchAuthSession).mockRejectedValue(new Error('Session expired'));
 
-      await expect(getMyDictionaries()).rejects.toThrow('Session expired');
+      await expect(getMyDictionaries()).rejects.toThrow('Authentication required');
     });
 
     it('should include authorization header with correct token', async () => {
@@ -186,7 +187,7 @@ describe('myDictionariesService', () => {
         expect.any(String),
         expect.objectContaining({
           headers: expect.objectContaining({
-            Authorization: `Bearer ${mockAccessToken}`,
+            Authorization: `Bearer ${mockIdToken}`,
           }),
         }),
       );
@@ -231,7 +232,7 @@ describe('myDictionariesService', () => {
       expect(mockFetch).toHaveBeenCalledWith(`/api/my-dictionaries/${sentenceId}`, {
         method: 'DELETE',
         headers: {
-          Authorization: `Bearer ${mockAccessToken}`,
+          Authorization: `Bearer ${mockIdToken}`,
           'Content-Type': 'application/json',
         },
       });
@@ -242,17 +243,17 @@ describe('myDictionariesService', () => {
         tokens: undefined,
       } as any);
 
-      await expect(deleteDictionaryEntry(sentenceId)).rejects.toThrow('Not authenticated');
+      await expect(deleteDictionaryEntry(sentenceId)).rejects.toThrow('Authentication required');
     });
 
     it('should throw error when access token is missing', async () => {
       vi.mocked(fetchAuthSession).mockResolvedValue({
         tokens: {
-          accessToken: undefined,
+          idToken: undefined,
         },
       } as any);
 
-      await expect(deleteDictionaryEntry(sentenceId)).rejects.toThrow('Not authenticated');
+      await expect(deleteDictionaryEntry(sentenceId)).rejects.toThrow('Authentication required');
     });
 
     it('should throw error when API returns error status', async () => {
@@ -267,12 +268,11 @@ describe('myDictionariesService', () => {
     it('should throw generic error when API error message is missing', async () => {
       mockFetch.mockResolvedValue({
         ok: false,
+        statusText: 'OK',
         json: vi.fn().mockResolvedValue({}),
       });
 
-      await expect(deleteDictionaryEntry(sentenceId)).rejects.toThrow(
-        'Failed to delete dictionary entry',
-      );
+      await expect(deleteDictionaryEntry(sentenceId)).rejects.toThrow('OK');
     });
 
     it('should handle network errors', async () => {
@@ -284,7 +284,7 @@ describe('myDictionariesService', () => {
     it('should handle session fetch errors', async () => {
       vi.mocked(fetchAuthSession).mockRejectedValue(new Error('Session expired'));
 
-      await expect(deleteDictionaryEntry(sentenceId)).rejects.toThrow('Session expired');
+      await expect(deleteDictionaryEntry(sentenceId)).rejects.toThrow('Authentication required');
     });
 
     it('should include authorization header with correct token', async () => {
@@ -299,7 +299,7 @@ describe('myDictionariesService', () => {
         expect.any(String),
         expect.objectContaining({
           headers: expect.objectContaining({
-            Authorization: `Bearer ${mockAccessToken}`,
+            Authorization: `Bearer ${mockIdToken}`,
           }),
         }),
       );
