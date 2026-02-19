@@ -41,6 +41,7 @@ export default defineConfig({
       assets: resolve(__dirname, './src/assets'),
       boot: resolve(__dirname, './src/boot'),
       stores: resolve(__dirname, './src/stores'),
+      '@vela/common': resolve(__dirname, '../../packages/common/src/index.ts'),
     },
   },
 });
