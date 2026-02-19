@@ -156,11 +156,11 @@ describe('myDictionariesService', () => {
     it('should throw generic error when API error message is missing', async () => {
       mockFetch.mockResolvedValue({
         ok: false,
-        statusText: 'OK',
+        statusText: 'Internal Server Error',
         json: vi.fn().mockResolvedValue({}),
       });
 
-      await expect(getMyDictionaries()).rejects.toThrow('OK');
+      await expect(getMyDictionaries()).rejects.toThrow('Internal Server Error');
     });
 
     it('should handle network errors', async () => {
@@ -268,11 +268,11 @@ describe('myDictionariesService', () => {
     it('should throw generic error when API error message is missing', async () => {
       mockFetch.mockResolvedValue({
         ok: false,
-        statusText: 'OK',
+        statusText: 'Internal Server Error',
         json: vi.fn().mockResolvedValue({}),
       });
 
-      await expect(deleteDictionaryEntry(sentenceId)).rejects.toThrow('OK');
+      await expect(deleteDictionaryEntry(sentenceId)).rejects.toThrow('Internal Server Error');
     });
 
     it('should handle network errors', async () => {
