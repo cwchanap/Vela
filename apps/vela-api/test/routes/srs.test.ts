@@ -1,7 +1,6 @@
 import { describe, test, expect, beforeEach, vi } from 'bun:test';
 import { Hono } from 'hono';
 
-// --- Mock dynamodb BEFORE importing the router ---
 const mockUserVocabularyProgress = {
   get: vi.fn(),
   getByUser: vi.fn(),
@@ -23,23 +22,23 @@ vi.mock('../../src/dynamodb', () => ({
   vocabulary: mockVocabulary,
 }));
 
-// Mock auth middleware to inject userId without real JWT validation
 vi.mock('../../src/middleware/auth', () => ({
-  requireAuth: async (c: any, next: () => Promise<void>) => {
-    c.set('userId', 'test-user-id');
+  requireAuth: async (_c: any, next: any) => {
+    _c.set('userId', 'test-user-id');
     await next();
   },
   AuthContext: {},
 }));
 
-// Mock calculateNextReview to return predictable results
+const mockCalculateNextReview = vi.fn().mockReturnValue({
+  easeFactor: 2.6,
+  interval: 1,
+  repetitions: 1,
+  nextReviewDate: '2026-02-22T00:00:00.000Z',
+});
+
 vi.mock('../../src/utils/srs', () => ({
-  calculateNextReview: vi.fn().mockReturnValue({
-    easeFactor: 2.6,
-    interval: 1,
-    repetitions: 1,
-    nextReviewDate: '2026-02-22T00:00:00.000Z',
-  }),
+  calculateNextReview: mockCalculateNextReview,
   SRS_DEFAULTS: {
     EASE_FACTOR: 2.5,
     MIN_EASE_FACTOR: 1.3,
@@ -48,8 +47,8 @@ vi.mock('../../src/utils/srs', () => ({
   },
 }));
 
-// Import actual router AFTER mocks are declared
-const srsRouter = (await import('../../src/routes/srs')).default;
+// Import AFTER mocks are declared
+const { default: srsRouter, processWithConcurrency } = await import('../../src/routes/srs');
 
 function createTestApp() {
   const app = new Hono();
@@ -75,9 +74,27 @@ function makeProgress(overrides: Record<string, unknown> = {}) {
   };
 }
 
+describe('processWithConcurrency', () => {
+  test('returns results in input order when promises resolve out of order', async () => {
+    const delays = [30, 10, 20];
+    const results = await processWithConcurrency(
+      delays,
+      (delay) => new Promise<number>((resolve) => setTimeout(() => resolve(delay), delay)),
+      2,
+    );
+    expect(results).toEqual(delays);
+  });
+});
+
 describe('SRS Routes', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockCalculateNextReview.mockReturnValue({
+      easeFactor: 2.6,
+      interval: 1,
+      repetitions: 1,
+      nextReviewDate: '2026-02-22T00:00:00.000Z',
+    });
   });
 
   // ------------------------------------------------------------------ //
@@ -151,7 +168,6 @@ describe('SRS Routes', () => {
 
       expect(res.status).toBe(200);
       const data = await res.json();
-      // Only the N5 item should match
       expect(data.items).toHaveLength(1);
       expect(data.items[0].progress.vocabulary_id).toBe('vocab-n5');
     });
@@ -356,7 +372,6 @@ describe('SRS Routes', () => {
         body: JSON.stringify({ vocabulary_id: 'vocab-1', quality: 6 }),
       });
 
-      // zValidator returns 400 for schema validation failures
       expect(res.status).toBe(400);
     });
 
@@ -371,12 +386,15 @@ describe('SRS Routes', () => {
       expect(res.status).toBe(400);
     });
 
-    test('returns 409 when updateAfterReview returns undefined and recovery also fails', async () => {
+    test('returns 404 when updateAfterReview returns undefined and recovery also fails', async () => {
       const existingProgress = makeProgress();
       mockVocabulary.getById.mockResolvedValue({ id: 'vocab-1' });
-      mockUserVocabularyProgress.get
-        .mockResolvedValueOnce(existingProgress) // initial get
-        .mockResolvedValueOnce(undefined); // recovery get — item gone
+      let getCallCount = 0;
+      mockUserVocabularyProgress.get.mockImplementation(() => {
+        getCallCount++;
+        if (getCallCount === 1) return Promise.resolve(existingProgress); // initial get
+        return Promise.resolve(undefined); // recovery get — item gone
+      });
       mockUserVocabularyProgress.updateAfterReview.mockResolvedValue(undefined);
 
       const app = createTestApp();
@@ -434,7 +452,6 @@ describe('SRS Routes', () => {
 
       expect(res.status).toBe(200);
       const data = await res.json();
-      // The route returns `{ progress }` where progress is undefined → serialised as null in JSON
       expect(data.progress === null || data.progress === undefined).toBe(true);
     });
 
@@ -584,7 +601,6 @@ describe('SRS Routes', () => {
 
       expect(res.status).toBe(200);
       const data = await res.json();
-      // After deduplication there is only 1 unique vocab_id
       expect(data.processed).toBe(1);
       expect(data.successful).toBe(1);
     });
@@ -665,7 +681,6 @@ describe('SRS Routes', () => {
         body: JSON.stringify({ reviews }),
       });
 
-      // zValidator returns 400 for schema violations
       expect(res.status).toBe(400);
     });
 
