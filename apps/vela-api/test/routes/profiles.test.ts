@@ -82,4 +82,107 @@ describe('Profiles Route', () => {
     // GET should be idempotent and not write
     expect(mockProfilesDb.update).not.toHaveBeenCalled();
   });
+
+  test('GET / returns 403 when user_id does not match authenticated user', async () => {
+    const app = createTestApp();
+    const res = await app.request('/?user_id=other-user');
+    expect(res.status).toBe(403);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toContain('Forbidden');
+  });
+
+  test('GET / creates profile when profile does not exist', async () => {
+    mockProfilesDb.get.mockResolvedValueOnce(null);
+    mockProfilesDb.create.mockResolvedValueOnce(undefined);
+    const app = createTestApp();
+    const res = await app.request('/?user_id=test-user');
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { profile: { user_id: string } };
+    expect(body.profile.user_id).toBe('test-user');
+    expect(mockProfilesDb.create).toHaveBeenCalledTimes(1);
+  });
+
+  test('GET / returns 500 on DynamoDB error', async () => {
+    mockProfilesDb.get.mockRejectedValueOnce(new Error('DDB error'));
+    const app = createTestApp();
+    const res = await app.request('/?user_id=test-user');
+    expect(res.status).toBe(500);
+  });
+
+  test('PUT /update updates profile successfully', async () => {
+    mockProfilesDb.update.mockResolvedValueOnce({
+      user_id: 'test-user',
+      username: 'new-name',
+      updated_at: new Date().toISOString(),
+    });
+    const app = createTestApp();
+    const res = await app.request('/update', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ user_id: 'test-user', username: 'new-name' }),
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { success: boolean };
+    expect(body.success).toBe(true);
+  });
+
+  test('PUT /update returns 403 when user_id does not match', async () => {
+    const app = createTestApp();
+    const res = await app.request('/update', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ user_id: 'other-user', username: 'hacker' }),
+    });
+    expect(res.status).toBe(403);
+  });
+
+  test('POST /create creates a new profile', async () => {
+    mockProfilesDb.get.mockResolvedValueOnce(null);
+    mockProfilesDb.create.mockResolvedValueOnce(undefined);
+    const app = createTestApp();
+    const res = await app.request('/create', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ user_id: 'test-user', email: 'test@example.com' }),
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { success: boolean };
+    expect(body.success).toBe(true);
+  });
+
+  test('POST /create returns success when profile already exists', async () => {
+    mockProfilesDb.get.mockResolvedValueOnce({ user_id: 'test-user', username: 'existing' });
+    const app = createTestApp();
+    const res = await app.request('/create', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ user_id: 'test-user' }),
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { message: string };
+    expect(body.message).toContain('already exists');
+  });
+
+  test('POST /create updates username when profile exists without username', async () => {
+    mockProfilesDb.get.mockResolvedValueOnce({ user_id: 'test-user', username: null });
+    mockProfilesDb.update.mockResolvedValueOnce(undefined);
+    const app = createTestApp();
+    const res = await app.request('/create', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ user_id: 'test-user', username: 'new-username' }),
+    });
+    expect(res.status).toBe(200);
+    expect(mockProfilesDb.update).toHaveBeenCalledTimes(1);
+  });
+
+  test('POST /create returns 403 when user_id does not match', async () => {
+    const app = createTestApp();
+    const res = await app.request('/create', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ user_id: 'other-user' }),
+    });
+    expect(res.status).toBe(403);
+  });
 });
