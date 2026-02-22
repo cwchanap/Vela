@@ -55,3 +55,6 @@ apps/*/coverage/
 
 # Specs folder (internal documentation)
 specs/
+
+# Claude settings
+.claude/
