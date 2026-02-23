@@ -26,6 +26,19 @@ function suppressConsoleWarn(): { messages: string[]; restore: () => void } {
   };
 }
 
+/** Captures console.error output and provides a restore function. */
+function suppressConsoleError(): { messages: unknown[]; restore: () => void } {
+  const original = console.error;
+  const messages: unknown[] = [];
+  console.error = (...args: unknown[]) => messages.push(args);
+  return {
+    messages,
+    restore: () => {
+      console.error = original;
+    },
+  };
+}
+
 function createTestApp() {
   const app = new Hono<AuthContext>();
   app.use('*', requireAuth);
@@ -60,8 +73,7 @@ describe('requireAuth middleware', () => {
 
   test('returns 401 when token verification fails', async () => {
     // Suppress the expected console.error from the middleware
-    const originalConsoleError = console.error;
-    console.error = () => {};
+    const { restore } = suppressConsoleError();
 
     try {
       mockVerify.mockImplementationOnce(() => Promise.reject(new Error('Token expired')));
@@ -73,7 +85,7 @@ describe('requireAuth middleware', () => {
       const body = (await res.json()) as { error: string };
       expect(body.error).toContain('Invalid or expired token');
     } finally {
-      console.error = originalConsoleError;
+      restore();
     }
   });
 
@@ -105,14 +117,13 @@ describe('requireAuth middleware', () => {
     expect(body.userEmail).toBeNull();
   });
 
-  test('returns 401 when verifier returns null (verify throws)', async () => {
+  test('returns 401 when verifier returns null (verify throws non-Error)', async () => {
     // Suppress the expected console.error from the middleware
-    const originalConsoleError = console.error;
-    console.error = () => {};
+    const { restore } = suppressConsoleError();
 
     try {
-      // Simulates any scenario where getUserClaimsFromToken returns null
-      mockVerify.mockImplementationOnce(() => Promise.reject(new Error('Invalid signature')));
+      // Simulates a non-Error rejection (different code path than Error rejection)
+      mockVerify.mockImplementationOnce(() => Promise.reject('string error'));
       const app = createTestApp();
       const res = await app.request('/test', {
         headers: { Authorization: 'Bearer malformed-token' },
@@ -121,7 +132,7 @@ describe('requireAuth middleware', () => {
       const body = (await res.json()) as { error: string };
       expect(body.error).toContain('Invalid or expired token');
     } finally {
-      console.error = originalConsoleError;
+      restore();
     }
   });
 
