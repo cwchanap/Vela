@@ -1,5 +1,6 @@
 import { describe, test, expect, beforeEach, mock } from 'bun:test';
 import { Hono } from 'hono';
+import type { AuthContext } from '../../src/middleware/auth';
 
 // Mock aws-jwt-verify before importing auth
 const mockVerify = mock(() => Promise.resolve({ sub: 'user-123', email: 'user@example.com' }));
@@ -12,12 +13,23 @@ mock.module('aws-jwt-verify', () => ({
 // Import AFTER mocking so the module uses the mocked CognitoJwtVerifier
 const { requireAuth, initializeAuthVerifier } = await import('../../src/middleware/auth');
 
+/** Captures console.warn output and provides a restore function. */
+function suppressConsoleWarn(): { messages: string[]; restore: () => void } {
+  const original = console.warn;
+  const messages: string[] = [];
+  console.warn = (msg: string) => messages.push(msg);
+  return {
+    messages,
+    restore: () => {
+      console.warn = original;
+    },
+  };
+}
+
 function createTestApp() {
-  const app = new Hono();
-  app.use('*', requireAuth as any);
-  app.get('/test', (c) =>
-    c.json({ userId: c.get('userId' as any), userEmail: c.get('userEmail' as any) }),
-  );
+  const app = new Hono<AuthContext>();
+  app.use('*', requireAuth);
+  app.get('/test', (c) => c.json({ userId: c.get('userId'), userEmail: c.get('userEmail') }));
   return app;
 }
 
@@ -77,7 +89,12 @@ describe('requireAuth middleware', () => {
   });
 
   test('sets userEmail to null when email claim is not a string', async () => {
-    mockVerify.mockImplementationOnce(() => Promise.resolve({ sub: 'user-456', email: 12345 }));
+    mockVerify.mockImplementationOnce(
+      () =>
+        Promise.resolve({ sub: 'user-456', email: 12345 }) as unknown as ReturnType<
+          typeof mockVerify
+        >,
+    );
     const app = createTestApp();
     const res = await app.request('/test', {
       headers: { Authorization: 'Bearer valid-token' },
@@ -124,41 +141,32 @@ describe('initializeAuthVerifier', () => {
   });
 
   test('warns and returns without throwing when userPoolId is missing', () => {
-    const originalConsoleWarn = console.warn;
-    const warnMessages: string[] = [];
-    console.warn = (msg: string) => warnMessages.push(msg);
-
+    const { messages, restore } = suppressConsoleWarn();
     try {
       expect(() => initializeAuthVerifier('', 'client-id')).not.toThrow();
-      expect(warnMessages.some((m) => m.includes('Cognito configuration missing'))).toBe(true);
+      expect(messages.some((m) => m.includes('Cognito configuration missing'))).toBe(true);
     } finally {
-      console.warn = originalConsoleWarn;
+      restore();
     }
   });
 
   test('warns and returns without throwing when clientId is missing', () => {
-    const originalConsoleWarn = console.warn;
-    const warnMessages: string[] = [];
-    console.warn = (msg: string) => warnMessages.push(msg);
-
+    const { messages, restore } = suppressConsoleWarn();
     try {
       expect(() => initializeAuthVerifier('us-east-1_test', '')).not.toThrow();
-      expect(warnMessages.some((m) => m.includes('Cognito configuration missing'))).toBe(true);
+      expect(messages.some((m) => m.includes('Cognito configuration missing'))).toBe(true);
     } finally {
-      console.warn = originalConsoleWarn;
+      restore();
     }
   });
 
   test('warns and returns without throwing when both args are missing', () => {
-    const originalConsoleWarn = console.warn;
-    const warnMessages: string[] = [];
-    console.warn = (msg: string) => warnMessages.push(msg);
-
+    const { messages, restore } = suppressConsoleWarn();
     try {
       expect(() => initializeAuthVerifier('', '')).not.toThrow();
-      expect(warnMessages.some((m) => m.includes('Cognito configuration missing'))).toBe(true);
+      expect(messages.some((m) => m.includes('Cognito configuration missing'))).toBe(true);
     } finally {
-      console.warn = originalConsoleWarn;
+      restore();
     }
   });
 });
