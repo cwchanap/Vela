@@ -188,11 +188,20 @@ describe('useGameStore', () => {
       expect(store.currentSentenceQuestionIndex).toBe(1);
     });
 
+    it('startSentenceGame resets previous score', () => {
+      const store = useGameStore();
+      store.startSentenceGame([makeSentenceQuestion()]);
+      store.answerSentenceQuestion(true);
+      store.startSentenceGame([makeSentenceQuestion(), makeSentenceQuestion()]);
+      expect(store.score).toBe(0);
+    });
+
     it('answerSentenceQuestion does not increment score on wrong answer', () => {
       const store = useGameStore();
       store.startSentenceGame([makeSentenceQuestion(), makeSentenceQuestion()]);
       store.answerSentenceQuestion(false);
       expect(store.score).toBe(0);
+      expect(store.currentSentenceQuestionIndex).toBe(1);
     });
 
     it('answerSentenceQuestion ends game when all questions answered', () => {

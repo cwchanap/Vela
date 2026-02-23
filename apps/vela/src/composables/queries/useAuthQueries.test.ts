@@ -1,7 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { VueQueryPlugin, QueryClient } from '@tanstack/vue-query';
-import { mount } from '@vue/test-utils';
-import { defineComponent } from 'vue';
+import { withQueryClient } from 'src/test-utils/withQueryClient';
 
 const mockAuthService = {
   getCurrentSession: vi.fn(),
@@ -17,22 +15,6 @@ const mockAuthService = {
 };
 
 vi.mock('src/services/authService', () => ({ authService: mockAuthService }));
-
-function withQueryClient<T>(composableFn: () => T): { result: T; queryClient: QueryClient } {
-  const queryClient = new QueryClient({
-    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
-  });
-  let result!: T;
-  const Wrapper = defineComponent({
-    setup() {
-      result = composableFn();
-      return {};
-    },
-    template: '<div />',
-  });
-  mount(Wrapper, { global: { plugins: [[VueQueryPlugin, { queryClient }]] } });
-  return { result, queryClient };
-}
 
 describe('useAuthQueries', () => {
   beforeEach(() => {

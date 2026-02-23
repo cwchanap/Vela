@@ -56,7 +56,7 @@
 
 ## Testing Conventions
 
-- **API**: Bun test runner, `app.request()` for route tests, `mock.module()` for AWS SDK mocks
+- **API**: Bun test runner, `app.request()` for route tests, `vi.mock()` (from `bun:test`) for module mocks; use `mock.module()` only when mocking must precede a dynamic `await import()`
 - **Frontend**: Vitest + `@vue/test-utils`, `QueryClient` wrapper, `createTestingPinia`
 - Follow existing test file patterns (colocated `*.test.ts` for API utils/routes, same directory for frontend)
 

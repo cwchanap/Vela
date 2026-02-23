@@ -169,6 +169,30 @@ describe('hiraganaToRomaji', () => {
     expect(hiraganaToRomaji('はひふへほ')).toBe('hahifuheho');
   });
 
+  it('converts ma-row', () => {
+    expect(hiraganaToRomaji('まみむめも')).toBe('mamimumemo');
+  });
+
+  it('converts ya-row', () => {
+    expect(hiraganaToRomaji('やゆよ')).toBe('yayuyo');
+  });
+
+  it('converts ra-row', () => {
+    expect(hiraganaToRomaji('らりるれろ')).toBe('rarirurero');
+  });
+
+  it('converts wa-row', () => {
+    expect(hiraganaToRomaji('わゐゑを')).toBe('wawiwewo');
+  });
+
+  it('converts voiced (dakuten) consonants', () => {
+    expect(hiraganaToRomaji('がぎぐげご')).toBe('gagigugego');
+  });
+
+  it('converts semi-voiced (handakuten) consonants', () => {
+    expect(hiraganaToRomaji('ぱぴぷぺぽ')).toBe('papipupepo');
+  });
+
   it('converts ん to n', () => {
     expect(hiraganaToRomaji('ん')).toBe('n');
   });
@@ -211,7 +235,8 @@ describe('assessDifficulty', () => {
   });
 
   it('caps at 5 for text with many kanji', () => {
-    // many kanji: 6 kanji = +3 → base 4, plus length → cap at 5
+    // 15 kanji: kanji bonus = min(15*0.5, 3) = 3, length bonus = min((15-10)*0.1, 2) = 0.5
+    // total = 1 + 3 + 0.5 = 4.5 → round → 5 (capped at 5)
     const result = assessDifficulty('猫犬鳥魚虫花人山川木石竹馬鹿熊');
     expect(result).toBe(5);
   });

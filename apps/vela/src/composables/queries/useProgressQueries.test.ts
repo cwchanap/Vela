@@ -1,8 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { VueQueryPlugin, QueryClient } from '@tanstack/vue-query';
-import { mount } from '@vue/test-utils';
-import { defineComponent } from 'vue';
 import { flushPromises } from '@vue/test-utils';
+import { isRef } from 'vue';
+import { withQueryClient } from 'src/test-utils/withQueryClient';
 
 const mockProgressService = {
   getProgressAnalytics: vi.fn(),
@@ -10,22 +9,6 @@ const mockProgressService = {
 };
 
 vi.mock('src/services/progressService', () => ({ progressService: mockProgressService }));
-
-function withQueryClient<T>(composableFn: () => T): { result: T; queryClient: QueryClient } {
-  const queryClient = new QueryClient({
-    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
-  });
-  let result!: T;
-  const Wrapper = defineComponent({
-    setup() {
-      result = composableFn();
-      return {};
-    },
-    template: '<div />',
-  });
-  mount(Wrapper, { global: { plugins: [[VueQueryPlugin, { queryClient }]] } });
-  return { result, queryClient };
-}
 
 describe('useProgressQueries', () => {
   beforeEach(() => {
@@ -69,7 +52,7 @@ describe('useProgressQueries', () => {
       const { useProgressAnalyticsQuery } = await import('./useProgressQueries');
       const { result } = withQueryClient(() => useProgressAnalyticsQuery('user-123'));
       expect(result).toBeDefined();
-      expect(typeof result.isPending).toBe('object');
+      expect(isRef(result.isPending)).toBe(true);
     });
 
     it('calls getProgressAnalytics when userId is provided', async () => {
@@ -117,7 +100,7 @@ describe('useProgressQueries', () => {
         correctAnswers: 8,
         experienceGained: 50,
       });
-      expect(invalidateSpy).toHaveBeenCalled();
+      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['progress'] });
     });
 
     it('returns mutation object with mutateAsync', async () => {
