@@ -63,11 +63,12 @@ describe('requireAuth middleware', () => {
   beforeEach(() => {
     mockVerify.mockClear();
     mockCreate.mockClear();
-    // Suppress the console.log output from initializeAuthVerifier
     const { restore } = suppressConsoleLog();
-    // Ensure verifier is initialized so the token verification path is exercised
-    initializeAuthVerifier('us-east-1_test', 'test-client-id');
-    restore();
+    try {
+      initializeAuthVerifier('us-east-1_test', 'test-client-id');
+    } finally {
+      restore();
+    }
   });
 
   test('returns 401 when Authorization header is missing', async () => {
@@ -165,7 +166,12 @@ describe('requireAuth middleware', () => {
 
 describe('initializeAuthVerifier', () => {
   test('does not throw with valid config', () => {
-    expect(() => initializeAuthVerifier('us-east-1_test', 'client-id')).not.toThrow();
+    const { restore } = suppressConsoleLog();
+    try {
+      expect(() => initializeAuthVerifier('us-east-1_test', 'client-id')).not.toThrow();
+    } finally {
+      restore();
+    }
   });
 
   test('warns and returns without throwing when userPoolId is missing', () => {
