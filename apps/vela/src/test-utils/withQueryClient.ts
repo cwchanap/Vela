@@ -22,6 +22,8 @@ export function withQueryClient<T>(composableFn: () => T): {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
+  // Set gcTime to 0 to evict inactive queries immediately
+  (queryClient as { gcTime?: number }).gcTime = 0;
   let result!: T;
   const Wrapper = defineComponent({
     setup() {
