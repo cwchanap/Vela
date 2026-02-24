@@ -26,10 +26,23 @@ function suppressConsoleWarn(): { messages: string[]; restore: () => void } {
   };
 }
 
+/** Captures console.log output and provides a restore function. */
+function suppressConsoleLog(): { messages: string[]; restore: () => void } {
+  const original = console.log;
+  const messages: string[] = [];
+  console.log = (msg: string) => messages.push(msg);
+  return {
+    messages,
+    restore: () => {
+      console.log = original;
+    },
+  };
+}
+
 /** Captures console.error output and provides a restore function. */
-function suppressConsoleError(): { messages: unknown[]; restore: () => void } {
+function suppressConsoleError(): { messages: unknown[][]; restore: () => void } {
   const original = console.error;
-  const messages: unknown[] = [];
+  const messages: unknown[][] = [];
   console.error = (...args: unknown[]) => messages.push(args);
   return {
     messages,
@@ -49,8 +62,12 @@ function createTestApp() {
 describe('requireAuth middleware', () => {
   beforeEach(() => {
     mockVerify.mockClear();
+    mockCreate.mockClear();
+    // Suppress the console.log output from initializeAuthVerifier
+    const { restore } = suppressConsoleLog();
     // Ensure verifier is initialized so the token verification path is exercised
     initializeAuthVerifier('us-east-1_test', 'test-client-id');
+    restore();
   });
 
   test('returns 401 when Authorization header is missing', async () => {
@@ -117,7 +134,7 @@ describe('requireAuth middleware', () => {
     expect(body.userEmail).toBeNull();
   });
 
-  test('returns 401 when verifier returns null (verify throws non-Error)', async () => {
+  test('returns 401 when verifier rejects with a non-Error value', async () => {
     // Suppress the expected console.error from the middleware
     const { restore } = suppressConsoleError();
 
