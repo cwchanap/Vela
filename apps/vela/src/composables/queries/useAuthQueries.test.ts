@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { flushPromises } from '@vue/test-utils';
 import { withQueryClient } from 'src/test-utils/withQueryClient';
 
 const mockAuthService = {
@@ -39,22 +40,24 @@ describe('useAuthQueries', () => {
   });
 
   describe('useSessionQuery', () => {
-    it('returns a query object', async () => {
+    it('resolves with null when no session exists', async () => {
       mockAuthService.getCurrentSession.mockResolvedValue(null);
       const { useSessionQuery } = await import('./useAuthQueries');
       const { result } = withQueryClient(() => useSessionQuery());
-      expect(result).toBeDefined();
-      expect(typeof result.isPending).toBe('object'); // ref
+      await flushPromises();
+      expect(result.data.value).toBeNull();
+      expect(result.isPending.value).toBe(false);
     });
   });
 
   describe('useCurrentUserQuery', () => {
-    it('returns a query object', async () => {
+    it('resolves with null when no user exists', async () => {
       mockAuthService.getCurrentUser.mockResolvedValue(null);
       const { useCurrentUserQuery } = await import('./useAuthQueries');
       const { result } = withQueryClient(() => useCurrentUserQuery());
-      expect(result).toBeDefined();
-      expect(typeof result.isPending).toBe('object');
+      await flushPromises();
+      expect(result.data.value).toBeNull();
+      expect(result.isPending.value).toBe(false);
     });
   });
 
@@ -96,6 +99,18 @@ describe('useAuthQueries', () => {
       const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries');
       await result.mutateAsync({ email: 'a@b.com', password: 'pass' });
       expect(invalidateSpy).toHaveBeenCalled();
+    });
+
+    it('does not invalidate queries when sign in returns success: false', async () => {
+      mockAuthService.signIn.mockResolvedValueOnce({
+        success: false,
+        error: 'Invalid credentials',
+      });
+      const { useSignInMutation } = await import('./useAuthQueries');
+      const { result, queryClient } = withQueryClient(() => useSignInMutation());
+      const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries');
+      await result.mutateAsync({ email: 'bad@example.com', password: 'wrong' });
+      expect(invalidateSpy).not.toHaveBeenCalled();
     });
   });
 

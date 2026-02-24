@@ -32,12 +32,13 @@ describe('useGameQueries', () => {
   });
 
   describe('useVocabularyQuestionsQuery', () => {
-    it('returns a query object', async () => {
+    it('resolves with empty array when no questions exist', async () => {
       mockGameService.getVocabularyQuestions.mockResolvedValue([]);
       const { useVocabularyQuestionsQuery } = await import('./useGameQueries');
       const { result } = withQueryClient(() => useVocabularyQuestionsQuery(10));
-      expect(result).toBeDefined();
-      expect(typeof result.isPending).toBe('object');
+      await flushPromises();
+      expect(result.data.value).toEqual([]);
+      expect(result.isPending.value).toBe(false);
     });
 
     it('calls gameService.getVocabularyQuestions with custom count', async () => {
@@ -58,12 +59,13 @@ describe('useGameQueries', () => {
   });
 
   describe('useSentenceQuestionsQuery', () => {
-    it('returns a query object', async () => {
+    it('resolves with empty array when no questions exist', async () => {
       mockGameService.getSentenceQuestions.mockResolvedValue([]);
       const { useSentenceQuestionsQuery } = await import('./useGameQueries');
       const { result } = withQueryClient(() => useSentenceQuestionsQuery(5));
-      expect(result).toBeDefined();
-      expect(typeof result.isPending).toBe('object');
+      await flushPromises();
+      expect(result.data.value).toEqual([]);
+      expect(result.isPending.value).toBe(false);
     });
 
     it('calls gameService.getSentenceQuestions with default count of 5', async () => {
