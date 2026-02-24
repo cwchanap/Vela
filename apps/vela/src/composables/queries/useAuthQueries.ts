@@ -62,10 +62,12 @@ export function useSignUpMutation() {
 
   return useMutation({
     mutationFn: (data: SignUpData) => authService.signUp(data),
-    onSuccess: () => {
-      // Invalidate session and user queries
-      queryClient.invalidateQueries({ queryKey: authKeys.session() });
-      queryClient.invalidateQueries({ queryKey: authKeys.user() });
+    onSuccess: (result) => {
+      if (result.success) {
+        // Invalidate session and user queries
+        queryClient.invalidateQueries({ queryKey: authKeys.session() });
+        queryClient.invalidateQueries({ queryKey: authKeys.user() });
+      }
     },
   });
 }

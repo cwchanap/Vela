@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, beforeAll } from 'vitest';
 import { flushPromises } from '@vue/test-utils';
 import { withQueryClient } from 'src/test-utils/withQueryClient';
 
@@ -18,23 +18,27 @@ const mockAuthService = {
 vi.mock('src/services/authService', () => ({ authService: mockAuthService }));
 
 describe('useAuthQueries', () => {
+  let authKeys: typeof import('./useAuthQueries').authKeys;
+
+  beforeAll(async () => {
+    ({ authKeys } = await import('./useAuthQueries'));
+  });
+
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.resetModules();
   });
 
   describe('authKeys', () => {
     it('generates correct session key', async () => {
-      const { authKeys } = await import('./useAuthQueries');
       expect(authKeys.session()).toEqual(['auth', 'session']);
     });
 
     it('generates correct user key', async () => {
-      const { authKeys } = await import('./useAuthQueries');
       expect(authKeys.user()).toEqual(['auth', 'user']);
     });
 
     it('generates correct profile key', async () => {
-      const { authKeys } = await import('./useAuthQueries');
       expect(authKeys.profile('user-123')).toEqual(['auth', 'profile', 'user-123']);
     });
   });
@@ -99,6 +103,18 @@ describe('useAuthQueries', () => {
       const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries');
       await result.mutateAsync({ email: 'a@b.com', password: 'pass' });
       expect(invalidateSpy).toHaveBeenCalled();
+      // Verify session key is invalidated
+      const sessionCall = invalidateSpy.mock.calls.find((call) => {
+        const options = call[0] as { queryKey?: readonly unknown[] };
+        return options?.queryKey?.includes('session');
+      });
+      expect(sessionCall).toBeDefined();
+      // Verify user key is invalidated
+      const userCall = invalidateSpy.mock.calls.find((call) => {
+        const options = call[0] as { queryKey?: readonly unknown[] };
+        return options?.queryKey?.includes('user');
+      });
+      expect(userCall).toBeDefined();
     });
 
     it('does not invalidate queries when sign in returns success: false', async () => {
@@ -146,6 +162,30 @@ describe('useAuthQueries', () => {
       const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries');
       await result.mutateAsync({ email: 'new@example.com', password: 'pass', username: 'user' });
       expect(invalidateSpy).toHaveBeenCalled();
+      // Verify session key is invalidated
+      const sessionCall = invalidateSpy.mock.calls.find((call) => {
+        const options = call[0] as { queryKey?: readonly unknown[] };
+        return options?.queryKey?.includes('session');
+      });
+      expect(sessionCall).toBeDefined();
+      // Verify user key is invalidated
+      const userCall = invalidateSpy.mock.calls.find((call) => {
+        const options = call[0] as { queryKey?: readonly unknown[] };
+        return options?.queryKey?.includes('user');
+      });
+      expect(userCall).toBeDefined();
+    });
+
+    it('does not invalidate queries when sign up returns success: false', async () => {
+      mockAuthService.signUp.mockResolvedValueOnce({
+        success: false,
+        error: 'Email already exists',
+      });
+      const { useSignUpMutation } = await import('./useAuthQueries');
+      const { result, queryClient } = withQueryClient(() => useSignUpMutation());
+      const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries');
+      await result.mutateAsync({ email: 'exists@example.com', password: 'pass', username: 'user' });
+      expect(invalidateSpy).not.toHaveBeenCalled();
     });
   });
 
@@ -188,6 +228,12 @@ describe('useAuthQueries', () => {
       await result.mutateAsync({ userId: 'u1', profileData: { username: 'newname' } });
       expect(mockAuthService.updateUserProfile).toHaveBeenCalledWith('u1', { username: 'newname' });
       expect(invalidateSpy).toHaveBeenCalled();
+      // Verify profile key is invalidated
+      const profileCall = invalidateSpy.mock.calls.find((call) => {
+        const options = call[0] as { queryKey?: readonly unknown[] };
+        return options?.queryKey?.includes('profile');
+      });
+      expect(profileCall).toBeDefined();
     });
   });
 });
