@@ -1,5 +1,6 @@
 import { describe, test, expect, beforeEach, vi } from 'bun:test';
 import { Hono } from 'hono';
+import type { Context, Next } from 'hono';
 
 const mockUserVocabularyProgress = {
   get: vi.fn(),
@@ -23,7 +24,7 @@ vi.mock('../../src/dynamodb', () => ({
 }));
 
 vi.mock('../../src/middleware/auth', () => ({
-  requireAuth: async (_c: any, next: any) => {
+  requireAuth: async (_c: Context, next: Next) => {
     _c.set('userId', 'test-user-id');
     await next();
   },
