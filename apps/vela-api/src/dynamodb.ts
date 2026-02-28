@@ -668,6 +668,7 @@ export const savedSentences = {
 // TTS Settings operations
 interface TTSSSettings {
   user_id: string;
+  provider: string;
   api_key: string;
   voice_id: string | null;
   model: string | null;

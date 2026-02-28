@@ -14,6 +14,15 @@ export interface TTSSettings {
   hasApiKey: boolean;
 }
 
+// In-session audio URL cache keyed by vocabularyId.
+// Presigned S3 URLs expire in 1 hour; cache for 55 minutes to avoid serving expired URLs.
+const audioUrlCache = new Map<string, { url: string; expiresAt: number }>();
+const CACHE_TTL_MS = 55 * 60 * 1000;
+
+export function clearAudioUrlCache(): void {
+  audioUrlCache.clear();
+}
+
 /**
  * Get Authorization header with JWT token
  */
@@ -37,14 +46,19 @@ async function getAuthHeader(): Promise<Record<string, string>> {
 }
 
 /**
- * Generate or retrieve TTS audio for a vocabulary item
- * Note: userId is no longer needed - extracted from JWT token on backend
+ * Generate or retrieve TTS audio for a vocabulary item.
+ * Checks in-session URL cache before making a backend request.
  */
 export async function generatePronunciation(
   vocabularyId: string,
   text: string,
   _userId?: string, // Deprecated parameter, kept for backward compatibility
 ): Promise<TTSResponse> {
+  const cached = audioUrlCache.get(vocabularyId);
+  if (cached && cached.expiresAt > Date.now()) {
+    return { audioUrl: cached.url, cached: true };
+  }
+
   const headers = await getAuthHeader();
 
   const response = await fetch(getApiUrl('tts/generate'), {
@@ -62,23 +76,29 @@ export async function generatePronunciation(
       const error = await response.json();
       errorMessage = error.error || errorMessage;
     } catch {
-      // If JSON parsing fails, try to get the response as text
       const errorText = await response.text();
       errorMessage = errorText || `${errorMessage}: ${response.statusText}`;
     }
     throw new Error(errorMessage);
   }
 
-  return response.json();
+  const result: TTSResponse = await response.json();
+  audioUrlCache.set(vocabularyId, { url: result.audioUrl, expiresAt: Date.now() + CACHE_TTL_MS });
+  return result;
 }
 
 /**
- * Get audio URL for a vocabulary item (if it exists)
- * Returns null if audio doesn't exist (404), throws error for other failures
+ * Get audio URL for a vocabulary item (if it exists).
+ * Returns null if audio doesn't exist (404).
  */
 export async function getAudioUrl(vocabularyId: string): Promise<string | null> {
   if (!vocabularyId || typeof vocabularyId !== 'string') {
     throw new Error('vocabularyId is required and must be a non-empty string');
+  }
+
+  const cached = audioUrlCache.get(vocabularyId);
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.url;
   }
 
   const headers = await getAuthHeader();
@@ -88,26 +108,25 @@ export async function getAudioUrl(vocabularyId: string): Promise<string | null> 
     headers,
   });
 
-  // 404 means audio hasn't been generated yet - this is expected
   if (response.status === 404) {
     return null;
   }
 
-  // Other errors should be surfaced
   if (!response.ok) {
     throw new Error(`Failed to fetch audio URL: ${response.status} ${response.statusText}`);
   }
 
   const data = await response.json();
+  audioUrlCache.set(vocabularyId, { url: data.audioUrl, expiresAt: Date.now() + CACHE_TTL_MS });
   return data.audioUrl;
 }
 
 /**
  * Save TTS settings for a user
- * Note: userId is no longer needed - extracted from JWT token on backend
  */
 export async function saveTTSSettings(
   _userId: string, // Deprecated parameter, kept for backward compatibility
+  provider: string,
   apiKey: string,
   voiceId?: string,
   model?: string,
@@ -118,6 +137,7 @@ export async function saveTTSSettings(
     method: 'POST',
     headers,
     body: JSON.stringify({
+      provider,
       apiKey,
       voiceId: voiceId || null,
       model: model || null,
@@ -130,7 +150,6 @@ export async function saveTTSSettings(
       const error = await response.json();
       errorMessage = error.error || errorMessage;
     } catch {
-      // If JSON parsing fails, try to get the response as text
       const errorText = await response.text();
       errorMessage = errorText || response.statusText || errorMessage;
     }
@@ -140,7 +159,6 @@ export async function saveTTSSettings(
 
 /**
  * Get TTS settings for a user
- * Note: userId is no longer needed - extracted from JWT token on backend
  */
 export async function getTTSSettings(_userId?: string): Promise<TTSSettings> {
   const headers = await getAuthHeader();
@@ -155,7 +173,6 @@ export async function getTTSSettings(_userId?: string): Promise<TTSSettings> {
       const error = await response.json();
       errorMessage = error.error || errorMessage;
     } catch {
-      // If JSON parsing fails, try to get the response as text
       const errorText = await response.text();
       errorMessage = errorText || response.statusText || errorMessage;
     }
