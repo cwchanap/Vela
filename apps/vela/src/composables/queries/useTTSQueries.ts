@@ -1,13 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query';
 import { getTTSSettings, saveTTSSettings } from 'src/services/ttsService';
-
-/**
- * Query key factory for TTS-related queries
- */
-export const ttsKeys = {
-  all: ['tts'] as const,
-  settings: () => [...ttsKeys.all, 'settings'] as const,
-};
+import { ttsKeys } from '@vela/common';
 
 /**
  * Hook to fetch TTS settings for the current user
@@ -24,8 +17,8 @@ export function useTTSSettingsQuery() {
 export interface TTSSettingsPayload {
   provider: string;
   apiKey: string;
-  voiceId?: string;
-  model?: string;
+  voiceId?: string | undefined;
+  model?: string | undefined;
 }
 
 /**

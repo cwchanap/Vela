@@ -245,11 +245,11 @@ import { useLLMSettingsStore } from '../../stores/llmSettings';
 import { useThemeStore } from '../../stores/theme';
 import { useAuthStore } from '../../stores/auth';
 import { Notify } from 'quasar';
+import { clearAudioUrlCache } from '../../services/ttsService';
 import {
-  getTTSSettings as fetchTTSSettings,
-  saveTTSSettings as updateTTSSettings,
-  clearAudioUrlCache,
-} from '../../services/ttsService';
+  useTTSSettingsQuery,
+  useUpdateTTSSettingsMutation,
+} from '../../composables/queries/useTTSQueries';
 
 const store = useLLMSettingsStore();
 const themeStore = useThemeStore();
@@ -340,7 +340,13 @@ const ttsApiKeyInput = ref('');
 const ttsVoiceId = ref('');
 const ttsModel = ref('');
 const showTtsApiKey = ref(false);
-const hasTTSKey = ref(false);
+
+// TanStack Query hooks for TTS
+const { data: ttsSettingsData } = useTTSSettingsQuery();
+const { mutate: saveTTSSettings } = useUpdateTTSSettingsMutation();
+
+// Computed from query data
+const hasTTSKey = computed(() => ttsSettingsData.value?.hasApiKey ?? false);
 
 const ttsProviderOptions = [
   { label: 'ElevenLabs', value: 'elevenlabs' },
@@ -405,21 +411,20 @@ watch(ttsProvider, (newProvider) => {
   }
 });
 
-// Load TTS settings on mount
-const loadTTSSettings = async () => {
-  if (!currentUserId.value) return;
-  try {
-    const data = await fetchTTSSettings();
-    hasTTSKey.value = data.hasApiKey;
-    ttsProvider.value = data.provider || 'elevenlabs';
-    ttsVoiceId.value = data.voiceId || '';
-    ttsModel.value = data.model || '';
-  } catch (error) {
-    console.error('Failed to load TTS settings:', error);
-  }
-};
+// Sync local form state with query data when it loads/changes
+watch(
+  () => ttsSettingsData.value,
+  (data) => {
+    if (data) {
+      ttsProvider.value = data.provider || 'elevenlabs';
+      ttsVoiceId.value = data.voiceId || '';
+      ttsModel.value = data.model || '';
+    }
+  },
+  { immediate: true },
+);
 
-// Save TTS settings
+// Save TTS settings using mutation
 const saveSettingsHandler = async () => {
   const userId = currentUserId.value;
 
@@ -441,42 +446,33 @@ const saveSettingsHandler = async () => {
     return;
   }
 
-  try {
-    await updateTTSSettings(
-      userId,
-      ttsProvider.value,
-      ttsApiKeyInput.value,
-      ttsVoiceId.value || undefined,
-      ttsModel.value || undefined,
-    );
-
-    hasTTSKey.value = true;
-    clearAudioUrlCache();
-    Notify.create({
-      type: 'positive',
-      message: 'TTS settings saved successfully',
-      position: 'top',
-    });
-  } catch (error) {
-    console.error('Error saving TTS settings:', error);
-    Notify.create({
-      type: 'negative',
-      message: error instanceof Error ? error.message : 'Failed to save TTS settings',
-      position: 'top',
-    });
-  }
+  saveTTSSettings(
+    {
+      provider: ttsProvider.value,
+      apiKey: ttsApiKeyInput.value,
+      voiceId: ttsVoiceId.value || undefined,
+      model: ttsModel.value || undefined,
+    },
+    {
+      onSuccess: () => {
+        clearAudioUrlCache();
+        Notify.create({
+          type: 'positive',
+          message: 'TTS settings saved successfully',
+          position: 'top',
+        });
+      },
+      onError: (error) => {
+        console.error('Error saving TTS settings:', error);
+        Notify.create({
+          type: 'negative',
+          message: error instanceof Error ? error.message : 'Failed to save TTS settings',
+          position: 'top',
+        });
+      },
+    },
+  );
 };
-
-// Load TTS settings when authenticated
-watch(
-  () => currentUserId.value,
-  (userId) => {
-    if (userId) {
-      loadTTSSettings();
-    }
-  },
-  { immediate: true },
-);
 </script>
 
 <style scoped>
