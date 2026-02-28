@@ -392,6 +392,16 @@ watch(ttsProvider, (newProvider) => {
       ttsVoiceId.value = 'Kore';
     }
     ttsModel.value = 'gemini-2.5-flash-preview-tts';
+  } else if (newProvider === 'elevenlabs') {
+    // Clear voice/model if they contain values from other providers
+    const openaiVoices = openaiVoiceOptions.map((o) => o.value);
+    const geminiVoices = geminiVoiceOptions.map((o) => o.value);
+    if (openaiVoices.includes(ttsVoiceId.value) || geminiVoices.includes(ttsVoiceId.value)) {
+      ttsVoiceId.value = '';
+    }
+    if (ttsModel.value === 'tts-1' || ttsModel.value === 'gemini-2.5-flash-preview-tts') {
+      ttsModel.value = '';
+    }
   }
 });
 

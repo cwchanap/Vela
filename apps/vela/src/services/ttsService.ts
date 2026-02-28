@@ -15,9 +15,9 @@ export interface TTSSettings {
 }
 
 // In-session audio URL cache keyed by vocabularyId.
-// Presigned S3 URLs expire in 1 hour; cache for 55 minutes to avoid serving expired URLs.
+// Presigned S3 URLs expire in 15 minutes; cache for 14 minutes to avoid serving expired URLs.
 const audioUrlCache = new Map<string, { url: string; expiresAt: number }>();
-const CACHE_TTL_MS = 55 * 60 * 1000;
+const CACHE_TTL_MS = 14 * 60 * 1000;
 
 export function clearAudioUrlCache(): void {
   audioUrlCache.clear();
