@@ -6,6 +6,7 @@ import {
   getTTSSettings,
   playAudio,
   pronounceWord,
+  clearAudioUrlCache,
 } from './ttsService';
 import type { TTSResponse, TTSSettings } from './ttsService';
 import type { Vocabulary } from '../types/database';
@@ -56,6 +57,7 @@ describe('ttsService', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockFetch.mockClear();
+    clearAudioUrlCache();
     vi.mocked(fetchAuthSession).mockResolvedValue(mockSession as any);
   });
 
@@ -331,7 +333,7 @@ describe('ttsService', () => {
         json: vi.fn().mockResolvedValue({ success: true }),
       });
 
-      await saveTTSSettings('user-123', 'sk-test-api-key', 'voice-id-1', 'model-1');
+      await saveTTSSettings('user-123', 'elevenlabs', 'sk-test-api-key', 'voice-id-1', 'model-1');
 
       expect(fetchAuthSession).toHaveBeenCalled();
       expect(mockFetch).toHaveBeenCalledWith('/api/tts/settings', {
@@ -341,6 +343,7 @@ describe('ttsService', () => {
           Authorization: `Bearer ${mockIdToken}`,
         },
         body: JSON.stringify({
+          provider: 'elevenlabs',
           apiKey: 'sk-test-api-key',
           voiceId: 'voice-id-1',
           model: 'model-1',
@@ -354,12 +357,13 @@ describe('ttsService', () => {
         json: vi.fn().mockResolvedValue({ success: true }),
       });
 
-      await saveTTSSettings('user-123', 'sk-test-api-key');
+      await saveTTSSettings('user-123', 'openai', 'sk-test-api-key');
 
       expect(mockFetch).toHaveBeenCalledWith(
         '/api/tts/settings',
         expect.objectContaining({
           body: JSON.stringify({
+            provider: 'openai',
             apiKey: 'sk-test-api-key',
             voiceId: null,
             model: null,
@@ -374,7 +378,7 @@ describe('ttsService', () => {
         json: vi.fn().mockResolvedValue({ success: true }),
       });
 
-      await saveTTSSettings('user-123', 'sk-test-api-key');
+      await saveTTSSettings('user-123', 'elevenlabs', 'sk-test-api-key');
 
       expect(mockFetch).toHaveBeenCalledWith(
         expect.any(String),
@@ -390,7 +394,9 @@ describe('ttsService', () => {
         json: vi.fn().mockResolvedValue({ error: 'Invalid API key' }),
       });
 
-      await expect(saveTTSSettings('user-123', 'invalid-key')).rejects.toThrow('Invalid API key');
+      await expect(saveTTSSettings('user-123', 'elevenlabs', 'invalid-key')).rejects.toThrow(
+        'Invalid API key',
+      );
     });
 
     it('should throw generic error when API error message is missing', async () => {
@@ -399,7 +405,7 @@ describe('ttsService', () => {
         json: vi.fn().mockResolvedValue({}),
       });
 
-      await expect(saveTTSSettings('user-123', 'sk-test-api-key')).rejects.toThrow(
+      await expect(saveTTSSettings('user-123', 'elevenlabs', 'sk-test-api-key')).rejects.toThrow(
         'Failed to save TTS settings',
       );
     });
@@ -410,7 +416,7 @@ describe('ttsService', () => {
         json: vi.fn().mockResolvedValue({ success: true }),
       });
 
-      await saveTTSSettings('user-123', 'sk-test-api-key');
+      await saveTTSSettings('user-123', 'elevenlabs', 'sk-test-api-key');
 
       expect(mockFetch).toHaveBeenCalledWith(
         expect.any(String),
@@ -426,12 +432,13 @@ describe('ttsService', () => {
         json: vi.fn().mockResolvedValue({ success: true }),
       });
 
-      await saveTTSSettings('user-123', 'sk-test-api-key', '', '');
+      await saveTTSSettings('user-123', 'gemini', 'sk-test-api-key', '', '');
 
       expect(mockFetch).toHaveBeenCalledWith(
         expect.any(String),
         expect.objectContaining({
           body: JSON.stringify({
+            provider: 'gemini',
             apiKey: 'sk-test-api-key',
             voiceId: null,
             model: null,

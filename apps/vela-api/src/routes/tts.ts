@@ -12,40 +12,37 @@ import {
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { requireAuth, type AuthContext } from '../middleware/auth';
 import { createHash } from 'crypto';
+import { createTTSProvider } from '../tts/factory';
+import type { TTSProviderName } from '../tts/types';
 
 /**
- * Default TTS settings for ElevenLabs
- */
-const DEFAULT_VOICE_ID = 'ErXwobaYiN019PkySvjV';
-const DEFAULT_MODEL = 'eleven_multilingual_v2';
-
-/**
- * Generate a cache key that includes userId and TTS settings
- * This ensures each user gets their own cached audio with their chosen voice/model
+ * Generate a cache key that includes userId, provider, and TTS settings
  * Format: tts/{userId}/{vocabularyId}/{settingsHash}.mp3
  */
 function generateCacheKey(
   userId: string,
   vocabularyId: string,
+  provider: string,
   voiceId: string,
   model: string,
 ): string {
-  // Create a hash of the voice and model settings to keep keys short
   const settingsHash = createHash('sha256')
-    .update(`${voiceId}:${model}`)
+    .update(`${provider}:${voiceId}:${model}`)
     .digest('hex')
-    .substring(0, 16); // Use first 16 chars for brevity
+    .substring(0, 16);
 
   return `tts/${userId}/${vocabularyId}/${settingsHash}.mp3`;
 }
 
-// Validation schemas (userId removed - will be extracted from JWT)
+const TTSProviderSchema = z.enum(['elevenlabs', 'openai', 'gemini']);
+
 const GenerateTTSSchema = z.object({
   vocabularyId: z.string().min(1),
   text: z.string().min(1),
 });
 
 const SaveTTSSettingsSchema = z.object({
+  provider: TTSProviderSchema,
   apiKey: z.string().min(1),
   voiceId: z.string().nullable().optional(),
   model: z.string().nullable().optional(),
@@ -58,142 +55,91 @@ const VocabularyIdParamSchema = z.object({
 const createTTSRoute = (env: Env) => {
   const tts = new Hono<{ Bindings: Env } & AuthContext>();
 
-  // Instantiate S3 client once per route factory (reused across requests)
   const region = env.AWS_REGION || process.env.AWS_REGION || 'us-east-1';
   const s3Client = new S3Client({ region });
 
   /**
    * POST /api/tts/generate
-   * Generate TTS audio for a vocabulary word using ElevenLabs
-   * Requires authentication - userId extracted from JWT token
+   * Generate TTS audio for a vocabulary word.
+   * Checks S3 cache before calling the configured provider API.
    */
   tts.post('/generate', requireAuth, zValidator('json', GenerateTTSSchema), async (c) => {
     try {
       const { vocabularyId, text } = c.req.valid('json');
-      const userId = c.get('userId'); // Extract from authenticated context
+      const userId = c.get('userId');
 
       if (!userId) {
         return c.json({ error: 'Unauthorized: User ID not found' }, 401);
       }
 
-      // Get user's TTS settings from DynamoDB
       const settings = await ttsSettingsDB.get(userId);
 
       if (!settings || !settings.api_key) {
         return c.json({ error: 'TTS API key not configured. Please configure in Settings.' }, 400);
       }
 
-      const { api_key: apiKey, voice_id: voiceId, model } = settings;
-
       const bucketName = env.TTS_AUDIO_BUCKET_NAME || process.env.TTS_AUDIO_BUCKET_NAME;
-
       if (!bucketName) {
         return c.json({ error: 'TTS audio bucket not configured' }, 500);
       }
 
-      // Generate cache key that includes userId and TTS settings
-      // This ensures each user gets their own cached audio with their chosen voice/model
-      const effectiveVoiceId = voiceId || DEFAULT_VOICE_ID;
-      const effectiveModel = model || DEFAULT_MODEL;
-      const s3Key = generateCacheKey(userId, vocabularyId, effectiveVoiceId, effectiveModel);
+      const provider = (settings.provider || 'elevenlabs') as TTSProviderName;
+      const ttsProvider = createTTSProvider(provider);
+      const voiceId = settings.voice_id || '';
+      const model = settings.model || '';
+      const s3Key = generateCacheKey(userId, vocabularyId, provider, voiceId, model);
 
+      // Check S3 cache first
       try {
-        // Use HeadObjectCommand to check if object exists without downloading it
-        const headCommand = new HeadObjectCommand({
-          Bucket: bucketName,
-          Key: s3Key,
-        });
+        await s3Client.send(new HeadObjectCommand({ Bucket: bucketName, Key: s3Key }));
 
-        await s3Client.send(headCommand);
+        const audioUrl = await getSignedUrl(
+          s3Client,
+          new GetObjectCommand({ Bucket: bucketName, Key: s3Key }),
+          { expiresIn: 3600 },
+        );
 
-        // If we reach here, object exists - return pre-signed URL
-        const getCommand = new GetObjectCommand({
-          Bucket: bucketName,
-          Key: s3Key,
-        });
-        const audioUrl = await getSignedUrl(s3Client, getCommand, { expiresIn: 3600 });
-
-        return c.json({
-          audioUrl,
-          cached: true,
-        });
+        return c.json({ audioUrl, cached: true });
       } catch (error: any) {
-        // Object doesn't exist (NotFound error), proceed to generate
         if (error.name !== 'NotFound' && error.name !== 'NoSuchKey') {
           console.error('S3 check error:', error);
-          // Non-404 errors should be logged but we'll still try to generate
         }
       }
 
-      // Call ElevenLabs API to generate audio with timeout
-      const elevenLabsUrl = `https://api.elevenlabs.io/v1/text-to-speech/${voiceId || DEFAULT_VOICE_ID}`;
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
-
-      let elevenLabsResponse: Response;
+      // Generate audio via provider
+      let result;
       try {
-        elevenLabsResponse = await fetch(elevenLabsUrl, {
-          method: 'POST',
-          headers: {
-            Accept: 'audio/mpeg',
-            'Content-Type': 'application/json',
-            'xi-api-key': apiKey,
-          },
-          body: JSON.stringify({
-            text,
-            model_id: model || DEFAULT_MODEL,
-            voice_settings: {
-              stability: 0.5,
-              similarity_boost: 0.75,
-            },
-          }),
-          signal: controller.signal,
+        result = await ttsProvider.generate({
+          text,
+          apiKey: settings.api_key,
+          voiceId: settings.voice_id,
+          model: settings.model,
         });
-        clearTimeout(timeoutId); // Clear timeout on successful fetch
       } catch (error: any) {
-        clearTimeout(timeoutId); // Clear timeout on error
-        if (error.name === 'AbortError') {
-          return c.json({ error: 'Request timeout: TTS generation took too long' }, 504);
+        if (error.message?.includes('timeout')) {
+          return c.json({ error: error.message }, 504);
         }
-        throw error; // Re-throw other errors to be handled by outer catch
+        console.error('TTS provider error:', error);
+        return c.json({ error: `Failed to generate TTS audio: ${error.message}` }, 500);
       }
-
-      if (!elevenLabsResponse.ok) {
-        const errorText = await elevenLabsResponse.text();
-        console.error('ElevenLabs API error:', errorText);
-        return c.json(
-          {
-            error: `Failed to generate TTS audio: ${elevenLabsResponse.statusText}`,
-          },
-          500,
-        );
-      }
-
-      // Get audio buffer from ElevenLabs
-      const audioBuffer = await elevenLabsResponse.arrayBuffer();
 
       // Upload to S3
-      const putCommand = new PutObjectCommand({
-        Bucket: bucketName,
-        Key: s3Key,
-        Body: Buffer.from(audioBuffer),
-        ContentType: 'audio/mpeg',
-      });
+      await s3Client.send(
+        new PutObjectCommand({
+          Bucket: bucketName,
+          Key: s3Key,
+          Body: result.audioBuffer,
+          ContentType: result.contentType,
+        }),
+      );
 
-      await s3Client.send(putCommand);
+      const audioUrl = await getSignedUrl(
+        s3Client,
+        new GetObjectCommand({ Bucket: bucketName, Key: s3Key }),
+        { expiresIn: 3600 },
+      );
 
-      // Generate pre-signed URL
-      const getCommand = new GetObjectCommand({
-        Bucket: bucketName,
-        Key: s3Key,
-      });
-
-      const audioUrl = await getSignedUrl(s3Client, getCommand, { expiresIn: 3600 });
-
-      return c.json({
-        audioUrl,
-        cached: false,
-      });
+      return c.json({ audioUrl, cached: false });
     } catch (error) {
       console.error('TTS generation error:', error);
       return c.json(
@@ -205,8 +151,7 @@ const createTTSRoute = (env: Env) => {
 
   /**
    * GET /api/tts/audio/:vocabularyId
-   * Get audio URL for a vocabulary item
-   * Requires authentication to prevent unauthorized access
+   * Get presigned URL for existing cached audio.
    */
   tts.get(
     '/audio/:vocabularyId',
@@ -215,52 +160,42 @@ const createTTSRoute = (env: Env) => {
     async (c) => {
       try {
         const { vocabularyId } = c.req.valid('param');
-        const userId = c.get('userId'); // Extract from authenticated context
+        const userId = c.get('userId');
 
         if (!userId) {
           return c.json({ error: 'Unauthorized: User ID not found' }, 401);
         }
 
-        // Get user's TTS settings to determine the correct cache key
         const settings = await ttsSettingsDB.get(userId);
-
         if (!settings) {
           return c.json({ error: 'TTS settings not found. Please configure in Settings.' }, 400);
         }
 
-        const { voice_id: voiceId, model } = settings;
-        const effectiveVoiceId = voiceId || DEFAULT_VOICE_ID;
-        const effectiveModel = model || DEFAULT_MODEL;
-
         const bucketName = env.TTS_AUDIO_BUCKET_NAME || process.env.TTS_AUDIO_BUCKET_NAME;
-
         if (!bucketName) {
           return c.json({ error: 'TTS audio bucket not configured' }, 500);
         }
 
-        // Generate user-specific cache key
-        const s3Key = generateCacheKey(userId, vocabularyId, effectiveVoiceId, effectiveModel);
+        const provider = (settings.provider || 'elevenlabs') as TTSProviderName;
+        const s3Key = generateCacheKey(
+          userId,
+          vocabularyId,
+          provider,
+          settings.voice_id || '',
+          settings.model || '',
+        );
 
         try {
-          // Use HeadObjectCommand to verify object exists
-          const headCommand = new HeadObjectCommand({
-            Bucket: bucketName,
-            Key: s3Key,
-          });
+          await s3Client.send(new HeadObjectCommand({ Bucket: bucketName, Key: s3Key }));
 
-          await s3Client.send(headCommand);
-
-          // Object exists, generate pre-signed URL
-          const getCommand = new GetObjectCommand({
-            Bucket: bucketName,
-            Key: s3Key,
-          });
-
-          const audioUrl = await getSignedUrl(s3Client, getCommand, { expiresIn: 3600 });
+          const audioUrl = await getSignedUrl(
+            s3Client,
+            new GetObjectCommand({ Bucket: bucketName, Key: s3Key }),
+            { expiresIn: 3600 },
+          );
 
           return c.json({ audioUrl });
         } catch (error: any) {
-          // Audio not found in S3
           if (error.name === 'NotFound' || error.name === 'NoSuchKey') {
             return c.json({ error: 'Audio not found. Please generate it first.' }, 404);
           }
@@ -276,13 +211,12 @@ const createTTSRoute = (env: Env) => {
 
   /**
    * POST /api/tts/settings
-   * Save TTS settings (ElevenLabs API key, voice ID, model)
-   * Requires authentication - userId extracted from JWT token
+   * Save TTS settings (provider, API key, voice, model).
    */
   tts.post('/settings', requireAuth, zValidator('json', SaveTTSSettingsSchema), async (c) => {
     try {
-      const { apiKey, voiceId, model } = c.req.valid('json');
-      const userId = c.get('userId'); // Extract from authenticated context
+      const { provider, apiKey, voiceId, model } = c.req.valid('json');
+      const userId = c.get('userId');
 
       if (!userId) {
         return c.json({ error: 'Unauthorized: User ID not found' }, 401);
@@ -290,6 +224,7 @@ const createTTSRoute = (env: Env) => {
 
       await ttsSettingsDB.put({
         user_id: userId,
+        provider,
         api_key: apiKey,
         voice_id: voiceId || null,
         model: model || null,
@@ -307,12 +242,11 @@ const createTTSRoute = (env: Env) => {
 
   /**
    * GET /api/tts/settings
-   * Get TTS settings for the authenticated user
-   * Requires authentication - userId extracted from JWT token
+   * Get TTS settings for the authenticated user.
    */
   tts.get('/settings', requireAuth, async (c) => {
     try {
-      const userId = c.get('userId'); // Extract from authenticated context
+      const userId = c.get('userId');
 
       if (!userId) {
         return c.json({ error: 'Unauthorized: User ID not found' }, 401);
@@ -323,6 +257,7 @@ const createTTSRoute = (env: Env) => {
       if (!settings) {
         return c.json({
           hasApiKey: false,
+          provider: 'elevenlabs',
           voiceId: null,
           model: null,
         });
@@ -330,6 +265,7 @@ const createTTSRoute = (env: Env) => {
 
       return c.json({
         hasApiKey: !!settings.api_key,
+        provider: settings.provider || 'elevenlabs',
         voiceId: settings.voice_id || null,
         model: settings.model || null,
       });
