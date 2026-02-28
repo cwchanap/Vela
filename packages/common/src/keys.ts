@@ -50,3 +50,11 @@ export const srsKeys = {
   progress: (vocabularyId: string) => [...srsKeys.all, 'progress', vocabularyId] as const,
   allProgress: () => [...srsKeys.all, 'all'] as const,
 };
+
+/**
+ * TTS (Text-to-Speech) query keys
+ */
+export const ttsKeys = {
+  all: ['tts'] as const,
+  settings: () => [...ttsKeys.all, 'settings'] as const,
+};

@@ -13,7 +13,6 @@ import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { requireAuth, type AuthContext } from '../middleware/auth';
 import { createHash } from 'crypto';
 import { createTTSProvider } from '../tts/factory';
-import type { TTSProviderName } from '../tts/types';
 
 /**
  * Generate a cache key that includes userId, provider, and TTS settings
@@ -83,7 +82,12 @@ const createTTSRoute = (env: Env) => {
         return c.json({ error: 'TTS audio bucket not configured' }, 500);
       }
 
-      const provider = (settings.provider || 'elevenlabs') as TTSProviderName;
+      const providerValue = settings.provider || 'elevenlabs';
+      const providerParse = TTSProviderSchema.safeParse(providerValue);
+      if (!providerParse.success) {
+        return c.json({ error: 'Invalid TTS provider configuration' }, 400);
+      }
+      const provider = providerParse.data;
       const ttsProvider = createTTSProvider(provider);
       const voiceId = settings.voice_id || '';
       const model = settings.model || '';
@@ -96,7 +100,7 @@ const createTTSRoute = (env: Env) => {
         const audioUrl = await getSignedUrl(
           s3Client,
           new GetObjectCommand({ Bucket: bucketName, Key: s3Key }),
-          { expiresIn: 3600 },
+          { expiresIn: 900 },
         );
 
         return c.json({ audioUrl, cached: true });
@@ -136,7 +140,7 @@ const createTTSRoute = (env: Env) => {
       const audioUrl = await getSignedUrl(
         s3Client,
         new GetObjectCommand({ Bucket: bucketName, Key: s3Key }),
-        { expiresIn: 3600 },
+        { expiresIn: 900 },
       );
 
       return c.json({ audioUrl, cached: false });
@@ -176,7 +180,12 @@ const createTTSRoute = (env: Env) => {
           return c.json({ error: 'TTS audio bucket not configured' }, 500);
         }
 
-        const provider = (settings.provider || 'elevenlabs') as TTSProviderName;
+        const providerValue = settings.provider || 'elevenlabs';
+        const providerParse = TTSProviderSchema.safeParse(providerValue);
+        if (!providerParse.success) {
+          return c.json({ error: 'Invalid TTS provider configuration' }, 400);
+        }
+        const provider = providerParse.data;
         const s3Key = generateCacheKey(
           userId,
           vocabularyId,
@@ -191,7 +200,7 @@ const createTTSRoute = (env: Env) => {
           const audioUrl = await getSignedUrl(
             s3Client,
             new GetObjectCommand({ Bucket: bucketName, Key: s3Key }),
-            { expiresIn: 3600 },
+            { expiresIn: 900 },
           );
 
           return c.json({ audioUrl });
@@ -263,9 +272,13 @@ const createTTSRoute = (env: Env) => {
         });
       }
 
+      const providerValue = settings.provider || 'elevenlabs';
+      const providerParse = TTSProviderSchema.safeParse(providerValue);
+      const provider = providerParse.success ? providerParse.data : 'elevenlabs';
+
       return c.json({
         hasApiKey: !!settings.api_key,
-        provider: settings.provider || 'elevenlabs',
+        provider,
         voiceId: settings.voice_id || null,
         model: settings.model || null,
       });
