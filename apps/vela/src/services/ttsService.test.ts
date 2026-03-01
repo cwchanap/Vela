@@ -333,7 +333,7 @@ describe('ttsService', () => {
         json: vi.fn().mockResolvedValue({ success: true }),
       });
 
-      await saveTTSSettings('user-123', 'elevenlabs', 'sk-test-api-key', 'voice-id-1', 'model-1');
+      await saveTTSSettings('elevenlabs', 'sk-test-api-key', 'voice-id-1', 'model-1');
 
       expect(fetchAuthSession).toHaveBeenCalled();
       expect(mockFetch).toHaveBeenCalledWith('/api/tts/settings', {
@@ -357,7 +357,7 @@ describe('ttsService', () => {
         json: vi.fn().mockResolvedValue({ success: true }),
       });
 
-      await saveTTSSettings('user-123', 'openai', 'sk-test-api-key');
+      await saveTTSSettings('openai', 'sk-test-api-key');
 
       expect(mockFetch).toHaveBeenCalledWith(
         '/api/tts/settings',
@@ -372,13 +372,13 @@ describe('ttsService', () => {
       );
     });
 
-    it('should not send userId in request body (deprecated parameter)', async () => {
+    it('should not send userId in request body', async () => {
       mockFetch.mockResolvedValue({
         ok: true,
         json: vi.fn().mockResolvedValue({ success: true }),
       });
 
-      await saveTTSSettings('user-123', 'elevenlabs', 'sk-test-api-key');
+      await saveTTSSettings('elevenlabs', 'sk-test-api-key');
 
       expect(mockFetch).toHaveBeenCalledWith(
         expect.any(String),
@@ -394,9 +394,7 @@ describe('ttsService', () => {
         json: vi.fn().mockResolvedValue({ error: 'Invalid API key' }),
       });
 
-      await expect(saveTTSSettings('user-123', 'elevenlabs', 'invalid-key')).rejects.toThrow(
-        'Invalid API key',
-      );
+      await expect(saveTTSSettings('elevenlabs', 'invalid-key')).rejects.toThrow('Invalid API key');
     });
 
     it('should throw generic error when API error message is missing', async () => {
@@ -405,7 +403,7 @@ describe('ttsService', () => {
         json: vi.fn().mockResolvedValue({}),
       });
 
-      await expect(saveTTSSettings('user-123', 'elevenlabs', 'sk-test-api-key')).rejects.toThrow(
+      await expect(saveTTSSettings('elevenlabs', 'sk-test-api-key')).rejects.toThrow(
         'Failed to save TTS settings',
       );
     });
@@ -416,7 +414,7 @@ describe('ttsService', () => {
         json: vi.fn().mockResolvedValue({ success: true }),
       });
 
-      await saveTTSSettings('user-123', 'elevenlabs', 'sk-test-api-key');
+      await saveTTSSettings('elevenlabs', 'sk-test-api-key');
 
       expect(mockFetch).toHaveBeenCalledWith(
         expect.any(String),
@@ -432,7 +430,7 @@ describe('ttsService', () => {
         json: vi.fn().mockResolvedValue({ success: true }),
       });
 
-      await saveTTSSettings('user-123', 'gemini', 'sk-test-api-key', '', '');
+      await saveTTSSettings('gemini', 'sk-test-api-key', '', '');
 
       expect(mockFetch).toHaveBeenCalledWith(
         expect.any(String),
