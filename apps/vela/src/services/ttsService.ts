@@ -14,13 +14,28 @@ export interface TTSSettings {
   hasApiKey: boolean;
 }
 
-// In-session audio URL cache keyed by vocabularyId.
+// In-session audio URL cache keyed by user + settings + vocabularyId.
 // Presigned S3 URLs expire in 15 minutes; cache for 14 minutes to avoid serving expired URLs.
 const audioUrlCache = new Map<string, { url: string; expiresAt: number }>();
 const CACHE_TTL_MS = 14 * 60 * 1000;
 
 export function clearAudioUrlCache(): void {
   audioUrlCache.clear();
+}
+
+/**
+ * Generate a cache key that includes userId, provider, voice, model, and vocabularyId
+ * This ensures cache isolation between users and settings
+ */
+function generateCacheKey(
+  userId: string,
+  vocabularyId: string,
+  provider?: string,
+  voiceId?: string,
+  model?: string,
+): string {
+  const settingsPart = provider ? `${provider}:${voiceId || ''}:${model || ''}` : '';
+  return settingsPart ? `${userId}:${settingsPart}:${vocabularyId}` : `${userId}:${vocabularyId}`;
 }
 
 /**
@@ -52,11 +67,20 @@ async function getAuthHeader(): Promise<Record<string, string>> {
 export async function generatePronunciation(
   vocabularyId: string,
   text: string,
-  _userId?: string, // Deprecated parameter, kept for backward compatibility
+  userId: string,
+  provider?: string,
+  voiceId?: string,
+  model?: string,
 ): Promise<TTSResponse> {
-  const cached = audioUrlCache.get(vocabularyId);
-  if (cached && cached.expiresAt > Date.now()) {
-    return { audioUrl: cached.url, cached: true };
+  const cacheKey = generateCacheKey(userId, vocabularyId, provider, voiceId, model);
+  const cached = audioUrlCache.get(cacheKey);
+
+  if (cached) {
+    if (cached.expiresAt > Date.now()) {
+      return { audioUrl: cached.url, cached: true };
+    }
+    // Remove expired entry to prevent unbounded cache growth
+    audioUrlCache.delete(cacheKey);
   }
 
   const headers = await getAuthHeader();
@@ -83,7 +107,7 @@ export async function generatePronunciation(
   }
 
   const result: TTSResponse = await response.json();
-  audioUrlCache.set(vocabularyId, { url: result.audioUrl, expiresAt: Date.now() + CACHE_TTL_MS });
+  audioUrlCache.set(cacheKey, { url: result.audioUrl, expiresAt: Date.now() + CACHE_TTL_MS });
   return result;
 }
 
@@ -91,14 +115,26 @@ export async function generatePronunciation(
  * Get audio URL for a vocabulary item (if it exists).
  * Returns null if audio doesn't exist (404).
  */
-export async function getAudioUrl(vocabularyId: string): Promise<string | null> {
+export async function getAudioUrl(
+  vocabularyId: string,
+  userId: string,
+  provider?: string,
+  voiceId?: string,
+  model?: string,
+): Promise<string | null> {
   if (!vocabularyId || typeof vocabularyId !== 'string') {
     throw new Error('vocabularyId is required and must be a non-empty string');
   }
 
-  const cached = audioUrlCache.get(vocabularyId);
-  if (cached && cached.expiresAt > Date.now()) {
-    return cached.url;
+  const cacheKey = generateCacheKey(userId, vocabularyId, provider, voiceId, model);
+  const cached = audioUrlCache.get(cacheKey);
+
+  if (cached) {
+    if (cached.expiresAt > Date.now()) {
+      return cached.url;
+    }
+    // Remove expired entry to prevent unbounded cache growth
+    audioUrlCache.delete(cacheKey);
   }
 
   const headers = await getAuthHeader();
@@ -117,7 +153,7 @@ export async function getAudioUrl(vocabularyId: string): Promise<string | null> 
   }
 
   const data = await response.json();
-  audioUrlCache.set(vocabularyId, { url: data.audioUrl, expiresAt: Date.now() + CACHE_TTL_MS });
+  audioUrlCache.set(cacheKey, { url: data.audioUrl, expiresAt: Date.now() + CACHE_TTL_MS });
   return data.audioUrl;
 }
 
@@ -125,7 +161,6 @@ export async function getAudioUrl(vocabularyId: string): Promise<string | null> 
  * Save TTS settings for a user
  */
 export async function saveTTSSettings(
-  _userId: string, // Deprecated parameter, kept for backward compatibility
   provider: string,
   apiKey: string,
   voiceId?: string,
@@ -202,9 +237,22 @@ export function playAudio(audioUrl: string): Promise<void> {
 /**
  * Generate and play pronunciation for a vocabulary word
  */
-export async function pronounceWord(word: Vocabulary, userId: string): Promise<void> {
+export async function pronounceWord(
+  word: Vocabulary,
+  userId: string,
+  provider?: string,
+  voiceId?: string,
+  model?: string,
+): Promise<void> {
   try {
-    const { audioUrl } = await generatePronunciation(word.id, word.japanese_word, userId);
+    const { audioUrl } = await generatePronunciation(
+      word.id,
+      word.japanese_word,
+      userId,
+      provider,
+      voiceId,
+      model,
+    );
     await playAudio(audioUrl);
   } catch (error) {
     console.error('Error pronouncing word:', error);

@@ -372,6 +372,10 @@ const geminiVoiceOptions = [
   { label: 'Leda', value: 'Leda' },
   { label: 'Orus', value: 'Orus' },
   { label: 'Zephyr', value: 'Zephyr' },
+  { label: 'Callirrhoe', value: 'Callirrhoe' },
+  { label: 'Autonoe', value: 'Autonoe' },
+  { label: 'Enceladus', value: 'Enceladus' },
+  { label: 'Iocaste', value: 'Iocaste' },
 ];
 
 const ttsApiKeyLabel = computed(() => {

@@ -16,7 +16,7 @@ import { createTTSProvider } from '../tts/factory';
 
 /**
  * Generate a cache key that includes userId, provider, and TTS settings
- * Format: tts/{userId}/{vocabularyId}/{settingsHash}.mp3
+ * Format: tts/{userId}/{vocabularyId}/{settingsHash}
  */
 function generateCacheKey(
   userId: string,
@@ -30,7 +30,7 @@ function generateCacheKey(
     .digest('hex')
     .substring(0, 16);
 
-  return `tts/${userId}/${vocabularyId}/${settingsHash}.mp3`;
+  return `tts/${userId}/${vocabularyId}/${settingsHash}`;
 }
 
 const TTSProviderSchema = z.enum(['elevenlabs', 'openai', 'gemini']);

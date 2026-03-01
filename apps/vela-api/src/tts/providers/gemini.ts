@@ -31,9 +31,12 @@ export class GeminiProvider implements TTSProvider {
 
     let response: Response;
     try {
-      response = await fetch(`${endpoint}?key=${request.apiKey}`, {
+      response = await fetch(endpoint, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'x-goog-api-key': request.apiKey,
+        },
         body: JSON.stringify({
           contents: [{ parts: [{ text: request.text }] }],
           generationConfig: {
