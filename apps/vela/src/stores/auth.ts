@@ -10,6 +10,7 @@ import type { UserPreferences, Profile } from '../types/shared';
 import type { AppSession } from '../services/authService';
 import { queryClient, QUERY_STALE_TIME } from '../boot/query';
 import { authKeys } from '@vela/common';
+import { clearAudioUrlCache } from '../services/ttsService';
 
 export interface User {
   id: string;
@@ -292,6 +293,7 @@ export const useAuthStore = defineStore('auth', () => {
 
       // Clear all cached queries on sign out
       queryClient.clear();
+      clearAudioUrlCache();
 
       clearAuth();
       return true;

@@ -155,6 +155,9 @@ export async function saveTTSSettings(
     }
     throw new Error(errorMessage);
   }
+
+  // Clear audio URL cache when settings change to ensure new settings are applied
+  clearAudioUrlCache();
 }
 
 /**
