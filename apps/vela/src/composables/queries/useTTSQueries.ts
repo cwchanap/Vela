@@ -29,7 +29,7 @@ export function useUpdateTTSSettingsMutation() {
 
   return useMutation({
     mutationFn: ({ provider, apiKey, voiceId, model }: TTSSettingsPayload) =>
-      saveTTSSettings('', provider, apiKey, voiceId, model),
+      saveTTSSettings(provider, apiKey, voiceId, model),
     onSuccess: () => {
       // Invalidate TTS settings to refetch updated data
       queryClient.invalidateQueries({ queryKey: ttsKeys.all });
