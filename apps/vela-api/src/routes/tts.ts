@@ -105,8 +105,17 @@ const createTTSRoute = (env: Env) => {
 
         return c.json({ audioUrl, cached: true });
       } catch (error: any) {
-        if (error.name !== 'NotFound' && error.name !== 'NoSuchKey') {
-          console.error('S3 check error:', error);
+        if (error.name === 'NotFound' || error.name === 'NoSuchKey') {
+          // Cache miss — fall through to generate
+        } else {
+          console.error('S3 cache check failed', {
+            errorName: error.name,
+            errorMessage: error.message,
+            userId,
+            s3Key,
+            bucket: bucketName,
+          });
+          return c.json({ error: 'Audio service temporarily unavailable. Please try again.' }, 503);
         }
       }
 
@@ -128,20 +137,48 @@ const createTTSRoute = (env: Env) => {
       }
 
       // Upload to S3
-      await s3Client.send(
-        new PutObjectCommand({
-          Bucket: bucketName,
-          Key: s3Key,
-          Body: result.audioBuffer,
-          ContentType: result.contentType,
-        }),
-      );
+      try {
+        await s3Client.send(
+          new PutObjectCommand({
+            Bucket: bucketName,
+            Key: s3Key,
+            Body: result.audioBuffer,
+            ContentType: result.contentType,
+          }),
+        );
+      } catch (uploadError: any) {
+        console.error('S3 upload failed after successful TTS generation', {
+          errorName: uploadError.name,
+          errorMessage: uploadError.message,
+          provider,
+          userId,
+          s3Key,
+        });
+        return c.json(
+          { error: 'Audio was generated but could not be saved. Please try again.' },
+          500,
+        );
+      }
 
-      const audioUrl = await getSignedUrl(
-        s3Client,
-        new GetObjectCommand({ Bucket: bucketName, Key: s3Key }),
-        { expiresIn: 900 },
-      );
+      let audioUrl: string;
+      try {
+        audioUrl = await getSignedUrl(
+          s3Client,
+          new GetObjectCommand({ Bucket: bucketName, Key: s3Key }),
+          { expiresIn: 900 },
+        );
+      } catch (signingError: any) {
+        console.error('Failed to generate presigned URL after S3 upload', {
+          errorName: signingError.name,
+          errorMessage: signingError.message,
+          userId,
+          s3Key,
+        });
+        return c.json(
+          { error: 'Audio was saved but could not be accessed. Please try again.' },
+          500,
+        );
+      }
 
       return c.json({ audioUrl, cached: false });
     } catch (error) {
