@@ -697,19 +697,28 @@ export const ttsSettings = {
         throw new Error('user_id is required and must be a string');
       }
 
-      const timestamp = Date.now();
-      const itemToStore: TTSSSettings = {
-        ...settings,
-        created_at: timestamp, // Always set created_at for new items
-        updated_at: timestamp,
-      };
+      const now = Date.now();
 
-      const command = new PutCommand({
+      // Use UpdateCommand with if_not_exists so created_at is preserved on updates
+      const command = new UpdateCommand({
         TableName: TABLE_NAMES.TTS_SETTINGS,
-        Item: itemToStore,
+        Key: { user_id: settings.user_id },
+        UpdateExpression:
+          'SET #provider = :provider, api_key = :api_key, voice_id = :voice_id, #model = :model, updated_at = :updated_at, created_at = if_not_exists(created_at, :created_at)',
+        ExpressionAttributeNames: {
+          '#provider': 'provider',
+          '#model': 'model',
+        },
+        ExpressionAttributeValues: {
+          ':provider': settings.provider,
+          ':api_key': settings.api_key,
+          ':voice_id': settings.voice_id,
+          ':model': settings.model,
+          ':updated_at': now,
+          ':created_at': now,
+        },
       });
       await docClient.send(command);
-      return itemToStore;
     } catch (error) {
       handleDynamoError(error);
     }
