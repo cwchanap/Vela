@@ -311,6 +311,12 @@ const createTTSRoute = (env: Env) => {
 
       const providerValue = settings.provider || 'elevenlabs';
       const providerParse = TTSProviderSchema.safeParse(providerValue);
+      if (!providerParse.success) {
+        console.warn('Invalid provider value in TTS settings, falling back to elevenlabs', {
+          storedValue: providerValue,
+          userId,
+        });
+      }
       const provider = providerParse.success ? providerParse.data : 'elevenlabs';
 
       return c.json({
