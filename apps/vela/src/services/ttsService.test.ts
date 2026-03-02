@@ -6,6 +6,7 @@ import {
   getTTSSettings,
   playAudio,
   pronounceWord,
+  clearAudioUrlCache,
 } from './ttsService';
 import type { TTSResponse, TTSSettings } from './ttsService';
 import type { Vocabulary } from '../types/database';
@@ -56,6 +57,7 @@ describe('ttsService', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockFetch.mockClear();
+    clearAudioUrlCache();
     vi.mocked(fetchAuthSession).mockResolvedValue(mockSession as any);
   });
 
@@ -72,7 +74,7 @@ describe('ttsService', () => {
           .mockResolvedValue({ audioUrl: 'https://example.com/audio.mp3', cached: false }),
       });
 
-      await generatePronunciation('vocab-1', '猫');
+      await generatePronunciation('vocab-1', '猫', 'user-123');
 
       expect(mockFetch).toHaveBeenCalledWith(
         expect.any(String),
@@ -90,7 +92,7 @@ describe('ttsService', () => {
         tokens: undefined,
       } as any);
 
-      await expect(generatePronunciation('vocab-1', '猫')).rejects.toThrow(
+      await expect(generatePronunciation('vocab-1', '猫', 'user-123')).rejects.toThrow(
         'Authentication required. Please sign in.',
       );
     });
@@ -102,7 +104,7 @@ describe('ttsService', () => {
         },
       } as any);
 
-      await expect(generatePronunciation('vocab-1', '猫')).rejects.toThrow(
+      await expect(generatePronunciation('vocab-1', '猫', 'user-123')).rejects.toThrow(
         'Authentication required. Please sign in.',
       );
     });
@@ -110,7 +112,7 @@ describe('ttsService', () => {
     it('should throw error when fetchAuthSession fails', async () => {
       vi.mocked(fetchAuthSession).mockRejectedValue(new Error('Session expired'));
 
-      await expect(generatePronunciation('vocab-1', '猫')).rejects.toThrow(
+      await expect(generatePronunciation('vocab-1', '猫', 'user-123')).rejects.toThrow(
         'Authentication required. Please sign in.',
       );
     });
@@ -128,7 +130,7 @@ describe('ttsService', () => {
         json: vi.fn().mockResolvedValue(mockTTSResponse),
       });
 
-      const result = await generatePronunciation('vocab-1', '猫');
+      const result = await generatePronunciation('vocab-1', '猫', 'user-123');
 
       expect(fetchAuthSession).toHaveBeenCalled();
       expect(mockFetch).toHaveBeenCalledWith('/api/tts/generate', {
@@ -156,7 +158,7 @@ describe('ttsService', () => {
         json: vi.fn().mockResolvedValue(cachedResponse),
       });
 
-      const result = await generatePronunciation('vocab-2', '犬');
+      const result = await generatePronunciation('vocab-2', '犬', 'user-123');
 
       expect(result.cached).toBe(true);
       expect(result.audioUrl).toBe('https://example.com/audio/cached.mp3');
@@ -186,7 +188,7 @@ describe('ttsService', () => {
         json: vi.fn().mockResolvedValue({ error: 'TTS service unavailable' }),
       });
 
-      await expect(generatePronunciation('vocab-1', '猫')).rejects.toThrow(
+      await expect(generatePronunciation('vocab-1', '猫', 'user-123')).rejects.toThrow(
         'TTS service unavailable',
       );
     });
@@ -197,7 +199,7 @@ describe('ttsService', () => {
         json: vi.fn().mockResolvedValue({}),
       });
 
-      await expect(generatePronunciation('vocab-1', '猫')).rejects.toThrow(
+      await expect(generatePronunciation('vocab-1', '猫', 'user-123')).rejects.toThrow(
         'Failed to generate pronunciation',
       );
     });
@@ -208,7 +210,7 @@ describe('ttsService', () => {
         json: vi.fn().mockResolvedValue(mockTTSResponse),
       });
 
-      await generatePronunciation('vocab-1', '猫');
+      await generatePronunciation('vocab-1', '猫', 'user-123');
 
       expect(mockFetch).toHaveBeenCalledWith(
         expect.any(String),
@@ -224,7 +226,7 @@ describe('ttsService', () => {
         json: vi.fn().mockResolvedValue(mockTTSResponse),
       });
 
-      await generatePronunciation('vocab-3', 'こんにちは');
+      await generatePronunciation('vocab-3', 'こんにちは', 'user-123');
 
       expect(mockFetch).toHaveBeenCalledWith(
         expect.any(String),
@@ -242,7 +244,7 @@ describe('ttsService', () => {
         json: vi.fn().mockResolvedValue({ audioUrl: 'https://example.com/audio/word.mp3' }),
       });
 
-      const result = await getAudioUrl('vocab-1');
+      const result = await getAudioUrl('vocab-1', 'user-123');
 
       expect(fetchAuthSession).toHaveBeenCalled();
       expect(mockFetch).toHaveBeenCalledWith('/api/tts/audio/vocab-1', {
@@ -261,7 +263,7 @@ describe('ttsService', () => {
         json: vi.fn().mockResolvedValue({ error: 'Audio not found' }),
       });
 
-      const result = await getAudioUrl('vocab-999');
+      const result = await getAudioUrl('vocab-999', 'user-123');
 
       expect(result).toBeNull();
     });
@@ -274,7 +276,7 @@ describe('ttsService', () => {
         json: vi.fn(),
       });
 
-      await expect(getAudioUrl('vocab-1')).rejects.toThrow(
+      await expect(getAudioUrl('vocab-1', 'user-123')).rejects.toThrow(
         'Failed to fetch audio URL: 500 Internal Server Error',
       );
     });
@@ -282,19 +284,19 @@ describe('ttsService', () => {
     it('should throw error for authentication failures', async () => {
       vi.mocked(fetchAuthSession).mockRejectedValue(new Error('Auth failed'));
 
-      await expect(getAudioUrl('vocab-1')).rejects.toThrow(
+      await expect(getAudioUrl('vocab-1', 'user-123')).rejects.toThrow(
         'Authentication required. Please sign in.',
       );
     });
 
     it('should validate vocabularyId input', async () => {
-      await expect(getAudioUrl('')).rejects.toThrow(
+      await expect(getAudioUrl('', 'user-123')).rejects.toThrow(
         'vocabularyId is required and must be a non-empty string',
       );
-      await expect(getAudioUrl(null as any)).rejects.toThrow(
+      await expect(getAudioUrl(null as any, 'user-123')).rejects.toThrow(
         'vocabularyId is required and must be a non-empty string',
       );
-      await expect(getAudioUrl(undefined as any)).rejects.toThrow(
+      await expect(getAudioUrl(undefined as any, 'user-123')).rejects.toThrow(
         'vocabularyId is required and must be a non-empty string',
       );
     });
@@ -305,7 +307,7 @@ describe('ttsService', () => {
         json: vi.fn().mockResolvedValue({ audioUrl: 'https://example.com/audio.mp3' }),
       });
 
-      await getAudioUrl('vocab/1');
+      await getAudioUrl('vocab/1', 'user-123');
 
       expect(mockFetch).toHaveBeenCalledWith('/api/tts/audio/vocab%2F1', expect.any(Object));
     });
@@ -316,7 +318,7 @@ describe('ttsService', () => {
         json: vi.fn().mockResolvedValue({ audioUrl: 'https://example.com/audio.mp3' }),
       });
 
-      await getAudioUrl('vocab-1');
+      await getAudioUrl('vocab-1', 'user-123');
 
       // GET is default, no method property should be set
       const callArgs = mockFetch.mock.calls[0];
@@ -331,7 +333,7 @@ describe('ttsService', () => {
         json: vi.fn().mockResolvedValue({ success: true }),
       });
 
-      await saveTTSSettings('user-123', 'sk-test-api-key', 'voice-id-1', 'model-1');
+      await saveTTSSettings('elevenlabs', 'sk-test-api-key', 'voice-id-1', 'model-1');
 
       expect(fetchAuthSession).toHaveBeenCalled();
       expect(mockFetch).toHaveBeenCalledWith('/api/tts/settings', {
@@ -341,6 +343,7 @@ describe('ttsService', () => {
           Authorization: `Bearer ${mockIdToken}`,
         },
         body: JSON.stringify({
+          provider: 'elevenlabs',
           apiKey: 'sk-test-api-key',
           voiceId: 'voice-id-1',
           model: 'model-1',
@@ -354,12 +357,13 @@ describe('ttsService', () => {
         json: vi.fn().mockResolvedValue({ success: true }),
       });
 
-      await saveTTSSettings('user-123', 'sk-test-api-key');
+      await saveTTSSettings('openai', 'sk-test-api-key');
 
       expect(mockFetch).toHaveBeenCalledWith(
         '/api/tts/settings',
         expect.objectContaining({
           body: JSON.stringify({
+            provider: 'openai',
             apiKey: 'sk-test-api-key',
             voiceId: null,
             model: null,
@@ -368,13 +372,13 @@ describe('ttsService', () => {
       );
     });
 
-    it('should not send userId in request body (deprecated parameter)', async () => {
+    it('should not send userId in request body', async () => {
       mockFetch.mockResolvedValue({
         ok: true,
         json: vi.fn().mockResolvedValue({ success: true }),
       });
 
-      await saveTTSSettings('user-123', 'sk-test-api-key');
+      await saveTTSSettings('elevenlabs', 'sk-test-api-key');
 
       expect(mockFetch).toHaveBeenCalledWith(
         expect.any(String),
@@ -390,7 +394,7 @@ describe('ttsService', () => {
         json: vi.fn().mockResolvedValue({ error: 'Invalid API key' }),
       });
 
-      await expect(saveTTSSettings('user-123', 'invalid-key')).rejects.toThrow('Invalid API key');
+      await expect(saveTTSSettings('elevenlabs', 'invalid-key')).rejects.toThrow('Invalid API key');
     });
 
     it('should throw generic error when API error message is missing', async () => {
@@ -399,7 +403,7 @@ describe('ttsService', () => {
         json: vi.fn().mockResolvedValue({}),
       });
 
-      await expect(saveTTSSettings('user-123', 'sk-test-api-key')).rejects.toThrow(
+      await expect(saveTTSSettings('elevenlabs', 'sk-test-api-key')).rejects.toThrow(
         'Failed to save TTS settings',
       );
     });
@@ -410,7 +414,7 @@ describe('ttsService', () => {
         json: vi.fn().mockResolvedValue({ success: true }),
       });
 
-      await saveTTSSettings('user-123', 'sk-test-api-key');
+      await saveTTSSettings('elevenlabs', 'sk-test-api-key');
 
       expect(mockFetch).toHaveBeenCalledWith(
         expect.any(String),
@@ -426,12 +430,13 @@ describe('ttsService', () => {
         json: vi.fn().mockResolvedValue({ success: true }),
       });
 
-      await saveTTSSettings('user-123', 'sk-test-api-key', '', '');
+      await saveTTSSettings('gemini', 'sk-test-api-key', '', '');
 
       expect(mockFetch).toHaveBeenCalledWith(
         expect.any(String),
         expect.objectContaining({
           body: JSON.stringify({
+            provider: 'gemini',
             apiKey: 'sk-test-api-key',
             voiceId: null,
             model: null,

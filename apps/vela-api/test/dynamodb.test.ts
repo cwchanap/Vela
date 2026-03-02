@@ -48,6 +48,7 @@ vi.mock('@aws-sdk/lib-dynamodb', () => ({
   }),
   GetCommand: vi.fn(),
   BatchGetCommand: vi.fn(),
+  BatchWriteCommand: vi.fn().mockImplementation((input: any) => ({ input })),
   UpdateCommand: vi.fn(),
   DeleteCommand: vi.fn(),
 }));
