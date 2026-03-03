@@ -56,5 +56,5 @@ export const srsKeys = {
  */
 export const ttsKeys = {
   all: ['tts'] as const,
-  settings: () => [...ttsKeys.all, 'settings'] as const,
+  settings: (userId: string | null) => [...ttsKeys.all, 'settings', userId] as const,
 };
