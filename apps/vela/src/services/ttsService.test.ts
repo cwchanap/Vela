@@ -25,7 +25,7 @@ import { fetchAuthSession } from 'aws-amplify/auth';
 
 // Mock fetch
 const mockFetch = vi.fn();
-global.fetch = mockFetch;
+global.fetch = mockFetch as unknown as typeof fetch;
 
 // Mock Audio
 class MockAudio {
@@ -158,10 +158,14 @@ describe('ttsService', () => {
         json: vi.fn().mockResolvedValue(cachedResponse),
       });
 
-      const result = await generatePronunciation('vocab-2', '犬', 'user-123');
+      const firstResult = await generatePronunciation('vocab-2', '犬', 'user-123');
+      const secondResult = await generatePronunciation('vocab-2', '犬', 'user-123');
 
-      expect(result.cached).toBe(true);
-      expect(result.audioUrl).toBe('https://example.com/audio/cached.mp3');
+      expect(firstResult.cached).toBe(true);
+      expect(firstResult.audioUrl).toBe('https://example.com/audio/cached.mp3');
+      expect(secondResult.cached).toBe(true);
+      expect(secondResult.audioUrl).toBe('https://example.com/audio/cached.mp3');
+      expect(mockFetch).toHaveBeenCalledTimes(1);
     });
 
     it('should accept deprecated userId parameter without using it', async () => {

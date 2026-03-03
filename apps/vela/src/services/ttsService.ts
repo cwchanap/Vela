@@ -18,9 +18,71 @@ export interface TTSSettings {
 // Presigned S3 URLs expire in 15 minutes; cache for 14 minutes to avoid serving expired URLs.
 const audioUrlCache = new Map<string, { url: string; expiresAt: number }>();
 const CACHE_TTL_MS = 14 * 60 * 1000;
+const MAX_CACHE_ENTRIES = 300;
+const EXPIRED_SWEEP_INTERVAL_MS = 5 * 60 * 1000;
+let lastExpiredSweepAt = 0;
 
 export function clearAudioUrlCache(): void {
   audioUrlCache.clear();
+  lastExpiredSweepAt = 0;
+}
+
+function encodeCachePart(value: string): string {
+  return encodeURIComponent(value);
+}
+
+function sweepExpiredEntries(now: number): void {
+  for (const [key, entry] of audioUrlCache.entries()) {
+    if (entry.expiresAt <= now) {
+      audioUrlCache.delete(key);
+    }
+  }
+  lastExpiredSweepAt = now;
+}
+
+function maybeSweepExpiredEntries(now: number): void {
+  if (now - lastExpiredSweepAt >= EXPIRED_SWEEP_INTERVAL_MS) {
+    sweepExpiredEntries(now);
+  }
+}
+
+function enforceCacheSizeLimit(): void {
+  while (audioUrlCache.size > MAX_CACHE_ENTRIES) {
+    const oldestKey = audioUrlCache.keys().next().value;
+    if (!oldestKey) {
+      break;
+    }
+    audioUrlCache.delete(oldestKey);
+  }
+}
+
+function getCachedAudioUrl(cacheKey: string): string | null {
+  const now = Date.now();
+  maybeSweepExpiredEntries(now);
+
+  const cached = audioUrlCache.get(cacheKey);
+  if (!cached) {
+    return null;
+  }
+
+  if (cached.expiresAt <= now) {
+    audioUrlCache.delete(cacheKey);
+    return null;
+  }
+
+  // Refresh insertion order so recently used entries are kept when size-based eviction runs.
+  audioUrlCache.delete(cacheKey);
+  audioUrlCache.set(cacheKey, cached);
+  return cached.url;
+}
+
+function setCachedAudioUrl(cacheKey: string, url: string): void {
+  const now = Date.now();
+  maybeSweepExpiredEntries(now);
+
+  audioUrlCache.delete(cacheKey);
+  audioUrlCache.set(cacheKey, { url, expiresAt: now + CACHE_TTL_MS });
+  enforceCacheSizeLimit();
 }
 
 /**
@@ -34,8 +96,13 @@ function generateCacheKey(
   voiceId?: string,
   model?: string,
 ): string {
-  const settingsPart = provider ? `${provider}:${voiceId || ''}:${model || ''}` : '';
-  return settingsPart ? `${userId}:${settingsPart}:${vocabularyId}` : `${userId}:${vocabularyId}`;
+  return [
+    `u=${encodeCachePart(userId)}`,
+    `vocab=${encodeCachePart(vocabularyId)}`,
+    `p=${encodeCachePart(provider || '')}`,
+    `voice=${encodeCachePart(voiceId || '')}`,
+    `m=${encodeCachePart(model || '')}`,
+  ].join('|');
 }
 
 /**
@@ -73,18 +140,14 @@ export async function generatePronunciation(
   model?: string,
 ): Promise<TTSResponse> {
   const cacheKey = generateCacheKey(userId, vocabularyId, provider, voiceId, model);
-  const cached = audioUrlCache.get(cacheKey);
-
-  if (cached) {
-    if (cached.expiresAt > Date.now()) {
-      return { audioUrl: cached.url, cached: true };
-    }
-    // Remove expired entry to prevent unbounded cache growth
-    audioUrlCache.delete(cacheKey);
+  const cachedAudioUrl = getCachedAudioUrl(cacheKey);
+  if (cachedAudioUrl) {
+    return { audioUrl: cachedAudioUrl, cached: true };
   }
 
   const headers = await getAuthHeader();
 
+  // provider/voiceId/model are client-side cache partition keys only and are not sent to backend.
   const response = await fetch(getApiUrl('tts/generate'), {
     method: 'POST',
     headers,
@@ -107,7 +170,7 @@ export async function generatePronunciation(
   }
 
   const result: TTSResponse = await response.json();
-  audioUrlCache.set(cacheKey, { url: result.audioUrl, expiresAt: Date.now() + CACHE_TTL_MS });
+  setCachedAudioUrl(cacheKey, result.audioUrl);
   return result;
 }
 
@@ -127,19 +190,15 @@ export async function getAudioUrl(
   }
 
   const cacheKey = generateCacheKey(userId, vocabularyId, provider, voiceId, model);
-  const cached = audioUrlCache.get(cacheKey);
-
-  if (cached) {
-    if (cached.expiresAt > Date.now()) {
-      return cached.url;
-    }
-    // Remove expired entry to prevent unbounded cache growth
-    audioUrlCache.delete(cacheKey);
+  const cachedAudioUrl = getCachedAudioUrl(cacheKey);
+  if (cachedAudioUrl) {
+    return cachedAudioUrl;
   }
 
   const headers = await getAuthHeader();
   const encodedVocabularyId = encodeURIComponent(vocabularyId);
 
+  // provider/voiceId/model are client-side cache partition keys only and are not sent to backend.
   const response = await fetch(getApiUrl(`tts/audio/${encodedVocabularyId}`), {
     headers,
   });
@@ -153,7 +212,7 @@ export async function getAudioUrl(
   }
 
   const data = await response.json();
-  audioUrlCache.set(cacheKey, { url: data.audioUrl, expiresAt: Date.now() + CACHE_TTL_MS });
+  setCachedAudioUrl(cacheKey, data.audioUrl);
   return data.audioUrl;
 }
 
