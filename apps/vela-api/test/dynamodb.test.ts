@@ -4,6 +4,7 @@ let mockSend: ReturnType<typeof vi.fn>;
 let mockScanCommand: ReturnType<typeof vi.fn>;
 let mockPutCommand: ReturnType<typeof vi.fn>;
 let mockQueryCommand: ReturnType<typeof vi.fn>;
+let mockBatchWriteCommand: ReturnType<typeof vi.fn>;
 let vocabulary: typeof import('../src/dynamodb').vocabulary;
 let sentences: typeof import('../src/dynamodb').sentences;
 let savedSentences: typeof import('../src/dynamodb').savedSentences;
@@ -13,6 +14,7 @@ const globalMock = globalThis as typeof globalThis & {
   __dynamoMockPutCommand?: ReturnType<typeof vi.fn>;
   __dynamoMockQueryCommand?: ReturnType<typeof vi.fn>;
   __dynamoMockScanCommand?: ReturnType<typeof vi.fn>;
+  __dynamoMockBatchWriteCommand?: ReturnType<typeof vi.fn>;
 };
 
 vi.mock('@aws-sdk/client-dynamodb', () => ({
@@ -48,7 +50,13 @@ vi.mock('@aws-sdk/lib-dynamodb', () => ({
   }),
   GetCommand: vi.fn(),
   BatchGetCommand: vi.fn(),
-  BatchWriteCommand: vi.fn().mockImplementation((input: any) => ({ input })),
+  BatchWriteCommand: vi.fn().mockImplementation((input: any) => {
+    if (!globalMock.__dynamoMockBatchWriteCommand) {
+      globalMock.__dynamoMockBatchWriteCommand = vi.fn();
+    }
+    globalMock.__dynamoMockBatchWriteCommand(input);
+    return { input };
+  }),
   UpdateCommand: vi.fn(),
   DeleteCommand: vi.fn(),
 }));
@@ -65,10 +73,12 @@ describe('DynamoDB Operations', () => {
     mockScanCommand = vi.fn();
     mockPutCommand = vi.fn();
     mockQueryCommand = vi.fn();
+    mockBatchWriteCommand = vi.fn();
     globalMock.__dynamoMockSend = mockSend;
     globalMock.__dynamoMockScanCommand = mockScanCommand;
     globalMock.__dynamoMockPutCommand = mockPutCommand;
     globalMock.__dynamoMockQueryCommand = mockQueryCommand;
+    globalMock.__dynamoMockBatchWriteCommand = mockBatchWriteCommand;
   });
 
   describe('Saved Sentences', () => {

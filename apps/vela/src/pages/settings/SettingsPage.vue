@@ -245,7 +245,6 @@ import { useLLMSettingsStore } from '../../stores/llmSettings';
 import { useThemeStore } from '../../stores/theme';
 import { useAuthStore } from '../../stores/auth';
 import { Notify } from 'quasar';
-import { clearAudioUrlCache } from '../../services/ttsService';
 import {
   useTTSSettingsQuery,
   useUpdateTTSSettingsMutation,
@@ -459,7 +458,6 @@ const saveSettingsHandler = async () => {
     },
     {
       onSuccess: () => {
-        clearAudioUrlCache();
         Notify.create({
           type: 'positive',
           message: 'TTS settings saved successfully',

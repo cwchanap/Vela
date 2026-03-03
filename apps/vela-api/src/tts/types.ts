@@ -5,11 +5,12 @@ export interface TTSGenerateRequest {
   apiKey: string;
   voiceId: string | null;
   model: string | null;
+  outputFormat?: string;
 }
 
 export interface TTSGenerateResult {
   audioBuffer: Buffer;
-  contentType: 'audio/mpeg' | 'audio/wav';
+  contentType: string;
 }
 
 export interface TTSProvider {

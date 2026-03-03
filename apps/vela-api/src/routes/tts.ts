@@ -129,11 +129,21 @@ const createTTSRoute = (env: Env) => {
           model: settings.model,
         });
       } catch (error: any) {
-        if (error.message?.includes('timeout')) {
-          return c.json({ error: error.message }, 504);
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        if (errorMessage.toLowerCase().includes('timeout')) {
+          console.error('TTS provider timeout', {
+            provider,
+            userId,
+            error,
+          });
+          return c.json({ error: 'TTS generation timed out' }, 504);
         }
-        console.error('TTS provider error:', error);
-        return c.json({ error: `Failed to generate TTS audio: ${error.message}` }, 500);
+        console.error('TTS provider error', {
+          provider,
+          userId,
+          error,
+        });
+        return c.json({ error: 'Failed to generate TTS audio' }, 500);
       }
 
       // Upload to S3
@@ -183,10 +193,7 @@ const createTTSRoute = (env: Env) => {
       return c.json({ audioUrl, cached: false });
     } catch (error) {
       console.error('TTS generation error:', error);
-      return c.json(
-        { error: error instanceof Error ? error.message : 'Failed to generate TTS' },
-        500,
-      );
+      return c.json({ error: 'Failed to generate TTS audio' }, 500);
     }
   });
 

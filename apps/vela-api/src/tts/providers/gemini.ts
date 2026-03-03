@@ -18,6 +18,56 @@ export const VOICES = [
   'Iocaste',
 ] as const;
 
+const FORMAT_TO_CONTENT_TYPE: Record<string, string> = {
+  MP3: 'audio/mpeg',
+  MPEG: 'audio/mpeg',
+  AUDIO_MPEG: 'audio/mpeg',
+  OGG_OPUS: 'audio/ogg',
+  OGG: 'audio/ogg',
+  AUDIO_OGG: 'audio/ogg',
+  AUDIO_OPUS: 'audio/ogg',
+  WAV: 'audio/wav',
+  AUDIO_WAV: 'audio/wav',
+  WAV_L16: 'audio/wav',
+  L16: 'audio/L16',
+  AUDIO_L16: 'audio/L16',
+  PCM: 'audio/pcm',
+  AUDIO_PCM: 'audio/pcm',
+  PCM_L16: 'audio/pcm',
+  ALAW: 'audio/PCMA',
+  AUDIO_PCMA: 'audio/PCMA',
+  MULAW: 'audio/PCMU',
+  MU_LAW: 'audio/PCMU',
+  AUDIO_PCMU: 'audio/PCMU',
+};
+
+function normalizeFormat(value: string): string {
+  return value
+    .trim()
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, '_');
+}
+
+function resolveContentType(
+  requestedFormat?: string,
+  responseFormat?: string,
+  mimeType?: string,
+): string {
+  const candidates = [requestedFormat, responseFormat, mimeType]
+    .filter((candidate): candidate is string => !!candidate)
+    .map((candidate) => candidate.split(';')[0]?.trim() ?? candidate)
+    .map(normalizeFormat);
+
+  for (const candidate of candidates) {
+    const mapped = FORMAT_TO_CONTENT_TYPE[candidate];
+    if (mapped) {
+      return mapped;
+    }
+  }
+
+  return 'audio/mpeg';
+}
+
 export class GeminiProvider implements TTSProvider {
   readonly name = 'gemini' as const;
 
@@ -73,10 +123,8 @@ export class GeminiProvider implements TTSProvider {
     }
 
     const mimeType = inlineData?.mimeType as string | undefined;
-    const contentType: 'audio/mpeg' | 'audio/wav' =
-      mimeType?.startsWith('audio/wav') || mimeType?.startsWith('audio/L16')
-        ? 'audio/wav'
-        : 'audio/mpeg';
+    const responseFormat = inlineData?.outputFormat as string | undefined;
+    const contentType = resolveContentType(request.outputFormat, responseFormat, mimeType);
 
     return {
       audioBuffer: Buffer.from(b64, 'base64'),
