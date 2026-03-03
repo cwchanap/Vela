@@ -135,11 +135,17 @@ export async function generatePronunciation(
   vocabularyId: string,
   text: string,
   userId: string,
-  provider?: string,
-  voiceId?: string,
-  model?: string,
 ): Promise<TTSResponse> {
-  const cacheKey = generateCacheKey(userId, vocabularyId, provider, voiceId, model);
+  // Fetch current TTS settings to ensure proper cache partitioning
+  // This prevents stale audio URLs when settings change in another tab/device
+  const settings = await getTTSSettings();
+  const cacheKey = generateCacheKey(
+    userId,
+    vocabularyId,
+    settings.provider,
+    settings.voiceId ?? undefined,
+    settings.model ?? undefined,
+  );
   const cachedAudioUrl = getCachedAudioUrl(cacheKey);
   if (cachedAudioUrl) {
     return { audioUrl: cachedAudioUrl, cached: true };
@@ -178,18 +184,20 @@ export async function generatePronunciation(
  * Get audio URL for a vocabulary item (if it exists).
  * Returns null if audio doesn't exist (404).
  */
-export async function getAudioUrl(
-  vocabularyId: string,
-  userId: string,
-  provider?: string,
-  voiceId?: string,
-  model?: string,
-): Promise<string | null> {
+export async function getAudioUrl(vocabularyId: string, userId: string): Promise<string | null> {
   if (!vocabularyId || typeof vocabularyId !== 'string') {
     throw new Error('vocabularyId is required and must be a non-empty string');
   }
 
-  const cacheKey = generateCacheKey(userId, vocabularyId, provider, voiceId, model);
+  // Fetch current TTS settings to ensure proper cache partitioning
+  const settings = await getTTSSettings();
+  const cacheKey = generateCacheKey(
+    userId,
+    vocabularyId,
+    settings.provider,
+    settings.voiceId ?? undefined,
+    settings.model ?? undefined,
+  );
   const cachedAudioUrl = getCachedAudioUrl(cacheKey);
   if (cachedAudioUrl) {
     return cachedAudioUrl;
@@ -296,22 +304,9 @@ export function playAudio(audioUrl: string): Promise<void> {
 /**
  * Generate and play pronunciation for a vocabulary word
  */
-export async function pronounceWord(
-  word: Vocabulary,
-  userId: string,
-  provider?: string,
-  voiceId?: string,
-  model?: string,
-): Promise<void> {
+export async function pronounceWord(word: Vocabulary, userId: string): Promise<void> {
   try {
-    const { audioUrl } = await generatePronunciation(
-      word.id,
-      word.japanese_word,
-      userId,
-      provider,
-      voiceId,
-      model,
-    );
+    const { audioUrl } = await generatePronunciation(word.id, word.japanese_word, userId);
     await playAudio(audioUrl);
   } catch (error) {
     console.error('Error pronouncing word:', error);
