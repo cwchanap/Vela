@@ -54,11 +54,32 @@ describe('ttsService', () => {
     },
   };
 
+  const mockTTSSettings: TTSSettings = {
+    provider: 'elevenlabs',
+    voiceId: 'voice-123',
+    model: 'model-456',
+    hasApiKey: true,
+  };
+
   beforeEach(() => {
     vi.clearAllMocks();
     mockFetch.mockClear();
     clearAudioUrlCache();
     vi.mocked(fetchAuthSession).mockResolvedValue(mockSession as any);
+
+    // Default mock for TTS settings endpoint (called internally by generatePronunciation/getAudioUrl)
+    mockFetch.mockImplementation((url: string) => {
+      if (url === '/api/tts/settings') {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve(mockTTSSettings),
+        });
+      }
+      return Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve({}),
+      });
+    });
   });
 
   afterEach(() => {
@@ -153,9 +174,17 @@ describe('ttsService', () => {
         cached: true,
       };
 
-      mockFetch.mockResolvedValue({
-        ok: true,
-        json: vi.fn().mockResolvedValue(cachedResponse),
+      mockFetch.mockImplementation((url: string) => {
+        if (url === '/api/tts/settings') {
+          return Promise.resolve({
+            ok: true,
+            json: () => Promise.resolve(mockTTSSettings),
+          });
+        }
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve(cachedResponse),
+        });
       });
 
       const firstResult = await generatePronunciation('vocab-2', '犬', 'user-123');
@@ -165,7 +194,8 @@ describe('ttsService', () => {
       expect(firstResult.audioUrl).toBe('https://example.com/audio/cached.mp3');
       expect(secondResult.cached).toBe(true);
       expect(secondResult.audioUrl).toBe('https://example.com/audio/cached.mp3');
-      expect(mockFetch).toHaveBeenCalledTimes(1);
+      // Called for settings + generate on first call, settings only on second (cached)
+      expect(mockFetch).toHaveBeenCalledTimes(3);
     });
 
     it('should accept deprecated userId parameter without using it', async () => {
@@ -198,9 +228,17 @@ describe('ttsService', () => {
     });
 
     it('should throw generic error when API error message is missing', async () => {
-      mockFetch.mockResolvedValue({
-        ok: false,
-        json: vi.fn().mockResolvedValue({}),
+      mockFetch.mockImplementation((url: string) => {
+        if (url === '/api/tts/settings') {
+          return Promise.resolve({
+            ok: true,
+            json: () => Promise.resolve(mockTTSSettings),
+          });
+        }
+        return Promise.resolve({
+          ok: false,
+          json: () => Promise.resolve({}),
+        });
       });
 
       await expect(generatePronunciation('vocab-1', '猫', 'user-123')).rejects.toThrow(
@@ -261,10 +299,18 @@ describe('ttsService', () => {
     });
 
     it('should return null when audio does not exist (404)', async () => {
-      mockFetch.mockResolvedValue({
-        ok: false,
-        status: 404,
-        json: vi.fn().mockResolvedValue({ error: 'Audio not found' }),
+      mockFetch.mockImplementation((url: string) => {
+        if (url === '/api/tts/settings') {
+          return Promise.resolve({
+            ok: true,
+            json: () => Promise.resolve(mockTTSSettings),
+          });
+        }
+        return Promise.resolve({
+          ok: false,
+          status: 404,
+          json: () => Promise.resolve({ error: 'Audio not found' }),
+        });
       });
 
       const result = await getAudioUrl('vocab-999', 'user-123');
@@ -273,11 +319,19 @@ describe('ttsService', () => {
     });
 
     it('should throw error for non-404 error responses', async () => {
-      mockFetch.mockResolvedValue({
-        ok: false,
-        status: 500,
-        statusText: 'Internal Server Error',
-        json: vi.fn(),
+      mockFetch.mockImplementation((url: string) => {
+        if (url === '/api/tts/settings') {
+          return Promise.resolve({
+            ok: true,
+            json: () => Promise.resolve(mockTTSSettings),
+          });
+        }
+        return Promise.resolve({
+          ok: false,
+          status: 500,
+          statusText: 'Internal Server Error',
+          text: () => Promise.resolve('Internal Server Error'),
+        });
       });
 
       await expect(getAudioUrl('vocab-1', 'user-123')).rejects.toThrow(
@@ -632,9 +686,17 @@ describe('ttsService', () => {
         cached: false,
       };
 
-      mockFetch.mockResolvedValue({
-        ok: true,
-        json: vi.fn().mockResolvedValue(mockTTSResponse),
+      mockFetch.mockImplementation((url: string) => {
+        if (url === '/api/tts/settings') {
+          return Promise.resolve({
+            ok: true,
+            json: () => Promise.resolve(mockTTSSettings),
+          });
+        }
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve(mockTTSResponse),
+        });
       });
 
       let audioInstance: MockAudio | null = null as MockAudio | null;
@@ -664,12 +726,12 @@ describe('ttsService', () => {
       expect(audioInstance?.src).toBe('https://example.com/audio/neko.mp3');
 
       // Verify that the deprecated userId is not included in the request body
-      const firstCall = mockFetch.mock.calls[0];
-      if (!firstCall) {
-        throw new Error('Expected fetch to be called');
+      const generateCall = mockFetch.mock.calls.find((call) => call[0] === '/api/tts/generate');
+      if (!generateCall) {
+        throw new Error('Expected fetch to be called with /api/tts/generate');
       }
 
-      const [, requestInit] = firstCall as [string, RequestInit];
+      const [, requestInit] = generateCall as [string, RequestInit];
       const body = requestInit.body;
       if (typeof body !== 'string') {
         throw new Error('Expected request body to be a string');
