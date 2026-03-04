@@ -419,9 +419,17 @@ watch(
   () => ttsSettingsData.value,
   (data) => {
     if (data) {
+      // Only overwrite voice/model when API returns non-null values
+      // to preserve provider watcher defaults
+      if (data.voiceId != null) {
+        ttsVoiceId.value = data.voiceId;
+      }
+      if (data.model != null) {
+        ttsModel.value = data.model;
+      }
+      // Set provider last so its watch applies appropriate defaults
+      // for voice/model when API returns null
       ttsProvider.value = data.provider || 'elevenlabs';
-      ttsVoiceId.value = data.voiceId || '';
-      ttsModel.value = data.model || '';
     }
   },
   { immediate: true },
