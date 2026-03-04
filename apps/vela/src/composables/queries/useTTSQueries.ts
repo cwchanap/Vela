@@ -3,6 +3,7 @@ import { getTTSSettings, saveTTSSettings } from 'src/services/ttsService';
 import { ttsKeys } from '@vela/common';
 import { useAuthStore } from 'src/stores/auth';
 import { storeToRefs } from 'pinia';
+import { computed } from 'vue';
 
 /**
  * Hook to fetch TTS settings for the current user
@@ -11,12 +12,15 @@ export function useTTSSettingsQuery() {
   const authStore = useAuthStore();
   const { user } = storeToRefs(authStore);
 
+  const queryKey = computed(() => ttsKeys.settings(user.value?.id ?? null));
+  const enabled = computed(() => !!user.value?.id);
+
   return useQuery({
-    queryKey: ttsKeys.settings(user.value?.id ?? null),
+    queryKey,
     queryFn: () => getTTSSettings(),
     staleTime: 5 * 60 * 1000, // 5 minutes - TTS settings change infrequently
     gcTime: 10 * 60 * 1000, // 10 minutes
-    enabled: !!user.value?.id,
+    enabled,
   });
 }
 
