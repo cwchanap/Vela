@@ -8,11 +8,9 @@ type OutputEntry = {
 
 type OutputMap = Record<string, string>;
 
-function loadOutputs(outputsPath: string): OutputMap {
+function loadOutputs(outputsPath: string): OutputMap | null {
   if (!fs.existsSync(outputsPath)) {
-    throw new Error(
-      `CloudFormation outputs file not found at resolved path: ${outputsPath}. Run 'bun run get-outputs' first.`,
-    );
+    return null;
   }
 
   const raw = fs.readFileSync(outputsPath, 'utf8');
@@ -43,6 +41,13 @@ function main(): void {
   // cdk-outputs.json is written in the @vela/cdk package root
   const outputsPath = path.resolve(process.cwd(), 'cdk-outputs.json');
   const outputs = loadOutputs(outputsPath);
+
+  if (outputs === null) {
+    console.log(
+      'No CloudFormation outputs found (stack not yet deployed). Skipping .env.production generation.',
+    );
+    return;
+  }
 
   const envVars = {
     VITE_COGNITO_USER_POOL_ID: outputs.VITE_COGNITO_USER_POOL_ID,
