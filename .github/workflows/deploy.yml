@@ -146,14 +146,3 @@ jobs:
           echo "📱 Website URL: ${{ steps.get-outputs.outputs.website-url }}"
           echo "🔗 API URL: ${{ steps.get-outputs.outputs.api-url }}"
 
-  cleanup:
-    if: always() && needs.build.result == 'success'
-    needs: [build, deploy]
-    runs-on: ubuntu-latest
-    steps:
-      - name: Cleanup artifacts
-        uses: actions/upload-artifact/merge@v4
-        with:
-          name: cleanup-artifacts-${{ github.sha }}
-          pattern: "*-${{ github.sha }}"
-          delete-merged: true
