@@ -31,7 +31,8 @@ jobs:
         run: bun install --frozen-lockfile
 
       - name: Build Lambda function
-        run: bun --cwd packages/cdk run lambda:build
+        run: bun run lambda:build
+        working-directory: packages/cdk
 
       - name: Upload Lambda artifact
         id: upload-lambda
