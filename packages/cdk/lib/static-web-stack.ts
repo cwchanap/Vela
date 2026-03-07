@@ -182,26 +182,6 @@ export class StaticWebStack extends Stack {
       description: 'CloudFront domain name - use this for CNAME record in Cloudflare',
     });
 
-    new CfnOutput(this, 'VITE_COGNITO_USER_POOL_ID', {
-      value: auth.userPool.userPoolId,
-      description: 'Cognito User Pool ID for frontend',
-    });
-
-    new CfnOutput(this, 'VITE_COGNITO_USER_POOL_CLIENT_ID', {
-      value: auth.userPoolClient.userPoolClientId,
-      description: 'Cognito User Pool Client ID for frontend',
-    });
-
-    new CfnOutput(this, 'VITE_AWS_REGION', {
-      value: Stack.of(this).region,
-      description: 'AWS Region for frontend',
-    });
-
-    new CfnOutput(this, 'VITE_API_URL', {
-      value: '/api/',
-      description: 'Frontend API base path via CloudFront',
-    });
-
     const ttsAudioBucketName = getTtsAudioBucketName(this);
 
     new CfnOutput(this, 'TTSAudioBucketName', {
