@@ -1,25 +1,42 @@
 <template>
   <q-page class="dashboard-page">
+    <!-- Ambient background blobs -->
+    <div class="ambient-layer" aria-hidden="true">
+      <div class="ambient-blob blob-primary"></div>
+      <div class="ambient-blob blob-sakura"></div>
+      <div class="ambient-blob blob-jade"></div>
+    </div>
+
     <div class="dashboard-container">
       <!-- Hero Section: Daily Progress Ring -->
-      <div class="daily-goal-hero">
+      <div class="daily-goal-hero anim-enter-1">
+        <!-- Decorative kanji -->
+        <span class="kanji-deco hero-kanji-1" aria-hidden="true">学</span>
+        <span class="kanji-deco hero-kanji-2" aria-hidden="true">日</span>
+
         <div class="hero-content">
-          <h1 class="hero-greeting">Welcome back, {{ authStore.userName }}!</h1>
+          <h1 class="hero-greeting">
+            <span class="greeting-wave">👋</span>
+            <span>{{ authStore.userName }}</span>
+          </h1>
           <p class="hero-subtitle">Let's continue your Japanese journey</p>
         </div>
 
         <div class="progress-ring-wrapper">
+          <div class="ring-outer-glow"></div>
           <q-circular-progress
             :value="dailyProgress"
-            size="180px"
-            :thickness="0.1"
+            size="168px"
+            :thickness="0.09"
             color="primary"
             track-color="grey-3"
             class="progress-ring"
           >
             <div class="ring-content">
-              <div class="ring-value">{{ minutesToday }}/{{ dailyGoalMinutes }}</div>
-              <div class="ring-label">minutes today</div>
+              <div class="ring-value">
+                {{ minutesToday }}<span class="ring-sep">/</span>{{ dailyGoalMinutes }}
+              </div>
+              <div class="ring-label">min today</div>
             </div>
           </q-circular-progress>
         </div>
@@ -39,12 +56,12 @@
       </div>
 
       <!-- Stats Row -->
-      <div class="stats-row">
+      <div class="stats-row anim-enter-2">
         <div class="stat-badge">
           <q-icon name="local_fire_department" class="stat-icon streak" />
           <div class="stat-info">
             <span class="stat-value">{{ authStore.userStreak }}</span>
-            <span class="stat-label">day streak</span>
+            <span class="stat-label">Streak</span>
           </div>
         </div>
 
@@ -52,7 +69,7 @@
           <q-icon name="star" class="stat-icon xp" />
           <div class="stat-info">
             <span class="stat-value">{{ authStore.userExperience }}</span>
-            <span class="stat-label">total XP</span>
+            <span class="stat-label">Total XP</span>
           </div>
         </div>
 
@@ -67,19 +84,20 @@
           <q-icon name="schedule" class="stat-icon time" />
           <div class="stat-info">
             <span class="stat-value">{{ minutesToday }}</span>
-            <span class="stat-label">min today</span>
+            <span class="stat-label">Min Today</span>
           </div>
         </div>
       </div>
 
       <!-- Quick Actions Grid -->
-      <div class="section-header">
+      <div class="section-header anim-enter-3">
         <h2 class="section-title">Continue Learning</h2>
+        <span class="section-kana">学習</span>
       </div>
 
-      <div class="actions-grid">
+      <div class="actions-grid anim-enter-4">
         <div
-          class="action-card"
+          class="action-card action-card--vocab"
           role="button"
           tabindex="0"
           aria-label="Navigate to Vocabulary game"
@@ -92,13 +110,12 @@
           <div class="action-title">Vocabulary</div>
           <div class="action-desc">Learn new words</div>
           <q-btn flat dense color="primary" class="action-btn">
-            Play
-            <q-icon name="chevron_right" size="xs" />
+            Play <q-icon name="chevron_right" size="xs" />
           </q-btn>
         </div>
 
         <div
-          class="action-card"
+          class="action-card action-card--grammar"
           role="button"
           tabindex="0"
           aria-label="Navigate to Sentence game"
@@ -110,14 +127,13 @@
           </div>
           <div class="action-title">Sentences</div>
           <div class="action-desc">Build sentences</div>
-          <q-btn flat dense color="primary" class="action-btn">
-            Play
-            <q-icon name="chevron_right" size="xs" />
+          <q-btn flat dense color="secondary" class="action-btn">
+            Play <q-icon name="chevron_right" size="xs" />
           </q-btn>
         </div>
 
         <div
-          class="action-card"
+          class="action-card action-card--chat"
           role="button"
           tabindex="0"
           aria-label="Open AI Tutor chat"
@@ -129,14 +145,13 @@
           </div>
           <div class="action-title">AI Tutor</div>
           <div class="action-desc">Get help</div>
-          <q-btn flat dense color="primary" class="action-btn">
-            Chat
-            <q-icon name="chevron_right" size="xs" />
+          <q-btn flat dense color="positive" class="action-btn">
+            Chat <q-icon name="chevron_right" size="xs" />
           </q-btn>
         </div>
 
         <div
-          class="action-card"
+          class="action-card action-card--writing"
           role="button"
           tabindex="0"
           aria-label="View saved vocabulary"
@@ -148,52 +163,52 @@
           </div>
           <div class="action-title">My Words</div>
           <div class="action-desc">Saved vocabulary</div>
-          <q-btn flat dense color="primary" class="action-btn">
-            View
-            <q-icon name="chevron_right" size="xs" />
+          <q-btn flat dense color="purple" class="action-btn">
+            View <q-icon name="chevron_right" size="xs" />
           </q-btn>
         </div>
       </div>
 
       <!-- Achievement Teaser -->
-      <div class="achievement-teaser loading" v-if="achievementsLoading">
+      <div class="achievement-teaser loading anim-enter-5" v-if="achievementsLoading">
         <div class="teaser-content">
-          <q-spinner size="24px" class="teaser-spinner" />
+          <q-spinner size="20px" color="primary" />
           <span class="teaser-text">Loading achievements…</span>
         </div>
       </div>
 
-      <div class="achievement-teaser error" v-else-if="achievementsError">
+      <div class="achievement-teaser error anim-enter-5" v-else-if="achievementsError">
         <div class="teaser-content">
           <q-icon name="error_outline" class="teaser-icon error" />
           <span class="teaser-text">{{ achievementsError }}</span>
         </div>
         <q-btn flat dense color="primary" @click="fetchAchievements">
-          Retry
-          <q-icon name="refresh" size="xs" />
+          Retry <q-icon name="refresh" size="xs" />
         </q-btn>
       </div>
 
-      <div class="achievement-teaser" v-else-if="achievements.length > 0">
+      <div class="achievement-teaser anim-enter-5" v-else-if="achievements.length > 0">
         <div class="teaser-content">
-          <q-icon name="emoji_events" class="teaser-icon" />
-          <span class="teaser-text">{{ achievements.length }} achievements unlocked</span>
+          <span class="teaser-trophy">🏆</span>
+          <div>
+            <div class="teaser-text">{{ achievements.length }} achievements unlocked</div>
+            <div class="teaser-sub">Keep up the great work!</div>
+          </div>
         </div>
         <q-btn flat dense color="primary" @click="navigateTo('/progress')">
-          View all
-          <q-icon name="chevron_right" size="xs" />
+          View all <q-icon name="chevron_right" size="xs" />
         </q-btn>
       </div>
 
-      <!-- Empty state for achievements -->
-      <div class="achievement-teaser empty" v-else>
+      <div class="achievement-teaser empty anim-enter-5" v-else>
         <div class="teaser-content">
-          <q-icon name="emoji_events" class="teaser-icon empty" />
-          <span class="teaser-text">Complete lessons to earn achievements!</span>
+          <span class="teaser-trophy dim">🏆</span>
+          <div>
+            <div class="teaser-text">Complete lessons to earn achievements!</div>
+          </div>
         </div>
         <q-btn flat dense color="primary" @click="navigateToLearn">
-          Start now
-          <q-icon name="chevron_right" size="xs" />
+          Start now <q-icon name="chevron_right" size="xs" />
         </q-btn>
       </div>
     </div>
@@ -240,9 +255,7 @@ const minutesToday = computed(() => Math.round(todayStudyTime.value));
 const dailyGoalMinutes = computed(() => preferences.value.dailyGoal ?? 30);
 
 const dailyProgress = computed(() => {
-  if (!dailyGoalMinutes.value) {
-    return 0;
-  }
+  if (!dailyGoalMinutes.value) return 0;
   return Math.min((minutesToday.value / dailyGoalMinutes.value) * 100, 100);
 });
 
@@ -266,23 +279,14 @@ const mapAchievement = (raw: any): Achievement | null => {
 
   const rawTitle = (raw as any).name ?? (raw as any).title ?? rawId;
   const title = typeof rawTitle === 'string' && rawTitle.trim() ? rawTitle : 'Achievement';
-
   const rawDescription = (raw as any).description;
   const description = typeof rawDescription === 'string' ? rawDescription : '';
-
   const rawIcon = (raw as any).icon;
   const icon = typeof rawIcon === 'string' && rawIcon.trim() ? rawIcon : 'emoji_events';
-
   const rawColor = (raw as any).color;
   const color = typeof rawColor === 'string' && rawColor.trim() ? rawColor : 'primary';
 
-  return {
-    id,
-    title,
-    description,
-    icon,
-    color,
-  };
+  return { id, title, description, icon, color };
 };
 
 const fetchAchievements = async () => {
@@ -295,9 +299,7 @@ const fetchAchievements = async () => {
   achievementsLoading.value = true;
   achievementsError.value = null;
 
-  if (achievementsAbort.value) {
-    achievementsAbort.value.abort();
-  }
+  if (achievementsAbort.value) achievementsAbort.value.abort();
 
   const controller = new AbortController();
   achievementsAbort.value = controller;
@@ -331,15 +333,9 @@ const navigateTo = async (path: string) => {
   try {
     await router.push(path);
   } catch (err) {
-    if (isNavigationFailure(err, NavigationFailureType.duplicated)) {
-      return;
-    }
+    if (isNavigationFailure(err, NavigationFailureType.duplicated)) return;
     console.error('Navigation failed:', err);
-    $q.notify({
-      type: 'negative',
-      message: 'Navigation failed. Please try again.',
-      timeout: 2000,
-    });
+    $q.notify({ type: 'negative', message: 'Navigation failed. Please try again.', timeout: 2000 });
   }
 };
 
@@ -355,23 +351,13 @@ const handleActionKeydown = (path: string, event: KeyboardEvent) => {
 };
 
 onMounted(async () => {
-  // Ensure auth store is initialized
-  if (!authStore.isInitialized) {
-    await authStore.initialize();
-  }
-
-  // Redirect to login if not authenticated
-  if (!authStore.isAuthenticated) {
-    void router.push('/auth/login');
-  }
-
+  if (!authStore.isInitialized) await authStore.initialize();
+  if (!authStore.isAuthenticated) void router.push('/auth/login');
   void fetchAchievements();
 });
 
 onBeforeUnmount(() => {
-  if (achievementsAbort.value) {
-    achievementsAbort.value.abort();
-  }
+  if (achievementsAbort.value) achievementsAbort.value.abort();
 });
 </script>
 
@@ -379,48 +365,94 @@ onBeforeUnmount(() => {
 /* Dashboard Layout */
 .dashboard-page {
   min-height: 100vh;
-  padding: 24px;
+  padding: 28px 24px;
   background: var(--bg-page);
+  position: relative;
+  overflow: hidden;
 }
 
 .dashboard-container {
-  max-width: 800px;
+  max-width: 820px;
   margin: 0 auto;
+  position: relative;
+  z-index: 1;
 }
 
-/* Hero Section - Daily Goal */
+/* ==========================================
+   HERO SECTION
+   ========================================== */
 .daily-goal-hero {
   background: var(--bg-card);
+  border: 1px solid var(--glass-border);
   border-radius: var(--border-radius-xl);
-  padding: 32px;
+  padding: 36px 32px 32px;
   text-align: center;
   box-shadow: var(--shadow-card);
-  margin-bottom: 24px;
+  margin-bottom: 20px;
+  position: relative;
+  overflow: hidden;
+}
+
+/* Decorative kanji inside hero */
+.hero-kanji-1 {
+  font-size: 120px;
+  top: -20px;
+  right: 16px;
+  position: absolute;
+}
+
+.hero-kanji-2 {
+  font-size: 80px;
+  bottom: 12px;
+  left: 16px;
+  position: absolute;
 }
 
 .hero-content {
-  margin-bottom: 24px;
+  margin-bottom: 28px;
+  position: relative;
+  z-index: 1;
 }
 
 .hero-greeting {
-  font-size: 1.75rem;
-  font-weight: 700;
+  font-family: 'Syne', sans-serif;
+  font-size: 1.9rem;
+  font-weight: 800;
   color: var(--text-primary);
   margin: 0 0 8px 0;
+  letter-spacing: -0.03em;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+}
+
+.greeting-wave {
+  font-size: 1.6rem;
+  animation: float-gentle 3s ease-in-out infinite;
+  display: inline-block;
 }
 
 .hero-subtitle {
   font-size: 1rem;
   color: var(--text-secondary);
   margin: 0;
+  font-weight: 400;
 }
 
 .progress-ring-wrapper {
-  margin-bottom: 24px;
+  margin-bottom: 28px;
+  position: relative;
+  display: inline-block;
+  z-index: 1;
 }
 
-.progress-ring {
-  margin: 0 auto;
+.ring-outer-glow {
+  position: absolute;
+  inset: -12px;
+  border-radius: 50%;
+  background: radial-gradient(circle, var(--glow-primary) 0%, transparent 70%);
+  pointer-events: none;
 }
 
 .ring-content {
@@ -428,30 +460,47 @@ onBeforeUnmount(() => {
 }
 
 .ring-value {
-  font-size: 2rem;
-  font-weight: 700;
+  font-family: 'Syne', sans-serif;
+  font-size: 1.6rem;
+  font-weight: 800;
   color: var(--color-primary);
-  line-height: 1.2;
+  line-height: 1.1;
+}
+
+.ring-sep {
+  font-weight: 300;
+  opacity: 0.5;
+  font-size: 1.2rem;
 }
 
 .ring-label {
-  font-size: 0.85rem;
+  font-size: 0.75rem;
   color: var(--text-secondary);
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  margin-top: 2px;
 }
 
 .start-learning-btn {
-  padding: 14px 32px;
+  padding: 14px 40px;
+  font-family: 'Syne', sans-serif;
   font-size: 1rem;
   font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
+  text-transform: none;
+  letter-spacing: 0.02em;
+  box-shadow: var(--shadow-button);
+  position: relative;
+  z-index: 1;
 }
 
-/* Stats Row */
+/* ==========================================
+   STATS ROW
+   ========================================== */
 .stats-row {
   display: flex;
   gap: 12px;
-  margin-bottom: 32px;
+  margin-bottom: 28px;
   flex-wrap: wrap;
   justify-content: center;
 }
@@ -460,28 +509,35 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 12px 16px;
+  padding: 14px 18px;
   background: var(--bg-card);
-  border-radius: var(--border-radius-md);
+  border-radius: var(--border-radius-lg);
+  border: 1px solid var(--glass-border);
   box-shadow: var(--shadow-card);
-  min-width: 140px;
+  min-width: 130px;
   justify-content: center;
 }
 
+.stat-badge:hover {
+  transform: translateY(-3px);
+  box-shadow: var(--shadow-card-hover);
+}
+
 .stat-badge .stat-icon {
-  font-size: 28px;
+  font-size: 26px;
 }
 
 .stat-badge .stat-icon.streak {
   color: var(--color-streak);
+  filter: drop-shadow(0 2px 6px var(--glow-amber));
 }
-
 .stat-badge .stat-icon.xp {
   color: var(--color-xp);
+  filter: drop-shadow(0 2px 6px var(--glow-jade));
 }
-
 .stat-badge .stat-icon.time {
   color: var(--color-purple);
+  filter: drop-shadow(0 2px 6px rgba(155, 97, 255, 0.3));
 }
 
 .stat-info {
@@ -491,16 +547,19 @@ onBeforeUnmount(() => {
 }
 
 .stat-value {
+  font-family: 'Syne', sans-serif;
   font-size: 1.25rem;
-  font-weight: 700;
+  font-weight: 800;
   color: var(--text-primary);
-  line-height: 1.2;
+  line-height: 1.1;
 }
 
 .stat-label {
-  font-size: 0.75rem;
+  font-size: 0.7rem;
   color: var(--text-secondary);
-  text-transform: lowercase;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
 }
 
 .level-badge .stat-info {
@@ -510,110 +569,175 @@ onBeforeUnmount(() => {
 .level-circle {
   width: 40px;
   height: 40px;
-  border-radius: 50%;
-  background: var(--color-level);
+  border-radius: 10px;
+  background: linear-gradient(135deg, var(--color-primary), var(--color-purple));
   color: white;
+  font-family: 'Syne', sans-serif;
   font-size: 1.1rem;
-  font-weight: 700;
+  font-weight: 800;
   display: flex;
   align-items: center;
   justify-content: center;
+  box-shadow: 0 4px 12px var(--glow-primary);
 }
 
-/* Section Header */
+/* ==========================================
+   SECTION HEADER
+   ========================================== */
 .section-header {
   margin-bottom: 16px;
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
 }
 
 .section-title {
-  font-size: 1.25rem;
+  font-family: 'Syne', sans-serif;
+  font-size: 1.2rem;
   font-weight: 700;
   color: var(--text-primary);
   margin: 0;
+  letter-spacing: -0.02em;
 }
 
-/* Actions Grid */
+.section-kana {
+  font-family: 'Noto Serif JP', serif;
+  font-size: 0.8rem;
+  color: var(--color-primary);
+  opacity: 0.5;
+  font-weight: 300;
+}
+
+/* ==========================================
+   ACTION CARDS
+   ========================================== */
 .actions-grid {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
-  gap: 16px;
-  margin-bottom: 24px;
+  gap: 14px;
+  margin-bottom: 20px;
 }
 
 .action-card {
-  background: var(--glass-bg);
-  backdrop-filter: var(--glass-backdrop);
+  background: var(--bg-card);
   border: 1px solid var(--glass-border);
   border-radius: var(--border-radius-lg);
-  padding: 20px;
+  padding: 22px 18px 18px;
   text-align: center;
   cursor: pointer;
-  transition:
-    transform 0.2s,
-    box-shadow 0.2s;
+  position: relative;
+  overflow: hidden;
+  box-shadow: var(--shadow-card);
+}
+
+/* Colored top accent stripe per card type */
+.action-card--vocab::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: linear-gradient(90deg, #5b4af7, #7b61ff);
+}
+.action-card--grammar::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: linear-gradient(90deg, #e8447a, #ff6ba3);
+}
+.action-card--chat::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: linear-gradient(90deg, #1db87a, #00cc88);
+}
+.action-card--writing::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: linear-gradient(90deg, #9b61ff, #b89aff);
 }
 
 .action-card:focus-visible {
   outline: 3px solid var(--color-primary);
-  outline-offset: 4px;
+  outline-offset: 3px;
 }
 
 .action-card:hover {
-  transform: translateY(-4px);
+  transform: translateY(-6px);
   box-shadow: var(--shadow-card-hover);
 }
 
 .action-icon {
-  width: 56px;
-  height: 56px;
-  border-radius: 50%;
+  width: 54px;
+  height: 54px;
+  border-radius: 14px;
   display: flex;
   align-items: center;
   justify-content: center;
-  margin: 0 auto 12px;
+  margin: 0 auto 14px;
   font-size: 24px;
   color: white;
 }
 
 .action-icon.vocab {
-  background: var(--color-vocab);
+  background: linear-gradient(135deg, #5b4af7, #7b61ff);
+  box-shadow: 0 6px 16px var(--glow-primary);
 }
-
 .action-icon.grammar {
-  background: var(--color-grammar);
+  background: linear-gradient(135deg, #e8447a, #ff6ba3);
+  box-shadow: 0 6px 16px var(--glow-sakura);
 }
-
 .action-icon.chat {
-  background: var(--color-chat);
+  background: linear-gradient(135deg, #1db87a, #00cc88);
+  box-shadow: 0 6px 16px var(--glow-jade);
 }
-
 .action-icon.writing {
-  background: var(--color-writing);
+  background: linear-gradient(135deg, #9b61ff, #b89aff);
+  box-shadow: 0 6px 16px rgba(155, 97, 255, 0.25);
 }
 
 .action-title {
+  font-family: 'Syne', sans-serif;
   font-size: 1rem;
-  font-weight: 600;
+  font-weight: 700;
   color: var(--text-primary);
   margin-bottom: 4px;
+  letter-spacing: -0.01em;
 }
 
 .action-desc {
-  font-size: 0.8rem;
+  font-size: 0.78rem;
   color: var(--text-secondary);
   margin-bottom: 12px;
+  line-height: 1.4;
 }
 
 .action-btn {
+  font-family: 'Figtree', sans-serif;
   font-weight: 600;
   text-transform: none;
+  font-size: 0.85rem;
 }
 
-/* Achievement Teaser */
+/* ==========================================
+   ACHIEVEMENT TEASER
+   ========================================== */
 .achievement-teaser {
   background: var(--bg-card);
-  border-radius: var(--border-radius-md);
-  padding: 16px 20px;
+  border: 1px solid var(--glass-border);
+  border-radius: var(--border-radius-lg);
+  padding: 18px 20px;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -622,14 +746,23 @@ onBeforeUnmount(() => {
 
 .achievement-teaser.empty {
   background: var(--glass-bg-subtle);
-  border: 1px dashed var(--glass-border);
-  box-shadow: none;
+  border-style: dashed;
 }
 
 .teaser-content {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 14px;
+}
+
+.teaser-trophy {
+  font-size: 28px;
+  filter: drop-shadow(0 2px 8px var(--glow-amber));
+}
+
+.teaser-trophy.dim {
+  opacity: 0.35;
+  filter: none;
 }
 
 .teaser-icon {
@@ -637,60 +770,76 @@ onBeforeUnmount(() => {
   color: var(--color-streak);
 }
 
-.teaser-icon.empty {
-  color: var(--text-secondary);
+.teaser-icon.error {
+  color: var(--color-error);
 }
 
 .teaser-text {
-  font-size: 0.9rem;
-  font-weight: 500;
+  font-family: 'Figtree', sans-serif;
+  font-size: 0.92rem;
+  font-weight: 600;
   color: var(--text-primary);
+}
+
+.teaser-sub {
+  font-size: 0.78rem;
+  color: var(--text-secondary);
+  margin-top: 2px;
 }
 
 .achievement-teaser.empty .teaser-text {
   color: var(--text-secondary);
 }
 
-/* Responsive */
+/* ==========================================
+   ANIMATIONS (local)
+   ========================================== */
+@keyframes float-gentle {
+  0%,
+  100% {
+    transform: translateY(0) rotate(0deg);
+  }
+  50% {
+    transform: translateY(-5px) rotate(1deg);
+  }
+}
+
+/* ==========================================
+   RESPONSIVE
+   ========================================== */
 @media (max-width: 600px) {
   .dashboard-page {
     padding: 16px;
   }
-
   .daily-goal-hero {
-    padding: 24px 16px;
+    padding: 28px 20px 24px;
   }
-
   .hero-greeting {
     font-size: 1.5rem;
   }
-
+  .hero-kanji-1 {
+    font-size: 80px;
+  }
+  .hero-kanji-2 {
+    display: none;
+  }
   .stats-row {
     gap: 8px;
   }
-
   .stat-badge {
-    min-width: 120px;
+    min-width: 110px;
     padding: 10px 12px;
   }
-
-  .stat-badge .stat-icon {
-    font-size: 24px;
-  }
-
   .stat-value {
     font-size: 1.1rem;
   }
-
   .actions-grid {
     grid-template-columns: 1fr 1fr;
-    gap: 12px;
+    gap: 10px;
   }
-
   .action-card {
-    padding: 16px;
+    padding: 18px 14px 14px;
   }
-
   .action-icon {
     width: 48px;
     height: 48px;
@@ -703,7 +852,6 @@ onBeforeUnmount(() => {
     display: grid;
     grid-template-columns: 1fr 1fr;
   }
-
   .stat-badge {
     min-width: auto;
   }
