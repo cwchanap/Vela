@@ -26,8 +26,8 @@
           <q-tooltip>Toggle collapse</q-tooltip>
         </q-btn>
         <q-toolbar-title class="app-title">
-          <div class="app-logo">
-            <span class="logo-mark">帆</span>
+          <div class="app-logo" aria-label="Vela">
+            <span class="logo-mark" aria-hidden="true">帆</span>
             <span class="logo-text">Vela</span>
           </div>
         </q-toolbar-title>

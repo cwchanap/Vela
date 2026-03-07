@@ -98,13 +98,21 @@
             </div>
           </div>
           <div class="challenge-progress">
-            <div class="challenge-progress-track">
+            <div
+              class="challenge-progress-track"
+              role="progressbar"
+              :aria-valuenow="gamesCompletedToday"
+              :aria-valuemin="0"
+              :aria-valuemax="dailyChallengeGoal"
+              :aria-label="challengeText"
+            >
               <div
                 class="challenge-progress-fill"
                 :style="{ width: `${challengeProgress * 100}%` }"
+                aria-hidden="true"
               ></div>
             </div>
-            <span class="progress-text">{{ challengeText }}</span>
+            <span class="progress-text" aria-hidden="true">{{ challengeText }}</span>
           </div>
         </div>
       </div>

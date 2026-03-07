@@ -796,17 +796,9 @@ onBeforeUnmount(() => {
 }
 
 /* ==========================================
-   ANIMATIONS (local)
+   ANIMATIONS
+   (uses global @keyframes float-gentle from app.scss)
    ========================================== */
-@keyframes float-gentle {
-  0%,
-  100% {
-    transform: translateY(0) rotate(0deg);
-  }
-  50% {
-    transform: translateY(-5px) rotate(1deg);
-  }
-}
 
 /* ==========================================
    RESPONSIVE
