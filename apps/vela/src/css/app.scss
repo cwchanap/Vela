@@ -1,34 +1,67 @@
-// Vela Japanese Learning App - Duolingo-Inspired Global Styles
+// Vela - Wa-Modern Japanese Learning App
+// Design System: Indigo & Sakura
 
 // ============================================
-// COLOR SYSTEM - Duolingo-inspired solid colors
+// FONTS — Syne (headings) + Figtree (body)
+// ============================================
+@import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;500;600;700;800&family=Figtree:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400&family=Noto+Serif+JP:wght@300;700&display=swap');
+
+body {
+  font-family:
+    'Figtree',
+    -apple-system,
+    BlinkMacSystemFont,
+    sans-serif;
+  font-feature-settings:
+    'kern' 1,
+    'liga' 1;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+h1,
+h2,
+h3,
+h4 {
+  font-family: 'Syne', sans-serif;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+// ============================================
+// COLOR SYSTEM — Wa-Modern palette
 // ============================================
 :root {
-  // Primary palette (matches quasar.variables.scss)
-  --color-primary: #1cb0f6; // Vibrant blue
-  --color-success: #58cc02; // Green - XP, correct
-  --color-streak: #ff9600; // Orange - streaks
-  --color-error: #ff4b4b; // Red - errors
-  --color-purple: #ce82ff; // Purple - time, writing
+  // Core brand colors
+  --color-primary: #5b4af7; // Aizome indigo
+  --color-success: #1db87a; // Jade green
+  --color-streak: #f59e0b; // Amber gold
+  --color-error: #f04b5a; // Coral red
+  --color-purple: #9b61ff; // Electric violet
 
-  // Semantic colors for features
-  --color-level: var(--color-primary); // Blue - levels
-  --color-xp: var(--color-success); // Green - XP/success
-  --color-vocab: var(--color-primary); // Blue - vocabulary
-  --color-grammar: var(--color-streak); // Orange - grammar/sentence
-  --color-chat: var(--color-success); // Green - chat
-  --color-writing: var(--color-purple); // Purple - writing
+  // Sakura accent
+  --color-sakura: #e8447a;
 
-  // Shadow system (Duolingo-style depth)
-  --shadow-card: 0 2px 4px rgba(0, 0, 0, 0.08);
-  --shadow-card-hover: 0 4px 12px rgba(0, 0, 0, 0.15);
-  --shadow-button: 0 4px 0 rgba(0, 0, 0, 0.1);
-  --shadow-soft: 0 4px 20px rgba(0, 0, 0, 0.1);
-  --shadow-medium: 0 8px 30px rgba(0, 0, 0, 0.12);
-  --shadow-chat-user: 0 4px 12px color-mix(in srgb, var(--color-primary) 20%, transparent);
-  --shadow-chat-ai: 0 4px 12px color-mix(in srgb, var(--color-chat) 20%, transparent);
-  --nav-item-hover-bg: color-mix(in srgb, var(--color-primary) 8%, transparent);
-  --nav-item-active-bg: color-mix(in srgb, var(--color-primary) 12%, transparent);
+  // Semantic feature colors
+  --color-level: var(--color-primary);
+  --color-xp: var(--color-success);
+  --color-vocab: var(--color-primary);
+  --color-grammar: var(--color-sakura);
+  --color-chat: var(--color-success);
+  --color-writing: var(--color-purple);
+
+  // Shadow system
+  --shadow-card: 0 1px 3px rgba(0, 0, 0, 0.04), 0 4px 16px rgba(91, 74, 247, 0.06);
+  --shadow-card-hover: 0 4px 8px rgba(0, 0, 0, 0.06), 0 12px 32px rgba(91, 74, 247, 0.14);
+  --shadow-button: 0 4px 12px rgba(91, 74, 247, 0.3);
+  --shadow-soft: 0 4px 24px rgba(91, 74, 247, 0.08);
+  --shadow-medium: 0 8px 40px rgba(91, 74, 247, 0.12);
+  --shadow-chat-user: 0 4px 12px rgba(91, 74, 247, 0.2);
+  --shadow-chat-ai: 0 4px 12px rgba(29, 184, 122, 0.15);
+
+  // Nav states
+  --nav-item-hover-bg: rgba(91, 74, 247, 0.06);
+  --nav-item-active-bg: rgba(91, 74, 247, 0.1);
 
   // Border radius
   --border-radius-sm: 8px;
@@ -37,44 +70,184 @@
   --border-radius-xl: 24px;
   --border-radius-full: 50%;
 
-  // Glassmorphism (hybrid approach - subtle)
-  --glass-bg: rgba(255, 255, 255, 0.85);
-  --glass-bg-subtle: rgba(255, 255, 255, 0.6);
-  --glass-border: rgba(0, 0, 0, 0.08);
-  --glass-backdrop: blur(10px);
+  // Glass morphism
+  --glass-bg: rgba(255, 255, 255, 0.82);
+  --glass-bg-subtle: rgba(255, 255, 255, 0.5);
+  --glass-border: rgba(91, 74, 247, 0.1);
+  --glass-backdrop: blur(16px) saturate(1.4);
 
-  // Background colors
-  --bg-page: #f7f7f7;
+  // Light mode surfaces
+  --bg-page: #f3f1fb;
   --bg-card: #ffffff;
-  --text-primary: #3c3c3c;
-  --text-secondary: #777777;
+  --bg-surface: #f8f7ff;
+  --text-primary: #1a1630;
+  --text-secondary: #6b6882;
+
+  // Glow colors
+  --glow-primary: rgba(91, 74, 247, 0.25);
+  --glow-sakura: rgba(232, 68, 122, 0.2);
+  --glow-jade: rgba(29, 184, 122, 0.2);
+  --glow-amber: rgba(245, 158, 11, 0.2);
 }
 
-// Dark mode CSS variables
+// ============================================
+// DARK MODE
+// ============================================
 body.body--dark {
-  --glass-bg: rgba(30, 30, 30, 0.9);
-  --glass-bg-subtle: rgba(30, 30, 30, 0.7);
-  --glass-border: rgba(255, 255, 255, 0.1);
-  --shadow-card: 0 2px 4px rgba(0, 0, 0, 0.3);
-  --shadow-card-hover: 0 4px 12px rgba(0, 0, 0, 0.4);
-  --shadow-soft: 0 4px 20px rgba(0, 0, 0, 0.3);
-  --shadow-medium: 0 8px 30px rgba(0, 0, 0, 0.4);
+  --color-primary: #7b61ff;
+  --color-success: #00cc88;
+  --color-streak: #ffb347;
+  --color-error: #ff5470;
+  --color-purple: #b89aff;
+  --color-sakura: #ff6ba3;
 
-  --bg-page: #131f24;
-  --bg-card: #1e1e1e;
-  --text-primary: #ffffff;
-  --text-secondary: #afafaf;
+  --glass-bg: rgba(17, 16, 30, 0.88);
+  --glass-bg-subtle: rgba(17, 16, 30, 0.65);
+  --glass-border: rgba(123, 97, 255, 0.15);
+  --glass-backdrop: blur(20px) saturate(1.6);
+
+  --shadow-card: 0 2px 4px rgba(0, 0, 0, 0.4), 0 4px 20px rgba(0, 0, 0, 0.3);
+  --shadow-card-hover: 0 4px 8px rgba(0, 0, 0, 0.5), 0 12px 40px rgba(123, 97, 255, 0.2);
+  --shadow-soft: 0 4px 24px rgba(0, 0, 0, 0.4);
+  --shadow-medium: 0 8px 40px rgba(0, 0, 0, 0.5);
+  --shadow-button: 0 4px 16px rgba(123, 97, 255, 0.4);
+
+  --nav-item-hover-bg: rgba(123, 97, 255, 0.1);
+  --nav-item-active-bg: rgba(123, 97, 255, 0.15);
+
+  --bg-page: #080714;
+  --bg-card: #11101e;
+  --bg-surface: #161428;
+  --text-primary: #e8e4f4;
+  --text-secondary: #8b87a0;
+
+  --glow-primary: rgba(123, 97, 255, 0.35);
+  --glow-sakura: rgba(255, 107, 163, 0.25);
+  --glow-jade: rgba(0, 204, 136, 0.25);
+  --glow-amber: rgba(255, 179, 71, 0.25);
 }
 
-// Global smooth transitions
-* {
-  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+// ============================================
+// ANIMATIONS
+// ============================================
+@keyframes glow-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 8px var(--glow-primary);
+  }
+  50% {
+    box-shadow:
+      0 0 20px var(--glow-primary),
+      0 0 40px var(--glow-primary);
+  }
 }
 
-// Custom glassmorphism utility classes
+@keyframes float-gentle {
+  0%,
+  100% {
+    transform: translateY(0px) rotate(0deg);
+  }
+  33% {
+    transform: translateY(-8px) rotate(0.5deg);
+  }
+  66% {
+    transform: translateY(-4px) rotate(-0.5deg);
+  }
+}
+
+@keyframes slide-up-fade {
+  from {
+    opacity: 0;
+    transform: translateY(16px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes shimmer {
+  0% {
+    background-position: -200% center;
+  }
+  100% {
+    background-position: 200% center;
+  }
+}
+
+@keyframes gradient-flow {
+  0% {
+    background-position: 0% 50%;
+  }
+  50% {
+    background-position: 100% 50%;
+  }
+  100% {
+    background-position: 0% 50%;
+  }
+}
+
+@keyframes blob-drift {
+  0%,
+  100% {
+    transform: translate(0, 0) scale(1);
+  }
+  25% {
+    transform: translate(20px, -15px) scale(1.05);
+  }
+  50% {
+    transform: translate(-10px, 20px) scale(0.95);
+  }
+  75% {
+    transform: translate(15px, 10px) scale(1.02);
+  }
+}
+
+@keyframes entrance {
+  from {
+    opacity: 0;
+    transform: translateY(24px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+// ============================================
+// GLOBAL TRANSITIONS (targeted, not *)
+// ============================================
+a,
+button,
+.q-btn,
+.q-item,
+.nav-item,
+.stat-badge,
+.action-card,
+.game-card {
+  transition:
+    transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1),
+    box-shadow 0.25s ease,
+    background-color 0.2s ease,
+    border-color 0.2s ease,
+    color 0.2s ease,
+    opacity 0.2s ease;
+}
+
+// ============================================
+// PAGE CONTAINER
+// ============================================
+.q-page-container {
+  background-color: var(--bg-page);
+}
+
+// ============================================
+// GLASS UTILITIES
+// ============================================
 .glass-card {
   background: var(--glass-bg);
   backdrop-filter: var(--glass-backdrop);
+  -webkit-backdrop-filter: var(--glass-backdrop);
   border: 1px solid var(--glass-border);
   border-radius: var(--border-radius-md);
   box-shadow: var(--shadow-soft);
@@ -83,12 +256,11 @@ body.body--dark {
 .glass-button {
   background: var(--glass-bg);
   backdrop-filter: var(--glass-backdrop);
+  -webkit-backdrop-filter: var(--glass-backdrop);
   border: 1px solid var(--glass-border);
   border-radius: var(--border-radius-sm);
-  transition: all 0.3s ease;
 
   &:hover {
-    background: rgba(255, 255, 255, 0.35);
     transform: translateY(-2px);
     box-shadow: var(--shadow-medium);
   }
@@ -97,8 +269,6 @@ body.body--dark {
 // ============================================
 // TYPOGRAPHY UTILITIES
 // ============================================
-
-// Primary colored text (solid, not gradient)
 .text-primary-color {
   color: var(--color-primary) !important;
   font-weight: 600;
@@ -112,77 +282,80 @@ body.body--dark {
   color: var(--color-streak) !important;
 }
 
-// Legacy gradient text (kept for compatibility)
 .gradient-text {
-  background: linear-gradient(90deg, var(--color-primary), var(--color-success));
+  background: linear-gradient(135deg, var(--color-primary), var(--color-sakura));
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
   font-weight: 700;
 }
 
-// Animated background for auth pages
+// Shimmer gradient text
+.shimmer-text {
+  background: linear-gradient(
+    90deg,
+    var(--color-primary) 0%,
+    var(--color-sakura) 40%,
+    var(--color-primary) 100%
+  );
+  background-size: 200% auto;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: shimmer 3s linear infinite;
+}
+
+// ============================================
+// ANIMATED BACKGROUND
+// ============================================
 .animated-bg {
-  background: linear-gradient(135deg, #1cb0f6 0%, #0095d9 100%);
-  background-size: 200% 200%;
-  animation: gradientShift 8s ease infinite;
+  background: linear-gradient(135deg, #5b4af7 0%, #e8447a 50%, #1db87a 100%);
+  background-size: 300% 300%;
+  animation: gradient-flow 8s ease infinite;
 }
 
-@keyframes gradientShift {
-  0% {
-    background-position: 0% 50%;
-  }
-  50% {
-    background-position: 100% 50%;
-  }
-  100% {
-    background-position: 0% 50%;
-  }
-}
-
-// Enhanced card hover effects
+// ============================================
+// CARD STYLES
+// ============================================
 .modern-card {
   border-radius: var(--border-radius-md);
   box-shadow: var(--shadow-soft);
-  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  border: 1px solid var(--glass-border);
+  background: var(--bg-card);
 
   &:hover {
-    transform: translateY(-8px);
-    box-shadow: var(--shadow-strong);
-  }
-}
-
-// Floating animation for interactive elements
-@keyframes float {
-  0%,
-  100% {
-    transform: translateY(0px);
-  }
-  50% {
     transform: translateY(-6px);
+    box-shadow: var(--shadow-card-hover);
   }
 }
 
+// ============================================
+// FLOATING ANIMATION
+// ============================================
 .floating {
-  animation: float 3s ease-in-out infinite;
+  animation: float-gentle 4s ease-in-out infinite;
 }
 
-// Modern button styles
+// ============================================
+// MODERN BUTTON
+// ============================================
 .modern-btn {
   border-radius: var(--border-radius-sm);
+  font-family: 'Syne', sans-serif;
   font-weight: 600;
   text-transform: none;
-  box-shadow: var(--shadow-soft);
-  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  letter-spacing: 0.01em;
+  box-shadow: var(--shadow-button);
 
   &:hover {
     transform: translateY(-2px);
-    box-shadow: var(--shadow-medium);
+    box-shadow: 0 8px 24px var(--glow-primary);
   }
 }
 
-// Improved input styles
+// ============================================
+// INPUT STYLES
+// ============================================
 .modern-input {
   .q-field__control {
     border-radius: var(--border-radius-sm);
@@ -191,7 +364,7 @@ body.body--dark {
   }
 
   &.q-field--focused .q-field__control {
-    box-shadow: 0 0 0 2px rgba(102, 126, 234, 0.3);
+    box-shadow: 0 0 0 3px rgba(91, 74, 247, 0.2);
   }
 }
 
@@ -199,49 +372,44 @@ body.body--dark {
 // SCROLLBAR
 // ============================================
 ::-webkit-scrollbar {
-  width: 8px;
+  width: 6px;
 }
 
 ::-webkit-scrollbar-track {
-  background: rgba(0, 0, 0, 0.05);
-  border-radius: 4px;
-}
-
-body.body--dark ::-webkit-scrollbar-track {
-  background: rgba(255, 255, 255, 0.05);
+  background: transparent;
 }
 
 ::-webkit-scrollbar-thumb {
-  background: var(--color-primary);
+  background: color-mix(in srgb, var(--color-primary) 30%, transparent);
   border-radius: 4px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #0095d9;
+  background: color-mix(in srgb, var(--color-primary) 55%, transparent);
 }
 
 // ============================================
-// STAT BADGES (Duolingo-style compact stats)
+// STAT BADGES
 // ============================================
 .stat-badge {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 12px 16px;
+  gap: 10px;
+  padding: 14px 18px;
   background: var(--bg-card);
-  border-radius: var(--border-radius-md);
+  border-radius: var(--border-radius-lg);
+  border: 1px solid var(--glass-border);
   box-shadow: var(--shadow-card);
-  transition:
-    transform 0.2s,
-    box-shadow 0.2s;
 
   &:hover {
-    transform: translateY(-2px);
+    transform: translateY(-3px);
     box-shadow: var(--shadow-card-hover);
   }
 
   .stat-icon {
-    font-size: 24px;
+    font-size: 26px;
+    filter: drop-shadow(0 2px 8px currentColor);
+
     &.streak {
       color: var(--color-streak);
     }
@@ -257,96 +425,116 @@ body.body--dark ::-webkit-scrollbar-track {
   }
 
   .stat-value {
-    font-size: 1.25rem;
+    font-family: 'Syne', sans-serif;
+    font-size: 1.3rem;
     font-weight: 700;
     color: var(--text-primary);
+    line-height: 1;
   }
 
   .stat-label {
-    font-size: 0.85rem;
+    font-size: 0.75rem;
+    font-weight: 500;
     color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
   }
 }
 
 // ============================================
-// ACTION CARDS (Hybrid glass + solid icons)
+// ACTION CARDS
 // ============================================
 .action-card {
-  background: var(--glass-bg);
-  backdrop-filter: var(--glass-backdrop);
+  background: var(--bg-card);
   border: 1px solid var(--glass-border);
   border-radius: var(--border-radius-lg);
   padding: 24px;
   text-align: center;
   box-shadow: var(--shadow-card);
-  transition:
-    transform 0.2s,
-    box-shadow 0.2s;
   cursor: pointer;
+  position: relative;
+  overflow: hidden;
+
+  // Colored top accent line
+  &::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 3px;
+    border-radius: var(--border-radius-lg) var(--border-radius-lg) 0 0;
+  }
 
   &:hover {
-    transform: translateY(-4px);
+    transform: translateY(-6px);
     box-shadow: var(--shadow-card-hover);
   }
 
   .action-icon {
-    width: 64px;
-    height: 64px;
-    border-radius: var(--border-radius-full);
+    width: 60px;
+    height: 60px;
+    border-radius: var(--border-radius-md);
     display: flex;
     align-items: center;
     justify-content: center;
-    margin: 0 auto 16px;
+    margin: 0 auto 14px;
     color: white;
-    font-size: 28px;
+    font-size: 26px;
 
     &.vocab {
-      background: var(--color-vocab);
+      background: linear-gradient(135deg, #5b4af7, #7b61ff);
     }
     &.grammar {
-      background: var(--color-grammar);
+      background: linear-gradient(135deg, #e8447a, #ff6ba3);
     }
     &.chat {
-      background: var(--color-chat);
+      background: linear-gradient(135deg, #1db87a, #00cc88);
     }
     &.writing {
-      background: var(--color-writing);
+      background: linear-gradient(135deg, #9b61ff, #b89aff);
     }
   }
 
   .action-title {
-    font-size: 1.1rem;
-    font-weight: 600;
+    font-family: 'Syne', sans-serif;
+    font-size: 1rem;
+    font-weight: 700;
     color: var(--text-primary);
     margin-bottom: 4px;
+    letter-spacing: -0.01em;
   }
 
   .action-desc {
-    font-size: 0.85rem;
+    font-size: 0.8rem;
     color: var(--text-secondary);
+    line-height: 1.4;
   }
 }
 
 // ============================================
-// PROGRESS RING (Daily goal hero)
+// DAILY GOAL HERO
 // ============================================
 .daily-goal-hero {
   display: flex;
   flex-direction: column;
   align-items: center;
   padding: 32px;
-  background: var(--glass-bg);
-  backdrop-filter: var(--glass-backdrop);
+  background: var(--bg-card);
+  border: 1px solid var(--glass-border);
   border-radius: var(--border-radius-xl);
   box-shadow: var(--shadow-card);
+  position: relative;
+  overflow: hidden;
 
   .goal-content {
     text-align: center;
   }
 
   .goal-count {
+    font-family: 'Syne', sans-serif;
     font-size: 2.5rem;
-    font-weight: 700;
+    font-weight: 800;
     color: var(--color-primary);
   }
 
@@ -354,15 +542,17 @@ body.body--dark ::-webkit-scrollbar-track {
     font-size: 0.9rem;
     color: var(--text-secondary);
     margin-top: 4px;
+    font-weight: 500;
   }
 
   .start-btn {
     margin-top: 24px;
-    padding: 12px 32px;
+    padding: 12px 36px;
+    font-family: 'Syne', sans-serif;
     font-size: 1rem;
     font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
+    text-transform: none;
+    letter-spacing: 0.02em;
   }
 }
 
@@ -375,20 +565,113 @@ body.body--dark ::-webkit-scrollbar-track {
 
 .text-caption {
   color: var(--text-secondary) !important;
+  font-size: 0.8rem;
 }
 
-// Page transitions
-.page-enter-active,
+// ============================================
+// PAGE TRANSITIONS
+// ============================================
+.page-enter-active {
+  animation: entrance 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
 .page-leave-active {
-  transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
-}
-
-.page-enter-from {
-  opacity: 0;
-  transform: translateY(20px);
+  transition: all 0.25s ease;
 }
 
 .page-leave-to {
   opacity: 0;
-  transform: translateY(-20px);
+  transform: translateY(-12px);
+}
+
+// ============================================
+// AMBIENT BACKGROUND BLOBS
+// ============================================
+.ambient-layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  overflow: hidden;
+  z-index: 0;
+}
+
+.ambient-blob {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(70px);
+  opacity: 0.12;
+  will-change: transform;
+
+  &.blob-primary {
+    width: 500px;
+    height: 500px;
+    background: var(--color-primary);
+    top: -150px;
+    right: -100px;
+    animation: blob-drift 12s ease-in-out infinite;
+  }
+
+  &.blob-sakura {
+    width: 350px;
+    height: 350px;
+    background: var(--color-sakura);
+    bottom: 0;
+    left: -80px;
+    animation: blob-drift 15s ease-in-out infinite reverse;
+    animation-delay: -5s;
+  }
+
+  &.blob-jade {
+    width: 280px;
+    height: 280px;
+    background: var(--color-success);
+    top: 50%;
+    right: 20%;
+    animation: blob-drift 10s ease-in-out infinite;
+    animation-delay: -3s;
+    opacity: 0.08;
+  }
+}
+
+body.body--dark .ambient-blob {
+  opacity: 0.18;
+  filter: blur(80px);
+}
+
+// ============================================
+// KANJI DECORATIVE ELEMENTS
+// ============================================
+.kanji-deco {
+  position: absolute;
+  pointer-events: none;
+  user-select: none;
+  font-family: 'Noto Serif JP', serif;
+  font-weight: 700;
+  color: var(--color-primary);
+  opacity: 0.04;
+  z-index: 0;
+  line-height: 1;
+
+  body.body--dark & {
+    opacity: 0.06;
+  }
+}
+
+// ============================================
+// ENTRANCE ANIMATION HELPERS
+// ============================================
+.anim-enter-1 {
+  animation: entrance 0.5s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+.anim-enter-2 {
+  animation: entrance 0.5s cubic-bezier(0.34, 1.56, 0.64, 1) 0.08s both;
+}
+.anim-enter-3 {
+  animation: entrance 0.5s cubic-bezier(0.34, 1.56, 0.64, 1) 0.16s both;
+}
+.anim-enter-4 {
+  animation: entrance 0.5s cubic-bezier(0.34, 1.56, 0.64, 1) 0.24s both;
+}
+.anim-enter-5 {
+  animation: entrance 0.5s cubic-bezier(0.34, 1.56, 0.64, 1) 0.32s both;
 }

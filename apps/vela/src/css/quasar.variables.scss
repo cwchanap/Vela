@@ -1,27 +1,17 @@
 // Quasar SCSS (& Sass) Variables
 // --------------------------------------------------
-// To customize the look and feel of this app, you can override
-// the Sass/SCSS variables found in Quasar's source Sass/SCSS files.
+// Vela - Wa-Modern Japanese Learning
+// Palette inspired by Japanese aizome (indigo dyeing) and sakura aesthetics
 
-// Check documentation for full list of Quasar variables
+$primary: #5b4af7; // Deep indigo — aizome blue
+$secondary: #e8447a; // Sakura pink — secondary accent
+$accent: #1db87a; // Jade green — success/positive
+$warning: #f59e0b; // Amber gold — streaks, achievements
+$error-color: #f04b5a; // Coral red — errors, mistakes
 
-// Your own variables (that are declared here) and Quasar's own
-// ones will be available out of the box in your .vue/.scss/.sass files
+$dark: #11101e; // Deep ink blue-black for dark surfaces
+$dark-page: #080714; // Deepest ink for page background
 
-// It's highly recommended to change the default colors
-// to match your app's branding.
-// Tip: Use the "Theme Builder" on Quasar's documentation website.
-
-// Duolingo-inspired vibrant color palette
-$primary: #1cb0f6; // Vibrant blue - main brand color
-$secondary: #58cc02; // Success green - XP, correct answers
-$accent: #ff9600; // Orange - streaks, warnings
-$error-color: #ff4b4b; // Error red - mistakes, alerts
-
-$dark: #1e1e1e;
-$dark-page: #131f24; // Slightly blue-tinted dark for better contrast
-
-$positive: $secondary; // Success states
-$negative: $error-color; // Error red - mistakes, alerts
-$info: $primary; // Information states
-$warning: $accent; // Warnings, streaks
+$positive: $accent;
+$negative: $error-color;
+$info: $primary;
