@@ -50,22 +50,19 @@ function main(): void {
   }
 
   const envVars = {
-    VITE_COGNITO_USER_POOL_ID: outputs.VITE_COGNITO_USER_POOL_ID,
-    VITE_COGNITO_USER_POOL_CLIENT_ID: outputs.VITE_COGNITO_USER_POOL_CLIENT_ID,
+    VITE_COGNITO_USER_POOL_ID: outputs.CognitoUserPoolId,
+    VITE_COGNITO_USER_POOL_CLIENT_ID: outputs.CognitoUserPoolClientId,
     VITE_AWS_REGION:
-      process.env.VITE_AWS_REGION ||
-      outputs.VITE_AWS_REGION ||
-      process.env.AWS_REGION ||
-      'us-east-1',
-    VITE_API_URL: process.env.VITE_API_URL || outputs.VITE_API_URL || '/api/',
+      process.env.VITE_AWS_REGION || outputs.CognitoRegion || process.env.AWS_REGION || 'us-east-1',
+    VITE_API_URL: '/api/',
   } as const;
 
   if (!envVars.VITE_COGNITO_USER_POOL_ID) {
-    throw new Error('Missing VITE_COGNITO_USER_POOL_ID in CloudFormation outputs');
+    throw new Error('Missing CognitoUserPoolId in CloudFormation outputs');
   }
 
   if (!envVars.VITE_COGNITO_USER_POOL_CLIENT_ID) {
-    throw new Error('Missing VITE_COGNITO_USER_POOL_CLIENT_ID in CloudFormation outputs');
+    throw new Error('Missing CognitoUserPoolClientId in CloudFormation outputs');
   }
 
   const repoRoot = path.resolve(process.cwd(), '..', '..');
