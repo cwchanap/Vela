@@ -163,7 +163,7 @@
           </div>
           <div class="action-title">My Words</div>
           <div class="action-desc">Saved vocabulary</div>
-          <q-btn flat dense color="purple" class="action-btn">
+          <q-btn flat dense class="action-btn action-btn--writing">
             View <q-icon name="chevron_right" size="xs" />
           </q-btn>
         </div>
@@ -728,6 +728,10 @@ onBeforeUnmount(() => {
   font-weight: 600;
   text-transform: none;
   font-size: 0.85rem;
+}
+
+.action-btn--writing {
+  color: var(--color-purple);
 }
 
 /* ==========================================
