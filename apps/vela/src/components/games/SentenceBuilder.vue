@@ -2,7 +2,8 @@
   <div v-if="gameStore.sentenceGameActive && currentQuestion">
     <div class="q-mb-md">
       <p class="text-h6">Unscramble the sentence:</p>
-      <p class="text-body1">{{ currentQuestion.sentence.english_translation }}</p>
+      <p class="text-h5 japanese-text">{{ currentQuestion.sentence.japanese_sentence }}</p>
+      <p class="text-caption text-grey">{{ currentQuestion.sentence.english_translation }}</p>
     </div>
 
     <div class="row q-gutter-md">
@@ -240,5 +241,10 @@ watch(
 
 .cursor-pointer {
   cursor: grab;
+}
+
+.japanese-text {
+  font-family: 'Hiragino Sans', 'Noto Sans JP', sans-serif;
+  line-height: 2;
 }
 </style>

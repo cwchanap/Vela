@@ -119,11 +119,11 @@ describe('gameService', () => {
 
       questions.forEach((question) => {
         expect(question.options).toHaveLength(4);
-        expect(question.options).toContain(question.correctAnswer);
+        expect(question.options.map((o) => o.text)).toContain(question.correctAnswer);
       });
     });
 
-    it('should set the correct answer from the word translation', async () => {
+    it('should set the correct answer from the japanese_word', async () => {
       mockFetch.mockResolvedValue({
         ok: true,
         json: vi.fn().mockResolvedValue({ vocabulary: mockVocabulary }),
@@ -132,7 +132,7 @@ describe('gameService', () => {
       const questions = await gameService.getVocabularyQuestions(5);
 
       questions.forEach((question) => {
-        expect(question.correctAnswer).toBe(question.word.english_translation);
+        expect(question.correctAnswer).toBe(question.word.japanese_word);
       });
     });
 
