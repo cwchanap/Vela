@@ -158,19 +158,22 @@ async function startGame() {
             // Fetch additional random vocabulary to ensure we have enough distractors
             const additionalVocab = await gameService.getVocabularyQuestions(10, jlptFilter);
 
+            const toOption = (v: Vocabulary) => ({
+              text: v.japanese_word,
+              reading: v.hiragana,
+            });
+
             const questions = vocabulary.map((word) => {
               const otherWords = vocabulary.filter((v) => v.id !== word.id);
-              let distractors = shuffleArray(otherWords)
-                .slice(0, 3)
-                .map((v) => v.english_translation);
+              let distractors = shuffleArray(otherWords).slice(0, 3).map(toOption);
 
               // If we don't have enough distractors, fetch from additional vocabulary
               if (distractors.length < 3) {
                 const needed = 3 - distractors.length;
+                const usedTexts = new Set(distractors.map((d) => d.text));
                 const availableDistractors = additionalVocab
-                  .filter((q) => q.word.id !== word.id)
-                  .map((q) => q.word.english_translation)
-                  .filter((trans) => !distractors.includes(trans));
+                  .filter((q) => q.word.id !== word.id && !usedTexts.has(q.word.japanese_word))
+                  .map((q) => toOption(q.word));
 
                 distractors = [
                   ...distractors,
@@ -178,20 +181,27 @@ async function startGame() {
                 ];
               }
 
-              // Ensure we have exactly 3 unique distractors
-              const uniqueDistractors = [...new Set(distractors)].slice(0, 3);
+              // Ensure we have exactly 3 unique distractors by japanese_word
+              const seen = new Set<string>();
+              const uniqueDistractors = distractors
+                .filter((d) => {
+                  if (seen.has(d.text)) return false;
+                  seen.add(d.text);
+                  return true;
+                })
+                .slice(0, 3);
 
               // If still not enough, show error and fall back
               if (uniqueDistractors.length < 3) {
                 throw new Error('Insufficient vocabulary for generating questions');
               }
 
-              const options = [...uniqueDistractors, word.english_translation];
+              const options = [...uniqueDistractors, toOption(word)];
 
               return {
                 word,
                 options: shuffleArray(options),
-                correctAnswer: word.english_translation,
+                correctAnswer: word.japanese_word,
               };
             });
 

@@ -7,9 +7,17 @@ export interface SentenceQuestion {
   correctAnswer: string;
 }
 
+export interface VocabularyOption {
+  /** Japanese word text (may contain kanji) */
+  text: string;
+  /** Hiragana reading for furikana display */
+  reading?: string;
+}
+
 export interface Question {
   word: Vocabulary;
-  options: string[];
+  options: VocabularyOption[];
+  /** japanese_word value of the correct answer */
   correctAnswer: string;
 }
 

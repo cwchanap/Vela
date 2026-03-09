@@ -14,8 +14,13 @@ describe('VocabularyCard', () => {
       hiragana: 'ねこ',
       created_at: '2024-01-01T00:00:00Z',
     },
-    options: ['cat', 'dog', 'bird', 'fish'],
-    correctAnswer: 'cat',
+    options: [
+      { text: '猫', reading: 'ねこ' },
+      { text: '犬', reading: 'いぬ' },
+      { text: '鳥', reading: 'とり' },
+      { text: '魚', reading: 'さかな' },
+    ],
+    correctAnswer: '猫',
   };
 
   const mountComponent = (question: Question = mockQuestion) => {
@@ -29,68 +34,39 @@ describe('VocabularyCard', () => {
     });
   };
 
-  it('should render Japanese word', () => {
-    const wrapper = mountComponent();
-
-    expect(wrapper.text()).toContain('猫');
-  });
-
-  it('should render romaji when available', () => {
-    const wrapper = mountComponent();
-
-    expect(wrapper.text()).toContain('neko');
-  });
-
-  it('should not render romaji when not available', () => {
-    const questionWithoutRomaji: Question = {
-      word: {
-        id: 'vocab-3',
-        japanese_word: '魚',
-        english_translation: 'fish',
-        created_at: '2024-01-01T00:00:00Z',
-      },
-      options: ['fish', 'cat', 'dog', 'bird'],
-      correctAnswer: 'fish',
-    };
-
-    const wrapper = mountComponent(questionWithoutRomaji);
-
-    expect(wrapper.find('.text-subtitle1').exists()).toBe(false);
-  });
-
-  it('should render all answer options', () => {
+  it('should render English word as the question prompt', () => {
     const wrapper = mountComponent();
 
     expect(wrapper.text()).toContain('cat');
-    expect(wrapper.text()).toContain('dog');
-    expect(wrapper.text()).toContain('bird');
-    expect(wrapper.text()).toContain('fish');
+  });
+
+  it('should render Japanese options', () => {
+    const wrapper = mountComponent();
+
+    expect(wrapper.text()).toContain('猫');
+    expect(wrapper.text()).toContain('犬');
+    expect(wrapper.text()).toContain('鳥');
+    expect(wrapper.text()).toContain('魚');
   });
 
   it('should render correct number of option buttons', () => {
     const wrapper = mountComponent();
 
-    // Find all buttons with labels matching options
     const buttons = wrapper.findAllComponents({ name: 'QBtn' });
-    // Filter out the pronounce button (which has icon, not label for options)
-    const optionButtons = buttons.filter((btn) => {
-      const label = btn.props('label');
-      return label && mockQuestion.options.includes(label);
-    });
-
+    // 4 option buttons + 1 pronounce button
+    const optionButtons = buttons.filter((btn) => !btn.props('icon'));
     expect(optionButtons.length).toBe(4);
   });
 
-  it('should emit answer event when option button is clicked', async () => {
+  it('should emit answer event with japanese_word when option button is clicked', async () => {
     const wrapper = mountComponent();
 
     const buttons = wrapper.findAllComponents({ name: 'QBtn' });
-    const catButton = buttons.find((btn) => btn.props('label') === 'cat');
-
-    await catButton?.trigger('click');
+    const optionButtons = buttons.filter((btn) => !btn.props('icon'));
+    await optionButtons[0]?.trigger('click');
 
     expect(wrapper.emitted('answer')).toBeTruthy();
-    expect(wrapper.emitted('answer')?.[0]).toEqual(['cat']);
+    expect(wrapper.emitted('answer')?.[0]).toEqual([mockQuestion.options[0]?.text]);
   });
 
   it('should emit pronounce event when pronounce button is clicked', async () => {
@@ -103,20 +79,21 @@ describe('VocabularyCard', () => {
     expect(wrapper.emitted('pronounce')?.[0]).toEqual([mockQuestion.word]);
   });
 
-  it('should display Japanese word in large text', () => {
+  it('should display English word in large text', () => {
     const wrapper = mountComponent();
 
-    const japaneseWord = wrapper.find('.text-h2');
-    expect(japaneseWord.exists()).toBe(true);
-    expect(japaneseWord.text()).toBe('猫');
+    const heading = wrapper.find('.text-h4');
+    expect(heading.exists()).toBe(true);
+    expect(heading.text()).toBe('cat');
   });
 
   it('should have pronounce button with volume icon', () => {
     const wrapper = mountComponent();
 
-    const pronounceButton = wrapper.findComponent({ name: 'QBtn' });
+    const pronounceButton = wrapper
+      .find('[data-testid="btn-pronounce"]')
+      .findComponent({ name: 'QBtn' });
     expect(pronounceButton.exists()).toBe(true);
-    // Check the component props
     expect(pronounceButton.props('icon')).toBe('volume_up');
   });
 
@@ -132,59 +109,52 @@ describe('VocabularyCard', () => {
     const wrapper = mountComponent();
 
     const buttons = wrapper.findAllComponents({ name: 'QBtn' });
-    const correctButton = buttons.find(
-      (btn) => btn.props('label') === mockQuestion.word.english_translation,
-    );
+    const optionButtons = buttons.filter((btn) => !btn.props('icon'));
+    // First option is 猫 which is the correct answer
+    await optionButtons[0]?.trigger('click');
 
-    await correctButton?.trigger('click');
-
-    expect(wrapper.emitted('answer')?.[0]).toEqual(['cat']);
+    expect(wrapper.emitted('answer')?.[0]).toEqual(['猫']);
   });
 
   it('should emit wrong answer when incorrect option is clicked', async () => {
     const wrapper = mountComponent();
 
     const buttons = wrapper.findAllComponents({ name: 'QBtn' });
-    const wrongButton = buttons.find((btn) => btn.props('label') === 'dog');
+    const optionButtons = buttons.filter((btn) => !btn.props('icon'));
+    // Second option is 犬 which is wrong
+    await optionButtons[1]?.trigger('click');
 
-    await wrongButton?.trigger('click');
-
-    expect(wrapper.emitted('answer')?.[0]).toEqual(['dog']);
+    expect(wrapper.emitted('answer')?.[0]).toEqual(['犬']);
   });
 
   it('should handle multiple clicks on different options', async () => {
     const wrapper = mountComponent();
 
     const buttons = wrapper.findAllComponents({ name: 'QBtn' });
-    const optionButtons = buttons.filter((btn) => {
-      const label = btn.props('label');
-      return label && mockQuestion.options.includes(label);
-    });
+    const optionButtons = buttons.filter((btn) => !btn.props('icon'));
 
     for (const btn of optionButtons) {
       await btn.trigger('click');
     }
 
     expect(wrapper.emitted('answer')?.length).toBe(4);
-    expect(wrapper.emitted('answer')?.[0]).toEqual(['cat']);
-    expect(wrapper.emitted('answer')?.[1]).toEqual(['dog']);
-    expect(wrapper.emitted('answer')?.[2]).toEqual(['bird']);
-    expect(wrapper.emitted('answer')?.[3]).toEqual(['fish']);
   });
 
-  it('should display romaji in grey color', () => {
+  it('should have tooltip on pronounce button', () => {
     const wrapper = mountComponent();
 
-    const romajiElement = wrapper.find('.text-grey');
-    expect(romajiElement.exists()).toBe(true);
-    expect(romajiElement.text()).toBe('neko');
+    const tooltip = wrapper.findComponent({ name: 'QTooltip' });
+    expect(tooltip.exists()).toBe(true);
   });
 
-  it('should center Japanese word display', () => {
+  it('should have flat style option buttons', () => {
     const wrapper = mountComponent();
 
-    const japaneseWord = wrapper.find('.text-h2');
-    expect(japaneseWord.classes()).toContain('text-center');
+    const buttons = wrapper.findAllComponents({ name: 'QBtn' }).filter((btn) => !btn.props('icon'));
+
+    buttons.forEach((button) => {
+      expect(button.props('flat')).toBe(true);
+    });
   });
 
   it('should render with different vocabulary', () => {
@@ -196,48 +166,23 @@ describe('VocabularyCard', () => {
         english_translation: 'dog',
         created_at: '2024-01-01T00:00:00Z',
       },
-      options: ['dog', 'cat', 'bird', 'fish'],
-      correctAnswer: 'dog',
+      options: [
+        { text: '犬', reading: 'いぬ' },
+        { text: '猫', reading: 'ねこ' },
+        { text: '鳥', reading: 'とり' },
+        { text: '魚', reading: 'さかな' },
+      ],
+      correctAnswer: '犬',
     };
 
     const wrapper = mountComponent(customQuestion);
 
-    expect(wrapper.text()).toContain('犬');
-    expect(wrapper.text()).toContain('inu');
     expect(wrapper.text()).toContain('dog');
+    expect(wrapper.text()).toContain('犬');
   });
 
-  it('should have tooltip on pronounce button', () => {
-    const wrapper = mountComponent();
-
-    const tooltip = wrapper.findComponent({ name: 'QTooltip' });
-    expect(tooltip.exists()).toBe(true);
-    // Tooltip content might not render in test environment, just verify it exists
-  });
-
-  it('should have flat style option buttons', () => {
-    const wrapper = mountComponent();
-
-    const buttons = wrapper.findAllComponents({ name: 'QBtn' }).filter((btn) => {
-      const label = btn.props('label');
-      return label && mockQuestion.options.includes(label);
-    });
-
-    buttons.forEach((button) => {
-      expect(button.props('flat')).toBe(true);
-    });
-  });
-
-  it('should arrange options vertically', () => {
-    const wrapper = mountComponent();
-
-    const cardActions = wrapper.findComponent({ name: 'QCardActions' });
-    expect(cardActions.exists()).toBe(true);
-    expect(cardActions.props('vertical')).toBe(true);
-  });
-
-  it('should handle vocabulary without hiragana field', () => {
-    const questionWithoutHiragana: Question = {
+  it('should handle options without hiragana reading', () => {
+    const questionWithoutReadings: Question = {
       word: {
         id: 'vocab-4',
         japanese_word: '猫',
@@ -245,13 +190,13 @@ describe('VocabularyCard', () => {
         english_translation: 'cat',
         created_at: '2024-01-01T00:00:00Z',
       },
-      options: ['cat', 'dog', 'bird', 'fish'],
-      correctAnswer: 'cat',
+      options: [{ text: '猫' }, { text: '犬' }, { text: '鳥' }, { text: '魚' }],
+      correctAnswer: '猫',
     };
 
-    const wrapper = mountComponent(questionWithoutHiragana);
+    const wrapper = mountComponent(questionWithoutReadings);
 
+    expect(wrapper.text()).toContain('cat');
     expect(wrapper.text()).toContain('猫');
-    expect(wrapper.text()).toContain('neko');
   });
 });

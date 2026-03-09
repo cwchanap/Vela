@@ -1,4 +1,4 @@
-import type { Question, SentenceQuestion } from 'src/stores/games';
+import type { Question, SentenceQuestion, VocabularyOption } from 'src/stores/games';
 import type { Vocabulary, Sentence } from 'src/types/database';
 import { getApiUrl } from 'src/utils/api';
 import { httpJson } from 'src/utils/httpClient';
@@ -49,19 +49,26 @@ async function getVocabularyQuestions(count = 10, jlptLevels?: number[]): Promis
     const data = await httpJson<{ vocabulary: Vocabulary[] }>(getApiUrl(url));
     const vocabulary: Vocabulary[] = data.vocabulary || [];
 
-    // Create multiple choice questions
+    // Create multiple choice questions with Japanese options
+    const toOption = (v: Vocabulary): VocabularyOption => ({
+      text: v.japanese_word,
+      reading: v.hiragana,
+    });
+
     const questions: Question[] = vocabulary.map((word) => {
-      const options = vocabulary
+      const distractors: VocabularyOption[] = vocabulary
         .filter((v) => v.id !== word.id)
         .sort(() => 0.5 - Math.random())
         .slice(0, 3)
-        .map((v) => v.english_translation);
-      options.push(word.english_translation);
+        .map(toOption);
+      const options: VocabularyOption[] = [...distractors, toOption(word)].sort(
+        () => 0.5 - Math.random(),
+      );
 
       return {
-        word: word,
-        options: options.sort(() => 0.5 - Math.random()),
-        correctAnswer: word.english_translation,
+        word,
+        options,
+        correctAnswer: word.japanese_word,
       };
     });
 
