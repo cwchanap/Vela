@@ -58,3 +58,6 @@ specs/
 
 # Claude settings
 .claude/
+
+# Git worktrees
+.worktrees/
