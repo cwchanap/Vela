@@ -160,7 +160,7 @@ async function startGame() {
 
             const toOption = (v: Vocabulary) => ({
               text: v.japanese_word,
-              reading: v.hiragana,
+              ...(v.hiragana !== undefined ? { reading: v.hiragana } : {}),
             });
 
             const questions = vocabulary.map((word) => {

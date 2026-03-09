@@ -46,13 +46,18 @@ async function getVocabularyQuestions(count = 10, jlptLevels?: number[]): Promis
     if (jlptLevels && jlptLevels.length > 0) {
       url += `&jlpt=${jlptLevels.join(',')}`;
     }
-    const data = await httpJson<{ vocabulary: Vocabulary[] }>(getApiUrl(url));
-    const vocabulary: Vocabulary[] = data.vocabulary || [];
+    const data = await httpJson<{ vocabulary: Array<Vocabulary & { japanese?: string }> }>(
+      getApiUrl(url),
+    );
+    // Normalize: API may return `japanese` instead of `japanese_word`
+    const vocabulary: Vocabulary[] = (data.vocabulary || [])
+      .map((v) => ({ ...v, japanese_word: v.japanese_word || v.japanese || '' }))
+      .filter((v) => v.japanese_word);
 
     // Create multiple choice questions with Japanese options
     const toOption = (v: Vocabulary): VocabularyOption => ({
       text: v.japanese_word,
-      reading: v.hiragana,
+      ...(v.hiragana !== undefined ? { reading: v.hiragana } : {}),
     });
 
     const questions: Question[] = vocabulary.map((word) => {
