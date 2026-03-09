@@ -181,6 +181,71 @@ describe('VocabularyCard', () => {
     expect(wrapper.text()).toContain('犬');
   });
 
+  it('should render a FuriKana component for each option', () => {
+    const wrapper = mountComponent();
+
+    const furiKanaComponents = wrapper.findAllComponents({ name: 'FuriKana' });
+    expect(furiKanaComponents).toHaveLength(4);
+  });
+
+  it('should pass option text to each FuriKana component', () => {
+    const wrapper = mountComponent();
+
+    const furiKanaComponents = wrapper.findAllComponents({ name: 'FuriKana' });
+    const optionTexts = furiKanaComponents.map((c) => c.props('text'));
+    expect(optionTexts).toContain('猫');
+    expect(optionTexts).toContain('犬');
+    expect(optionTexts).toContain('鳥');
+    expect(optionTexts).toContain('魚');
+  });
+
+  it('should pass hiragana reading to each FuriKana component', () => {
+    const wrapper = mountComponent();
+
+    const furiKanaComponents = wrapper.findAllComponents({ name: 'FuriKana' });
+    const readings = furiKanaComponents.map((c) => c.props('reading'));
+    expect(readings).toContain('ねこ');
+    expect(readings).toContain('いぬ');
+    expect(readings).toContain('とり');
+    expect(readings).toContain('さかな');
+  });
+
+  it('should render ruby elements for kanji options with readings', () => {
+    const wrapper = mountComponent();
+
+    // All 4 options have kanji and readings, so all should render ruby
+    const rubyElements = wrapper.findAll('ruby');
+    expect(rubyElements.length).toBe(4);
+  });
+
+  it('should render span elements for kana options without kanji', () => {
+    const kanaQuestion: Question = {
+      word: {
+        id: 'vocab-5',
+        japanese_word: 'ねこ',
+        english_translation: 'cat',
+        created_at: '2024-01-01T00:00:00Z',
+      },
+      options: [
+        { text: 'ねこ', reading: 'ねこ' },
+        { text: 'いぬ', reading: 'いぬ' },
+        { text: 'とり', reading: 'とり' },
+        { text: 'さかな', reading: 'さかな' },
+      ],
+      correctAnswer: 'ねこ',
+    };
+
+    const wrapper = mountComponent(kanaQuestion);
+
+    // Pure kana options should not render ruby (no kanji to annotate)
+    expect(wrapper.findAll('ruby').length).toBe(0);
+
+    // Each FuriKana should render a span instead of ruby
+    const furiKanaComponents = wrapper.findAllComponents({ name: 'FuriKana' });
+    expect(furiKanaComponents.every((c) => c.find('span').exists())).toBe(true);
+    expect(furiKanaComponents.every((c) => !c.find('ruby').exists())).toBe(true);
+  });
+
   it('should handle options without hiragana reading', () => {
     const questionWithoutReadings: Question = {
       word: {

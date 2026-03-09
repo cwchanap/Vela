@@ -136,6 +136,98 @@ describe('gameService', () => {
       });
     });
 
+    it('should use japanese_word as option text', async () => {
+      mockFetch.mockResolvedValue({
+        ok: true,
+        json: vi.fn().mockResolvedValue({ vocabulary: mockVocabulary }),
+      });
+
+      const questions = await gameService.getVocabularyQuestions(5);
+
+      questions.forEach((question) => {
+        question.options.forEach((option) => {
+          expect(typeof option.text).toBe('string');
+          // Option text must be a japanese_word from the vocabulary set
+          const knownWords = mockVocabulary.map((v) => v.japanese_word);
+          expect(knownWords).toContain(option.text);
+        });
+      });
+    });
+
+    it('should include hiragana reading in option when available', async () => {
+      mockFetch.mockResolvedValue({
+        ok: true,
+        json: vi.fn().mockResolvedValue({ vocabulary: mockVocabulary }),
+      });
+
+      const questions = await gameService.getVocabularyQuestions(5);
+
+      questions.forEach((question) => {
+        question.options.forEach((option) => {
+          const source = mockVocabulary.find((v) => v.japanese_word === option.text);
+          expect(option.reading).toBe(source?.hiragana);
+        });
+      });
+    });
+
+    it('should have undefined reading for options without hiragana', async () => {
+      const vocabWithoutHiragana: Vocabulary[] = [
+        {
+          id: 'v1',
+          japanese_word: '猫',
+          english_translation: 'cat',
+          created_at: '2024-01-01T00:00:00Z',
+        },
+        {
+          id: 'v2',
+          japanese_word: '犬',
+          english_translation: 'dog',
+          created_at: '2024-01-01T00:00:00Z',
+        },
+        {
+          id: 'v3',
+          japanese_word: '鳥',
+          english_translation: 'bird',
+          created_at: '2024-01-01T00:00:00Z',
+        },
+        {
+          id: 'v4',
+          japanese_word: '魚',
+          english_translation: 'fish',
+          created_at: '2024-01-01T00:00:00Z',
+        },
+      ];
+
+      mockFetch.mockResolvedValue({
+        ok: true,
+        json: vi.fn().mockResolvedValue({ vocabulary: vocabWithoutHiragana }),
+      });
+
+      const questions = await gameService.getVocabularyQuestions(4);
+
+      questions.forEach((question) => {
+        question.options.forEach((option) => {
+          expect(option.reading).toBeUndefined();
+        });
+      });
+    });
+
+    it('should not include english_translation in options', async () => {
+      mockFetch.mockResolvedValue({
+        ok: true,
+        json: vi.fn().mockResolvedValue({ vocabulary: mockVocabulary }),
+      });
+
+      const questions = await gameService.getVocabularyQuestions(5);
+
+      const englishWords = mockVocabulary.map((v) => v.english_translation);
+      questions.forEach((question) => {
+        question.options.forEach((option) => {
+          expect(englishWords).not.toContain(option.text);
+        });
+      });
+    });
+
     it('should handle empty vocabulary response', async () => {
       mockFetch.mockResolvedValue({
         ok: true,

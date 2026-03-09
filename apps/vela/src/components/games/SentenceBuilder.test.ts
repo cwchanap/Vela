@@ -181,7 +181,32 @@ describe('SentenceBuilder', () => {
     expect(wrapper.find('.word-bank').exists()).toBe(true);
   });
 
-  it('should display English translation as hint', async () => {
+  it('should display Japanese sentence as the main prompt', async () => {
+    const gameStore = useGameStore();
+    gameStore.startSentenceGame(mockSentenceQuestions);
+
+    const wrapper = mountComponent();
+    await flushPromises();
+    await wrapper.vm.$nextTick();
+
+    const japaneseSentence = mockSentenceQuestions[0]?.sentence.japanese_sentence;
+    expect(wrapper.text()).toContain(japaneseSentence || '');
+  });
+
+  it('should render Japanese sentence in large text element', async () => {
+    const gameStore = useGameStore();
+    gameStore.startSentenceGame(mockSentenceQuestions);
+
+    const wrapper = mountComponent();
+    await flushPromises();
+    await wrapper.vm.$nextTick();
+
+    const largeText = wrapper.find('.text-h5.japanese-text');
+    expect(largeText.exists()).toBe(true);
+    expect(largeText.text()).toBe(mockSentenceQuestions[0]?.sentence.japanese_sentence);
+  });
+
+  it('should display English translation as a small hint caption', async () => {
     const gameStore = useGameStore();
     gameStore.startSentenceGame(mockSentenceQuestions);
 
@@ -191,6 +216,19 @@ describe('SentenceBuilder', () => {
 
     const englishTranslation = mockSentenceQuestions[0]?.sentence.english_translation;
     expect(wrapper.text()).toContain(englishTranslation || '');
+  });
+
+  it('should render English translation in caption style, not as primary content', async () => {
+    const gameStore = useGameStore();
+    gameStore.startSentenceGame(mockSentenceQuestions);
+
+    const wrapper = mountComponent();
+    await flushPromises();
+    await wrapper.vm.$nextTick();
+
+    const caption = wrapper.find('.text-caption.text-grey');
+    expect(caption.exists()).toBe(true);
+    expect(caption.text()).toBe(mockSentenceQuestions[0]?.sentence.english_translation);
   });
 
   it('should create drop zone for user answer', async () => {
