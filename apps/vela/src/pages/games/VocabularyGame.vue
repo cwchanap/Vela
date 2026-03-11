@@ -68,6 +68,7 @@ import { useAuthStore } from 'src/stores/auth';
 import { gameService } from '../../services/gameService';
 import { srsService } from '../../services/srsService';
 import { pronounceWord } from '../../services/ttsService';
+import { toVocabularyOption } from 'src/utils/vocabulary';
 import VocabularyCard from 'src/components/games/VocabularyCard.vue';
 import ScoreDisplay from 'src/components/games/ScoreDisplay.vue';
 import GameTimer from 'src/components/games/GameTimer.vue';
@@ -158,14 +159,9 @@ async function startGame() {
             // Fetch additional random vocabulary to ensure we have enough distractors
             const additionalVocab = await gameService.getVocabularyQuestions(10, jlptFilter);
 
-            const toOption = (v: Vocabulary) => ({
-              text: v.japanese_word,
-              ...(v.hiragana !== undefined ? { reading: v.hiragana } : {}),
-            });
-
             const questions = vocabulary.map((word) => {
               const otherWords = vocabulary.filter((v) => v.id !== word.id);
-              let distractors = shuffleArray(otherWords).slice(0, 3).map(toOption);
+              let distractors = shuffleArray(otherWords).slice(0, 3).map(toVocabularyOption);
 
               // If we don't have enough distractors, fetch from additional vocabulary
               if (distractors.length < 3) {
@@ -173,7 +169,7 @@ async function startGame() {
                 const usedTexts = new Set(distractors.map((d) => d.text));
                 const availableDistractors = additionalVocab
                   .filter((q) => q.word.id !== word.id && !usedTexts.has(q.word.japanese_word))
-                  .map((q) => toOption(q.word));
+                  .map((q) => toVocabularyOption(q.word));
 
                 distractors = [
                   ...distractors,
@@ -196,7 +192,7 @@ async function startGame() {
                 throw new Error('Insufficient vocabulary for generating questions');
               }
 
-              const options = [...uniqueDistractors, toOption(word)];
+              const options = [...uniqueDistractors, toVocabularyOption(word)];
 
               return {
                 word,
