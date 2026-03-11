@@ -142,9 +142,14 @@ async function startGame() {
         const dueResponse = await srsService.getDueItems(10, jlptFilter);
         if (dueResponse.items.length > 0) {
           // Convert due items to questions format, filtering out null vocabulary
-          const vocabulary = dueResponse.items
-            .map((item) => item.vocabulary)
-            .filter((vocab) => vocab !== null) as Vocabulary[];
+          // Normalize: API may return `japanese` instead of `japanese_word` for legacy records
+          const vocabulary = (
+            dueResponse.items
+              .map((item) => item.vocabulary)
+              .filter((vocab) => vocab !== null) as Array<Vocabulary & { japanese?: string }>
+          )
+            .map((v) => ({ ...v, japanese_word: v.japanese_word || v.japanese || '' }))
+            .filter((v) => v.japanese_word) as Vocabulary[];
 
           // Validate minimum vocabulary count
           if (vocabulary.length < 4) {
