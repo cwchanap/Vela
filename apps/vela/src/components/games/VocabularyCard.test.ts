@@ -15,12 +15,12 @@ describe('VocabularyCard', () => {
       created_at: '2024-01-01T00:00:00Z',
     },
     options: [
-      { text: '猫', reading: 'ねこ' },
-      { text: '犬', reading: 'いぬ' },
-      { text: '鳥', reading: 'とり' },
-      { text: '魚', reading: 'さかな' },
+      { id: 'vocab-1', text: '猫', reading: 'ねこ' },
+      { id: 'vocab-2', text: '犬', reading: 'いぬ' },
+      { id: 'vocab-3', text: '鳥', reading: 'とり' },
+      { id: 'vocab-4', text: '魚', reading: 'さかな' },
     ],
-    correctAnswer: '猫',
+    correctAnswer: 'vocab-1',
   };
 
   const mountComponent = (question: Question = mockQuestion) => {
@@ -58,7 +58,7 @@ describe('VocabularyCard', () => {
     expect(optionButtons.length).toBe(4);
   });
 
-  it('should emit answer event with japanese_word when option button is clicked', async () => {
+  it('should emit answer event with vocabulary id when option button is clicked', async () => {
     const wrapper = mountComponent();
 
     const buttons = wrapper.findAllComponents({ name: 'QBtn' });
@@ -66,7 +66,7 @@ describe('VocabularyCard', () => {
     await optionButtons[0]?.trigger('click');
 
     expect(wrapper.emitted('answer')).toBeTruthy();
-    expect(wrapper.emitted('answer')?.[0]).toEqual([mockQuestion.options[0]?.text]);
+    expect(wrapper.emitted('answer')?.[0]).toEqual([mockQuestion.options[0]?.id]);
   });
 
   it('should emit pronounce event when pronounce button is clicked', async () => {
@@ -114,12 +114,12 @@ describe('VocabularyCard', () => {
         created_at: '2024-01-01T00:00:00Z',
       },
       options: [
-        { text: '犬', reading: 'いぬ' },
-        { text: '猫', reading: 'ねこ' },
-        { text: '鳥', reading: 'とり' },
-        { text: '魚', reading: 'さかな' },
+        { id: 'vocab-2', text: '犬', reading: 'いぬ' },
+        { id: 'vocab-1', text: '猫', reading: 'ねこ' },
+        { id: 'vocab-3', text: '鳥', reading: 'とり' },
+        { id: 'vocab-4', text: '魚', reading: 'さかな' },
       ],
-      correctAnswer: '犬',
+      correctAnswer: 'vocab-2',
     };
 
     const wrapper = mountComponent(customQuestion);
@@ -144,7 +144,7 @@ describe('VocabularyCard', () => {
     // First option is 猫 which is the correct answer
     await optionButtons[0]?.trigger('click');
 
-    expect(wrapper.emitted('answer')?.[0]).toEqual(['猫']);
+    expect(wrapper.emitted('answer')?.[0]).toEqual(['vocab-1']);
   });
 
   it('should emit wrong answer when incorrect option is clicked', async () => {
@@ -155,7 +155,7 @@ describe('VocabularyCard', () => {
     // Second option is 犬 which is wrong
     await optionButtons[1]?.trigger('click');
 
-    expect(wrapper.emitted('answer')?.[0]).toEqual(['犬']);
+    expect(wrapper.emitted('answer')?.[0]).toEqual(['vocab-2']);
   });
 
   it('should handle multiple clicks on different options', async () => {
@@ -198,12 +198,12 @@ describe('VocabularyCard', () => {
         created_at: '2024-01-01T00:00:00Z',
       },
       options: [
-        { text: '犬', reading: 'いぬ' },
-        { text: '猫', reading: 'ねこ' },
-        { text: '鳥', reading: 'とり' },
-        { text: '魚', reading: 'さかな' },
+        { id: 'vocab-2', text: '犬', reading: 'いぬ' },
+        { id: 'vocab-1', text: '猫', reading: 'ねこ' },
+        { id: 'vocab-3', text: '鳥', reading: 'とり' },
+        { id: 'vocab-4', text: '魚', reading: 'さかな' },
       ],
-      correctAnswer: '犬',
+      correctAnswer: 'vocab-2',
     };
 
     const wrapper = mountComponent(customQuestion);
@@ -258,12 +258,12 @@ describe('VocabularyCard', () => {
         created_at: '2024-01-01T00:00:00Z',
       },
       options: [
-        { text: 'ねこ', reading: 'ねこ' },
-        { text: 'いぬ', reading: 'いぬ' },
-        { text: 'とり', reading: 'とり' },
-        { text: 'さかな', reading: 'さかな' },
+        { id: 'vocab-5', text: 'ねこ', reading: 'ねこ' },
+        { id: 'vocab-6', text: 'いぬ', reading: 'いぬ' },
+        { id: 'vocab-7', text: 'とり', reading: 'とり' },
+        { id: 'vocab-8', text: 'さかな', reading: 'さかな' },
       ],
-      correctAnswer: 'ねこ',
+      correctAnswer: 'vocab-5',
     };
 
     const wrapper = mountComponent(kanaQuestion);
@@ -286,8 +286,13 @@ describe('VocabularyCard', () => {
         english_translation: 'cat',
         created_at: '2024-01-01T00:00:00Z',
       },
-      options: [{ text: '猫' }, { text: '犬' }, { text: '鳥' }, { text: '魚' }],
-      correctAnswer: '猫',
+      options: [
+        { id: 'vocab-1', text: '猫' },
+        { id: 'vocab-2', text: '犬' },
+        { id: 'vocab-3', text: '鳥' },
+        { id: 'vocab-4', text: '魚' },
+      ],
+      correctAnswer: 'vocab-1',
     };
 
     const wrapper = mountComponent(questionWithoutReadings);

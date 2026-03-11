@@ -119,11 +119,11 @@ describe('gameService', () => {
 
       questions.forEach((question) => {
         expect(question.options).toHaveLength(4);
-        expect(question.options.map((o) => o.text)).toContain(question.correctAnswer);
+        expect(question.options.map((o) => o.id)).toContain(question.correctAnswer);
       });
     });
 
-    it('should set the correct answer from the japanese_word', async () => {
+    it('should set the correct answer from the vocabulary id', async () => {
       mockFetch.mockResolvedValue({
         ok: true,
         json: vi.fn().mockResolvedValue({ vocabulary: mockVocabulary }),
@@ -132,8 +132,62 @@ describe('gameService', () => {
       const questions = await gameService.getVocabularyQuestions(5);
 
       questions.forEach((question) => {
-        expect(question.correctAnswer).toBe(question.word.japanese_word);
+        expect(question.correctAnswer).toBe(question.word.id);
       });
+    });
+
+    it('should exclude duplicate japanese_word distractors and the correct text', async () => {
+      const vocabularyWithDuplicateText: Vocabulary[] = [
+        {
+          id: 'vocab-1',
+          japanese_word: '猫',
+          hiragana: 'ねこ',
+          english_translation: 'cat',
+          created_at: '2024-01-01T00:00:00Z',
+        },
+        {
+          id: 'vocab-2',
+          japanese_word: '猫',
+          hiragana: 'ねこ',
+          english_translation: 'kitten',
+          created_at: '2024-01-01T00:00:00Z',
+        },
+        {
+          id: 'vocab-3',
+          japanese_word: '犬',
+          hiragana: 'いぬ',
+          english_translation: 'dog',
+          created_at: '2024-01-01T00:00:00Z',
+        },
+        {
+          id: 'vocab-4',
+          japanese_word: '鳥',
+          hiragana: 'とり',
+          english_translation: 'bird',
+          created_at: '2024-01-01T00:00:00Z',
+        },
+        {
+          id: 'vocab-5',
+          japanese_word: '魚',
+          hiragana: 'さかな',
+          english_translation: 'fish',
+          created_at: '2024-01-01T00:00:00Z',
+        },
+      ];
+
+      mockFetch.mockResolvedValue({
+        ok: true,
+        json: vi.fn().mockResolvedValue({ vocabulary: vocabularyWithDuplicateText }),
+      });
+
+      const questions = await gameService.getVocabularyQuestions(5);
+      const catQuestion = questions.find((question) => question.word.id === 'vocab-1');
+
+      expect(catQuestion).toBeDefined();
+      expect(catQuestion?.options.map((option) => option.text)).toEqual(
+        expect.arrayContaining(['猫', '犬', '鳥', '魚']),
+      );
+      expect(catQuestion?.options.filter((option) => option.text === '猫')).toHaveLength(1);
     });
 
     it('should use japanese_word as option text', async () => {

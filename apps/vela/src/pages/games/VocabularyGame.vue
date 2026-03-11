@@ -166,7 +166,7 @@ async function startGame() {
               // If we don't have enough distractors, fetch from additional vocabulary
               if (distractors.length < 3) {
                 const needed = 3 - distractors.length;
-                const usedTexts = new Set(distractors.map((d) => d.text));
+                const usedTexts = new Set([word.japanese_word, ...distractors.map((d) => d.text)]);
                 const availableDistractors = additionalVocab
                   .filter((q) => q.word.id !== word.id && !usedTexts.has(q.word.japanese_word))
                   .map((q) => toVocabularyOption(q.word));
@@ -178,7 +178,7 @@ async function startGame() {
               }
 
               // Ensure we have exactly 3 unique distractors by japanese_word
-              const seen = new Set<string>();
+              const seen = new Set<string>([word.japanese_word]);
               const uniqueDistractors = distractors
                 .filter((d) => {
                   if (seen.has(d.text)) return false;

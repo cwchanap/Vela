@@ -12,7 +12,7 @@ export interface VocabularyOption {
   id: string;
   /** Japanese word text (may contain kanji) */
   text: string;
-  /** Hiragana reading for furikana display */
+  /** Hiragana reading for furigana display */
   reading?: string;
 }
 
