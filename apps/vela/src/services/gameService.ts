@@ -69,7 +69,7 @@ async function getVocabularyQuestions(count = 10, jlptLevels?: number[]): Promis
       return {
         word,
         options,
-        correctAnswer: word.japanese_word,
+        correctAnswer: word.id,
       };
     });
 

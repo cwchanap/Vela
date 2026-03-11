@@ -8,6 +8,8 @@ export interface SentenceQuestion {
 }
 
 export interface VocabularyOption {
+  /** Unique identifier for the vocabulary item */
+  id: string;
   /** Japanese word text (may contain kanji) */
   text: string;
   /** Hiragana reading for furikana display */
@@ -17,7 +19,7 @@ export interface VocabularyOption {
 export interface Question {
   word: Vocabulary;
   options: VocabularyOption[];
-  /** japanese_word value of the correct answer */
+  /** id of the correct answer vocabulary */
   correctAnswer: string;
 }
 
