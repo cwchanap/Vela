@@ -12,7 +12,7 @@
     <q-separator />
 
     <q-card-section class="row q-col-gutter-sm">
-      <div v-for="option in question.options" :key="option.text" class="col-6">
+      <div v-for="(option, index) in question.options" :key="index" class="col-6">
         <q-btn @click="$emit('answer', option.text)" flat bordered class="full-width option-btn">
           <furi-kana
             :text="option.text"
@@ -32,6 +32,7 @@
         dense
         icon="volume_up"
         color="primary"
+        :aria-label="`Pronounce ${question.word.japanese_word}`"
         @click="$emit('pronounce', question.word)"
         data-testid="btn-pronounce"
       >

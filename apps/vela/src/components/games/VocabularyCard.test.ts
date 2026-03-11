@@ -97,6 +97,37 @@ describe('VocabularyCard', () => {
     expect(pronounceButton.props('icon')).toBe('volume_up');
   });
 
+  it('should have aria-label on pronounce button', () => {
+    const wrapper = mountComponent();
+
+    const pronounceButton = wrapper.find('[data-testid="btn-pronounce"]');
+    expect(pronounceButton.attributes('aria-label')).toBe('Pronounce 猫');
+  });
+
+  it('should have dynamic aria-label with Japanese word', () => {
+    const customQuestion: Question = {
+      word: {
+        id: 'vocab-2',
+        japanese_word: '犬',
+        romaji: 'inu',
+        english_translation: 'dog',
+        created_at: '2024-01-01T00:00:00Z',
+      },
+      options: [
+        { text: '犬', reading: 'いぬ' },
+        { text: '猫', reading: 'ねこ' },
+        { text: '鳥', reading: 'とり' },
+        { text: '魚', reading: 'さかな' },
+      ],
+      correctAnswer: '犬',
+    };
+
+    const wrapper = mountComponent(customQuestion);
+
+    const pronounceButton = wrapper.find('[data-testid="btn-pronounce"]');
+    expect(pronounceButton.attributes('aria-label')).toBe('Pronounce 犬');
+  });
+
   it('should render card with proper structure', () => {
     const wrapper = mountComponent();
 

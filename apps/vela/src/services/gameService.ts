@@ -2,6 +2,7 @@ import type { Question, SentenceQuestion, VocabularyOption } from 'src/stores/ga
 import type { Vocabulary, Sentence } from 'src/types/database';
 import { getApiUrl } from 'src/utils/api';
 import { httpJson } from 'src/utils/httpClient';
+import { toVocabularyOption } from 'src/utils/vocabulary';
 
 function shuffle<T>(array: T[]): T[] {
   let currentIndex = array.length,
@@ -55,18 +56,13 @@ async function getVocabularyQuestions(count = 10, jlptLevels?: number[]): Promis
       .filter((v) => v.japanese_word);
 
     // Create multiple choice questions with Japanese options
-    const toOption = (v: Vocabulary): VocabularyOption => ({
-      text: v.japanese_word,
-      ...(v.hiragana !== undefined ? { reading: v.hiragana } : {}),
-    });
-
     const questions: Question[] = vocabulary.map((word) => {
       const distractors: VocabularyOption[] = vocabulary
         .filter((v) => v.id !== word.id)
         .sort(() => 0.5 - Math.random())
         .slice(0, 3)
-        .map(toOption);
-      const options: VocabularyOption[] = [...distractors, toOption(word)].sort(
+        .map(toVocabularyOption);
+      const options: VocabularyOption[] = [...distractors, toVocabularyOption(word)].sort(
         () => 0.5 - Math.random(),
       );
 
