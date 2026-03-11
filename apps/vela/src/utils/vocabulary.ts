@@ -10,6 +10,7 @@ import type { Vocabulary } from 'src/types/database';
  */
 export function toVocabularyOption(vocabulary: Vocabulary): VocabularyOption {
   return {
+    id: vocabulary.id,
     text: vocabulary.japanese_word,
     ...(vocabulary.hiragana !== undefined ? { reading: vocabulary.hiragana } : {}),
   };

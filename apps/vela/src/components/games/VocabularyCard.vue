@@ -12,8 +12,8 @@
     <q-separator />
 
     <q-card-section class="row q-col-gutter-sm">
-      <div v-for="(option, index) in question.options" :key="index" class="col-6">
-        <q-btn @click="$emit('answer', option.text)" flat bordered class="full-width option-btn">
+      <div v-for="option in question.options" :key="option.id" class="col-6">
+        <q-btn @click="$emit('answer', option.id)" flat bordered class="full-width option-btn">
           <furi-kana
             :text="option.text"
             v-bind="option.reading !== undefined ? { reading: option.reading } : {}"
@@ -51,7 +51,7 @@ defineProps<{
 }>();
 
 defineEmits<{
-  (_e: 'answer', _answer: string): void;
+  (_e: 'answer', _vocabularyId: string): void;
   (_e: 'pronounce', _word: Question['word']): void;
 }>();
 </script>

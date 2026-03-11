@@ -197,7 +197,7 @@ async function startGame() {
               return {
                 word,
                 options: shuffleArray(options),
-                correctAnswer: word.japanese_word,
+                correctAnswer: word.id,
               };
             });
 
@@ -247,10 +247,10 @@ async function startGame() {
   }
 }
 
-async function handleAnswer(selectedAnswer: string) {
+async function handleAnswer(selectedVocabularyId: string) {
   if (!currentQuestion.value) return;
 
-  const isCorrect = selectedAnswer === currentQuestion.value.correctAnswer;
+  const isCorrect = selectedVocabularyId === currentQuestion.value.correctAnswer;
 
   if (isCorrect) {
     correctAnswers.value++;
