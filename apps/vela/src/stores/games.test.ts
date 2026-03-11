@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { setActivePinia, createPinia } from 'pinia';
 import { useGameStore } from './games';
+import type { Question } from './games';
 
 const mockVocab = {
   id: 'v1',
@@ -12,9 +13,14 @@ const mockVocab = {
   created_at: '2024-01-01T00:00:00Z',
 };
 
-const makeQuestion = (answer = 'cat') => ({
+const makeQuestion = (answer = 'v1'): Question => ({
   word: mockVocab,
-  options: ['cat', 'dog', 'bird', 'fish'],
+  options: [
+    { id: 'v1', text: '猫', reading: 'ねこ' },
+    { id: 'v2', text: '犬', reading: 'いぬ' },
+    { id: 'v3', text: '鳥', reading: 'とり' },
+    { id: 'v4', text: '魚', reading: 'さかな' },
+  ],
   correctAnswer: answer,
 });
 

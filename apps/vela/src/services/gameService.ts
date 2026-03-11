@@ -57,14 +57,26 @@ async function getVocabularyQuestions(count = 10, jlptLevels?: number[]): Promis
 
     // Create multiple choice questions with Japanese options
     const questions: Question[] = vocabulary.map((word) => {
-      const distractors: VocabularyOption[] = vocabulary
-        .filter((v) => v.id !== word.id)
-        .sort(() => 0.5 - Math.random())
-        .slice(0, 3)
-        .map(toVocabularyOption);
-      const options: VocabularyOption[] = [...distractors, toVocabularyOption(word)].sort(
-        () => 0.5 - Math.random(),
+      const distractorPool = shuffle(
+        vocabulary.filter((v) => v.id !== word.id && v.japanese_word !== word.japanese_word),
       );
+      const seenTexts = new Set<string>();
+      const distractors: VocabularyOption[] = [];
+
+      for (const candidate of distractorPool) {
+        if (seenTexts.has(candidate.japanese_word)) {
+          continue;
+        }
+
+        seenTexts.add(candidate.japanese_word);
+        distractors.push(toVocabularyOption(candidate));
+
+        if (distractors.length === 3) {
+          break;
+        }
+      }
+
+      const options: VocabularyOption[] = shuffle([...distractors, toVocabularyOption(word)]);
 
       return {
         word,
