@@ -49,6 +49,7 @@ describe('AIChatPage', () => {
   let notifyCreateSpy: ReturnType<typeof vi.fn>;
   let queryClient: QueryClient;
   let originalFetch: typeof global.fetch;
+  let wrapper: { unmount: () => void } | null = null;
 
   beforeEach(() => {
     // Create fresh Pinia instance for test isolation
@@ -99,6 +100,8 @@ describe('AIChatPage', () => {
   });
 
   afterEach(() => {
+    wrapper?.unmount();
+    wrapper = null;
     queryClient.clear();
     vi.restoreAllMocks();
     // Restore original fetch to prevent test pollution
@@ -221,6 +224,7 @@ describe('AIChatPage', () => {
   };
 
   const mountComponent = (props = {}) => {
+    wrapper?.unmount();
     const mockQuasarInstance = {
       notify: notifyCreateSpy,
       platform: {
@@ -240,7 +244,7 @@ describe('AIChatPage', () => {
       },
     };
 
-    return mount(AIChatPage, {
+    wrapper = mount(AIChatPage, {
       global: {
         plugins: [
           [
@@ -272,6 +276,7 @@ describe('AIChatPage', () => {
       },
       props,
     });
+    return wrapper;
   };
 
   describe('Initial Rendering', () => {
