@@ -218,10 +218,52 @@ describe('gameService', () => {
 
       questions.forEach((question) => {
         question.options.forEach((option) => {
-          const source = mockVocabulary.find((v) => v.japanese_word === option.text);
-          expect(option.reading).toBe(source?.hiragana);
+          const sourceVocabulary = mockVocabulary.find((v) => v.id === option.id);
+          expect(option.reading).toBe(sourceVocabulary?.hiragana);
         });
       });
+    });
+
+    it('should skip questions that cannot produce 4 unique options', async () => {
+      const insufficientVocabulary: Vocabulary[] = [
+        {
+          id: 'vocab-1',
+          japanese_word: '猫',
+          hiragana: 'ねこ',
+          english_translation: 'cat',
+          created_at: '2024-01-01T00:00:00Z',
+        },
+        {
+          id: 'vocab-2',
+          japanese_word: '猫',
+          hiragana: 'ねこ',
+          english_translation: 'kitten',
+          created_at: '2024-01-01T00:00:00Z',
+        },
+        {
+          id: 'vocab-3',
+          japanese_word: '犬',
+          hiragana: 'いぬ',
+          english_translation: 'dog',
+          created_at: '2024-01-01T00:00:00Z',
+        },
+        {
+          id: 'vocab-4',
+          japanese_word: '鳥',
+          hiragana: 'とり',
+          english_translation: 'bird',
+          created_at: '2024-01-01T00:00:00Z',
+        },
+      ];
+
+      mockFetch.mockResolvedValue({
+        ok: true,
+        json: vi.fn().mockResolvedValue({ vocabulary: insufficientVocabulary }),
+      });
+
+      const questions = await gameService.getVocabularyQuestions(4);
+
+      expect(questions).toEqual([]);
     });
 
     it('should have undefined reading for options without hiragana', async () => {

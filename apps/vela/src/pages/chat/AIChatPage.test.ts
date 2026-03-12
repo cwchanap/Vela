@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { mount, flushPromises } from '@vue/test-utils';
+import { mount, flushPromises, type VueWrapper } from '@vue/test-utils';
 import { createPinia, setActivePinia } from 'pinia';
 import { Quasar, Notify } from 'quasar';
 import { VueQueryPlugin, QueryClient } from '@tanstack/vue-query';
@@ -49,7 +49,7 @@ describe('AIChatPage', () => {
   let notifyCreateSpy: ReturnType<typeof vi.fn>;
   let queryClient: QueryClient;
   let originalFetch: typeof global.fetch;
-  let wrapper: { unmount: () => void } | null = null;
+  let wrapper: VueWrapper<any> | null = null;
 
   beforeEach(() => {
     // Create fresh Pinia instance for test isolation
@@ -223,7 +223,7 @@ describe('AIChatPage', () => {
     } as Awaited<ReturnType<typeof awsAmplify.fetchAuthSession>>);
   };
 
-  const mountComponent = (props = {}) => {
+  const mountComponent = (props = {}): VueWrapper<any> => {
     wrapper?.unmount();
     const mockQuasarInstance = {
       notify: notifyCreateSpy,
@@ -244,7 +244,7 @@ describe('AIChatPage', () => {
       },
     };
 
-    wrapper = mount(AIChatPage, {
+    const mountedWrapper = mount(AIChatPage, {
       global: {
         plugins: [
           [
@@ -276,7 +276,8 @@ describe('AIChatPage', () => {
       },
       props,
     });
-    return wrapper;
+    wrapper = mountedWrapper;
+    return mountedWrapper;
   };
 
   describe('Initial Rendering', () => {

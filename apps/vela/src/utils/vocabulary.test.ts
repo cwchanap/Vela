@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { toVocabularyOption } from './vocabulary';
+import { normalizeVocabulary, toVocabularyOption } from './vocabulary';
 import type { Vocabulary } from 'src/types/database';
 
 describe('toVocabularyOption', () => {
@@ -106,7 +106,37 @@ describe('toVocabularyOption', () => {
     const result = toVocabularyOption(vocab);
 
     expect(result.text).toBe('猫');
-    // Empty string should not be included as reading
-    expect(result.reading).toBe('');
+    // Omit result.reading when hiragana is blank so consumers do not receive a meaningless empty reading.
+    expect(result.reading).toBeUndefined();
+  });
+});
+
+describe('normalizeVocabulary', () => {
+  it('should populate japanese_word from the legacy japanese field', () => {
+    const result = normalizeVocabulary({
+      id: 'vocab-legacy',
+      japanese_word: '',
+      japanese: '猫',
+      english_translation: 'cat',
+      created_at: '2024-01-01T00:00:00Z',
+    });
+
+    expect(result).toEqual({
+      id: 'vocab-legacy',
+      japanese_word: '猫',
+      english_translation: 'cat',
+      created_at: '2024-01-01T00:00:00Z',
+    });
+  });
+
+  it('should return null when japanese_word and japanese are both missing', () => {
+    const result = normalizeVocabulary({
+      id: 'vocab-empty',
+      japanese_word: '',
+      english_translation: 'cat',
+      created_at: '2024-01-01T00:00:00Z',
+    });
+
+    expect(result).toBeNull();
   });
 });

@@ -34,6 +34,9 @@ describe('VocabularyCard', () => {
     });
   };
 
+  const findAnswerButtons = (wrapper: ReturnType<typeof mountComponent>) =>
+    wrapper.findAll('[data-testid="answer-button"]');
+
   it('should render English word as the question prompt', () => {
     const wrapper = mountComponent();
 
@@ -52,17 +55,14 @@ describe('VocabularyCard', () => {
   it('should render correct number of option buttons', () => {
     const wrapper = mountComponent();
 
-    const buttons = wrapper.findAllComponents({ name: 'QBtn' });
-    // 4 option buttons + 1 pronounce button
-    const optionButtons = buttons.filter((btn) => !btn.props('icon'));
+    const optionButtons = findAnswerButtons(wrapper);
     expect(optionButtons.length).toBe(4);
   });
 
   it('should emit answer event with vocabulary id when option button is clicked', async () => {
     const wrapper = mountComponent();
 
-    const buttons = wrapper.findAllComponents({ name: 'QBtn' });
-    const optionButtons = buttons.filter((btn) => !btn.props('icon'));
+    const optionButtons = findAnswerButtons(wrapper);
     await optionButtons[0]?.trigger('click');
 
     expect(wrapper.emitted('answer')).toBeTruthy();
@@ -139,8 +139,7 @@ describe('VocabularyCard', () => {
   it('should emit correct answer when correct option is clicked', async () => {
     const wrapper = mountComponent();
 
-    const buttons = wrapper.findAllComponents({ name: 'QBtn' });
-    const optionButtons = buttons.filter((btn) => !btn.props('icon'));
+    const optionButtons = findAnswerButtons(wrapper);
     // First option is 猫 which is the correct answer
     await optionButtons[0]?.trigger('click');
 
@@ -150,8 +149,7 @@ describe('VocabularyCard', () => {
   it('should emit wrong answer when incorrect option is clicked', async () => {
     const wrapper = mountComponent();
 
-    const buttons = wrapper.findAllComponents({ name: 'QBtn' });
-    const optionButtons = buttons.filter((btn) => !btn.props('icon'));
+    const optionButtons = findAnswerButtons(wrapper);
     // Second option is 犬 which is wrong
     await optionButtons[1]?.trigger('click');
 
@@ -161,8 +159,7 @@ describe('VocabularyCard', () => {
   it('should handle multiple clicks on different options', async () => {
     const wrapper = mountComponent();
 
-    const buttons = wrapper.findAllComponents({ name: 'QBtn' });
-    const optionButtons = buttons.filter((btn) => !btn.props('icon'));
+    const optionButtons = findAnswerButtons(wrapper);
 
     for (const btn of optionButtons) {
       await btn.trigger('click');
@@ -181,10 +178,10 @@ describe('VocabularyCard', () => {
   it('should have flat style option buttons', () => {
     const wrapper = mountComponent();
 
-    const buttons = wrapper.findAllComponents({ name: 'QBtn' }).filter((btn) => !btn.props('icon'));
+    const optionButtons = findAnswerButtons(wrapper);
 
-    buttons.forEach((button) => {
-      expect(button.props('flat')).toBe(true);
+    optionButtons.forEach((button) => {
+      expect(button.classes()).toContain('q-btn--flat');
     });
   });
 

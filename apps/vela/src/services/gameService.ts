@@ -2,7 +2,7 @@ import type { Question, SentenceQuestion, VocabularyOption } from 'src/stores/ga
 import type { Vocabulary, Sentence } from 'src/types/database';
 import { getApiUrl } from 'src/utils/api';
 import { httpJson } from 'src/utils/httpClient';
-import { toVocabularyOption } from 'src/utils/vocabulary';
+import { normalizeVocabulary, toVocabularyOption } from 'src/utils/vocabulary';
 
 function shuffle<T>(array: T[]): T[] {
   let currentIndex = array.length,
@@ -50,40 +50,65 @@ async function getVocabularyQuestions(count = 10, jlptLevels?: number[]): Promis
     const data = await httpJson<{ vocabulary: Array<Vocabulary & { japanese?: string }> }>(
       getApiUrl(url),
     );
-    // Normalize: API may return `japanese` instead of `japanese_word`
     const vocabulary: Vocabulary[] = (data.vocabulary || [])
-      .map((v) => ({ ...v, japanese_word: v.japanese_word || v.japanese || '' }))
-      .filter((v) => v.japanese_word);
+      .map(normalizeVocabulary)
+      .filter((word): word is Vocabulary => word !== null);
 
     // Create multiple choice questions with Japanese options
-    const questions: Question[] = vocabulary.map((word) => {
-      const distractorPool = shuffle(
-        vocabulary.filter((v) => v.id !== word.id && v.japanese_word !== word.japanese_word),
-      );
-      const seenTexts = new Set<string>();
-      const distractors: VocabularyOption[] = [];
+    const questions: Question[] = vocabulary
+      .map((word) => {
+        const distractorPool = shuffle(
+          vocabulary.filter((v) => v.id !== word.id && v.japanese_word !== word.japanese_word),
+        );
+        const seenTexts = new Set<string>([word.japanese_word]);
+        const distractors: VocabularyOption[] = [];
 
-      for (const candidate of distractorPool) {
-        if (seenTexts.has(candidate.japanese_word)) {
-          continue;
+        for (const candidate of distractorPool) {
+          if (seenTexts.has(candidate.japanese_word)) {
+            continue;
+          }
+
+          seenTexts.add(candidate.japanese_word);
+          distractors.push(toVocabularyOption(candidate));
+
+          if (distractors.length === 3) {
+            break;
+          }
         }
 
-        seenTexts.add(candidate.japanese_word);
-        distractors.push(toVocabularyOption(candidate));
+        if (distractors.length < 3) {
+          const remainingVocabulary = shuffle(
+            vocabulary.filter(
+              (candidate) =>
+                candidate.id !== word.id &&
+                candidate.japanese_word !== word.japanese_word &&
+                !seenTexts.has(candidate.japanese_word),
+            ),
+          );
 
-        if (distractors.length === 3) {
-          break;
+          for (const candidate of remainingVocabulary) {
+            seenTexts.add(candidate.japanese_word);
+            distractors.push(toVocabularyOption(candidate));
+
+            if (distractors.length === 3) {
+              break;
+            }
+          }
         }
-      }
 
-      const options: VocabularyOption[] = shuffle([...distractors, toVocabularyOption(word)]);
+        if (distractors.length < 3) {
+          return null;
+        }
 
-      return {
-        word,
-        options,
-        correctAnswer: word.id,
-      };
-    });
+        const options: VocabularyOption[] = shuffle([...distractors, toVocabularyOption(word)]);
+
+        return {
+          word,
+          options,
+          correctAnswer: word.id,
+        };
+      })
+      .filter((question): question is Question => question !== null);
 
     return questions;
   } catch (error) {
