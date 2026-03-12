@@ -6,34 +6,79 @@ import { vi } from 'vitest';
 // Quasar's @quasar/vite-plugin passes --localstorage-file to jsdom without a
 // valid path, which produces a broken localStorage object whose getItem/setItem
 // are not functions. Override it here before any store is initialised.
+const storageData = new WeakMap<Storage, Record<string, string>>();
+
+const getStorageData = (storage: Storage) => {
+  const existingData = storageData.get(storage);
+
+  if (existingData) {
+    return existingData;
+  }
+
+  const nextData: Record<string, string> = {};
+  storageData.set(storage, nextData);
+  return nextData;
+};
+
+Object.defineProperties(Storage.prototype, {
+  getItem: {
+    configurable: true,
+    value(key: string) {
+      return getStorageData(this as Storage)[key] ?? null;
+    },
+  },
+  setItem: {
+    configurable: true,
+    writable: true,
+    value(key: string, value: string) {
+      getStorageData(this as Storage)[key] = String(value);
+    },
+  },
+  removeItem: {
+    configurable: true,
+    writable: true,
+    value(key: string) {
+      delete getStorageData(this as Storage)[key];
+    },
+  },
+  clear: {
+    configurable: true,
+    writable: true,
+    value() {
+      storageData.set(this as Storage, {});
+    },
+  },
+  length: {
+    configurable: true,
+    get() {
+      return Object.keys(getStorageData(this as Storage)).length;
+    },
+  },
+  key: {
+    configurable: true,
+    writable: true,
+    value(index: number) {
+      return Object.keys(getStorageData(this as Storage))[index] ?? null;
+    },
+  },
+});
+
 const makeStorageMock = () => {
-  let store: Record<string, string> = {};
-  return {
-    getItem: (key: string) => store[key] ?? null,
-    setItem: (key: string, value: string) => {
-      store[key] = String(value);
-    },
-    removeItem: (key: string) => {
-      delete store[key];
-    },
-    clear: () => {
-      store = {};
-    },
-    get length() {
-      return Object.keys(store).length;
-    },
-    key: (index: number) => Object.keys(store)[index] ?? null,
-  };
+  const storage = Object.create(Storage.prototype) as Storage;
+  storageData.set(storage, {});
+  return storage;
 };
 
 Object.defineProperty(window, 'localStorage', {
   value: makeStorageMock(),
   writable: true,
+  configurable: true,
 });
 
 Object.defineProperty(window, 'sessionStorage', {
   value: makeStorageMock(),
   writable: true,
+  configurable: true,
 });
 
 // Mock window.scrollTo

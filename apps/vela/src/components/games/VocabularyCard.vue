@@ -13,7 +13,13 @@
 
     <q-card-section class="row q-col-gutter-sm">
       <div v-for="option in question.options" :key="option.id" class="col-6">
-        <q-btn @click="$emit('answer', option.id)" flat outline class="full-width option-btn">
+        <q-btn
+          @click="$emit('answer', option.id)"
+          flat
+          outline
+          class="full-width option-btn"
+          data-testid="answer-button"
+        >
           <furi-kana
             :text="option.text"
             v-bind="option.reading !== undefined ? { reading: option.reading } : {}"

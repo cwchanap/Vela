@@ -68,7 +68,7 @@ import { useAuthStore } from 'src/stores/auth';
 import { gameService } from '../../services/gameService';
 import { srsService } from '../../services/srsService';
 import { pronounceWord } from '../../services/ttsService';
-import { toVocabularyOption } from 'src/utils/vocabulary';
+import { normalizeVocabulary, toVocabularyOption } from 'src/utils/vocabulary';
 import VocabularyCard from 'src/components/games/VocabularyCard.vue';
 import ScoreDisplay from 'src/components/games/ScoreDisplay.vue';
 import GameTimer from 'src/components/games/GameTimer.vue';
@@ -143,13 +143,11 @@ async function startGame() {
         if (dueResponse.items.length > 0) {
           // Convert due items to questions format, filtering out null vocabulary
           // Normalize: API may return `japanese` instead of `japanese_word` for legacy records
-          const vocabulary = (
-            dueResponse.items
-              .map((item) => item.vocabulary)
-              .filter((vocab) => vocab !== null) as Array<Vocabulary & { japanese?: string }>
-          )
-            .map((v) => ({ ...v, japanese_word: v.japanese_word || v.japanese || '' }))
-            .filter((v) => v.japanese_word) as Vocabulary[];
+          const vocabulary = dueResponse.items
+            .map((item) => item.vocabulary)
+            .filter((vocab): vocab is Vocabulary & { japanese?: string } => vocab !== null)
+            .map(normalizeVocabulary)
+            .filter((vocab): vocab is Vocabulary => vocab !== null);
 
           // Validate minimum vocabulary count
           if (vocabulary.length < 4) {

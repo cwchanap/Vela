@@ -13,7 +13,7 @@ const mockVocab = {
   created_at: '2024-01-01T00:00:00Z',
 };
 
-const makeQuestion = (answer = 'v1'): Question => ({
+const makeQuestion = (correctAnswerId: Question['correctAnswer'] = 'v1'): Question => ({
   word: mockVocab,
   options: [
     { id: 'v1', text: '猫', reading: 'ねこ' },
@@ -21,7 +21,7 @@ const makeQuestion = (answer = 'v1'): Question => ({
     { id: 'v3', text: '鳥', reading: 'とり' },
     { id: 'v4', text: '魚', reading: 'さかな' },
   ],
-  correctAnswer: answer,
+  correctAnswer: correctAnswerId,
 });
 
 const mockSentence = {
@@ -110,7 +110,7 @@ describe('useGameStore', () => {
   describe('vocabulary game', () => {
     it('startGame initializes game state', () => {
       const store = useGameStore();
-      const questions = [makeQuestion(), makeQuestion('dog')];
+      const questions = [makeQuestion(), makeQuestion('v2')];
       store.startGame(questions);
       expect(store.gameActive).toBe(true);
       expect(store.score).toBe(0);
