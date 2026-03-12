@@ -2,7 +2,6 @@
   <div v-if="gameStore.sentenceGameActive && currentQuestion">
     <div class="q-mb-md">
       <p class="text-h6">Unscramble the sentence:</p>
-      <p class="text-h5 japanese-text">{{ currentQuestion.sentence.japanese_sentence }}</p>
       <p class="text-caption text-grey">{{ currentQuestion.sentence.english_translation }}</p>
     </div>
 

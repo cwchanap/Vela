@@ -164,31 +164,34 @@ async function startGame() {
 
             const questions = vocabulary.map((word) => {
               const otherWords = vocabulary.filter((v) => v.id !== word.id);
-              let distractors = shuffleArray(otherWords).slice(0, 3).map(toVocabularyOption);
 
-              // If we don't have enough distractors, fetch from additional vocabulary
-              if (distractors.length < 3) {
-                const needed = 3 - distractors.length;
-                const usedTexts = new Set([word.japanese_word, ...distractors.map((d) => d.text)]);
-                const availableDistractors = additionalVocab
-                  .filter((q) => q.word.id !== word.id && !usedTexts.has(q.word.japanese_word))
-                  .map((q) => toVocabularyOption(q.word));
-
-                distractors = [
-                  ...distractors,
-                  ...shuffleArray(availableDistractors).slice(0, needed),
-                ];
-              }
-
-              // Ensure we have exactly 3 unique distractors by japanese_word
+              // Dedupe by japanese_word first before checking count
               const seen = new Set<string>([word.japanese_word]);
-              const uniqueDistractors = distractors
+              let uniqueDistractors = shuffleArray(otherWords)
+                .map(toVocabularyOption)
                 .filter((d) => {
                   if (seen.has(d.text)) return false;
                   seen.add(d.text);
                   return true;
                 })
                 .slice(0, 3);
+
+              // If we don't have enough unique distractors, fetch from additional vocabulary
+              if (uniqueDistractors.length < 3) {
+                const needed = 3 - uniqueDistractors.length;
+                const usedTexts = new Set([
+                  word.japanese_word,
+                  ...uniqueDistractors.map((d) => d.text),
+                ]);
+                const availableDistractors = additionalVocab
+                  .filter((q) => q.word.id !== word.id && !usedTexts.has(q.word.japanese_word))
+                  .map((q) => toVocabularyOption(q.word));
+
+                uniqueDistractors = [
+                  ...uniqueDistractors,
+                  ...shuffleArray(availableDistractors).slice(0, needed),
+                ];
+              }
 
               // If still not enough, show error and fall back
               if (uniqueDistractors.length < 3) {
