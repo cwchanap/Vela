@@ -224,6 +224,57 @@ describe('gameService', () => {
       });
     });
 
+    it('should normalize legacy "japanese" field to "japanese_word"', async () => {
+      const legacyVocabulary = [
+        {
+          id: 'vocab-1',
+          japanese: '猫',
+          hiragana: 'ねこ',
+          english_translation: 'cat',
+          created_at: '2024-01-01T00:00:00Z',
+        },
+        {
+          id: 'vocab-2',
+          japanese: '犬',
+          hiragana: 'いぬ',
+          english_translation: 'dog',
+          created_at: '2024-01-01T00:00:00Z',
+        },
+        {
+          id: 'vocab-3',
+          japanese: '鳥',
+          hiragana: 'とり',
+          english_translation: 'bird',
+          created_at: '2024-01-01T00:00:00Z',
+        },
+        {
+          id: 'vocab-4',
+          japanese: '魚',
+          hiragana: 'さかな',
+          english_translation: 'fish',
+          created_at: '2024-01-01T00:00:00Z',
+        },
+      ];
+
+      mockFetch.mockResolvedValue({
+        ok: true,
+        json: vi.fn().mockResolvedValue({ vocabulary: legacyVocabulary }),
+      });
+
+      const questions = await gameService.getVocabularyQuestions(4);
+
+      expect(questions.length).toBeGreaterThan(0);
+      questions.forEach((question) => {
+        expect(question.correctAnswer).toBe(question.word.id);
+        expect(typeof question.word.japanese_word).toBe('string');
+        const correctOption = question.options.find((o) => o.id === question.correctAnswer);
+        expect(correctOption).toBeDefined();
+        expect(correctOption?.text).toBe(question.word.japanese_word);
+        const sourceVocab = legacyVocabulary.find((v) => v.id === question.word.id);
+        expect(correctOption?.reading).toBe(sourceVocab?.hiragana);
+      });
+    });
+
     it('should skip questions that cannot produce 4 unique options', async () => {
       const insufficientVocabulary: Vocabulary[] = [
         {

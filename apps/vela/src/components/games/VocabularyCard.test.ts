@@ -101,7 +101,7 @@ describe('VocabularyCard', () => {
     const wrapper = mountComponent();
 
     const pronounceButton = wrapper.find('[data-testid="btn-pronounce"]');
-    expect(pronounceButton.attributes('aria-label')).toBe('Pronounce 猫');
+    expect(pronounceButton.attributes('aria-label')).toBe('Play pronunciation for 猫');
   });
 
   it('should have dynamic aria-label with Japanese word', () => {
@@ -125,7 +125,7 @@ describe('VocabularyCard', () => {
     const wrapper = mountComponent(customQuestion);
 
     const pronounceButton = wrapper.find('[data-testid="btn-pronounce"]');
-    expect(pronounceButton.attributes('aria-label')).toBe('Pronounce 犬');
+    expect(pronounceButton.attributes('aria-label')).toBe('Play pronunciation for 犬');
   });
 
   it('should render card with proper structure', () => {
