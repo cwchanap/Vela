@@ -21,7 +21,7 @@ describe('gameService', () => {
     vi.restoreAllMocks();
   });
 
-  describe('getVocabularyQuestions', () => {
+  describe('vocabulary helpers', () => {
     const mockVocabulary: Vocabulary[] = [
       {
         id: 'vocab-1',
@@ -315,6 +315,42 @@ describe('gameService', () => {
       const questions = await gameService.getVocabularyQuestions(4);
 
       expect(questions).toEqual([]);
+    });
+
+    it('should still return the normalized vocabulary pool for SRS distractor sourcing', async () => {
+      const insufficientVocabulary: Array<Vocabulary & { japanese?: string }> = [
+        {
+          id: 'vocab-1',
+          japanese_word: '猫',
+          hiragana: 'ねこ',
+          english_translation: 'cat',
+          created_at: '2024-01-01T00:00:00Z',
+        },
+        {
+          id: 'vocab-2',
+          japanese: '犬',
+          hiragana: 'いぬ',
+          english_translation: 'dog',
+          created_at: '2024-01-01T00:00:00Z',
+        },
+        {
+          id: 'vocab-3',
+          japanese_word: '鳥',
+          hiragana: 'とり',
+          english_translation: 'bird',
+          created_at: '2024-01-01T00:00:00Z',
+        },
+      ];
+
+      mockFetch.mockResolvedValue({
+        ok: true,
+        json: vi.fn().mockResolvedValue({ vocabulary: insufficientVocabulary }),
+      });
+
+      const vocabulary = await gameService.getVocabularyPool(3);
+
+      expect(vocabulary).toHaveLength(3);
+      expect(vocabulary.map((word) => word.japanese_word)).toEqual(['猫', '犬', '鳥']);
     });
 
     it('should have undefined reading for options without hiragana', async () => {

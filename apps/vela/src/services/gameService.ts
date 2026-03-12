@@ -17,6 +17,21 @@ function shuffle<T>(array: T[]): T[] {
   return array;
 }
 
+async function getVocabularyPool(count = 10, jlptLevels?: number[]): Promise<Vocabulary[]> {
+  let url = `games/vocabulary?limit=${count}`;
+  if (jlptLevels && jlptLevels.length > 0) {
+    url += `&jlpt=${jlptLevels.join(',')}`;
+  }
+
+  const data = await httpJson<{ vocabulary: Array<Vocabulary & { japanese?: string }> }>(
+    getApiUrl(url),
+  );
+
+  return (data.vocabulary || [])
+    .map(normalizeVocabulary)
+    .filter((word): word is Vocabulary => word !== null);
+}
+
 async function getSentenceQuestions(count = 5): Promise<SentenceQuestion[]> {
   try {
     const data = await httpJson<{ sentences: Sentence[] }>(
@@ -43,16 +58,7 @@ async function getSentenceQuestions(count = 5): Promise<SentenceQuestion[]> {
 
 async function getVocabularyQuestions(count = 10, jlptLevels?: number[]): Promise<Question[]> {
   try {
-    let url = `games/vocabulary?limit=${count}`;
-    if (jlptLevels && jlptLevels.length > 0) {
-      url += `&jlpt=${jlptLevels.join(',')}`;
-    }
-    const data = await httpJson<{ vocabulary: Array<Vocabulary & { japanese?: string }> }>(
-      getApiUrl(url),
-    );
-    const vocabulary: Vocabulary[] = (data.vocabulary || [])
-      .map(normalizeVocabulary)
-      .filter((word): word is Vocabulary => word !== null);
+    const vocabulary = await getVocabularyPool(count, jlptLevels);
 
     // Create multiple choice questions with Japanese options
     const questions: Question[] = vocabulary
@@ -147,6 +153,7 @@ async function getSentenceQuestionsWithJlpt(
 }
 
 export const gameService = {
+  getVocabularyPool,
   getVocabularyQuestions,
   getSentenceQuestions,
   getSentenceQuestionsWithJlpt,
