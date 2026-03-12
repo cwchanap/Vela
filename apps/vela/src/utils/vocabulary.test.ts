@@ -28,6 +28,7 @@ describe('toVocabularyOption', () => {
     const result = toVocabularyOption(mockVocabularyWithHiragana);
 
     expect(result).toEqual({
+      id: 'vocab-1',
       text: '猫',
       reading: 'ねこ',
     });
@@ -37,6 +38,7 @@ describe('toVocabularyOption', () => {
     const result = toVocabularyOption(mockVocabularyWithoutHiragana);
 
     expect(result).toEqual({
+      id: 'vocab-2',
       text: '猫',
     });
     expect(result.reading).toBeUndefined();
@@ -68,6 +70,7 @@ describe('toVocabularyOption', () => {
     const result = toVocabularyOption(vocab);
 
     expect(result).toEqual({
+      id: 'vocab-4',
       text: 'コンピューター',
       reading: 'コンピューター',
     });
@@ -85,6 +88,7 @@ describe('toVocabularyOption', () => {
     const result = toVocabularyOption(vocab);
 
     expect(result).toEqual({
+      id: 'vocab-5',
       text: '勉強',
       reading: 'べんきょう',
     });
