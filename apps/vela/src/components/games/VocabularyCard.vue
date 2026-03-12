@@ -38,7 +38,7 @@
         dense
         icon="volume_up"
         color="primary"
-        aria-label="Play pronunciation"
+        :aria-label="`Play pronunciation for ${question.word.japanese_word}`"
         @click="$emit('pronounce', question.word)"
         data-testid="btn-pronounce"
       >
