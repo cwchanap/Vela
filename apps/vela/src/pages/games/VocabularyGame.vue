@@ -149,18 +149,10 @@ async function startGame() {
             .map(normalizeVocabulary)
             .filter((vocab): vocab is Vocabulary => vocab !== null);
 
-          // Validate minimum vocabulary count
-          if (vocabulary.length < 4) {
-            Notify.create({
-              type: 'warning',
-              message: `You need at least 4 vocabulary words to play. Currently have ${vocabulary.length} due words. Falling back to random vocabulary.`,
-              position: 'top',
-              timeout: 5000,
-            });
-            // Fall through to random questions below
-          } else {
+          if (vocabulary.length > 0) {
             // Fetch additional random vocabulary to ensure we have enough distractors
             const additionalVocab = await gameService.getVocabularyQuestions(10, jlptFilter);
+            const additionalWords = additionalVocab.map((q) => q.word);
 
             const questions = vocabulary.map((word) => {
               const otherWords = vocabulary.filter((v) => v.id !== word.id);
@@ -176,7 +168,7 @@ async function startGame() {
                 })
                 .slice(0, 3);
 
-              // If we don't have enough unique distractors, fetch from additional vocabulary
+              // If we don't have enough unique distractors, pull from additional vocabulary
               if (uniqueDistractors.length < 3) {
                 const needed = 3 - uniqueDistractors.length;
                 const usedTexts = new Set([
@@ -184,9 +176,9 @@ async function startGame() {
                   ...uniqueDistractors.map((d) => d.text),
                 ]);
                 const seenTexts = new Set<string>();
-                const availableDistractors = additionalVocab
-                  .filter((q) => q.word.id !== word.id && !usedTexts.has(q.word.japanese_word))
-                  .map((q) => toVocabularyOption(q.word))
+                const availableDistractors = additionalWords
+                  .filter((v) => v.id !== word.id && !usedTexts.has(v.japanese_word))
+                  .map(toVocabularyOption)
                   .filter((opt) => {
                     if (seenTexts.has(opt.text)) return false;
                     seenTexts.add(opt.text);
@@ -199,7 +191,7 @@ async function startGame() {
                 ];
               }
 
-              // If still not enough, show error and fall back
+              // If still not enough, throw so we fall back to random
               if (uniqueDistractors.length < 3) {
                 throw new Error('Insufficient vocabulary for generating questions');
               }
