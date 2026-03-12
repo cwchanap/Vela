@@ -183,9 +183,15 @@ async function startGame() {
                   word.japanese_word,
                   ...uniqueDistractors.map((d) => d.text),
                 ]);
+                const seenTexts = new Set<string>();
                 const availableDistractors = additionalVocab
                   .filter((q) => q.word.id !== word.id && !usedTexts.has(q.word.japanese_word))
-                  .map((q) => toVocabularyOption(q.word));
+                  .map((q) => toVocabularyOption(q.word))
+                  .filter((opt) => {
+                    if (seenTexts.has(opt.text)) return false;
+                    seenTexts.add(opt.text);
+                    return true;
+                  });
 
                 uniqueDistractors = [
                   ...uniqueDistractors,
