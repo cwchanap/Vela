@@ -181,7 +181,7 @@ describe('SentenceBuilder', () => {
     expect(wrapper.find('.word-bank').exists()).toBe(true);
   });
 
-  it('should display Japanese sentence as the main prompt', async () => {
+  it('should not display the Japanese sentence prompt that reveals the answer', async () => {
     const gameStore = useGameStore();
     gameStore.startSentenceGame(mockSentenceQuestions);
 
@@ -190,10 +190,10 @@ describe('SentenceBuilder', () => {
     await wrapper.vm.$nextTick();
 
     const japaneseSentence = mockSentenceQuestions[0]?.sentence.japanese_sentence;
-    expect(wrapper.text()).toContain(japaneseSentence || '');
+    expect(wrapper.text()).not.toContain(japaneseSentence || '');
   });
 
-  it('should render Japanese sentence in large text element', async () => {
+  it('should not render the Japanese sentence in a large prompt element', async () => {
     const gameStore = useGameStore();
     gameStore.startSentenceGame(mockSentenceQuestions);
 
@@ -202,8 +202,7 @@ describe('SentenceBuilder', () => {
     await wrapper.vm.$nextTick();
 
     const largeText = wrapper.find('.text-h5.japanese-text');
-    expect(largeText.exists()).toBe(true);
-    expect(largeText.text()).toBe(mockSentenceQuestions[0]?.sentence.japanese_sentence);
+    expect(largeText.exists()).toBe(false);
   });
 
   it('should display English translation as a small hint caption', async () => {
@@ -226,7 +225,7 @@ describe('SentenceBuilder', () => {
     await flushPromises();
     await wrapper.vm.$nextTick();
 
-    const caption = wrapper.find('.text-caption.text-grey');
+    const caption = wrapper.find('.text-caption.text-grey-7');
     expect(caption.exists()).toBe(true);
     expect(caption.text()).toBe(mockSentenceQuestions[0]?.sentence.english_translation);
   });

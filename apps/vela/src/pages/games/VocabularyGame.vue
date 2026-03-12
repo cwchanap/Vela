@@ -151,8 +151,7 @@ async function startGame() {
 
           if (vocabulary.length > 0) {
             // Fetch additional random vocabulary to ensure we have enough distractors
-            const additionalVocab = await gameService.getVocabularyQuestions(10, jlptFilter);
-            const additionalWords = additionalVocab.map((q) => q.word);
+            const additionalWords = await gameService.getVocabularyPool(10, jlptFilter);
 
             const questions = vocabulary.map((word) => {
               const otherWords = vocabulary.filter((v) => v.id !== word.id);
