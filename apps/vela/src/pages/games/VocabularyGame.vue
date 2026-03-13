@@ -18,9 +18,13 @@
           </div>
 
           <!-- Due Items Count -->
-          <div v-if="dueCount > 0" class="text-body2 q-mb-md">
+          <div v-if="dueCount !== null && dueCount > 0" class="text-body2 q-mb-md">
             <q-icon name="schedule" color="primary" class="q-mr-xs" />
             <span class="text-primary text-weight-medium">{{ dueCount }} words</span> due for review
+          </div>
+          <div v-else-if="dueCount === null && srsMode" class="text-body2 text-negative q-mb-md">
+            <q-icon name="warning" color="negative" class="q-mr-xs" />
+            Could not load review count
           </div>
         </q-card-section>
 
@@ -28,7 +32,9 @@
           <q-btn
             @click="startGame"
             :label="
-              srsMode && dueCount > 0 ? `Review ${Math.min(dueCount, 10)} Words` : 'Start Quiz'
+              srsMode && dueCount !== null && dueCount > 0
+                ? `Review ${Math.min(dueCount, 10)} Words`
+                : 'Start Quiz'
             "
             color="primary"
             size="lg"
@@ -145,7 +151,7 @@ const lastAnswerResult = ref<{ selectedId: string; isCorrect: boolean } | null>(
 // JLPT and SRS settings
 const selectedJlptLevels = ref<JLPTLevel[]>([]);
 const srsMode = ref(false);
-const dueCount = ref(0);
+const dueCount = ref<number | null>(null);
 
 // Queue SRS reviews to ensure they're recorded even if user navigates away
 const srsReviewQueue = ref<Array<{ vocabularyId: string; quality: ReviewInput['quality'] }>>([]);
@@ -179,7 +185,7 @@ async function fetchDueCount(jlptLevels?: JLPTLevel[]) {
     dueCount.value = stats.due_today;
   } catch (error) {
     console.error('Failed to fetch SRS stats:', error);
-    dueCount.value = 0;
+    dueCount.value = null;
   }
 }
 
@@ -190,7 +196,12 @@ async function startGame() {
     const jlptFilter = selectedJlptLevels.value.length > 0 ? selectedJlptLevels.value : undefined;
 
     // If SRS mode is enabled and user is authenticated, try to get due items first
-    if (srsMode.value && authStore.isAuthenticated && dueCount.value > 0) {
+    if (
+      srsMode.value &&
+      authStore.isAuthenticated &&
+      dueCount.value !== null &&
+      dueCount.value > 0
+    ) {
       try {
         const dueResponse = await srsService.getDueItems(10, jlptFilter);
         if (dueResponse.items.length > 0) {
@@ -266,6 +277,19 @@ async function startGame() {
           }
         }
       } catch (error) {
+        if (
+          error instanceof Error &&
+          error.message === 'Insufficient vocabulary for generating questions'
+        ) {
+          Notify.create({
+            type: 'warning',
+            message:
+              'Not enough vocabulary in your review pool to generate a full quiz. Try adding more words or switching to All Levels.',
+            position: 'top',
+            timeout: 6000,
+          });
+          return;
+        }
         console.error('Failed to fetch due items, falling back to random:', error);
       }
     }
@@ -386,7 +410,13 @@ watch(
           console.log(`Successfully recorded ${srsReviewQueue.value.length} SRS reviews`);
         } catch (error) {
           console.error('Failed to record SRS batch reviews:', error);
-          // Don't block session recording if SRS fails
+          Notify.create({
+            type: 'warning',
+            message:
+              'Your review progress could not be saved. Your spaced repetition schedule may not update correctly.',
+            position: 'top',
+            timeout: 6000,
+          });
         }
       }
 

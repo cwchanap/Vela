@@ -139,34 +139,14 @@ onMounted(async () => {
 const removeWord = (index: number) => {
   const word = userAnswer.value.splice(index, 1)[0];
   if (word) {
-    console.log('[SentenceBuilder] removeWord', {
-      index,
-      word,
-      userAnswer: [...userAnswer.value],
-      scrambledBefore: [...scrambledWords.value],
-    });
     scrambledWords.value.push(word);
-    console.log('[SentenceBuilder] after removeWord', {
-      scrambledAfter: [...scrambledWords.value],
-      userAnswer: [...userAnswer.value],
-    });
   }
 };
 
 const addWord = (index: number) => {
   const word = scrambledWords.value.splice(index, 1)[0];
   if (word) {
-    console.log('[SentenceBuilder] addWord', {
-      index,
-      word,
-      scrambledBefore: [...scrambledWords.value],
-      userAnswerBefore: [...userAnswer.value],
-    });
     userAnswer.value.push(word);
-    console.log('[SentenceBuilder] after addWord', {
-      scrambledAfter: [...scrambledWords.value],
-      userAnswerAfter: [...userAnswer.value],
-    });
   }
 };
 
