@@ -3,19 +3,7 @@ import type { Vocabulary, Sentence } from 'src/types/database';
 import { getApiUrl } from 'src/utils/api';
 import { httpJson } from 'src/utils/httpClient';
 import { normalizeVocabulary, toVocabularyOption } from 'src/utils/vocabulary';
-
-function shuffle<T>(array: T[]): T[] {
-  let currentIndex = array.length,
-    randomIndex;
-
-  while (currentIndex !== 0) {
-    randomIndex = Math.floor(Math.random() * currentIndex);
-    currentIndex--;
-    [array[currentIndex], array[randomIndex]] = [array[randomIndex]!, array[currentIndex]!];
-  }
-
-  return array;
-}
+import { shuffleArray } from 'src/utils/array';
 
 async function getVocabularyPool(count = 10, jlptLevels?: number[]): Promise<Vocabulary[]> {
   let url = `games/vocabulary?limit=${count}`;
@@ -46,7 +34,7 @@ async function getSentenceQuestions(count = 5): Promise<SentenceQuestion[]> {
           : sentence.japanese_sentence.split('');
       return {
         sentence,
-        scrambled: shuffle([...tokens]),
+        scrambled: shuffleArray([...tokens]),
         correctAnswer: tokens.join(' '),
       };
     });
@@ -63,7 +51,7 @@ async function getVocabularyQuestions(count = 10, jlptLevels?: number[]): Promis
     // Create multiple choice questions with Japanese options
     const questions: Question[] = vocabulary
       .map((word) => {
-        const distractorPool = shuffle(
+        const distractorPool = shuffleArray(
           vocabulary.filter((v) => v.id !== word.id && v.japanese_word !== word.japanese_word),
         );
         const seenTexts = new Set<string>([word.japanese_word]);
@@ -83,30 +71,13 @@ async function getVocabularyQuestions(count = 10, jlptLevels?: number[]): Promis
         }
 
         if (distractors.length < 3) {
-          const remainingVocabulary = shuffle(
-            vocabulary.filter(
-              (candidate) =>
-                candidate.id !== word.id &&
-                candidate.japanese_word !== word.japanese_word &&
-                !seenTexts.has(candidate.japanese_word),
-            ),
-          );
-
-          for (const candidate of remainingVocabulary) {
-            seenTexts.add(candidate.japanese_word);
-            distractors.push(toVocabularyOption(candidate));
-
-            if (distractors.length === 3) {
-              break;
-            }
-          }
-        }
-
-        if (distractors.length < 3) {
           return null;
         }
 
-        const options: VocabularyOption[] = shuffle([...distractors, toVocabularyOption(word)]);
+        const options: VocabularyOption[] = shuffleArray([
+          ...distractors,
+          toVocabularyOption(word),
+        ]);
 
         return {
           word,
@@ -142,7 +113,7 @@ async function getSentenceQuestionsWithJlpt(
           : sentence.japanese_sentence.split('');
       return {
         sentence,
-        scrambled: shuffle([...tokens]),
+        scrambled: shuffleArray([...tokens]),
         correctAnswer: tokens.join(' '),
       };
     });

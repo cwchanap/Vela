@@ -13,6 +13,10 @@ export function normalizeVocabulary(vocabulary: LegacyVocabulary): Vocabulary | 
   const japaneseWord = vocabulary.japanese_word?.trim() || vocabulary.japanese?.trim() || '';
 
   if (!japaneseWord) {
+    console.warn(
+      '[normalizeVocabulary] Rejected vocabulary item with missing japanese_word:',
+      vocabulary,
+    );
     return null;
   }
 
