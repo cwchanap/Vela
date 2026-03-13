@@ -126,13 +126,20 @@ const autoFillCorrect = () => {
 onMounted(async () => {
   if (!gameStore.sentenceGameActive) {
     const questions = await gameService.getSentenceQuestions(5);
-    if (questions.length > 0) {
-      gameStore.startSentenceGame(questions);
-      gameStartTime.value = new Date();
-      correctAnswers.value = 0;
-      totalQuestions.value = questions.length;
-      initializeQuestion();
+    if (questions.length === 0) {
+      $q.notify({
+        type: 'negative',
+        message: 'Could not load sentence questions. Please try again.',
+        position: 'top',
+        timeout: 5000,
+      });
+      return;
     }
+    gameStore.startSentenceGame(questions);
+    gameStartTime.value = new Date();
+    correctAnswers.value = 0;
+    totalQuestions.value = questions.length;
+    initializeQuestion();
   }
 });
 
@@ -153,7 +160,8 @@ const addWord = (index: number) => {
 const checkAnswer = () => {
   if (!currentQuestion.value) return;
 
-  const isCorrect = userAnswer.value.join(' ') === currentQuestion.value.correctAnswer;
+  const correctAnswer = currentQuestion.value.correctAnswer;
+  const isCorrect = userAnswer.value.join(' ') === correctAnswer;
 
   if (isCorrect) {
     correctAnswers.value++;
@@ -162,9 +170,7 @@ const checkAnswer = () => {
   gameStore.answerSentenceQuestion(isCorrect);
 
   $q.notify({
-    message: isCorrect
-      ? 'Correct!'
-      : `Incorrect. The correct answer is: ${currentQuestion.value.correctAnswer}`,
+    message: isCorrect ? 'Correct!' : `Incorrect. The correct answer is: ${correctAnswer}`,
     color: isCorrect ? 'positive' : 'negative',
     position: 'top',
     timeout: 2000,
@@ -188,13 +194,23 @@ watch(
       // Game just ended
       const durationSeconds = Math.round((Date.now() - gameStartTime.value.getTime()) / 1000);
 
-      await progressStore.recordGameSession(
-        'sentence',
-        gameStore.score,
-        durationSeconds,
-        totalQuestions.value,
-        correctAnswers.value,
-      );
+      try {
+        await progressStore.recordGameSession(
+          'sentence',
+          gameStore.score,
+          durationSeconds,
+          totalQuestions.value,
+          correctAnswers.value,
+        );
+      } catch (error) {
+        console.error('Failed to record game session:', error);
+        $q.notify({
+          type: 'warning',
+          message: 'Your game progress could not be saved. Please check your connection.',
+          position: 'top',
+          timeout: 5000,
+        });
+      }
 
       // Reset tracking variables
       gameStartTime.value = null;

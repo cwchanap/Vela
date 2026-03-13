@@ -1,4 +1,11 @@
 import type { Question, SentenceQuestion, VocabularyOption } from 'src/stores/games';
+
+export class InsufficientVocabularyError extends Error {
+  constructor() {
+    super('Insufficient vocabulary for generating questions');
+    this.name = 'InsufficientVocabularyError';
+  }
+}
 import type { Vocabulary, Sentence } from 'src/types/database';
 import { getApiUrl } from 'src/utils/api';
 import { httpJson } from 'src/utils/httpClient';
