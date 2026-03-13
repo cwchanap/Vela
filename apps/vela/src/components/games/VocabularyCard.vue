@@ -31,7 +31,7 @@
 
     <q-separator />
 
-    <q-card-actions align="right">
+    <q-card-actions v-if="showPronunciation" align="right">
       <q-btn
         flat
         round
@@ -54,6 +54,7 @@ import FuriKana from './FuriKana.vue';
 
 defineProps<{
   question: Question;
+  showPronunciation?: boolean;
 }>();
 
 defineEmits<{

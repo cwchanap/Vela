@@ -23,10 +23,11 @@ describe('VocabularyCard', () => {
     correctAnswer: 'vocab-1',
   };
 
-  const mountComponent = (question: Question = mockQuestion) => {
+  const mountComponent = (question: Question = mockQuestion, showPronunciation = false) => {
     return mount(VocabularyCard, {
       props: {
         question,
+        showPronunciation,
       },
       global: {
         plugins: [Quasar],
@@ -70,7 +71,7 @@ describe('VocabularyCard', () => {
   });
 
   it('should emit pronounce event when pronounce button is clicked', async () => {
-    const wrapper = mountComponent();
+    const wrapper = mountComponent(mockQuestion, true);
 
     const pronounceButton = wrapper.find('[data-testid="btn-pronounce"]');
     await pronounceButton.trigger('click');
@@ -87,8 +88,8 @@ describe('VocabularyCard', () => {
     expect(heading.text()).toBe('cat');
   });
 
-  it('should have pronounce button with volume icon', () => {
-    const wrapper = mountComponent();
+  it('should have pronounce button with volume icon when showPronunciation is true', () => {
+    const wrapper = mountComponent(mockQuestion, true);
 
     const pronounceButton = wrapper
       .find('[data-testid="btn-pronounce"]')
@@ -97,14 +98,14 @@ describe('VocabularyCard', () => {
     expect(pronounceButton.props('icon')).toBe('volume_up');
   });
 
-  it('should have aria-label on pronounce button', () => {
-    const wrapper = mountComponent();
+  it('should have aria-label on pronounce button when showPronunciation is true', () => {
+    const wrapper = mountComponent(mockQuestion, true);
 
     const pronounceButton = wrapper.find('[data-testid="btn-pronounce"]');
     expect(pronounceButton.attributes('aria-label')).toBe('Play pronunciation for 猫');
   });
 
-  it('should have dynamic aria-label with Japanese word', () => {
+  it('should have dynamic aria-label with Japanese word when showPronunciation is true', () => {
     const customQuestion: Question = {
       word: {
         id: 'vocab-2',
@@ -122,7 +123,7 @@ describe('VocabularyCard', () => {
       correctAnswer: 'vocab-2',
     };
 
-    const wrapper = mountComponent(customQuestion);
+    const wrapper = mountComponent(customQuestion, true);
 
     const pronounceButton = wrapper.find('[data-testid="btn-pronounce"]');
     expect(pronounceButton.attributes('aria-label')).toBe('Play pronunciation for 犬');
@@ -133,6 +134,17 @@ describe('VocabularyCard', () => {
 
     expect(wrapper.find('.my-card').exists()).toBe(true);
     expect(wrapper.findComponent({ name: 'QCardSection' }).exists()).toBe(true);
+  });
+
+  it('should not render QCardActions when showPronunciation is false', () => {
+    const wrapper = mountComponent();
+
+    expect(wrapper.findComponent({ name: 'QCardActions' }).exists()).toBe(false);
+  });
+
+  it('should render QCardActions when showPronunciation is true', () => {
+    const wrapper = mountComponent(mockQuestion, true);
+
     expect(wrapper.findComponent({ name: 'QCardActions' }).exists()).toBe(true);
   });
 
@@ -168,8 +180,8 @@ describe('VocabularyCard', () => {
     expect(wrapper.emitted('answer')?.length).toBe(4);
   });
 
-  it('should have tooltip on pronounce button', () => {
-    const wrapper = mountComponent();
+  it('should have tooltip on pronounce button when showPronunciation is true', () => {
+    const wrapper = mountComponent(mockQuestion, true);
 
     const tooltip = wrapper.findComponent({ name: 'QTooltip' });
     expect(tooltip.exists()).toBe(true);
