@@ -39,14 +39,65 @@
     </div>
 
     <!-- Active Game -->
-    <div v-else-if="gameStore.gameActive && currentQuestion">
+    <div v-else-if="gameStore.gameActive && currentQuestion && !showAnswerFeedback">
       <game-timer />
       <vocabulary-card
         :question="currentQuestion"
+        :show-pronunciation="false"
         @answer="handleAnswer"
         @pronounce="handlePronounce"
       />
       <score-display :score="gameStore.score" />
+    </div>
+
+    <!-- Answer Feedback -->
+    <div
+      v-else-if="gameStore.gameActive && currentQuestion && showAnswerFeedback && lastAnswerResult"
+      class="text-center"
+    >
+      <q-card class="q-pa-lg" style="max-width: 420px">
+        <q-card-section>
+          <div class="text-h3 q-mb-md">
+            {{ lastAnswerResult.isCorrect ? '✓' : '✗' }}
+          </div>
+          <div
+            class="text-h5 q-mb-sm"
+            :class="lastAnswerResult.isCorrect ? 'text-positive' : 'text-negative'"
+          >
+            {{ lastAnswerResult.isCorrect ? 'Correct!' : 'Incorrect' }}
+          </div>
+          <div class="text-body1 q-mb-md">
+            {{ currentQuestion.word.english_translation }} =
+            {{ currentQuestion.word.japanese_word }}
+          </div>
+          <q-btn
+            flat
+            round
+            dense
+            icon="volume_up"
+            color="primary"
+            size="lg"
+            :aria-label="`Play pronunciation for ${currentQuestion.word.japanese_word}`"
+            @click="handlePronounce(currentQuestion.word)"
+            class="q-mb-md"
+          >
+            <q-tooltip>Listen to pronunciation</q-tooltip>
+          </q-btn>
+        </q-card-section>
+        <q-card-actions align="center">
+          <q-btn
+            @click="proceedToNextQuestion"
+            :label="
+              gameStore.currentQuestionIndex + 1 >= gameStore.questions.length
+                ? 'Finish'
+                : 'Next Question'
+            "
+            color="primary"
+            size="lg"
+          />
+        </q-card-actions>
+      </q-card>
+      <score-display :score="gameStore.score" class="q-mt-md" />
     </div>
 
     <!-- Game Over Screen - only show when game is inactive and not showing setup -->
@@ -88,6 +139,8 @@ const correctAnswers = ref(0);
 const totalQuestions = ref(0);
 const showSetup = ref(true);
 const isLoading = ref(false);
+const showAnswerFeedback = ref(false);
+const lastAnswerResult = ref<{ selectedId: string; isCorrect: boolean } | null>(null);
 
 // JLPT and SRS settings
 const selectedJlptLevels = ref<JLPTLevel[]>([]);
@@ -255,6 +308,16 @@ async function handleAnswer(selectedVocabularyId: string) {
 
   const isCorrect = selectedVocabularyId === currentQuestion.value.correctAnswer;
 
+  // Store the result and show feedback
+  lastAnswerResult.value = { selectedId: selectedVocabularyId, isCorrect };
+  showAnswerFeedback.value = true;
+}
+
+async function proceedToNextQuestion() {
+  if (!currentQuestion.value || !lastAnswerResult.value) return;
+
+  const { isCorrect } = lastAnswerResult.value;
+
   if (isCorrect) {
     correctAnswers.value++;
   }
@@ -271,6 +334,9 @@ async function handleAnswer(selectedVocabularyId: string) {
     });
   }
 
+  // Hide feedback and move to next question
+  showAnswerFeedback.value = false;
+  lastAnswerResult.value = null;
   gameStore.answerQuestion(isCorrect);
 }
 
