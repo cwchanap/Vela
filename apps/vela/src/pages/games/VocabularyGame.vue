@@ -122,7 +122,7 @@ import { useRoute } from 'vue-router';
 import { useGameStore } from 'src/stores/games';
 import { useProgressStore } from 'src/stores/progress';
 import { useAuthStore } from 'src/stores/auth';
-import { gameService } from '../../services/gameService';
+import { gameService, InsufficientVocabularyError } from '../../services/gameService';
 import { srsService } from '../../services/srsService';
 import { pronounceWord } from '../../services/ttsService';
 import { normalizeVocabulary, toVocabularyOption } from 'src/utils/vocabulary';
@@ -256,7 +256,7 @@ async function startGame() {
 
               // If still not enough, throw so we fall back to random
               if (uniqueDistractors.length < 3) {
-                throw new Error('Insufficient vocabulary for generating questions');
+                throw new InsufficientVocabularyError();
               }
 
               const options = [...uniqueDistractors, toVocabularyOption(word)];
@@ -277,10 +277,7 @@ async function startGame() {
           }
         }
       } catch (error) {
-        if (
-          error instanceof Error &&
-          error.message === 'Insufficient vocabulary for generating questions'
-        ) {
+        if (error instanceof InsufficientVocabularyError) {
           Notify.create({
             type: 'warning',
             message:
@@ -291,6 +288,12 @@ async function startGame() {
           return;
         }
         console.error('Failed to fetch due items, falling back to random:', error);
+        Notify.create({
+          type: 'warning',
+          message: 'Could not load your review words. Starting a random quiz instead.',
+          position: 'top',
+          timeout: 5000,
+        });
       }
     }
 
@@ -338,7 +341,12 @@ async function handleAnswer(selectedVocabularyId: string) {
 }
 
 async function proceedToNextQuestion() {
-  if (!currentQuestion.value || !lastAnswerResult.value) return;
+  if (!currentQuestion.value || !lastAnswerResult.value) {
+    console.warn('[proceedToNextQuestion] Called with null currentQuestion or lastAnswerResult');
+    showAnswerFeedback.value = false;
+    lastAnswerResult.value = null;
+    return;
+  }
 
   const { isCorrect } = lastAnswerResult.value;
 
@@ -420,13 +428,23 @@ watch(
         }
       }
 
-      await progressStore.recordGameSession(
-        'vocabulary',
-        gameStore.score,
-        durationSeconds,
-        totalQuestions.value,
-        correctAnswers.value,
-      );
+      try {
+        await progressStore.recordGameSession(
+          'vocabulary',
+          gameStore.score,
+          durationSeconds,
+          totalQuestions.value,
+          correctAnswers.value,
+        );
+      } catch (error) {
+        console.error('Failed to record game session:', error);
+        Notify.create({
+          type: 'warning',
+          message: 'Your game progress could not be saved. Please check your connection.',
+          position: 'top',
+          timeout: 5000,
+        });
+      }
 
       // Refresh due count after game
       await fetchDueCount(selectedJlptLevels.value);

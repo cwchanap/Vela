@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { mount, flushPromises } from '@vue/test-utils';
 import { createPinia, setActivePinia } from 'pinia';
-import { Quasar } from 'quasar';
+import { Quasar, Notify } from 'quasar';
 import SentenceBuilder from './SentenceBuilder.vue';
 import { useGameStore } from 'src/stores/games';
 import { gameService } from 'src/services/gameService';
@@ -49,7 +49,7 @@ describe('SentenceBuilder', () => {
   const mountComponent = () => {
     return mount(SentenceBuilder, {
       global: {
-        plugins: [Quasar],
+        plugins: [[Quasar, { plugins: { Notify } }]],
       },
     });
   };
@@ -152,8 +152,8 @@ describe('SentenceBuilder', () => {
     const wrapper = mountComponent();
     await flushPromises();
 
-    // Should still show loading since no game started
-    expect(wrapper.text()).toContain('Loading game...');
+    // Game should not have started — no game content visible
+    expect(wrapper.findComponent({ name: 'QSpinnerDots' }).exists()).toBe(true);
   });
 
   it('should show game content when game is active', async () => {
