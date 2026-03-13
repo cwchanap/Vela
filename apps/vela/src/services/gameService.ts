@@ -1,4 +1,14 @@
 import type { Question, SentenceQuestion, VocabularyOption } from 'src/stores/games';
+import type { Vocabulary, Sentence } from 'src/types/database';
+import { getApiUrl } from 'src/utils/api';
+import { shuffleArray } from 'src/utils/array';
+import { httpJson } from 'src/utils/httpClient';
+import {
+  buildDistractors,
+  normalizeVocabulary,
+  toVocabularyOption,
+  type LegacyVocabularyPayload,
+} from 'src/utils/vocabulary';
 
 export class InsufficientVocabularyError extends Error {
   constructor() {
@@ -6,11 +16,6 @@ export class InsufficientVocabularyError extends Error {
     this.name = 'InsufficientVocabularyError';
   }
 }
-import type { Vocabulary, Sentence } from 'src/types/database';
-import { getApiUrl } from 'src/utils/api';
-import { httpJson } from 'src/utils/httpClient';
-import { normalizeVocabulary, toVocabularyOption } from 'src/utils/vocabulary';
-import { shuffleArray } from 'src/utils/array';
 
 async function getVocabularyPool(count = 10, jlptLevels?: number[]): Promise<Vocabulary[]> {
   let url = `games/vocabulary?limit=${count}`;
@@ -18,13 +23,16 @@ async function getVocabularyPool(count = 10, jlptLevels?: number[]): Promise<Voc
     url += `&jlpt=${jlptLevels.join(',')}`;
   }
 
-  const data = await httpJson<{ vocabulary: Array<Vocabulary & { japanese?: string }> }>(
-    getApiUrl(url),
-  );
+  try {
+    const data = await httpJson<{ vocabulary?: LegacyVocabularyPayload[] }>(getApiUrl(url));
 
-  return (data.vocabulary || [])
-    .map(normalizeVocabulary)
-    .filter((word): word is Vocabulary => word !== null);
+    return (data.vocabulary || [])
+      .map(normalizeVocabulary)
+      .filter((word): word is Vocabulary => word !== null);
+  } catch (error) {
+    console.error('Error fetching vocabulary pool:', error);
+    return [];
+  }
 }
 
 async function getSentenceQuestions(count = 5): Promise<SentenceQuestion[]> {
@@ -58,24 +66,7 @@ async function getVocabularyQuestions(count = 10, jlptLevels?: number[]): Promis
     // Create multiple choice questions with Japanese options
     const questions: Question[] = vocabulary
       .map((word) => {
-        const distractorPool = shuffleArray(
-          vocabulary.filter((v) => v.id !== word.id && v.japanese_word !== word.japanese_word),
-        );
-        const seenTexts = new Set<string>([word.japanese_word]);
-        const distractors: VocabularyOption[] = [];
-
-        for (const candidate of distractorPool) {
-          if (seenTexts.has(candidate.japanese_word)) {
-            continue;
-          }
-
-          seenTexts.add(candidate.japanese_word);
-          distractors.push(toVocabularyOption(candidate));
-
-          if (distractors.length === 3) {
-            break;
-          }
-        }
+        const distractors = buildDistractors(word, vocabulary);
 
         if (distractors.length < 3) {
           return null;

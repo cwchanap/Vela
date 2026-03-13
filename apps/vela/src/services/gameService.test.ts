@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { gameService } from './gameService';
 import type { Vocabulary, Sentence } from 'src/types/database';
+import type { LegacyVocabularyPayload } from 'src/utils/vocabulary';
 
 // Mock the API utility
 vi.mock('src/utils/api', () => ({
@@ -318,7 +319,7 @@ describe('gameService', () => {
     });
 
     it('should still return the normalized vocabulary pool for SRS distractor sourcing', async () => {
-      const insufficientVocabulary: Array<Vocabulary & { japanese?: string }> = [
+      const insufficientVocabulary: LegacyVocabularyPayload[] = [
         {
           id: 'vocab-1',
           japanese_word: '猫',
@@ -351,6 +352,19 @@ describe('gameService', () => {
 
       expect(vocabulary).toHaveLength(3);
       expect(vocabulary.map((word) => word.japanese_word)).toEqual(['猫', '犬', '鳥']);
+    });
+
+    it('should return an empty vocabulary pool when the fetch fails', async () => {
+      const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      mockFetch.mockRejectedValue(new Error('Network error'));
+
+      const vocabulary = await gameService.getVocabularyPool(5);
+
+      expect(vocabulary).toEqual([]);
+      expect(consoleErrorSpy).toHaveBeenCalledWith(
+        'Error fetching vocabulary pool:',
+        expect.any(Error),
+      );
     });
 
     it('should have undefined reading for options without hiragana', async () => {

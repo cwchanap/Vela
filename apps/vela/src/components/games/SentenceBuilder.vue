@@ -237,9 +237,4 @@ watch(
 .cursor-pointer {
   cursor: grab;
 }
-
-.japanese-text {
-  font-family: 'Hiragino Sans', 'Noto Sans JP', sans-serif;
-  line-height: 2;
-}
 </style>

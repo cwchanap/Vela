@@ -45,65 +45,62 @@
     </div>
 
     <!-- Active Game -->
-    <div v-else-if="gameStore.gameActive && currentQuestion && !showAnswerFeedback">
+    <div v-else-if="gameStore.gameActive && currentQuestion">
       <game-timer />
-      <vocabulary-card
-        :question="currentQuestion"
-        :show-pronunciation="false"
-        @answer="handleAnswer"
-        @pronounce="handlePronounce"
-      />
-      <score-display :score="gameStore.score" />
-    </div>
-
-    <!-- Answer Feedback -->
-    <div
-      v-else-if="gameStore.gameActive && currentQuestion && showAnswerFeedback && lastAnswerResult"
-      class="text-center"
-    >
-      <q-card class="q-pa-lg" style="max-width: 420px">
-        <q-card-section>
-          <div class="text-h3 q-mb-md">
-            {{ lastAnswerResult.isCorrect ? '✓' : '✗' }}
-          </div>
-          <div
-            class="text-h5 q-mb-sm"
-            :class="lastAnswerResult.isCorrect ? 'text-positive' : 'text-negative'"
-          >
-            {{ lastAnswerResult.isCorrect ? 'Correct!' : 'Incorrect' }}
-          </div>
-          <div class="text-body1 q-mb-md">
-            {{ currentQuestion.word.english_translation }} =
-            {{ currentQuestion.word.japanese_word }}
-          </div>
-          <q-btn
-            flat
-            round
-            dense
-            icon="volume_up"
-            color="primary"
-            size="lg"
-            :aria-label="`Play pronunciation for ${currentQuestion.word.japanese_word}`"
-            @click="handlePronounce(currentQuestion.word)"
-            class="q-mb-md"
-          >
-            <q-tooltip>Listen to pronunciation</q-tooltip>
-          </q-btn>
-        </q-card-section>
-        <q-card-actions align="center">
-          <q-btn
-            @click="proceedToNextQuestion"
-            :label="
-              gameStore.currentQuestionIndex + 1 >= gameStore.questions.length
-                ? 'Finish'
-                : 'Next Question'
-            "
-            color="primary"
-            size="lg"
-          />
-        </q-card-actions>
-      </q-card>
-      <score-display :score="gameStore.score" class="q-mt-md" />
+      <div v-if="!showAnswerFeedback || !lastAnswerResult">
+        <vocabulary-card
+          :question="currentQuestion"
+          :show-pronunciation="false"
+          @answer="handleAnswer"
+          @pronounce="handlePronounce"
+        />
+        <score-display :score="gameStore.score" />
+      </div>
+      <div v-else class="text-center">
+        <q-card class="q-pa-lg" style="max-width: 420px">
+          <q-card-section>
+            <div class="text-h3 q-mb-md">
+              {{ lastAnswerResult.isCorrect ? '✓' : '✗' }}
+            </div>
+            <div
+              class="text-h5 q-mb-sm"
+              :class="lastAnswerResult.isCorrect ? 'text-positive' : 'text-negative'"
+            >
+              {{ lastAnswerResult.isCorrect ? 'Correct!' : 'Incorrect' }}
+            </div>
+            <div class="text-body1 q-mb-md">
+              {{ currentQuestion.word.english_translation }} =
+              {{ currentQuestion.word.japanese_word }}
+            </div>
+            <q-btn
+              flat
+              round
+              dense
+              icon="volume_up"
+              color="primary"
+              size="lg"
+              :aria-label="`Play pronunciation for ${currentQuestion.word.japanese_word}`"
+              @click="handlePronounce(currentQuestion.word)"
+              class="q-mb-md"
+            >
+              <q-tooltip>Listen to pronunciation</q-tooltip>
+            </q-btn>
+          </q-card-section>
+          <q-card-actions align="center">
+            <q-btn
+              @click="proceedToNextQuestion"
+              :label="
+                gameStore.currentQuestionIndex + 1 >= gameStore.questions.length
+                  ? 'Finish'
+                  : 'Next Question'
+              "
+              color="primary"
+              size="lg"
+            />
+          </q-card-actions>
+        </q-card>
+        <score-display :score="gameStore.score" class="q-mt-md" />
+      </div>
     </div>
 
     <!-- Game Over Screen - only show when game is inactive and not showing setup -->
@@ -125,7 +122,7 @@ import { useAuthStore } from 'src/stores/auth';
 import { gameService, InsufficientVocabularyError } from '../../services/gameService';
 import { srsService } from '../../services/srsService';
 import { pronounceWord } from '../../services/ttsService';
-import { normalizeVocabulary, toVocabularyOption } from 'src/utils/vocabulary';
+import { buildDistractors, normalizeVocabulary, toVocabularyOption } from 'src/utils/vocabulary';
 import VocabularyCard from 'src/components/games/VocabularyCard.vue';
 import ScoreDisplay from 'src/components/games/ScoreDisplay.vue';
 import GameTimer from 'src/components/games/GameTimer.vue';
@@ -209,7 +206,7 @@ async function startGame() {
           // Normalize: API may return `japanese` instead of `japanese_word` for legacy records
           const vocabulary = dueResponse.items
             .map((item) => item.vocabulary)
-            .filter((vocab): vocab is Vocabulary & { japanese?: string } => vocab !== null)
+            .filter((vocab) => vocab !== null)
             .map(normalizeVocabulary)
             .filter((vocab): vocab is Vocabulary => vocab !== null);
 
@@ -218,41 +215,7 @@ async function startGame() {
             const additionalWords = await gameService.getVocabularyPool(10, jlptFilter);
 
             const questions = vocabulary.map((word) => {
-              const otherWords = vocabulary.filter((v) => v.id !== word.id);
-
-              // Dedupe by japanese_word first before checking count
-              const seen = new Set<string>([word.japanese_word]);
-              let uniqueDistractors = shuffleArray(otherWords)
-                .map(toVocabularyOption)
-                .filter((d) => {
-                  if (seen.has(d.text)) return false;
-                  seen.add(d.text);
-                  return true;
-                })
-                .slice(0, 3);
-
-              // If we don't have enough unique distractors, pull from additional vocabulary
-              if (uniqueDistractors.length < 3) {
-                const needed = 3 - uniqueDistractors.length;
-                const usedTexts = new Set([
-                  word.japanese_word,
-                  ...uniqueDistractors.map((d) => d.text),
-                ]);
-                const seenTexts = new Set<string>();
-                const availableDistractors = additionalWords
-                  .filter((v) => v.id !== word.id && !usedTexts.has(v.japanese_word))
-                  .map(toVocabularyOption)
-                  .filter((opt) => {
-                    if (seenTexts.has(opt.text)) return false;
-                    seenTexts.add(opt.text);
-                    return true;
-                  });
-
-                uniqueDistractors = [
-                  ...uniqueDistractors,
-                  ...shuffleArray(availableDistractors).slice(0, needed),
-                ];
-              }
+              const uniqueDistractors = buildDistractors(word, vocabulary, additionalWords);
 
               // If still not enough, throw so we fall back to random
               if (uniqueDistractors.length < 3) {
