@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { normalizeVocabulary, toVocabularyOption } from './vocabulary';
+import { buildDistractors, normalizeVocabulary, toVocabularyOption } from './vocabulary';
 import type { Vocabulary } from 'src/types/database';
 
 describe('toVocabularyOption', () => {
@@ -138,5 +138,83 @@ describe('normalizeVocabulary', () => {
     });
 
     expect(result).toBeNull();
+  });
+});
+
+describe('buildDistractors', () => {
+  const targetWord: Vocabulary = {
+    id: 'target',
+    japanese_word: '猫',
+    hiragana: 'ねこ',
+    english_translation: 'cat',
+    created_at: '2024-01-01T00:00:00Z',
+  };
+
+  it('should backfill missing unique distractors from additional words', () => {
+    const primaryVocabulary: Vocabulary[] = [
+      targetWord,
+      {
+        id: 'dog-1',
+        japanese_word: '犬',
+        hiragana: 'いぬ',
+        english_translation: 'dog',
+        created_at: '2024-01-01T00:00:00Z',
+      },
+      {
+        id: 'dog-2',
+        japanese_word: '犬',
+        hiragana: 'いぬ',
+        english_translation: 'puppy',
+        created_at: '2024-01-01T00:00:00Z',
+      },
+      {
+        id: 'bird',
+        japanese_word: '鳥',
+        hiragana: 'とり',
+        english_translation: 'bird',
+        created_at: '2024-01-01T00:00:00Z',
+      },
+    ];
+    const additionalVocabulary: Vocabulary[] = [
+      {
+        id: 'fish',
+        japanese_word: '魚',
+        hiragana: 'さかな',
+        english_translation: 'fish',
+        created_at: '2024-01-01T00:00:00Z',
+      },
+    ];
+
+    const distractors = buildDistractors(targetWord, primaryVocabulary, additionalVocabulary);
+
+    expect(distractors).toHaveLength(3);
+    expect(distractors.map((option) => option.text)).toEqual(
+      expect.arrayContaining(['犬', '鳥', '魚']),
+    );
+    expect(new Set(distractors.map((option) => option.text)).size).toBe(3);
+  });
+
+  it('should return fewer distractors when there are not enough unique words', () => {
+    const distractors = buildDistractors(
+      targetWord,
+      [
+        targetWord,
+        {
+          id: 'dog-1',
+          japanese_word: '犬',
+          hiragana: 'いぬ',
+          english_translation: 'dog',
+          created_at: '2024-01-01T00:00:00Z',
+        },
+      ],
+      [],
+    );
+
+    expect(distractors).toHaveLength(1);
+    expect(distractors[0]).toMatchObject({
+      id: 'dog-1',
+      text: '犬',
+      reading: 'いぬ',
+    });
   });
 });

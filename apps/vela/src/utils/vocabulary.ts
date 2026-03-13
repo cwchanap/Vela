@@ -1,7 +1,8 @@
 import type { VocabularyOption } from 'src/stores/games';
 import type { Vocabulary } from 'src/types/database';
+import { shuffleArray } from './array';
 
-type LegacyVocabulary = Omit<Vocabulary, 'japanese_word'> & {
+export type LegacyVocabularyPayload = Omit<Vocabulary, 'japanese_word'> & {
   japanese_word?: string | null;
   japanese?: string | null;
 };
@@ -9,7 +10,7 @@ type LegacyVocabulary = Omit<Vocabulary, 'japanese_word'> & {
 /**
  * Normalize vocabulary from APIs that may still send the legacy `japanese` field.
  */
-export function normalizeVocabulary(vocabulary: LegacyVocabulary): Vocabulary | null {
+export function normalizeVocabulary(vocabulary: LegacyVocabularyPayload): Vocabulary | null {
   const japaneseWord = vocabulary.japanese_word?.trim() || vocabulary.japanese?.trim() || '';
 
   if (!japaneseWord) {
@@ -41,4 +42,37 @@ export function toVocabularyOption(vocabulary: Vocabulary): VocabularyOption {
     text: vocabulary.japanese_word,
     ...(vocabulary.hiragana ? { reading: vocabulary.hiragana } : {}),
   };
+}
+
+export function buildDistractors(
+  targetWord: Vocabulary,
+  vocabulary: Vocabulary[],
+  additionalWords: Vocabulary[] = [],
+  count = 3,
+): VocabularyOption[] {
+  const distractors: VocabularyOption[] = [];
+  const seenTexts = new Set<string>([targetWord.japanese_word]);
+
+  const addUniqueDistractors = (pool: Vocabulary[]) => {
+    for (const candidate of shuffleArray(pool)) {
+      if (candidate.id === targetWord.id || seenTexts.has(candidate.japanese_word)) {
+        continue;
+      }
+
+      seenTexts.add(candidate.japanese_word);
+      distractors.push(toVocabularyOption(candidate));
+
+      if (distractors.length === count) {
+        return;
+      }
+    }
+  };
+
+  addUniqueDistractors(vocabulary);
+
+  if (distractors.length < count) {
+    addUniqueDistractors(additionalWords);
+  }
+
+  return distractors;
 }

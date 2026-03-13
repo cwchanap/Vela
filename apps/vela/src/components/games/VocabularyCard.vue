@@ -20,11 +20,7 @@
           class="full-width option-btn"
           data-testid="answer-button"
         >
-          <furi-kana
-            :text="option.text"
-            v-bind="option.reading !== undefined ? { reading: option.reading } : {}"
-            class="text-h6"
-          />
+          <furi-kana :text="option.text" :reading="option.reading" class="text-h6" />
         </q-btn>
       </div>
     </q-card-section>

@@ -11,7 +11,7 @@ import { isKanji } from 'src/utils/japanese';
 
 const props = defineProps<{
   text: string;
-  reading?: string;
+  reading?: string | undefined;
 }>();
 
 const hasKanji = computed(() => Array.from(props.text).some(isKanji));
