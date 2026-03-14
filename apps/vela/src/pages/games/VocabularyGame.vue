@@ -244,19 +244,19 @@ async function startGame() {
           Notify.create({
             type: 'warning',
             message:
-              'Not enough vocabulary in your review pool to generate a full quiz. Try adding more words or switching to All Levels.',
+              'Not enough unique distractors in your review pool. Starting a random quiz instead.',
             position: 'top',
-            timeout: 6000,
+            timeout: 5000,
           });
-          return;
+        } else {
+          console.error('Failed to fetch due items, falling back to random:', error);
+          Notify.create({
+            type: 'warning',
+            message: 'Could not load your review words. Starting a random quiz instead.',
+            position: 'top',
+            timeout: 5000,
+          });
         }
-        console.error('Failed to fetch due items, falling back to random:', error);
-        Notify.create({
-          type: 'warning',
-          message: 'Could not load your review words. Starting a random quiz instead.',
-          position: 'top',
-          timeout: 5000,
-        });
       }
     }
 
@@ -298,29 +298,14 @@ async function handleAnswer(selectedVocabularyId: string) {
 
   const isCorrect = selectedVocabularyId === currentQuestion.value.correctAnswer;
 
-  // Store the result and show feedback
-  lastAnswerResult.value = { selectedId: selectedVocabularyId, isCorrect };
-  showAnswerFeedback.value = true;
-}
-
-async function proceedToNextQuestion() {
-  if (!currentQuestion.value || !lastAnswerResult.value) {
-    console.warn('[proceedToNextQuestion] Called with null currentQuestion or lastAnswerResult');
-    showAnswerFeedback.value = false;
-    lastAnswerResult.value = null;
-    return;
-  }
-
-  const { isCorrect } = lastAnswerResult.value;
-
+  // Commit the answer immediately so progress is recorded even if the user
+  // navigates away before pressing Next/Finish on the feedback screen.
   if (isCorrect) {
     correctAnswers.value++;
   }
 
-  // Update individual word progress
   progressStore.updateProgress(currentQuestion.value.word.id, isCorrect);
 
-  // Queue SRS review if user is authenticated
   if (authStore.isAuthenticated) {
     const quality = srsService.qualityFromCorrectness(isCorrect);
     srsReviewQueue.value.push({
@@ -329,7 +314,22 @@ async function proceedToNextQuestion() {
     });
   }
 
-  // Hide feedback and move to next question
+  // Store the result and show feedback
+  lastAnswerResult.value = { selectedId: selectedVocabularyId, isCorrect };
+  showAnswerFeedback.value = true;
+}
+
+async function proceedToNextQuestion() {
+  if (!lastAnswerResult.value) {
+    console.warn('[proceedToNextQuestion] Called with null lastAnswerResult');
+    showAnswerFeedback.value = false;
+    lastAnswerResult.value = null;
+    return;
+  }
+
+  const { isCorrect } = lastAnswerResult.value;
+
+  // Hide feedback and advance game state
   showAnswerFeedback.value = false;
   lastAnswerResult.value = null;
   gameStore.answerQuestion(isCorrect);
