@@ -61,7 +61,9 @@ async function getSentenceQuestions(count = 5): Promise<SentenceQuestion[]> {
 
 async function getVocabularyQuestions(count = 10, jlptLevels?: number[]): Promise<Question[]> {
   try {
-    const vocabulary = await getVocabularyPool(count, jlptLevels);
+    // Over-fetch so that duplicate japanese_word values (e.g. homographs in a
+    // JLPT-filtered pool) don't prevent us from building enough distractors.
+    const vocabulary = await getVocabularyPool(count * 3, jlptLevels);
 
     // Create multiple choice questions with Japanese options
     const questions: Question[] = vocabulary

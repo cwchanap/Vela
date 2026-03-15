@@ -45,7 +45,7 @@
     </div>
 
     <!-- Active Game -->
-    <div v-else-if="gameStore.gameActive && currentQuestion">
+    <div v-else-if="(gameStore.gameActive && currentQuestion) || showAnswerFeedback">
       <game-timer />
       <div v-if="!showAnswerFeedback || !lastAnswerResult">
         <vocabulary-card
@@ -69,8 +69,8 @@
               {{ lastAnswerResult.isCorrect ? 'Correct!' : 'Incorrect' }}
             </div>
             <div class="text-body1 q-mb-md">
-              {{ currentQuestion.word.english_translation }} =
-              {{ currentQuestion.word.japanese_word }}
+              {{ lastAnswerResult.word.english_translation }} =
+              {{ lastAnswerResult.word.japanese_word }}
             </div>
             <q-btn
               flat
@@ -79,8 +79,8 @@
               icon="volume_up"
               color="primary"
               size="lg"
-              :aria-label="`Play pronunciation for ${currentQuestion.word.japanese_word}`"
-              @click="handlePronounce(currentQuestion.word)"
+              :aria-label="`Play pronunciation for ${lastAnswerResult.word.japanese_word}`"
+              @click="handlePronounce(lastAnswerResult.word)"
               class="q-mb-md"
             >
               <q-tooltip>Listen to pronunciation</q-tooltip>
@@ -90,7 +90,7 @@
             <q-btn
               @click="proceedToNextQuestion"
               :label="
-                gameStore.currentQuestionIndex + 1 >= gameStore.questions.length
+                gameStore.currentQuestionIndex >= gameStore.questions.length
                   ? 'Finish'
                   : 'Next Question'
               "
@@ -143,7 +143,11 @@ const totalQuestions = ref(0);
 const showSetup = ref(true);
 const isLoading = ref(false);
 const showAnswerFeedback = ref(false);
-const lastAnswerResult = ref<{ selectedId: string; isCorrect: boolean } | null>(null);
+const lastAnswerResult = ref<{
+  selectedId: string;
+  isCorrect: boolean;
+  word: Vocabulary;
+} | null>(null);
 
 // JLPT and SRS settings
 const selectedJlptLevels = ref<JLPTLevel[]>([]);
@@ -297,42 +301,34 @@ async function handleAnswer(selectedVocabularyId: string) {
   if (!currentQuestion.value) return;
 
   const isCorrect = selectedVocabularyId === currentQuestion.value.correctAnswer;
+  const answeredWord = currentQuestion.value.word;
 
-  // Commit the answer immediately so progress is recorded even if the user
-  // navigates away before pressing Next/Finish on the feedback screen.
   if (isCorrect) {
     correctAnswers.value++;
   }
 
-  progressStore.updateProgress(currentQuestion.value.word.id, isCorrect);
+  progressStore.updateProgress(answeredWord.id, isCorrect);
 
   if (authStore.isAuthenticated) {
     const quality = srsService.qualityFromCorrectness(isCorrect);
     srsReviewQueue.value.push({
-      vocabularyId: currentQuestion.value.word.id,
+      vocabularyId: answeredWord.id,
       quality,
     });
   }
 
-  // Store the result and show feedback
-  lastAnswerResult.value = { selectedId: selectedVocabularyId, isCorrect };
+  // Advance the game store now so the store state is consistent even if the
+  // user navigates away while the feedback card is open.
+  gameStore.answerQuestion(isCorrect);
+
+  // Store result (including the word) and show feedback
+  lastAnswerResult.value = { selectedId: selectedVocabularyId, isCorrect, word: answeredWord };
   showAnswerFeedback.value = true;
 }
 
-async function proceedToNextQuestion() {
-  if (!lastAnswerResult.value) {
-    console.warn('[proceedToNextQuestion] Called with null lastAnswerResult');
-    showAnswerFeedback.value = false;
-    lastAnswerResult.value = null;
-    return;
-  }
-
-  const { isCorrect } = lastAnswerResult.value;
-
-  // Hide feedback and advance game state
+function proceedToNextQuestion() {
   showAnswerFeedback.value = false;
   lastAnswerResult.value = null;
-  gameStore.answerQuestion(isCorrect);
 }
 
 async function handlePronounce(word: Vocabulary) {
