@@ -45,9 +45,9 @@
     </div>
 
     <!-- Active Game -->
-    <div v-else-if="(gameStore.gameActive && currentQuestion) || showAnswerFeedback">
+    <div v-else-if="gameStore.gameActive || showAnswerFeedback">
       <game-timer />
-      <div v-if="!showAnswerFeedback || !lastAnswerResult">
+      <div v-if="currentQuestion && (!showAnswerFeedback || !lastAnswerResult)">
         <vocabulary-card
           :question="currentQuestion"
           :show-pronunciation="false"
@@ -56,7 +56,7 @@
         />
         <score-display :score="gameStore.score" />
       </div>
-      <div v-else class="text-center">
+      <div v-else-if="lastAnswerResult" class="text-center">
         <q-card class="q-pa-lg" style="max-width: 420px">
           <q-card-section>
             <div class="text-h3 q-mb-md">
