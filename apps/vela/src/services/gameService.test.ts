@@ -84,7 +84,7 @@ describe('gameService', () => {
 
       const questions = await gameService.getVocabularyQuestions(5);
 
-      expect(mockFetch).toHaveBeenCalledWith('/api/games/vocabulary?limit=5', {
+      expect(mockFetch).toHaveBeenCalledWith('/api/games/vocabulary?limit=15', {
         headers: {
           'Content-Type': 'application/json',
         },
@@ -103,7 +103,7 @@ describe('gameService', () => {
 
       await gameService.getVocabularyQuestions();
 
-      expect(mockFetch).toHaveBeenCalledWith('/api/games/vocabulary?limit=10', {
+      expect(mockFetch).toHaveBeenCalledWith('/api/games/vocabulary?limit=30', {
         headers: {
           'Content-Type': 'application/json',
         },
@@ -499,7 +499,7 @@ describe('gameService', () => {
 
       await gameService.getVocabularyQuestions(5, [5, 4]);
 
-      expect(mockFetch).toHaveBeenCalledWith('/api/games/vocabulary?limit=5&jlpt=5,4', {
+      expect(mockFetch).toHaveBeenCalledWith('/api/games/vocabulary?limit=15&jlpt=5,4', {
         headers: {
           'Content-Type': 'application/json',
         },
@@ -514,7 +514,7 @@ describe('gameService', () => {
 
       await gameService.getVocabularyQuestions(5, []);
 
-      expect(mockFetch).toHaveBeenCalledWith('/api/games/vocabulary?limit=5', {
+      expect(mockFetch).toHaveBeenCalledWith('/api/games/vocabulary?limit=15', {
         headers: {
           'Content-Type': 'application/json',
         },
@@ -529,7 +529,7 @@ describe('gameService', () => {
 
       await gameService.getVocabularyQuestions(10, [5]);
 
-      expect(mockFetch).toHaveBeenCalledWith('/api/games/vocabulary?limit=10&jlpt=5', {
+      expect(mockFetch).toHaveBeenCalledWith('/api/games/vocabulary?limit=30&jlpt=5', {
         headers: {
           'Content-Type': 'application/json',
         },
