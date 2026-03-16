@@ -87,7 +87,7 @@ async function getVocabularyQuestions(count = 10, jlptLevels?: number[]): Promis
       })
       .filter((question): question is Question => question !== null);
 
-    return questions;
+    return questions.slice(0, count);
   } catch (error) {
     console.error('Error fetching vocabulary:', error);
     return [];
