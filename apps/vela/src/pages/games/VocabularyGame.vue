@@ -321,9 +321,9 @@ async function handleAnswer(selectedVocabularyId: string) {
   // user navigates away while the feedback card is open.
   gameStore.answerQuestion(isCorrect);
 
-  // Store result (including the word) and show feedback
-  lastAnswerResult.value = { selectedId: selectedVocabularyId, isCorrect, word: answeredWord };
+  // Show feedback first so the card hides atomically once both flags are set
   showAnswerFeedback.value = true;
+  lastAnswerResult.value = { selectedId: selectedVocabularyId, isCorrect, word: answeredWord };
 }
 
 function proceedToNextQuestion() {
