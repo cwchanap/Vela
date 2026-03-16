@@ -149,11 +149,16 @@ describe('SentenceBuilder', () => {
   it('should handle empty questions response', async () => {
     vi.mocked(gameService.getSentenceQuestions).mockResolvedValue([]);
 
+    const gameStore = useGameStore();
+    const startGameSpy = vi.spyOn(gameStore, 'startSentenceGame');
+
     const wrapper = mountComponent();
     await flushPromises();
 
     // Game should not have started — no game content visible
     expect(wrapper.findComponent({ name: 'QSpinnerDots' }).exists()).toBe(true);
+    expect(gameStore.sentenceGameActive).toBe(false);
+    expect(startGameSpy).not.toHaveBeenCalled();
   });
 
   it('should show game content when game is active', async () => {
@@ -181,7 +186,7 @@ describe('SentenceBuilder', () => {
     expect(wrapper.find('.word-bank').exists()).toBe(true);
   });
 
-  it('should not display the Japanese sentence prompt that reveals the answer', async () => {
+  it('should display the Japanese sentence as the primary prompt', async () => {
     const gameStore = useGameStore();
     gameStore.startSentenceGame(mockSentenceQuestions);
 
@@ -190,10 +195,10 @@ describe('SentenceBuilder', () => {
     await wrapper.vm.$nextTick();
 
     const japaneseSentence = mockSentenceQuestions[0]?.sentence.japanese_sentence;
-    expect(wrapper.text()).not.toContain(japaneseSentence || '');
+    expect(wrapper.text()).toContain(japaneseSentence || '');
   });
 
-  it('should not render the Japanese sentence in a large prompt element', async () => {
+  it('should render the Japanese sentence in a large prompt element', async () => {
     const gameStore = useGameStore();
     gameStore.startSentenceGame(mockSentenceQuestions);
 
@@ -202,7 +207,7 @@ describe('SentenceBuilder', () => {
     await wrapper.vm.$nextTick();
 
     const largeText = wrapper.find('.text-h5.japanese-text');
-    expect(largeText.exists()).toBe(false);
+    expect(largeText.exists()).toBe(true);
   });
 
   it('should display English translation as a small hint caption', async () => {
