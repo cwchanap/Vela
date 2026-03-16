@@ -760,8 +760,13 @@ describe('DynamoDB Operations', () => {
       const mockItem = {
         user_id: mockUserId,
         vocabulary_id: 'vocab-1',
-        interval: 5,
+        next_review_date: '2024-01-14T00:00:00Z',
         ease_factor: 2.5,
+        interval: 5,
+        repetitions: 2,
+        first_learned_at: '2024-01-01T00:00:00Z',
+        total_reviews: 3,
+        correct_count: 2,
       };
       mockSend.mockResolvedValueOnce({ Item: mockItem });
 
@@ -874,7 +879,17 @@ describe('DynamoDB Operations', () => {
     });
 
     test('updateAfterReview should update record successfully', async () => {
-      const updatedAttrs = { user_id: mockUserId, vocabulary_id: 'vocab-1', interval: 14 };
+      const updatedAttrs = {
+        user_id: mockUserId,
+        vocabulary_id: 'vocab-1',
+        next_review_date: '2024-01-21T00:00:00Z',
+        ease_factor: 2.7,
+        interval: 14,
+        repetitions: 3,
+        first_learned_at: '2024-01-01T00:00:00Z',
+        total_reviews: 4,
+        correct_count: 4,
+      };
       mockSend.mockResolvedValueOnce({ Attributes: updatedAttrs });
 
       const result = await userVocabularyProgress.updateAfterReview(mockUserId, 'vocab-1', {
