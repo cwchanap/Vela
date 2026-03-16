@@ -24,8 +24,9 @@ vi.mock('../boot/query', () => ({
 
 vi.mock('@vela/common', () => ({
   progressKeys: {
-    analytics: (id: string | null) => ['progress', 'analytics', id],
     all: ['progress'],
+    analytics: (id: string | null) => ['progress', 'analytics', id],
+    session: (sessionId: string) => ['progress', 'session', sessionId],
   },
 }));
 
