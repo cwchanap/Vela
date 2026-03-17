@@ -1,0 +1,123 @@
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { flushPromises } from '@vue/test-utils';
+import { ref } from 'vue';
+import { withQueryClient } from 'src/test-utils/withQueryClient';
+
+const mockGetTTSSettings = vi.fn();
+const mockSaveTTSSettings = vi.fn();
+
+vi.mock('src/services/ttsService', () => ({
+  getTTSSettings: mockGetTTSSettings,
+  saveTTSSettings: mockSaveTTSSettings,
+}));
+
+const mockUser = ref<{ id: string } | null>(null);
+
+vi.mock('src/stores/auth', () => ({
+  useAuthStore: () => ({
+    user: mockUser,
+  }),
+}));
+
+vi.mock('pinia', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('pinia')>();
+  return {
+    ...actual,
+    storeToRefs: (store: any) => {
+      return { user: store.user };
+    },
+  };
+});
+
+vi.mock('@vela/common', () => ({
+  ttsKeys: {
+    settings: (userId: string | null) => ['tts', 'settings', userId],
+  },
+}));
+
+describe('useTTSQueries', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockUser.value = null;
+  });
+
+  describe('useTTSSettingsQuery', () => {
+    it('is disabled when user is null', async () => {
+      mockUser.value = null;
+      const { useTTSSettingsQuery } = await import('./useTTSQueries');
+      const { result } = withQueryClient(() => useTTSSettingsQuery());
+      expect(result).toBeDefined();
+      expect(mockGetTTSSettings).not.toHaveBeenCalled();
+    });
+
+    it('returns a query object', async () => {
+      mockUser.value = { id: 'user-123' };
+      mockGetTTSSettings.mockResolvedValue({ provider: 'elevenlabs', apiKey: 'key' });
+      const { useTTSSettingsQuery } = await import('./useTTSQueries');
+      const { result } = withQueryClient(() => useTTSSettingsQuery());
+      expect(result).toBeDefined();
+    });
+
+    it('calls getTTSSettings when user is set', async () => {
+      mockUser.value = { id: 'user-123' };
+      mockGetTTSSettings.mockResolvedValue({ provider: 'elevenlabs', apiKey: 'key' });
+      const { useTTSSettingsQuery } = await import('./useTTSQueries');
+      withQueryClient(() => useTTSSettingsQuery());
+      await flushPromises();
+      expect(mockGetTTSSettings).toHaveBeenCalled();
+    });
+  });
+
+  describe('useUpdateTTSSettingsMutation', () => {
+    it('calls saveTTSSettings with correct arguments', async () => {
+      mockUser.value = { id: 'user-123' };
+      mockSaveTTSSettings.mockResolvedValueOnce({ success: true });
+      const { useUpdateTTSSettingsMutation } = await import('./useTTSQueries');
+      const { result } = withQueryClient(() => useUpdateTTSSettingsMutation());
+      await result.mutateAsync({
+        provider: 'elevenlabs',
+        apiKey: 'test-key',
+        voiceId: 'voice-1',
+        model: 'eleven_turbo_v2',
+      });
+      expect(mockSaveTTSSettings).toHaveBeenCalledWith(
+        'elevenlabs',
+        'test-key',
+        'voice-1',
+        'eleven_turbo_v2',
+      );
+    });
+
+    it('calls saveTTSSettings without optional fields', async () => {
+      mockUser.value = { id: 'user-123' };
+      mockSaveTTSSettings.mockResolvedValueOnce({ success: true });
+      const { useUpdateTTSSettingsMutation } = await import('./useTTSQueries');
+      const { result } = withQueryClient(() => useUpdateTTSSettingsMutation());
+      await result.mutateAsync({ provider: 'openai', apiKey: 'openai-key' });
+      expect(mockSaveTTSSettings).toHaveBeenCalledWith(
+        'openai',
+        'openai-key',
+        undefined,
+        undefined,
+      );
+    });
+
+    it('invalidates TTS settings queries on success', async () => {
+      mockUser.value = { id: 'user-123' };
+      mockSaveTTSSettings.mockResolvedValueOnce({ success: true });
+      const { useUpdateTTSSettingsMutation } = await import('./useTTSQueries');
+      const { result, queryClient } = withQueryClient(() => useUpdateTTSSettingsMutation());
+      const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries');
+      await result.mutateAsync({ provider: 'elevenlabs', apiKey: 'key' });
+      expect(invalidateSpy).toHaveBeenCalledWith(
+        expect.objectContaining({ queryKey: expect.arrayContaining(['tts']) }),
+      );
+    });
+
+    it('returns mutation object with mutateAsync', async () => {
+      const { useUpdateTTSSettingsMutation } = await import('./useTTSQueries');
+      const { result } = withQueryClient(() => useUpdateTTSSettingsMutation());
+      expect(typeof result.mutateAsync).toBe('function');
+    });
+  });
+});
