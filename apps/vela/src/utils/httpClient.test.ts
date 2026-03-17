@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 vi.mock('aws-amplify/auth', () => ({
   fetchAuthSession: vi.fn(),
@@ -14,11 +14,15 @@ describe('httpJson', () => {
     vi.resetAllMocks();
   });
 
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
   it('makes a fetch request with Content-Type application/json', async () => {
-    global.fetch = vi.fn().mockResolvedValue({
-      ok: true,
-      json: async () => ({ data: 'test' }),
-    } as Response);
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({ ok: true, json: async () => ({ data: 'test' }) }),
+    );
 
     const result = await httpJson('/api/test');
     expect(result).toEqual({ data: 'test' });
@@ -31,42 +35,48 @@ describe('httpJson', () => {
   });
 
   it('throws error with statusText on non-ok response without body', async () => {
-    global.fetch = vi.fn().mockResolvedValue({
-      ok: false,
-      statusText: 'Not Found',
-      json: async () => {
-        throw new Error('parse error');
-      },
-    } as unknown as Response);
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: false,
+        statusText: 'Not Found',
+        json: async () => {
+          throw new Error('parse error');
+        },
+      }),
+    );
 
     await expect(httpJson('/api/missing')).rejects.toThrow('Not Found');
   });
 
   it('throws error with error field from response body', async () => {
-    global.fetch = vi.fn().mockResolvedValue({
-      ok: false,
-      statusText: 'Bad Request',
-      json: async () => ({ error: 'Invalid input' }),
-    } as unknown as Response);
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: false,
+        statusText: 'Bad Request',
+        json: async () => ({ error: 'Invalid input' }),
+      }),
+    );
 
     await expect(httpJson('/api/bad')).rejects.toThrow('Invalid input');
   });
 
   it('throws error with stringified non-string error field', async () => {
-    global.fetch = vi.fn().mockResolvedValue({
-      ok: false,
-      statusText: 'Bad Request',
-      json: async () => ({ error: { code: 400 } }),
-    } as unknown as Response);
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: false,
+        statusText: 'Bad Request',
+        json: async () => ({ error: { code: 400 } }),
+      }),
+    );
 
     await expect(httpJson('/api/bad')).rejects.toThrow('{"code":400}');
   });
 
   it('merges caller headers with Content-Type header', async () => {
-    global.fetch = vi.fn().mockResolvedValue({
-      ok: true,
-      json: async () => ({}),
-    } as Response);
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => ({}) }));
 
     await httpJson('/api/test', { headers: { 'X-Custom': 'value' } });
 
@@ -82,10 +92,7 @@ describe('httpJson', () => {
   });
 
   it('handles Headers instance as init headers', async () => {
-    global.fetch = vi.fn().mockResolvedValue({
-      ok: true,
-      json: async () => ({}),
-    } as Response);
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => ({}) }));
 
     const headers = new Headers({ 'X-Token': 'abc' });
     await httpJson('/api/test', { headers });
@@ -99,10 +106,7 @@ describe('httpJson', () => {
   });
 
   it('handles array of header pairs as init headers', async () => {
-    global.fetch = vi.fn().mockResolvedValue({
-      ok: true,
-      json: async () => ({}),
-    } as Response);
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => ({}) }));
 
     await httpJson('/api/test', { headers: [['X-Pair', 'yes']] });
 
@@ -120,15 +124,19 @@ describe('httpJsonAuth', () => {
     vi.resetAllMocks();
   });
 
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
   it('includes Authorization Bearer token in request headers', async () => {
     mockFetchAuthSession.mockResolvedValue({
       tokens: { idToken: { toString: () => 'test-token-123' } },
     } as any);
 
-    global.fetch = vi.fn().mockResolvedValue({
-      ok: true,
-      json: async () => ({ ok: true }),
-    } as Response);
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({ ok: true, json: async () => ({ ok: true }) }),
+    );
 
     await httpJsonAuth('/api/protected');
 
@@ -159,11 +167,14 @@ describe('httpJsonAuth', () => {
       tokens: { idToken: { toString: () => 'token' } },
     } as any);
 
-    global.fetch = vi.fn().mockResolvedValue({
-      ok: false,
-      statusText: 'Forbidden',
-      json: async () => ({ error: 'Access denied' }),
-    } as unknown as Response);
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: false,
+        statusText: 'Forbidden',
+        json: async () => ({ error: 'Access denied' }),
+      }),
+    );
 
     await expect(httpJsonAuth('/api/protected')).rejects.toThrow('Access denied');
   });
@@ -173,10 +184,7 @@ describe('httpJsonAuth', () => {
       tokens: { idToken: { toString: () => 'original-token' } },
     } as any);
 
-    global.fetch = vi.fn().mockResolvedValue({
-      ok: true,
-      json: async () => ({}),
-    } as Response);
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => ({}) }));
 
     await httpJsonAuth('/api/protected', {
       headers: { Authorization: 'Bearer override-token' },

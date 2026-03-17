@@ -149,29 +149,23 @@ describe('parsePendingReviews', () => {
   });
 
   it('does not log warnings when logWarnings is false', () => {
-    const consoleSpy = { warn: vi.fn(), error: vi.fn() };
-    const origWarn = console.warn;
-    const origError = console.error;
-    console.warn = consoleSpy.warn;
-    console.error = consoleSpy.error;
+    const warnSpy = vi.spyOn(console, 'warn');
+    const errorSpy = vi.spyOn(console, 'error');
 
     parsePendingReviews('not-json', { logWarnings: false });
 
-    console.warn = origWarn;
-    console.error = origError;
-    expect(consoleSpy.warn).not.toHaveBeenCalled();
-    expect(consoleSpy.error).not.toHaveBeenCalled();
+    expect(warnSpy).not.toHaveBeenCalled();
+    expect(errorSpy).not.toHaveBeenCalled();
+    vi.restoreAllMocks();
   });
 
-  it('logs warnings when logWarnings is true and data is invalid', () => {
-    const consoleSpy = { error: vi.fn() };
-    const origError = console.error;
-    console.error = consoleSpy.error;
+  it('logs errors when logWarnings is true and JSON is unparseable', () => {
+    const errorSpy = vi.spyOn(console, 'error');
 
     parsePendingReviews('not-json', { logWarnings: true });
 
-    console.error = origError;
-    expect(consoleSpy.error).toHaveBeenCalled();
+    expect(errorSpy).toHaveBeenCalled();
+    vi.restoreAllMocks();
   });
 });
 
