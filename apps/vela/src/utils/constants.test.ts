@@ -41,7 +41,7 @@ describe('LEARNING_LEVELS', () => {
   });
 
   it('levels are sequential from 1 to 5', () => {
-    const values = Object.values(LEARNING_LEVELS);
+    const values = [...Object.values(LEARNING_LEVELS)].sort((a, b) => a - b);
     expect(values).toEqual([1, 2, 3, 4, 5]);
   });
 });

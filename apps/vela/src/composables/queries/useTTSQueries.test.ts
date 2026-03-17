@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { flushPromises } from '@vue/test-utils';
 import { ref } from 'vue';
 import { withQueryClient } from 'src/test-utils/withQueryClient';
@@ -36,16 +36,26 @@ vi.mock('@vela/common', () => ({
 }));
 
 describe('useTTSQueries', () => {
+  let cleanup: (() => void) | undefined;
+
   beforeEach(() => {
     vi.clearAllMocks();
     mockUser.value = null;
+  });
+
+  afterEach(() => {
+    if (cleanup) {
+      cleanup();
+      cleanup = undefined;
+    }
   });
 
   describe('useTTSSettingsQuery', () => {
     it('is disabled when user is null', async () => {
       mockUser.value = null;
       const { useTTSSettingsQuery } = await import('./useTTSQueries');
-      const { result } = withQueryClient(() => useTTSSettingsQuery());
+      const { result, cleanup: qcCleanup } = withQueryClient(() => useTTSSettingsQuery());
+      cleanup = qcCleanup;
       expect(result).toBeDefined();
       expect(mockGetTTSSettings).not.toHaveBeenCalled();
     });
@@ -54,7 +64,8 @@ describe('useTTSQueries', () => {
       mockUser.value = { id: 'user-123' };
       mockGetTTSSettings.mockResolvedValue({ provider: 'elevenlabs', apiKey: 'key' });
       const { useTTSSettingsQuery } = await import('./useTTSQueries');
-      const { result } = withQueryClient(() => useTTSSettingsQuery());
+      const { result, cleanup: qcCleanup } = withQueryClient(() => useTTSSettingsQuery());
+      cleanup = qcCleanup;
       expect(result).toBeDefined();
     });
 
@@ -62,7 +73,8 @@ describe('useTTSQueries', () => {
       mockUser.value = { id: 'user-123' };
       mockGetTTSSettings.mockResolvedValue({ provider: 'elevenlabs', apiKey: 'key' });
       const { useTTSSettingsQuery } = await import('./useTTSQueries');
-      withQueryClient(() => useTTSSettingsQuery());
+      const { cleanup: qcCleanup } = withQueryClient(() => useTTSSettingsQuery());
+      cleanup = qcCleanup;
       await flushPromises();
       expect(mockGetTTSSettings).toHaveBeenCalled();
     });
@@ -73,7 +85,8 @@ describe('useTTSQueries', () => {
       mockUser.value = { id: 'user-123' };
       mockSaveTTSSettings.mockResolvedValueOnce({ success: true });
       const { useUpdateTTSSettingsMutation } = await import('./useTTSQueries');
-      const { result } = withQueryClient(() => useUpdateTTSSettingsMutation());
+      const { result, cleanup: qcCleanup } = withQueryClient(() => useUpdateTTSSettingsMutation());
+      cleanup = qcCleanup;
       await result.mutateAsync({
         provider: 'elevenlabs',
         apiKey: 'test-key',
@@ -92,7 +105,8 @@ describe('useTTSQueries', () => {
       mockUser.value = { id: 'user-123' };
       mockSaveTTSSettings.mockResolvedValueOnce({ success: true });
       const { useUpdateTTSSettingsMutation } = await import('./useTTSQueries');
-      const { result } = withQueryClient(() => useUpdateTTSSettingsMutation());
+      const { result, cleanup: qcCleanup } = withQueryClient(() => useUpdateTTSSettingsMutation());
+      cleanup = qcCleanup;
       await result.mutateAsync({ provider: 'openai', apiKey: 'openai-key' });
       expect(mockSaveTTSSettings).toHaveBeenCalledWith(
         'openai',
@@ -106,7 +120,12 @@ describe('useTTSQueries', () => {
       mockUser.value = { id: 'user-123' };
       mockSaveTTSSettings.mockResolvedValueOnce({ success: true });
       const { useUpdateTTSSettingsMutation } = await import('./useTTSQueries');
-      const { result, queryClient } = withQueryClient(() => useUpdateTTSSettingsMutation());
+      const {
+        result,
+        queryClient,
+        cleanup: qcCleanup,
+      } = withQueryClient(() => useUpdateTTSSettingsMutation());
+      cleanup = qcCleanup;
       const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries');
       await result.mutateAsync({ provider: 'elevenlabs', apiKey: 'key' });
       expect(invalidateSpy).toHaveBeenCalledWith(
@@ -116,7 +135,8 @@ describe('useTTSQueries', () => {
 
     it('returns mutation object with mutateAsync', async () => {
       const { useUpdateTTSSettingsMutation } = await import('./useTTSQueries');
-      const { result } = withQueryClient(() => useUpdateTTSSettingsMutation());
+      const { result, cleanup: qcCleanup } = withQueryClient(() => useUpdateTTSSettingsMutation());
+      cleanup = qcCleanup;
       expect(typeof result.mutateAsync).toBe('function');
     });
   });

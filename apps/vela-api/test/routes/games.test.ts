@@ -1,7 +1,6 @@
 import { describe, test, expect, beforeEach, vi } from 'bun:test';
 import { Hono } from 'hono';
 import type { Env } from '../../src/types';
-import { games } from '../../src/routes/games';
 
 const mockVocabularyDB = {
   getRandom: vi.fn(),
@@ -15,6 +14,9 @@ vi.mock('../../src/dynamodb', () => ({
   vocabulary: mockVocabularyDB,
   sentences: mockSentencesDB,
 }));
+
+// Import AFTER mocks are declared
+const { games } = await import('../../src/routes/games');
 
 function createTestApp() {
   const app = new Hono<{ Bindings: Env }>();
