@@ -23,11 +23,9 @@ vi.mock('./auth', () => ({
   useAuthStore: () => mockAuthStore,
 }));
 
-// Mock window.matchMedia
-Object.defineProperty(window, 'matchMedia', {
-  writable: true,
-  value: vi.fn().mockImplementation((query: string) => ({
-    matches: false,
+const makeMatchMedia = (matches: boolean) =>
+  vi.fn().mockImplementation((query: string) => ({
+    matches,
     media: query,
     onchange: null,
     addListener: vi.fn(),
@@ -35,8 +33,10 @@ Object.defineProperty(window, 'matchMedia', {
     addEventListener: vi.fn(),
     removeEventListener: vi.fn(),
     dispatchEvent: vi.fn(),
-  })),
-});
+  }));
+
+// Use vi.stubGlobal so Vitest restores the original after the suite
+vi.stubGlobal('matchMedia', makeMatchMedia(false));
 
 describe('useThemeStore', () => {
   beforeEach(() => {

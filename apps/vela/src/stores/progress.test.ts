@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { setActivePinia, createPinia } from 'pinia';
+import type { Achievement, ProgressAnalytics, SkillCategory } from '../services/progressService';
 
 const mockProgressService = {
   getProgressAnalytics: vi.fn(),
@@ -288,11 +289,12 @@ describe('useProgressStore', () => {
       const { useProgressStore } = await import('./progress');
       const store = useProgressStore();
       // Set analytics directly
-      store.analytics = {
+      const analyticsForLevelProgress = {
         ...mockAnalytics,
         currentLevel: 2,
         totalExperience: 150,
-      } as any;
+      } satisfies ProgressAnalytics;
+      store.analytics = analyticsForLevelProgress;
       // level 2: (150 - 100) / (200 - 100) * 100 = 50%
       expect(store.currentLevelProgress).toBe(50);
     });
@@ -308,7 +310,7 @@ describe('useProgressStore', () => {
     it('returns up to 7 days reversed', async () => {
       const { useProgressStore } = await import('./progress');
       const store = useProgressStore();
-      store.analytics = mockAnalytics as any;
+      store.analytics = mockAnalytics as ProgressAnalytics;
       const chart = store.dailyProgressChart;
       expect(chart.length).toBe(2);
       expect(chart[0]).toHaveProperty('experience');
@@ -328,7 +330,7 @@ describe('useProgressStore', () => {
     it('maps weekly progress data correctly', async () => {
       const { useProgressStore } = await import('./progress');
       const store = useProgressStore();
-      store.analytics = mockAnalytics as any;
+      store.analytics = mockAnalytics as ProgressAnalytics;
       const chart = store.weeklyProgressChart;
       expect(chart.length).toBe(1);
       expect(chart[0]).toHaveProperty('experience', 350);
@@ -345,7 +347,7 @@ describe('useProgressStore', () => {
     it('maps monthly progress data correctly', async () => {
       const { useProgressStore } = await import('./progress');
       const store = useProgressStore();
-      store.analytics = mockAnalytics as any;
+      store.analytics = mockAnalytics as ProgressAnalytics;
       const chart = store.monthlyProgressChart;
       expect(chart.length).toBe(1);
       expect(chart[0]).toHaveProperty('experience', 1200);
@@ -362,7 +364,7 @@ describe('useProgressStore', () => {
     it('returns only earned achievements sorted by date', async () => {
       const { useProgressStore } = await import('./progress');
       const store = useProgressStore();
-      store.achievements = [
+      const achievementsFixture = [
         {
           id: 'a1',
           name: 'First',
@@ -395,7 +397,8 @@ describe('useProgressStore', () => {
           experience_reward: 30,
           earned_at: '2024-01-03',
         },
-      ] as any;
+      ] satisfies Achievement[];
+      store.achievements = achievementsFixture;
       const recent = store.recentAchievements;
       expect(recent.length).toBe(2);
       // Most recent first
@@ -550,7 +553,18 @@ describe('useProgressStore', () => {
     it('clears new achievements', async () => {
       const { useProgressStore } = await import('./progress');
       const store = useProgressStore();
-      store.newAchievements = [{ id: 'a1' }] as any;
+      store.newAchievements = [
+        {
+          id: 'a1',
+          name: '',
+          description: '',
+          icon: '',
+          category: '',
+          requirement_type: '',
+          requirement_value: 0,
+          experience_reward: 0,
+        },
+      ] satisfies Achievement[];
       store.dismissNewAchievements();
       expect(store.newAchievements).toEqual([]);
     });
@@ -566,7 +580,7 @@ describe('useProgressStore', () => {
     it('returns matching skill category', async () => {
       const { useProgressStore } = await import('./progress');
       const store = useProgressStore();
-      store.skillCategories = mockAnalytics.skillCategories as any;
+      store.skillCategories = mockAnalytics.skillCategories as SkillCategory[];
       const result = store.getSkillCategoryProgress('Vocabulary');
       expect(result).not.toBeNull();
       expect(result?.id).toBe('sc1');
@@ -575,7 +589,7 @@ describe('useProgressStore', () => {
     it('returns null for unknown category', async () => {
       const { useProgressStore } = await import('./progress');
       const store = useProgressStore();
-      store.skillCategories = mockAnalytics.skillCategories as any;
+      store.skillCategories = mockAnalytics.skillCategories as SkillCategory[];
       expect(store.getSkillCategoryProgress('Grammar')).toBeNull();
     });
   });
@@ -604,7 +618,7 @@ describe('useProgressStore', () => {
             accuracy_percentage: 80,
           },
         ],
-      } as any;
+      } satisfies ProgressAnalytics;
       const result = store.getTodayProgress();
       expect(result).not.toBeNull();
       expect(result?.date).toBe(today);
@@ -613,7 +627,7 @@ describe('useProgressStore', () => {
     it('returns null if today is not in daily progress', async () => {
       const { useProgressStore } = await import('./progress');
       const store = useProgressStore();
-      store.analytics = mockAnalytics as any;
+      store.analytics = mockAnalytics as ProgressAnalytics;
       expect(store.getTodayProgress()).toBeNull();
     });
   });
