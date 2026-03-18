@@ -356,6 +356,25 @@ describe('My Dictionaries Route', () => {
 
       expect(res.status).toBe(200);
       expect(res.headers.get('content-type')).toContain('text/event-stream');
+
+      // Drain and verify SSE payload
+      const reader = res.body?.getReader();
+      const decoder = new TextDecoder();
+      let sseText = '';
+      if (reader) {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          sseText += typeof value === 'string' ? value : decoder.decode(value);
+        }
+      }
+      const events = sseText
+        .split('\n')
+        .filter((l) => l.startsWith('data: '))
+        .map((l) => JSON.parse(l.slice(6)));
+      const chunkEvents = events.filter((e) => e.type === 'chunk');
+      expect(chunkEvents.length).toBeGreaterThan(0);
+      expect(chunkEvents[0].text).toBe('日');
     });
 
     test('google provider: returns 500 when API returns error', async () => {
@@ -406,6 +425,25 @@ describe('My Dictionaries Route', () => {
 
       expect(res.status).toBe(200);
       expect(res.headers.get('content-type')).toContain('text/event-stream');
+
+      // Drain and verify SSE payload
+      const reader = res.body?.getReader();
+      const decoder = new TextDecoder();
+      let sseText = '';
+      if (reader) {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          sseText += typeof value === 'string' ? value : decoder.decode(value);
+        }
+      }
+      const events = sseText
+        .split('\n')
+        .filter((l) => l.startsWith('data: '))
+        .map((l) => JSON.parse(l.slice(6)));
+      const chunkEvents = events.filter((e) => e.type === 'chunk');
+      expect(chunkEvents.length).toBeGreaterThan(0);
+      expect(chunkEvents[0].text).toBe('Translation: Hello');
     });
 
     test('openrouter provider: returns 500 when API returns error', async () => {

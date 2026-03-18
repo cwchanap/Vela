@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, afterAll, beforeEach, vi } from 'vitest';
 import { setActivePinia, createPinia } from 'pinia';
 
 // Stub crypto.randomUUID for deterministic tests
@@ -6,6 +6,8 @@ let uuidCounter = 0;
 vi.stubGlobal('crypto', {
   randomUUID: () => `test-uuid-${++uuidCounter}`,
 });
+
+afterAll(() => vi.unstubAllGlobals());
 
 describe('useChatStore', () => {
   beforeEach(() => {
@@ -245,6 +247,24 @@ describe('useChatStore', () => {
       store.startNewChat();
       const secondId = store.chatId;
       expect(firstId).not.toBe(secondId);
+    });
+
+    it('resets isTyping to false', async () => {
+      const { useChatStore } = await import('./chat');
+      const store = useChatStore();
+
+      store.setTyping(true);
+      store.startNewChat();
+      expect(store.isTyping).toBe(false);
+    });
+
+    it('resets isLoading to false', async () => {
+      const { useChatStore } = await import('./chat');
+      const store = useChatStore();
+
+      store.setLoading(true);
+      store.startNewChat();
+      expect(store.isLoading).toBe(false);
     });
   });
 

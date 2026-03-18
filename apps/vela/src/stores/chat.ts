@@ -51,6 +51,8 @@ export const useChatStore = defineStore('chat', () => {
     chatId.value = crypto.randomUUID();
     messages.value = [];
     error.value = null;
+    isTyping.value = false;
+    isLoading.value = false;
   };
 
   const clearMessages = () => {

@@ -316,7 +316,7 @@ describe('TTS Route', () => {
       const body = (await res.json()) as { audioUrl: string; cached: boolean };
       expect(body.audioUrl).toBe('https://s3.example.com/new-audio.mp3');
       expect(body.cached).toBe(false);
-      expect(mockTTSProvider.generate).toHaveBeenCalledOnce();
+      expect(mockTTSProvider.generate).toHaveBeenCalledTimes(1);
     });
 
     test('returns 400 when no TTS settings configured', async () => {
