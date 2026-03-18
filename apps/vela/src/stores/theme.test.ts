@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, afterAll, beforeEach, vi } from 'vitest';
 import { setActivePinia, createPinia } from 'pinia';
 
 // Mock Quasar Dark and LocalStorage
@@ -35,8 +35,9 @@ const makeMatchMedia = (matches: boolean) =>
     dispatchEvent: vi.fn(),
   }));
 
-// Use vi.stubGlobal so Vitest restores the original after the suite
 vi.stubGlobal('matchMedia', makeMatchMedia(false));
+
+afterAll(() => vi.unstubAllGlobals());
 
 describe('useThemeStore', () => {
   beforeEach(() => {
