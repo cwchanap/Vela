@@ -155,4 +155,29 @@ describe('GameTimer', () => {
     // Verify component is mounted
     expect(wrapper.exists()).toBe(true);
   });
+
+  it('should call onTimeout prop instead of gameStore.endGame when provided', async () => {
+    const onTimeout = vi.fn();
+    const gameStore = useGameStore();
+    const endGameSpy = vi.spyOn(gameStore, 'endGame');
+
+    mount(GameTimer, { props: { onTimeout } });
+
+    await vi.advanceTimersByTimeAsync(60000);
+    await flushPromises();
+
+    expect(onTimeout).toHaveBeenCalledTimes(1);
+    expect(endGameSpy).not.toHaveBeenCalled();
+  });
+
+  it('should not call onTimeout before timer reaches 0', async () => {
+    const onTimeout = vi.fn();
+
+    mount(GameTimer, { props: { onTimeout } });
+
+    await vi.advanceTimersByTimeAsync(59000);
+    await flushPromises();
+
+    expect(onTimeout).not.toHaveBeenCalled();
+  });
 });
