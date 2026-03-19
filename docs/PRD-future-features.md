@@ -1,8 +1,23 @@
 # Vela Japanese Learning App - Product Requirements Document
 
-**Version:** 1.0
-**Date:** January 2026
-**Status:** Draft
+**Version:** 1.1
+**Date:** March 2026
+**Status:** In Progress
+
+---
+
+## Implementation Status Overview
+
+| Feature                    | Status                  | Evidence                                                           |
+| -------------------------- | ----------------------- | ------------------------------------------------------------------ |
+| Flashcard Review Mode      | ✅ Implemented          | Full SRS + cram modes, flip animation, JLPT filters, session stats |
+| Listening Comprehension    | ❌ Not Started          | UI placeholder only in GamesIndex; no routes, services, or API     |
+| Vocabulary Tagging         | ❌ Not Started          | No tag schema, no API endpoints, no UI                             |
+| Contextual Sentence Mining | 🔶 Partially Done (40%) | Sentence saving via extension works; missing mining/analysis logic |
+| Reading Passages           | ❌ Not Started          | No routes, components, or database tables                          |
+| Grammar Lessons            | ❌ Not Started          | No routes, components, or curriculum structure                     |
+| Writing Practice           | ❌ Not Started          | UI placeholder only in GamesIndex; no canvas or stroke logic       |
+| Social Features            | ❌ Not Started          | No leaderboards, friends, or sharing                               |
 
 ---
 
@@ -26,6 +41,16 @@ This PRD outlines eight new features for the Vela Japanese learning application.
 ---
 
 ## 1. Flashcard Review Mode
+
+**Status: ✅ Implemented**
+
+**Key files:**
+
+- `apps/vela/src/pages/FlashcardReview.vue` — main page
+- `apps/vela/src/stores/flashcards.ts` — state management
+- `apps/vela/src/services/flashcardService.ts` — vocabulary fetching
+- `apps/vela-api/src/routes/srs.ts` — backend SRS algorithm
+- `apps/vela/src/components/flashcards/` — FlashcardCard, FlashcardRating, FlashcardSummary, FlashcardSetup, FlashcardInput
 
 ### Overview
 
@@ -74,6 +99,10 @@ Users currently learn vocabulary through multiple-choice quizzes, which test rec
 
 ## 2. Listening Comprehension Game
 
+**Status: ❌ Not Started**
+
+A UI placeholder (headphones icon, "Coming Soon" label) exists in `apps/vela/src/pages/games/GamesIndex.vue`. No routes, components, services, or API endpoints have been implemented.
+
 ### Overview
 
 An audio-based learning game that plays Japanese speech and asks users to identify meanings, transcribe what they hear, or answer comprehension questions. Leverages the existing text-to-speech infrastructure.
@@ -120,6 +149,10 @@ Listening is one of the four core language skills, yet the current application h
 ---
 
 ## 3. Vocabulary Tagging & Custom Study Lists
+
+**Status: ❌ Not Started**
+
+My Dictionaries page (`apps/vela/src/pages/dictionary/MyDictionariesPage.vue`) exists for viewing saved sentences but has no tagging functionality. No tag schema, API endpoints, or UI components for tagging or custom study lists have been implemented.
 
 ### Overview
 
@@ -170,6 +203,22 @@ Users accumulate vocabulary from various sources (games, saved sentences, browse
 
 ## 4. Contextual Sentence Mining
 
+**Status: 🔶 Partially Implemented (~40%)**
+
+**What's done:**
+
+- Browser extension context menu saves selected Japanese text to `vela-saved-sentences` DynamoDB table
+- `apps/vela-api/src/routes/my-dictionaries.ts` stores sentences with `source_url`, `context`, and `created_at`
+- `apps/vela/src/pages/dictionary/MyDictionariesPage.vue` displays saved sentences with source links
+
+**What's missing:**
+
+- Japanese text tokenization / word-level highlighting (SM-1, SM-2)
+- One-click flashcard creation from highlighted words (SM-3)
+- Difficulty scoring based on vocabulary/kanji (SM-6)
+- Batch import from a page (SM-7)
+- Automatic sync queue for offline capture (SM-8)
+
 ### Overview
 
 Enhanced browser extension functionality that automatically analyzes saved Japanese text, identifies vocabulary words, provides instant translations, and enables one-click flashcard creation from discovered content.
@@ -216,6 +265,10 @@ The current browser extension saves raw text but users must manually look up wor
 ---
 
 ## 5. Reading Passages with Comprehension
+
+**Status: ❌ Not Started**
+
+No routes, pages, components, or database tables exist for reading passages or comprehension questions.
 
 ### Overview
 
@@ -266,6 +319,10 @@ Learners study isolated vocabulary and sentences but lack practice with connecte
 
 ## 6. Grammar Point Lessons
 
+**Status: ❌ Not Started**
+
+No routes, components, curriculum structure, or database tables exist for grammar lessons. The existing Sentence Anagram Game is not grammar instruction.
+
 ### Overview
 
 Structured lessons covering Japanese grammar points organized by JLPT level. Each lesson includes explanations, example sentences, and interactive exercises for practicing grammar patterns.
@@ -313,6 +370,10 @@ Vocabulary knowledge alone is insufficient for Japanese proficiency. Users need 
 ---
 
 ## 7. Writing Practice
+
+**Status: ❌ Not Started**
+
+A UI placeholder (pen icon, "Coming Soon" label) exists in `apps/vela/src/pages/games/GamesIndex.vue`. No canvas component, stroke order data, character evaluation logic, routes, or API endpoints have been implemented.
 
 ### Overview
 
@@ -363,6 +424,10 @@ Character writing builds muscle memory that reinforces recognition. Many learner
 ---
 
 ## 8. Social Features
+
+**Status: ❌ Not Started**
+
+No leaderboards, friend connections, study groups, activity feeds, or social API endpoints exist in the codebase. Progress tracking is present but private/individual only.
 
 ### Overview
 
@@ -474,6 +539,7 @@ The feature set will be considered successful if:
 
 ## Revision History
 
-| Version | Date         | Author | Changes       |
-| ------- | ------------ | ------ | ------------- |
-| 1.0     | January 2026 | Claude | Initial draft |
+| Version | Date         | Author | Changes                                                         |
+| ------- | ------------ | ------ | --------------------------------------------------------------- |
+| 1.0     | January 2026 | Claude | Initial draft                                                   |
+| 1.1     | March 2026   | Claude | Added implementation status per feature based on codebase audit |

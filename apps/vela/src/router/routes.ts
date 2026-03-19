@@ -115,6 +115,11 @@ const routes: RouteRecordRaw[] = [
         name: 'sentence-game',
         component: () => import('pages/games/SentenceGame.vue'),
       },
+      {
+        path: 'listening',
+        name: 'listening-game',
+        component: () => import('pages/games/ListeningGame.vue'),
+      },
     ],
   },
 
