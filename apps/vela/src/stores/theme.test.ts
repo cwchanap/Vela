@@ -43,6 +43,7 @@ describe('useThemeStore', () => {
   beforeEach(() => {
     setActivePinia(createPinia());
     vi.clearAllMocks();
+    vi.stubGlobal('matchMedia', makeMatchMedia(false));
     mockAuthStore.user = null;
     mockLocalStorage.has.mockReturnValue(false);
     mockLocalStorage.getItem.mockReturnValue(null);
