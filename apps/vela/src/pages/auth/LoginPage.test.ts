@@ -7,16 +7,6 @@ import LoginPage from './LoginPage.vue';
 // Install Notify plugin globally
 Notify.create = vi.fn() as any;
 
-// Stub AuthForm so we don't need Cognito setup
-vi.mock('../../components/auth/AuthForm.vue', () => ({
-  default: {
-    name: 'AuthForm',
-    template: '<div data-testid="auth-form">AuthForm</div>',
-    props: ['mode', 'redirectTo'],
-    emits: ['success', 'error'],
-  },
-}));
-
 const createTestRouter = () =>
   createRouter({
     history: createMemoryHistory(),
@@ -110,14 +100,17 @@ describe('LoginPage', () => {
 
     it('redirects to "/" after signin success', async () => {
       vi.useFakeTimers();
-      wrapper = mountComponent();
-      const routerPushSpy = vi.spyOn(router, 'push');
-      // handleAuthSuccess with 'signin' waits 1 second then pushes
-      const promise = wrapper.vm.handleAuthSuccess('signin');
-      await vi.runAllTimersAsync();
-      await promise;
-      vi.useRealTimers();
-      expect(routerPushSpy).toHaveBeenCalledWith('/');
+      try {
+        wrapper = mountComponent();
+        const routerPushSpy = vi.spyOn(router, 'push');
+        // handleAuthSuccess with 'signin' waits 1 second then pushes
+        const promise = wrapper.vm.handleAuthSuccess('signin');
+        await vi.runAllTimersAsync();
+        await promise;
+        expect(routerPushSpy).toHaveBeenCalledWith('/');
+      } finally {
+        vi.useRealTimers();
+      }
     });
   });
 

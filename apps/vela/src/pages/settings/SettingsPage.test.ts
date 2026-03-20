@@ -188,7 +188,7 @@ describe('SettingsPage', () => {
         avatar_url: null,
         preferences: null,
       };
-      (authStore as any).session = { user: { id: 'user-1' } };
+      authStore.setSession({ user: authStore.user });
       expect(wrapper.vm.isAuthenticated).toBe(true);
     });
   });
