@@ -290,15 +290,58 @@ export async function getTTSSettings(_userId?: string): Promise<TTSSettings> {
 /**
  * Play audio from URL
  */
-export function playAudio(audioUrl: string): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const audio = new Audio(audioUrl);
+export interface AudioPlaybackHandle {
+  audio: HTMLAudioElement;
+  finished: Promise<void>;
+  stop: () => void;
+}
 
-    audio.onended = () => resolve();
-    audio.onerror = () => reject(new Error('Failed to play audio'));
+export function playAudio(audioUrl: string): AudioPlaybackHandle {
+  const audio = new Audio(audioUrl);
+  let settled = false;
+  let resolveFinished!: () => void;
+  let rejectFinished!: (_error: Error) => void;
 
-    audio.play().catch(reject);
+  const cleanup = () => {
+    audio.onended = null;
+    audio.onerror = null;
+  };
+
+  const resolveOnce = () => {
+    if (settled) return;
+    settled = true;
+    cleanup();
+    resolveFinished();
+  };
+
+  const rejectOnce = (error: Error) => {
+    if (settled) return;
+    settled = true;
+    cleanup();
+    rejectFinished(error);
+  };
+
+  const finished = new Promise<void>((resolve, reject) => {
+    resolveFinished = resolve;
+    rejectFinished = reject;
   });
+
+  audio.onended = () => resolveOnce();
+  audio.onerror = () => rejectOnce(new Error('Failed to play audio'));
+  audio.play().catch((error) => {
+    rejectOnce(error instanceof Error ? error : new Error(String(error)));
+  });
+
+  return {
+    audio,
+    finished,
+    stop: () => {
+      if (settled) return;
+      audio.pause();
+      audio.currentTime = 0;
+      resolveOnce();
+    },
+  };
 }
 
 /**
@@ -307,7 +350,7 @@ export function playAudio(audioUrl: string): Promise<void> {
 export async function pronounceWord(word: Vocabulary, userId: string): Promise<void> {
   try {
     const { audioUrl } = await generatePronunciation(word.id, word.japanese_word, userId);
-    await playAudio(audioUrl);
+    await playAudio(audioUrl).finished;
   } catch (error) {
     console.error('Error pronouncing word:', error);
     throw error;

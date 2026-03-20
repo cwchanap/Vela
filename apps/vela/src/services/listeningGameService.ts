@@ -48,7 +48,7 @@ async function getSentenceQuestions(
   count: number,
 ): Promise<ListeningQuestion[]> {
   // Fetch extra items to have enough for distractors
-  let url = `games/sentences?limit=${count + 3}`;
+  let url = `games/sentences?limit=${count * 2}`;
   if (config.jlptLevels.length > 0) {
     url += `&jlpt=${config.jlptLevels.join(',')}`;
   }

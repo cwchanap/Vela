@@ -87,11 +87,20 @@ describe('MultipleChoiceQuestion', () => {
   });
 
   it('shuffles options (options array contains correct answer)', () => {
-    // Mount multiple times and verify correct answer always present
-    for (let i = 0; i < 3; i++) {
+    const renderedSequences = new Set<string>();
+
+    for (let i = 0; i < 12; i++) {
       const wrapper = mountComponent();
+      renderedSequences.add(
+        wrapper
+          .findAll('button')
+          .map((button) => button.text().trim())
+          .join('|'),
+      );
       expect(wrapper.text()).toContain('cat');
     }
+
+    expect(renderedSequences.size).toBeGreaterThan(1);
   });
 
   describe('with fewer than 3 distractors', () => {

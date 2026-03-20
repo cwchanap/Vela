@@ -16,12 +16,27 @@
       <span v-else-if="hasPlayed">Click to replay</span>
       <span v-else>Click to play</span>
     </div>
+    <div
+      v-if="hasError"
+      class="text-negative text-caption q-mt-sm row items-center justify-center q-gutter-xs"
+    >
+      <span>Audio playback failed. Try again.</span>
+      <q-btn
+        flat
+        dense
+        round
+        size="sm"
+        icon="close"
+        aria-label="Dismiss audio playback error"
+        @click="hasError = false"
+      />
+    </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, watch } from 'vue';
-import { playAudio } from 'src/services/ttsService';
+import { onUnmounted, ref, shallowRef, watch } from 'vue';
+import { playAudio, type AudioPlaybackHandle } from 'src/services/ttsService';
 
 const props = withDefaults(
   defineProps<{
@@ -39,16 +54,40 @@ const emit = defineEmits<{
 
 const isPlaying = ref(false);
 const hasPlayed = ref(false);
+const hasError = ref(false);
+const currentPlayback = shallowRef<AudioPlaybackHandle | null>(null);
+
+function stopPlayback({ resetPlayed = false, clearError = false } = {}) {
+  const playback = currentPlayback.value;
+  currentPlayback.value = null;
+
+  if (playback) {
+    playback.stop();
+  }
+
+  isPlaying.value = false;
+
+  if (resetPlayed) {
+    hasPlayed.value = false;
+  }
+
+  if (clearError) {
+    hasError.value = false;
+  }
+}
 
 watch(
   () => props.audioUrl,
   (url, oldUrl) => {
-    if (!url && oldUrl) {
-      // URL cleared — question is resetting
-      hasPlayed.value = false;
-      isPlaying.value = false;
+    if (url === oldUrl) return;
+
+    if (!url) {
+      stopPlayback({ resetPlayed: true, clearError: true });
       return;
     }
+
+    stopPlayback({ resetPlayed: true, clearError: true });
+
     if (url && props.autoPlay) {
       void play(url);
     }
@@ -57,21 +96,38 @@ watch(
 
 async function play(url = props.audioUrl) {
   if (!url || isPlaying.value) return;
+
+  hasError.value = false;
   isPlaying.value = true;
+  const playback = playAudio(url);
+  currentPlayback.value = playback;
+
   try {
-    await playAudio(url);
+    await playback.finished;
+    if (currentPlayback.value !== playback) return;
+
     if (!hasPlayed.value) {
       hasPlayed.value = true;
       emit('played');
     }
   } catch (e) {
+    if (currentPlayback.value !== playback) return;
+
+    hasError.value = true;
     console.error('Audio playback error:', e);
   } finally {
-    isPlaying.value = false;
+    if (currentPlayback.value === playback) {
+      currentPlayback.value = null;
+      isPlaying.value = false;
+    }
   }
 }
 
 function handleClick() {
   void play();
 }
+
+onUnmounted(() => {
+  stopPlayback({ resetPlayed: true, clearError: true });
+});
 </script>
