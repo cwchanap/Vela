@@ -53,7 +53,16 @@ describe('IndexPage', () => {
       session: any;
     }> = {},
   ) => {
-    const w = mount(IndexPage, {
+    // Configure store BEFORE mounting so onMounted sees the correct auth state
+    const authStore = useAuthStore();
+    authStore.isInitialized = authState.isInitialized ?? true;
+    authStore.user = authState.user ?? null;
+    // Drive isAuthenticated via setSession (it's a computed of user + session)
+    const session =
+      authState.session ?? (authState.isAuthenticated ? { user: authStore.user } : null);
+    authStore.setSession(session);
+
+    return mount(IndexPage, {
       global: {
         plugins: [Quasar, router],
         stubs: {
@@ -65,14 +74,6 @@ describe('IndexPage', () => {
         },
       },
     });
-
-    const authStore = useAuthStore();
-    authStore.isInitialized = authState.isInitialized ?? true;
-    (authStore as any).isAuthenticated = authState.isAuthenticated ?? false;
-    authStore.user = authState.user ?? null;
-    (authStore as any).session = authState.session ?? null;
-
-    return w;
   };
 
   describe('Rendering', () => {
