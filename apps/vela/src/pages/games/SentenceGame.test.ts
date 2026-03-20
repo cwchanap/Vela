@@ -17,7 +17,6 @@ const mountComponent = () =>
       plugins: [Quasar],
       stubs: {
         'q-page': { template: '<div><slot /></div>' },
-        SentenceBuilder: { template: '<div data-testid="sentence-builder">SentenceBuilder</div>' },
       },
     },
   });
