@@ -161,7 +161,7 @@ describe('SettingsPage', () => {
   describe('canSaveTTS computed', () => {
     it('returns false when user is not authenticated', () => {
       authStore.user = null;
-      (authStore as any).session = null;
+      authStore.setSession(null);
       expect(wrapper.vm.canSaveTTS).toBe(false);
     });
 
