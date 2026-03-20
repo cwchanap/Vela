@@ -4,8 +4,6 @@ import { createPinia, setActivePinia } from 'pinia';
 import { Quasar, Notify } from 'quasar';
 import { createRouter, createMemoryHistory } from 'vue-router';
 import LoginPage from './LoginPage.vue';
-// Install Notify plugin globally
-Notify.create = vi.fn() as any;
 
 const createTestRouter = () =>
   createRouter({
@@ -26,6 +24,7 @@ describe('LoginPage', () => {
     router = createTestRouter();
     await router.push('/auth/login');
     vi.clearAllMocks();
+    Notify.create = vi.fn() as any;
   });
 
   afterEach(() => {
@@ -86,7 +85,6 @@ describe('LoginPage', () => {
       wrapper = mountComponent();
       // onMounted runs and checks if route includes signup
       await flushPromises();
-      // authStore.initialize is mocked to not redirect (no session)
       expect(wrapper.vm.authMode).toBe('signup');
     });
   });
