@@ -157,10 +157,14 @@ async function handleStart(config: ListeningConfig) {
 async function loadAudioForCurrentQuestion() {
   const question = listeningStore.currentQuestion;
   const userId = authStore.user?.id;
-  if (!question || !userId) return;
+  currentAudioUrl.value = null;
+  if (!question || !userId) {
+    isLoadingAudio.value = false;
+    audioHasPlayed.value = true;
+    return;
+  }
 
   isLoadingAudio.value = true;
-  currentAudioUrl.value = null;
   audioHasPlayed.value = false;
 
   try {
@@ -211,7 +215,9 @@ function preloadNextAudio() {
   // currentIndex still points to the current question (submitAnswer not called yet)
   const nextQuestion = listeningStore.questions[listeningStore.currentIndex + 1];
   if (nextQuestion) {
-    void generatePronunciation(nextQuestion.id, nextQuestion.text, userId);
+    generatePronunciation(nextQuestion.id, nextQuestion.text, userId).catch((error) => {
+      console.error('Failed to preload next audio:', error);
+    });
   }
 }
 

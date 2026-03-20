@@ -196,5 +196,14 @@ describe('listeningGameService.getListeningQuestions', () => {
       const calledUrl: string = mockFetch.mock.calls[0]![0] as string;
       expect(calledUrl).toContain('jlpt=3');
     });
+
+    it('over-fetches sentences to build distractor pool (limit = count * 2)', async () => {
+      mockFetch.mockReturnValue(mockResponse({ sentences: [] }));
+
+      await listeningGameService.getListeningQuestions(sentenceConfig, 5);
+
+      const calledUrl: string = mockFetch.mock.calls[0]![0] as string;
+      expect(calledUrl).toContain('limit=10');
+    });
   });
 });
