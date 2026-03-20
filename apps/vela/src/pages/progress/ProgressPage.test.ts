@@ -67,11 +67,6 @@ describe('ProgressPage', () => {
           'q-page': { template: '<div><slot /></div>' },
           'q-card': { template: '<div><slot /></div>' },
           'q-card-section': { template: '<div><slot /></div>' },
-          ProgressDashboard: true,
-          ProgressChart: true,
-          SkillCategoryCard: true,
-          AchievementItem: true,
-          AchievementDialog: true,
         },
       },
     });
@@ -110,8 +105,8 @@ describe('ProgressPage', () => {
   });
 
   describe('chartData computed', () => {
-    it('returns empty array when dailyProgressChart is null/undefined', () => {
-      (progressStore as any).dailyProgressChart = null;
+    it('returns empty array when analytics is null', () => {
+      (progressStore as any).analytics = null;
       expect(wrapper.vm.chartData).toEqual([]);
     });
 
@@ -194,8 +189,9 @@ describe('ProgressPage', () => {
   });
 
   describe('Shows empty achievements message', () => {
-    it('shows no achievements message when recentAchievements is empty', () => {
+    it('shows no achievements message when recentAchievements is empty', async () => {
       (progressStore as any).recentAchievements = [];
+      await wrapper.vm.$nextTick();
       expect(wrapper.text()).toContain('No achievements yet');
     });
   });

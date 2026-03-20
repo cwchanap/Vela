@@ -14,12 +14,13 @@ describe('AuthLayout', () => {
   const mountComponent = async () => {
     const router = createTestRouter();
     await router.push('/');
+    await router.isReady();
     return mount(AuthLayout, {
       global: {
         plugins: [Quasar, router],
         stubs: {
-          'q-layout': true,
-          'q-page-container': true,
+          'q-layout': { name: 'QLayout', template: '<div><slot /></div>' },
+          'q-page-container': { name: 'QPageContainer', template: '<div><slot /></div>' },
           'router-view': true,
         },
       },
@@ -39,18 +40,15 @@ describe('AuthLayout', () => {
     wrapper.unmount();
   });
 
-  it('renders q-page-container', async () => {
+  it('renders q-page-container inside q-layout', async () => {
     const wrapper = await mountComponent();
-    // When stubs are set to true, they are replaced with simple stub components
-    // Just verify the wrapper renders properly
-    expect(wrapper.html()).toBeTruthy();
+    expect(wrapper.findComponent({ name: 'QPageContainer' }).exists()).toBe(true);
     wrapper.unmount();
   });
 
-  it('has proper layout structure', async () => {
+  it('renders router-view inside the layout', async () => {
     const wrapper = await mountComponent();
-    // Verify the component structure renders without errors
-    expect(wrapper.exists()).toBe(true);
+    expect(wrapper.find('router-view-stub').exists()).toBe(true);
     wrapper.unmount();
   });
 });

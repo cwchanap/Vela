@@ -250,10 +250,10 @@ describe('IndexPage', () => {
       expect(result?.color).toBe('orange');
     });
 
-    it('uses title field over name field', () => {
+    it('uses name field over title field', () => {
       wrapper = mountComponent();
       const result = wrapper.vm.mapAchievement({ id: 'ach-6', name: 'Name', title: 'Title' });
-      // title takes precedence (name ?? title, but actually name ?? title in our code uses the `name` key first via `raw.name ?? raw.title`)
+      // raw.name takes precedence over raw.title
       expect(result?.title).toBe('Name');
     });
   });

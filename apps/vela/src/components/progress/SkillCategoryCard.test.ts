@@ -127,7 +127,8 @@ describe('SkillCategoryCard', () => {
       wrapper = mountComponent({ showActions: true });
       const buttons = wrapper.findAllComponents({ name: 'QBtn' });
       const practiceBtn = buttons.find((b) => b.text() === 'Practice');
-      await practiceBtn?.trigger('click');
+      expect(practiceBtn).toBeDefined();
+      await practiceBtn!.trigger('click');
       expect(wrapper.emitted('practice')).toBeTruthy();
     });
 
@@ -135,7 +136,8 @@ describe('SkillCategoryCard', () => {
       wrapper = mountComponent({ showActions: true });
       const buttons = wrapper.findAllComponents({ name: 'QBtn' });
       const detailsBtn = buttons.find((b) => b.text() === 'Details');
-      await detailsBtn?.trigger('click');
+      expect(detailsBtn).toBeDefined();
+      await detailsBtn!.trigger('click');
       expect(wrapper.emitted('details')).toBeTruthy();
     });
   });

@@ -73,11 +73,6 @@ describe('GamesIndex', () => {
   describe('challengeProgress computed', () => {
     it('returns 0 initially (no games completed)', () => {
       wrapper = mountComponent();
-      expect(wrapper.vm.challengeProgress).toBe(0);
-    });
-
-    it('calculates ratio as gamesCompletedToday / dailyChallengeGoal', () => {
-      wrapper = mountComponent();
       // default: gamesCompletedToday=0, dailyChallengeGoal=3
       expect(wrapper.vm.challengeProgress).toBe(0);
     });

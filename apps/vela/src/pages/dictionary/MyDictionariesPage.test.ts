@@ -60,7 +60,7 @@ describe('MyDictionariesPage', () => {
     setActivePinia(createPinia());
     const router = createTestRouter();
     await router.push('/');
-    vi.clearAllMocks();
+    vi.resetAllMocks();
   });
 
   afterEach(() => {
