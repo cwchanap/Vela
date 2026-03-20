@@ -61,6 +61,9 @@ describe('MyDictionariesPage', () => {
     const router = createTestRouter();
     await router.push('/');
     vi.resetAllMocks();
+    // Re-establish defaults cleared by resetAllMocks
+    vi.mocked(myDictionariesService.getMyDictionaries).mockResolvedValue([]);
+    vi.mocked(myDictionariesService.deleteDictionaryEntry).mockResolvedValue(undefined);
   });
 
   afterEach(() => {
