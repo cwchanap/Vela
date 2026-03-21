@@ -31,6 +31,10 @@ export type ListeningQuestion =
       id: string;
       /** japanese_sentence — passed to TTS API */
       text: string;
+      /** hiragana reading — accepted as correct dictation answer when provided */
+      reading?: string;
+      /** romaji — accepted as correct dictation answer when provided */
+      romaji?: string;
       englishTranslation: string;
       /** Three wrong English translations for multiple-choice mode */
       distractors: string[];

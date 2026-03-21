@@ -29,18 +29,23 @@ async function getVocabularyQuestions(
     .map(normalizeVocabulary)
     .filter((v): v is Vocabulary => v !== null);
 
-  return pool.slice(0, count).map(
-    (word): ListeningQuestion => ({
+  const questions: ListeningQuestion[] = [];
+  for (const word of pool) {
+    if (questions.length >= count) break;
+    const distractors = buildEnglishDistractors(word.english_translation, pool);
+    if (distractors.length < 3) continue;
+    questions.push({
       kind: 'vocabulary',
       id: word.id,
       text: word.japanese_word,
       englishTranslation: word.english_translation,
-      distractors: buildEnglishDistractors(word.english_translation, pool),
+      distractors,
       raw: word,
       ...(word.hiragana ? { reading: word.hiragana } : {}),
       ...(word.romaji ? { romaji: word.romaji } : {}),
-    }),
-  );
+    });
+  }
+  return questions;
 }
 
 async function getSentenceQuestions(
@@ -56,16 +61,21 @@ async function getSentenceQuestions(
   const data = await httpJson<{ sentences: Sentence[] }>(getApiUrl(url));
   const pool: Sentence[] = data.sentences ?? [];
 
-  return pool.slice(0, count).map(
-    (sentence): ListeningQuestion => ({
+  const questions: ListeningQuestion[] = [];
+  for (const sentence of pool) {
+    if (questions.length >= count) break;
+    const distractors = buildEnglishDistractors(sentence.english_translation, pool);
+    if (distractors.length < 3) continue;
+    questions.push({
       kind: 'sentence',
       id: sentence.id,
       text: sentence.japanese_sentence,
       englishTranslation: sentence.english_translation,
-      distractors: buildEnglishDistractors(sentence.english_translation, pool),
+      distractors,
       raw: sentence,
-    }),
-  );
+    });
+  }
+  return questions;
 }
 
 function buildEnglishDistractors(

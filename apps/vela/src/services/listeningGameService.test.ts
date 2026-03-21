@@ -76,7 +76,12 @@ describe('listeningGameService.getListeningQuestions', () => {
     });
 
     it('maps hiragana to reading field', async () => {
-      const pool = [makeVocabPayload('v1', '猫', 'cat'), makeVocabPayload('v2', '犬', 'dog')];
+      const pool = [
+        makeVocabPayload('v1', '猫', 'cat'),
+        makeVocabPayload('v2', '犬', 'dog'),
+        makeVocabPayload('v3', '鳥', 'bird'),
+        makeVocabPayload('v4', '魚', 'fish'),
+      ];
       mockFetch.mockReturnValue(mockResponse({ vocabulary: pool }));
 
       const questions = await listeningGameService.getListeningQuestions(vocabConfig, 1);
@@ -146,6 +151,15 @@ describe('listeningGameService.getListeningQuestions', () => {
       const calledUrl: string = mockFetch.mock.calls[0]![0] as string;
       expect(calledUrl).toContain('limit=10');
     });
+
+    it('drops vocabulary questions that cannot produce 3 distractors', async () => {
+      // Only 2 items in pool — the first question can only get 1 distractor, not 3
+      const pool = [makeVocabPayload('v1', '猫', 'cat'), makeVocabPayload('v2', '犬', 'dog')];
+      mockFetch.mockReturnValue(mockResponse({ vocabulary: pool }));
+
+      const questions = await listeningGameService.getListeningQuestions(vocabConfig, 2);
+      expect(questions).toHaveLength(0);
+    });
   });
 
   describe('sentence source', () => {
@@ -204,6 +218,18 @@ describe('listeningGameService.getListeningQuestions', () => {
 
       const calledUrl: string = mockFetch.mock.calls[0]![0] as string;
       expect(calledUrl).toContain('limit=10');
+    });
+
+    it('drops sentence questions that cannot produce 3 distractors', async () => {
+      // Only 2 sentences — cannot build 3 distractors for any question
+      const pool = [
+        makeSentence('s1', '猫がいる', 'There is a cat'),
+        makeSentence('s2', '犬がいる', 'There is a dog'),
+      ];
+      mockFetch.mockReturnValue(mockResponse({ sentences: pool }));
+
+      const questions = await listeningGameService.getListeningQuestions(sentenceConfig, 2);
+      expect(questions).toHaveLength(0);
     });
   });
 });
