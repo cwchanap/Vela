@@ -18,10 +18,8 @@ export function isDictationCorrect(userInput: string, question: ListeningQuestio
 
   if (normalized === normalizeAnswer(question.text)) return true;
 
-  if (question.kind === 'vocabulary') {
-    if (question.reading && normalized === normalizeAnswer(question.reading)) return true;
-    if (question.romaji && normalized === normalizeAnswer(question.romaji)) return true;
-  }
+  if (question.reading && normalized === normalizeAnswer(question.reading)) return true;
+  if (question.romaji && normalized === normalizeAnswer(question.romaji)) return true;
 
   return false;
 }

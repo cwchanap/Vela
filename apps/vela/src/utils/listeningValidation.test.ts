@@ -148,9 +148,25 @@ describe('isDictationCorrect', () => {
     });
   });
 
-  describe('sentence question — no reading/romaji fallbacks', () => {
-    it('does not accept hiragana-only input for sentence question', () => {
+  describe('sentence question — reading/romaji fallbacks', () => {
+    it('does not accept hiragana-only input when no reading field is set', () => {
       expect(isDictationCorrect('ねこがいる', sentenceQuestion)).toBe(false);
+    });
+
+    it('accepts hiragana reading when reading field is provided', () => {
+      const sentenceWithReading: ListeningQuestion = {
+        ...sentenceQuestion,
+        reading: 'ねこがいる',
+      };
+      expect(isDictationCorrect('ねこがいる', sentenceWithReading)).toBe(true);
+    });
+
+    it('accepts romaji when romaji field is provided', () => {
+      const sentenceWithRomaji: ListeningQuestion = {
+        ...sentenceQuestion,
+        romaji: 'neko ga iru',
+      };
+      expect(isDictationCorrect('neko ga iru', sentenceWithRomaji)).toBe(true);
     });
   });
 });
