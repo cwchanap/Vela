@@ -245,7 +245,9 @@ watch(
   () => listeningStore.gameActive,
   async (isActive, wasActive) => {
     if (wasActive && !isActive && gameStartTime.value) {
-      const durationSeconds = Math.round((Date.now() - gameStartTime.value.getTime()) / 1000);
+      const startTime = gameStartTime.value;
+      gameStartTime.value = null;
+      const durationSeconds = Math.round((Date.now() - startTime.getTime()) / 1000);
       try {
         await progressStore.recordGameSession(
           'listening',
@@ -263,7 +265,6 @@ watch(
           timeout: 5000,
         });
       }
-      gameStartTime.value = null;
     }
   },
 );
