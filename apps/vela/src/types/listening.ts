@@ -22,7 +22,7 @@ export type ListeningQuestion =
       romaji?: string;
       englishTranslation: string;
       /** Three wrong English translations for multiple-choice mode */
-      distractors: string[];
+      distractors: [string, string, string];
       raw: Vocabulary;
     }
   | {
@@ -37,6 +37,6 @@ export type ListeningQuestion =
       romaji?: string;
       englishTranslation: string;
       /** Three wrong English translations for multiple-choice mode */
-      distractors: string[];
+      distractors: [string, string, string];
       raw: Sentence;
     };

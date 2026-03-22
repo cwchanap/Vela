@@ -39,7 +39,7 @@ async function getVocabularyQuestions(
       id: word.id,
       text: word.japanese_word,
       englishTranslation: word.english_translation,
-      distractors,
+      distractors: distractors as [string, string, string],
       raw: word,
       ...(word.hiragana ? { reading: word.hiragana } : {}),
       ...(word.romaji ? { romaji: word.romaji } : {}),
@@ -71,7 +71,7 @@ async function getSentenceQuestions(
       id: sentence.id,
       text: sentence.japanese_sentence,
       englishTranslation: sentence.english_translation,
-      distractors,
+      distractors: distractors as [string, string, string],
       raw: sentence,
     });
   }

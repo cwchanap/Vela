@@ -21,6 +21,17 @@
           </template>
         </q-banner>
 
+        <!-- TTS settings fetch failed -->
+        <q-banner v-else-if="ttsStatus === 'error'" rounded class="bg-negative text-white q-mb-md">
+          <template #avatar>
+            <q-icon name="error" color="white" />
+          </template>
+          Could not check text-to-speech configuration. Please try again.
+          <template #action>
+            <q-btn flat label="Retry" color="white" @click="recheckTtsStatus" />
+          </template>
+        </q-banner>
+
         <template v-else>
           <!-- Mode selection -->
           <div class="q-mb-lg">
@@ -98,7 +109,7 @@ const emit = defineEmits<{
   start: [config: ListeningConfig];
 }>();
 
-type TtsStatus = 'loading' | 'ready' | 'missing';
+type TtsStatus = 'loading' | 'ready' | 'missing' | 'error';
 
 const ttsStatus = ref<TtsStatus>('loading');
 const mode = ref<ListeningMode>('multiple-choice');
@@ -109,10 +120,22 @@ onMounted(async () => {
   try {
     const settings = await getTTSSettings();
     ttsStatus.value = settings.hasApiKey ? 'ready' : 'missing';
-  } catch {
-    ttsStatus.value = 'missing';
+  } catch (error) {
+    console.error('Failed to fetch TTS settings:', error);
+    ttsStatus.value = 'error';
   }
 });
+
+async function recheckTtsStatus() {
+  ttsStatus.value = 'loading';
+  try {
+    const settings = await getTTSSettings();
+    ttsStatus.value = settings.hasApiKey ? 'ready' : 'missing';
+  } catch (error) {
+    console.error('Failed to fetch TTS settings:', error);
+    ttsStatus.value = 'error';
+  }
+}
 
 function handleStart() {
   emit('start', {
