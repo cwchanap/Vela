@@ -255,6 +255,7 @@ export const useProgressStore = defineStore('progress', () => {
       await loadProgressAnalytics(userId);
     } catch (error) {
       console.error('Failed to record game session:', error);
+      throw error;
     }
   };
 

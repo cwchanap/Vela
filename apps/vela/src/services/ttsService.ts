@@ -348,11 +348,6 @@ export function playAudio(audioUrl: string): AudioPlaybackHandle {
  * Generate and play pronunciation for a vocabulary word
  */
 export async function pronounceWord(word: Vocabulary, userId: string): Promise<void> {
-  try {
-    const { audioUrl } = await generatePronunciation(word.id, word.japanese_word, userId);
-    await playAudio(audioUrl).finished;
-  } catch (error) {
-    console.error('Error pronouncing word:', error);
-    throw error;
-  }
+  const { audioUrl } = await generatePronunciation(word.id, word.japanese_word, userId);
+  await playAudio(audioUrl).finished;
 }

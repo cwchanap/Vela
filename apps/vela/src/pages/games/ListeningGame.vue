@@ -140,7 +140,6 @@ async function handleStart(config: ListeningConfig) {
     correctAnswers.value = 0;
     totalQuestions.value = questions.length;
     showSetup.value = false;
-    await loadAudioForCurrentQuestion();
   } catch (e) {
     console.error('Failed to start listening game:', e);
     Notify.create({
@@ -149,9 +148,11 @@ async function handleStart(config: ListeningConfig) {
       position: 'top',
       timeout: 5000,
     });
+    return;
   } finally {
     isStarting.value = false;
   }
+  await loadAudioForCurrentQuestion();
 }
 
 async function loadAudioForCurrentQuestion() {
@@ -159,6 +160,11 @@ async function loadAudioForCurrentQuestion() {
   const userId = authStore.user?.id;
   currentAudioUrl.value = null;
   if (!question || !userId) {
+    if (!userId) {
+      console.warn(
+        'loadAudioForCurrentQuestion: no authenticated user — skipping audio. Session may have expired.',
+      );
+    }
     isLoadingAudio.value = false;
     audioHasPlayed.value = true;
     return;

@@ -709,12 +709,14 @@ describe('useProgressStore', () => {
       expect(mockQueryClient.invalidateQueries).toHaveBeenCalled();
     });
 
-    it('handles error gracefully', async () => {
+    it('propagates error to caller', async () => {
       const { useProgressStore } = await import('./progress');
       const store = useProgressStore();
       mockProgressService.recordGameSession.mockRejectedValue(new Error('API error'));
 
-      await expect(store.recordGameSession('vocabulary', 80, 120, 10, 8)).resolves.not.toThrow();
+      await expect(store.recordGameSession('vocabulary', 80, 120, 10, 8)).rejects.toThrow(
+        'API error',
+      );
     });
   });
 });
