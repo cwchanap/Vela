@@ -455,7 +455,7 @@ async function handlePronounce(entry: MyDictionaryEntry) {
     // Get user ID from session if profile hasn't loaded yet
     const userId = user.value?.id || authStore.session.user.id;
     const { audioUrl } = await generatePronunciation(entry.sentence_id, entry.sentence, userId);
-    await playAudio(audioUrl);
+    await playAudio(audioUrl).finished;
   } catch (err) {
     console.error('Pronunciation error:', err);
     $q.notify({

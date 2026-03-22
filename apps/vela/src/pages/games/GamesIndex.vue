@@ -60,10 +60,15 @@
           </q-btn>
         </div>
 
-        <!-- Listening — Coming Soon -->
-        <div class="game-card game-card--listening coming-soon" aria-disabled="true">
+        <!-- Listening -->
+        <div
+          class="game-card game-card--listening"
+          role="button"
+          tabindex="0"
+          @click="navigateToGame('listening')"
+          @keydown="handleGameCardKeydown('listening', $event)"
+        >
           <div class="game-card-bg" aria-hidden="true"></div>
-          <div class="coming-soon-badge">Soon</div>
           <div class="game-icon listening">
             <q-icon name="headphones" />
           </div>
@@ -71,6 +76,10 @@
             <h3 class="game-title">Listening</h3>
             <p class="game-desc">Improve your listening comprehension</p>
           </div>
+          <q-btn unelevated rounded color="teal" class="game-btn">
+            <q-icon name="play_arrow" size="sm" class="q-mr-xs" />
+            Play
+          </q-btn>
         </div>
 
         <!-- Writing — Coming Soon -->
@@ -300,6 +309,10 @@ const handleGameCardKeydown = (gameType: string, event: KeyboardEvent) => {
 .game-card--vocab:hover .game-card-bg {
   opacity: 1;
   background: radial-gradient(ellipse at top, rgba(91, 74, 247, 0.05) 0%, transparent 70%);
+}
+.game-card--listening:hover .game-card-bg {
+  opacity: 1;
+  background: radial-gradient(ellipse at top, rgba(29, 184, 122, 0.05) 0%, transparent 70%);
 }
 .game-card--sentence:hover .game-card-bg {
   opacity: 1;

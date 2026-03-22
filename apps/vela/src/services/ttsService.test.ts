@@ -32,6 +32,8 @@ class MockAudio {
   src: string;
   onended: (() => void) | null = null;
   onerror: (() => void) | null = null;
+  currentTime = 0;
+  pause = vi.fn();
 
   constructor(src: string) {
     this.src = src;
@@ -600,15 +602,15 @@ describe('ttsService', () => {
 
       global.Audio = CustomMockAudio as any;
 
-      const playPromise = playAudio(audioUrl);
+      const playback = playAudio(audioUrl);
 
       // Simulate audio ended
       if (audioInstance && audioInstance.onended) {
         audioInstance.onended();
       }
 
-      await expect(playPromise).resolves.toBeUndefined();
-      expect(audioInstance?.src).toBe(audioUrl);
+      await expect(playback.finished).resolves.toBeUndefined();
+      expect(playback.audio.src).toBe(audioUrl);
     });
 
     it('should reject when audio fails to load', async () => {
@@ -624,14 +626,14 @@ describe('ttsService', () => {
 
       global.Audio = CustomMockAudio as any;
 
-      const playPromise = playAudio(audioUrl);
+      const playback = playAudio(audioUrl);
 
       // Simulate audio error
       if (audioInstance && audioInstance.onerror) {
         audioInstance.onerror();
       }
 
-      await expect(playPromise).rejects.toThrow('Failed to play audio');
+      await expect(playback.finished).rejects.toThrow('Failed to play audio');
     });
 
     it('should reject when play() fails', async () => {
@@ -645,7 +647,29 @@ describe('ttsService', () => {
 
       global.Audio = CustomMockAudio as any;
 
-      await expect(playAudio(audioUrl)).rejects.toThrow('Playback error');
+      await expect(playAudio(audioUrl).finished).rejects.toThrow('Playback error');
+    });
+
+    it('should expose a stop method that cancels playback', async () => {
+      const audioUrl = 'https://example.com/audio/test.mp3';
+      let audioInstance: MockAudio | null = null as MockAudio | null;
+
+      const CustomMockAudio = class extends MockAudio {
+        constructor(src: string) {
+          super(src);
+          audioInstance = this;
+          this.currentTime = 12;
+        }
+      };
+
+      global.Audio = CustomMockAudio as any;
+
+      const playback = playAudio(audioUrl);
+      playback.stop();
+
+      await expect(playback.finished).resolves.toBeUndefined();
+      expect(audioInstance?.pause).toHaveBeenCalledTimes(1);
+      expect(audioInstance?.currentTime).toBe(0);
     });
 
     it('should create Audio instance with correct URL', async () => {
@@ -664,7 +688,8 @@ describe('ttsService', () => {
 
       global.Audio = CustomMockAudio as any;
 
-      await playAudio(audioUrl);
+      const playback = playAudio(audioUrl);
+      await playback.finished;
 
       expect(capturedSrc).toBe(audioUrl);
     });
