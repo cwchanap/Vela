@@ -1,5 +1,12 @@
 import { describe, test, expect } from 'bun:test';
-import { calculateNextReview, isDue, calculateDueItems, SRS_DEFAULTS, type SRSItem } from './srs';
+import {
+  calculateNextReview,
+  isDue,
+  calculateDueItems,
+  srsItemToResult,
+  SRS_DEFAULTS,
+  type SRSItem,
+} from './srs';
 
 describe('SRS SM-2 Algorithm', () => {
   describe('calculateNextReview', () => {
@@ -278,6 +285,48 @@ describe('SRS SM-2 Algorithm', () => {
       expect(isDue('2024-12-29', mockNow)).toBe(true);
       expect(isDue('2024-12-30', mockNow)).toBe(true);
       expect(isDue('2024-12-31', mockNow)).toBe(false);
+    });
+  });
+
+  describe('srsItemToResult', () => {
+    test('should map SRSItem snake_case fields to camelCase result', () => {
+      const item: SRSItem = {
+        vocabulary_id: 'vocab-1',
+        user_id: 'user-1',
+        ease_factor: 2.5,
+        interval: 6,
+        repetitions: 3,
+        next_review_date: '2024-12-30T12:00:00Z',
+      };
+
+      const result = srsItemToResult(item);
+
+      expect(result.easeFactor).toBe(2.5);
+      expect(result.interval).toBe(6);
+      expect(result.repetitions).toBe(3);
+      expect(result.nextReviewDate).toBe('2024-12-30T12:00:00Z');
+      expect(result).not.toHaveProperty('vocabulary_id');
+      expect(result).not.toHaveProperty('user_id');
+    });
+
+    test('should handle default/initial SRS values', () => {
+      const item: SRSItem = {
+        vocabulary_id: 'vocab-new',
+        user_id: 'user-1',
+        ease_factor: SRS_DEFAULTS.EASE_FACTOR,
+        interval: 0,
+        repetitions: 0,
+        next_review_date: '2024-01-01T00:00:00Z',
+      };
+
+      const result = srsItemToResult(item);
+
+      expect(result.easeFactor).toBe(SRS_DEFAULTS.EASE_FACTOR);
+      expect(result.interval).toBe(0);
+      expect(result.repetitions).toBe(0);
+      expect(result.nextReviewDate).toBe('2024-01-01T00:00:00Z');
+      expect(result).not.toHaveProperty('vocabulary_id');
+      expect(result).not.toHaveProperty('user_id');
     });
   });
 
