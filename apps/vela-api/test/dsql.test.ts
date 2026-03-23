@@ -115,7 +115,7 @@ describe('checkDsqlHealth', () => {
 
     try {
       await checkDsqlHealth();
-      const constructorArgs = mockAuroraDSQLClient.mock.calls[0][0] as any;
+      const constructorArgs = mockAuroraDSQLClient.mock.calls[0][0] as Record<string, unknown>;
       expect(constructorArgs.user).toBe('custom-user');
     } finally {
       delete process.env.AURORA_DB_ENDPOINT;
@@ -131,7 +131,7 @@ describe('checkDsqlHealth', () => {
 
     try {
       await checkDsqlHealth();
-      const constructorArgs = mockAuroraDSQLClient.mock.calls[0][0] as any;
+      const constructorArgs = mockAuroraDSQLClient.mock.calls[0][0] as Record<string, unknown>;
       expect(constructorArgs.user).toBe('admin');
     } finally {
       delete process.env.AURORA_DB_ENDPOINT;

@@ -659,6 +659,8 @@ describe('corsMiddleware - extension origins', () => {
     expect(res.status).toBe(200);
     expect(json.message).toBe('GET success');
     expect(res.headers.get('Access-Control-Allow-Origin')).toBe('moz-extension://valid-ext-id');
+    // Extensions should NOT get Allow-Credentials header (same as Chrome extension)
+    expect(res.headers.get('Access-Control-Allow-Credentials')).toBeNull();
   });
 
   test('should skip empty extension IDs from comma-separated list', async () => {
@@ -674,7 +676,10 @@ describe('corsMiddleware - extension origins', () => {
       },
     });
     const res = await app.request(req);
+    const json = await res.json();
 
     expect(res.status).toBe(403);
+    expect(res.headers.get('Access-Control-Allow-Origin')).toBeNull();
+    expect(json.error).toContain('CORS policy violation');
   });
 });
