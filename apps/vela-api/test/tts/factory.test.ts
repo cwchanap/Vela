@@ -22,4 +22,8 @@ describe('createTTSProvider', () => {
     expect(provider).toBeInstanceOf(GeminiProvider);
     expect(provider.name).toBe('gemini');
   });
+
+  test('throws for unknown provider name', () => {
+    expect(() => createTTSProvider('unknown' as any)).toThrow('Unknown TTS provider: unknown');
+  });
 });

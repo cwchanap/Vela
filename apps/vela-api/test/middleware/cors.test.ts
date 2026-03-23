@@ -621,3 +621,60 @@ describe('isAllowedOrigin utility', () => {
     });
   });
 });
+
+describe('corsMiddleware - extension origins', () => {
+  test('should allow request from allowed Chrome extension origin', async () => {
+    const app = createTestApp({
+      CORS_ALLOWED_EXTENSION_IDS: 'valid-ext-id',
+    });
+    const req = new Request('http://localhost/test', {
+      method: 'GET',
+      headers: {
+        Origin: 'chrome-extension://valid-ext-id',
+      },
+    });
+    const res = await app.request(req);
+    const json = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(json.message).toBe('GET success');
+    expect(res.headers.get('Access-Control-Allow-Origin')).toBe('chrome-extension://valid-ext-id');
+    // Extensions should NOT get Allow-Credentials header
+    expect(res.headers.get('Access-Control-Allow-Credentials')).toBeNull();
+  });
+
+  test('should allow request from allowed Firefox extension origin', async () => {
+    const app = createTestApp({
+      CORS_ALLOWED_EXTENSION_IDS: 'valid-ext-id',
+    });
+    const req = new Request('http://localhost/test', {
+      method: 'GET',
+      headers: {
+        Origin: 'moz-extension://valid-ext-id',
+      },
+    });
+    const res = await app.request(req);
+    const json = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(json.message).toBe('GET success');
+    expect(res.headers.get('Access-Control-Allow-Origin')).toBe('moz-extension://valid-ext-id');
+  });
+
+  test('should skip empty extension IDs from comma-separated list', async () => {
+    // Extension IDs list with an empty entry (e.g. "id1,,id2") should not allow
+    // "chrome-extension://" (with no ID) as origin
+    const app = createTestApp({
+      CORS_ALLOWED_EXTENSION_IDS: 'valid-ext-id,,another-ext-id',
+    });
+    const req = new Request('http://localhost/test', {
+      method: 'GET',
+      headers: {
+        Origin: 'chrome-extension://',
+      },
+    });
+    const res = await app.request(req);
+
+    expect(res.status).toBe(403);
+  });
+});

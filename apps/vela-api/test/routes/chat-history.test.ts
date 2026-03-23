@@ -408,5 +408,287 @@ describe('Chat History Route', () => {
       expect(res.status).toBe(403);
       expect(json.error).toContain('Forbidden');
     });
+
+    test('should return 500 when AWS credentials missing for DELETE /thread', async () => {
+      const app = createTestApp({});
+      const req = new Request('http://localhost/thread?thread_id=thread-123', {
+        method: 'DELETE',
+      });
+      const res = await app.request(req);
+      const json = await res.json();
+
+      expect(res.status).toBe(500);
+      expect(json.error).toContain('Missing AWS credentials');
+    });
+
+    test('should return ok when thread is already empty', async () => {
+      // First call: getMessages returns empty (no messages in thread)
+      mockSend.mockResolvedValueOnce({ Items: [] });
+
+      const app = createTestApp({
+        AWS_ACCESS_KEY_ID: 'test-key',
+        AWS_SECRET_ACCESS_KEY: 'test-secret',
+      });
+
+      const req = new Request('http://localhost/thread?thread_id=empty-thread', {
+        method: 'DELETE',
+      });
+      const res = await app.request(req);
+      const json = await res.json();
+
+      expect(res.status).toBe(200);
+      expect(json.ok).toBe(true);
+    });
+
+    test('should return 500 when DynamoDB error occurs during delete', async () => {
+      // getMessages succeeds, but deleteThread fails
+      mockSend
+        .mockResolvedValueOnce({
+          Items: [
+            {
+              ThreadId: 'thread-123',
+              Timestamp: 1693440000000,
+              UserId: 'user-123',
+              message: 'hello',
+              is_user: true,
+            },
+          ],
+        })
+        .mockRejectedValueOnce(new Error('DynamoDB delete error'));
+
+      const app = createTestApp({
+        AWS_ACCESS_KEY_ID: 'test-key',
+        AWS_SECRET_ACCESS_KEY: 'test-secret',
+      });
+
+      const req = new Request('http://localhost/thread?thread_id=thread-123', {
+        method: 'DELETE',
+      });
+      const res = await app.request(req);
+      const json = await res.json();
+
+      expect(res.status).toBe(500);
+      expect(json.error).toContain('delete');
+    });
+
+    test('should retry batch delete when there are unprocessed items', async () => {
+      const message = {
+        ThreadId: 'thread-123',
+        Timestamp: 1693440000000,
+        UserId: 'user-123',
+        message: 'hello',
+        is_user: true,
+      };
+
+      mockSend
+        // getMessages call
+        .mockResolvedValueOnce({ Items: [message] })
+        // First deleteThread query (pagination)
+        .mockResolvedValueOnce({ Items: [message], LastEvaluatedKey: undefined })
+        // First batch write - returns unprocessed items
+        .mockResolvedValueOnce({
+          UnprocessedItems: {
+            'vela-chat-history': [
+              { DeleteRequest: { Key: { ThreadId: 'thread-123', Timestamp: 1693440000000 } } },
+            ],
+          },
+        })
+        // Retry batch write - all processed
+        .mockResolvedValueOnce({ UnprocessedItems: {} });
+
+      const app = createTestApp({
+        AWS_ACCESS_KEY_ID: 'test-key',
+        AWS_SECRET_ACCESS_KEY: 'test-secret',
+      });
+
+      const req = new Request('http://localhost/thread?thread_id=thread-123', {
+        method: 'DELETE',
+      });
+      const res = await app.request(req);
+      const json = await res.json();
+
+      expect(res.status).toBe(200);
+      expect(json.ok).toBe(true);
+    });
+  });
+
+  describe('GET /threads - additional coverage', () => {
+    test('should return 500 when AWS credentials missing for GET /threads', async () => {
+      const app = createTestApp({});
+      const req = new Request('http://localhost/threads?user_id=user-123');
+      const res = await app.request(req);
+      const json = await res.json();
+
+      expect(res.status).toBe(500);
+      expect(json.error).toContain('Missing AWS credentials');
+    });
+
+    test('should return 403 when accessing another user threads', async () => {
+      const app = createTestApp({
+        AWS_ACCESS_KEY_ID: 'test-key',
+        AWS_SECRET_ACCESS_KEY: 'test-secret',
+      });
+      const req = new Request('http://localhost/threads?user_id=other-user-456');
+      const res = await app.request(req);
+      const json = await res.json();
+
+      expect(res.status).toBe(403);
+      expect(json.error).toContain('Forbidden');
+    });
+
+    test('should return empty threads list when user has no messages', async () => {
+      mockSend.mockResolvedValueOnce({ Items: [], LastEvaluatedKey: undefined });
+
+      const app = createTestApp({
+        AWS_ACCESS_KEY_ID: 'test-key',
+        AWS_SECRET_ACCESS_KEY: 'test-secret',
+      });
+
+      const req = new Request('http://localhost/threads?user_id=user-123');
+      const res = await app.request(req);
+      const json = await res.json();
+
+      expect(res.status).toBe(200);
+      expect(json.threads).toHaveLength(0);
+    });
+
+    test('should fallback to scan when GSI index is not found', async () => {
+      const resourceNotFoundError = Object.assign(new Error('Requested resource not found'), {
+        name: 'ResourceNotFoundException',
+      });
+
+      mockSend
+        // First call fails with ResourceNotFoundException (GSI missing)
+        .mockRejectedValueOnce(resourceNotFoundError)
+        // Fallback scan succeeds
+        .mockResolvedValueOnce({
+          Items: [
+            {
+              ThreadId: 'thread-1',
+              Timestamp: 1693440000000,
+              UserId: 'user-123',
+              message: 'Hello',
+              is_user: true,
+            },
+          ],
+        });
+
+      const app = createTestApp({
+        AWS_ACCESS_KEY_ID: 'test-key',
+        AWS_SECRET_ACCESS_KEY: 'test-secret',
+      });
+
+      const req = new Request('http://localhost/threads?user_id=user-123');
+      const res = await app.request(req);
+      const json = await res.json();
+
+      expect(res.status).toBe(200);
+      expect(json.threads).toHaveLength(1);
+    });
+
+    test('should fallback to scan when index has ValidationException', async () => {
+      const validationError = Object.assign(new Error('Invalid IndexName'), {
+        name: 'ValidationException',
+      });
+
+      mockSend.mockRejectedValueOnce(validationError).mockResolvedValueOnce({ Items: [] });
+
+      const app = createTestApp({
+        AWS_ACCESS_KEY_ID: 'test-key',
+        AWS_SECRET_ACCESS_KEY: 'test-secret',
+      });
+
+      const req = new Request('http://localhost/threads?user_id=user-123');
+      const res = await app.request(req);
+
+      expect(res.status).toBe(200);
+    });
+
+    test('should propagate non-index errors from listThreads query', async () => {
+      const accessDeniedError = Object.assign(new Error('Access denied'), {
+        name: 'AccessDeniedException',
+      });
+
+      mockSend.mockRejectedValueOnce(accessDeniedError);
+
+      const app = createTestApp({
+        AWS_ACCESS_KEY_ID: 'test-key',
+        AWS_SECRET_ACCESS_KEY: 'test-secret',
+      });
+
+      const req = new Request('http://localhost/threads?user_id=user-123');
+      const res = await app.request(req);
+      const json = await res.json();
+
+      expect(res.status).toBe(500);
+      expect(json.error).toContain('Access denied');
+    });
+
+    test('should return 400 when user_id is empty string', async () => {
+      const app = createTestApp({
+        AWS_ACCESS_KEY_ID: 'test-key',
+        AWS_SECRET_ACCESS_KEY: 'test-secret',
+      });
+      const req = new Request('http://localhost/threads?user_id=');
+      const res = await app.request(req);
+      const json = await res.json();
+
+      expect(res.status).toBe(400);
+      expect(json.error).toContain('user_id is required');
+    });
+  });
+
+  describe('GET /messages - additional coverage', () => {
+    test('should return 500 when AWS credentials missing for GET /messages', async () => {
+      const app = createTestApp({});
+      const req = new Request('http://localhost/messages?thread_id=thread-123');
+      const res = await app.request(req);
+      const json = await res.json();
+
+      expect(res.status).toBe(500);
+      expect(json.error).toContain('Missing AWS credentials');
+    });
+
+    test('should return 403 when messages belong to different user', async () => {
+      mockSend.mockResolvedValueOnce({
+        Items: [
+          {
+            ThreadId: 'thread-123',
+            Timestamp: 1693440000000,
+            UserId: 'other-user',
+            message: 'Not mine',
+            is_user: true,
+          },
+        ],
+      });
+
+      const app = createTestApp({
+        AWS_ACCESS_KEY_ID: 'test-key',
+        AWS_SECRET_ACCESS_KEY: 'test-secret',
+      });
+
+      const req = new Request('http://localhost/messages?thread_id=thread-123');
+      const res = await app.request(req);
+      const json = await res.json();
+
+      expect(res.status).toBe(403);
+      expect(json.error).toContain('Forbidden');
+    });
+
+    test('should return 500 when DynamoDB error occurs in getMessages', async () => {
+      mockSend.mockRejectedValueOnce(new Error('DynamoDB connection error'));
+
+      const app = createTestApp({
+        AWS_ACCESS_KEY_ID: 'test-key',
+        AWS_SECRET_ACCESS_KEY: 'test-secret',
+      });
+
+      const req = new Request('http://localhost/messages?thread_id=thread-123');
+      const res = await app.request(req);
+      const json = await res.json();
+
+      expect(res.status).toBe(500);
+      expect(json.error).toContain('DynamoDB connection error');
+    });
   });
 });
