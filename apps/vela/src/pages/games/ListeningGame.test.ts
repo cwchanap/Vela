@@ -8,6 +8,7 @@ const mockListeningGameService = {
 };
 
 const mockGeneratePronunciation = vi.fn();
+const mockNotifyCreate = vi.fn();
 let ListeningGame: Component;
 
 const listeningStore = reactive({
@@ -238,6 +239,16 @@ describe('ListeningGame', () => {
     vi.doMock('src/stores/auth', () => ({
       useAuthStore: () => authStore,
     }));
+    vi.doMock('quasar', async (importOriginal) => {
+      const actual = await importOriginal<typeof import('quasar')>();
+      return {
+        ...actual,
+        Notify: {
+          ...actual.Notify,
+          create: mockNotifyCreate,
+        },
+      };
+    });
     ListeningGame = (await import('./ListeningGame.vue')).default;
   });
 
@@ -245,20 +256,30 @@ describe('ListeningGame', () => {
     vi.restoreAllMocks();
   });
 
-  it('reveals the question UI when audio loading is skipped because no user is signed in', async () => {
-    authStore.user = null;
+  it('skips the current question when audio loading fails', async () => {
+    const audioError = new Error('TTS unavailable');
     mockListeningGameService.getListeningQuestions.mockResolvedValue([
       makeQuestion('q1', '猫', 'cat'),
+      makeQuestion('q2', '犬', 'dog'),
     ]);
+    mockGeneratePronunciation
+      .mockRejectedValueOnce(audioError)
+      .mockResolvedValueOnce({ audioUrl: 'https://example.com/q2.mp3' });
 
     const wrapper = mountPage();
 
     await wrapper.find('.start-button').trigger('click');
     await flushPromises();
 
-    expect(mockGeneratePronunciation).not.toHaveBeenCalled();
+    expect(listeningStore.currentQuestion?.id).toBe('q2');
+    expect(mockNotifyCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: 'Failed to load audio. Skipping this question.',
+        type: 'warning',
+      }),
+    );
     expect(wrapper.find('.answer-button').exists()).toBe(true);
-    expect(wrapper.text()).not.toContain('Listen to the audio, then answer the question');
+    expect(wrapper.find('.answer-feedback-stub').exists()).toBe(false);
   });
 
   it('catches next-audio preload failures instead of leaving an unhandled rejection', async () => {
@@ -311,6 +332,36 @@ describe('ListeningGame', () => {
       expect.any(Number),
       1,
       1,
+    );
+  });
+
+  it('notifies the user when saving the listening session fails', async () => {
+    progressStore.recordGameSession.mockRejectedValue(new Error('Save failed'));
+    mockListeningGameService.getListeningQuestions.mockResolvedValue([
+      makeQuestion('q1', '猫', 'cat'),
+    ]);
+    mockGeneratePronunciation.mockResolvedValue({ audioUrl: 'https://example.com/q1.mp3' });
+
+    const wrapper = mountPage();
+
+    await wrapper.find('.start-button').trigger('click');
+    await flushPromises();
+
+    await wrapper.find('.answer-button').trigger('click');
+    await flushPromises();
+
+    expect(progressStore.recordGameSession).toHaveBeenCalledWith(
+      'listening',
+      1,
+      expect.any(Number),
+      1,
+      1,
+    );
+    expect(mockNotifyCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: 'Your game progress could not be saved. Please check your connection.',
+        type: 'warning',
+      }),
     );
   });
 

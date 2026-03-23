@@ -309,7 +309,6 @@ describe('progressService', () => {
     it('should handle network errors gracefully', async () => {
       mockFetch.mockRejectedValue(new Error('Network error'));
 
-      // Should not throw
       await expect(
         progressService.recordGameSession(
           gameSessionData.gameType,
@@ -319,7 +318,7 @@ describe('progressService', () => {
           gameSessionData.correctAnswers,
           gameSessionData.experienceGained,
         ),
-      ).resolves.toBeUndefined();
+      ).rejects.toThrow('Network error');
     });
 
     it('should handle API error status gracefully', async () => {
@@ -329,7 +328,6 @@ describe('progressService', () => {
         json: vi.fn().mockResolvedValue({ error: 'Invalid data' }),
       });
 
-      // Should not throw
       await expect(
         progressService.recordGameSession(
           gameSessionData.gameType,
@@ -339,7 +337,7 @@ describe('progressService', () => {
           gameSessionData.correctAnswers,
           gameSessionData.experienceGained,
         ),
-      ).resolves.toBeUndefined();
+      ).rejects.toThrow('Invalid data');
     });
 
     it('should use POST method', async () => {

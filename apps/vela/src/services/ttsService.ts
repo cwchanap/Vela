@@ -17,6 +17,7 @@ export interface TTSSettings {
 // In-session audio URL cache keyed by user + settings + vocabularyId.
 // Presigned S3 URLs expire in 15 minutes; cache for 14 minutes to avoid serving expired URLs.
 const audioUrlCache = new Map<string, { url: string; expiresAt: number }>();
+const pendingAudioRequests = new Map<string, Promise<TTSResponse>>();
 const CACHE_TTL_MS = 14 * 60 * 1000;
 const MAX_CACHE_ENTRIES = 300;
 const EXPIRED_SWEEP_INTERVAL_MS = 5 * 60 * 1000;
@@ -24,6 +25,7 @@ let lastExpiredSweepAt = 0;
 
 export function clearAudioUrlCache(): void {
   audioUrlCache.clear();
+  pendingAudioRequests.clear();
   lastExpiredSweepAt = 0;
 }
 
@@ -151,33 +153,50 @@ export async function generatePronunciation(
     return { audioUrl: cachedAudioUrl, cached: true };
   }
 
-  const headers = await getAuthHeader();
-
-  // provider/voiceId/model are client-side cache partition keys only and are not sent to backend.
-  const response = await fetch(getApiUrl('tts/generate'), {
-    method: 'POST',
-    headers,
-    body: JSON.stringify({
-      vocabularyId,
-      text,
-    }),
-  });
-
-  if (!response.ok) {
-    let errorMessage = `Failed to generate pronunciation (status: ${response.status})`;
-    try {
-      const error = await response.json();
-      errorMessage = error.error || errorMessage;
-    } catch {
-      const errorText = await response.text();
-      errorMessage = errorText || `${errorMessage}: ${response.statusText}`;
-    }
-    throw new Error(errorMessage);
+  const pendingRequest = pendingAudioRequests.get(cacheKey);
+  if (pendingRequest) {
+    return pendingRequest;
   }
 
-  const result: TTSResponse = await response.json();
-  setCachedAudioUrl(cacheKey, result.audioUrl);
-  return result;
+  const request = (async (): Promise<TTSResponse> => {
+    const headers = await getAuthHeader();
+
+    // provider/voiceId/model are client-side cache partition keys only and are not sent to backend.
+    const response = await fetch(getApiUrl('tts/generate'), {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        vocabularyId,
+        text,
+      }),
+    });
+
+    if (!response.ok) {
+      let errorMessage = `Failed to generate pronunciation (status: ${response.status})`;
+      try {
+        const error = await response.json();
+        errorMessage = error.error || errorMessage;
+      } catch {
+        const errorText = await response.text();
+        errorMessage = errorText || `${errorMessage}: ${response.statusText}`;
+      }
+      throw new Error(errorMessage);
+    }
+
+    const result: TTSResponse = await response.json();
+    setCachedAudioUrl(cacheKey, result.audioUrl);
+    return result;
+  })();
+
+  pendingAudioRequests.set(cacheKey, request);
+
+  try {
+    return await request;
+  } finally {
+    if (pendingAudioRequests.get(cacheKey) === request) {
+      pendingAudioRequests.delete(cacheKey);
+    }
+  }
 }
 
 /**
