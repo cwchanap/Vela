@@ -159,6 +159,18 @@ async function handleStart(config: ListeningConfig) {
   await loadAudioForCurrentQuestion();
 }
 
+async function skipCurrentQuestionAfterAudioFailure() {
+  if (listeningStore.currentIndex + 1 >= listeningStore.questions.length) {
+    shouldRecordSession.value = true;
+  }
+
+  listeningStore.submitAnswer(false);
+
+  if (listeningStore.gameActive) {
+    await loadAudioForCurrentQuestion();
+  }
+}
+
 async function loadAudioForCurrentQuestion() {
   const question = listeningStore.currentQuestion;
   const userId = authStore.user?.id;
@@ -168,9 +180,16 @@ async function loadAudioForCurrentQuestion() {
       console.warn(
         'loadAudioForCurrentQuestion: no authenticated user — skipping audio. Session may have expired.',
       );
+      Notify.create({
+        type: 'warning',
+        message: 'Audio is unavailable. Skipping this question.',
+        position: 'top',
+        timeout: 4000,
+      });
+      await skipCurrentQuestionAfterAudioFailure();
     }
     isLoadingAudio.value = false;
-    audioHasPlayed.value = true;
+    audioHasPlayed.value = false;
     return;
   }
 
@@ -183,13 +202,12 @@ async function loadAudioForCurrentQuestion() {
   } catch (e) {
     console.error('Failed to load audio:', e);
     Notify.create({
-      type: 'negative',
-      message: 'Failed to load audio. You can still answer the question.',
+      type: 'warning',
+      message: 'Failed to load audio. Skipping this question.',
       position: 'top',
       timeout: 4000,
     });
-    // Allow question to proceed even without audio
-    audioHasPlayed.value = true;
+    await skipCurrentQuestionAfterAudioFailure();
   } finally {
     isLoadingAudio.value = false;
   }

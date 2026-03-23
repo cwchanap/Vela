@@ -200,6 +200,59 @@ describe('ttsService', () => {
       expect(mockFetch).toHaveBeenCalledTimes(3);
     });
 
+    it('should reuse the same in-flight generate request for concurrent callers', async () => {
+      const mockTTSResponse: TTSResponse = {
+        audioUrl: 'https://example.com/audio/shared.mp3',
+        cached: false,
+      };
+      let resolveGenerateResponse!: (_value: Awaited<ReturnType<typeof mockFetch>>) => void;
+      const generateResponsePromise = new Promise<Awaited<ReturnType<typeof mockFetch>>>(
+        (resolve) => {
+          resolveGenerateResponse = resolve;
+        },
+      );
+
+      mockFetch.mockImplementation((url: string) => {
+        if (url === '/api/tts/settings') {
+          return Promise.resolve({
+            ok: true,
+            json: () => Promise.resolve(mockTTSSettings),
+          });
+        }
+
+        if (url === '/api/tts/generate') {
+          return generateResponsePromise;
+        }
+
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({}),
+        });
+      });
+
+      const firstRequest = generatePronunciation('vocab-4', '鳥', 'user-123');
+      const secondRequest = generatePronunciation('vocab-4', '鳥', 'user-123');
+
+      await vi.waitFor(() => {
+        expect(mockFetch.mock.calls.filter((call) => call[0] === '/api/tts/generate')).toHaveLength(
+          1,
+        );
+      });
+
+      resolveGenerateResponse({
+        ok: true,
+        json: () => Promise.resolve(mockTTSResponse),
+      });
+
+      const [firstResult, secondResult] = await Promise.all([firstRequest, secondRequest]);
+
+      expect(firstResult).toEqual(mockTTSResponse);
+      expect(secondResult).toEqual(mockTTSResponse);
+      expect(mockFetch.mock.calls.filter((call) => call[0] === '/api/tts/generate')).toHaveLength(
+        1,
+      );
+    });
+
     it('should accept deprecated userId parameter without using it', async () => {
       mockFetch.mockResolvedValue({
         ok: true,

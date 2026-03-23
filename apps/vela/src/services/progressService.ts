@@ -185,22 +185,18 @@ class ProgressService {
     const userId = this.getCurrentUserId();
     if (!userId) return;
 
-    try {
-      await httpJsonAuth(getApiUrl('progress/game-session'), {
-        method: 'POST',
-        body: JSON.stringify({
-          user_id: userId,
-          game_type: gameType,
-          score,
-          duration_seconds: durationSeconds,
-          questions_answered: questionsAnswered,
-          correct_answers: correctAnswers,
-          experience_gained: experienceGained,
-        }),
-      });
-    } catch (error) {
-      console.error('Error recording game session:', error);
-    }
+    await httpJsonAuth(getApiUrl('progress/game-session'), {
+      method: 'POST',
+      body: JSON.stringify({
+        user_id: userId,
+        game_type: gameType,
+        score,
+        duration_seconds: durationSeconds,
+        questions_answered: questionsAnswered,
+        correct_answers: correctAnswers,
+        experience_gained: experienceGained,
+      }),
+    });
   }
 }
 
