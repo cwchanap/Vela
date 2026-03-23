@@ -33,6 +33,33 @@ vi.mock('../../src/middleware/auth', () => ({
 // Import AFTER mocks are declared
 const authApp = (await import('../../src/routes/auth')).default;
 
+/** Temporarily sets or deletes env vars for the duration of an async callback, then restores them. */
+async function withTempEnv(
+  overrides: Record<string, string | undefined>,
+  fn: () => Promise<void>,
+): Promise<void> {
+  const originals: Record<string, string | undefined> = {};
+  for (const [key, value] of Object.entries(overrides)) {
+    originals[key] = process.env[key];
+    if (value === undefined) {
+      delete process.env[key];
+    } else {
+      process.env[key] = value;
+    }
+  }
+  try {
+    await fn();
+  } finally {
+    for (const [key, original] of Object.entries(originals)) {
+      if (original !== undefined) {
+        process.env[key] = original;
+      } else {
+        delete process.env[key];
+      }
+    }
+  }
+}
+
 function createTestApp(env: Partial<Env> = {}) {
   const app = new Hono<{ Bindings: Env }>();
   app.use('*', async (c, next) => {
@@ -204,10 +231,7 @@ describe('Auth Route', () => {
     });
 
     test('returns 500 when user pool ID is not configured', async () => {
-      const originalEnv = process.env.VITE_COGNITO_USER_POOL_ID;
-      delete process.env.VITE_COGNITO_USER_POOL_ID;
-
-      try {
+      await withTempEnv({ VITE_COGNITO_USER_POOL_ID: undefined }, async () => {
         const app = createTestApp({});
         const res = await app.request('/signin', {
           method: 'POST',
@@ -217,37 +241,26 @@ describe('Auth Route', () => {
         expect(res.status).toBe(500);
         const body = (await res.json()) as { error: string };
         expect(body.error).toContain('User pool ID not configured');
-      } finally {
-        if (originalEnv !== undefined) {
-          process.env.VITE_COGNITO_USER_POOL_ID = originalEnv;
-        }
-      }
+        expect(mockCognitoSend).not.toHaveBeenCalled();
+      });
     });
 
     test('returns 500 when Cognito client ID is not configured', async () => {
-      const originalClientId = process.env.COGNITO_CLIENT_ID;
-      const originalViteClientId = process.env.VITE_COGNITO_USER_POOL_CLIENT_ID;
-      delete process.env.COGNITO_CLIENT_ID;
-      delete process.env.VITE_COGNITO_USER_POOL_CLIENT_ID;
-
-      try {
-        const app = createTestApp({ VITE_COGNITO_USER_POOL_ID: 'us-east-1_test123' });
-        const res = await app.request('/signin', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ email: 'user@example.com', password: 'password123' }),
-        });
-        expect(res.status).toBe(500);
-        const body = (await res.json()) as { error: string };
-        expect(body.error).toContain('Cognito client ID not configured');
-      } finally {
-        if (originalClientId !== undefined) {
-          process.env.COGNITO_CLIENT_ID = originalClientId;
-        }
-        if (originalViteClientId !== undefined) {
-          process.env.VITE_COGNITO_USER_POOL_CLIENT_ID = originalViteClientId;
-        }
-      }
+      await withTempEnv(
+        { COGNITO_CLIENT_ID: undefined, VITE_COGNITO_USER_POOL_CLIENT_ID: undefined },
+        async () => {
+          const app = createTestApp({ VITE_COGNITO_USER_POOL_ID: 'us-east-1_test123' });
+          const res = await app.request('/signin', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email: 'user@example.com', password: 'password123' }),
+          });
+          expect(res.status).toBe(500);
+          const body = (await res.json()) as { error: string };
+          expect(body.error).toContain('Cognito client ID not configured');
+          expect(mockCognitoSend).not.toHaveBeenCalled();
+        },
+      );
     });
 
     test('returns tokens on successful sign in', async () => {
@@ -335,29 +348,21 @@ describe('Auth Route', () => {
 
   describe('POST /refresh - client ID configuration', () => {
     test('returns 500 when Cognito client ID is not configured for refresh', async () => {
-      const originalClientId = process.env.COGNITO_CLIENT_ID;
-      const originalViteClientId = process.env.VITE_COGNITO_USER_POOL_CLIENT_ID;
-      delete process.env.COGNITO_CLIENT_ID;
-      delete process.env.VITE_COGNITO_USER_POOL_CLIENT_ID;
-
-      try {
-        const app = createTestApp({ VITE_COGNITO_USER_POOL_ID: 'us-east-1_test123' });
-        const res = await app.request('/refresh', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ refreshToken: 'some-token' }),
-        });
-        expect(res.status).toBe(500);
-        const body = (await res.json()) as { error: string };
-        expect(body.error).toContain('Cognito client ID not configured');
-      } finally {
-        if (originalClientId !== undefined) {
-          process.env.COGNITO_CLIENT_ID = originalClientId;
-        }
-        if (originalViteClientId !== undefined) {
-          process.env.VITE_COGNITO_USER_POOL_CLIENT_ID = originalViteClientId;
-        }
-      }
+      await withTempEnv(
+        { COGNITO_CLIENT_ID: undefined, VITE_COGNITO_USER_POOL_CLIENT_ID: undefined },
+        async () => {
+          const app = createTestApp({ VITE_COGNITO_USER_POOL_ID: 'us-east-1_test123' });
+          const res = await app.request('/refresh', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ refreshToken: 'some-token' }),
+          });
+          expect(res.status).toBe(500);
+          const body = (await res.json()) as { error: string };
+          expect(body.error).toContain('Cognito client ID not configured');
+          expect(mockCognitoSend).not.toHaveBeenCalled();
+        },
+      );
     });
   });
 
@@ -375,10 +380,7 @@ describe('Auth Route', () => {
     });
 
     test('returns 500 when user pool ID is not configured', async () => {
-      const originalEnv = process.env.VITE_COGNITO_USER_POOL_ID;
-      delete process.env.VITE_COGNITO_USER_POOL_ID;
-
-      try {
+      await withTempEnv({ VITE_COGNITO_USER_POOL_ID: undefined }, async () => {
         const app = createTestApp({});
         const res = await app.request('/auto-confirm', {
           method: 'POST',
@@ -388,11 +390,8 @@ describe('Auth Route', () => {
         expect(res.status).toBe(500);
         const body = (await res.json()) as { error: string };
         expect(body.error).toContain('User pool ID not configured');
-      } finally {
-        if (originalEnv !== undefined) {
-          process.env.VITE_COGNITO_USER_POOL_ID = originalEnv;
-        }
-      }
+        expect(mockCognitoSend).not.toHaveBeenCalled();
+      });
     });
 
     test('returns 404 when user not found', async () => {

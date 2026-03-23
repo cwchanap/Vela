@@ -509,6 +509,8 @@ describe('Chat History Route', () => {
 
       expect(res.status).toBe(200);
       expect(json.ok).toBe(true);
+      // Verify: getMessages query + pagination query + first batch write + retry batch write
+      expect(mockSend).toHaveBeenCalledTimes(4);
     });
   });
 
@@ -584,6 +586,14 @@ describe('Chat History Route', () => {
 
       expect(res.status).toBe(200);
       expect(json.threads).toHaveLength(1);
+      // Verify the call sequence: first a Query (with GSI), then a Scan (fallback)
+      expect(mockSend).toHaveBeenCalledTimes(2);
+      expect(mockQueryCommand).toHaveBeenCalledWith(
+        expect.objectContaining({ IndexName: 'UserIdIndex' }),
+      );
+      expect(mockScanCommand).toHaveBeenCalledWith(
+        expect.objectContaining({ FilterExpression: 'UserId = :userId' }),
+      );
     });
 
     test('should fallback to scan when index has ValidationException', async () => {
@@ -602,6 +612,14 @@ describe('Chat History Route', () => {
       const res = await app.request(req);
 
       expect(res.status).toBe(200);
+      // Verify the call sequence: first a Query (with GSI), then a Scan (fallback)
+      expect(mockSend).toHaveBeenCalledTimes(2);
+      expect(mockQueryCommand).toHaveBeenCalledWith(
+        expect.objectContaining({ IndexName: 'UserIdIndex' }),
+      );
+      expect(mockScanCommand).toHaveBeenCalledWith(
+        expect.objectContaining({ FilterExpression: 'UserId = :userId' }),
+      );
     });
 
     test('should propagate non-index errors from listThreads query', async () => {

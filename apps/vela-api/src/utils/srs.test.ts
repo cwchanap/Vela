@@ -305,6 +305,8 @@ describe('SRS SM-2 Algorithm', () => {
       expect(result.interval).toBe(6);
       expect(result.repetitions).toBe(3);
       expect(result.nextReviewDate).toBe('2024-12-30T12:00:00Z');
+      expect(result).not.toHaveProperty('vocabulary_id');
+      expect(result).not.toHaveProperty('user_id');
     });
 
     test('should handle default/initial SRS values', () => {
@@ -323,6 +325,8 @@ describe('SRS SM-2 Algorithm', () => {
       expect(result.interval).toBe(0);
       expect(result.repetitions).toBe(0);
       expect(result.nextReviewDate).toBe('2024-01-01T00:00:00Z');
+      expect(result).not.toHaveProperty('vocabulary_id');
+      expect(result).not.toHaveProperty('user_id');
     });
   });
 
