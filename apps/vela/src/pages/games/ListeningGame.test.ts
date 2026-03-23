@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { flushPromises, mount } from '@vue/test-utils';
 import { defineComponent, reactive, type Component } from 'vue';
-import type { ListeningConfig, ListeningQuestion } from 'src/types/listening';
+import type { ListeningConfig, ListeningQuestion } from '../../types/listening';
 
 const mockListeningGameService = {
   getListeningQuestions: vi.fn(),
@@ -282,5 +282,53 @@ describe('ListeningGame', () => {
     await flushPromises();
 
     expect(consoleErrorSpy).toHaveBeenCalledWith('Failed to preload next audio:', preloadError);
+  });
+
+  it('records only attempted prompts when a listening game times out', async () => {
+    mockListeningGameService.getListeningQuestions.mockResolvedValue([
+      makeQuestion('q1', '猫', 'cat'),
+      makeQuestion('q2', '犬', 'dog'),
+    ]);
+    mockGeneratePronunciation
+      .mockResolvedValueOnce({ audioUrl: 'https://example.com/q1.mp3' })
+      .mockResolvedValueOnce({ audioUrl: 'https://example.com/q2.mp3' });
+
+    const wrapper = mountPage();
+
+    await wrapper.find('.start-button').trigger('click');
+    await flushPromises();
+
+    await wrapper.find('.answer-button').trigger('click');
+    await flushPromises();
+
+    const onTimeout = wrapper.findComponent(GameTimerStub).props('onTimeout') as () => void;
+    onTimeout();
+    await flushPromises();
+
+    expect(progressStore.recordGameSession).toHaveBeenCalledWith(
+      'listening',
+      1,
+      expect.any(Number),
+      1,
+      1,
+    );
+  });
+
+  it('does not record an abandoned listening game during unmount cleanup', async () => {
+    mockListeningGameService.getListeningQuestions.mockResolvedValue([
+      makeQuestion('q1', '猫', 'cat'),
+      makeQuestion('q2', '犬', 'dog'),
+    ]);
+    mockGeneratePronunciation.mockResolvedValue({ audioUrl: 'https://example.com/q1.mp3' });
+
+    const wrapper = mountPage();
+
+    await wrapper.find('.start-button').trigger('click');
+    await flushPromises();
+
+    wrapper.unmount();
+    await flushPromises();
+
+    expect(progressStore.recordGameSession).not.toHaveBeenCalled();
   });
 });

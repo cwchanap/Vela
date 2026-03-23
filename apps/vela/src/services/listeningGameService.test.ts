@@ -1,15 +1,15 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { listeningGameService } from './listeningGameService';
-import type { ListeningConfig } from 'src/types/listening';
-import type { LegacyVocabularyPayload } from 'src/utils/vocabulary';
-import type { Sentence } from 'src/types/database';
+import type { ListeningConfig } from '../types/listening';
+import type { LegacyVocabularyPayload } from '../utils/vocabulary';
+import type { Sentence } from '../types/database';
 
 vi.mock('src/utils/api', () => ({
   getApiUrl: vi.fn((endpoint: string) => `/api/${endpoint}`),
 }));
 
 const mockFetch = vi.fn();
-global.fetch = mockFetch;
+global.fetch = mockFetch as unknown as typeof fetch;
 
 const mockResponse = (body: unknown, ok = true) =>
   Promise.resolve({
@@ -33,6 +33,7 @@ const makeSentence = (id: string, japanese: string, english: string): Sentence =
   japanese_sentence: japanese,
   english_translation: english,
   created_at: '2024-01-01T00:00:00Z',
+  words_array: japanese.split(''),
 });
 
 const vocabConfig: ListeningConfig = {
@@ -178,6 +179,27 @@ describe('listeningGameService.getListeningQuestions', () => {
       expect(questions[0]!.kind).toBe('sentence');
       expect(questions[0]!.text).toBe('猫がいる');
       expect(questions[0]!.englishTranslation).toBe('There is a cat');
+    });
+
+    it('maps sentence hiragana and romaji when provided', async () => {
+      const pool = [
+        {
+          ...makeSentence('s1', '猫がいる', 'There is a cat'),
+          hiragana: 'ねこがいる',
+          romaji: 'neko ga iru',
+        },
+        makeSentence('s2', '犬がいる', 'There is a dog'),
+        makeSentence('s3', '鳥がいる', 'There is a bird'),
+        makeSentence('s4', '魚がいる', 'There is a fish'),
+      ];
+      mockFetch.mockReturnValue(mockResponse({ sentences: pool }));
+
+      const questions = await listeningGameService.getListeningQuestions(sentenceConfig, 1);
+      const q = questions[0]!;
+
+      if (q.kind !== 'sentence') throw new Error('expected sentence kind');
+      expect(q.reading).toBe('ねこがいる');
+      expect(q.romaji).toBe('neko ga iru');
     });
 
     it('builds 3 distractors for sentences', async () => {

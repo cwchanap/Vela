@@ -8,7 +8,7 @@
       v-else-if="listeningStore.gameActive || showAnswerFeedback"
       class="text-center q-pa-md listening-game-container"
     >
-      <game-timer :on-timeout="() => listeningStore.endGame()" />
+      <game-timer :on-timeout="handleTimeout" />
       <score-display :score="listeningStore.score" class="q-mb-md" />
 
       <!-- Answer Feedback Card -->
@@ -42,14 +42,14 @@
         <template v-if="audioHasPlayed">
           <multiple-choice-question
             v-if="currentConfig?.mode === 'multiple-choice'"
-            :key="listeningStore.currentQuestion.id"
+            :key="`${listeningStore.currentQuestion.id}-multiple-choice`"
             :correct-answer="listeningStore.currentQuestion.englishTranslation"
             :distractors="listeningStore.currentQuestion.distractors"
             @answer="handleAnswer"
           />
           <dictation-question
             v-else
-            :key="listeningStore.currentQuestion.id"
+            :key="`${listeningStore.currentQuestion.id}-dictation`"
             @answer="handleAnswer"
           />
         </template>
@@ -107,6 +107,7 @@ const isStarting = ref(false);
 const currentConfig = ref<ListeningConfig | null>(null);
 const gameStartTime = ref<Date | null>(null);
 const correctAnswers = ref(0);
+const attemptedQuestions = ref(0);
 const totalQuestions = ref(0);
 const showAnswerFeedback = ref(false);
 const lastAnswerResult = ref<{
@@ -117,6 +118,7 @@ const lastAnswerResult = ref<{
 const currentAudioUrl = ref<string | null>(null);
 const isLoadingAudio = ref(false);
 const audioHasPlayed = ref(false);
+const shouldRecordSession = ref(false);
 
 async function handleStart(config: ListeningConfig) {
   isStarting.value = true;
@@ -138,7 +140,9 @@ async function handleStart(config: ListeningConfig) {
     listeningStore.startGame(questions);
     gameStartTime.value = new Date();
     correctAnswers.value = 0;
+    attemptedQuestions.value = 0;
     totalQuestions.value = questions.length;
+    shouldRecordSession.value = false;
     showSetup.value = false;
   } catch (e) {
     console.error('Failed to start listening game:', e);
@@ -200,6 +204,7 @@ function handleAnswer(input: string) {
       ? input === question.englishTranslation
       : isDictationCorrect(input, question);
 
+  attemptedQuestions.value++;
   if (isCorrect) correctAnswers.value++;
 
   // Update vocabulary mastery state for vocabulary-source games
@@ -209,6 +214,10 @@ function handleAnswer(input: string) {
 
   // Pre-load next question's audio while user reads feedback
   preloadNextAudio();
+
+  if (listeningStore.currentIndex + 1 >= listeningStore.questions.length) {
+    shouldRecordSession.value = true;
+  }
 
   listeningStore.submitAnswer(isCorrect);
   showAnswerFeedback.value = true;
@@ -238,6 +247,11 @@ async function proceedToNextQuestion() {
   }
 }
 
+function handleTimeout() {
+  shouldRecordSession.value = true;
+  listeningStore.endGame();
+}
+
 function playAgain() {
   if (currentConfig.value) {
     void handleStart(currentConfig.value);
@@ -250,16 +264,23 @@ function playAgain() {
 watch(
   () => listeningStore.gameActive,
   async (isActive, wasActive) => {
-    if (wasActive && !isActive && gameStartTime.value) {
+    if (wasActive && !isActive) {
       const startTime = gameStartTime.value;
+      const shouldRecord = shouldRecordSession.value;
       gameStartTime.value = null;
+      shouldRecordSession.value = false;
+
+      if (!startTime || !shouldRecord) {
+        return;
+      }
+
       const durationSeconds = Math.round((Date.now() - startTime.getTime()) / 1000);
       try {
         await progressStore.recordGameSession(
           'listening',
           listeningStore.score,
           durationSeconds,
-          totalQuestions.value,
+          attemptedQuestions.value,
           correctAnswers.value,
         );
       } catch (e) {
@@ -278,6 +299,7 @@ watch(
 // Clean up store if user navigates away mid-game
 onBeforeUnmount(() => {
   if (listeningStore.gameActive) {
+    shouldRecordSession.value = false;
     listeningStore.endGame();
   }
 });
