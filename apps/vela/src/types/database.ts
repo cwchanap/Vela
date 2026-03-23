@@ -1,6 +1,8 @@
 export interface Sentence {
   id: string;
   japanese_sentence: string;
+  hiragana?: string;
+  romaji?: string;
   english_translation: string;
   difficulty_level?: number;
   category?: string;

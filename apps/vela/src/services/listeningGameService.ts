@@ -73,6 +73,8 @@ async function getSentenceQuestions(
       englishTranslation: sentence.english_translation,
       distractors: distractors as [string, string, string],
       raw: sentence,
+      ...(sentence.hiragana ? { reading: sentence.hiragana } : {}),
+      ...(sentence.romaji ? { romaji: sentence.romaji } : {}),
     });
   }
   return questions;
