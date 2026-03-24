@@ -29,8 +29,10 @@ const progressStore = {
 
 const authStore = reactive<{
   user: { id: string } | null;
+  session: { user: { id: string } } | null;
 }>({
   user: { id: 'user-123' },
+  session: { user: { id: 'user-123' } },
 });
 
 const listeningConfig: ListeningConfig = {
@@ -56,6 +58,31 @@ const makeQuestion = (id: string, text: string, englishTranslation: string): Lis
     difficulty_level: 1,
     category: 'test',
     created_at: '2024-01-01T00:00:00Z',
+  },
+});
+
+const makeSentenceQuestion = (
+  id: string,
+  text: string,
+  englishTranslation: string,
+): ListeningQuestion => ({
+  kind: 'sentence',
+  id,
+  text,
+  reading: `${text}-reading`,
+  romaji: `${text}-romaji`,
+  englishTranslation,
+  distractors: ['wrong-1', 'wrong-2', 'wrong-3'],
+  raw: {
+    id,
+    japanese_sentence: text,
+    hiragana: `${text}-reading`,
+    romaji: `${text}-romaji`,
+    english_translation: englishTranslation,
+    difficulty_level: 1,
+    category: 'test',
+    created_at: '2024-01-01T00:00:00Z',
+    words_array: [text],
   },
 });
 
@@ -175,6 +202,9 @@ function resetStores() {
   });
 
   authStore.user = { id: 'user-123' };
+  authStore.session = { user: { id: 'user-123' } };
+  listeningConfig.mode = 'multiple-choice';
+  listeningConfig.source = 'vocabulary';
   progressStore.updateProgress.mockReset();
   progressStore.recordGameSession.mockReset();
   progressStore.recordGameSession.mockResolvedValue(undefined);
@@ -282,6 +312,26 @@ describe('ListeningGame', () => {
     expect(wrapper.find('.answer-feedback-stub').exists()).toBe(false);
   });
 
+  it('uses the session user ID while the profile is still loading', async () => {
+    authStore.user = null;
+    authStore.session = { user: { id: 'session-user-456' } };
+    mockListeningGameService.getListeningQuestions.mockResolvedValue([
+      makeQuestion('q1', '猫', 'cat'),
+    ]);
+    mockGeneratePronunciation.mockResolvedValue({ audioUrl: 'https://example.com/q1.mp3' });
+
+    const wrapper = mountPage();
+
+    await wrapper.find('.start-button').trigger('click');
+    await flushPromises();
+
+    expect(mockGeneratePronunciation).toHaveBeenCalledWith('q1', '猫', 'session-user-456');
+    expect(mockNotifyCreate).not.toHaveBeenCalledWith(
+      expect.objectContaining({ message: 'Audio is unavailable. Skipping this question.' }),
+    );
+    expect(listeningStore.currentQuestion?.id).toBe('q1');
+  });
+
   it('catches next-audio preload failures instead of leaving an unhandled rejection', async () => {
     const preloadError = new Error('Preload failed');
     const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
@@ -327,7 +377,31 @@ describe('ListeningGame', () => {
     await flushPromises();
 
     expect(progressStore.recordGameSession).toHaveBeenCalledWith(
-      'listening',
+      'vocabulary',
+      1,
+      expect.any(Number),
+      1,
+      1,
+    );
+  });
+
+  it('records listening sessions using the practiced sentence source', async () => {
+    listeningConfig.source = 'sentences';
+    mockListeningGameService.getListeningQuestions.mockResolvedValue([
+      makeSentenceQuestion('s1', '猫です。', 'It is a cat.'),
+    ]);
+    mockGeneratePronunciation.mockResolvedValue({ audioUrl: 'https://example.com/s1.mp3' });
+
+    const wrapper = mountPage();
+
+    await wrapper.find('.start-button').trigger('click');
+    await flushPromises();
+
+    await wrapper.find('.answer-button').trigger('click');
+    await flushPromises();
+
+    expect(progressStore.recordGameSession).toHaveBeenCalledWith(
+      'sentence',
       1,
       expect.any(Number),
       1,
@@ -351,7 +425,7 @@ describe('ListeningGame', () => {
     await flushPromises();
 
     expect(progressStore.recordGameSession).toHaveBeenCalledWith(
-      'listening',
+      'vocabulary',
       1,
       expect.any(Number),
       1,
