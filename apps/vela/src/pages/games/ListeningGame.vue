@@ -120,6 +120,18 @@ const isLoadingAudio = ref(false);
 const audioHasPlayed = ref(false);
 const shouldRecordSession = ref(false);
 
+function getAuthenticatedUserId() {
+  return authStore.user?.id ?? authStore.session?.user?.id ?? null;
+}
+
+function getRecordedGameType(config: ListeningConfig | null) {
+  if (!config) {
+    return null;
+  }
+
+  return config.source === 'vocabulary' ? 'vocabulary' : 'sentence';
+}
+
 async function handleStart(config: ListeningConfig) {
   isStarting.value = true;
   try {
@@ -173,7 +185,7 @@ async function skipCurrentQuestionAfterAudioFailure() {
 
 async function loadAudioForCurrentQuestion() {
   const question = listeningStore.currentQuestion;
-  const userId = authStore.user?.id;
+  const userId = getAuthenticatedUserId();
   currentAudioUrl.value = null;
   if (!question || !userId) {
     if (!userId) {
@@ -243,7 +255,7 @@ function handleAnswer(input: string) {
 }
 
 function preloadNextAudio() {
-  const userId = authStore.user?.id;
+  const userId = getAuthenticatedUserId();
   if (!userId) return;
   // currentIndex still points to the current question (submitAnswer not called yet)
   const nextQuestion = listeningStore.questions[listeningStore.currentIndex + 1];
@@ -293,9 +305,14 @@ watch(
       }
 
       const durationSeconds = Math.round((Date.now() - startTime.getTime()) / 1000);
+      const gameType = getRecordedGameType(currentConfig.value);
+      if (!gameType) {
+        return;
+      }
+
       try {
         await progressStore.recordGameSession(
-          'listening',
+          gameType,
           listeningStore.score,
           durationSeconds,
           attemptedQuestions.value,
