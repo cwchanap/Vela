@@ -208,6 +208,7 @@ describe('Chat History Route', () => {
 
       expect(res.status).toBe(500);
       expect(json.error).toContain('Missing AWS credentials');
+      expect(mockSend).not.toHaveBeenCalled();
     });
   });
 
@@ -419,6 +420,7 @@ describe('Chat History Route', () => {
 
       expect(res.status).toBe(500);
       expect(json.error).toContain('Missing AWS credentials');
+      expect(mockSend).not.toHaveBeenCalled();
     });
 
     test('should return ok when thread is already empty', async () => {
@@ -499,6 +501,7 @@ describe('Chat History Route', () => {
       const app = createTestApp({
         AWS_ACCESS_KEY_ID: 'test-key',
         AWS_SECRET_ACCESS_KEY: 'test-secret',
+        DDB_TABLE: 'vela-chat-history',
       });
 
       const req = new Request('http://localhost/thread?thread_id=thread-123', {
@@ -523,6 +526,7 @@ describe('Chat History Route', () => {
 
       expect(res.status).toBe(500);
       expect(json.error).toContain('Missing AWS credentials');
+      expect(mockSend).not.toHaveBeenCalled();
     });
 
     test('should return 403 when accessing another user threads', async () => {
@@ -665,6 +669,7 @@ describe('Chat History Route', () => {
 
       expect(res.status).toBe(500);
       expect(json.error).toContain('Missing AWS credentials');
+      expect(mockSend).not.toHaveBeenCalled();
     });
 
     test('should return 403 when messages belong to different user', async () => {
