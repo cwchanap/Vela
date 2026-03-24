@@ -4,7 +4,10 @@ import { describe, test, expect, vi, beforeEach } from 'bun:test';
 const mockConnect = vi.fn();
 const mockQuery = vi.fn();
 const mockEnd = vi.fn();
-const mockAuroraDSQLClient = vi.fn(() => ({
+const mockAuroraDSQLClient = vi.fn<
+  [Record<string, unknown>],
+  { connect: typeof mockConnect; query: typeof mockQuery; end: typeof mockEnd }
+>(() => ({
   connect: mockConnect,
   query: mockQuery,
   end: mockEnd,
@@ -115,7 +118,7 @@ describe('checkDsqlHealth', () => {
 
     try {
       await checkDsqlHealth();
-      const constructorArgs = mockAuroraDSQLClient.mock.calls[0][0] as Record<string, unknown>;
+      const constructorArgs = mockAuroraDSQLClient.mock.calls[0][0];
       expect(constructorArgs.user).toBe('custom-user');
     } finally {
       delete process.env.AURORA_DB_ENDPOINT;
@@ -131,7 +134,7 @@ describe('checkDsqlHealth', () => {
 
     try {
       await checkDsqlHealth();
-      const constructorArgs = mockAuroraDSQLClient.mock.calls[0][0] as Record<string, unknown>;
+      const constructorArgs = mockAuroraDSQLClient.mock.calls[0][0];
       expect(constructorArgs.user).toBe('admin');
     } finally {
       delete process.env.AURORA_DB_ENDPOINT;
