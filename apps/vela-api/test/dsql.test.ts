@@ -5,8 +5,12 @@ const mockConnect = vi.fn();
 const mockQuery = vi.fn();
 const mockEnd = vi.fn();
 const mockAuroraDSQLClient = vi.fn<
-  [Record<string, unknown>],
-  { connect: typeof mockConnect; query: typeof mockQuery; end: typeof mockEnd }
+  // eslint-disable-next-line no-unused-vars
+  (config: Record<string, unknown>) => {
+    connect: typeof mockConnect;
+    query: typeof mockQuery;
+    end: typeof mockEnd;
+  }
 >(() => ({
   connect: mockConnect,
   query: mockQuery,
