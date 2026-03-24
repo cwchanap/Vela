@@ -474,46 +474,58 @@ describe('Chat History Route', () => {
     });
 
     test('should retry batch delete when there are unprocessed items', async () => {
-      const message = {
-        ThreadId: 'thread-123',
-        Timestamp: 1693440000000,
-        UserId: 'user-123',
-        message: 'hello',
-        is_user: true,
-      };
+      // Stub setTimeout so exponential backoff in the retry loop does not add real delay
+      const setTimeoutSpy = vi.spyOn(globalThis, 'setTimeout').mockImplementation(((
+        fn: () => void,
+      ) => {
+        fn();
+        return 0 as unknown as ReturnType<typeof setTimeout>;
+      }) as typeof setTimeout);
 
-      mockSend
-        // getMessages call
-        .mockResolvedValueOnce({ Items: [message] })
-        // First deleteThread query (pagination)
-        .mockResolvedValueOnce({ Items: [message], LastEvaluatedKey: undefined })
-        // First batch write - returns unprocessed items
-        .mockResolvedValueOnce({
-          UnprocessedItems: {
-            'vela-chat-history': [
-              { DeleteRequest: { Key: { ThreadId: 'thread-123', Timestamp: 1693440000000 } } },
-            ],
-          },
-        })
-        // Retry batch write - all processed
-        .mockResolvedValueOnce({ UnprocessedItems: {} });
+      try {
+        const message = {
+          ThreadId: 'thread-123',
+          Timestamp: 1693440000000,
+          UserId: 'user-123',
+          message: 'hello',
+          is_user: true,
+        };
 
-      const app = createTestApp({
-        AWS_ACCESS_KEY_ID: 'test-key',
-        AWS_SECRET_ACCESS_KEY: 'test-secret',
-        DDB_TABLE: 'vela-chat-history',
-      });
+        mockSend
+          // getMessages call
+          .mockResolvedValueOnce({ Items: [message] })
+          // First deleteThread query (pagination)
+          .mockResolvedValueOnce({ Items: [message], LastEvaluatedKey: undefined })
+          // First batch write - returns unprocessed items
+          .mockResolvedValueOnce({
+            UnprocessedItems: {
+              'vela-chat-history': [
+                { DeleteRequest: { Key: { ThreadId: 'thread-123', Timestamp: 1693440000000 } } },
+              ],
+            },
+          })
+          // Retry batch write - all processed
+          .mockResolvedValueOnce({ UnprocessedItems: {} });
 
-      const req = new Request('http://localhost/thread?thread_id=thread-123', {
-        method: 'DELETE',
-      });
-      const res = await app.request(req);
-      const json = await res.json();
+        const app = createTestApp({
+          AWS_ACCESS_KEY_ID: 'test-key',
+          AWS_SECRET_ACCESS_KEY: 'test-secret',
+          DDB_TABLE: 'vela-chat-history',
+        });
 
-      expect(res.status).toBe(200);
-      expect(json.ok).toBe(true);
-      // Verify: getMessages query + pagination query + first batch write + retry batch write
-      expect(mockSend).toHaveBeenCalledTimes(4);
+        const req = new Request('http://localhost/thread?thread_id=thread-123', {
+          method: 'DELETE',
+        });
+        const res = await app.request(req);
+        const json = await res.json();
+
+        expect(res.status).toBe(200);
+        expect(json.ok).toBe(true);
+        // Verify: getMessages query + pagination query + first batch write + retry batch write
+        expect(mockSend).toHaveBeenCalledTimes(4);
+      } finally {
+        setTimeoutSpy.mockRestore();
+      }
     });
   });
 
