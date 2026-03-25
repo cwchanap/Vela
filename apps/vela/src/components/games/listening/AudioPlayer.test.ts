@@ -108,6 +108,7 @@ describe('AudioPlayer', () => {
 
     await wrapper.setProps({ audioUrl: 'https://example.com/fail.mp3' });
     await vi.waitFor(() => {
+      expect(wrapper.emitted('error')).toHaveLength(1);
       expect(wrapper.text()).toContain('Audio playback failed. Try again.');
     });
 

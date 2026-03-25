@@ -35,6 +35,10 @@ const authStore = reactive<{
   session: { user: { id: 'user-123' } },
 });
 
+const audioPlayerBehavior = reactive({
+  autoEmitPlayed: true,
+});
+
 const listeningConfig: ListeningConfig = {
   mode: 'multiple-choice',
   source: 'vocabulary',
@@ -86,6 +90,18 @@ const makeSentenceQuestion = (
   },
 });
 
+function createDeferred<T>() {
+  let resolve!: (_value: T) => void;
+  let reject!: (_error?: unknown) => void;
+
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+
+  return { promise, resolve, reject };
+}
+
 const ListeningSetupStub = defineComponent({
   name: 'ListeningSetup',
   props: {
@@ -115,15 +131,16 @@ const AudioPlayerStub = defineComponent({
       default: false,
     },
   },
-  emits: ['played'],
+  emits: ['played', 'error'],
   watch: {
     audioUrl(url: string | null) {
-      if (url) {
+      if (url && audioPlayerBehavior.autoEmitPlayed) {
         this.$emit('played');
       }
     },
   },
-  template: '<div class="audio-player-stub" />',
+  template:
+    '<div class="audio-player-stub"><button class="audio-played-button" @click="$emit(\'played\')">Played</button><button class="audio-error-button" @click="$emit(\'error\')">Error</button></div>',
 });
 
 const MultipleChoiceQuestionStub = defineComponent({
@@ -203,6 +220,7 @@ function resetStores() {
 
   authStore.user = { id: 'user-123' };
   authStore.session = { user: { id: 'user-123' } };
+  audioPlayerBehavior.autoEmitPlayed = true;
   listeningConfig.mode = 'multiple-choice';
   listeningConfig.source = 'vocabulary';
   progressStore.updateProgress.mockReset();
@@ -355,6 +373,75 @@ describe('ListeningGame', () => {
     expect(consoleErrorSpy).toHaveBeenCalledWith('Failed to preload next audio:', preloadError);
   });
 
+  it('ignores stale audio failures after a new listening session has already started', async () => {
+    const staleAudioError = new Error('Stale TTS failure');
+    const deferredAudio = createDeferred<{ audioUrl: string }>();
+    void deferredAudio.promise.catch(() => undefined);
+
+    mockListeningGameService.getListeningQuestions
+      .mockResolvedValueOnce([makeQuestion('q1', '猫', 'cat'), makeQuestion('q2', '犬', 'dog')])
+      .mockResolvedValueOnce([makeQuestion('n1', '鳥', 'bird'), makeQuestion('n2', '魚', 'fish')]);
+    mockGeneratePronunciation
+      .mockReturnValueOnce(deferredAudio.promise)
+      .mockResolvedValueOnce({ audioUrl: 'https://example.com/n1.mp3' });
+
+    const wrapper = mountPage();
+
+    await wrapper.find('.start-button').trigger('click');
+    await flushPromises();
+
+    const onTimeout = wrapper.findComponent(GameTimerStub).props('onTimeout') as () => void;
+    onTimeout();
+    await flushPromises();
+
+    await wrapper.find('button').trigger('click');
+    await flushPromises();
+
+    expect(listeningStore.currentQuestion?.id).toBe('n1');
+    const notifyCallCount = mockNotifyCreate.mock.calls.length;
+
+    deferredAudio.reject(staleAudioError);
+    await flushPromises();
+
+    expect(listeningStore.currentQuestion?.id).toBe('n1');
+    expect(listeningStore.submitAnswer).not.toHaveBeenCalled();
+    expect(mockNotifyCreate).toHaveBeenCalledTimes(notifyCallCount);
+  });
+
+  it('skips to the next question when audio playback fails', async () => {
+    audioPlayerBehavior.autoEmitPlayed = false;
+    mockListeningGameService.getListeningQuestions.mockResolvedValue([
+      makeQuestion('q1', '猫', 'cat'),
+      makeQuestion('q2', '犬', 'dog'),
+    ]);
+    mockGeneratePronunciation
+      .mockResolvedValueOnce({ audioUrl: 'https://example.com/q1.mp3' })
+      .mockResolvedValueOnce({ audioUrl: 'https://example.com/q2.mp3' });
+
+    const wrapper = mountPage();
+
+    await wrapper.find('.start-button').trigger('click');
+    await flushPromises();
+
+    expect(wrapper.find('.answer-button').exists()).toBe(false);
+
+    await wrapper.find('.audio-error-button').trigger('click');
+    await flushPromises();
+
+    expect(listeningStore.currentQuestion?.id).toBe('q2');
+    expect(mockNotifyCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: 'Audio playback failed. Skipping this question.',
+        type: 'warning',
+      }),
+    );
+
+    await wrapper.find('.audio-played-button').trigger('click');
+    await flushPromises();
+
+    expect(wrapper.find('.answer-button').exists()).toBe(true);
+  });
+
   it('records only attempted prompts when a listening game times out', async () => {
     mockListeningGameService.getListeningQuestions.mockResolvedValue([
       makeQuestion('q1', '猫', 'cat'),
@@ -383,6 +470,42 @@ describe('ListeningGame', () => {
       1,
       1,
     );
+  });
+
+  it('does not record a listening session when the timer expires before any answer is submitted', async () => {
+    mockListeningGameService.getListeningQuestions.mockResolvedValue([
+      makeQuestion('q1', '猫', 'cat'),
+      makeQuestion('q2', '犬', 'dog'),
+    ]);
+    mockGeneratePronunciation
+      .mockResolvedValueOnce({ audioUrl: 'https://example.com/q1.mp3' })
+      .mockResolvedValueOnce({ audioUrl: 'https://example.com/q2.mp3' });
+
+    const wrapper = mountPage();
+
+    await wrapper.find('.start-button').trigger('click');
+    await flushPromises();
+
+    const onTimeout = wrapper.findComponent(GameTimerStub).props('onTimeout') as () => void;
+    onTimeout();
+    await flushPromises();
+
+    expect(progressStore.recordGameSession).not.toHaveBeenCalled();
+  });
+
+  it('does not record a listening session when audio failures skip every prompt without an answer', async () => {
+    mockListeningGameService.getListeningQuestions.mockResolvedValue([
+      makeQuestion('q1', '猫', 'cat'),
+    ]);
+    mockGeneratePronunciation.mockRejectedValueOnce(new Error('TTS unavailable'));
+
+    const wrapper = mountPage();
+
+    await wrapper.find('.start-button').trigger('click');
+    await flushPromises();
+
+    expect(listeningStore.gameActive).toBe(false);
+    expect(progressStore.recordGameSession).not.toHaveBeenCalled();
   });
 
   it('records listening sessions using the practiced sentence source', async () => {
