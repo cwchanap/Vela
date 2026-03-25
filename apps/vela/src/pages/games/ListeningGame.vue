@@ -36,6 +36,7 @@
           :is-loading="isLoadingAudio"
           class="q-mb-lg"
           @played="audioHasPlayed = true"
+          @error="handleAudioPlaybackFailure"
         />
 
         <!-- Question UI — only revealed after first audio play -->
@@ -119,6 +120,27 @@ const currentAudioUrl = ref<string | null>(null);
 const isLoadingAudio = ref(false);
 const audioHasPlayed = ref(false);
 const shouldRecordSession = ref(false);
+const activeAudioRequestId = ref(0);
+const isUnmounted = ref(false);
+
+function invalidateAudioRequest() {
+  activeAudioRequestId.value += 1;
+}
+
+function beginAudioRequest() {
+  const requestId = activeAudioRequestId.value + 1;
+  activeAudioRequestId.value = requestId;
+  return requestId;
+}
+
+function isCurrentAudioRequest(requestId: number, questionId: string) {
+  return (
+    !isUnmounted.value &&
+    activeAudioRequestId.value === requestId &&
+    listeningStore.gameActive &&
+    listeningStore.currentQuestion?.id === questionId
+  );
+}
 
 function getAuthenticatedUserId() {
   return authStore.user?.id ?? authStore.session?.user?.id ?? null;
@@ -135,6 +157,7 @@ function getRecordedGameType(config: ListeningConfig | null) {
 async function handleStart(config: ListeningConfig) {
   isStarting.value = true;
   try {
+    invalidateAudioRequest();
     const questions = await listeningGameService.getListeningQuestions(config, 10);
     if (questions.length === 0) {
       Notify.create({
@@ -176,6 +199,8 @@ async function skipCurrentQuestionAfterAudioFailure() {
     shouldRecordSession.value = true;
   }
 
+  currentAudioUrl.value = null;
+  audioHasPlayed.value = false;
   listeningStore.submitAnswer(false);
 
   if (listeningStore.gameActive) {
@@ -183,22 +208,32 @@ async function skipCurrentQuestionAfterAudioFailure() {
   }
 }
 
+async function handleAudioFailure(message: string) {
+  Notify.create({
+    type: 'warning',
+    message,
+    position: 'top',
+    timeout: 4000,
+  });
+  await skipCurrentQuestionAfterAudioFailure();
+}
+
 async function loadAudioForCurrentQuestion() {
   const question = listeningStore.currentQuestion;
   const userId = getAuthenticatedUserId();
+  const requestId = question ? beginAudioRequest() : activeAudioRequestId.value;
   currentAudioUrl.value = null;
   if (!question || !userId) {
     if (!userId) {
+      if (!question || !listeningStore.gameActive) {
+        isLoadingAudio.value = false;
+        audioHasPlayed.value = false;
+        return;
+      }
       console.warn(
         'loadAudioForCurrentQuestion: no authenticated user — skipping audio. Session may have expired.',
       );
-      Notify.create({
-        type: 'warning',
-        message: 'Audio is unavailable. Skipping this question.',
-        position: 'top',
-        timeout: 4000,
-      });
-      await skipCurrentQuestionAfterAudioFailure();
+      await handleAudioFailure('Audio is unavailable. Skipping this question.');
     }
     isLoadingAudio.value = false;
     audioHasPlayed.value = false;
@@ -210,19 +245,31 @@ async function loadAudioForCurrentQuestion() {
 
   try {
     const { audioUrl } = await generatePronunciation(question.id, question.text, userId);
+    if (!isCurrentAudioRequest(requestId, question.id)) {
+      return;
+    }
     currentAudioUrl.value = audioUrl;
   } catch (e) {
+    if (!isCurrentAudioRequest(requestId, question.id)) {
+      return;
+    }
     console.error('Failed to load audio:', e);
-    Notify.create({
-      type: 'warning',
-      message: 'Failed to load audio. Skipping this question.',
-      position: 'top',
-      timeout: 4000,
-    });
-    await skipCurrentQuestionAfterAudioFailure();
+    await handleAudioFailure('Failed to load audio. Skipping this question.');
   } finally {
-    isLoadingAudio.value = false;
+    if (activeAudioRequestId.value === requestId) {
+      isLoadingAudio.value = false;
+    }
   }
+}
+
+async function handleAudioPlaybackFailure() {
+  if (!listeningStore.gameActive || !listeningStore.currentQuestion) {
+    return;
+  }
+
+  invalidateAudioRequest();
+  isLoadingAudio.value = false;
+  await handleAudioFailure('Audio playback failed. Skipping this question.');
 }
 
 function handleAnswer(input: string) {
@@ -269,6 +316,7 @@ function preloadNextAudio() {
 async function proceedToNextQuestion() {
   showAnswerFeedback.value = false;
   lastAnswerResult.value = null;
+  invalidateAudioRequest();
   currentAudioUrl.value = null;
   audioHasPlayed.value = false;
 
@@ -278,6 +326,10 @@ async function proceedToNextQuestion() {
 }
 
 function handleTimeout() {
+  invalidateAudioRequest();
+  currentAudioUrl.value = null;
+  isLoadingAudio.value = false;
+  audioHasPlayed.value = false;
   shouldRecordSession.value = true;
   listeningStore.endGame();
 }
@@ -297,10 +349,13 @@ watch(
     if (wasActive && !isActive) {
       const startTime = gameStartTime.value;
       const shouldRecord = shouldRecordSession.value;
+      const attemptedCount = attemptedQuestions.value;
+      const correctCount = correctAnswers.value;
+      const finalScore = listeningStore.score;
       gameStartTime.value = null;
       shouldRecordSession.value = false;
 
-      if (!startTime || !shouldRecord) {
+      if (!startTime || !shouldRecord || attemptedCount === 0) {
         return;
       }
 
@@ -313,10 +368,10 @@ watch(
       try {
         await progressStore.recordGameSession(
           gameType,
-          listeningStore.score,
+          finalScore,
           durationSeconds,
-          attemptedQuestions.value,
-          correctAnswers.value,
+          attemptedCount,
+          correctCount,
         );
       } catch (e) {
         console.error('Failed to record game session:', e);
@@ -333,6 +388,11 @@ watch(
 
 // Clean up store if user navigates away mid-game
 onBeforeUnmount(() => {
+  isUnmounted.value = true;
+  invalidateAudioRequest();
+  currentAudioUrl.value = null;
+  isLoadingAudio.value = false;
+  audioHasPlayed.value = false;
   if (listeningStore.gameActive) {
     shouldRecordSession.value = false;
     listeningStore.endGame();

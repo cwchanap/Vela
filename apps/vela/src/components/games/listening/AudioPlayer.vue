@@ -50,6 +50,7 @@ const props = withDefaults(
 
 const emit = defineEmits<{
   played: [];
+  error: [];
 }>();
 
 const isPlaying = ref(false);
@@ -114,6 +115,7 @@ async function play(url = props.audioUrl) {
     if (currentPlayback.value !== playback) return;
 
     hasError.value = true;
+    emit('error');
     console.error('Audio playback error:', e);
   } finally {
     if (currentPlayback.value === playback) {
