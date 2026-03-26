@@ -185,7 +185,7 @@ export const useProgressStore = defineStore('progress', () => {
 
       // Fall back to current user from auth store if userId not provided
       const authStore = useAuthStore();
-      const effectiveUserId = userId ?? authStore.user?.id ?? null;
+      const effectiveUserId = userId ?? authStore.user?.id ?? authStore.session?.user?.id ?? null;
 
       const queryKey = progressKeys.analytics(effectiveUserId);
       const queryState = queryClient.getQueryState(queryKey);
@@ -244,6 +244,7 @@ export const useProgressStore = defineStore('progress', () => {
         questionsAnswered,
         correctAnswers,
         experienceGained,
+        userId,
       );
 
       // Achievement checking is now handled by the API

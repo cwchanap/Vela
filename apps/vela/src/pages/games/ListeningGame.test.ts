@@ -165,6 +165,16 @@ const DictationQuestionStub = defineComponent({
 
 const AnswerFeedbackStub = defineComponent({
   name: 'AnswerFeedback',
+  props: {
+    reading: {
+      type: String,
+      default: undefined,
+    },
+    isCorrect: {
+      type: Boolean,
+      default: false,
+    },
+  },
   emits: ['next'],
   template: '<div class="answer-feedback-stub" />',
 });
@@ -348,6 +358,38 @@ describe('ListeningGame', () => {
       expect.objectContaining({ message: 'Audio is unavailable. Skipping this question.' }),
     );
     expect(listeningStore.currentQuestion?.id).toBe('q1');
+
+    await wrapper.find('.answer-button').trigger('click');
+    await flushPromises();
+
+    expect(progressStore.recordGameSession).toHaveBeenCalledWith(
+      'vocabulary',
+      1,
+      expect.any(Number),
+      1,
+      1,
+      'session-user-456',
+    );
+  });
+
+  it('passes sentence readings to answer feedback when available', async () => {
+    listeningConfig.mode = 'dictation';
+    listeningConfig.source = 'sentences';
+    mockListeningGameService.getListeningQuestions.mockResolvedValue([
+      makeSentenceQuestion('s1', '猫です。', 'It is a cat.'),
+    ]);
+    mockGeneratePronunciation.mockResolvedValue({ audioUrl: 'https://example.com/s1.mp3' });
+
+    const wrapper = mountPage();
+
+    await wrapper.find('.start-button').trigger('click');
+    await flushPromises();
+
+    await wrapper.find('.dictation-button').trigger('click');
+    await flushPromises();
+
+    expect(wrapper.findComponent(AnswerFeedbackStub).props('reading')).toBe('猫です。-reading');
+    expect(wrapper.findComponent(AnswerFeedbackStub).props('isCorrect')).toBe(false);
   });
 
   it('catches next-audio preload failures instead of leaving an unhandled rejection', async () => {
@@ -527,6 +569,7 @@ describe('ListeningGame', () => {
       expect.any(Number),
       1,
       1,
+      'user-123',
     );
   });
 
@@ -615,6 +658,7 @@ describe('ListeningGame', () => {
       expect.any(Number),
       1,
       1,
+      'user-123',
     );
   });
 
@@ -639,6 +683,7 @@ describe('ListeningGame', () => {
       expect.any(Number),
       1,
       1,
+      'user-123',
     );
     expect(mockNotifyCreate).toHaveBeenCalledWith(
       expect.objectContaining({

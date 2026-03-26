@@ -16,11 +16,7 @@
         v-if="showAnswerFeedback && lastAnswerResult"
         :is-correct="lastAnswerResult.isCorrect"
         :japanese-text="lastAnswerResult.question.text"
-        v-bind="
-          lastAnswerResult.question.kind === 'vocabulary' && lastAnswerResult.question.reading
-            ? { reading: lastAnswerResult.question.reading }
-            : {}
-        "
+        :reading="lastAnswerResult.question.reading"
         :english-translation="lastAnswerResult.question.englishTranslation"
         :audio-url="currentAudioUrl"
         :user-input="lastAnswerResult.userInput"
@@ -370,6 +366,8 @@ watch(
         return;
       }
 
+      const userId = getAuthenticatedUserId();
+
       try {
         await progressStore.recordGameSession(
           gameType,
@@ -377,6 +375,7 @@ watch(
           durationSeconds,
           attemptedCount,
           correctCount,
+          userId,
         );
       } catch (e) {
         console.error('Failed to record game session:', e);

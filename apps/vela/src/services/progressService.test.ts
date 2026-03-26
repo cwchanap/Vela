@@ -12,6 +12,7 @@ import type {
 // Mock auth store
 const mockAuthStore = {
   user: { id: 'user-123', email: 'test@example.com' },
+  session: { user: { id: 'user-123' } },
 };
 
 vi.mock('src/stores/auth', () => ({
@@ -36,6 +37,7 @@ describe('progressService', () => {
     vi.clearAllMocks();
     mockFetch.mockClear();
     mockAuthStore.user = { id: 'user-123', email: 'test@example.com' };
+    mockAuthStore.session = { user: { id: 'user-123' } };
     vi.mocked(awsAmplifyAuth.fetchAuthSession).mockResolvedValue({
       tokens: {
         idToken: {
@@ -138,8 +140,25 @@ describe('progressService', () => {
       expect(result).toEqual(mockProgressAnalytics);
     });
 
+    it('should fall back to the session user when profile data is still loading', async () => {
+      mockAuthStore.user = null as any;
+      mockAuthStore.session = { user: { id: 'session-user-456' } };
+      mockFetch.mockResolvedValue({
+        ok: true,
+        json: vi.fn().mockResolvedValue(mockProgressAnalytics),
+      });
+
+      await progressService.getProgressAnalytics();
+
+      expect(mockFetch).toHaveBeenCalledWith(
+        '/api/progress/analytics?user_id=session-user-456',
+        expect.any(Object),
+      );
+    });
+
     it('should return default analytics when user is not logged in', async () => {
       mockAuthStore.user = null as any;
+      mockAuthStore.session = null as any;
 
       const result = await progressService.getProgressAnalytics();
 
@@ -154,6 +173,7 @@ describe('progressService', () => {
 
     it('should return default analytics when user ID is missing', async () => {
       mockAuthStore.user = { id: '', email: 'test@example.com' } as any;
+      mockAuthStore.session = null as any;
 
       const result = await progressService.getProgressAnalytics();
 
@@ -278,6 +298,7 @@ describe('progressService', () => {
 
     it('should not record game session when user is not logged in', async () => {
       mockAuthStore.user = null as any;
+      mockAuthStore.session = null as any;
 
       await progressService.recordGameSession(
         gameSessionData.gameType,
@@ -289,6 +310,57 @@ describe('progressService', () => {
       );
 
       expect(mockFetch).not.toHaveBeenCalled();
+    });
+
+    it('should fall back to the session user when recording a game session', async () => {
+      mockAuthStore.user = null as any;
+      mockAuthStore.session = { user: { id: 'session-user-456' } };
+      mockFetch.mockResolvedValue({
+        ok: true,
+        json: vi.fn().mockResolvedValue({ success: true }),
+      });
+
+      await progressService.recordGameSession(
+        gameSessionData.gameType,
+        gameSessionData.score,
+        gameSessionData.durationSeconds,
+        gameSessionData.questionsAnswered,
+        gameSessionData.correctAnswers,
+        gameSessionData.experienceGained,
+      );
+
+      expect(mockFetch).toHaveBeenCalledWith(
+        '/api/progress/game-session',
+        expect.objectContaining({
+          body: expect.stringContaining('"user_id":"session-user-456"'),
+        }),
+      );
+    });
+
+    it('should prefer an explicit user ID when recording a game session', async () => {
+      mockAuthStore.user = null as any;
+      mockAuthStore.session = null as any;
+      mockFetch.mockResolvedValue({
+        ok: true,
+        json: vi.fn().mockResolvedValue({ success: true }),
+      });
+
+      await progressService.recordGameSession(
+        gameSessionData.gameType,
+        gameSessionData.score,
+        gameSessionData.durationSeconds,
+        gameSessionData.questionsAnswered,
+        gameSessionData.correctAnswers,
+        gameSessionData.experienceGained,
+        'explicit-user-789',
+      );
+
+      expect(mockFetch).toHaveBeenCalledWith(
+        '/api/progress/game-session',
+        expect.objectContaining({
+          body: expect.stringContaining('"user_id":"explicit-user-789"'),
+        }),
+      );
     });
 
     it('should not record game session when user ID is missing', async () => {
