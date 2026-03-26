@@ -67,7 +67,7 @@
     <div v-else class="text-center q-pa-md">
       <div class="text-h4 q-mb-sm">Game Over!</div>
       <div class="text-h6 text-grey q-mb-lg">
-        {{ correctAnswers }} / {{ totalQuestions }} correct
+        {{ correctAnswers }} / {{ attemptedQuestions }} correct
       </div>
       <q-btn
         label="Play Again"
@@ -110,7 +110,6 @@ const currentConfig = ref<ListeningConfig | null>(null);
 const gameStartTime = ref<Date | null>(null);
 const correctAnswers = ref(0);
 const attemptedQuestions = ref(0);
-const totalQuestions = ref(0);
 const showAnswerFeedback = ref(false);
 const lastAnswerResult = ref<{
   isCorrect: boolean;
@@ -177,7 +176,6 @@ async function handleStart(config: ListeningConfig) {
     gameStartTime.value = new Date();
     correctAnswers.value = 0;
     attemptedQuestions.value = 0;
-    totalQuestions.value = questions.length;
     shouldRecordSession.value = false;
     showSetup.value = false;
   } catch (e) {
@@ -263,8 +261,12 @@ async function loadAudioForCurrentQuestion() {
   }
 }
 
-async function handleAudioPlaybackFailure() {
+async function handleAudioPlaybackFailure(reason: 'autoplay-blocked' | 'playback-failed') {
   if (!listeningStore.gameActive || !listeningStore.currentQuestion) {
+    return;
+  }
+
+  if (reason === 'autoplay-blocked') {
     return;
   }
 

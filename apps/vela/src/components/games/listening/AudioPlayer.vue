@@ -20,7 +20,7 @@
       v-if="hasError"
       class="text-negative text-caption q-mt-sm row items-center justify-center q-gutter-xs"
     >
-      <span>Audio playback failed. Try again.</span>
+      <span>{{ errorMessage }}</span>
       <q-btn
         flat
         dense
@@ -38,6 +38,8 @@
 import { onUnmounted, ref, shallowRef, watch } from 'vue';
 import { playAudio, type AudioPlaybackHandle } from 'src/services/ttsService';
 
+type AudioPlayerErrorReason = 'autoplay-blocked' | 'playback-failed';
+
 const props = withDefaults(
   defineProps<{
     audioUrl: string | null;
@@ -50,13 +52,27 @@ const props = withDefaults(
 
 const emit = defineEmits<{
   played: [];
-  error: [];
+  error: [reason: AudioPlayerErrorReason];
 }>();
 
 const isPlaying = ref(false);
 const hasPlayed = ref(false);
 const hasError = ref(false);
+const errorMessage = ref('Audio playback failed. Try again.');
 const currentPlayback = shallowRef<AudioPlaybackHandle | null>(null);
+
+function getPlaybackErrorReason(error: unknown): AudioPlayerErrorReason {
+  if (
+    typeof error === 'object' &&
+    error !== null &&
+    'name' in error &&
+    (error as { name?: string }).name === 'NotAllowedError'
+  ) {
+    return 'autoplay-blocked';
+  }
+
+  return 'playback-failed';
+}
 
 function stopPlayback({ resetPlayed = false, clearError = false } = {}) {
   const playback = currentPlayback.value;
@@ -99,6 +115,7 @@ async function play(url = props.audioUrl) {
   if (!url || isPlaying.value) return;
 
   hasError.value = false;
+  errorMessage.value = 'Audio playback failed. Try again.';
   isPlaying.value = true;
   const playback = playAudio(url);
   currentPlayback.value = playback;
@@ -114,8 +131,13 @@ async function play(url = props.audioUrl) {
   } catch (e) {
     if (currentPlayback.value !== playback) return;
 
+    const errorReason = getPlaybackErrorReason(e);
     hasError.value = true;
-    emit('error');
+    errorMessage.value =
+      errorReason === 'autoplay-blocked'
+        ? 'Autoplay was blocked. Tap play to continue.'
+        : 'Audio playback failed. Try again.';
+    emit('error', errorReason);
     console.error('Audio playback error:', e);
   } finally {
     if (currentPlayback.value === playback) {

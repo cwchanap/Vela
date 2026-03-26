@@ -140,7 +140,7 @@ const AudioPlayerStub = defineComponent({
     },
   },
   template:
-    '<div class="audio-player-stub"><button class="audio-played-button" @click="$emit(\'played\')">Played</button><button class="audio-error-button" @click="$emit(\'error\')">Error</button></div>',
+    '<div class="audio-player-stub"><button class="audio-played-button" @click="$emit(\'played\')">Played</button><button class="audio-error-button" @click="$emit(\'error\', \'playback-failed\')">Error</button><button class="audio-autoplay-blocked-button" @click="$emit(\'error\', \'autoplay-blocked\')">Autoplay blocked</button></div>',
 });
 
 const MultipleChoiceQuestionStub = defineComponent({
@@ -444,6 +444,60 @@ describe('ListeningGame', () => {
     await flushPromises();
 
     expect(wrapper.find('.answer-button').exists()).toBe(true);
+  });
+
+  it('keeps the current prompt available when autoplay is blocked', async () => {
+    audioPlayerBehavior.autoEmitPlayed = false;
+    mockListeningGameService.getListeningQuestions.mockResolvedValue([
+      makeQuestion('q1', '猫', 'cat'),
+      makeQuestion('q2', '犬', 'dog'),
+    ]);
+    mockGeneratePronunciation.mockResolvedValueOnce({ audioUrl: 'https://example.com/q1.mp3' });
+
+    const wrapper = mountPage();
+
+    await wrapper.find('.start-button').trigger('click');
+    await flushPromises();
+
+    expect(wrapper.find('.answer-button').exists()).toBe(false);
+
+    await wrapper.find('.audio-autoplay-blocked-button').trigger('click');
+    await flushPromises();
+
+    expect(listeningStore.currentQuestion?.id).toBe('q1');
+    expect(listeningStore.submitAnswer).not.toHaveBeenCalled();
+    expect(mockNotifyCreate).not.toHaveBeenCalled();
+
+    await wrapper.find('.audio-played-button').trigger('click');
+    await flushPromises();
+
+    expect(wrapper.find('.answer-button').exists()).toBe(true);
+  });
+
+  it('shows game-over accuracy using attempted prompts after skipped audio questions', async () => {
+    mockListeningGameService.getListeningQuestions.mockResolvedValue([
+      makeQuestion('q1', '猫', 'cat'),
+      makeQuestion('q2', '犬', 'dog'),
+    ]);
+    mockGeneratePronunciation
+      .mockRejectedValueOnce(new Error('TTS unavailable'))
+      .mockResolvedValueOnce({ audioUrl: 'https://example.com/q2.mp3' });
+
+    const wrapper = mountPage();
+
+    await wrapper.find('.start-button').trigger('click');
+    await flushPromises();
+
+    expect(listeningStore.currentQuestion?.id).toBe('q2');
+
+    await wrapper.find('.answer-button').trigger('click');
+    await flushPromises();
+
+    wrapper.findComponent(AnswerFeedbackStub).vm.$emit('next');
+    await flushPromises();
+
+    expect(wrapper.text()).toContain('1 / 1 correct');
+    expect(wrapper.text()).not.toContain('1 / 2 correct');
   });
 
   it('records only attempted prompts when a listening game times out', async () => {
