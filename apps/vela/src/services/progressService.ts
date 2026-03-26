@@ -88,7 +88,7 @@ export interface UserStats {
 class ProgressService {
   private getCurrentUserId(): string | null {
     const authStore = useAuthStore();
-    return authStore.user?.id || null;
+    return authStore.user?.id ?? authStore.session?.user?.id ?? null;
   }
 
   async getProgressAnalytics(): Promise<ProgressAnalytics> {
@@ -181,14 +181,15 @@ class ProgressService {
     questionsAnswered: number,
     correctAnswers: number,
     experienceGained: number,
+    userId: string | null = null,
   ): Promise<void> {
-    const userId = this.getCurrentUserId();
-    if (!userId) return;
+    const effectiveUserId = userId ?? this.getCurrentUserId();
+    if (!effectiveUserId) return;
 
     await httpJsonAuth(getApiUrl('progress/game-session'), {
       method: 'POST',
       body: JSON.stringify({
-        user_id: userId,
+        user_id: effectiveUserId,
         game_type: gameType,
         score,
         duration_seconds: durationSeconds,

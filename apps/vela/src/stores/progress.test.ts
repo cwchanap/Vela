@@ -12,8 +12,8 @@ vi.mock('../services/progressService', () => ({
 }));
 
 const mockQueryClient = {
-  getQueryState: vi.fn(() => null),
-  getQueryData: vi.fn(() => null),
+  getQueryState: vi.fn(),
+  getQueryData: vi.fn(),
   setQueryData: vi.fn(),
   invalidateQueries: vi.fn(),
 };
@@ -33,6 +33,7 @@ vi.mock('@vela/common', () => ({
 
 const mockAuthStore = {
   user: null as null | { id: string; preferences?: Record<string, unknown> },
+  session: null as null | { user: { id: string } },
 };
 
 vi.mock('./auth', () => ({
@@ -41,10 +42,18 @@ vi.mock('./auth', () => ({
 
 const mockAnalytics = {
   wordsLearned: 50,
+  sentencesCompleted: 20,
+  averageAccuracy: 75,
   currentLevel: 3,
   totalExperience: 250,
   experienceToNextLevel: 300,
-  learningStreak: { current_streak: 5 },
+  totalTimeSpent: 120,
+  learningStreak: {
+    current_streak: 5,
+    longest_streak: 8,
+    start_date: '2024-01-01',
+    is_active: true,
+  },
   achievements: [
     {
       id: 'a1',
@@ -70,6 +79,32 @@ const mockAnalytics = {
       experience_to_next_level: 200,
     },
   ],
+  userStats: {
+    wordsLearned: 50,
+    sentencesCompleted: 20,
+    averageAccuracy: 75,
+    currentLevel: 3,
+    totalExperience: 250,
+    learningStreak: {
+      current_streak: 5,
+      longest_streak: 8,
+      start_date: '2024-01-01',
+      is_active: true,
+    },
+    achievements: [
+      {
+        id: 'a1',
+        name: 'First Steps',
+        description: 'Learn your first word',
+        icon: '🌱',
+        category: 'beginner',
+        requirement_type: 'words',
+        requirement_value: 1,
+        experience_reward: 10,
+        earned_at: '2024-01-01',
+      },
+    ],
+  },
   dailyProgress: [
     {
       date: '2024-01-07',
@@ -93,32 +128,29 @@ const mockAnalytics = {
   weeklyProgress: [
     {
       date: '2024-01-07',
+      experience_gained: 350,
       vocabulary_studied: 35,
       sentences_completed: 20,
-      time_spent_minutes: 70,
-      experience_gained: 350,
-      games_played: 14,
       accuracy_percentage: 75,
     },
   ],
   monthlyProgress: [
     {
       date: '2024-01',
+      experience_gained: 1200,
       vocabulary_studied: 120,
       sentences_completed: 80,
-      time_spent_minutes: 240,
-      experience_gained: 1200,
-      games_played: 48,
       accuracy_percentage: 78,
     },
   ],
-};
+} satisfies ProgressAnalytics;
 
 describe('useProgressStore', () => {
   beforeEach(() => {
     setActivePinia(createPinia());
     vi.clearAllMocks();
     mockAuthStore.user = null;
+    mockAuthStore.session = null;
     mockQueryClient.getQueryState.mockReturnValue(null);
     mockQueryClient.getQueryData.mockReturnValue(null);
   });
@@ -661,6 +693,23 @@ describe('useProgressStore', () => {
       expect(store.analytics).toEqual(mockAnalytics);
     });
 
+    it('uses auth session user if no profile userId is available', async () => {
+      const { useProgressStore } = await import('./progress');
+      const store = useProgressStore();
+      mockAuthStore.user = null;
+      mockAuthStore.session = { user: { id: 'session-user-456' } };
+      mockProgressService.getProgressAnalytics.mockResolvedValue(mockAnalytics);
+
+      await store.loadProgressAnalytics(null);
+
+      expect(mockQueryClient.getQueryState).toHaveBeenCalledWith([
+        'progress',
+        'analytics',
+        'session-user-456',
+      ]);
+      expect(store.analytics).toEqual(mockAnalytics);
+    });
+
     it('uses cached data when fresh', async () => {
       const { useProgressStore } = await import('./progress');
       const store = useProgressStore();
@@ -705,6 +754,7 @@ describe('useProgressStore', () => {
         10,
         8,
         expect.any(Number),
+        'user-1',
       );
       expect(mockQueryClient.invalidateQueries).toHaveBeenCalled();
     });
