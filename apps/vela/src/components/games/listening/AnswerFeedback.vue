@@ -12,7 +12,10 @@
       <div class="text-body1 text-grey q-mb-md">{{ englishTranslation }}</div>
 
       <!-- Show user's typed input when dictation was wrong -->
-      <div v-if="userInput && !isCorrect" class="text-caption text-negative q-mb-md">
+      <div
+        v-if="showUserInput && userInput && !isCorrect"
+        class="text-caption text-negative q-mb-md"
+      >
         You typed: "{{ userInput }}"
       </div>
 
@@ -43,6 +46,7 @@ defineProps<{
   englishTranslation: string;
   audioUrl: string | null;
   userInput?: string | undefined;
+  showUserInput?: boolean | undefined;
   isLast: boolean;
 }>();
 
