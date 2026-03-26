@@ -394,7 +394,11 @@ describe('ListeningGame', () => {
     onTimeout();
     await flushPromises();
 
-    await wrapper.find('button').trigger('click');
+    const playAgainButton = wrapper
+      .findAll('button')
+      .find((button) => button.text() === 'Play Again');
+    expect(playAgainButton).toBeTruthy();
+    await playAgainButton!.trigger('click');
     await flushPromises();
 
     expect(listeningStore.currentQuestion?.id).toBe('n1');

@@ -24,7 +24,7 @@ function createPlaybackHandle(): PlaybackHandle {
       resolve = res;
       reject = rej;
     }),
-    stop: vi.fn(),
+    stop: vi.fn(() => resolve()),
     resolve: () => resolve(),
     reject: (error: Error) => reject(error),
   };
@@ -112,7 +112,7 @@ describe('AudioPlayer', () => {
       expect(wrapper.text()).toContain('Audio playback failed. Try again.');
     });
 
-    await wrapper.find('button').trigger('click');
+    await wrapper.get('[aria-label="Dismiss audio playback error"]').trigger('click');
     await vi.waitFor(() => {
       expect(wrapper.text()).not.toContain('Audio playback failed. Try again.');
     });
