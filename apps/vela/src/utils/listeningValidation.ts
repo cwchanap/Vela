@@ -3,8 +3,10 @@ import type { ListeningQuestion } from '../types/listening';
 /** Normalize Japanese input for comparison: collapse whitespace and trim */
 export function normalizeAnswer(s: string): string {
   return s
+    .normalize('NFKC')
     .replace(/[\s\u3000]+/g, '') // collapses and removes all ASCII and full-width spaces
-    .toLowerCase();
+    .toLowerCase()
+    .replace(/[\u30a1-\u30f6]/g, (char) => String.fromCharCode(char.charCodeAt(0) - 0x60));
 }
 
 /**
