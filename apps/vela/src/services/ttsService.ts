@@ -172,13 +172,22 @@ export async function generatePronunciation(
     });
 
     if (!response.ok) {
-      let errorMessage = `Failed to generate pronunciation (status: ${response.status})`;
+      const statusMessage = `Failed to generate pronunciation (status: ${response.status})`;
+      let errorMessage = statusMessage;
       try {
-        const error = await response.json();
-        errorMessage = error.error || errorMessage;
+        const responseText = await response.text();
+        if (responseText) {
+          try {
+            const parsedError = JSON.parse(responseText) as { error?: string };
+            errorMessage = parsedError.error || responseText;
+          } catch {
+            errorMessage = responseText;
+          }
+        } else {
+          errorMessage = `${statusMessage}: ${response.statusText}`;
+        }
       } catch {
-        const errorText = await response.text();
-        errorMessage = errorText || `${errorMessage}: ${response.statusText}`;
+        errorMessage = `${statusMessage}: ${response.statusText}`;
       }
       throw new Error(errorMessage);
     }

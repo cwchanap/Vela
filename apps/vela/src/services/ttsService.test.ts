@@ -272,17 +272,21 @@ describe('ttsService', () => {
     });
 
     it('should throw error when API returns error status', async () => {
+      const text = vi.fn().mockResolvedValue(JSON.stringify({ error: 'TTS service unavailable' }));
       mockFetch.mockResolvedValue({
         ok: false,
-        json: vi.fn().mockResolvedValue({ error: 'TTS service unavailable' }),
+        status: 503,
+        statusText: 'Service Unavailable',
+        text,
       });
 
       await expect(generatePronunciation('vocab-1', '猫', 'user-123')).rejects.toThrow(
         'TTS service unavailable',
       );
+      expect(text).toHaveBeenCalledTimes(1);
     });
 
-    it('should throw generic error when API error message is missing', async () => {
+    it('should fall back to the raw error body when the response is not JSON', async () => {
       mockFetch.mockImplementation((url: string) => {
         if (url === '/api/tts/settings') {
           return Promise.resolve({
@@ -292,12 +296,35 @@ describe('ttsService', () => {
         }
         return Promise.resolve({
           ok: false,
-          json: () => Promise.resolve({}),
+          status: 500,
+          statusText: 'Internal Server Error',
+          text: () => Promise.resolve('Upstream TTS timeout'),
         });
       });
 
       await expect(generatePronunciation('vocab-1', '猫', 'user-123')).rejects.toThrow(
-        'Failed to generate pronunciation',
+        'Upstream TTS timeout',
+      );
+    });
+
+    it('should fall back to status info when the API error body is empty', async () => {
+      mockFetch.mockImplementation((url: string) => {
+        if (url === '/api/tts/settings') {
+          return Promise.resolve({
+            ok: true,
+            json: () => Promise.resolve(mockTTSSettings),
+          });
+        }
+        return Promise.resolve({
+          ok: false,
+          status: 500,
+          statusText: 'Internal Server Error',
+          text: () => Promise.resolve(''),
+        });
+      });
+
+      await expect(generatePronunciation('vocab-1', '猫', 'user-123')).rejects.toThrow(
+        'Failed to generate pronunciation (status: 500): Internal Server Error',
       );
     });
 
