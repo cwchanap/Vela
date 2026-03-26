@@ -15,6 +15,10 @@ describe('normalizeAnswer', () => {
     expect(normalizeAnswer('NEKO')).toBe('neko');
   });
 
+  it('normalizes katakana to hiragana', () => {
+    expect(normalizeAnswer('ネコ')).toBe('ねこ');
+  });
+
   it('handles empty string', () => {
     expect(normalizeAnswer('')).toBe('');
   });
@@ -32,7 +36,7 @@ const vocabQuestion: ListeningQuestion = {
   reading: 'ねこ',
   romaji: 'neko',
   englishTranslation: 'cat',
-  distractors: ['dog', 'bird'],
+  distractors: ['dog', 'bird', 'fish'],
   raw: {
     id: 'v1',
     japanese_word: '猫',
@@ -50,7 +54,7 @@ const vocabQuestionNoReading: ListeningQuestion = {
   id: 'v2',
   text: '猫',
   englishTranslation: 'cat',
-  distractors: [],
+  distractors: ['dog', 'bird', 'fish'],
   raw: {
     id: 'v2',
     japanese_word: '猫',
@@ -66,12 +70,13 @@ const sentenceQuestion: ListeningQuestion = {
   id: 's1',
   text: '猫がいる',
   englishTranslation: 'There is a cat',
-  distractors: ['There is a dog'],
+  distractors: ['There is a dog', 'There is a bird', 'There is a fish'],
   raw: {
     id: 's1',
     japanese_sentence: '猫がいる',
     english_translation: 'There is a cat',
     created_at: '2024-01-01T00:00:00Z',
+    words_array: ['猫', 'が', 'いる'],
   },
 };
 
@@ -99,6 +104,10 @@ describe('isDictationCorrect', () => {
   describe('vocabulary question — hiragana reading match', () => {
     it('accepts hiragana reading', () => {
       expect(isDictationCorrect('ねこ', vocabQuestion)).toBe(true);
+    });
+
+    it('accepts katakana reading when stored reading is hiragana', () => {
+      expect(isDictationCorrect('ネコ', vocabQuestion)).toBe(true);
     });
 
     it('accepts hiragana with full-width spaces', () => {
@@ -159,6 +168,14 @@ describe('isDictationCorrect', () => {
         reading: 'ねこがいる',
       };
       expect(isDictationCorrect('ねこがいる', sentenceWithReading)).toBe(true);
+    });
+
+    it('accepts katakana input when sentence reading is stored in hiragana', () => {
+      const sentenceWithReading: ListeningQuestion = {
+        ...sentenceQuestion,
+        reading: 'ねこがいる',
+      };
+      expect(isDictationCorrect('ネコガイル', sentenceWithReading)).toBe(true);
     });
 
     it('accepts romaji when romaji field is provided', () => {
