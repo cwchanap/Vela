@@ -108,13 +108,34 @@ describe('AudioPlayer', () => {
 
     await wrapper.setProps({ audioUrl: 'https://example.com/fail.mp3' });
     await vi.waitFor(() => {
-      expect(wrapper.emitted('error')).toHaveLength(1);
+      expect(wrapper.emitted('error')).toEqual([['playback-failed']]);
       expect(wrapper.text()).toContain('Audio playback failed. Try again.');
     });
 
     await wrapper.get('[aria-label="Dismiss audio playback error"]').trigger('click');
     await vi.waitFor(() => {
       expect(wrapper.text()).not.toContain('Audio playback failed. Try again.');
+    });
+  });
+
+  it('surfaces autoplay-blocked errors without treating them as generic playback failures', async () => {
+    const autoplayBlockedError = Object.assign(new Error('Autoplay blocked'), {
+      name: 'NotAllowedError',
+    });
+    const failedPlayback = createPlaybackHandle();
+    void failedPlayback.finished.catch(() => undefined);
+
+    mockPlayAudio.mockImplementationOnce(() => {
+      queueMicrotask(() => failedPlayback.reject(autoplayBlockedError));
+      return failedPlayback;
+    });
+
+    const wrapper = mountComponent();
+
+    await wrapper.setProps({ audioUrl: 'https://example.com/autoplay.mp3' });
+    await vi.waitFor(() => {
+      expect(wrapper.emitted('error')).toEqual([['autoplay-blocked']]);
+      expect(wrapper.text()).toContain('Autoplay was blocked. Tap play to continue.');
     });
   });
 });
