@@ -24,6 +24,7 @@
         :english-translation="lastAnswerResult.question.englishTranslation"
         :audio-url="currentAudioUrl"
         :user-input="lastAnswerResult.userInput"
+        :show-user-input="currentConfig?.mode === 'dictation'"
         :is-last="listeningStore.currentIndex >= listeningStore.questions.length"
         @next="proceedToNextQuestion"
       />
@@ -326,6 +327,8 @@ async function proceedToNextQuestion() {
 }
 
 function handleTimeout() {
+  showAnswerFeedback.value = false;
+  lastAnswerResult.value = null;
   invalidateAudioRequest();
   currentAudioUrl.value = null;
   isLoadingAudio.value = false;

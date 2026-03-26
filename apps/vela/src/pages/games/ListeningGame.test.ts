@@ -476,6 +476,34 @@ describe('ListeningGame', () => {
     );
   });
 
+  it('shows the game-over state immediately when timeout happens during answer feedback', async () => {
+    mockListeningGameService.getListeningQuestions.mockResolvedValue([
+      makeQuestion('q1', '猫', 'cat'),
+      makeQuestion('q2', '犬', 'dog'),
+    ]);
+    mockGeneratePronunciation
+      .mockResolvedValueOnce({ audioUrl: 'https://example.com/q1.mp3' })
+      .mockResolvedValueOnce({ audioUrl: 'https://example.com/q2.mp3' });
+
+    const wrapper = mountPage();
+
+    await wrapper.find('.start-button').trigger('click');
+    await flushPromises();
+
+    await wrapper.find('.answer-button').trigger('click');
+    await flushPromises();
+
+    expect(wrapper.find('.answer-feedback-stub').exists()).toBe(true);
+
+    const onTimeout = wrapper.findComponent(GameTimerStub).props('onTimeout') as () => void;
+    onTimeout();
+    await flushPromises();
+
+    expect(wrapper.find('.answer-feedback-stub').exists()).toBe(false);
+    expect(wrapper.text()).toContain('Game Over!');
+    expect(wrapper.text()).toContain('Play Again');
+  });
+
   it('does not record a listening session when the timer expires before any answer is submitted', async () => {
     mockListeningGameService.getListeningQuestions.mockResolvedValue([
       makeQuestion('q1', '猫', 'cat'),
