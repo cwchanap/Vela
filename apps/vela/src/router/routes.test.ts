@@ -152,7 +152,10 @@ describe('routes', () => {
   });
 
   it('all routes with components have lazy-loaded components', () => {
-    const routesWithComponents = routes.filter((r) => r.component);
+    const flattenRoutes = (routeRecords: any[]): any[] =>
+      routeRecords.flatMap((r) => [r, ...flattenRoutes((r.children as any[]) ?? [])]);
+
+    const routesWithComponents = flattenRoutes(routes as any[]).filter((r) => r.component);
     routesWithComponents.forEach((route) => {
       // component should be a function (lazy-loaded) or an object (direct)
       const componentType = typeof route.component;
