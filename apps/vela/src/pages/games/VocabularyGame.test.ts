@@ -235,6 +235,9 @@ describe('VocabularyGame', () => {
       await vi.waitFor(() => expect(gameStore.gameActive).toBe(true));
 
       expect(mockGetVocabularyQuestions).toHaveBeenCalledWith(10, undefined);
+      // Setup screen should be hidden after starting
+      await wrapper.vm.$nextTick();
+      expect(wrapper.find('[data-label="Start Quiz"]').exists()).toBe(false);
       wrapper.unmount();
     });
 
