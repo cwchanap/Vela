@@ -415,14 +415,17 @@ describe('useAuthStore', () => {
       mockAuthService.updateUserProfile.mockResolvedValueOnce({ success: true });
       mockAuthService.getUserProfile.mockResolvedValueOnce({
         ...mockProfile,
-        total_experience: 100,
+        total_experience: 1100,
+        current_level: 2,
       });
       const { useAuthStore } = await import('./auth');
       const store = useAuthStore();
-      store.setUser(makeUser({ total_experience: 0, current_level: 1 }));
-      const result = await store.updateExperience(100);
+      store.setUser(makeUser({ total_experience: 900, current_level: 1 }));
+      const result = await store.updateExperience(200);
       expect(result).toBe(true);
-      expect(store.user?.total_experience).toBe(100);
+      expect(store.user?.total_experience).toBe(1100);
+      // Math.floor(1100 / 1000) + 1 = 2
+      expect(store.user?.current_level).toBe(2);
     });
 
     it('returns false on exception', async () => {
@@ -449,7 +452,7 @@ describe('useAuthStore', () => {
       const { useAuthStore } = await import('./auth');
       const store = useAuthStore();
       store.setUser(makeUser({ learning_streak: 3 }));
-      const result = await store.updateStreak(true);
+      const result = await store.updateStreak();
       expect(result).toBe(true);
       expect(store.user?.learning_streak).toBe(4);
     });
@@ -495,6 +498,7 @@ describe('useAuthStore', () => {
       store.setUser(makeUser({ preferences: { dailyGoal: 30 } }));
       const result = await store.updatePreferences({ dailyGoal: 60 });
       expect(result).toBe(true);
+      expect(store.user?.preferences).toMatchObject({ dailyGoal: 60 });
     });
 
     it('returns false on exception', async () => {

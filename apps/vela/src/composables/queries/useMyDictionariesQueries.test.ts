@@ -97,8 +97,13 @@ describe('useMyDictionariesQueries', () => {
 
       await result.mutateAsync('to-delete');
 
-      // Either updated optimistically or invalidated - either way, the mutation ran
+      // The mutation should have been called with the deleted id
       expect(mockDeleteDictionaryEntry).toHaveBeenCalledWith('to-delete');
+      // The cached entries should be updated optimistically to remove the deleted entry
+      const updatedEntries = queryClient.getQueryData<typeof existingEntries>(
+        myDictionariesKeys.list(50),
+      );
+      expect(updatedEntries).toEqual([{ sentence_id: 'keep', sentence: 'Keep me' }]);
     });
 
     it('handles mutation errors gracefully', async () => {
