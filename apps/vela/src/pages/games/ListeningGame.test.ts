@@ -372,6 +372,38 @@ describe('ListeningGame', () => {
     );
   });
 
+  it('ends the listening session once when authentication is missing before audio loads', async () => {
+    const consoleWarnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+
+    authStore.user = null;
+    authStore.session = null;
+    mockListeningGameService.getListeningQuestions.mockResolvedValue([
+      makeQuestion('q1', '猫', 'cat'),
+      makeQuestion('q2', '犬', 'dog'),
+    ]);
+
+    const wrapper = mountPage();
+
+    await wrapper.find('.start-button').trigger('click');
+    await flushPromises();
+
+    expect(mockGeneratePronunciation).not.toHaveBeenCalled();
+    expect(listeningStore.submitAnswer).not.toHaveBeenCalled();
+    expect(listeningStore.endGame).toHaveBeenCalledTimes(1);
+    expect(listeningStore.gameActive).toBe(false);
+    expect(wrapper.find('.start-button').exists()).toBe(true);
+    expect(progressStore.recordGameSession).not.toHaveBeenCalled();
+    expect(mockNotifyCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: 'Your session has expired. Please sign in again to continue listening practice.',
+        type: 'warning',
+      }),
+    );
+    expect(consoleWarnSpy).toHaveBeenCalledWith(
+      'loadAudioForCurrentQuestion: no authenticated user — ending listening session. Session may have expired.',
+    );
+  });
+
   it('passes sentence readings to answer feedback when available', async () => {
     listeningConfig.mode = 'dictation';
     listeningConfig.source = 'sentences';

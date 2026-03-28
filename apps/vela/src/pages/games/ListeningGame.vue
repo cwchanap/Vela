@@ -213,25 +213,49 @@ async function handleAudioFailure(message: string) {
   await skipCurrentQuestionAfterAudioFailure();
 }
 
+function handleMissingAuthentication() {
+  invalidateAudioRequest();
+  currentAudioUrl.value = null;
+  isLoadingAudio.value = false;
+  audioHasPlayed.value = false;
+  showAnswerFeedback.value = false;
+  lastAnswerResult.value = null;
+  shouldRecordSession.value = false;
+  showSetup.value = true;
+
+  if (listeningStore.gameActive) {
+    listeningStore.endGame();
+  }
+
+  Notify.create({
+    type: 'warning',
+    message: 'Your session has expired. Please sign in again to continue listening practice.',
+    position: 'top',
+    timeout: 5000,
+  });
+}
+
 async function loadAudioForCurrentQuestion() {
   const question = listeningStore.currentQuestion;
   const userId = getAuthenticatedUserId();
   const requestId = question ? beginAudioRequest() : activeAudioRequestId.value;
   currentAudioUrl.value = null;
-  if (!question || !userId) {
-    if (!userId) {
-      if (!question || !listeningStore.gameActive) {
-        isLoadingAudio.value = false;
-        audioHasPlayed.value = false;
-        return;
-      }
-      console.warn(
-        'loadAudioForCurrentQuestion: no authenticated user — skipping audio. Session may have expired.',
-      );
-      await handleAudioFailure('Audio is unavailable. Skipping this question.');
-    }
+  if (!question) {
     isLoadingAudio.value = false;
     audioHasPlayed.value = false;
+    return;
+  }
+
+  if (!userId) {
+    if (!listeningStore.gameActive) {
+      isLoadingAudio.value = false;
+      audioHasPlayed.value = false;
+      return;
+    }
+    console.warn(
+      'loadAudioForCurrentQuestion: no authenticated user — ending listening session. Session may have expired.',
+    );
+    handleMissingAuthentication();
     return;
   }
 
