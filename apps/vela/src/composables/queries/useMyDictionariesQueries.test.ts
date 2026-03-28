@@ -143,9 +143,11 @@ describe('useMyDictionariesQueries', () => {
 
       await flushPromises();
 
-      // Verify that setQueryData was called during rollback (onError)
-      // It gets called twice: once for optimistic update, once for rollback
-      expect(setQueryDataSpy).toHaveBeenCalledWith(myDictionariesKeys.list(50), expect.anything());
+      // Verify setQueryData was called twice: once for optimistic update, once for rollback
+      expect(setQueryDataSpy.mock.calls).toHaveLength(2);
+      // The rollback (second call) should restore the original entries
+      expect(setQueryDataSpy.mock.calls[1]![0]).toEqual(myDictionariesKeys.list(50));
+      expect(setQueryDataSpy.mock.calls[1]![1]).toEqual(existingEntries);
     });
   });
 });

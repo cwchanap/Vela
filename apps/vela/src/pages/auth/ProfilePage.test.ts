@@ -37,8 +37,12 @@ describe('ProfilePage', () => {
     vi.restoreAllMocks();
   });
 
-  const mountComponent = () =>
-    mount(ProfilePage, {
+  const mountComponent = (options: { triggerInitialize?: boolean } = {}) => {
+    const authStore = useAuthStore();
+    if (!options.triggerInitialize) {
+      authStore.isInitialized = true;
+    }
+    return mount(ProfilePage, {
       global: {
         plugins: [Quasar, router],
         stubs: {
@@ -61,6 +65,7 @@ describe('ProfilePage', () => {
         },
       },
     });
+  };
 
   describe('Not authenticated state', () => {
     it('shows not signed in message when user is not authenticated', () => {
@@ -225,7 +230,7 @@ describe('ProfilePage', () => {
       authStore.isInitialized = false;
       const initializeSpy = vi.spyOn(authStore, 'initialize').mockResolvedValue(undefined);
 
-      const wrapper = mountComponent();
+      const wrapper = mountComponent({ triggerInitialize: true });
       await wrapper.vm.$nextTick();
 
       expect(initializeSpy).toHaveBeenCalled();

@@ -73,7 +73,10 @@ import { Hub } from 'aws-amplify/utils';
 describe('AuthService', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockFetch.mockClear();
+    mockFetch.mockResolvedValue({
+      ok: true,
+      json: vi.fn().mockResolvedValue({ profile: null }),
+    });
   });
 
   afterEach(() => {

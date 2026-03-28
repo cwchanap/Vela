@@ -48,18 +48,18 @@ describe('config', () => {
 
     it('defaults api url to /api/ when VITE_API_URL is not set', async () => {
       const { config } = await import('./index');
-      // In test environment VITE_API_URL is typically not set
-      expect(config.api.url).toBeTruthy();
+      // In test environment VITE_API_URL is not set, so fallback applies
+      expect(config.api.url).toBe('/api/');
     });
 
     it('defaults app name when VITE_APP_NAME is not set', async () => {
       const { config } = await import('./index');
-      expect(config.app.name).toBeTruthy();
+      expect(config.app.name).toBe('Japanese Learning App');
     });
 
     it('defaults app version when VITE_APP_VERSION is not set', async () => {
       const { config } = await import('./index');
-      expect(config.app.version).toBeTruthy();
+      expect(config.app.version).toBe('1.0.0');
     });
   });
 

@@ -28,7 +28,7 @@ describe('ErrorNotFound', () => {
         plugins: [Quasar, router],
         stubs: {
           'q-btn': {
-            template: '<a :to="to"><slot /></a>',
+            template: '<a :href="to"><slot /></a>',
             props: ['to', 'label', 'color', 'textColor', 'unelevated', 'noCaps'],
           },
         },
@@ -62,9 +62,8 @@ describe('ErrorNotFound', () => {
 
   it('has a link to the home page', () => {
     const wrapper = mountComponent();
-    // The q-btn stub has to="/"
     const btn = wrapper.find('a');
-    expect(btn.attributes('to')).toBe('/');
+    expect(btn.attributes('href')).toBe('/');
     wrapper.unmount();
   });
 

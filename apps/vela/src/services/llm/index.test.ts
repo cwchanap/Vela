@@ -216,14 +216,16 @@ describe('LLMService', () => {
       );
     });
 
-    it('stores undefined when key is undefined', async () => {
+    it('clears a previously set key when called with undefined', async () => {
       const service = new LLMService();
+      service.setApiKey('stale-key');
       service.setApiKey(undefined);
       mockGoogleGenerate.mockResolvedValue({ text: 'response', raw: {} });
 
       await service.generate({ prompt: 'test' });
 
-      expect(mockGoogleGenerate).toHaveBeenCalled();
+      const callArg = mockGoogleGenerate.mock.calls[0][0];
+      expect(callArg.apiKey).toBeUndefined();
     });
   });
 

@@ -561,7 +561,7 @@ describe('VocabularyGame', () => {
   });
 
   describe('currentQuestion computed', () => {
-    it('returns null when no questions loaded', async () => {
+    it('returns undefined when no questions loaded', async () => {
       const wrapper = await mountComponent();
       expect((wrapper.vm as any).currentQuestion).toBeUndefined();
       wrapper.unmount();
