@@ -1,6 +1,6 @@
 import type { ListeningQuestion } from '../types/listening';
 
-/** Normalize Japanese input for comparison: collapse whitespace and trim */
+/** Normalize answers for comparison using NFKC, whitespace removal, ASCII lowercasing, and katakana-to-hiragana conversion. */
 export function normalizeAnswer(s: string): string {
   return s
     .normalize('NFKC')
@@ -11,7 +11,7 @@ export function normalizeAnswer(s: string): string {
 
 /**
  * Check if a dictation answer is correct.
- * Accepts: the Japanese text, hiragana reading (vocabulary only), or romaji (vocabulary only).
+ * Accepts: the Japanese text, plus reading or romaji when provided on the question.
  */
 export function isDictationCorrect(userInput: string, question: ListeningQuestion): boolean {
   if (!userInput.trim()) return false;
