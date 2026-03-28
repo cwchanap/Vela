@@ -340,4 +340,170 @@ describe('useAuthStore', () => {
       expect(store.error).toBe('Invalid code');
     });
   });
+
+  describe('resendSignUpCode', () => {
+    it('returns true on success', async () => {
+      mockAuthService.resendSignUpCode.mockResolvedValueOnce({ success: true });
+      const { useAuthStore } = await import('./auth');
+      const store = useAuthStore();
+      const result = await store.resendSignUpCode('test@example.com');
+      expect(result).toBe(true);
+    });
+
+    it('returns false and sets error on failure', async () => {
+      mockAuthService.resendSignUpCode.mockResolvedValueOnce({
+        success: false,
+        error: 'Too many requests',
+      });
+      const { useAuthStore } = await import('./auth');
+      const store = useAuthStore();
+      const result = await store.resendSignUpCode('test@example.com');
+      expect(result).toBe(false);
+      expect(store.error).toBe('Too many requests');
+    });
+
+    it('returns false and sets generic error on exception', async () => {
+      mockAuthService.resendSignUpCode.mockRejectedValueOnce(new Error('network'));
+      const { useAuthStore } = await import('./auth');
+      const store = useAuthStore();
+      const result = await store.resendSignUpCode('test@example.com');
+      expect(result).toBe(false);
+      expect(store.error).toContain('unexpected error');
+    });
+  });
+
+  describe('updatePassword', () => {
+    it('returns true on success', async () => {
+      mockAuthService.updatePassword.mockResolvedValueOnce({ success: true });
+      const { useAuthStore } = await import('./auth');
+      const store = useAuthStore();
+      const result = await store.updatePassword('newPassword123');
+      expect(result).toBe(true);
+    });
+
+    it('returns false and sets error on failure', async () => {
+      mockAuthService.updatePassword.mockResolvedValueOnce({
+        success: false,
+        error: 'Password update requires current password',
+      });
+      const { useAuthStore } = await import('./auth');
+      const store = useAuthStore();
+      const result = await store.updatePassword('newPassword123');
+      expect(result).toBe(false);
+      expect(store.error).toContain('Password update requires current password');
+    });
+
+    it('returns false and sets generic error on exception', async () => {
+      mockAuthService.updatePassword.mockRejectedValueOnce(new Error('network'));
+      const { useAuthStore } = await import('./auth');
+      const store = useAuthStore();
+      const result = await store.updatePassword('newPassword123');
+      expect(result).toBe(false);
+      expect(store.error).toContain('unexpected error');
+    });
+  });
+
+  describe('updateExperience', () => {
+    it('returns false when no user is logged in', async () => {
+      const { useAuthStore } = await import('./auth');
+      const store = useAuthStore();
+      const result = await store.updateExperience(100);
+      expect(result).toBe(false);
+    });
+
+    it('updates experience and level on success', async () => {
+      mockAuthService.updateUserProfile.mockResolvedValueOnce({ success: true });
+      mockAuthService.getUserProfile.mockResolvedValueOnce({
+        ...mockProfile,
+        total_experience: 100,
+      });
+      const { useAuthStore } = await import('./auth');
+      const store = useAuthStore();
+      store.setUser(makeUser({ total_experience: 0, current_level: 1 }));
+      const result = await store.updateExperience(100);
+      expect(result).toBe(true);
+      expect(store.user?.total_experience).toBe(100);
+    });
+
+    it('returns false on exception', async () => {
+      mockAuthService.updateUserProfile.mockRejectedValueOnce(new Error('network'));
+      const { useAuthStore } = await import('./auth');
+      const store = useAuthStore();
+      store.setUser(makeUser());
+      const result = await store.updateExperience(100);
+      expect(result).toBe(false);
+    });
+  });
+
+  describe('updateStreak', () => {
+    it('returns false when no user is logged in', async () => {
+      const { useAuthStore } = await import('./auth');
+      const store = useAuthStore();
+      const result = await store.updateStreak();
+      expect(result).toBe(false);
+    });
+
+    it('increments learning streak on success with default increment=true', async () => {
+      mockAuthService.updateUserProfile.mockResolvedValueOnce({ success: true });
+      mockAuthService.getUserProfile.mockResolvedValueOnce({ ...mockProfile, learning_streak: 4 });
+      const { useAuthStore } = await import('./auth');
+      const store = useAuthStore();
+      store.setUser(makeUser({ learning_streak: 3 }));
+      const result = await store.updateStreak(true);
+      expect(result).toBe(true);
+      expect(store.user?.learning_streak).toBe(4);
+    });
+
+    it('resets learning streak when increment=false', async () => {
+      mockAuthService.updateUserProfile.mockResolvedValueOnce({ success: true });
+      mockAuthService.getUserProfile.mockResolvedValueOnce({ ...mockProfile, learning_streak: 0 });
+      const { useAuthStore } = await import('./auth');
+      const store = useAuthStore();
+      store.setUser(makeUser({ learning_streak: 5 }));
+      const result = await store.updateStreak(false);
+      expect(result).toBe(true);
+      expect(store.user?.learning_streak).toBe(0);
+    });
+
+    it('returns false on exception', async () => {
+      mockAuthService.updateUserProfile.mockRejectedValueOnce(new Error('network'));
+      const { useAuthStore } = await import('./auth');
+      const store = useAuthStore();
+      store.setUser(makeUser());
+      const result = await store.updateStreak();
+      expect(result).toBe(false);
+    });
+  });
+
+  describe('updatePreferences', () => {
+    it('returns false when no user is logged in', async () => {
+      const { useAuthStore } = await import('./auth');
+      const store = useAuthStore();
+      const result = await store.updatePreferences({ dailyGoal: 30 });
+      expect(result).toBe(false);
+    });
+
+    it('updates user preferences on success', async () => {
+      const updatedPrefs = { dailyGoal: 60, dailyLessonGoal: 10 };
+      mockAuthService.updateUserProfile.mockResolvedValueOnce({ success: true });
+      mockAuthService.getUserProfile.mockResolvedValueOnce({
+        ...mockProfile,
+        preferences: updatedPrefs,
+      });
+      const { useAuthStore } = await import('./auth');
+      const store = useAuthStore();
+      store.setUser(makeUser({ preferences: { dailyGoal: 30 } }));
+      const result = await store.updatePreferences({ dailyGoal: 60 });
+      expect(result).toBe(true);
+    });
+
+    it('returns false on exception', async () => {
+      mockAuthService.updateUserProfile.mockRejectedValueOnce(new Error('network'));
+      const { useAuthStore } = await import('./auth');
+      const store = useAuthStore();
+      store.setUser(makeUser({ preferences: {} }));
+      const result = await store.updatePreferences({ dailyGoal: 30 });
+      expect(result).toBe(false);
+    });
+  });
 });
