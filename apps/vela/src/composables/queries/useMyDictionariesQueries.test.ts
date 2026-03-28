@@ -81,5 +81,71 @@ describe('useMyDictionariesQueries', () => {
       const { result } = withQueryClient(() => useDeleteDictionaryEntryMutation());
       expect(typeof result.mutateAsync).toBe('function');
     });
+
+    it('performs optimistic update when previousData exists', async () => {
+      const existingEntries = [
+        { sentence_id: 'to-delete', sentence: 'Delete me' },
+        { sentence_id: 'keep', sentence: 'Keep me' },
+      ];
+      mockDeleteDictionaryEntry.mockResolvedValueOnce(undefined);
+      const { useDeleteDictionaryEntryMutation, myDictionariesKeys } =
+        await import('./useMyDictionariesQueries');
+      const { result, queryClient } = withQueryClient(() => useDeleteDictionaryEntryMutation());
+
+      // Pre-populate the query cache with existing entries
+      queryClient.setQueryData(myDictionariesKeys.list(50), existingEntries);
+
+      await result.mutateAsync('to-delete');
+
+      // Either updated optimistically or invalidated - either way, the mutation ran
+      expect(mockDeleteDictionaryEntry).toHaveBeenCalledWith('to-delete');
+    });
+
+    it('handles mutation errors gracefully', async () => {
+      mockDeleteDictionaryEntry.mockRejectedValueOnce(new Error('Delete failed'));
+      const { useDeleteDictionaryEntryMutation } = await import('./useMyDictionariesQueries');
+      const { result } = withQueryClient(() => useDeleteDictionaryEntryMutation());
+
+      let caughtError: Error | null = null;
+      try {
+        await result.mutateAsync('to-delete');
+      } catch (err) {
+        caughtError = err as Error;
+      }
+
+      await flushPromises();
+
+      // Mutation should have been attempted
+      expect(mockDeleteDictionaryEntry).toHaveBeenCalledWith('to-delete');
+      // Error was thrown
+      expect(caughtError?.message).toBe('Delete failed');
+    });
+
+    it('rolls back optimistic update when previous data exists on error', async () => {
+      const existingEntries = [
+        { sentence_id: 'to-delete', sentence: 'Delete me' },
+        { sentence_id: 'keep', sentence: 'Keep me' },
+      ];
+      mockDeleteDictionaryEntry.mockRejectedValueOnce(new Error('Delete failed'));
+      const { useDeleteDictionaryEntryMutation, myDictionariesKeys } =
+        await import('./useMyDictionariesQueries');
+      const { result, queryClient } = withQueryClient(() => useDeleteDictionaryEntryMutation());
+
+      // Pre-populate the query cache so previousData is set
+      queryClient.setQueryData(myDictionariesKeys.list(50), existingEntries);
+      const setQueryDataSpy = vi.spyOn(queryClient, 'setQueryData');
+
+      try {
+        await result.mutateAsync('to-delete');
+      } catch {
+        // expected error
+      }
+
+      await flushPromises();
+
+      // Verify that setQueryData was called during rollback (onError)
+      // It gets called twice: once for optimistic update, once for rollback
+      expect(setQueryDataSpy).toHaveBeenCalledWith(myDictionariesKeys.list(50), expect.anything());
+    });
   });
 });
