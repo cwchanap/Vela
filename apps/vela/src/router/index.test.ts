@@ -108,10 +108,6 @@ describe('router/index', () => {
     mockAuthStore.isAuthenticated = false;
     mockAuthStore.session = null;
 
-    // Reset env flags changed between tests
-    delete (process.env as Record<string, string | undefined>).SERVER;
-    delete (process.env as Record<string, string | undefined>).VUE_ROUTER_MODE;
-
     // Import the module (cached after first load; calling default({}) re-evaluates the factory)
     routerFactory = (await import('./index')).default as (..._args: unknown[]) => unknown;
   });
@@ -125,7 +121,7 @@ describe('router/index', () => {
   // =========================================================================
   describe('history factory selection', () => {
     it('uses createMemoryHistory when SERVER env is set', () => {
-      process.env.SERVER = 'true';
+      vi.stubEnv('SERVER', 'true');
       routerFactory({});
       expect(mockCreateMemoryHistory).toHaveBeenCalledTimes(1);
       expect(mockCreateWebHistory).not.toHaveBeenCalled();
@@ -133,8 +129,7 @@ describe('router/index', () => {
     });
 
     it('uses createWebHistory when VUE_ROUTER_MODE is "history"', () => {
-      delete (process.env as Record<string, string | undefined>).SERVER;
-      process.env.VUE_ROUTER_MODE = 'history';
+      vi.stubEnv('VUE_ROUTER_MODE', 'history');
       routerFactory({});
       expect(mockCreateWebHistory).toHaveBeenCalledTimes(1);
       expect(mockCreateMemoryHistory).not.toHaveBeenCalled();
@@ -142,8 +137,6 @@ describe('router/index', () => {
     });
 
     it('uses createWebHashHistory as default (no SERVER, VUE_ROUTER_MODE not "history")', () => {
-      delete (process.env as Record<string, string | undefined>).SERVER;
-      delete (process.env as Record<string, string | undefined>).VUE_ROUTER_MODE;
       routerFactory({});
       expect(mockCreateWebHashHistory).toHaveBeenCalledTimes(1);
       expect(mockCreateMemoryHistory).not.toHaveBeenCalled();
@@ -160,7 +153,10 @@ describe('router/index', () => {
     beforeEach(() => {
       // Instantiate the router — this registers the beforeEach guard via our mock
       routerFactory({});
-      expect(mockBeforeEachCbs).toHaveLength(1);
+      // Runtime invariant: router must register exactly one guard
+      if (mockBeforeEachCbs.length !== 1) {
+        throw new Error(`Expected exactly 1 guard, got ${mockBeforeEachCbs.length}`);
+      }
       guard = mockBeforeEachCbs[0] as (..._args: unknown[]) => Promise<void>;
     });
 
@@ -169,6 +165,7 @@ describe('router/index', () => {
       const next = vi.fn();
       await guard(makeRoute({ path: '/dashboard', fullPath: '/dashboard' }), makeRoute({}), next);
       expect(next).toHaveBeenCalledWith({ name: 'home' });
+      expect(next).toHaveBeenCalledTimes(1);
     });
 
     // --- auth store initialization ---
@@ -212,7 +209,10 @@ describe('router/index', () => {
       mockAuthStore.isAuthenticated = false;
 
       // Temporarily disable dev mode so the login-redirect branch is exercised.
-      // import.meta.env is a mutable plain object in Vitest.
+      // Direct mutation of import.meta.env is used here because:
+      // - Vitest exposes import.meta.env as a mutable plain object
+      // - vi.stubEnv() only affects process.env, not import.meta.env
+      // - The router production code reads import.meta.env.DEV directly
       const origDEV = import.meta.env.DEV;
       const origVITE_DEV_MODE = import.meta.env.VITE_DEV_MODE;
       try {
@@ -230,6 +230,7 @@ describe('router/index', () => {
           next,
         );
         expect(next).toHaveBeenCalledWith({ name: 'login', query: { redirect: '/protected' } });
+        expect(next).toHaveBeenCalledTimes(1);
       } finally {
         (import.meta.env as Record<string, unknown>).DEV = origDEV;
         (import.meta.env as Record<string, unknown>).VITE_DEV_MODE = origVITE_DEV_MODE;
@@ -271,6 +272,7 @@ describe('router/index', () => {
         next,
       );
       expect(next).toHaveBeenCalledWith({ name: 'home' });
+      expect(next).toHaveBeenCalledTimes(1);
     });
 
     it('allows user without session to access guest-only route', async () => {
