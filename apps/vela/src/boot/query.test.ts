@@ -1,6 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { createApp } from 'vue';
 import { VueQueryPlugin } from '@tanstack/vue-query';
+import {
+  QUERY_STALE_TIME as EXPECTED_STALE_TIME,
+  QUERY_GC_TIME as EXPECTED_GC_TIME,
+} from '@vela/common';
 
 describe('boot/query', () => {
   describe('module exports', () => {
@@ -13,12 +17,12 @@ describe('boot/query', () => {
 
     it('should re-export QUERY_STALE_TIME constant', async () => {
       const { QUERY_STALE_TIME } = await import('./query');
-      expect(QUERY_STALE_TIME).toBe(5 * 60 * 1000);
+      expect(QUERY_STALE_TIME).toBe(EXPECTED_STALE_TIME);
     });
 
     it('should re-export QUERY_GC_TIME constant', async () => {
       const { QUERY_GC_TIME } = await import('./query');
-      expect(QUERY_GC_TIME).toBe(10 * 60 * 1000);
+      expect(QUERY_GC_TIME).toBe(EXPECTED_GC_TIME);
     });
   });
 
