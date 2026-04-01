@@ -1,315 +1,304 @@
-import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { setActivePinia, createPinia } from 'pinia';
-import type { Router, RouteLocationNormalized } from 'vue-router';
+import type { RouteLocationNormalized } from 'vue-router';
 
-// Mock the auth store
-const mockAuthStore = {
-  isInitialized: false,
-  isAuthenticated: false,
-  session: null,
-  initialize: vi.fn(),
-};
+// ===========================================================================
+// Hoisted mocks — must run before vi.mock() factory functions are evaluated.
+// ===========================================================================
+const {
+  mockBeforeEachCbs,
+  mockCreateWebHistory,
+  mockCreateWebHashHistory,
+  mockCreateMemoryHistory,
+  mockCreateRouter,
+  mockAuthStore,
+} = vi.hoisted(() => {
+  const mockBeforeEachCbs: ((..._args: unknown[]) => unknown)[] = [];
+
+  const mockRouterInstance = {
+    beforeEach: (fn: (..._args: unknown[]) => unknown) => {
+      mockBeforeEachCbs.push(fn);
+    },
+    options: {} as { history?: unknown },
+  };
+
+  const mockCreateRouter = vi.fn((options: { history?: unknown }) => {
+    mockRouterInstance.options = options;
+    return mockRouterInstance;
+  });
+
+  const mockCreateWebHistory = vi.fn(() => ({ _type: 'web' }));
+  const mockCreateWebHashHistory = vi.fn(() => ({ _type: 'hash' }));
+  const mockCreateMemoryHistory = vi.fn(() => ({ _type: 'memory' }));
+
+  const mockAuthStore = {
+    isInitialized: false,
+    isAuthenticated: false,
+    session: null as unknown,
+    initialize: vi.fn(),
+  };
+
+  return {
+    mockBeforeEachCbs,
+    mockCreateWebHistory,
+    mockCreateWebHashHistory,
+    mockCreateMemoryHistory,
+    mockCreateRouter,
+    mockAuthStore,
+  };
+});
+
+// ===========================================================================
+// Module mocks
+// ===========================================================================
+vi.mock('vue-router', () => ({
+  createRouter: mockCreateRouter,
+  createWebHistory: mockCreateWebHistory,
+  createWebHashHistory: mockCreateWebHashHistory,
+  createMemoryHistory: mockCreateMemoryHistory,
+}));
 
 vi.mock('../stores/auth', () => ({
   useAuthStore: vi.fn(() => mockAuthStore),
 }));
 
-// Mock the routes
-vi.mock('./routes', () => ({
-  default: [],
-}));
+vi.mock('./routes', () => ({ default: [] }));
 
-describe('router', () => {
-  let router: Router;
+// ===========================================================================
+// Helper
+// ===========================================================================
+function makeRoute(overrides: {
+  path?: string;
+  fullPath?: string;
+  matched?: Array<{ meta: Record<string, unknown> }>;
+}): RouteLocationNormalized {
+  return {
+    path: '/',
+    fullPath: '/',
+    name: undefined,
+    matched: [],
+    meta: {},
+    query: {},
+    params: {},
+    hash: '',
+    redirectedFrom: undefined,
+    ...overrides,
+  } as unknown as RouteLocationNormalized;
+}
 
-  beforeEach(() => {
+// ===========================================================================
+// Tests
+// ===========================================================================
+describe('router/index', () => {
+  let routerFactory: (..._args: unknown[]) => unknown;
+
+  beforeEach(async () => {
     setActivePinia(createPinia());
-    vi.clearAllMocks();
-    // Reset auth store mock state
+
+    // Reset captured callbacks and mock call counters
+    mockBeforeEachCbs.length = 0;
+    mockCreateWebHistory.mockClear();
+    mockCreateWebHashHistory.mockClear();
+    mockCreateMemoryHistory.mockClear();
+    mockCreateRouter.mockClear();
+    mockAuthStore.initialize.mockReset();
+
+    // Reset auth state
     mockAuthStore.isInitialized = false;
     mockAuthStore.isAuthenticated = false;
     mockAuthStore.session = null;
+
+    // Reset env flags changed between tests
+    delete (process.env as Record<string, string | undefined>).SERVER;
+    delete (process.env as Record<string, string | undefined>).VUE_ROUTER_MODE;
+
+    // Import the module (cached after first load; calling default({}) re-evaluates the factory)
+    routerFactory = (await import('./index')).default as (..._args: unknown[]) => unknown;
   });
 
   afterEach(() => {
     vi.unstubAllEnvs();
   });
 
-  describe('router creation', () => {
-    it('creates router with web history in browser mode', async () => {
-      // Set environment for web history mode
-      vi.stubEnv('VUE_ROUTER_MODE', 'history');
-      delete (process.env as any).SERVER;
-
-      const routerModule = await import('./index');
-      router = routerModule.default({});
-
-      expect(router).toBeDefined();
-      expect(router.options.history).toBeDefined();
+  // =========================================================================
+  // History factory selection
+  // =========================================================================
+  describe('history factory selection', () => {
+    it('uses createMemoryHistory when SERVER env is set', () => {
+      process.env.SERVER = 'true';
+      routerFactory({});
+      expect(mockCreateMemoryHistory).toHaveBeenCalledTimes(1);
+      expect(mockCreateWebHistory).not.toHaveBeenCalled();
+      expect(mockCreateWebHashHistory).not.toHaveBeenCalled();
     });
 
-    it('creates router with hash history when VUE_ROUTER_MODE is not history', async () => {
-      // Set environment for hash history mode
-      delete (process.env as any).VUE_ROUTER_MODE;
-      delete (process.env as any).SERVER;
-
-      const routerModule = await import('./index');
-      router = routerModule.default({});
-
-      expect(router).toBeDefined();
-      expect(router.options.history).toBeDefined();
+    it('uses createWebHistory when VUE_ROUTER_MODE is "history"', () => {
+      delete (process.env as Record<string, string | undefined>).SERVER;
+      process.env.VUE_ROUTER_MODE = 'history';
+      routerFactory({});
+      expect(mockCreateWebHistory).toHaveBeenCalledTimes(1);
+      expect(mockCreateMemoryHistory).not.toHaveBeenCalled();
+      expect(mockCreateWebHashHistory).not.toHaveBeenCalled();
     });
 
-    it('creates router with memory history in SSR mode', async () => {
-      // Set environment for SSR mode
-      vi.stubEnv('SERVER', 'true');
-
-      const routerModule = await import('./index');
-      router = routerModule.default({});
-
-      expect(router).toBeDefined();
-      expect(router.options.history).toBeDefined();
+    it('uses createWebHashHistory as default (no SERVER, VUE_ROUTER_MODE not "history")', () => {
+      delete (process.env as Record<string, string | undefined>).SERVER;
+      delete (process.env as Record<string, string | undefined>).VUE_ROUTER_MODE;
+      routerFactory({});
+      expect(mockCreateWebHashHistory).toHaveBeenCalledTimes(1);
+      expect(mockCreateMemoryHistory).not.toHaveBeenCalled();
+      expect(mockCreateWebHistory).not.toHaveBeenCalled();
     });
   });
 
-  describe('navigation guards', () => {
-    beforeEach(async () => {
-      // Create a fresh router instance for each test
-      delete (process.env as any).SERVER;
-      delete (process.env as any).VUE_ROUTER_MODE;
+  // =========================================================================
+  // Navigation guard body
+  // =========================================================================
+  describe('navigation guard', () => {
+    let guard: (..._args: unknown[]) => Promise<void>;
 
-      const routerModule = await import('./index');
-      router = routerModule.default({});
+    beforeEach(() => {
+      // Instantiate the router — this registers the beforeEach guard via our mock
+      routerFactory({});
+      expect(mockBeforeEachCbs).toHaveLength(1);
+      guard = mockBeforeEachCbs[0] as (..._args: unknown[]) => Promise<void>;
     });
 
-    describe('legacy dashboard redirect', () => {
-      it('redirects /dashboard to home route', async () => {
-        const to = {
-          path: '/dashboard',
-          matched: [],
-          name: undefined,
-          fullPath: '/dashboard',
-        } as unknown as RouteLocationNormalized;
-        const from = {
-          path: '/',
-          matched: [],
-          name: undefined,
-          fullPath: '/',
-        } as unknown as RouteLocationNormalized;
-        const next = vi.fn();
-
-        // Access the internal beforeEach hooks from the router
-        const guards = (router as any).beforeHooks || (router as any)._beforeEach;
-        if (guards && guards.length > 0) {
-          await guards[0](to, from, next);
-          expect(next).toHaveBeenCalledWith({ name: 'home' });
-        }
-      });
+    // --- legacy /dashboard redirect ---
+    it('redirects /dashboard to { name: "home" }', async () => {
+      const next = vi.fn();
+      await guard(makeRoute({ path: '/dashboard', fullPath: '/dashboard' }), makeRoute({}), next);
+      expect(next).toHaveBeenCalledWith({ name: 'home' });
     });
 
-    describe('auth store initialization', () => {
-      it('initializes auth store when not initialized', async () => {
-        mockAuthStore.isInitialized = false;
-        mockAuthStore.initialize.mockResolvedValueOnce(undefined);
-
-        const to = {
-          path: '/some-route',
-          matched: [],
-          name: undefined,
-          fullPath: '/some-route',
-        } as unknown as RouteLocationNormalized;
-        const from = {
-          path: '/',
-          matched: [],
-          name: undefined,
-          fullPath: '/',
-        } as unknown as RouteLocationNormalized;
-        const next = vi.fn();
-
-        // Access internal hooks - router stores them differently
-        // Let's extract the guard from the router instance
-        const guards = (router as any).beforeHooks || (router as any)._beforeEach;
-        if (guards && guards.length > 0) {
-          await guards[0](to, from, next);
-          expect(mockAuthStore.initialize).toHaveBeenCalled();
-          expect(next).toHaveBeenCalled();
-        }
-      });
-
-      it('does not initialize auth store when already initialized', async () => {
-        mockAuthStore.isInitialized = true;
-        mockAuthStore.initialize.mockClear();
-
-        const to = {
-          path: '/some-route',
-          matched: [],
-          name: undefined,
-          fullPath: '/some-route',
-        } as unknown as RouteLocationNormalized;
-        const from = {
-          path: '/',
-          matched: [],
-          name: undefined,
-          fullPath: '/',
-        } as unknown as RouteLocationNormalized;
-        const next = vi.fn();
-
-        const guards = (router as any).beforeHooks || (router as any)._beforeEach;
-        if (guards && guards.length > 0) {
-          await guards[0](to, from, next);
-          expect(mockAuthStore.initialize).not.toHaveBeenCalled();
-          expect(next).toHaveBeenCalled();
-        }
-      });
+    // --- auth store initialization ---
+    it('initializes auth store when isInitialized is false', async () => {
+      mockAuthStore.isInitialized = false;
+      mockAuthStore.initialize.mockResolvedValueOnce(undefined);
+      const next = vi.fn();
+      await guard(makeRoute({ path: '/home', fullPath: '/home' }), makeRoute({}), next);
+      expect(mockAuthStore.initialize).toHaveBeenCalledTimes(1);
+      expect(next).toHaveBeenCalled();
     });
 
-    describe('requiresAuth guard', () => {
-      it('redirects to login when user is not authenticated', async () => {
-        mockAuthStore.isInitialized = true;
-        mockAuthStore.isAuthenticated = false;
+    it('skips authStore.initialize() when already initialized', async () => {
+      mockAuthStore.isInitialized = true;
+      const next = vi.fn();
+      await guard(makeRoute({ path: '/home', fullPath: '/home' }), makeRoute({}), next);
+      expect(mockAuthStore.initialize).not.toHaveBeenCalled();
+      expect(next).toHaveBeenCalled();
+    });
 
-        const to = {
+    // --- requiresAuth: authenticated ---
+    it('allows authenticated user through requiresAuth route', async () => {
+      mockAuthStore.isInitialized = true;
+      mockAuthStore.isAuthenticated = true;
+      const next = vi.fn();
+      await guard(
+        makeRoute({
           path: '/protected',
           fullPath: '/protected',
-          name: 'protected',
           matched: [{ meta: { requiresAuth: true } }],
-        } as unknown as RouteLocationNormalized;
-        const from = {
-          path: '/',
-          matched: [],
-          name: undefined,
-          fullPath: '/',
-        } as unknown as RouteLocationNormalized;
+        }),
+        makeRoute({}),
+        next,
+      );
+      expect(next).toHaveBeenCalledWith();
+    });
+
+    // --- requiresAuth: unauthenticated in production (non-dev) ---
+    it('redirects unauthenticated user to login when not in dev mode', async () => {
+      mockAuthStore.isInitialized = true;
+      mockAuthStore.isAuthenticated = false;
+
+      // Temporarily disable dev mode so the login-redirect branch is exercised.
+      // import.meta.env is a mutable plain object in Vitest.
+      const origDEV = import.meta.env.DEV;
+      const origVITE_DEV_MODE = import.meta.env.VITE_DEV_MODE;
+      try {
+        (import.meta.env as Record<string, unknown>).DEV = false;
+        (import.meta.env as Record<string, unknown>).VITE_DEV_MODE = '';
+
         const next = vi.fn();
+        await guard(
+          makeRoute({
+            path: '/protected',
+            fullPath: '/protected',
+            matched: [{ meta: { requiresAuth: true } }],
+          }),
+          makeRoute({}),
+          next,
+        );
+        expect(next).toHaveBeenCalledWith({ name: 'login', query: { redirect: '/protected' } });
+      } finally {
+        (import.meta.env as Record<string, unknown>).DEV = origDEV;
+        (import.meta.env as Record<string, unknown>).VITE_DEV_MODE = origVITE_DEV_MODE;
+      }
+    });
 
-        const guards = (router as any).beforeHooks || (router as any)._beforeEach;
-        if (guards && guards.length > 0) {
-          await guards[0](to, from, next);
-          expect(next).toHaveBeenCalledWith({
-            name: 'login',
-            query: { redirect: '/protected' },
-          });
-        }
-      });
-
-      it('allows access when user is authenticated', async () => {
-        mockAuthStore.isInitialized = true;
-        mockAuthStore.isAuthenticated = true;
-
-        const to = {
+    // --- requiresAuth: dev-mode bypass ---
+    it('allows unauthenticated user through requiresAuth in dev mode (dev bypass)', async () => {
+      mockAuthStore.isInitialized = true;
+      mockAuthStore.isAuthenticated = false;
+      // import.meta.env.DEV is true by default in Vitest — the dev bypass fires
+      const next = vi.fn();
+      await guard(
+        makeRoute({
           path: '/protected',
           fullPath: '/protected',
-          name: 'protected',
           matched: [{ meta: { requiresAuth: true } }],
-        } as unknown as RouteLocationNormalized;
-        const from = {
-          path: '/',
-          matched: [],
-          name: undefined,
-          fullPath: '/',
-        } as unknown as RouteLocationNormalized;
-        const next = vi.fn();
-
-        const guards = (router as any).beforeHooks || (router as any)._beforeEach;
-        if (guards && guards.length > 0) {
-          await guards[0](to, from, next);
-          expect(next).toHaveBeenCalledWith();
-        }
-      });
-
-      it('allows access in dev mode even when not authenticated', async () => {
-        mockAuthStore.isInitialized = true;
-        mockAuthStore.isAuthenticated = false;
-
-        // We can't easily change import.meta.env in tests
-        // The dev mode check in the router uses import.meta.env.DEV
-        // Let's skip this test for now as it requires more complex mocking
-
-        // For now, just test that the logic exists
-        expect(true).toBe(true);
-      });
+        }),
+        makeRoute({}),
+        next,
+      );
+      // Dev bypass calls next() without arguments and returns
+      expect(next).toHaveBeenCalledWith();
+      expect(next).not.toHaveBeenCalledWith(expect.objectContaining({ name: 'login' }));
     });
 
-    describe('requiresGuest guard', () => {
-      it('redirects to home when user has session', async () => {
-        mockAuthStore.isInitialized = true;
-        mockAuthStore.session = { user: { id: 'user-123' } };
-
-        const to = {
+    // --- requiresGuest ---
+    it('redirects user with a session away from guest-only route', async () => {
+      mockAuthStore.isInitialized = true;
+      mockAuthStore.session = { tokens: 'mock' };
+      const next = vi.fn();
+      await guard(
+        makeRoute({
           path: '/login',
           fullPath: '/login',
-          name: 'login',
           matched: [{ meta: { requiresGuest: true } }],
-        } as unknown as RouteLocationNormalized;
-        const from = {
-          path: '/',
-          matched: [],
-          name: undefined,
-          fullPath: '/',
-        } as unknown as RouteLocationNormalized;
-        const next = vi.fn();
-
-        const guards = (router as any).beforeHooks || (router as any)._beforeEach;
-        if (guards && guards.length > 0) {
-          await guards[0](to, from, next);
-          expect(next).toHaveBeenCalledWith({ name: 'home' });
-        }
-      });
-
-      it('allows access when user has no session', async () => {
-        mockAuthStore.isInitialized = true;
-        mockAuthStore.session = null;
-
-        const to = {
-          path: '/login',
-          fullPath: '/login',
-          name: 'login',
-          matched: [{ meta: { requiresGuest: true } }],
-        } as unknown as RouteLocationNormalized;
-        const from = {
-          path: '/',
-          matched: [],
-          name: undefined,
-          fullPath: '/',
-        } as unknown as RouteLocationNormalized;
-        const next = vi.fn();
-
-        const guards = (router as any).beforeHooks || (router as any)._beforeEach;
-        if (guards && guards.length > 0) {
-          await guards[0](to, from, next);
-          expect(next).toHaveBeenCalledWith();
-        }
-      });
+        }),
+        makeRoute({}),
+        next,
+      );
+      expect(next).toHaveBeenCalledWith({ name: 'home' });
     });
 
-    describe('error handling', () => {
-      it('allows navigation and logs error when guard throws', async () => {
-        const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
-        mockAuthStore.initialize.mockRejectedValueOnce(new Error('Test error'));
+    it('allows user without session to access guest-only route', async () => {
+      mockAuthStore.isInitialized = true;
+      mockAuthStore.session = null;
+      const next = vi.fn();
+      await guard(
+        makeRoute({
+          path: '/login',
+          fullPath: '/login',
+          matched: [{ meta: { requiresGuest: true } }],
+        }),
+        makeRoute({}),
+        next,
+      );
+      expect(next).toHaveBeenCalledWith();
+    });
 
-        const to = {
-          path: '/some-route',
-          matched: [],
-          name: undefined,
-          fullPath: '/some-route',
-        } as unknown as RouteLocationNormalized;
-        const from = {
-          path: '/',
-          matched: [],
-          name: undefined,
-          fullPath: '/',
-        } as unknown as RouteLocationNormalized;
-        const next = vi.fn();
-
-        const guards = (router as any).beforeHooks || (router as any)._beforeEach;
-        if (guards && guards.length > 0) {
-          await guards[0](to, from, next);
-          expect(consoleErrorSpy).toHaveBeenCalledWith('Router guard error:', expect.any(Error));
-          expect(next).toHaveBeenCalledWith();
-        }
-
-        consoleErrorSpy.mockRestore();
-      });
+    // --- error handling ---
+    it('falls back to next() and logs an error when the guard throws', async () => {
+      const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      mockAuthStore.isInitialized = false;
+      mockAuthStore.initialize.mockRejectedValueOnce(new Error('boom'));
+      const next = vi.fn();
+      await guard(makeRoute({ path: '/home', fullPath: '/home' }), makeRoute({}), next);
+      expect(consoleSpy).toHaveBeenCalledWith('Router guard error:', expect.any(Error));
+      expect(next).toHaveBeenCalledWith();
+      consoleSpy.mockRestore();
     });
   });
 });
