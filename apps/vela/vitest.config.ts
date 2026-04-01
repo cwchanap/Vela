@@ -43,6 +43,7 @@ export default defineConfig({
       stores: resolve(__dirname, './src/stores'),
       '@vela/common': resolve(__dirname, '../../packages/common/src/index.ts'),
       '#q-app/wrappers': resolve(__dirname, './src/test/mocks/q-app-wrappers.ts'),
+      'quasar/wrappers': resolve(__dirname, './src/test/mocks/quasar-wrappers.ts'),
     },
   },
 });
