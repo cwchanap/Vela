@@ -434,6 +434,16 @@ describe('useAuthStore', () => {
       expect(result).toBe(false);
       expect(store.error).toBe('Update rejected');
     });
+
+    it('returns false and sets generic error when service throws', async () => {
+      mockAuthService.updateUserProfile.mockRejectedValueOnce(new Error('Network failure'));
+      const { useAuthStore } = await import('./auth');
+      const store = useAuthStore();
+      store.setUser(makeUser());
+      const result = await store.updateProfile({ username: 'new' });
+      expect(result).toBe(false);
+      expect(store.error).toBe('An unexpected error occurred during profile update');
+    });
   });
 
   describe('confirmSignUp', () => {
