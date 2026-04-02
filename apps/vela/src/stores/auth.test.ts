@@ -192,6 +192,15 @@ describe('useAuthStore', () => {
       await store.signIn({ email: 'a@b.com', password: 'pass' });
       expect(store.isLoading).toBe(false);
     });
+
+    it('returns false and sets generic error on exception', async () => {
+      mockAuthService.signIn.mockRejectedValueOnce(new Error('network'));
+      const { useAuthStore } = await import('./auth');
+      const store = useAuthStore();
+      const result = await store.signIn({ email: 'test@example.com', password: 'pass' });
+      expect(result).toBe(false);
+      expect(store.error).toContain('unexpected error');
+    });
   });
 
   describe('signOut', () => {
@@ -215,6 +224,15 @@ describe('useAuthStore', () => {
       const result = await store.signOut();
       expect(result).toBe(false);
       expect(store.error).toBe('Sign out failed');
+    });
+
+    it('returns false and sets generic error on exception', async () => {
+      mockAuthService.signOut.mockRejectedValueOnce(new Error('network'));
+      const { useAuthStore } = await import('./auth');
+      const store = useAuthStore();
+      const result = await store.signOut();
+      expect(result).toBe(false);
+      expect(store.error).toContain('unexpected error');
     });
   });
 
@@ -243,6 +261,19 @@ describe('useAuthStore', () => {
       expect(result).toBe(false);
       expect(store.error).toBe('Email in use');
     });
+
+    it('returns false and sets generic error on exception', async () => {
+      mockAuthService.signUp.mockRejectedValueOnce(new Error('network'));
+      const { useAuthStore } = await import('./auth');
+      const store = useAuthStore();
+      const result = await store.signUp({
+        email: 'test@example.com',
+        password: 'pass',
+        username: 'u',
+      });
+      expect(result).toBe(false);
+      expect(store.error).toContain('unexpected error');
+    });
   });
 
   describe('resetPassword', () => {
@@ -264,6 +295,15 @@ describe('useAuthStore', () => {
       const result = await store.resetPassword('noone@example.com');
       expect(result).toBe(false);
       expect(store.error).toBe('User not found');
+    });
+
+    it('returns false and sets generic error on exception', async () => {
+      mockAuthService.resetPassword.mockRejectedValueOnce(new Error('network'));
+      const { useAuthStore } = await import('./auth');
+      const store = useAuthStore();
+      const result = await store.resetPassword('test@example.com');
+      expect(result).toBe(false);
+      expect(store.error).toContain('unexpected error');
     });
   });
 
@@ -296,6 +336,70 @@ describe('useAuthStore', () => {
       expect(store.isInitialized).toBe(true);
       expect(store.user?.id).toBe('user-123');
     });
+
+    it('sets error and does not set isInitialized when getCurrentSession rejects', async () => {
+      mockAuthService.getCurrentSession.mockRejectedValueOnce(new Error('network error'));
+      const { useAuthStore } = await import('./auth');
+      const store = useAuthStore();
+      await store.initialize();
+      expect(store.error).toBe('Failed to initialize authentication');
+      expect(store.isInitialized).toBe(false);
+      expect(store.isLoading).toBe(false);
+    });
+
+    it('onAuthStateChange callback with session sets session and loads profile', async () => {
+      let capturedCallback: ((_event: string, _session: unknown) => void) | null = null;
+      mockAuthService.getCurrentSession.mockResolvedValueOnce(null);
+      mockAuthService.onAuthStateChange.mockImplementation(
+        (cb: (_event: string, _session: unknown) => void) => {
+          capturedCallback = cb;
+        },
+      );
+      mockAuthService.getUserProfile.mockResolvedValueOnce(mockProfile);
+      const { useAuthStore } = await import('./auth');
+      const store = useAuthStore();
+      await store.initialize();
+
+      expect(capturedCallback).not.toBeNull();
+      capturedCallback!('SIGNED_IN', mockSession);
+
+      await vi.waitFor(() => {
+        expect(store.user?.id).toBe('user-123');
+      });
+      expect(store.session).toEqual(mockSession);
+    });
+
+    it('onAuthStateChange callback with null session clears auth', async () => {
+      let capturedCallback: ((_event: string, _session: unknown) => void) | null = null;
+      mockAuthService.getCurrentSession.mockResolvedValueOnce(null);
+      mockAuthService.onAuthStateChange.mockImplementation(
+        (cb: (_event: string, _session: unknown) => void) => {
+          capturedCallback = cb;
+        },
+      );
+      const { useAuthStore } = await import('./auth');
+      const store = useAuthStore();
+      await store.initialize();
+      store.setUser(makeUser());
+      store.setSession(mockSession);
+
+      capturedCallback!('SIGNED_OUT', null);
+
+      await vi.waitFor(() => {
+        expect(store.user).toBeNull();
+      });
+      expect(store.session).toBeNull();
+    });
+  });
+
+  describe('loadUserProfile', () => {
+    it('sets error when getUserProfile rejects', async () => {
+      mockAuthService.getUserProfile.mockRejectedValueOnce(new Error('network'));
+      const { useAuthStore } = await import('./auth');
+      const store = useAuthStore();
+      await store.loadUserProfile('user-123');
+      expect(store.error).toBe('Failed to load user profile');
+    });
   });
 
   describe('updateProfile', () => {
@@ -316,6 +420,19 @@ describe('useAuthStore', () => {
       const result = await store.updateProfile({ username: 'updated' });
       expect(result).toBe(true);
       expect(mockQueryClient.invalidateQueries).toHaveBeenCalledTimes(1);
+    });
+
+    it('returns false and sets error when service returns failure response', async () => {
+      mockAuthService.updateUserProfile.mockResolvedValueOnce({
+        success: false,
+        error: 'Update rejected',
+      });
+      const { useAuthStore } = await import('./auth');
+      const store = useAuthStore();
+      store.setUser(makeUser());
+      const result = await store.updateProfile({ username: 'new' });
+      expect(result).toBe(false);
+      expect(store.error).toBe('Update rejected');
     });
   });
 
@@ -338,6 +455,15 @@ describe('useAuthStore', () => {
       const result = await store.confirmSignUp('test@example.com', 'wrong');
       expect(result).toBe(false);
       expect(store.error).toBe('Invalid code');
+    });
+
+    it('returns false and sets generic error on exception', async () => {
+      mockAuthService.confirmSignUp.mockRejectedValueOnce(new Error('network'));
+      const { useAuthStore } = await import('./auth');
+      const store = useAuthStore();
+      const result = await store.confirmSignUp('test@example.com', 'code');
+      expect(result).toBe(false);
+      expect(store.error).toContain('unexpected error');
     });
   });
 
