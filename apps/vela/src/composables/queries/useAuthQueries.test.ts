@@ -235,5 +235,103 @@ describe('useAuthQueries', () => {
       });
       expect(profileCall).toBeDefined();
     });
+
+    it('applies optimistic update to cache when previous profile exists', async () => {
+      mockAuthService.updateUserProfile.mockResolvedValueOnce({ success: true });
+      const { useUpdateProfileMutation, authKeys } = await import('./useAuthQueries');
+      const { result, queryClient } = withQueryClient(() => useUpdateProfileMutation());
+
+      const previousProfile = {
+        id: 'u1',
+        username: 'oldname',
+        email: 'a@b.com',
+        avatar_url: 'https://old.avatar/img.png',
+        native_language: 'en',
+        current_level: 1,
+        total_experience: 0,
+        learning_streak: 0,
+        last_activity: null,
+        preferences: { dailyGoal: 10, difficulty: 'Beginner' as const, notifications: false },
+        created_at: '2024-01-01',
+        updated_at: '2024-01-01',
+      };
+
+      // Pre-populate the cache so onMutate can snapshot it
+      queryClient.setQueryData(authKeys.profile('u1'), previousProfile);
+
+      const mutatePromise = result.mutateAsync({
+        userId: 'u1',
+        profileData: {
+          username: 'newname',
+          avatar_url: 'https://new.avatar/img.png',
+          native_language: 'ja',
+          preferences: { dailyGoal: 20, difficulty: 'Intermediate', notifications: true },
+        },
+      });
+
+      // Flush the onMutate microtasks so the optimistic write is applied
+      await flushPromises();
+
+      const optimistic = queryClient.getQueryData(authKeys.profile('u1')) as typeof previousProfile;
+      expect(optimistic.username).toBe('newname');
+      expect(optimistic.avatar_url).toBe('https://new.avatar/img.png');
+      expect(optimistic.native_language).toBe('ja');
+      expect(optimistic.preferences).toEqual({
+        dailyGoal: 20,
+        difficulty: 'Intermediate',
+        notifications: true,
+      });
+      // Unchanged fields must be preserved
+      expect(optimistic.current_level).toBe(1);
+
+      await mutatePromise;
+    });
+
+    it('rolls back cache to previous profile when mutation rejects', async () => {
+      mockAuthService.updateUserProfile.mockRejectedValueOnce(new Error('Network error'));
+      const { useUpdateProfileMutation, authKeys } = await import('./useAuthQueries');
+      const { result, queryClient } = withQueryClient(() => useUpdateProfileMutation());
+
+      const previousProfile = {
+        id: 'u1',
+        username: 'oldname',
+        email: 'a@b.com',
+        avatar_url: null,
+        native_language: 'en',
+        current_level: 1,
+        total_experience: 0,
+        learning_streak: 0,
+        last_activity: null,
+        preferences: { dailyGoal: 10, difficulty: 'Beginner' as const, notifications: false },
+        created_at: '2024-01-01',
+        updated_at: '2024-01-01',
+      };
+
+      queryClient.setQueryData(authKeys.profile('u1'), previousProfile);
+
+      await expect(
+        result.mutateAsync({ userId: 'u1', profileData: { username: 'newname' } }),
+      ).rejects.toThrow('Network error');
+
+      await flushPromises();
+
+      const restored = queryClient.getQueryData(authKeys.profile('u1'));
+      expect(restored).toEqual(previousProfile);
+    });
+
+    it('does not write to cache when no previous profile is in cache', async () => {
+      mockAuthService.updateUserProfile.mockResolvedValueOnce({ success: true });
+      const { useUpdateProfileMutation, authKeys } = await import('./useAuthQueries');
+      const { result, queryClient } = withQueryClient(() => useUpdateProfileMutation());
+
+      // Ensure no cached profile exists for this user
+      expect(queryClient.getQueryData(authKeys.profile('u2'))).toBeUndefined();
+
+      await result.mutateAsync({ userId: 'u2', profileData: { username: 'newname' } });
+      await flushPromises();
+
+      // The cache should remain empty — no optimistic write was applied
+      expect(queryClient.getQueryData(authKeys.profile('u2'))).toBeUndefined();
+    });
   });
 });
