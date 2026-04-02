@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { signIn, checkSession, refreshToken, saveDictionaryEntry, getMyDictionaries } from './api';
 
 const mockFetch = vi.fn();
@@ -13,7 +13,11 @@ function mockJsonResponse(data: unknown, status = 200) {
 }
 
 beforeEach(() => {
-  mockFetch.mockClear();
+  mockFetch.mockReset();
+});
+
+afterAll(() => {
+  vi.unstubAllGlobals();
 });
 
 describe('signIn', () => {
