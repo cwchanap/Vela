@@ -5,10 +5,23 @@ import { Quasar } from 'quasar';
 import AuthForm from './AuthForm.vue';
 import { useAuthStore } from '../../stores/auth';
 
+let notifySpy: ReturnType<typeof vi.fn>;
+
+vi.mock('quasar', async () => {
+  const actual = await vi.importActual<typeof import('quasar')>('quasar');
+  return {
+    ...actual,
+    useQuasar: () => ({
+      notify: notifySpy,
+    }),
+  };
+});
+
 describe('AuthForm', () => {
   beforeEach(() => {
     setActivePinia(createPinia());
     vi.clearAllMocks();
+    notifySpy = vi.fn();
   });
 
   const mountComponent = (props = {}) => {
@@ -399,6 +412,304 @@ describe('AuthForm', () => {
       expect(usernameInput?.exists()).toBe(true);
       const personIcon = usernameInput?.findComponent({ name: 'QIcon' });
       expect(personIcon?.props('name')).toBe('person');
+    });
+  });
+
+  describe('Submit Behavior', () => {
+    it('sign-in success: calls signIn with credentials, notifies and emits success', async () => {
+      const wrapper = mountComponent({ mode: 'signin' });
+      const authStore = useAuthStore();
+      vi.spyOn(authStore, 'signIn').mockResolvedValue(true);
+
+      const vm = wrapper.vm as any;
+      vm.form.email = 'test@example.com';
+      vm.form.password = 'password123';
+
+      await vm.handleSubmit();
+      await wrapper.vm.$nextTick();
+
+      expect(authStore.signIn).toHaveBeenCalledWith({
+        email: 'test@example.com',
+        password: 'password123',
+      });
+      expect(notifySpy).toHaveBeenCalledWith(
+        expect.objectContaining({ type: 'positive', message: 'Welcome back!' }),
+      );
+      expect(wrapper.emitted('success')).toBeTruthy();
+      expect(wrapper.emitted('success')![0]).toEqual(['signin']);
+    });
+
+    it('sign-up success: calls signUp with credentials, notifies and emits success', async () => {
+      const wrapper = mountComponent({ mode: 'signup' });
+      const authStore = useAuthStore();
+      vi.spyOn(authStore, 'signUp').mockResolvedValue(true);
+
+      const vm = wrapper.vm as any;
+      vm.form.email = 'newuser@example.com';
+      vm.form.password = 'password123';
+      vm.form.username = 'testuser';
+
+      await vm.handleSubmit();
+      await wrapper.vm.$nextTick();
+
+      expect(authStore.signUp).toHaveBeenCalledWith({
+        email: 'newuser@example.com',
+        password: 'password123',
+        username: 'testuser',
+      });
+      expect(notifySpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: 'positive',
+          message: expect.stringContaining('Account created'),
+        }),
+      );
+      expect(wrapper.emitted('success')).toBeTruthy();
+      expect(wrapper.emitted('success')![0]).toEqual(['signup']);
+    });
+
+    it('sign-up with blank username sends undefined to store', async () => {
+      const wrapper = mountComponent({ mode: 'signup' });
+      const authStore = useAuthStore();
+      vi.spyOn(authStore, 'signUp').mockResolvedValue(true);
+
+      const vm = wrapper.vm as any;
+      vm.form.email = 'newuser@example.com';
+      vm.form.password = 'password123';
+      vm.form.username = '';
+
+      await vm.handleSubmit();
+
+      expect(authStore.signUp).toHaveBeenCalledWith({
+        email: 'newuser@example.com',
+        password: 'password123',
+        username: undefined,
+      });
+    });
+
+    it('failed sign-in emits error when store has an error message', async () => {
+      const wrapper = mountComponent({ mode: 'signin' });
+      const authStore = useAuthStore();
+      vi.spyOn(authStore, 'signIn').mockImplementation(async () => {
+        authStore.setError('Invalid credentials');
+        return false;
+      });
+
+      const vm = wrapper.vm as any;
+      vm.form.email = 'test@example.com';
+      vm.form.password = 'wrongpassword';
+
+      await vm.handleSubmit();
+      await wrapper.vm.$nextTick();
+
+      expect(wrapper.emitted('error')).toBeTruthy();
+      expect(wrapper.emitted('error')![0]).toEqual(['Invalid credentials']);
+    });
+
+    it('failed sign-in does not emit success or notify', async () => {
+      const wrapper = mountComponent({ mode: 'signin' });
+      const authStore = useAuthStore();
+      vi.spyOn(authStore, 'signIn').mockResolvedValue(false);
+
+      const vm = wrapper.vm as any;
+      vm.form.email = 'test@example.com';
+      vm.form.password = 'password123';
+
+      await vm.handleSubmit();
+
+      expect(wrapper.emitted('success')).toBeFalsy();
+      expect(notifySpy).not.toHaveBeenCalled();
+    });
+
+    it('failed sign-up emits error when store has an error message', async () => {
+      const wrapper = mountComponent({ mode: 'signup' });
+      const authStore = useAuthStore();
+      vi.spyOn(authStore, 'signUp').mockImplementation(async () => {
+        authStore.setError('Email already in use');
+        return false;
+      });
+
+      const vm = wrapper.vm as any;
+      vm.form.email = 'existing@example.com';
+      vm.form.password = 'password123';
+
+      await vm.handleSubmit();
+      await wrapper.vm.$nextTick();
+
+      expect(wrapper.emitted('error')).toBeTruthy();
+      expect(wrapper.emitted('error')![0]).toEqual(['Email already in use']);
+    });
+  });
+
+  describe('Toggle Mode Behavior', () => {
+    it('clicking toggle calls setError(null) to clear any existing error', async () => {
+      const wrapper = mountComponent({ mode: 'signin' });
+      const authStore = useAuthStore();
+      authStore.setError('Some previous error');
+      const setErrorSpy = vi.spyOn(authStore, 'setError');
+
+      const toggleButton = wrapper
+        .findAllComponents({ name: 'QBtn' })
+        .find((btn) => btn.text() === 'Sign Up');
+      await toggleButton!.trigger('click');
+
+      expect(setErrorSpy).toHaveBeenCalledWith(null);
+    });
+
+    it('clicking toggle switches from sign-in to sign-up UI', async () => {
+      const wrapper = mountComponent({ mode: 'signin' });
+      expect(wrapper.text()).toContain('Welcome Back');
+
+      const toggleButton = wrapper
+        .findAllComponents({ name: 'QBtn' })
+        .find((btn) => btn.text() === 'Sign Up');
+      await toggleButton!.trigger('click');
+      await wrapper.vm.$nextTick();
+
+      expect(wrapper.text()).toContain('Create Account');
+    });
+
+    it('clicking toggle switches from sign-up to sign-in UI', async () => {
+      const wrapper = mountComponent({ mode: 'signup' });
+
+      const toggleButton = wrapper
+        .findAllComponents({ name: 'QBtn' })
+        .find((btn) => btn.text() === 'Sign In');
+      await toggleButton!.trigger('click');
+      await wrapper.vm.$nextTick();
+
+      expect(wrapper.text()).toContain('Welcome Back');
+    });
+  });
+
+  describe('Password Reset Flow', () => {
+    it('returns early without calling resetPassword when email is empty', async () => {
+      const wrapper = mountComponent({ mode: 'signin' });
+      const authStore = useAuthStore();
+      const resetPasswordSpy = vi.spyOn(authStore, 'resetPassword');
+
+      const vm = wrapper.vm as any;
+      vm.resetEmail = '';
+
+      await vm.handlePasswordReset();
+
+      expect(resetPasswordSpy).not.toHaveBeenCalled();
+      expect(notifySpy).not.toHaveBeenCalled();
+    });
+
+    it('returns early without calling resetPassword when email is invalid', async () => {
+      const wrapper = mountComponent({ mode: 'signin' });
+      const authStore = useAuthStore();
+      const resetPasswordSpy = vi.spyOn(authStore, 'resetPassword');
+
+      const vm = wrapper.vm as any;
+      vm.resetEmail = 'not-an-email';
+
+      await vm.handlePasswordReset();
+
+      expect(resetPasswordSpy).not.toHaveBeenCalled();
+      expect(notifySpy).not.toHaveBeenCalled();
+    });
+
+    it('success: notifies positive, clears dialog and email state, resets loading', async () => {
+      const wrapper = mountComponent({ mode: 'signin' });
+      const authStore = useAuthStore();
+      vi.spyOn(authStore, 'resetPassword').mockResolvedValue(true);
+
+      const vm = wrapper.vm as any;
+      vm.resetEmail = 'user@example.com';
+      vm.showForgotPassword = true;
+
+      await vm.handlePasswordReset();
+      await wrapper.vm.$nextTick();
+
+      expect(authStore.resetPassword).toHaveBeenCalledWith('user@example.com');
+      expect(notifySpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: 'positive',
+          message: expect.stringContaining('Password reset link sent'),
+        }),
+      );
+      expect(vm.showForgotPassword).toBe(false);
+      expect(vm.resetEmail).toBe('');
+      expect(vm.resetLoading).toBe(false);
+    });
+
+    it('failure: notifies negative with the store error message', async () => {
+      const wrapper = mountComponent({ mode: 'signin' });
+      const authStore = useAuthStore();
+      vi.spyOn(authStore, 'resetPassword').mockImplementation(async () => {
+        authStore.setError('User not found');
+        return false;
+      });
+
+      const vm = wrapper.vm as any;
+      vm.resetEmail = 'unknown@example.com';
+
+      await vm.handlePasswordReset();
+      await wrapper.vm.$nextTick();
+
+      expect(notifySpy).toHaveBeenCalledWith(
+        expect.objectContaining({ type: 'negative', message: 'User not found' }),
+      );
+      expect(vm.resetLoading).toBe(false);
+    });
+
+    it('resets resetLoading to false in finally even on unexpected failure', async () => {
+      const wrapper = mountComponent({ mode: 'signin' });
+      const authStore = useAuthStore();
+      vi.spyOn(authStore, 'resetPassword').mockRejectedValue(new Error('Network error'));
+
+      const vm = wrapper.vm as any;
+      vm.resetEmail = 'user@example.com';
+
+      await vm.handlePasswordReset().catch(() => {});
+
+      expect(vm.resetLoading).toBe(false);
+    });
+
+    it('clicking Forgot Password? button opens the dialog', async () => {
+      const wrapper = mountComponent({ mode: 'signin' });
+      const vm = wrapper.vm as any;
+      expect(vm.showForgotPassword).toBe(false);
+
+      const forgotBtn = wrapper
+        .findAllComponents({ name: 'QBtn' })
+        .find((btn) => btn.text().includes('Forgot Password?'));
+      await forgotBtn!.trigger('click');
+
+      expect(vm.showForgotPassword).toBe(true);
+    });
+  });
+
+  describe('Password Visibility Toggle', () => {
+    it('clicking visibility icon toggles showPassword state', async () => {
+      const wrapper = mountComponent();
+      const vm = wrapper.vm as any;
+      expect(vm.showPassword).toBe(false);
+
+      const passwordInput = wrapper
+        .findAllComponents({ name: 'QInput' })
+        .find((input) => input.props('label') === 'Password');
+      const visibilityIcon = passwordInput!
+        .findAllComponents({ name: 'QIcon' })
+        .find(
+          (icon) => icon.props('name') === 'visibility' || icon.props('name') === 'visibility_off',
+        );
+      await visibilityIcon!.trigger('click');
+
+      expect(vm.showPassword).toBe(true);
+    });
+
+    it('password input type changes to text when showPassword is true', async () => {
+      const wrapper = mountComponent();
+      const vm = wrapper.vm as any;
+      vm.showPassword = true;
+      await wrapper.vm.$nextTick();
+
+      const passwordInput = wrapper
+        .findAllComponents({ name: 'QInput' })
+        .find((input) => input.props('label') === 'Password');
+      expect(passwordInput!.props('type')).toBe('text');
     });
   });
 });
