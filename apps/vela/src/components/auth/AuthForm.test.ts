@@ -517,6 +517,7 @@ describe('AuthForm', () => {
       await vm.handleSubmit();
 
       expect(wrapper.emitted('success')).toBeFalsy();
+      expect(wrapper.emitted('error')).toBeFalsy();
       expect(notifySpy).not.toHaveBeenCalled();
     });
 
@@ -657,6 +658,8 @@ describe('AuthForm', () => {
     it('resets resetLoading to false in finally even on unexpected failure', async () => {
       const wrapper = mountComponent({ mode: 'signin' });
       const authStore = useAuthStore();
+      // The real store resolves false on handled failures; force a raw rejection
+      // here so the component's finally-block cleanup is still verified.
       vi.spyOn(authStore, 'resetPassword').mockRejectedValue(new Error('Network error'));
 
       const vm = wrapper.vm as any;
