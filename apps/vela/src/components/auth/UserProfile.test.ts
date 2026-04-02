@@ -32,7 +32,6 @@ describe('UserProfile', () => {
 
   beforeEach(async () => {
     setActivePinia(createPinia());
-    notifySpy = vi.fn();
     router = createTestRouter();
     await router.push('/');
     vi.clearAllMocks();
@@ -532,7 +531,7 @@ describe('UserProfile', () => {
       expect(vm.editForm.notifications).toBe(true);
     });
 
-    it('uses the user avatar when it matches an allowed option', async () => {
+    it('copies an allowlisted avatar URL into the form unchanged', async () => {
       const authStore = useAuthStore();
       authStore.user = {
         ...mockUser,
@@ -558,7 +557,7 @@ describe('UserProfile', () => {
       expect(vm.editForm.avatar_url).toBe('https://api.dicebear.com/7.x/adventurer/svg?seed=Ada');
     });
 
-    it('uses the user avatar even when it is an external URL (selection enforced on save)', async () => {
+    it('copies a non-allowlisted avatar URL into the form unchanged', async () => {
       const authStore = useAuthStore();
       authStore.user = { ...mockUser, avatar_url: '/avatars/avatar1.png' };
 
@@ -613,6 +612,11 @@ describe('UserProfile', () => {
           username: 'newname',
           native_language: 'ja',
           avatar_url: 'https://api.dicebear.com/7.x/adventurer/svg?seed=Lin',
+          preferences: expect.objectContaining({
+            dailyGoal: 20,
+            difficulty: 'Intermediate',
+            notifications: false,
+          }),
         }),
       );
       expect(notifySpy).toHaveBeenCalledWith(
@@ -743,6 +747,24 @@ describe('UserProfile', () => {
       expect(notifySpy).toHaveBeenCalledWith(
         expect.objectContaining({ type: 'negative', message: 'Wrong password' }),
       );
+      expect(vm.passwordLoading).toBe(false);
+    });
+
+    it('does not notify when updatePassword returns false without an error message', async () => {
+      const authStore = useAuthStore();
+      authStore.user = mockUser;
+      vi.spyOn(authStore, 'updatePassword').mockResolvedValue(false);
+      authStore.error = null;
+
+      const wrapper = mountComponent();
+      const vm = wrapper.vm as any;
+      vm.passwordForm.newPassword = 'pass123';
+      vm.passwordForm.confirmPassword = 'pass123';
+
+      await vm.handlePasswordChange();
+      await flushPromises();
+
+      expect(notifySpy).not.toHaveBeenCalled();
       expect(vm.passwordLoading).toBe(false);
     });
   });
