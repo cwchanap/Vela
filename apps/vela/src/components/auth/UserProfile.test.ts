@@ -1,14 +1,42 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { mount } from '@vue/test-utils';
+import { mount, flushPromises } from '@vue/test-utils';
 import { createPinia, setActivePinia } from 'pinia';
 import { Quasar } from 'quasar';
+import { createRouter, createMemoryHistory } from 'vue-router';
 import UserProfile from './UserProfile.vue';
 import { useAuthStore } from '../../stores/auth';
 
+let notifySpy: ReturnType<typeof vi.fn>;
+
+vi.mock('quasar', async () => {
+  const actual = await vi.importActual<typeof import('quasar')>('quasar');
+  return {
+    ...actual,
+    useQuasar: () => ({
+      notify: notifySpy,
+    }),
+  };
+});
+
+const createTestRouter = () =>
+  createRouter({
+    history: createMemoryHistory(),
+    routes: [
+      { path: '/', component: { template: '<div />' } },
+      { path: '/auth/login', component: { template: '<div />' } },
+    ],
+  });
+
 describe('UserProfile', () => {
-  beforeEach(() => {
+  let router: ReturnType<typeof createTestRouter>;
+
+  beforeEach(async () => {
     setActivePinia(createPinia());
+    notifySpy = vi.fn();
+    router = createTestRouter();
+    await router.push('/');
     vi.clearAllMocks();
+    notifySpy = vi.fn();
   });
 
   const mockUser = {
@@ -32,7 +60,7 @@ describe('UserProfile', () => {
   const mountComponent = (props = {}) => {
     return mount(UserProfile, {
       global: {
-        plugins: [Quasar],
+        plugins: [Quasar, router],
         stubs: {
           QTooltip: { template: '<div />' },
         },
@@ -474,6 +502,320 @@ describe('UserProfile', () => {
         timeZone: 'UTC',
       });
       expect(wrapper.text()).toContain(expectedDate);
+    });
+
+    it('should return empty string for invalid date via vm', () => {
+      const wrapper = mountComponent();
+      const vm = wrapper.vm as any;
+
+      expect(vm.formatDate(undefined)).toBe('');
+      expect(vm.formatDate('')).toBe('');
+    });
+  });
+
+  describe('startEdit()', () => {
+    it('populates edit form from current user/preferences and enables edit mode', async () => {
+      const authStore = useAuthStore();
+      authStore.user = mockUser;
+
+      const wrapper = mountComponent();
+      const vm = wrapper.vm as any;
+
+      expect(vm.editMode).toBe(false);
+      vm.startEdit();
+
+      expect(vm.editMode).toBe(true);
+      expect(vm.editForm.username).toBe('testuser');
+      expect(vm.editForm.native_language).toBe('en');
+      expect(vm.editForm.dailyGoal).toBe(30);
+      expect(vm.editForm.difficulty).toBe('Beginner');
+      expect(vm.editForm.notifications).toBe(true);
+    });
+
+    it('uses the user avatar when it matches an allowed option', async () => {
+      const authStore = useAuthStore();
+      authStore.user = {
+        ...mockUser,
+        avatar_url: 'https://api.dicebear.com/7.x/adventurer/svg?seed=Ada',
+      };
+
+      const wrapper = mountComponent();
+      const vm = wrapper.vm as any;
+      vm.startEdit();
+
+      expect(vm.editForm.avatar_url).toBe('https://api.dicebear.com/7.x/adventurer/svg?seed=Ada');
+    });
+
+    it('falls back to first avatar option when user avatar is missing', async () => {
+      const authStore = useAuthStore();
+      authStore.user = { ...mockUser, avatar_url: undefined };
+
+      const wrapper = mountComponent();
+      const vm = wrapper.vm as any;
+      vm.startEdit();
+
+      // Should fall back to first avatar option
+      expect(vm.editForm.avatar_url).toBe('https://api.dicebear.com/7.x/adventurer/svg?seed=Ada');
+    });
+
+    it('uses the user avatar even when it is an external URL (selection enforced on save)', async () => {
+      const authStore = useAuthStore();
+      authStore.user = { ...mockUser, avatar_url: '/avatars/avatar1.png' };
+
+      const wrapper = mountComponent();
+      const vm = wrapper.vm as any;
+      vm.startEdit();
+
+      // startEdit just copies the current url; handleSave enforces whitelist
+      expect(vm.editForm.avatar_url).toBe('/avatars/avatar1.png');
+    });
+  });
+
+  describe('cancelEdit()', () => {
+    it('exits edit mode and clears store error', async () => {
+      const authStore = useAuthStore();
+      authStore.user = mockUser;
+      authStore.error = 'Some previous error';
+
+      const wrapper = mountComponent();
+      const vm = wrapper.vm as any;
+
+      vm.editMode = true;
+      vm.cancelEdit();
+
+      expect(vm.editMode).toBe(false);
+      expect(authStore.error).toBeNull();
+    });
+  });
+
+  describe('handleSave()', () => {
+    it('success: calls updateProfile with normalized payload, notifies positively and exits edit mode', async () => {
+      const authStore = useAuthStore();
+      authStore.user = mockUser;
+      vi.spyOn(authStore, 'updateProfile').mockResolvedValue(true);
+
+      const wrapper = mountComponent();
+      const vm = wrapper.vm as any;
+      vm.editMode = true;
+      vm.editForm.username = 'newname';
+      vm.editForm.native_language = 'ja';
+      vm.editForm.dailyGoal = 20;
+      vm.editForm.difficulty = 'Intermediate';
+      vm.editForm.notifications = false;
+      // Use a valid avatar from the whitelist
+      vm.editForm.avatar_url = 'https://api.dicebear.com/7.x/adventurer/svg?seed=Lin';
+
+      await vm.handleSave();
+      await flushPromises();
+
+      expect(authStore.updateProfile).toHaveBeenCalledWith(
+        expect.objectContaining({
+          username: 'newname',
+          native_language: 'ja',
+          avatar_url: 'https://api.dicebear.com/7.x/adventurer/svg?seed=Lin',
+        }),
+      );
+      expect(notifySpy).toHaveBeenCalledWith(
+        expect.objectContaining({ type: 'positive', message: 'Profile updated successfully!' }),
+      );
+      expect(vm.editMode).toBe(false);
+    });
+
+    it('enforces avatar whitelist fallback when selected avatar is invalid', async () => {
+      const authStore = useAuthStore();
+      authStore.user = mockUser;
+      vi.spyOn(authStore, 'updateProfile').mockResolvedValue(true);
+
+      const wrapper = mountComponent();
+      const vm = wrapper.vm as any;
+      vm.editMode = true;
+      vm.editForm.avatar_url = '/avatars/not-in-whitelist.png';
+
+      await vm.handleSave();
+      await flushPromises();
+
+      expect(authStore.updateProfile).toHaveBeenCalledWith(
+        expect.objectContaining({
+          avatar_url: 'https://api.dicebear.com/7.x/adventurer/svg?seed=Ada',
+        }),
+      );
+    });
+
+    it('failure: notifies negatively with store error and remains in edit mode', async () => {
+      const authStore = useAuthStore();
+      authStore.user = mockUser;
+      vi.spyOn(authStore, 'updateProfile').mockImplementation(async () => {
+        authStore.error = 'Update failed';
+        return false;
+      });
+
+      const wrapper = mountComponent();
+      const vm = wrapper.vm as any;
+      vm.editMode = true;
+
+      await vm.handleSave();
+      await flushPromises();
+
+      expect(notifySpy).toHaveBeenCalledWith(
+        expect.objectContaining({ type: 'negative', message: 'Update failed' }),
+      );
+      expect(vm.editMode).toBe(true);
+    });
+
+    it('does not notify when updateProfile returns false without an error message', async () => {
+      const authStore = useAuthStore();
+      authStore.user = mockUser;
+      vi.spyOn(authStore, 'updateProfile').mockResolvedValue(false);
+      authStore.error = null;
+
+      const wrapper = mountComponent();
+      const vm = wrapper.vm as any;
+      vm.editMode = true;
+
+      await vm.handleSave();
+      await flushPromises();
+
+      expect(notifySpy).not.toHaveBeenCalled();
+      expect(vm.editMode).toBe(true);
+    });
+  });
+
+  describe('handlePasswordChange()', () => {
+    it('returns early when passwords do not match', async () => {
+      const authStore = useAuthStore();
+      authStore.user = mockUser;
+      vi.spyOn(authStore, 'updatePassword').mockResolvedValue(true);
+
+      const wrapper = mountComponent();
+      const vm = wrapper.vm as any;
+      vm.passwordForm.newPassword = 'password1';
+      vm.passwordForm.confirmPassword = 'password2';
+
+      await vm.handlePasswordChange();
+
+      expect(authStore.updatePassword).not.toHaveBeenCalled();
+      expect(notifySpy).not.toHaveBeenCalled();
+    });
+
+    it('success: calls store, notifies positively, closes dialog and clears fields', async () => {
+      const authStore = useAuthStore();
+      authStore.user = mockUser;
+      vi.spyOn(authStore, 'updatePassword').mockResolvedValue(true);
+
+      const wrapper = mountComponent();
+      const vm = wrapper.vm as any;
+      vm.showPasswordDialog = true;
+      vm.passwordForm.newPassword = 'newPass123';
+      vm.passwordForm.confirmPassword = 'newPass123';
+
+      await vm.handlePasswordChange();
+      await flushPromises();
+
+      expect(authStore.updatePassword).toHaveBeenCalledWith('newPass123');
+      expect(notifySpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: 'positive',
+          message: 'Password updated successfully!',
+        }),
+      );
+      expect(vm.showPasswordDialog).toBe(false);
+      expect(vm.passwordForm.newPassword).toBe('');
+      expect(vm.passwordForm.confirmPassword).toBe('');
+      expect(vm.passwordLoading).toBe(false);
+    });
+
+    it('failure: notifies negatively with store error and resets loading', async () => {
+      const authStore = useAuthStore();
+      authStore.user = mockUser;
+      vi.spyOn(authStore, 'updatePassword').mockImplementation(async () => {
+        authStore.error = 'Wrong password';
+        return false;
+      });
+
+      const wrapper = mountComponent();
+      const vm = wrapper.vm as any;
+      vm.passwordForm.newPassword = 'pass123';
+      vm.passwordForm.confirmPassword = 'pass123';
+
+      await vm.handlePasswordChange();
+      await flushPromises();
+
+      expect(notifySpy).toHaveBeenCalledWith(
+        expect.objectContaining({ type: 'negative', message: 'Wrong password' }),
+      );
+      expect(vm.passwordLoading).toBe(false);
+    });
+  });
+
+  describe('handleSignOut()', () => {
+    it('success: notifies positively, navigates to /auth/login and resets loading', async () => {
+      const authStore = useAuthStore();
+      authStore.user = mockUser;
+      vi.spyOn(authStore, 'signOut').mockResolvedValue(true);
+      const routerSpy = vi.spyOn(router, 'push').mockResolvedValue(undefined);
+
+      const wrapper = mountComponent();
+      const vm = wrapper.vm as any;
+
+      await vm.handleSignOut();
+      await flushPromises();
+
+      expect(authStore.signOut).toHaveBeenCalled();
+      expect(notifySpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: 'positive',
+          message: 'Signed out successfully!',
+        }),
+      );
+      expect(routerSpy).toHaveBeenCalledWith('/auth/login');
+      expect(vm.signOutLoading).toBe(false);
+    });
+
+    it('failure: notifies negatively, does not navigate and resets loading', async () => {
+      const authStore = useAuthStore();
+      authStore.user = mockUser;
+      vi.spyOn(authStore, 'signOut').mockImplementation(async () => {
+        authStore.error = 'Sign out failed';
+        return false;
+      });
+      const routerSpy = vi.spyOn(router, 'push').mockResolvedValue(undefined);
+
+      const wrapper = mountComponent();
+      const vm = wrapper.vm as any;
+
+      await vm.handleSignOut();
+      await flushPromises();
+
+      expect(notifySpy).toHaveBeenCalledWith(
+        expect.objectContaining({ type: 'negative', message: 'Sign out failed' }),
+      );
+      expect(routerSpy).not.toHaveBeenCalled();
+      expect(vm.signOutLoading).toBe(false);
+    });
+  });
+
+  describe('onMounted()', () => {
+    it('calls authStore.initialize() when isInitialized is false', async () => {
+      const authStore = useAuthStore();
+      vi.spyOn(authStore, 'initialize').mockResolvedValue(undefined);
+      // isInitialized starts as false in a fresh store
+
+      mountComponent();
+      await flushPromises();
+
+      expect(authStore.initialize).toHaveBeenCalled();
+    });
+
+    it('does not call authStore.initialize() when isInitialized is true', async () => {
+      const authStore = useAuthStore();
+      // Set isInitialized to true before mounting
+      authStore.isInitialized = true;
+      vi.spyOn(authStore, 'initialize').mockResolvedValue(undefined);
+
+      mountComponent();
+      await flushPromises();
+
+      expect(authStore.initialize).not.toHaveBeenCalled();
     });
   });
 });
