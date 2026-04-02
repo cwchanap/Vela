@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach, beforeAll, afterAll } from 'vitest';
 import { authService } from './authService';
 
 // Mock Amplify modules
@@ -71,6 +71,11 @@ import {
 import { Hub } from 'aws-amplify/utils';
 
 describe('AuthService', () => {
+  // Capture the top-level Hub listener registered during authService module initialization.
+  // Must be done synchronously here (before any beforeEach can clear mock call records).
+  const initialHubListenCalls = [...vi.mocked(Hub.listen).mock.calls];
+  const topLevelHubListener = initialHubListenCalls[0]?.[1] as ((_data: any) => void) | undefined;
+
   beforeEach(() => {
     vi.clearAllMocks();
     mockFetch.mockResolvedValue({
@@ -236,6 +241,36 @@ describe('AuthService', () => {
 
       expect(result.success).toBe(false);
       expect(result.error).toBe('Sign in failed');
+    });
+
+    it('should return generic error when signIn throws a non-Error value', async () => {
+      vi.mocked(signIn).mockRejectedValue('unexpected non-error string');
+
+      const result = await authService.signIn({
+        email: 'test@example.com',
+        password: 'password123',
+      });
+
+      expect(result.success).toBe(false);
+      expect(result.error).toBe('An unexpected error occurred');
+    });
+
+    it('should return "Sign in failed after auto-confirmation" when retry fails after UserNotConfirmedException', async () => {
+      const err = new Error('User is not confirmed');
+      err.name = 'UserNotConfirmedException';
+
+      vi.mocked(signIn)
+        .mockRejectedValueOnce(err) // first call → UserNotConfirmedException
+        .mockRejectedValueOnce(new Error('retry also failed')); // retry → fails too
+      mockFetch.mockResolvedValue({ ok: true }); // autoConfirmUser succeeds
+
+      const result = await authService.signIn({
+        email: 'test@example.com',
+        password: 'password123',
+      });
+
+      expect(result.success).toBe(false);
+      expect(result.error).toBe('Sign in failed after auto-confirmation');
     });
   });
 
@@ -641,6 +676,160 @@ describe('AuthService', () => {
           provider: 'cognito',
         }),
       );
+    });
+
+    it('should fetch preferred_username when fetchUserAttributes succeeds in signedIn event', async () => {
+      const mockUser = {
+        userId: 'user-123',
+        signInDetails: { loginId: 'test@example.com' },
+      } as any;
+      const mockSession = { tokens: { accessToken: 'token' as any } } as any;
+
+      vi.mocked(getCurrentUser).mockResolvedValue(mockUser);
+      vi.mocked(fetchAuthSession).mockResolvedValue(mockSession);
+      vi.mocked(fetchUserAttributes).mockResolvedValue({ preferred_username: 'myuser' } as any);
+
+      const callback = vi.fn();
+      let capturedListener: ((_data: any) => void) | null = null;
+
+      vi.mocked(Hub.listen).mockImplementation((_channel: any, listener: any) => {
+        capturedListener = listener;
+        return vi.fn() as any;
+      });
+
+      mockFetch.mockResolvedValue({ ok: true, json: vi.fn().mockResolvedValue({ success: true }) });
+
+      authService.onAuthStateChange(callback);
+      capturedListener!({ payload: { event: 'signedIn' } });
+
+      await vi.waitFor(() => expect(callback).toHaveBeenCalled());
+
+      expect(callback).toHaveBeenCalledWith(
+        'SIGNED_IN',
+        expect.objectContaining({ user: expect.objectContaining({ id: 'user-123' }) }),
+      );
+      expect(fetchUserAttributes).toHaveBeenCalled();
+    });
+
+    it('should log error when getCurrentUser throws during signedIn Hub event', async () => {
+      const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      const err = new Error('get user failed');
+      vi.mocked(getCurrentUser).mockRejectedValue(err);
+
+      const callback = vi.fn();
+      let capturedListener: ((_data: any) => void) | null = null;
+
+      vi.mocked(Hub.listen).mockImplementation((_channel: any, listener: any) => {
+        capturedListener = listener;
+        return vi.fn() as any;
+      });
+
+      authService.onAuthStateChange(callback);
+      capturedListener!({ payload: { event: 'signedIn' } });
+
+      await vi.waitFor(() => expect(consoleSpy).toHaveBeenCalled());
+
+      expect(consoleSpy).toHaveBeenCalledWith('Error handling sign in:', err);
+      expect(callback).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('top-level Hub event logging', () => {
+    it('should log on signedIn event', () => {
+      const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+      topLevelHubListener?.({ payload: { event: 'signedIn' } });
+      expect(consoleSpy).toHaveBeenCalledWith('✅ User signed in to Cognito');
+    });
+
+    it('should log on signedOut event', () => {
+      const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+      topLevelHubListener?.({ payload: { event: 'signedOut' } });
+      expect(consoleSpy).toHaveBeenCalledWith('✅ User signed out from Cognito');
+    });
+
+    it('should log on tokenRefresh event', () => {
+      const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+      topLevelHubListener?.({ payload: { event: 'tokenRefresh' } });
+      expect(consoleSpy).toHaveBeenCalledWith('✅ Cognito token refreshed successfully');
+    });
+  });
+
+  describe('with Cognito authentication disabled (cognitoEnabled = false)', () => {
+    // Uses vi.resetModules() + vi.doMock() to get a fresh authService instance
+    // where configureAmplify() returns false (empty cognito config).
+    let disabledAuthService: typeof authService;
+
+    beforeAll(async () => {
+      vi.resetModules();
+      vi.doMock('../config', () => ({
+        config: {
+          cognito: { userPoolId: '', userPoolClientId: '', region: '' },
+          api: { url: '/api/' },
+          app: { isDev: false },
+        },
+      }));
+      // vi.mock registrations for aws-amplify/* still apply after resetModules
+      const mod = await import('./authService');
+      disabledAuthService = mod.authService;
+    });
+
+    afterAll(() => {
+      vi.resetModules();
+    });
+
+    it('signUp returns disabled error', async () => {
+      const result = await disabledAuthService.signUp({ email: 'a@b.com', password: 'pw' });
+      expect(result.success).toBe(false);
+      expect(result.error).toMatch(/disabled/i);
+    });
+
+    it('signIn returns disabled error', async () => {
+      const result = await disabledAuthService.signIn({ email: 'a@b.com', password: 'pw' });
+      expect(result.success).toBe(false);
+      expect(result.error).toMatch(/disabled/i);
+    });
+
+    it('signOut returns success when auth is disabled', async () => {
+      const result = await disabledAuthService.signOut();
+      expect(result.success).toBe(true);
+    });
+
+    it('getCurrentUser returns null when auth is disabled', async () => {
+      const result = await disabledAuthService.getCurrentUser();
+      expect(result).toBeNull();
+    });
+
+    it('confirmSignUp returns disabled error', async () => {
+      const result = await disabledAuthService.confirmSignUp('a@b.com', '123456');
+      expect(result.success).toBe(false);
+      expect(result.error).toMatch(/disabled/i);
+    });
+
+    it('resendSignUpCode returns disabled error', async () => {
+      const result = await disabledAuthService.resendSignUpCode('a@b.com');
+      expect(result.success).toBe(false);
+      expect(result.error).toMatch(/disabled/i);
+    });
+
+    it('resetPassword returns disabled error', async () => {
+      const result = await disabledAuthService.resetPassword('a@b.com');
+      expect(result.success).toBe(false);
+      expect(result.error).toMatch(/disabled/i);
+    });
+
+    it('updatePassword returns disabled error', async () => {
+      const result = await disabledAuthService.updatePassword('newpw');
+      expect(result.success).toBe(false);
+      expect(result.error).toMatch(/disabled/i);
+    });
+
+    it('onAuthStateChange returns noop unsubscribe when auth is disabled', () => {
+      const callback = vi.fn();
+      const sub = disabledAuthService.onAuthStateChange(callback);
+      expect(sub).toHaveProperty('unsubscribe');
+      expect(typeof sub.unsubscribe).toBe('function');
+      expect(() => sub.unsubscribe()).not.toThrow();
+      expect(callback).not.toHaveBeenCalled();
     });
   });
 });
