@@ -40,7 +40,7 @@ function setupBrowserMocks() {
 }
 
 describe('LoginPage', () => {
-  let wrapper: VueWrapper<ComponentPublicInstance>;
+  let wrapper: VueWrapper<ComponentPublicInstance> | null = null;
 
   beforeEach(() => {
     Object.keys(storageState).forEach((k) => delete storageState[k]);
@@ -52,7 +52,7 @@ describe('LoginPage', () => {
   afterEach(() => {
     if (wrapper) {
       wrapper.unmount();
-      wrapper = null as any;
+      wrapper = null;
     }
   });
 
@@ -213,7 +213,7 @@ describe('LoginPage', () => {
       await wrapper.find('#password').setValue('pass');
 
       const submitBtn = wrapper.find('button[type="submit"]');
-      wrapper.find('form').trigger('submit');
+      await wrapper.find('form').trigger('submit');
       await wrapper.vm.$nextTick();
 
       expect(submitBtn.text()).toBe('Signing in...');
@@ -235,7 +235,7 @@ describe('LoginPage', () => {
       await wrapper.find('#email').setValue('user@example.com');
       await wrapper.find('#password').setValue('pass');
 
-      wrapper.find('form').trigger('submit');
+      await wrapper.find('form').trigger('submit');
       await wrapper.vm.$nextTick();
 
       expect(wrapper.find('#email').attributes('disabled')).toBeDefined();
