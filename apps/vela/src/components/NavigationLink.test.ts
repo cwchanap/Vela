@@ -34,6 +34,21 @@ describe('NavigationLink', () => {
       },
       global: {
         plugins: [Quasar],
+        stubs: {
+          QItem: {
+            name: 'QItem',
+            template: '<div class="navigation-link" @click="handleClick"><slot /></div>',
+            props: ['clickable', 'to', 'disable'],
+            emits: ['click'],
+            methods: {
+              handleClick(event: Event) {
+                // Always emit click to trigger component's @click handler
+                // Component's handleClick will handle disabled logic
+                this.$emit('click', event);
+              },
+            },
+          },
+        },
       },
     });
   };
@@ -90,16 +105,14 @@ describe('NavigationLink', () => {
   });
 
   describe('click behavior when disabled', () => {
-    it('should trigger Quasar notify with expected message when disabled', () => {
+    it('should trigger Quasar notify with expected message when disabled', async () => {
       const wrapper = mountComponent({
         title: 'Premium Features',
         disabled: true,
       });
 
-      // Access and call the handleClick method directly
-      // (In real usage, Quasar prevents clicks on disabled items, but we test the logic)
-      const vm = wrapper.vm as any;
-      vm.handleClick();
+      const qItem = wrapper.find('.navigation-link');
+      await qItem.trigger('click');
 
       expect(notifyCreateSpy).toHaveBeenCalledTimes(1);
       expect(notifyCreateSpy).toHaveBeenCalledWith({
@@ -109,14 +122,13 @@ describe('NavigationLink', () => {
       });
     });
 
-    it('should NOT emit click event when disabled', () => {
+    it('should NOT emit click event when disabled', async () => {
       const wrapper = mountComponent({ disabled: true });
 
-      // Call handleClick directly
-      const vm = wrapper.vm as any;
-      vm.handleClick();
+      const qItem = wrapper.find('.navigation-link');
+      await qItem.trigger('click');
 
-      expect(wrapper.emitted('click')).toBeFalsy();
+      expect(wrapper.emitted('click')).toBeUndefined();
     });
   });
 
