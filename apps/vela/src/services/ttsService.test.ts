@@ -359,6 +359,27 @@ describe('ttsService', () => {
         }),
       );
     });
+
+    it('should fall back to statusText when response.text() itself rejects', async () => {
+      mockFetch.mockImplementation((url: string) => {
+        if (url === '/api/tts/settings') {
+          return Promise.resolve({
+            ok: true,
+            json: () => Promise.resolve(mockTTSSettings),
+          });
+        }
+        return Promise.resolve({
+          ok: false,
+          status: 503,
+          statusText: 'Service Unavailable',
+          text: () => Promise.reject(new Error('body read error')),
+        });
+      });
+
+      await expect(generatePronunciation('vocab-1', '猫', 'user-123')).rejects.toThrow(
+        'Failed to generate pronunciation (status: 503): Service Unavailable',
+      );
+    });
   });
 
   describe('getAudioUrl', () => {
@@ -463,6 +484,31 @@ describe('ttsService', () => {
       // GET is default, no method property should be set
       const callArgs = mockFetch.mock.calls[0];
       expect(callArgs?.[1]?.method).toBeUndefined();
+    });
+
+    it('should return cached URL on second call without re-fetching audio endpoint', async () => {
+      mockFetch.mockImplementation((url: string) => {
+        if (url === '/api/tts/settings') {
+          return Promise.resolve({
+            ok: true,
+            json: () => Promise.resolve(mockTTSSettings),
+          });
+        }
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ audioUrl: 'https://example.com/audio/cached-get.mp3' }),
+        });
+      });
+
+      const first = await getAudioUrl('vocab-cache-get', 'user-123');
+      const second = await getAudioUrl('vocab-cache-get', 'user-123');
+
+      expect(first).toBe('https://example.com/audio/cached-get.mp3');
+      expect(second).toBe('https://example.com/audio/cached-get.mp3');
+      const audioCalls = mockFetch.mock.calls.filter(
+        (c) => typeof c[0] === 'string' && (c[0] as string).includes('tts/audio/'),
+      );
+      expect(audioCalls).toHaveLength(1);
     });
   });
 
@@ -583,6 +629,122 @@ describe('ttsService', () => {
           }),
         }),
       );
+    });
+
+    it('should fall back to response.text() when response.json() throws', async () => {
+      mockFetch.mockResolvedValue({
+        ok: false,
+        statusText: 'Bad Request',
+        json: () => Promise.reject(new Error('not JSON')),
+        text: () => Promise.resolve('API key is invalid'),
+      });
+
+      await expect(saveTTSSettings('elevenlabs', 'bad-key')).rejects.toThrow('API key is invalid');
+    });
+
+    it('should fall back to statusText when json() throws and text() is empty', async () => {
+      mockFetch.mockResolvedValue({
+        ok: false,
+        statusText: 'Unprocessable Entity',
+        json: () => Promise.reject(new Error('not JSON')),
+        text: () => Promise.resolve(''),
+      });
+
+      await expect(saveTTSSettings('elevenlabs', 'bad-key')).rejects.toThrow(
+        'Unprocessable Entity',
+      );
+    });
+  });
+
+  describe('cache behavior', () => {
+    const CACHE_TTL = 14 * 60 * 1000;
+    const SWEEP_INTERVAL = 5 * 60 * 1000;
+
+    beforeEach(() => {
+      mockFetch.mockImplementation((url: string) => {
+        if (url === '/api/tts/settings') {
+          return Promise.resolve({
+            ok: true,
+            json: () => Promise.resolve(mockTTSSettings),
+          });
+        }
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ audioUrl: 'https://example.com/audio/item.mp3' }),
+        });
+      });
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it('should individually drop an expired entry when sweep interval has not elapsed since last sweep', async () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(0);
+      clearAudioUrlCache();
+
+      // Add entry at t=0; it expires at t=14 min
+      await getAudioUrl('vocab-indiv-expire', 'user-123');
+
+      // Advance to t=11 min: trigger a sweep (11 min >= 5 min since lastExpiredSweepAt=0)
+      vi.setSystemTime(SWEEP_INTERVAL * 2 + 60_000); // 660 000 ms
+      // Sweep runs; entry not yet expired (expires at 840 000). lastExpiredSweepAt=660 000.
+      await getAudioUrl('vocab-indiv-expire', 'user-123');
+
+      // Advance to t=14 min+1 ms: entry is expired, but 840 001 - 660 000 = 180 001 < 300 000 → no sweep
+      vi.setSystemTime(CACHE_TTL + 1);
+      await getAudioUrl('vocab-indiv-expire', 'user-123');
+
+      // Entry was dropped by the per-key check (lines 71-73); a fresh audio fetch was needed
+      const audioCalls = mockFetch.mock.calls.filter(
+        (c) =>
+          typeof c[0] === 'string' && (c[0] as string).includes('tts/audio/vocab-indiv-expire'),
+      );
+      expect(audioCalls).toHaveLength(2);
+    });
+
+    it('should sweep and remove expired entries when sweep interval elapses', async () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(0);
+      clearAudioUrlCache();
+
+      // Add entry at t=0; expires at t=14 min
+      await getAudioUrl('vocab-sweep-expire', 'user-123');
+
+      // Advance past both TTL (14 min) and sweep interval (5 min) so the sweep loop fires
+      vi.setSystemTime(CACHE_TTL + SWEEP_INTERVAL); // 1 140 000 ms
+      await getAudioUrl('vocab-sweep-expire', 'user-123');
+
+      // sweepExpiredEntries deleted the stale entry (lines 38-41); fresh fetch was required
+      const audioCalls = mockFetch.mock.calls.filter(
+        (c) =>
+          typeof c[0] === 'string' && (c[0] as string).includes('tts/audio/vocab-sweep-expire'),
+      );
+      expect(audioCalls).toHaveLength(2);
+    });
+
+    it('should evict the oldest entry when cache exceeds MAX_CACHE_ENTRIES', async () => {
+      // Populate 301 unique entries to exceed MAX_CACHE_ENTRIES (300) by one
+      for (let i = 0; i <= 300; i++) {
+        await getAudioUrl(`vocab-evict-${i}`, 'user-evict');
+      }
+
+      // vocab-evict-0 (oldest insertion) should have been evicted by enforceCacheSizeLimit
+      mockFetch.mockClear();
+      await getAudioUrl('vocab-evict-0', 'user-evict');
+      const evictedCalls = mockFetch.mock.calls.filter(
+        (c) => typeof c[0] === 'string' && (c[0] as string).includes('tts/audio/vocab-evict-0'),
+      );
+      expect(evictedCalls).toHaveLength(1); // had to re-fetch
+
+      // vocab-evict-300 (newest) should still be in cache
+      mockFetch.mockClear();
+      await getAudioUrl('vocab-evict-300', 'user-evict');
+      const newestCalls = mockFetch.mock.calls.filter(
+        (c) => typeof c[0] === 'string' && (c[0] as string).includes('tts/audio/vocab-evict-300'),
+      );
+      expect(newestCalls).toHaveLength(0); // served from cache
     });
   });
 
