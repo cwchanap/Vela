@@ -832,4 +832,59 @@ describe('AuthService', () => {
       expect(callback).not.toHaveBeenCalled();
     });
   });
+
+  describe('private profile creation helpers', () => {
+    it('logs and swallows create-profile races in ensureProfileForCurrentUser', async () => {
+      const consoleLogSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+      const raceError = new Error('Profile already exists');
+      const createProfileSpy = vi
+        .spyOn(authService as any, 'createUserProfile')
+        .mockRejectedValueOnce(raceError);
+
+      await (authService as any).ensureProfileForCurrentUser(
+        'user-123',
+        'test@example.com',
+        'tester',
+      );
+
+      expect(createProfileSpy).toHaveBeenCalledWith('user-123', {
+        email: 'test@example.com',
+        username: 'tester',
+      });
+      expect(consoleLogSpy).toHaveBeenCalledWith(
+        'Profile creation completed (may already exist):',
+        raceError,
+      );
+    });
+  });
+
+  describe('module initialization logging', () => {
+    it('logs detailed Cognito configuration in development mode', async () => {
+      const consoleDebugSpy = vi.spyOn(console, 'debug').mockImplementation(() => {});
+
+      vi.resetModules();
+      vi.doMock('../config', () => ({
+        config: {
+          cognito: {
+            userPoolId: 'dev-pool-id',
+            userPoolClientId: 'dev-client-id',
+            region: 'us-east-1',
+          },
+          api: {
+            url: '/api/',
+          },
+          app: {
+            isDev: true,
+          },
+        },
+      }));
+
+      await import('./authService');
+
+      expect(consoleDebugSpy).toHaveBeenCalledWith('✅ Amplify configured with Cognito', {
+        userPoolId: 'dev-pool-id',
+        userPoolClientId: 'dev-client-id',
+      });
+    });
+  });
 });

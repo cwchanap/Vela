@@ -35,24 +35,26 @@ export const config = {
   },
 } as const;
 
+type ConfigEnv = Record<string, unknown> | null | undefined;
+
 // Validation function to check required environment variables
-export const validateConfig = () => {
+export const validateConfig = (env?: ConfigEnv) => {
   try {
+    const resolvedEnv = env === undefined ? import.meta.env : env;
     const requiredVars = [
       'VITE_COGNITO_USER_POOL_ID',
       'VITE_COGNITO_USER_POOL_CLIENT_ID',
       'VITE_AWS_REGION',
     ];
 
-    // Ensure import.meta.env exists
-    if (typeof import.meta === 'undefined' || !import.meta.env) {
+    if (!resolvedEnv) {
       console.warn('Environment variables not available in this context');
       return true;
     }
 
-    const missingVars = requiredVars.filter((varName) => !import.meta.env[varName]);
+    const missingVars = requiredVars.filter((varName) => !resolvedEnv[varName]);
 
-    if (missingVars.length > 0 && import.meta.env.PROD) {
+    if (missingVars.length > 0 && resolvedEnv.PROD) {
       console.error('Missing required environment variables:', missingVars);
       throw new Error(`Missing required environment variables: ${missingVars.join(', ')}`);
     }

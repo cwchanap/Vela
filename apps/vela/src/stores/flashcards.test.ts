@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { setActivePinia, createPinia } from 'pinia';
 import { useFlashcardStore, QUALITY_RATINGS } from './flashcards';
 import type { Vocabulary } from 'src/types/database';
@@ -6,6 +6,10 @@ import type { Vocabulary } from 'src/types/database';
 describe('flashcards store', () => {
   beforeEach(() => {
     setActivePinia(createPinia());
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   const mockVocabulary: Vocabulary[] = [
@@ -132,6 +136,20 @@ describe('flashcards store', () => {
 
         // Second card: 2/3 = 67%
         expect(store.progressPercent).toBe(67);
+      });
+    });
+
+    describe('sessionDuration', () => {
+      it('should calculate session duration from the start time', () => {
+        vi.useFakeTimers();
+        vi.setSystemTime(new Date('2024-01-01T00:00:00Z'));
+
+        const store = useFlashcardStore();
+        store.startSession(mockVocabulary);
+
+        vi.setSystemTime(new Date('2024-01-01T00:00:45Z'));
+
+        expect(store.sessionDuration).toBe(45);
       });
     });
 
@@ -406,6 +424,17 @@ describe('flashcards store', () => {
         expect(store.stats.hardCount).toBe(1);
         expect(store.stats.goodCount).toBe(1);
         expect(store.stats.easyCount).toBe(0);
+      });
+
+      it('should track EASY rating counts separately', () => {
+        const store = useFlashcardStore();
+        store.startSession(mockVocabulary);
+        store.flipCard();
+
+        store.rateCard(QUALITY_RATINGS.EASY);
+
+        expect(store.stats.easyCount).toBe(1);
+        expect(store.stats.correctCount).toBe(1);
       });
 
       it('should end session after last card', () => {

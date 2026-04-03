@@ -179,6 +179,23 @@ describe('httpJsonAuth', () => {
     await expect(httpJsonAuth('/api/protected')).rejects.toThrow('Access denied');
   });
 
+  it('stringifies non-string error payloads for authenticated requests', async () => {
+    mockFetchAuthSession.mockResolvedValue({
+      tokens: { idToken: { toString: () => 'token' } },
+    } as any);
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: false,
+        statusText: 'Forbidden',
+        json: async () => ({ error: { code: 403 } }),
+      }),
+    );
+
+    await expect(httpJsonAuth('/api/protected')).rejects.toThrow('{"code":403}');
+  });
+
   it('caller headers override auth headers', async () => {
     mockFetchAuthSession.mockResolvedValue({
       tokens: { idToken: { toString: () => 'original-token' } },

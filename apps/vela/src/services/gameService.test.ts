@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { gameService } from './gameService';
+import { gameService, InsufficientVocabularyError } from './gameService';
 import type { Vocabulary, Sentence } from 'src/types/database';
 import type { LegacyVocabularyPayload } from 'src/utils/vocabulary';
 
@@ -20,6 +20,16 @@ describe('gameService', () => {
 
   afterEach(() => {
     vi.restoreAllMocks();
+  });
+
+  describe('InsufficientVocabularyError', () => {
+    it('uses the expected error name and message', () => {
+      const error = new InsufficientVocabularyError();
+
+      expect(error).toBeInstanceOf(Error);
+      expect(error.name).toBe('InsufficientVocabularyError');
+      expect(error.message).toBe('Insufficient vocabulary for generating questions');
+    });
   });
 
   describe('vocabulary helpers', () => {
@@ -883,6 +893,40 @@ describe('gameService', () => {
       expect(questions[0]).toHaveProperty('sentence');
       expect(questions[0]).toHaveProperty('scrambled');
       expect(questions[0]).toHaveProperty('correctAnswer');
+    });
+
+    it('should split the sentence into characters when words_array is empty', async () => {
+      mockFetch.mockResolvedValue({
+        ok: true,
+        json: vi.fn().mockResolvedValue({
+          sentences: [
+            {
+              id: 'sentence-2',
+              japanese_sentence: 'こんにちは',
+              english_translation: 'Hello',
+              difficulty_level: 1,
+              words_array: [],
+              created_at: '2024-01-01T00:00:00Z',
+            },
+          ],
+        }),
+      });
+
+      const questions = await gameService.getSentenceQuestionsWithJlpt(1, [5]);
+
+      expect(questions).toHaveLength(1);
+      expect([...questions[0]!.scrambled].sort()).toEqual([...'こんにちは'.split('')].sort());
+      expect(questions[0]!.correctAnswer).toBe('こ ん に ち は');
+    });
+
+    it('should return an empty array when fetching JLPT sentence questions fails', async () => {
+      const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      mockFetch.mockRejectedValue(new Error('Network error'));
+
+      const questions = await gameService.getSentenceQuestionsWithJlpt(5, [4]);
+
+      expect(questions).toEqual([]);
+      expect(consoleErrorSpy).toHaveBeenCalledWith('Error fetching sentences:', expect.any(Error));
     });
   });
 

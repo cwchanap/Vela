@@ -4,6 +4,7 @@ import { createPinia, setActivePinia } from 'pinia';
 import { Quasar } from 'quasar';
 import FlashcardSetup from './FlashcardSetup.vue';
 import { useAuthStore } from 'src/stores/auth';
+import { useFlashcardStore } from 'src/stores/flashcards';
 import { flashcardService } from 'src/services/flashcardService';
 
 describe('FlashcardSetup.vue - Race Condition Fix', () => {
@@ -247,5 +248,141 @@ describe('FlashcardSetup.vue - Race Condition Fix', () => {
       jlptLevels: expect.any(Array),
       showFurigana: expect.any(Boolean),
     });
+  });
+
+  it('should retry fetching due count instead of emitting start in srs mode when an error is present', async () => {
+    const _authStore = useAuthStore();
+
+    getStatsSpy.mockRejectedValue(new Error('Network error'));
+
+    _authStore.user = {
+      id: 'test-user',
+      email: 'test@test.com',
+      current_level: 1,
+      total_experience: 0,
+      learning_streak: 0,
+      native_language: 'en',
+      preferences: {},
+      created_at: '',
+      updated_at: '',
+    };
+    _authStore.session = {
+      idToken: 'test-token',
+      accessToken: 'test-access',
+      refreshToken: 'test-refresh',
+      userSub: 'test-user',
+      email: 'test@test.com',
+    };
+
+    const wrapper = mount(FlashcardSetup, {
+      global: {
+        plugins: [Quasar],
+        stubs: {
+          'jlpt-level-selector': true,
+        },
+      },
+    });
+
+    const component = wrapper.vm as any;
+
+    await wrapper.vm.$nextTick();
+    component.fetchDueCount();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(component.dueCountError).toBe('Unable to check due items. Please try again.');
+
+    getStatsSpy.mockClear();
+    component.handleStart();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    expect(getStatsSpy).toHaveBeenCalledTimes(1);
+    expect(wrapper.emitted('start')).toBeUndefined();
+  });
+
+  it('refetches due count when JLPT filters change', async () => {
+    const _authStore = useAuthStore();
+
+    getStatsSpy.mockResolvedValue({ due_today: 15 });
+
+    _authStore.user = {
+      id: 'test-user',
+      email: 'test@test.com',
+      current_level: 1,
+      total_experience: 0,
+      learning_streak: 0,
+      native_language: 'en',
+      preferences: {},
+      created_at: '',
+      updated_at: '',
+    };
+    _authStore.session = {
+      idToken: 'test-token',
+      accessToken: 'test-access',
+      refreshToken: 'test-refresh',
+      userSub: 'test-user',
+      email: 'test@test.com',
+    };
+
+    const wrapper = mount(FlashcardSetup, {
+      global: {
+        plugins: [Quasar],
+        stubs: {
+          'jlpt-level-selector': true,
+        },
+      },
+    });
+
+    const component = wrapper.vm as any;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    getStatsSpy.mockClear();
+    component.jlptLevels = [5, 4];
+    await wrapper.vm.$nextTick();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    expect(getStatsSpy).toHaveBeenCalledWith([5, 4]);
+  });
+
+  it('exposes setLoading to update the button loading state', async () => {
+    const wrapper = mount(FlashcardSetup, {
+      global: {
+        plugins: [Quasar],
+        stubs: {
+          'jlpt-level-selector': true,
+        },
+      },
+    });
+
+    const component = wrapper.vm as any;
+    component.setLoading(true);
+    await wrapper.vm.$nextTick();
+    expect(component.isLoading).toBe(true);
+
+    component.setLoading(false);
+    await wrapper.vm.$nextTick();
+    expect(component.isLoading).toBe(false);
+  });
+
+  it('initializes its local settings from the flashcard store', async () => {
+    const flashcardStore = useFlashcardStore();
+    flashcardStore.setStudyMode('cram');
+    flashcardStore.setCardDirection('en-to-jp');
+    flashcardStore.setJlptLevels([5, 4]);
+    flashcardStore.setShowFurigana(false);
+
+    const wrapper = mount(FlashcardSetup, {
+      global: {
+        plugins: [Quasar],
+        stubs: {
+          'jlpt-level-selector': true,
+        },
+      },
+    });
+
+    const component = wrapper.vm as any;
+
+    expect(component.studyMode).toBe('cram');
+    expect(component.cardDirection).toBe('en-to-jp');
+    expect(component.jlptLevels).toEqual([5, 4]);
+    expect(component.showFurigana).toBe(false);
   });
 });

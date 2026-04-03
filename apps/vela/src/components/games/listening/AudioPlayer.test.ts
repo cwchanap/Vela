@@ -1,7 +1,7 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { flushPromises, mount } from '@vue/test-utils';
 import { Quasar } from 'quasar';
 import type { Component } from 'vue';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mockPlayAudio = vi.fn();
 let AudioPlayer: Component;
@@ -137,5 +137,58 @@ describe('AudioPlayer', () => {
       expect(wrapper.emitted('error')).toEqual([['autoplay-blocked']]);
       expect(wrapper.text()).toContain('Autoplay was blocked. Tap play to continue.');
     });
+  });
+
+  it('emits played when autoplayed audio finishes successfully', async () => {
+    const playback = createPlaybackHandle();
+    mockPlayAudio.mockReturnValue(playback);
+    const wrapper = mountComponent();
+
+    await wrapper.setProps({ audioUrl: 'https://example.com/success.mp3' });
+    playback.resolve();
+
+    await vi.waitFor(() => {
+      expect(wrapper.emitted('played')).toHaveLength(1);
+      expect(wrapper.text()).toContain('Click to replay');
+    });
+  });
+
+  it('starts playback when the play button is clicked with autoPlay disabled', async () => {
+    const playback = createPlaybackHandle();
+    mockPlayAudio.mockReturnValue(playback);
+    const wrapper = mountComponent({
+      audioUrl: 'https://example.com/click.mp3',
+      autoPlay: false,
+    });
+
+    await wrapper.get('[aria-label="Play audio"]').trigger('click');
+
+    expect(mockPlayAudio).toHaveBeenCalledWith('https://example.com/click.mp3');
+
+    playback.resolve();
+
+    await vi.waitFor(() => {
+      expect(wrapper.emitted('played')).toHaveLength(1);
+    });
+  });
+
+  it('resets replay state when the audio URL is cleared', async () => {
+    const playback = createPlaybackHandle();
+    mockPlayAudio.mockReturnValue(playback);
+    const wrapper = mountComponent({
+      audioUrl: 'https://example.com/replay.mp3',
+      autoPlay: false,
+    });
+
+    await wrapper.get('[aria-label="Play audio"]').trigger('click');
+    playback.resolve();
+
+    await vi.waitFor(() => {
+      expect(wrapper.text()).toContain('Click to replay');
+    });
+
+    await wrapper.setProps({ audioUrl: null });
+
+    expect(wrapper.text()).toContain('Click to play');
   });
 });

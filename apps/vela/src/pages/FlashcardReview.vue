@@ -156,9 +156,17 @@ function readPendingReviews(): ReviewInput[] {
 
   const { reviews, hadErrors } = parsePendingReviews(stored, { logWarnings: true });
 
-  if (hadErrors && reviews.length === 0) {
-    localStorage.removeItem(key);
-    return [];
+  if (hadErrors) {
+    if (reviews.length === 0) {
+      localStorage.removeItem(key);
+      return [];
+    }
+
+    try {
+      localStorage.setItem(key, JSON.stringify(reviews));
+    } catch (storageError) {
+      console.error('Failed to persist sanitized pending reviews:', storageError);
+    }
   }
 
   return reviews;
@@ -450,7 +458,9 @@ async function handleRestart() {
         message: 'No more vocabulary available. Try different settings.',
         position: 'top',
       });
-      handleBackToSetup();
+      showSetup.value = true;
+      showSummary.value = false;
+      answerSubmitted.value = false;
       return;
     }
 

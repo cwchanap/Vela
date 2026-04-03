@@ -70,6 +70,16 @@ describe('useLLMSettingsStore', () => {
       const store = useLLMSettingsStore();
       expect(store.currentModel).toBe('gemini-2.5-flash-lite');
     });
+
+    it('falls back to the default provider model for unexpected runtime providers', async () => {
+      const { useLLMSettingsStore } = await import('./llmSettings');
+      const store = useLLMSettingsStore();
+
+      store.models = {} as any;
+      store.provider = 'unexpected-provider' as any;
+
+      expect(store.currentModel).toBe('gemini-2.5-flash-lite');
+    });
   });
 
   describe('computed: currentApiKey', () => {

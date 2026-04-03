@@ -95,6 +95,17 @@ describe('FlashcardCard', () => {
       // Back should show Japanese
       expect(wrapper.text()).toContain('猫');
     });
+
+    it('should show plain Japanese text on the back when furigana is disabled', () => {
+      const wrapper = mountComponent({
+        direction: 'en-to-jp',
+        isFlipped: true,
+        showFurigana: false,
+      });
+
+      expect(wrapper.find('.flashcard-back ruby').exists()).toBe(false);
+      expect(wrapper.find('.flashcard-back .japanese-text').text()).toContain('猫');
+    });
   });
 
   describe('flip behavior', () => {

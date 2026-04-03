@@ -1,4 +1,8 @@
-import { describe, it, expect } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 describe('config', () => {
   // Note: config is loaded at import time with import.meta.env, so we test the validateConfig function
@@ -89,6 +93,49 @@ describe('config', () => {
         validateConfig();
         validateConfig();
       }).not.toThrow();
+    });
+
+    it('warns and returns true when import.meta.env is unavailable', async () => {
+      const { validateConfig } = await import('./index');
+      const consoleWarnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+      expect(validateConfig(null)).toBe(true);
+      expect(consoleWarnSpy).toHaveBeenCalledWith(
+        'Environment variables not available in this context',
+      );
+    });
+
+    it('logs missing required variables in production and still returns true', async () => {
+      const { validateConfig } = await import('./index');
+      const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      const consoleWarnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const env = import.meta.env as Record<string, unknown>;
+      const originalEnv = {
+        PROD: env.PROD,
+        VITE_COGNITO_USER_POOL_ID: env.VITE_COGNITO_USER_POOL_ID,
+        VITE_COGNITO_USER_POOL_CLIENT_ID: env.VITE_COGNITO_USER_POOL_CLIENT_ID,
+        VITE_AWS_REGION: env.VITE_AWS_REGION,
+      };
+
+      try {
+        env.PROD = true;
+        env.VITE_COGNITO_USER_POOL_ID = '';
+        env.VITE_COGNITO_USER_POOL_CLIENT_ID = '';
+        env.VITE_AWS_REGION = '';
+
+        expect(validateConfig()).toBe(true);
+        expect(consoleErrorSpy).toHaveBeenCalledWith('Missing required environment variables:', [
+          'VITE_COGNITO_USER_POOL_ID',
+          'VITE_COGNITO_USER_POOL_CLIENT_ID',
+          'VITE_AWS_REGION',
+        ]);
+        expect(consoleWarnSpy).toHaveBeenCalledWith(
+          'Config validation skipped:',
+          expect.any(Error),
+        );
+      } finally {
+        Object.assign(env, originalEnv);
+      }
     });
   });
 });
