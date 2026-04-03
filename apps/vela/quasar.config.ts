@@ -75,15 +75,20 @@ export default defineConfig((/* ctx */) => {
         viteConf.build.rollupOptions = viteConf.build.rollupOptions || {};
         viteConf.resolve = viteConf.resolve || {};
 
+        const commonPath = resolve(__dirname, '../../packages/common/src/index.ts');
+
         if (Array.isArray(viteConf.resolve.alias)) {
-          viteConf.resolve.alias.push({
-            find: '@vela/common',
-            replacement: resolve(process.cwd(), '../../packages/common/src/index.ts'),
-          });
+          viteConf.resolve.alias = [
+            ...viteConf.resolve.alias.filter((a) => a.find !== '@vela/common'),
+            {
+              find: '@vela/common',
+              replacement: commonPath,
+            },
+          ];
         } else {
           viteConf.resolve.alias = {
             ...(viteConf.resolve.alias || {}),
-            '@vela/common': resolve(process.cwd(), '../../packages/common/src/index.ts'),
+            '@vela/common': commonPath,
           };
         }
 
