@@ -109,32 +109,23 @@ describe('config', () => {
       const { validateConfig } = await import('./index');
       const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
       const consoleWarnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
-      const env = import.meta.env as Record<string, unknown>;
-      const originalEnv = {
-        PROD: env.PROD,
-        VITE_COGNITO_USER_POOL_ID: env.VITE_COGNITO_USER_POOL_ID,
-        VITE_COGNITO_USER_POOL_CLIENT_ID: env.VITE_COGNITO_USER_POOL_CLIENT_ID,
-        VITE_AWS_REGION: env.VITE_AWS_REGION,
+
+      const env = {
+        PROD: true,
+        VITE_COGNITO_USER_POOL_ID: '',
+        VITE_COGNITO_USER_POOL_CLIENT_ID: '',
+        VITE_AWS_REGION: '',
       };
 
-      try {
-        env.PROD = true;
-        env.VITE_COGNITO_USER_POOL_ID = '';
-        env.VITE_COGNITO_USER_POOL_CLIENT_ID = '';
-        env.VITE_AWS_REGION = '';
-
-        expect(() => validateConfig()).toThrow(
-          'Missing required environment variables: VITE_COGNITO_USER_POOL_ID, VITE_COGNITO_USER_POOL_CLIENT_ID, VITE_AWS_REGION',
-        );
-        expect(consoleErrorSpy).toHaveBeenCalledWith('Missing required environment variables:', [
-          'VITE_COGNITO_USER_POOL_ID',
-          'VITE_COGNITO_USER_POOL_CLIENT_ID',
-          'VITE_AWS_REGION',
-        ]);
-        expect(consoleWarnSpy).not.toHaveBeenCalled();
-      } finally {
-        Object.assign(env, originalEnv);
-      }
+      expect(() => validateConfig(env)).toThrow(
+        'Missing required environment variables: VITE_COGNITO_USER_POOL_ID, VITE_COGNITO_USER_POOL_CLIENT_ID, VITE_AWS_REGION',
+      );
+      expect(consoleErrorSpy).toHaveBeenCalledWith('Missing required environment variables:', [
+        'VITE_COGNITO_USER_POOL_ID',
+        'VITE_COGNITO_USER_POOL_CLIENT_ID',
+        'VITE_AWS_REGION',
+      ]);
+      expect(consoleWarnSpy).not.toHaveBeenCalled();
     });
   });
 });
