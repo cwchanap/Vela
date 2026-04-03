@@ -2,6 +2,7 @@
 // https://v2.quasar.dev/quasar-cli-vite/quasar-config-file
 
 import { defineConfig } from '#q-app/wrappers';
+import { resolve } from 'node:path';
 
 export default defineConfig((/* ctx */) => {
   return {
@@ -72,6 +73,19 @@ export default defineConfig((/* ctx */) => {
         // Optimize build performance
         viteConf.build = viteConf.build || {};
         viteConf.build.rollupOptions = viteConf.build.rollupOptions || {};
+        viteConf.resolve = viteConf.resolve || {};
+
+        if (Array.isArray(viteConf.resolve.alias)) {
+          viteConf.resolve.alias.push({
+            find: '@vela/common',
+            replacement: resolve(process.cwd(), '../../packages/common/src/index.ts'),
+          });
+        } else {
+          viteConf.resolve.alias = {
+            ...(viteConf.resolve.alias || {}),
+            '@vela/common': resolve(process.cwd(), '../../packages/common/src/index.ts'),
+          };
+        }
 
         // Configure chunk splitting for better caching
         if (
