@@ -65,6 +65,7 @@ describe('SentenceBuilder', () => {
 
   afterEach(() => {
     vi.useRealTimers();
+    vi.restoreAllMocks();
   });
 
   const mountComponent = () => {

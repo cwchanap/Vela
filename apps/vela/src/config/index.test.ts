@@ -105,7 +105,7 @@ describe('config', () => {
       );
     });
 
-    it('logs missing required variables in production and still returns true', async () => {
+    it('throws in production when required variables are missing', async () => {
       const { validateConfig } = await import('./index');
       const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
       const consoleWarnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
@@ -123,16 +123,15 @@ describe('config', () => {
         env.VITE_COGNITO_USER_POOL_CLIENT_ID = '';
         env.VITE_AWS_REGION = '';
 
-        expect(validateConfig()).toBe(true);
+        expect(() => validateConfig()).toThrow(
+          'Missing required environment variables: VITE_COGNITO_USER_POOL_ID, VITE_COGNITO_USER_POOL_CLIENT_ID, VITE_AWS_REGION',
+        );
         expect(consoleErrorSpy).toHaveBeenCalledWith('Missing required environment variables:', [
           'VITE_COGNITO_USER_POOL_ID',
           'VITE_COGNITO_USER_POOL_CLIENT_ID',
           'VITE_AWS_REGION',
         ]);
-        expect(consoleWarnSpy).toHaveBeenCalledWith(
-          'Config validation skipped:',
-          expect.any(Error),
-        );
+        expect(consoleWarnSpy).not.toHaveBeenCalled();
       } finally {
         Object.assign(env, originalEnv);
       }

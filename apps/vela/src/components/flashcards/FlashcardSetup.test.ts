@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { mount } from '@vue/test-utils';
+import { mount, flushPromises } from '@vue/test-utils';
 import { createPinia, setActivePinia } from 'pinia';
 import { Quasar } from 'quasar';
 import FlashcardSetup from './FlashcardSetup.vue';
@@ -54,11 +54,11 @@ describe('FlashcardSetup.vue - Race Condition Fix', () => {
 
     // Wait for mount to complete
     await wrapper.vm.$nextTick();
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    await flushPromises();
 
     // Now call fetchDueCount manually
     component.fetchDueCount();
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    await flushPromises();
 
     expect(component.dueCount).toBe(15);
     expect(getStatsSpy).toHaveBeenCalled();
@@ -104,7 +104,7 @@ describe('FlashcardSetup.vue - Race Condition Fix', () => {
     await wrapper.vm.$nextTick();
 
     component.fetchDueCount();
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    await flushPromises();
 
     expect(component.dueCountError).toBe('Unable to check due items. Please try again.');
     expect(wrapper.text()).toContain('Unable to check due items');
@@ -151,14 +151,14 @@ describe('FlashcardSetup.vue - Race Condition Fix', () => {
 
     // Call fetchDueCount and verify it works
     await component.fetchDueCount();
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    await flushPromises();
 
     expect(component.dueCount).toBe(20);
 
     // Verify that multiple calls in sequence work correctly
     getStatsSpy.mockResolvedValue({ due_today: 25 });
     await component.fetchDueCount();
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    await flushPromises();
 
     expect(component.dueCount).toBe(25);
   });
@@ -181,7 +181,7 @@ describe('FlashcardSetup.vue - Race Condition Fix', () => {
     const component = wrapper.vm as any;
 
     component.fetchDueCount();
-    await new Promise((resolve) => setTimeout(resolve, 20));
+    await flushPromises();
 
     expect(component.dueCount).toBe(0);
     expect(getStatsSpy).not.toHaveBeenCalled();
@@ -226,7 +226,7 @@ describe('FlashcardSetup.vue - Race Condition Fix', () => {
 
     // Wait for error to be set
     component.fetchDueCount();
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    await flushPromises();
 
     expect(component.dueCountError).toBe('Unable to check due items. Please try again.');
 
@@ -287,12 +287,12 @@ describe('FlashcardSetup.vue - Race Condition Fix', () => {
 
     await wrapper.vm.$nextTick();
     component.fetchDueCount();
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    await flushPromises();
     expect(component.dueCountError).toBe('Unable to check due items. Please try again.');
 
     getStatsSpy.mockClear();
     component.handleStart();
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    await flushPromises();
 
     expect(getStatsSpy).toHaveBeenCalledTimes(1);
     expect(wrapper.emitted('start')).toBeUndefined();
@@ -332,12 +332,12 @@ describe('FlashcardSetup.vue - Race Condition Fix', () => {
     });
 
     const component = wrapper.vm as any;
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    await flushPromises();
 
     getStatsSpy.mockClear();
     component.jlptLevels = [5, 4];
     await wrapper.vm.$nextTick();
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    await flushPromises();
 
     expect(getStatsSpy).toHaveBeenCalledWith([5, 4]);
   });

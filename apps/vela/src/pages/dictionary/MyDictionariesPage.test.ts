@@ -70,13 +70,14 @@ const createTestRouter = () =>
 
 describe('MyDictionariesPage', () => {
   let wrapper: VueWrapper;
+  let router: ReturnType<typeof createTestRouter>;
   let authStore: ReturnType<typeof useAuthStore>;
   let originalFetch: typeof global.fetch;
   let fetchMock: ReturnType<typeof vi.fn>;
 
   beforeEach(async () => {
     setActivePinia(createPinia());
-    const router = createTestRouter();
+    router = createTestRouter();
     await router.push('/');
     originalFetch = global.fetch;
     fetchMock = vi.fn();
@@ -108,7 +109,7 @@ describe('MyDictionariesPage', () => {
   const mountComponent = () =>
     mount(MyDictionariesPage, {
       global: {
-        plugins: [Quasar, createTestRouter()],
+        plugins: [Quasar, router],
         stubs: {
           'q-page': { template: '<div><slot /></div>' },
           'q-card': { template: '<div><slot /></div>' },

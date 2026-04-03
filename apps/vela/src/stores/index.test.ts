@@ -27,29 +27,15 @@ describe('stores/index', () => {
   });
 
   describe('re-exports', () => {
-    it('should export useAuthStore as a function', () => {
-      expect(useAuthStore).toBeDefined();
-      expect(typeof useAuthStore).toBe('function');
-    });
-
-    it('should export useGameStore as a function', () => {
-      expect(useGameStore).toBeDefined();
-      expect(typeof useGameStore).toBe('function');
-    });
-
-    it('should export useChatStore as a function', () => {
-      expect(useChatStore).toBeDefined();
-      expect(typeof useChatStore).toBe('function');
-    });
-
-    it('should export useProgressStore as a function', () => {
-      expect(useProgressStore).toBeDefined();
-      expect(typeof useProgressStore).toBe('function');
-    });
-
-    it('should export useLLMSettingsStore as a function', () => {
-      expect(useLLMSettingsStore).toBeDefined();
-      expect(typeof useLLMSettingsStore).toBe('function');
+    it.each([
+      ['useAuthStore', useAuthStore],
+      ['useGameStore', useGameStore],
+      ['useChatStore', useChatStore],
+      ['useProgressStore', useProgressStore],
+      ['useLLMSettingsStore', useLLMSettingsStore],
+    ])('should export %s as a function', (_name, exportedStore) => {
+      expect(exportedStore).toBeDefined();
+      expect(typeof exportedStore).toBe('function');
     });
   });
 });

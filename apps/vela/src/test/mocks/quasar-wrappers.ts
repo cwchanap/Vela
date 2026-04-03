@@ -1,5 +1,5 @@
 // Mock for Quasar's quasar/wrappers
-// boot is just a wrapper that calls the function passed to it
+// boot returns the provided callback unchanged so tests can control when boot runs.
 export function boot(fn: Function) {
   return fn;
 }

@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 import {
   chunkArray,
   mergeReviews,
@@ -7,6 +7,10 @@ import {
   extractFailedReviews,
 } from './flashcardReviewUtils';
 import type { ReviewInput, BatchReviewResponse } from 'src/services/srsService';
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 describe('chunkArray', () => {
   it('splits array into chunks of specified size', () => {
@@ -148,7 +152,6 @@ describe('parsePendingReviews', () => {
     expect(warnSpy).toHaveBeenCalledWith(
       'Some pending flashcard reviews were invalid and removed.',
     );
-    vi.restoreAllMocks();
   });
 
   it('returns empty and hadErrors for non-array JSON', () => {
@@ -164,7 +167,6 @@ describe('parsePendingReviews', () => {
 
     expect(result).toEqual({ reviews: [], hadErrors: true });
     expect(warnSpy).toHaveBeenCalledWith('Invalid pending flashcard reviews data. Clearing.');
-    vi.restoreAllMocks();
   });
 
   it('returns empty and hadErrors for invalid JSON', () => {
@@ -187,7 +189,6 @@ describe('parsePendingReviews', () => {
 
     expect(warnSpy).not.toHaveBeenCalled();
     expect(errorSpy).not.toHaveBeenCalled();
-    vi.restoreAllMocks();
   });
 
   it('logs errors when logWarnings is true and JSON is unparseable', () => {
@@ -196,7 +197,6 @@ describe('parsePendingReviews', () => {
     parsePendingReviews('not-json', { logWarnings: true });
 
     expect(errorSpy).toHaveBeenCalled();
-    vi.restoreAllMocks();
   });
 });
 

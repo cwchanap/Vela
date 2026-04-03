@@ -327,7 +327,14 @@ describe('useAuthQueries', () => {
       // Ensure no cached profile exists for this user
       expect(queryClient.getQueryData(authKeys.profile('u2'))).toBeUndefined();
 
-      await result.mutateAsync({ userId: 'u2', profileData: { username: 'newname' } });
+      const mutatePromise = result.mutateAsync({
+        userId: 'u2',
+        profileData: { username: 'newname' },
+      });
+
+      expect(queryClient.getQueryData(authKeys.profile('u2'))).toBeUndefined();
+
+      await mutatePromise;
       await flushPromises();
 
       // The cache should remain empty — no optimistic write was applied

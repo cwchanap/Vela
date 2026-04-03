@@ -714,6 +714,33 @@ describe('FlashcardReview.vue - Component Integration', () => {
 
       wrapper.unmount();
     });
+
+    it('returns an empty list when clearing invalid reviews from storage throws', async () => {
+      const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      const wrapper = mountReview();
+
+      localStorage.setItem(
+        'pendingFlashcardReviews_test-user',
+        JSON.stringify([{ vocabulary_id: 'vocab1' }, 'invalid']),
+      );
+
+      const removeItemSpy = vi.spyOn(Storage.prototype, 'removeItem').mockImplementation(() => {
+        throw new DOMException('Access denied', 'SecurityError');
+      });
+
+      const componentInstance = wrapper.vm as any;
+      const readPendingReviews =
+        componentInstance.readPendingReviews ?? componentInstance.$?.setupState?.readPendingReviews;
+
+      expect(readPendingReviews()).toEqual([]);
+      expect(removeItemSpy).toHaveBeenCalledWith('pendingFlashcardReviews_test-user');
+      expect(consoleErrorSpy).toHaveBeenCalledWith(
+        'Failed to clear invalid pending reviews:',
+        expect.any(DOMException),
+      );
+
+      wrapper.unmount();
+    });
   });
 
   describe('Restart behavior', () => {
