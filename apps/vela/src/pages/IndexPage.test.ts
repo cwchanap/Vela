@@ -1,10 +1,11 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { mount, VueWrapper } from '@vue/test-utils';
+import { mount, VueWrapper, flushPromises } from '@vue/test-utils';
 import { createPinia, setActivePinia } from 'pinia';
 import { Quasar } from 'quasar';
 import { createRouter, createMemoryHistory } from 'vue-router';
 import IndexPage from './IndexPage.vue';
 import { useAuthStore } from 'src/stores/auth';
+import { httpJsonAuth } from 'src/utils/httpClient';
 
 // Mock httpClient to avoid real API calls
 vi.mock('src/utils/httpClient', () => ({
@@ -291,6 +292,119 @@ describe('IndexPage', () => {
       const event = new KeyboardEvent('keydown', { key: 'Tab' });
       await wrapper.vm.handleActionKeydown('/games/vocabulary', event as any);
       expect(routerPushSpy).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('achievements loading', () => {
+    const authenticatedUser = {
+      id: 'user-1',
+      email: 'test@example.com',
+      avatar_url: null,
+      current_level: 1,
+      total_experience: 0,
+      learning_streak: 0,
+      native_language: 'en',
+      preferences: {
+        dailyGoal: 30,
+        dailyLessonGoal: 5,
+        lessonDurationMinutes: 30,
+        todayStudyTime: 0,
+      },
+    };
+
+    it('loads achievements from the userStats fallback payload', async () => {
+      vi.mocked(httpJsonAuth).mockResolvedValueOnce({
+        userStats: {
+          achievements: [
+            {
+              achievement_id: 'ach-1',
+              title: 'First Steps',
+              description: 'Complete your first lesson',
+              icon: 'school',
+              color: 'positive',
+            },
+          ],
+        },
+      } as any);
+
+      wrapper = mountComponent({
+        user: authenticatedUser,
+        isAuthenticated: true,
+      });
+      await flushPromises();
+
+      expect(wrapper.vm.achievements).toEqual([
+        {
+          id: 'ach-1',
+          title: 'First Steps',
+          description: 'Complete your first lesson',
+          icon: 'school',
+          color: 'positive',
+        },
+      ]);
+      expect(wrapper.text()).toContain('1 achievements unlocked');
+      expect(wrapper.text()).toContain('View all');
+    });
+
+    it('loads achievements from the primary achievements payload', async () => {
+      vi.mocked(httpJsonAuth).mockResolvedValueOnce({
+        achievements: [
+          {
+            id: 'ach-primary',
+            name: 'Primary Path',
+            description: 'Loaded from the primary achievements array',
+            icon: 'emoji_events',
+            color: 'secondary',
+          },
+        ],
+      } as any);
+
+      wrapper = mountComponent({
+        user: authenticatedUser,
+        isAuthenticated: true,
+      });
+      await flushPromises();
+
+      expect(wrapper.vm.achievements).toEqual([
+        {
+          id: 'ach-primary',
+          title: 'Primary Path',
+          description: 'Loaded from the primary achievements array',
+          icon: 'emoji_events',
+          color: 'secondary',
+        },
+      ]);
+      expect(wrapper.text()).toContain('1 achievements unlocked');
+    });
+
+    it('shows the generic achievements error message for non-Error failures', async () => {
+      const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      vi.mocked(httpJsonAuth).mockRejectedValueOnce('boom');
+
+      wrapper = mountComponent({
+        user: authenticatedUser,
+        isAuthenticated: true,
+      });
+      await flushPromises();
+
+      expect(consoleErrorSpy).toHaveBeenCalledWith('Failed to fetch achievements:', 'boom');
+      expect(wrapper.vm.achievementsError).toBe('Failed to load achievements');
+      expect(wrapper.text()).toContain('Failed to load achievements');
+      expect(wrapper.text()).toContain('Retry');
+    });
+
+    it('ignores AbortError failures when fetching achievements', async () => {
+      vi.mocked(httpJsonAuth).mockRejectedValueOnce(new DOMException('Aborted', 'AbortError'));
+
+      wrapper = mountComponent({
+        user: authenticatedUser,
+        isAuthenticated: true,
+      });
+      await flushPromises();
+
+      expect(wrapper.vm.achievementsError).toBeNull();
+      expect(wrapper.vm.achievementsLoading).toBe(false);
+      expect(wrapper.text()).toContain('Complete lessons to earn achievements!');
     });
   });
 });

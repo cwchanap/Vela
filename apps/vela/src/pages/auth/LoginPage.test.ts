@@ -4,6 +4,7 @@ import { createPinia, setActivePinia } from 'pinia';
 import { Quasar, Notify } from 'quasar';
 import { createRouter, createMemoryHistory } from 'vue-router';
 import LoginPage from './LoginPage.vue';
+import { useAuthStore } from '../../stores/auth';
 
 const createTestRouter = () =>
   createRouter({
@@ -130,6 +131,22 @@ describe('LoginPage', () => {
       wrapper = mountComponent();
       await flushPromises();
       expect(wrapper.vm.redirectTo).toBe('/progress');
+    });
+
+    it('redirects immediately on mount when a session already exists', async () => {
+      const authStore = useAuthStore();
+      const initializeSpy = vi.spyOn(authStore, 'initialize').mockResolvedValue(undefined);
+      authStore.setSession({
+        user: { id: 'user-1', email: 'test@example.com' },
+        provider: 'cognito',
+      });
+      const routerPushSpy = vi.spyOn(router, 'push');
+
+      wrapper = mountComponent();
+      await flushPromises();
+
+      expect(initializeSpy).toHaveBeenCalled();
+      expect(routerPushSpy).toHaveBeenCalledWith('/');
     });
   });
 });

@@ -231,6 +231,7 @@ function resetStores() {
   authStore.user = { id: 'user-123' };
   authStore.session = { user: { id: 'user-123' } };
   audioPlayerBehavior.autoEmitPlayed = true;
+  listeningConfig.jlptLevels = [];
   listeningConfig.mode = 'multiple-choice';
   listeningConfig.source = 'vocabulary';
   progressStore.updateProgress.mockReset();
@@ -404,6 +405,99 @@ describe('ListeningGame', () => {
     );
   });
 
+  it('shows a generic warning when no listening questions are available', async () => {
+    mockListeningGameService.getListeningQuestions.mockResolvedValue([]);
+
+    const wrapper = mountPage();
+
+    await wrapper.find('.start-button').trigger('click');
+    await flushPromises();
+
+    expect(mockNotifyCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: 'No questions available. Please try again.',
+        type: 'warning',
+      }),
+    );
+    expect(listeningStore.gameActive).toBe(false);
+    expect(wrapper.find('.start-button').exists()).toBe(true);
+  });
+
+  it('shows a JLPT-specific warning when filtered listening questions are unavailable', async () => {
+    listeningConfig.jlptLevels = ['N5'];
+    mockListeningGameService.getListeningQuestions.mockResolvedValue([]);
+
+    const wrapper = mountPage();
+
+    await wrapper.find('.start-button').trigger('click');
+    await flushPromises();
+
+    expect(mockNotifyCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message:
+          'No questions found for the selected JLPT levels. Try different levels or "All Levels".',
+        type: 'warning',
+      }),
+    );
+    expect(listeningStore.gameActive).toBe(false);
+  });
+
+  it('notifies the user when the listening game fails to start', async () => {
+    const startError = new Error('Listening API down');
+    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    mockListeningGameService.getListeningQuestions.mockRejectedValue(startError);
+
+    const wrapper = mountPage();
+
+    await wrapper.find('.start-button').trigger('click');
+    await flushPromises();
+
+    expect(mockNotifyCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: 'Failed to start game. Please try again.',
+        type: 'negative',
+      }),
+    );
+    expect(consoleErrorSpy).toHaveBeenCalledWith('Failed to start listening game:', startError);
+    expect(wrapper.find('.start-button').exists()).toBe(true);
+  });
+
+  it('clears audio loading state when there is no current question', async () => {
+    const wrapper = mountPage();
+
+    (wrapper.vm as any).isLoadingAudio = true;
+    (wrapper.vm as any).audioHasPlayed = true;
+
+    await (wrapper.vm as any).loadAudioForCurrentQuestion();
+    await flushPromises();
+
+    expect((wrapper.vm as any).isLoadingAudio).toBe(false);
+    expect((wrapper.vm as any).audioHasPlayed).toBe(false);
+    expect(mockGeneratePronunciation).not.toHaveBeenCalled();
+  });
+
+  it('bails out quietly when authentication is missing after the game is already inactive', async () => {
+    authStore.user = null;
+    authStore.session = null;
+    listeningStore.questions = [makeQuestion('q1', '猫', 'cat')];
+    listeningStore.currentQuestion = listeningStore.questions[0];
+    listeningStore.gameActive = false;
+
+    const wrapper = mountPage();
+
+    (wrapper.vm as any).isLoadingAudio = true;
+    (wrapper.vm as any).audioHasPlayed = true;
+
+    await (wrapper.vm as any).loadAudioForCurrentQuestion();
+    await flushPromises();
+
+    expect((wrapper.vm as any).isLoadingAudio).toBe(false);
+    expect((wrapper.vm as any).audioHasPlayed).toBe(false);
+    expect(mockGeneratePronunciation).not.toHaveBeenCalled();
+    expect(listeningStore.endGame).not.toHaveBeenCalled();
+    expect(mockNotifyCreate).not.toHaveBeenCalled();
+  });
+
   it('passes sentence readings to answer feedback when available', async () => {
     listeningConfig.mode = 'dictation';
     listeningConfig.source = 'sentences';
@@ -486,6 +580,45 @@ describe('ListeningGame', () => {
     expect(mockNotifyCreate).toHaveBeenCalledTimes(notifyCallCount);
   });
 
+  it('ignores stale audio successes after a new listening session has already started', async () => {
+    const deferredAudio = createDeferred<{ audioUrl: string }>();
+
+    mockListeningGameService.getListeningQuestions
+      .mockResolvedValueOnce([makeQuestion('q1', '猫', 'cat'), makeQuestion('q2', '犬', 'dog')])
+      .mockResolvedValueOnce([makeQuestion('n1', '鳥', 'bird'), makeQuestion('n2', '魚', 'fish')]);
+    mockGeneratePronunciation
+      .mockReturnValueOnce(deferredAudio.promise)
+      .mockResolvedValueOnce({ audioUrl: 'https://example.com/n1.mp3' });
+
+    const wrapper = mountPage();
+
+    await wrapper.find('.start-button').trigger('click');
+    await flushPromises();
+
+    const onTimeout = wrapper.findComponent(GameTimerStub).props('onTimeout') as () => void;
+    onTimeout();
+    await flushPromises();
+
+    const playAgainButton = wrapper
+      .findAll('button')
+      .find((button) => button.text() === 'Play Again');
+    expect(playAgainButton).toBeTruthy();
+    await playAgainButton!.trigger('click');
+    await flushPromises();
+
+    expect(wrapper.findComponent(AudioPlayerStub).props('audioUrl')).toBe(
+      'https://example.com/n1.mp3',
+    );
+
+    deferredAudio.resolve({ audioUrl: 'https://example.com/q1.mp3' });
+    await flushPromises();
+
+    expect(listeningStore.currentQuestion?.id).toBe('n1');
+    expect(wrapper.findComponent(AudioPlayerStub).props('audioUrl')).toBe(
+      'https://example.com/n1.mp3',
+    );
+  });
+
   it('skips to the next question when audio playback fails', async () => {
     audioPlayerBehavior.autoEmitPlayed = false;
     mockListeningGameService.getListeningQuestions.mockResolvedValue([
@@ -548,6 +681,16 @@ describe('ListeningGame', () => {
     expect(wrapper.find('.answer-button').exists()).toBe(true);
   });
 
+  it('ignores playback failure events when there is no active prompt', async () => {
+    const wrapper = mountPage();
+
+    await (wrapper.vm as any).handleAudioPlaybackFailure('playback-failed');
+    await flushPromises();
+
+    expect(mockNotifyCreate).not.toHaveBeenCalled();
+    expect(listeningStore.submitAnswer).not.toHaveBeenCalled();
+  });
+
   it('shows game-over accuracy using attempted prompts after skipped audio questions', async () => {
     mockListeningGameService.getListeningQuestions.mockResolvedValue([
       makeQuestion('q1', '猫', 'cat'),
@@ -572,6 +715,34 @@ describe('ListeningGame', () => {
 
     expect(wrapper.text()).toContain('1 / 1 correct');
     expect(wrapper.text()).not.toContain('1 / 2 correct');
+  });
+
+  it('loads the next prompt audio after leaving answer feedback', async () => {
+    mockListeningGameService.getListeningQuestions.mockResolvedValue([
+      makeQuestion('q1', '猫', 'cat'),
+      makeQuestion('q2', '犬', 'dog'),
+    ]);
+    mockGeneratePronunciation
+      .mockResolvedValueOnce({ audioUrl: 'https://example.com/q1.mp3' })
+      .mockResolvedValueOnce({ audioUrl: 'https://example.com/q2-preload.mp3' })
+      .mockResolvedValueOnce({ audioUrl: 'https://example.com/q2-current.mp3' });
+
+    const wrapper = mountPage();
+
+    await wrapper.find('.start-button').trigger('click');
+    await flushPromises();
+
+    await wrapper.find('.answer-button').trigger('click');
+    await flushPromises();
+
+    wrapper.findComponent(AnswerFeedbackStub).vm.$emit('next');
+    await flushPromises();
+
+    expect(listeningStore.currentQuestion?.id).toBe('q2');
+    expect(mockGeneratePronunciation).toHaveBeenNthCalledWith(3, 'q2', '犬', 'user-123');
+    expect(wrapper.findComponent(AudioPlayerStub).props('audioUrl')).toBe(
+      'https://example.com/q2-current.mp3',
+    );
   });
 
   it('records only attempted prompts when a listening game times out', async () => {
@@ -694,6 +865,29 @@ describe('ListeningGame', () => {
     );
   });
 
+  it('does not record a listening session when the practiced config is missing at game end', async () => {
+    mockListeningGameService.getListeningQuestions.mockResolvedValue([
+      makeQuestion('q1', '猫', 'cat'),
+    ]);
+    mockGeneratePronunciation.mockResolvedValue({ audioUrl: 'https://example.com/q1.mp3' });
+
+    const wrapper = mountPage();
+
+    await wrapper.find('.start-button').trigger('click');
+    await flushPromises();
+
+    (wrapper.vm as any).currentConfig = null;
+    (wrapper.vm as any).gameStartTime = new Date(Date.now() - 1500);
+    (wrapper.vm as any).shouldRecordSession = true;
+    (wrapper.vm as any).attemptedQuestions = 1;
+    (wrapper.vm as any).correctAnswers = 1;
+    listeningStore.score = 1;
+    listeningStore.endGame();
+    await flushPromises();
+
+    expect(progressStore.recordGameSession).not.toHaveBeenCalled();
+  });
+
   it('notifies the user when saving the listening session fails', async () => {
     progressStore.recordGameSession.mockRejectedValue(new Error('Save failed'));
     mockListeningGameService.getListeningQuestions.mockResolvedValue([
@@ -741,5 +935,18 @@ describe('ListeningGame', () => {
     await flushPromises();
 
     expect(progressStore.recordGameSession).not.toHaveBeenCalled();
+  });
+
+  it('returns to setup when replay is requested without a saved config', async () => {
+    const wrapper = mountPage();
+
+    (wrapper.vm as any).showSetup = false;
+    await flushPromises();
+
+    (wrapper.vm as any).playAgain();
+    await flushPromises();
+
+    expect((wrapper.vm as any).showSetup).toBe(true);
+    expect(wrapper.find('.start-button').exists()).toBe(true);
   });
 });

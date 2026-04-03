@@ -204,6 +204,7 @@ describe('MainLayout – normalizePath', () => {
   beforeEach(async () => {
     setActivePinia(createPinia());
     mockScreen.gt.sm = false;
+    mockScreen.lt.md = false;
     router = createRouter({
       history: createMemoryHistory(),
       routes: [{ path: '/', component: { template: '<div />' } }],
@@ -268,6 +269,7 @@ describe('MainLayout – isActiveRoute', () => {
   beforeEach(async () => {
     setActivePinia(createPinia());
     mockScreen.gt.sm = false;
+    mockScreen.lt.md = false;
     router = createRouter({
       history: createMemoryHistory(),
       routes: [
@@ -317,6 +319,7 @@ describe('MainLayout – drawer handlers', () => {
   beforeEach(async () => {
     setActivePinia(createPinia());
     mockScreen.gt.sm = false;
+    mockScreen.lt.md = false;
     router = createRouter({
       history: createMemoryHistory(),
       routes: [{ path: '/', component: { template: '<div />' } }],
@@ -372,6 +375,7 @@ describe('MainLayout – handleLogout & onUserItemClick', () => {
   beforeEach(async () => {
     setActivePinia(createPinia());
     mockScreen.gt.sm = false;
+    mockScreen.lt.md = false;
     router = createRouter({
       history: createMemoryHistory(),
       routes: [
@@ -416,6 +420,8 @@ describe('MainLayout – onMounted and screen watcher', () => {
 
   beforeEach(async () => {
     setActivePinia(createPinia());
+    mockScreen.gt.sm = false;
+    mockScreen.lt.md = false;
     router = createRouter({
       history: createMemoryHistory(),
       routes: [{ path: '/', component: { template: '<div />' } }],

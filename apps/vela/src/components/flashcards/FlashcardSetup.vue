@@ -109,6 +109,7 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted } from 'vue';
 import { useAuthStore } from 'src/stores/auth';
+import { useFlashcardStore } from 'src/stores/flashcards';
 import { flashcardService } from 'src/services/flashcardService';
 import JlptLevelSelector from 'src/components/games/JlptLevelSelector.vue';
 import type { JLPTLevel } from 'src/types/database';
@@ -127,11 +128,12 @@ const emit = defineEmits<{
 }>();
 
 const authStore = useAuthStore();
+const flashcardStore = useFlashcardStore();
 
-const studyMode = ref<StudyMode>('srs');
-const cardDirection = ref<CardDirection>('jp-to-en');
-const jlptLevels = ref<JLPTLevel[]>([]);
-const showFurigana = ref(true);
+const studyMode = ref<StudyMode>(flashcardStore.studyMode);
+const cardDirection = ref<CardDirection>(flashcardStore.cardDirection);
+const jlptLevels = ref<JLPTLevel[]>([...flashcardStore.jlptLevels]);
+const showFurigana = ref(flashcardStore.showFurigana);
 const dueCount = ref(0);
 const dueCountError = ref<string | null>(null);
 const isLoading = ref(false);

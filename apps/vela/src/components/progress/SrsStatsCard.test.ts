@@ -1,6 +1,7 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { mount, flushPromises } from '@vue/test-utils';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { mount, flushPromises, type VueWrapper } from '@vue/test-utils';
 import { Quasar } from 'quasar';
+import { reactive } from 'vue';
 import SrsStatsCard from './SrsStatsCard.vue';
 
 // Mock srsService
@@ -14,16 +15,18 @@ vi.mock('src/services/srsService', () => ({
 }));
 
 // Mock auth store
-const mockAuthStore = {
+const mockAuthStore = reactive({
   isAuthenticated: false,
   user: null,
-};
+});
 
 vi.mock('src/stores/auth', () => ({
   useAuthStore: () => mockAuthStore,
 }));
 
 describe('SrsStatsCard', () => {
+  let wrappers: VueWrapper[] = [];
+
   const mockStats = {
     total_items: 100,
     due_today: 15,
@@ -45,8 +48,13 @@ describe('SrsStatsCard', () => {
     mockGetStats.mockClear();
   });
 
+  afterEach(() => {
+    wrappers.forEach((wrapper) => wrapper.unmount());
+    wrappers = [];
+  });
+
   function createWrapper() {
-    return mount(SrsStatsCard, {
+    const wrapper = mount(SrsStatsCard, {
       global: {
         plugins: [Quasar],
         stubs: {
@@ -58,6 +66,8 @@ describe('SrsStatsCard', () => {
         },
       },
     });
+    wrappers.push(wrapper);
+    return wrapper;
   }
 
   async function createAuthenticatedWrapper(mockStatsResponse = mockStats) {
@@ -90,6 +100,20 @@ describe('SrsStatsCard', () => {
     await createAuthenticatedWrapper();
 
     expect(mockGetStats).toHaveBeenCalledWith();
+  });
+
+  it('fetches stats when authentication becomes available after mount', async () => {
+    mockGetStats.mockResolvedValue(mockStats);
+    const wrapper = createWrapper();
+
+    expect(mockGetStats).not.toHaveBeenCalled();
+
+    mockAuthStore.user = { id: 'user-123' } as any;
+    mockAuthStore.isAuthenticated = true;
+    await flushPromises();
+
+    expect(mockGetStats).toHaveBeenCalledTimes(1);
+    expect(wrapper.text()).toContain('100');
   });
 
   it('displays stats correctly', async () => {

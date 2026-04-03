@@ -87,6 +87,22 @@ describe('FlashcardInput', () => {
     expect(wrapper.emitted('submit')?.[0]).toEqual(['wrong', false]);
   });
 
+  it('should treat an empty correct answer as incorrect and submit once', async () => {
+    const wrapper = mountComponent({
+      correctAnswer: '',
+      alternateAnswers: [],
+    });
+
+    const input = wrapper.findComponent({ name: 'QInput' });
+    await input.setValue('anything');
+
+    const submitBtn = wrapper.find('[data-testid="btn-submit-answer"]');
+    await submitBtn.trigger('click');
+
+    expect(wrapper.emitted('submit')?.[0]).toEqual(['anything', false]);
+    expect(input.props('readonly')).toBe(true);
+  });
+
   it('should be case insensitive', async () => {
     const wrapper = mountComponent();
 

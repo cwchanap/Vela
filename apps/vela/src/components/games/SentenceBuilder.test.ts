@@ -1,11 +1,26 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { mount, flushPromises } from '@vue/test-utils';
 import { createPinia, setActivePinia } from 'pinia';
 import { Quasar, Notify } from 'quasar';
 import SentenceBuilder from './SentenceBuilder.vue';
 import { useGameStore } from 'src/stores/games';
+import { useProgressStore } from 'src/stores/progress';
 import { gameService } from 'src/services/gameService';
 import type { SentenceQuestion } from 'src/stores/games';
+
+let notifySpy: ReturnType<typeof vi.fn>;
+let dialogSpy: ReturnType<typeof vi.fn>;
+
+vi.mock('quasar', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('quasar')>();
+  return {
+    ...actual,
+    useQuasar: () => ({
+      notify: notifySpy,
+      dialog: dialogSpy,
+    }),
+  };
+});
 
 // Mock game service
 vi.mock('src/services/gameService', () => ({
@@ -43,7 +58,13 @@ describe('SentenceBuilder', () => {
   beforeEach(() => {
     setActivePinia(createPinia());
     vi.clearAllMocks();
+    notifySpy = vi.fn();
+    dialogSpy = vi.fn();
     vi.mocked(gameService.getSentenceQuestions).mockResolvedValue(mockSentenceQuestions);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   const mountComponent = () => {
@@ -299,5 +320,176 @@ describe('SentenceBuilder', () => {
     // Game should have started (checked via store state)
     const gameStore = useGameStore();
     expect(gameStore.sentenceGameActive).toBe(true);
+  });
+
+  it('keeps currentQuestion null and ignores answer checks before the game starts', async () => {
+    let resolveQuestions!: (_questions: SentenceQuestion[]) => void;
+    vi.mocked(gameService.getSentenceQuestions).mockReturnValue(
+      new Promise<SentenceQuestion[]>((resolve) => {
+        resolveQuestions = resolve;
+      }),
+    );
+
+    const wrapper = mountComponent();
+    const vm = wrapper.vm as any;
+
+    expect(vm.currentQuestion).toBeNull();
+
+    vm.checkAnswer();
+
+    expect(notifySpy).not.toHaveBeenCalled();
+    resolveQuestions([]);
+    await flushPromises();
+  });
+
+  it('autoFillCorrect moves all answer tokens into the user answer', async () => {
+    const gameStore = useGameStore();
+    gameStore.startSentenceGame(mockSentenceQuestions);
+
+    const wrapper = mountComponent();
+    await flushPromises();
+    await wrapper.vm.$nextTick();
+
+    const vm = wrapper.vm as any;
+    vm.autoFillCorrect();
+    await wrapper.vm.$nextTick();
+
+    expect(vm.userAnswer).toEqual(['私は', '猫が', '好きです']);
+    expect(vm.scrambledWords).toEqual([]);
+  });
+
+  it('moves words between the scrambled bank and the user answer', async () => {
+    const wrapper = mountComponent();
+    await flushPromises();
+    await wrapper.vm.$nextTick();
+
+    const vm = wrapper.vm as any;
+
+    vm.addWord(0);
+    await wrapper.vm.$nextTick();
+    expect(vm.userAnswer).toEqual(['好きです']);
+    expect(vm.scrambledWords).toEqual(['私は', '猫が']);
+
+    vm.removeWord(0);
+    await wrapper.vm.$nextTick();
+    expect(vm.userAnswer).toEqual([]);
+    expect(vm.scrambledWords).toEqual(['私は', '猫が', '好きです']);
+  });
+
+  it('checks a correct answer, updates score, and loads the next question', async () => {
+    const gameStore = useGameStore();
+    const answerSpy = vi.spyOn(gameStore, 'answerSentenceQuestion');
+    gameStore.startSentenceGame(mockSentenceQuestions);
+
+    const wrapper = mountComponent();
+    await flushPromises();
+    await wrapper.vm.$nextTick();
+
+    const vm = wrapper.vm as any;
+    vm.userAnswer = ['私は', '猫が', '好きです'];
+    vm.checkAnswer();
+    await flushPromises();
+
+    expect(answerSpy).toHaveBeenCalledWith(true);
+    expect(gameStore.score).toBe(1);
+    expect(gameStore.currentSentenceQuestionIndex).toBe(1);
+    expect(vm.correctAnswers).toBe(1);
+    expect(vm.userAnswer).toEqual([]);
+    expect(vm.scrambledWords).toEqual(mockSentenceQuestions[1]?.scrambled);
+    expect(notifySpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: 'Correct!',
+        color: 'positive',
+      }),
+    );
+  });
+
+  it('checks an incorrect final answer and shows the game over dialog', async () => {
+    const singleQuestion = [mockSentenceQuestions[0]!];
+    const gameStore = useGameStore();
+    const answerSpy = vi.spyOn(gameStore, 'answerSentenceQuestion');
+    gameStore.startSentenceGame(singleQuestion);
+
+    const wrapper = mountComponent();
+    await flushPromises();
+    await wrapper.vm.$nextTick();
+
+    const vm = wrapper.vm as any;
+    vm.userAnswer = ['間違い'];
+    vm.checkAnswer();
+    await flushPromises();
+
+    expect(answerSpy).toHaveBeenCalledWith(false);
+    expect(notifySpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: `Incorrect. The correct answer is: ${singleQuestion[0].correctAnswer}`,
+        color: 'negative',
+      }),
+    );
+    expect(dialogSpy).toHaveBeenCalledWith({
+      title: 'Game Over',
+      message: 'You scored 0 out of 1!',
+    });
+  });
+
+  it('records the finished session and resets tracking after the last question', async () => {
+    vi.useFakeTimers();
+    const startTime = new Date('2024-01-01T00:00:00Z');
+    vi.setSystemTime(startTime);
+
+    const progressStore = useProgressStore();
+    const recordSessionSpy = vi
+      .spyOn(progressStore, 'recordGameSession')
+      .mockResolvedValue(undefined);
+    vi.mocked(gameService.getSentenceQuestions).mockResolvedValue([mockSentenceQuestions[0]!]);
+
+    const wrapper = mountComponent();
+    await flushPromises();
+
+    vi.setSystemTime(new Date('2024-01-01T00:00:30Z'));
+
+    const vm = wrapper.vm as any;
+    vm.userAnswer = ['私は', '猫が', '好きです'];
+    vm.checkAnswer();
+    await flushPromises();
+
+    expect(recordSessionSpy).toHaveBeenCalledWith('sentence', 1, 30, 1, 1);
+    expect(dialogSpy).toHaveBeenCalledWith({
+      title: 'Game Over',
+      message: 'You scored 1 out of 1!',
+    });
+    expect(vm.gameStartTime).toBeNull();
+    expect(vm.correctAnswers).toBe(0);
+    expect(vm.totalQuestions).toBe(0);
+  });
+
+  it('warns when saving the finished session fails', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2024-01-01T00:00:00Z'));
+
+    const progressStore = useProgressStore();
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.spyOn(progressStore, 'recordGameSession').mockRejectedValue(new Error('save failed'));
+    vi.mocked(gameService.getSentenceQuestions).mockResolvedValue([mockSentenceQuestions[0]!]);
+
+    const wrapper = mountComponent();
+    await flushPromises();
+
+    vi.setSystemTime(new Date('2024-01-01T00:00:05Z'));
+
+    const vm = wrapper.vm as any;
+    vm.userAnswer = ['私は', '猫が', '好きです'];
+    vm.checkAnswer();
+    await flushPromises();
+
+    expect(notifySpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'warning',
+        message: 'Your game progress could not be saved. Please check your connection.',
+      }),
+    );
+    expect(vm.gameStartTime).toBeNull();
+    expect(vm.correctAnswers).toBe(0);
+    expect(vm.totalQuestions).toBe(0);
   });
 });

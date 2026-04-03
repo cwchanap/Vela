@@ -16,6 +16,12 @@ import {
 import type { Vocabulary } from '../types/database';
 import type { ReviewInput } from '../services/srsService';
 
+const mockPronounceWord = vi.fn();
+
+vi.mock('src/services/ttsService', () => ({
+  pronounceWord: (...args: any[]) => mockPronounceWord(...args),
+}));
+
 describe('chunkArray helper', () => {
   it('should return empty array for empty input', () => {
     const result = chunkArray([], 100);
@@ -279,6 +285,20 @@ vi.mock('quasar', async () => {
 describe('FlashcardReview.vue - Component Integration', () => {
   let notifyCreateSpy: ReturnType<typeof vi.fn>;
 
+  const mountReview = () =>
+    mount(FlashcardReview, {
+      global: {
+        plugins: [Quasar],
+        stubs: {
+          'flashcard-setup': true,
+          'flashcard-card': true,
+          'flashcard-input': true,
+          'flashcard-rating': true,
+          'flashcard-summary': true,
+        },
+      },
+    });
+
   const mockVocabulary: Vocabulary[] = [
     {
       id: 'vocab1',
@@ -335,7 +355,9 @@ describe('FlashcardReview.vue - Component Integration', () => {
   describe('Session Watcher', () => {
     it('should show summary when session ends via store action', async () => {
       // Mock flashcardService to avoid actual API calls
-      vi.spyOn(flashcardServiceModule.flashcardService, 'recordBatchReview').mockResolvedValue();
+      vi.spyOn(flashcardServiceModule.flashcardService, 'recordBatchReview').mockResolvedValue({
+        results: [],
+      });
 
       const wrapper = mount(FlashcardReview, {
         global: {
@@ -373,7 +395,9 @@ describe('FlashcardReview.vue - Component Integration', () => {
     it('should not submit reviews if summary is already shown', async () => {
       const recordBatchReviewSpy = vi
         .spyOn(flashcardServiceModule.flashcardService, 'recordBatchReview')
-        .mockResolvedValue();
+        .mockResolvedValue({
+          results: [],
+        });
 
       const wrapper = mount(FlashcardReview, {
         global: {
@@ -411,7 +435,9 @@ describe('FlashcardReview.vue - Component Integration', () => {
     it('should only submit reviews once when last card is rated', async () => {
       const recordBatchReviewSpy = vi
         .spyOn(flashcardServiceModule.flashcardService, 'recordBatchReview')
-        .mockResolvedValue();
+        .mockResolvedValue({
+          results: [],
+        });
 
       const wrapper = mount(FlashcardReview, {
         global: {
@@ -442,6 +468,7 @@ describe('FlashcardReview.vue - Component Integration', () => {
       await flushPromises();
 
       expect(recordBatchReviewSpy).toHaveBeenCalledTimes(1);
+      expect(localStorage.getItem('pendingFlashcardReviews_test-user')).toBeNull();
 
       wrapper.unmount();
     });
@@ -643,11 +670,356 @@ describe('FlashcardReview.vue - Component Integration', () => {
     });
   });
 
+  describe('Pending review sanitization', () => {
+    it('persists only valid pending reviews after malformed entries are filtered out', async () => {
+      const wrapper = mountReview();
+
+      localStorage.setItem(
+        'pendingFlashcardReviews_test-user',
+        JSON.stringify([
+          { vocabulary_id: 'vocab1', quality: 3 },
+          { vocabulary_id: 'vocab2' },
+          'invalid',
+        ]),
+      );
+
+      const componentInstance = wrapper.vm as any;
+      const readPendingReviews =
+        componentInstance.readPendingReviews ?? componentInstance.$?.setupState?.readPendingReviews;
+
+      const reviews = readPendingReviews();
+
+      expect(reviews).toEqual([{ vocabulary_id: 'vocab1', quality: 3 }]);
+      expect(localStorage.getItem('pendingFlashcardReviews_test-user')).toBe(
+        JSON.stringify([{ vocabulary_id: 'vocab1', quality: 3 }]),
+      );
+
+      wrapper.unmount();
+    });
+
+    it('removes stored reviews when every pending entry is invalid', async () => {
+      const wrapper = mountReview();
+
+      localStorage.setItem(
+        'pendingFlashcardReviews_test-user',
+        JSON.stringify([{ vocabulary_id: 'vocab1' }, 'invalid']),
+      );
+
+      const componentInstance = wrapper.vm as any;
+      const readPendingReviews =
+        componentInstance.readPendingReviews ?? componentInstance.$?.setupState?.readPendingReviews;
+
+      expect(readPendingReviews()).toEqual([]);
+      expect(localStorage.getItem('pendingFlashcardReviews_test-user')).toBeNull();
+
+      wrapper.unmount();
+    });
+  });
+
+  describe('Restart behavior', () => {
+    it('keeps the current settings when restart returns to setup because no vocabulary is available', async () => {
+      vi.spyOn(flashcardServiceModule.flashcardService, 'getVocabularyForCram').mockResolvedValue(
+        [],
+      );
+
+      const wrapper = mount(FlashcardReview, {
+        global: {
+          plugins: [Quasar],
+          stubs: {
+            'flashcard-setup': true,
+            'flashcard-card': true,
+            'flashcard-input': true,
+            'flashcard-rating': true,
+            'flashcard-summary': true,
+          },
+        },
+      });
+
+      const flashcardStore = useFlashcardStore();
+      const componentInstance = wrapper.vm as any;
+
+      flashcardStore.setStudyMode('cram');
+      flashcardStore.setCardDirection('en-to-jp');
+      flashcardStore.setJlptLevels([5, 4]);
+      flashcardStore.setShowFurigana(false);
+      flashcardStore.startSession([mockVocabulary[0]]);
+      componentInstance.showSetup = false;
+      componentInstance.showSummary = true;
+
+      await componentInstance.handleRestart();
+      await flushPromises();
+
+      expect(notifyCreateSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: 'info',
+          message: 'No more vocabulary available. Try different settings.',
+        }),
+      );
+      expect(componentInstance.showSetup).toBe(true);
+      expect(componentInstance.showSummary).toBe(false);
+      expect(flashcardStore.sessionActive).toBe(false);
+      expect(flashcardStore.studyMode).toBe('cram');
+      expect(flashcardStore.cardDirection).toBe('en-to-jp');
+      expect(flashcardStore.jlptLevels).toEqual([5, 4]);
+      expect(flashcardStore.showFurigana).toBe(false);
+
+      wrapper.unmount();
+    });
+  });
+
+  describe('Start flow empty states', () => {
+    it('shows an info notification when no SRS vocabulary is due', async () => {
+      vi.spyOn(flashcardServiceModule.flashcardService, 'getVocabularyForSRS').mockResolvedValue({
+        vocabulary: [],
+        totalDue: 0,
+      });
+
+      const wrapper = mountReview();
+      const componentInstance = wrapper.vm as any;
+
+      await componentInstance.handleStart({
+        studyMode: 'srs',
+        cardDirection: 'jp-to-en',
+        jlptLevels: [],
+        showFurigana: true,
+      });
+      await flushPromises();
+
+      expect(notifyCreateSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: 'info',
+          message: 'No vocabulary due for review. Try cram mode instead!',
+        }),
+      );
+      expect(useFlashcardStore().sessionActive).toBe(false);
+      expect(componentInstance.isLoading).toBe(false);
+
+      wrapper.unmount();
+    });
+
+    it('shows a generic warning when cram mode has no vocabulary without filters', async () => {
+      vi.spyOn(flashcardServiceModule.flashcardService, 'getVocabularyForCram').mockResolvedValue(
+        [],
+      );
+
+      const wrapper = mountReview();
+      const componentInstance = wrapper.vm as any;
+
+      await componentInstance.handleStart({
+        studyMode: 'cram',
+        cardDirection: 'jp-to-en',
+        jlptLevels: [],
+        showFurigana: true,
+      });
+      await flushPromises();
+
+      expect(notifyCreateSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: 'warning',
+          message: 'No vocabulary available.',
+        }),
+      );
+      expect(useFlashcardStore().sessionActive).toBe(false);
+
+      wrapper.unmount();
+    });
+
+    it('shows a filtered warning when cram mode has no vocabulary for the selected JLPT levels', async () => {
+      const getVocabularyForCramSpy = vi
+        .spyOn(flashcardServiceModule.flashcardService, 'getVocabularyForCram')
+        .mockResolvedValue([]);
+
+      const wrapper = mountReview();
+      const componentInstance = wrapper.vm as any;
+
+      await componentInstance.handleStart({
+        studyMode: 'cram',
+        cardDirection: 'jp-to-en',
+        jlptLevels: [5],
+        showFurigana: false,
+      });
+      await flushPromises();
+
+      expect(getVocabularyForCramSpy).toHaveBeenCalledWith(20, [5]);
+      expect(notifyCreateSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: 'warning',
+          message: 'No vocabulary found for selected JLPT levels.',
+        }),
+      );
+
+      wrapper.unmount();
+    });
+  });
+
+  describe('Pronunciation handling', () => {
+    it('shows a warning when pronunciation is requested without a user id', async () => {
+      const wrapper = mountReview();
+      const authStore = useAuthStore();
+      const componentInstance = wrapper.vm as any;
+
+      authStore.user = null as any;
+
+      await componentInstance.handlePronounce(mockVocabulary[0]);
+
+      expect(mockPronounceWord).not.toHaveBeenCalled();
+      expect(notifyCreateSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: 'warning',
+          message: 'Please sign in to use pronunciation features',
+        }),
+      );
+
+      wrapper.unmount();
+    });
+
+    it('calls pronounceWord with the authenticated user id', async () => {
+      const wrapper = mountReview();
+      const componentInstance = wrapper.vm as any;
+
+      await componentInstance.handlePronounce(mockVocabulary[0]);
+
+      expect(mockPronounceWord).toHaveBeenCalledWith(mockVocabulary[0], 'test-user');
+
+      wrapper.unmount();
+    });
+
+    it('shows the thrown pronunciation error message when pronounceWord fails with an Error', async () => {
+      mockPronounceWord.mockRejectedValueOnce(new Error('TTS unavailable'));
+
+      const wrapper = mountReview();
+      const componentInstance = wrapper.vm as any;
+
+      await componentInstance.handlePronounce(mockVocabulary[0]);
+
+      expect(notifyCreateSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: 'negative',
+          message: 'TTS unavailable',
+        }),
+      );
+
+      wrapper.unmount();
+    });
+
+    it('falls back to a generic pronunciation error when a non-Error value is thrown', async () => {
+      mockPronounceWord.mockRejectedValueOnce('TTS unavailable');
+
+      const wrapper = mountReview();
+      const componentInstance = wrapper.vm as any;
+
+      await componentInstance.handlePronounce(mockVocabulary[0]);
+
+      expect(notifyCreateSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: 'negative',
+          message: 'Failed to play pronunciation. Please check your TTS settings.',
+        }),
+      );
+
+      wrapper.unmount();
+    });
+  });
+
+  describe('Back to setup behavior', () => {
+    it('resets the flashcard store and returns to setup', async () => {
+      const wrapper = mountReview();
+      const flashcardStore = useFlashcardStore();
+      const componentInstance = wrapper.vm as any;
+
+      flashcardStore.setStudyMode('cram');
+      flashcardStore.setCardDirection('en-to-jp');
+      flashcardStore.setJlptLevels([5]);
+      flashcardStore.setShowFurigana(false);
+      flashcardStore.startSession(mockVocabulary);
+      componentInstance.showSetup = false;
+      componentInstance.showSummary = true;
+      componentInstance.answerSubmitted = true;
+
+      componentInstance.handleBackToSetup();
+      await flushPromises();
+
+      expect(flashcardStore.studyMode).toBe('srs');
+      expect(flashcardStore.cardDirection).toBe('jp-to-en');
+      expect(flashcardStore.jlptLevels).toEqual([]);
+      expect(flashcardStore.showFurigana).toBe(true);
+      expect(flashcardStore.sessionActive).toBe(false);
+      expect(componentInstance.showSetup).toBe(true);
+      expect(componentInstance.showSummary).toBe(false);
+      expect(componentInstance.answerSubmitted).toBe(false);
+
+      wrapper.unmount();
+    });
+  });
+
+  describe('Queued review persistence', () => {
+    it('persists queued SRS reviews when the page unmounts', async () => {
+      const wrapper = mountReview();
+      const flashcardStore = useFlashcardStore();
+      const authStore = useAuthStore();
+      const componentInstance = wrapper.vm as any;
+
+      authStore.session = {
+        user: { id: 'test-user', email: 'test@test.com' },
+        provider: 'cognito',
+      } as any;
+
+      flashcardStore.setStudyMode('srs');
+      flashcardStore.startSession(mockVocabulary);
+      componentInstance.showSetup = false;
+
+      await componentInstance.handleRate(4);
+      await flushPromises();
+
+      wrapper.unmount();
+
+      expect(localStorage.getItem('pendingFlashcardReviews_test-user')).toBe(
+        JSON.stringify([{ vocabulary_id: 'vocab1', quality: 4 }]),
+      );
+    });
+
+    it('logs when queued reviews cannot be persisted on unmount', async () => {
+      const wrapper = mountReview();
+      const flashcardStore = useFlashcardStore();
+      const authStore = useAuthStore();
+      const componentInstance = wrapper.vm as any;
+      const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      const originalSetItem = Storage.prototype.setItem;
+
+      authStore.session = {
+        user: { id: 'test-user', email: 'test@test.com' },
+        provider: 'cognito',
+      } as any;
+
+      flashcardStore.setStudyMode('srs');
+      flashcardStore.startSession(mockVocabulary);
+      componentInstance.showSetup = false;
+
+      await componentInstance.handleRate(4);
+      await flushPromises();
+
+      Storage.prototype.setItem = vi.fn(() => {
+        throw new Error('quota exceeded');
+      });
+
+      wrapper.unmount();
+
+      expect(consoleErrorSpy).toHaveBeenCalledWith(
+        'Failed to persist queued reviews on unmount:',
+        expect.any(Error),
+      );
+
+      Storage.prototype.setItem = originalSetItem;
+    });
+  });
+
   describe('Cram Mode SRS Gating', () => {
     it('should not queue SRS reviews in cram mode', async () => {
       const recordBatchReviewSpy = vi
         .spyOn(flashcardServiceModule.flashcardService, 'recordBatchReview')
-        .mockResolvedValue();
+        .mockResolvedValue({
+          results: [],
+        });
 
       const wrapper = mount(FlashcardReview, {
         global: {
@@ -690,7 +1062,9 @@ describe('FlashcardReview.vue - Component Integration', () => {
     it('should queue SRS reviews in srs mode', async () => {
       const recordBatchReviewSpy = vi
         .spyOn(flashcardServiceModule.flashcardService, 'recordBatchReview')
-        .mockResolvedValue();
+        .mockResolvedValue({
+          results: [],
+        });
 
       const wrapper = mount(FlashcardReview, {
         global: {

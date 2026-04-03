@@ -1,12 +1,16 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { mount, VueWrapper } from '@vue/test-utils';
+import { mount, VueWrapper, flushPromises } from '@vue/test-utils';
 import { createPinia, setActivePinia } from 'pinia';
-import { Quasar } from 'quasar';
+import { Quasar, Notify } from 'quasar';
 import { createRouter, createMemoryHistory } from 'vue-router';
 import SettingsPage from './SettingsPage.vue';
 import { useLLMSettingsStore } from 'src/stores/llmSettings';
 import { useThemeStore } from 'src/stores/theme';
 import { useAuthStore } from 'src/stores/auth';
+import {
+  useTTSSettingsQuery,
+  useUpdateTTSSettingsMutation,
+} from '../../composables/queries/useTTSQueries';
 
 // Mock TTS queries composable
 vi.mock('../../composables/queries/useTTSQueries', () => ({
@@ -26,22 +30,13 @@ const createTestRouter = () =>
 
 describe('SettingsPage', () => {
   let wrapper: VueWrapper;
+  let router: ReturnType<typeof createTestRouter>;
   let llmStore: ReturnType<typeof useLLMSettingsStore>;
   let themeStore: ReturnType<typeof useThemeStore>;
   let authStore: ReturnType<typeof useAuthStore>;
 
-  beforeEach(async () => {
-    setActivePinia(createPinia());
-    const router = createTestRouter();
-    await router.push('/');
-
-    llmStore = useLLMSettingsStore();
-    themeStore = useThemeStore();
-    authStore = useAuthStore();
-
-    vi.clearAllMocks();
-
-    wrapper = mount(SettingsPage, {
+  const mountComponent = () =>
+    mount(SettingsPage, {
       global: {
         plugins: [Quasar, router],
         stubs: {
@@ -71,6 +66,26 @@ describe('SettingsPage', () => {
         },
       },
     });
+
+  beforeEach(async () => {
+    setActivePinia(createPinia());
+    router = createTestRouter();
+    await router.push('/');
+
+    llmStore = useLLMSettingsStore();
+    themeStore = useThemeStore();
+    authStore = useAuthStore();
+
+    vi.clearAllMocks();
+    Notify.create = vi.fn() as any;
+    vi.mocked(useTTSSettingsQuery).mockReturnValue({
+      data: { value: null },
+    } as any);
+    vi.mocked(useUpdateTTSSettingsMutation).mockReturnValue({
+      mutate: vi.fn(),
+    } as any);
+
+    wrapper = mountComponent();
   });
 
   afterEach(() => {
@@ -231,6 +246,202 @@ describe('SettingsPage', () => {
       const initialDark = themeStore.isDark;
       wrapper.vm.toggleDarkMode();
       expect(wrapper.vm.darkModeEnabled).toBe(!initialDark);
+    });
+  });
+
+  describe('theme preference persistence', () => {
+    it('saves the theme preference and shows a success notification', async () => {
+      const saveSpy = vi.spyOn(themeStore, 'saveToUserPreferences').mockResolvedValue(undefined);
+
+      await wrapper.vm.saveThemeToProfile();
+
+      expect(saveSpy).toHaveBeenCalled();
+      expect(Notify.create).toHaveBeenCalledWith({
+        type: 'positive',
+        message: 'Theme preference saved to your profile',
+        position: 'top',
+      });
+    });
+  });
+
+  describe('LLM settings actions', () => {
+    it('syncs local model fields and options when the provider changes', async () => {
+      llmStore.$patch({
+        models: {
+          ...llmStore.models,
+          openrouter: 'openrouter/custom-model',
+        },
+        keys: {
+          ...llmStore.keys,
+          openrouter: 'openrouter-key',
+        },
+      });
+      wrapper.vm.modelOptions = [llmStore.currentModel];
+
+      wrapper.vm.selectedProvider = 'openrouter';
+      await flushPromises();
+
+      expect(wrapper.vm.model).toBe('openrouter/custom-model');
+      expect(wrapper.vm.apiKeyInput).toBe('openrouter-key');
+      expect(wrapper.vm.modelOptions[0]).toBe('openrouter/custom-model');
+    });
+
+    it('saves trimmed model and API key changes through the store', async () => {
+      const saveSpy = vi.spyOn(llmStore, 'save').mockResolvedValue(undefined);
+      const notifySpy = vi.spyOn(llmStore, 'notifySaved').mockImplementation(() => {});
+
+      wrapper.vm.model = '  custom-model  ';
+      wrapper.vm.apiKeyInput = '  custom-key  ';
+
+      await wrapper.vm.save();
+
+      expect(llmStore.currentModel).toBe('custom-model');
+      expect(llmStore.currentApiKey).toBe('custom-key');
+      expect(saveSpy).toHaveBeenCalled();
+      expect(notifySpy).toHaveBeenCalled();
+    });
+
+    it('resets local fields to the store defaults', async () => {
+      llmStore.setProvider('openrouter');
+      llmStore.setModel('openrouter/custom-model');
+      llmStore.setApiKey('openrouter-key');
+      wrapper.vm.model = 'temporary-model';
+      wrapper.vm.apiKeyInput = 'temporary-key';
+
+      const resetSpy = vi.spyOn(llmStore, 'resetToDefaults');
+
+      await wrapper.vm.resetDefaults();
+
+      expect(resetSpy).toHaveBeenCalled();
+      expect(wrapper.vm.model).toBe(llmStore.currentModel);
+      expect(wrapper.vm.apiKeyInput).toBe('');
+    });
+  });
+
+  describe('TTS settings query sync', () => {
+    it('hydrates the local TTS form from loaded query data', async () => {
+      wrapper.unmount();
+      vi.mocked(useTTSSettingsQuery).mockReturnValue({
+        data: {
+          value: {
+            provider: 'elevenlabs',
+            voiceId: 'voice-123',
+            model: 'eleven_multilingual_v2',
+            hasApiKey: true,
+          },
+        },
+      } as any);
+
+      wrapper = mountComponent();
+      await flushPromises();
+
+      expect(wrapper.vm.ttsProvider).toBe('elevenlabs');
+      expect(wrapper.vm.ttsVoiceId).toBe('voice-123');
+      expect(wrapper.vm.ttsModel).toBe('eleven_multilingual_v2');
+      expect(wrapper.vm.hasTTSKey).toBe(true);
+    });
+  });
+
+  describe('saveSettingsHandler', () => {
+    it('shows a sign-in notification when no authenticated user is available', async () => {
+      authStore.user = null;
+      authStore.setSession(null);
+      wrapper.vm.ttsApiKeyInput = 'tts-key';
+
+      await wrapper.vm.saveSettingsHandler();
+
+      expect(Notify.create).toHaveBeenCalledWith({
+        type: 'negative',
+        message: 'Please sign in to save TTS settings',
+        position: 'top',
+      });
+    });
+
+    it('requires an API key before saving TTS settings', async () => {
+      authStore.user = {
+        id: 'user-1',
+        email: 'test@example.com',
+        avatar_url: null,
+        preferences: null,
+      };
+      wrapper.vm.ttsApiKeyInput = '';
+
+      await wrapper.vm.saveSettingsHandler();
+
+      expect(Notify.create).toHaveBeenCalledWith({
+        type: 'negative',
+        message: 'Please enter an API key',
+        position: 'top',
+      });
+    });
+
+    it('passes the save payload to the mutation and shows success feedback', async () => {
+      const mutate = vi.fn((_payload, options: any) => {
+        options.onSuccess();
+      });
+
+      wrapper.unmount();
+      vi.mocked(useUpdateTTSSettingsMutation).mockReturnValue({ mutate } as any);
+      wrapper = mountComponent();
+
+      authStore.user = {
+        id: 'user-1',
+        email: 'test@example.com',
+        avatar_url: null,
+        preferences: null,
+      };
+      wrapper.vm.ttsProvider = 'elevenlabs';
+      wrapper.vm.ttsApiKeyInput = 'tts-key';
+      wrapper.vm.ttsVoiceId = '';
+      wrapper.vm.ttsModel = '';
+
+      await wrapper.vm.saveSettingsHandler();
+
+      expect(mutate).toHaveBeenCalledWith(
+        {
+          provider: 'elevenlabs',
+          apiKey: 'tts-key',
+          voiceId: undefined,
+          model: undefined,
+        },
+        expect.objectContaining({
+          onSuccess: expect.any(Function),
+          onError: expect.any(Function),
+        }),
+      );
+      expect(Notify.create).toHaveBeenCalledWith({
+        type: 'positive',
+        message: 'TTS settings saved successfully',
+        position: 'top',
+      });
+    });
+
+    it('shows a fallback error when the mutation fails with a non-Error value', async () => {
+      const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      const mutate = vi.fn((_payload, options: any) => {
+        options.onError('boom');
+      });
+
+      wrapper.unmount();
+      vi.mocked(useUpdateTTSSettingsMutation).mockReturnValue({ mutate } as any);
+      wrapper = mountComponent();
+
+      authStore.user = {
+        id: 'user-1',
+        email: 'test@example.com',
+        avatar_url: null,
+        preferences: null,
+      };
+      wrapper.vm.ttsApiKeyInput = 'tts-key';
+
+      await wrapper.vm.saveSettingsHandler();
+
+      expect(consoleErrorSpy).toHaveBeenCalledWith('Error saving TTS settings:', 'boom');
+      expect(Notify.create).toHaveBeenCalledWith({
+        type: 'negative',
+        message: 'Failed to save TTS settings',
+        position: 'top',
+      });
     });
   });
 });

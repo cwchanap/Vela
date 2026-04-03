@@ -6,6 +6,7 @@ import { createRouter, createMemoryHistory } from 'vue-router';
 import VocabularyGame from './VocabularyGame.vue';
 import { useGameStore } from 'src/stores/games';
 import { useAuthStore } from 'src/stores/auth';
+import { useProgressStore } from 'src/stores/progress';
 
 // Mock child components
 vi.mock('src/components/games/VocabularyCard.vue', () => ({
@@ -49,6 +50,18 @@ const mockGetDueItems = vi.fn();
 const mockQualityFromCorrectness = vi.fn();
 const mockRecordBatchReview = vi.fn();
 const mockPronounceWord = vi.fn();
+const mockShuffleArray = vi.fn().mockImplementation((arr: any[]) => arr);
+const mockBuildDistractors = vi.fn().mockReturnValue([
+  { id: 'opt1', japanese_word: '猫', english_translation: 'cat' },
+  { id: 'opt2', japanese_word: '犬', english_translation: 'dog' },
+  { id: 'opt3', japanese_word: '鳥', english_translation: 'bird' },
+]);
+const mockNormalizeVocabulary = vi.fn().mockImplementation((v: any) => v);
+const mockToVocabularyOption = vi.fn().mockImplementation((v: any) => ({
+  id: v.id,
+  japanese_word: v.japanese_word,
+  english_translation: v.english_translation,
+}));
 
 vi.mock('../../services/gameService', () => ({
   gameService: {
@@ -77,21 +90,13 @@ vi.mock('../../services/ttsService', () => ({
 }));
 
 vi.mock('src/utils/vocabulary', () => ({
-  buildDistractors: vi.fn().mockReturnValue([
-    { id: 'opt1', japanese_word: '猫', english_translation: 'cat' },
-    { id: 'opt2', japanese_word: '犬', english_translation: 'dog' },
-    { id: 'opt3', japanese_word: '鳥', english_translation: 'bird' },
-  ]),
-  normalizeVocabulary: vi.fn().mockImplementation((v: any) => v),
-  toVocabularyOption: vi.fn().mockImplementation((v: any) => ({
-    id: v.id,
-    japanese_word: v.japanese_word,
-    english_translation: v.english_translation,
-  })),
+  buildDistractors: (...args: any[]) => mockBuildDistractors(...args),
+  normalizeVocabulary: (...args: any[]) => mockNormalizeVocabulary(...args),
+  toVocabularyOption: (...args: any[]) => mockToVocabularyOption(...args),
 }));
 
 vi.mock('src/utils/array', () => ({
-  shuffleArray: vi.fn().mockImplementation((arr: any[]) => arr),
+  shuffleArray: (...args: any[]) => mockShuffleArray(...args),
 }));
 
 const mockVocabQuestion = {
@@ -143,6 +148,18 @@ describe('VocabularyGame', () => {
     vi.clearAllMocks();
     Notify.create = vi.fn() as any;
 
+    mockGetVocabularyQuestions.mockReset();
+    mockGetVocabularyPool.mockReset();
+    mockGetStats.mockReset();
+    mockGetDueItems.mockReset();
+    mockQualityFromCorrectness.mockReset();
+    mockRecordBatchReview.mockReset();
+    mockPronounceWord.mockReset();
+    mockShuffleArray.mockReset();
+    mockBuildDistractors.mockReset();
+    mockNormalizeVocabulary.mockReset();
+    mockToVocabularyOption.mockReset();
+
     // Default mocks
     mockGetStats.mockResolvedValue({ due_today: 0 });
     mockGetVocabularyQuestions.mockResolvedValue([mockVocabQuestion]);
@@ -150,6 +167,18 @@ describe('VocabularyGame', () => {
     mockQualityFromCorrectness.mockReturnValue(3);
     mockRecordBatchReview.mockResolvedValue(undefined);
     mockPronounceWord.mockResolvedValue(undefined);
+    mockShuffleArray.mockImplementation((arr: any[]) => arr);
+    mockBuildDistractors.mockReturnValue([
+      { id: 'opt1', japanese_word: '猫', english_translation: 'cat' },
+      { id: 'opt2', japanese_word: '犬', english_translation: 'dog' },
+      { id: 'opt3', japanese_word: '鳥', english_translation: 'bird' },
+    ]);
+    mockNormalizeVocabulary.mockImplementation((v: any) => v);
+    mockToVocabularyOption.mockImplementation((v: any) => ({
+      id: v.id,
+      japanese_word: v.japanese_word,
+      english_translation: v.english_translation,
+    }));
   });
 
   afterEach(() => {
@@ -277,6 +306,27 @@ describe('VocabularyGame', () => {
       await startBtn.trigger('click');
       await vi.waitFor(() =>
         expect(mockGetVocabularyQuestions).toHaveBeenCalledWith(10, ['N5', 'N4']),
+      );
+      wrapper.unmount();
+    });
+
+    it('shows the JLPT-specific empty state message when filtered questions are unavailable', async () => {
+      mockGetVocabularyQuestions.mockResolvedValue([]);
+      const wrapper = await mountComponent();
+
+      (wrapper.vm as any).selectedJlptLevels = ['N5'];
+      await wrapper.vm.$nextTick();
+
+      const startBtn = wrapper.find('[data-label="Start Quiz"]');
+      await startBtn.trigger('click');
+
+      await vi.waitFor(() =>
+        expect(Notify.create).toHaveBeenCalledWith(
+          expect.objectContaining({
+            type: 'warning',
+            message: expect.stringContaining('selected JLPT levels'),
+          }),
+        ),
       );
       wrapper.unmount();
     });
@@ -426,6 +476,25 @@ describe('VocabularyGame', () => {
       expect(Notify.create).toHaveBeenCalledWith(expect.objectContaining({ type: 'negative' }));
       wrapper.unmount();
     });
+
+    it('shows the fallback pronunciation error when a non-Error value is thrown', async () => {
+      mockPronounceWord.mockRejectedValue('TTS failed');
+      const wrapper = await mountComponent();
+      const authStore = useAuthStore();
+      authStore.setUser(mockUser);
+      authStore.setSession({ user: { id: 'user-1', email: 'test@test.com' } } as any);
+
+      const word = { id: 'vocab-1', japanese_word: '本', english_translation: 'book' } as any;
+      await (wrapper.vm as any).handlePronounce(word);
+
+      expect(Notify.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: 'negative',
+          message: 'Failed to play pronunciation. Please check your TTS settings.',
+        }),
+      );
+      wrapper.unmount();
+    });
   });
 
   describe('fetchDueCount', () => {
@@ -462,6 +531,21 @@ describe('VocabularyGame', () => {
   });
 
   describe('SRS mode', () => {
+    it('enables SRS mode from the route query and shows the due-count error state', async () => {
+      mockGetStats.mockRejectedValue(new Error('SRS stats unavailable'));
+      const authStore = useAuthStore();
+      authStore.setUser(mockUser);
+      authStore.setSession({ user: { id: 'user-1', email: 'test@test.com' } } as any);
+      await router.push('/games/vocabulary?srsMode=true');
+      await router.isReady();
+
+      const wrapper = await mountComponent();
+
+      await vi.waitFor(() => expect((wrapper.vm as any).srsMode).toBe(true));
+      await vi.waitFor(() => expect(wrapper.text()).toContain('Could not load review count'));
+      wrapper.unmount();
+    });
+
     it('starts SRS game when srsMode is enabled with due items', async () => {
       mockGetStats.mockResolvedValue({ due_today: 3 });
       mockGetDueItems.mockResolvedValue({
@@ -483,16 +567,30 @@ describe('VocabularyGame', () => {
         { id: 'p3', japanese_word: '空', english_translation: 'sky' },
       ]);
 
-      const wrapper = await mountComponent();
       const authStore = useAuthStore();
       authStore.setUser(mockUser);
-      authStore.setSession({ user: { id: 'user-1', email: 'test@test.com' } });
+      authStore.setSession({ user: { id: 'user-1', email: 'test@test.com' } } as any);
+      const wrapper = await mountComponent();
       (wrapper.vm as any).dueCount = 3;
       (wrapper.vm as any).srsMode = true;
+      await wrapper.vm.$nextTick();
 
-      const startBtn = wrapper.find('[data-label="Start Quiz"]');
-      await startBtn.trigger('click');
-      await vi.waitFor(() => expect(mockGetDueItems).toHaveBeenCalled());
+      await (wrapper.vm as any).startGame();
+
+      const gameStore = useGameStore();
+      await vi.waitFor(() => expect(mockGetDueItems).toHaveBeenCalledWith(10, undefined));
+      await vi.waitFor(() => expect(gameStore.gameActive).toBe(true));
+      await vi.waitFor(() => expect(mockShuffleArray).toHaveBeenCalled());
+
+      expect(gameStore.questions).toHaveLength(1);
+      expect(gameStore.questions[0]).toEqual(
+        expect.objectContaining({
+          correctAnswer: 'srs-1',
+          word: expect.objectContaining({ id: 'srs-1' }),
+        }),
+      );
+      expect(gameStore.questions[0].options).toHaveLength(4);
+      expect(mockGetVocabularyQuestions).not.toHaveBeenCalled();
       wrapper.unmount();
     });
 
@@ -512,6 +610,88 @@ describe('VocabularyGame', () => {
         expect(Notify.create).toHaveBeenCalledWith(expect.objectContaining({ type: 'warning' })),
       );
       expect(mockGetVocabularyQuestions).toHaveBeenCalled();
+      wrapper.unmount();
+    });
+
+    it('falls back to a random quiz when SRS review words lack enough distractors', async () => {
+      mockGetStats.mockResolvedValue({ due_today: 1 });
+      mockGetDueItems.mockResolvedValue({
+        items: [
+          {
+            vocabulary: {
+              id: 'srs-1',
+              japanese_word: '山',
+              english_translation: 'mountain',
+              hiragana: 'やま',
+              jlpt_level: 'N5',
+            },
+          },
+        ],
+      });
+      mockGetVocabularyPool.mockResolvedValue([
+        { id: 'p1', japanese_word: '川', english_translation: 'river' },
+      ]);
+      mockBuildDistractors.mockReturnValueOnce([
+        { id: 'p1', japanese_word: '川', english_translation: 'river' },
+      ]);
+
+      const authStore = useAuthStore();
+      authStore.setUser(mockUser);
+      authStore.setSession({ user: { id: 'user-1', email: 'test@test.com' } } as any);
+      const wrapper = await mountComponent();
+      const gameStore = useGameStore();
+      (wrapper.vm as any).dueCount = 1;
+      (wrapper.vm as any).srsMode = true;
+      await wrapper.vm.$nextTick();
+
+      await (wrapper.vm as any).startGame();
+      await vi.waitFor(() => expect(mockBuildDistractors).toHaveBeenCalled());
+      await vi.waitFor(() => expect(mockGetVocabularyQuestions).toHaveBeenCalled());
+      expect(Notify.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: 'warning',
+          message: expect.stringContaining('Not enough unique distractors'),
+        }),
+      );
+
+      expect(gameStore.questions[0]).toEqual(
+        expect.objectContaining({
+          correctAnswer: 'vocab-1',
+          word: expect.objectContaining({ id: 'vocab-1' }),
+        }),
+      );
+      expect(gameStore.gameActive).toBe(true);
+      wrapper.unmount();
+    });
+  });
+
+  describe('session recording', () => {
+    it('warns when queued SRS reviews cannot be saved after the game ends', async () => {
+      mockRecordBatchReview.mockRejectedValue(new Error('SRS save failed'));
+      const wrapper = await mountComponent();
+      const authStore = useAuthStore();
+      authStore.setUser(mockUser);
+      authStore.setSession({ user: { id: 'user-1', email: 'test@test.com' } } as any);
+      const gameStore = useGameStore();
+      const progressStore = useProgressStore();
+      const recordGameSessionSpy = vi
+        .spyOn(progressStore, 'recordGameSession')
+        .mockResolvedValue(undefined);
+
+      const startBtn = wrapper.find('[data-label="Start Quiz"]');
+      await startBtn.trigger('click');
+      await vi.waitFor(() => expect(gameStore.gameActive).toBe(true));
+
+      await (wrapper.vm as any).handleAnswer('vocab-1');
+
+      await vi.waitFor(() => expect(mockRecordBatchReview).toHaveBeenCalledTimes(1));
+      await vi.waitFor(() => expect(recordGameSessionSpy).toHaveBeenCalledTimes(1));
+      expect(Notify.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: 'warning',
+          message: expect.stringContaining('review progress could not be saved'),
+        }),
+      );
       wrapper.unmount();
     });
   });

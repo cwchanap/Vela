@@ -130,10 +130,41 @@ describe('parsePendingReviews', () => {
     expect(hadErrors).toBe(true);
   });
 
+  it('logs a warning when invalid reviews are removed and warnings are enabled', () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    const result = parsePendingReviews(
+      JSON.stringify([
+        { vocabulary_id: 'a', quality: 3 },
+        { vocabulary_id: 'b', quality: 99 },
+      ]),
+      { logWarnings: true },
+    );
+
+    expect(result).toEqual({
+      reviews: [{ vocabulary_id: 'a', quality: 3 }],
+      hadErrors: true,
+    });
+    expect(warnSpy).toHaveBeenCalledWith(
+      'Some pending flashcard reviews were invalid and removed.',
+    );
+    vi.restoreAllMocks();
+  });
+
   it('returns empty and hadErrors for non-array JSON', () => {
     const { reviews, hadErrors } = parsePendingReviews('{"key":"value"}');
     expect(reviews).toEqual([]);
     expect(hadErrors).toBe(true);
+  });
+
+  it('logs a warning when non-array JSON is provided and warnings are enabled', () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    const result = parsePendingReviews('{"key":"value"}', { logWarnings: true });
+
+    expect(result).toEqual({ reviews: [], hadErrors: true });
+    expect(warnSpy).toHaveBeenCalledWith('Invalid pending flashcard reviews data. Clearing.');
+    vi.restoreAllMocks();
   });
 
   it('returns empty and hadErrors for invalid JSON', () => {
