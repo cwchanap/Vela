@@ -10,6 +10,7 @@ const mockListeningGameService = {
 const mockGeneratePronunciation = vi.fn();
 const mockNotifyCreate = vi.fn();
 let ListeningGame: Component;
+const mountedWrappers: Array<ReturnType<typeof mount>> = [];
 
 const listeningStore = reactive({
   questions: [] as ListeningQuestion[],
@@ -240,7 +241,7 @@ function resetStores() {
 }
 
 function mountPage() {
-  return mount(ListeningGame, {
+  const wrapper = mount(ListeningGame, {
     global: {
       stubs: {
         QPage: {
@@ -276,6 +277,8 @@ function mountPage() {
       },
     },
   });
+  mountedWrappers.push(wrapper);
+  return wrapper;
 }
 
 describe('ListeningGame', () => {
@@ -312,6 +315,11 @@ describe('ListeningGame', () => {
   });
 
   afterEach(() => {
+    for (const wrapper of mountedWrappers.splice(0)) {
+      if (wrapper.exists()) {
+        wrapper.unmount();
+      }
+    }
     vi.restoreAllMocks();
   });
 

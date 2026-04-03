@@ -276,12 +276,17 @@ export async function saveTTSSettings(
 
   if (!response.ok) {
     let errorMessage = 'Failed to save TTS settings';
+    const responseClone = typeof response.clone === 'function' ? response.clone() : null;
     try {
       const error = await response.json();
       errorMessage = error.error || errorMessage;
     } catch {
-      const errorText = await response.text();
-      errorMessage = errorText || response.statusText || errorMessage;
+      try {
+        const errorText = responseClone ? await responseClone.text() : await response.text();
+        errorMessage = errorText || response.statusText || errorMessage;
+      } catch {
+        errorMessage = response.statusText || errorMessage;
+      }
     }
     throw new Error(errorMessage);
   }

@@ -632,23 +632,25 @@ describe('ttsService', () => {
     });
 
     it('should fall back to response.text() when response.json() throws', async () => {
-      mockFetch.mockResolvedValue({
-        ok: false,
-        statusText: 'Bad Request',
-        json: () => Promise.reject(new Error('not JSON')),
-        text: () => Promise.resolve('API key is invalid'),
-      });
+      mockFetch.mockResolvedValue(
+        new Response('API key is invalid', {
+          status: 400,
+          statusText: 'Bad Request',
+          headers: { 'Content-Type': 'text/plain' },
+        }),
+      );
 
       await expect(saveTTSSettings('elevenlabs', 'bad-key')).rejects.toThrow('API key is invalid');
     });
 
     it('should fall back to statusText when json() throws and text() is empty', async () => {
-      mockFetch.mockResolvedValue({
-        ok: false,
-        statusText: 'Unprocessable Entity',
-        json: () => Promise.reject(new Error('not JSON')),
-        text: () => Promise.resolve(''),
-      });
+      mockFetch.mockResolvedValue(
+        new Response('', {
+          status: 422,
+          statusText: 'Unprocessable Entity',
+          headers: { 'Content-Type': 'text/plain' },
+        }),
+      );
 
       await expect(saveTTSSettings('elevenlabs', 'bad-key')).rejects.toThrow(
         'Unprocessable Entity',

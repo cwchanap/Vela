@@ -39,8 +39,9 @@ type ConfigEnv = Record<string, unknown> | null | undefined;
 
 // Validation function to check required environment variables
 export const validateConfig = (env?: ConfigEnv) => {
+  const resolvedEnv = env === undefined ? import.meta.env : env;
+
   try {
-    const resolvedEnv = env === undefined ? import.meta.env : env;
     const requiredVars = [
       'VITE_COGNITO_USER_POOL_ID',
       'VITE_COGNITO_USER_POOL_CLIENT_ID',
@@ -61,6 +62,10 @@ export const validateConfig = (env?: ConfigEnv) => {
 
     return true;
   } catch (error) {
+    if (resolvedEnv?.PROD) {
+      throw error;
+    }
+
     console.warn('Config validation skipped:', error);
     return true; // Allow app to continue in development
   }

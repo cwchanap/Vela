@@ -161,16 +161,12 @@ describe('LLMService', () => {
 
     it('falls back to google when an unsupported provider name is forced in', () => {
       const service = new LLMService();
-      service.setProvider('google');
+      const initialCallCount = MockGoogleProvider.mock.calls.length;
 
-      // Exercise the defensive fallback branch with an invalid runtime value.
-      (service as any).provider = undefined;
-      (service as any).providers = {};
+      service.setProvider('unsupported-provider' as never);
 
-      const fallbackProvider = (service as any).initProvider('unsupported-provider');
-
-      expect(MockGoogleProvider).toHaveBeenCalled();
-      expect(fallbackProvider.name).toBe('google');
+      expect(MockGoogleProvider).toHaveBeenCalledTimes(initialCallCount + 1);
+      expect(service.getProviderName()).toBe('google');
     });
   });
 

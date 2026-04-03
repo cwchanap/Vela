@@ -100,6 +100,7 @@ describe('FlashcardInput', () => {
     await submitBtn.trigger('click');
 
     expect(wrapper.emitted('submit')?.[0]).toEqual(['anything', false]);
+    expect(wrapper.emitted('submit')?.length).toBe(1);
     expect(input.props('readonly')).toBe(true);
   });
 

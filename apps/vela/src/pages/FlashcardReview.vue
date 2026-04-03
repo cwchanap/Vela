@@ -158,7 +158,11 @@ function readPendingReviews(): ReviewInput[] {
 
   if (hadErrors) {
     if (reviews.length === 0) {
-      localStorage.removeItem(key);
+      try {
+        localStorage.removeItem(key);
+      } catch (storageError) {
+        console.error('Failed to clear invalid pending reviews:', storageError);
+      }
       return [];
     }
 

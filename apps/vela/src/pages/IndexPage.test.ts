@@ -379,18 +379,22 @@ describe('IndexPage', () => {
 
     it('shows the generic achievements error message for non-Error failures', async () => {
       const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
-      vi.mocked(httpJsonAuth).mockRejectedValueOnce('boom');
+      try {
+        vi.mocked(httpJsonAuth).mockRejectedValueOnce('boom');
 
-      wrapper = mountComponent({
-        user: authenticatedUser,
-        isAuthenticated: true,
-      });
-      await flushPromises();
+        wrapper = mountComponent({
+          user: authenticatedUser,
+          isAuthenticated: true,
+        });
+        await flushPromises();
 
-      expect(consoleErrorSpy).toHaveBeenCalledWith('Failed to fetch achievements:', 'boom');
-      expect(wrapper.vm.achievementsError).toBe('Failed to load achievements');
-      expect(wrapper.text()).toContain('Failed to load achievements');
-      expect(wrapper.text()).toContain('Retry');
+        expect(consoleErrorSpy).toHaveBeenCalledWith('Failed to fetch achievements:', 'boom');
+        expect(wrapper.vm.achievementsError).toBe('Failed to load achievements');
+        expect(wrapper.text()).toContain('Failed to load achievements');
+        expect(wrapper.text()).toContain('Retry');
+      } finally {
+        consoleErrorSpy.mockRestore();
+      }
     });
 
     it('ignores AbortError failures when fetching achievements', async () => {

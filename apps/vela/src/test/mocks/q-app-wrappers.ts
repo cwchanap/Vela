@@ -1,5 +1,5 @@
 // Mock for Quasar's #q-app/wrappers
-// defineRouter is just a wrapper that calls the function passed to it
+// defineRouter returns the provided factory unchanged so tests can decide when to invoke it.
 export function defineRouter(fn: Function) {
   return fn;
 }
