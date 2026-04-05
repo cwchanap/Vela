@@ -103,7 +103,8 @@ describe('ListeningSetup', () => {
       await flushPromises();
 
       const startBtn = wrapper.findAll('button').find((b) => b.text().includes('Start Listening'));
-      await startBtn?.trigger('click');
+      expect(startBtn).toBeDefined();
+      await startBtn!.trigger('click');
 
       expect(wrapper.emitted('start')).toHaveLength(1);
       expect(wrapper.emitted('start')![0]).toEqual([
@@ -201,7 +202,8 @@ describe('ListeningSetup', () => {
 
       // Click Retry
       const retryBtn = wrapper.findAll('button').find((b) => b.text().includes('Retry'));
-      await retryBtn?.trigger('click');
+      expect(retryBtn).toBeDefined();
+      await retryBtn!.trigger('click');
       await flushPromises();
 
       expect(wrapper.text()).toContain('Start Listening');
@@ -221,7 +223,8 @@ describe('ListeningSetup', () => {
       await flushPromises();
 
       const retryBtn = wrapper.findAll('button').find((b) => b.text().includes('Retry'));
-      await retryBtn?.trigger('click');
+      expect(retryBtn).toBeDefined();
+      await retryBtn!.trigger('click');
       // Still loading - spinner should appear
       expect(wrapper.find('.spinner-stub').exists()).toBe(true);
 
@@ -240,7 +243,8 @@ describe('ListeningSetup', () => {
       await flushPromises();
 
       const retryBtn = wrapper.findAll('button').find((b) => b.text().includes('Retry'));
-      await retryBtn?.trigger('click');
+      expect(retryBtn).toBeDefined();
+      await retryBtn!.trigger('click');
       await flushPromises();
 
       expect(wrapper.text()).toContain('Could not check text-to-speech');
@@ -256,7 +260,8 @@ describe('ListeningSetup', () => {
       await flushPromises();
 
       const retryBtn = wrapper.findAll('button').find((b) => b.text().includes('Retry'));
-      await retryBtn?.trigger('click');
+      expect(retryBtn).toBeDefined();
+      await retryBtn!.trigger('click');
       await flushPromises();
 
       expect(wrapper.text()).toContain('Text-to-speech is required');
@@ -272,7 +277,8 @@ describe('ListeningSetup', () => {
       await flushPromises();
 
       const retryBtn = wrapper.findAll('button').find((b) => b.text().includes('Retry'));
-      await retryBtn?.trigger('click');
+      expect(retryBtn).toBeDefined();
+      await retryBtn!.trigger('click');
       await flushPromises();
 
       expect(mockGetTTSSettings).toHaveBeenCalledTimes(2);

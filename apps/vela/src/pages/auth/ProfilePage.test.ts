@@ -270,7 +270,7 @@ describe('ProfilePage', () => {
       wrapper.unmount();
     });
 
-    it('calculates next level XP as 0 when experience is an exact multiple of 1000', () => {
+    it('calculates next level XP as 1000 when experience is an exact multiple of 1000', () => {
       const authStore = useAuthStore();
       authStore.setUser({ ...mockUser, total_experience: 2000 });
       authStore.setSession({ user: { id: 'user-1', email: 'test@example.com' } });

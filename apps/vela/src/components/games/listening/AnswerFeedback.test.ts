@@ -85,13 +85,13 @@ describe('AnswerFeedback', () => {
 
   describe('reading field', () => {
     it('shows reading when provided', () => {
-      const wrapper = mountComponent({ reading: 'ねこ' });
-      expect(wrapper.text()).toContain('ねこ');
+      const wrapper = mountComponent({ reading: 'いぬ' });
+      expect(wrapper.text()).toContain('いぬ');
     });
 
     it('hides reading when not provided', () => {
       const wrapper = mountComponent({ reading: undefined });
-      expect(wrapper.text()).not.toContain('ねこ');
+      expect(wrapper.text()).not.toContain('いぬ');
     });
   });
 
@@ -133,13 +133,13 @@ describe('AnswerFeedback', () => {
 
   describe('japanese text and translation', () => {
     it('renders the Japanese text', () => {
-      const wrapper = mountComponent({ japaneseText: '猫' });
-      expect(wrapper.text()).toContain('猫');
+      const wrapper = mountComponent({ japaneseText: '犬' });
+      expect(wrapper.text()).toContain('犬');
     });
 
     it('renders the English translation', () => {
-      const wrapper = mountComponent({ englishTranslation: 'cat' });
-      expect(wrapper.text()).toContain('cat');
+      const wrapper = mountComponent({ englishTranslation: 'dog' });
+      expect(wrapper.text()).toContain('dog');
     });
   });
 });
