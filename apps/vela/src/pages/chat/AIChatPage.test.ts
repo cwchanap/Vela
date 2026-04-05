@@ -634,6 +634,69 @@ describe('AIChatPage', () => {
       );
       expect(chatStore.messages.length).toBeGreaterThan(0);
     });
+
+    it('skips prepending greeting when loaded thread already starts with greeting', async () => {
+      const GREETING_MESSAGE =
+        'こんにちは！日本語学習をお手伝いします。What would you like to practice today?';
+
+      const mockThreads = [createMockThread({ messageCount: 2 })];
+      const mockMessages = [
+        // First message IS the greeting (is_user=false, message=GREETING_MESSAGE)
+        createMockMessage(GREETING_MESSAGE, false),
+        createMockMessage('How do I say hello?', true, 1000),
+      ];
+
+      mockAuthSession();
+      fetchMock
+        .mockResolvedValueOnce({
+          ok: true,
+          json: async () => ({ threads: mockThreads }),
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          json: async () => ({ items: mockMessages }),
+        });
+
+      const wrapper = mountComponent();
+      const historyButton = wrapper.find('[data-testid="llm-chat-history"]');
+      await historyButton.trigger('click');
+      await flushPromises();
+
+      const threadItem = wrapper.find('[data-testid="llm-chat-thread-item"]');
+      await threadItem.trigger('click');
+      await flushPromises();
+
+      const chatStore = useChatStore();
+      // Should have exactly 2 messages, not 3 (no extra greeting prepended)
+      expect(chatStore.messages.length).toBe(2);
+      expect(chatStore.messages[0]!.content).toBe(GREETING_MESSAGE);
+    });
+
+    it('logs an error when loading thread messages fails', async () => {
+      const mockThreads = [createMockThread({ messageCount: 1 })];
+      const networkError = new Error('Network error loading messages');
+      const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+      mockAuthSession();
+      fetchMock
+        .mockResolvedValueOnce({
+          ok: true,
+          json: async () => ({ threads: mockThreads }),
+        })
+        .mockRejectedValueOnce(networkError);
+
+      const wrapper = mountComponent();
+      const historyButton = wrapper.find('[data-testid="llm-chat-history"]');
+      await historyButton.trigger('click');
+      await flushPromises();
+
+      const threadItem = wrapper.find('[data-testid="llm-chat-thread-item"]');
+      await threadItem.trigger('click');
+      await flushPromises();
+
+      expect(consoleErrorSpy).toHaveBeenCalledWith(networkError);
+      consoleErrorSpy.mockRestore();
+    });
   });
 
   describe('Delete Thread Functionality', () => {
@@ -747,6 +810,41 @@ describe('AIChatPage', () => {
       // mocking is unreliable in unit tests. The component does call $q.notify
       // in the confirmDelete error handler, but the Quasar injection system
       // doesn't pick up our mock properly. This is better tested in E2E tests.
+    });
+
+    it('should start a new chat when the currently-active thread is deleted', async () => {
+      const chatStore = useChatStore();
+      const activeThreadId = 'thread-active';
+      chatStore.startNewChat();
+      // Set chatId to match the thread we'll delete
+      (chatStore as any).chatId = activeThreadId;
+
+      mockAuthSession();
+      fetchMock
+        .mockResolvedValueOnce({
+          ok: true,
+          json: async () => ({ threads: [createMockThread({ ThreadId: activeThreadId })] }),
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          json: async () => ({}),
+        });
+
+      const wrapper = mountComponent();
+      const historyButton = wrapper.find('[data-testid="llm-chat-history"]');
+      await historyButton.trigger('click');
+      await flushPromises();
+
+      const deleteButton = wrapper.find('[data-testid="llm-chat-delete-thread"]');
+      await deleteButton.trigger('click');
+      await wrapper.vm.$nextTick();
+
+      const confirmButton = wrapper.find('[data-testid="llm-chat-confirm-delete"]');
+      await confirmButton.trigger('click');
+      await flushPromises();
+
+      // After deleting the active thread, a new chat should be started
+      expect(chatStore.chatId).not.toBe(activeThreadId);
     });
   });
 

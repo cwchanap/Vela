@@ -229,6 +229,35 @@ describe('SettingsPage', () => {
       await wrapper.vm.$nextTick();
       expect(wrapper.vm.ttsVoiceId).toBe('');
     });
+
+    it('clears gemini voice when switching to elevenlabs', async () => {
+      wrapper.vm.ttsProvider = 'gemini';
+      await wrapper.vm.$nextTick();
+      // ttsVoiceId should be 'Kore' (default gemini voice)
+      expect(wrapper.vm.ttsVoiceId).toBe('Kore');
+      wrapper.vm.ttsProvider = 'elevenlabs';
+      await wrapper.vm.$nextTick();
+      expect(wrapper.vm.ttsVoiceId).toBe('');
+    });
+
+    it('clears openai model when switching to elevenlabs', async () => {
+      wrapper.vm.ttsProvider = 'openai';
+      await wrapper.vm.$nextTick();
+      // openai sets default model 'tts-1'
+      expect(wrapper.vm.ttsModel).toBe('tts-1');
+      wrapper.vm.ttsProvider = 'elevenlabs';
+      await wrapper.vm.$nextTick();
+      expect(wrapper.vm.ttsModel).toBe('');
+    });
+
+    it('clears gemini model when switching to elevenlabs', async () => {
+      wrapper.vm.ttsProvider = 'gemini';
+      await wrapper.vm.$nextTick();
+      expect(wrapper.vm.ttsModel).toBe('gemini-2.5-flash-preview-tts');
+      wrapper.vm.ttsProvider = 'elevenlabs';
+      await wrapper.vm.$nextTick();
+      expect(wrapper.vm.ttsModel).toBe('');
+    });
   });
 
   describe('toggleDarkMode', () => {
@@ -340,6 +369,25 @@ describe('SettingsPage', () => {
       expect(wrapper.vm.ttsModel).toBe('eleven_multilingual_v2');
       expect(wrapper.vm.hasTTSKey).toBe(true);
     });
+
+    it('falls back to elevenlabs when loaded query data has no provider', async () => {
+      wrapper.unmount();
+      vi.mocked(useTTSSettingsQuery).mockReturnValue({
+        data: {
+          value: {
+            provider: null,
+            voiceId: 'voice-abc',
+            model: null,
+            hasApiKey: false,
+          },
+        },
+      } as any);
+
+      wrapper = mountComponent();
+      await flushPromises();
+
+      expect(wrapper.vm.ttsProvider).toBe('elevenlabs');
+    });
   });
 
   describe('saveSettingsHandler', () => {
@@ -442,6 +490,81 @@ describe('SettingsPage', () => {
         message: 'Failed to save TTS settings',
         position: 'top',
       });
+    });
+
+    it('shows the error message when the mutation fails with an Error instance', async () => {
+      const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      const saveError = new Error('Custom TTS error message');
+      const mutate = vi.fn((_payload, options: any) => {
+        options.onError(saveError);
+      });
+
+      wrapper.unmount();
+      vi.mocked(useUpdateTTSSettingsMutation).mockReturnValue({ mutate } as any);
+      wrapper = mountComponent();
+
+      authStore.user = {
+        id: 'user-1',
+        email: 'test@example.com',
+        avatar_url: null,
+        preferences: null,
+      };
+      wrapper.vm.ttsApiKeyInput = 'tts-key';
+
+      await wrapper.vm.saveSettingsHandler();
+
+      expect(consoleErrorSpy).toHaveBeenCalledWith('Error saving TTS settings:', saveError);
+      expect(Notify.create).toHaveBeenCalledWith({
+        type: 'negative',
+        message: 'Custom TTS error message',
+        position: 'top',
+      });
+    });
+  });
+
+  describe('API key visibility toggles', () => {
+    it('showApiKey defaults to false (password input)', () => {
+      expect(wrapper.vm.showApiKey).toBe(false);
+    });
+
+    it('toggles showApiKey to true when clicked', async () => {
+      wrapper.vm.showApiKey = true;
+      await wrapper.vm.$nextTick();
+      expect(wrapper.vm.showApiKey).toBe(true);
+    });
+
+    it('showTtsApiKey defaults to false (password input)', () => {
+      expect(wrapper.vm.showTtsApiKey).toBe(false);
+    });
+
+    it('toggles showTtsApiKey to true when clicked', async () => {
+      wrapper.vm.showTtsApiKey = true;
+      await wrapper.vm.$nextTick();
+      expect(wrapper.vm.showTtsApiKey).toBe(true);
+    });
+  });
+
+  describe('currentUserId computed', () => {
+    it('returns user id when user is set', () => {
+      authStore.user = {
+        id: 'user-from-profile',
+        email: 'a@b.com',
+        avatar_url: null,
+        preferences: null,
+      };
+      expect(wrapper.vm.currentUserId).toBe('user-from-profile');
+    });
+
+    it('falls back to session user id when user object has no id', () => {
+      authStore.user = null;
+      authStore.setSession({ user: { id: 'session-user-id', email: 'x@y.com' } });
+      expect(wrapper.vm.currentUserId).toBe('session-user-id');
+    });
+
+    it('returns null when neither user nor session is set', () => {
+      authStore.user = null;
+      authStore.setSession(null);
+      expect(wrapper.vm.currentUserId).toBeNull();
     });
   });
 });

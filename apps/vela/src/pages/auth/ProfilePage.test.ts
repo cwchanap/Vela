@@ -249,4 +249,44 @@ describe('ProfilePage', () => {
       wrapper.unmount();
     });
   });
+
+  describe('profile statistics display', () => {
+    it('displays the user experience value', () => {
+      const authStore = useAuthStore();
+      authStore.setUser({ ...mockUser, total_experience: 2500 });
+      authStore.setSession({ user: { id: 'user-1', email: 'test@example.com' } });
+      const wrapper = mountComponent();
+      // userExperience = 2500
+      expect(wrapper.text()).toContain('2500');
+      wrapper.unmount();
+    });
+
+    it('displays the user streak value', () => {
+      const authStore = useAuthStore();
+      authStore.setUser({ ...mockUser, learning_streak: 7 });
+      authStore.setSession({ user: { id: 'user-1', email: 'test@example.com' } });
+      const wrapper = mountComponent();
+      expect(wrapper.text()).toContain('7');
+      wrapper.unmount();
+    });
+
+    it('calculates next level XP as 0 when experience is an exact multiple of 1000', () => {
+      const authStore = useAuthStore();
+      authStore.setUser({ ...mockUser, total_experience: 2000 });
+      authStore.setSession({ user: { id: 'user-1', email: 'test@example.com' } });
+      const wrapper = mountComponent();
+      // currentLevelXP = 2000 % 1000 = 0, nextLevelXP = 1000 - 0 = 1000
+      expect((wrapper.vm as any).nextLevelXP).toBe(1000);
+      wrapper.unmount();
+    });
+
+    it('calculates level progress as 0 when experience is an exact multiple', () => {
+      const authStore = useAuthStore();
+      authStore.setUser({ ...mockUser, total_experience: 3000 });
+      authStore.setSession({ user: { id: 'user-1', email: 'test@example.com' } });
+      const wrapper = mountComponent();
+      expect((wrapper.vm as any).levelProgress).toBe(0);
+      wrapper.unmount();
+    });
+  });
 });

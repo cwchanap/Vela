@@ -261,6 +261,12 @@ describe('MainLayout – normalizePath', () => {
     const vm = mountComponent().vm as any;
     expect(vm.normalizePath('  /foo  ')).toBe('/foo');
   });
+
+  it('falls back to raw.split when URL constructor throws (e.g. null byte)', () => {
+    const vm = mountComponent().vm as any;
+    // A null byte makes new URL() throw; the catch splits on ?/# and returns the first segment
+    expect(vm.normalizePath('\x00')).toBe('/');
+  });
 });
 
 describe('MainLayout – isActiveRoute', () => {
