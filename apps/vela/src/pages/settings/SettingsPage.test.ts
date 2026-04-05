@@ -494,31 +494,35 @@ describe('SettingsPage', () => {
 
     it('shows the error message when the mutation fails with an Error instance', async () => {
       const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
-      const saveError = new Error('Custom TTS error message');
-      const mutate = vi.fn((_payload, options: any) => {
-        options.onError(saveError);
-      });
+      try {
+        const saveError = new Error('Custom TTS error message');
+        const mutate = vi.fn((_payload, options: any) => {
+          options.onError(saveError);
+        });
 
-      wrapper.unmount();
-      vi.mocked(useUpdateTTSSettingsMutation).mockReturnValue({ mutate } as any);
-      wrapper = mountComponent();
+        wrapper.unmount();
+        vi.mocked(useUpdateTTSSettingsMutation).mockReturnValue({ mutate } as any);
+        wrapper = mountComponent();
 
-      authStore.user = {
-        id: 'user-1',
-        email: 'test@example.com',
-        avatar_url: null,
-        preferences: null,
-      };
-      wrapper.vm.ttsApiKeyInput = 'tts-key';
+        authStore.user = {
+          id: 'user-1',
+          email: 'test@example.com',
+          avatar_url: null,
+          preferences: null,
+        };
+        wrapper.vm.ttsApiKeyInput = 'tts-key';
 
-      await wrapper.vm.saveSettingsHandler();
+        await wrapper.vm.saveSettingsHandler();
 
-      expect(consoleErrorSpy).toHaveBeenCalledWith('Error saving TTS settings:', saveError);
-      expect(Notify.create).toHaveBeenCalledWith({
-        type: 'negative',
-        message: 'Custom TTS error message',
-        position: 'top',
-      });
+        expect(consoleErrorSpy).toHaveBeenCalledWith('Error saving TTS settings:', saveError);
+        expect(Notify.create).toHaveBeenCalledWith({
+          type: 'negative',
+          message: 'Custom TTS error message',
+          position: 'top',
+        });
+      } finally {
+        consoleErrorSpy.mockRestore();
+      }
     });
   });
 

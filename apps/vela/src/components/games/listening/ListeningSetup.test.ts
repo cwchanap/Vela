@@ -120,9 +120,8 @@ describe('ListeningSetup', () => {
     it('shows loading indicator on the Start button when isStarting=true', async () => {
       const wrapper = mountComponent({ isStarting: true });
       await flushPromises();
-      // Quasar hides the button content and shows a spinner when loading
-      const html = wrapper.html();
-      expect(html).toContain('q-btn__content--hidden');
+      // Quasar hides the button content and shows a spinner when loading prop is true
+      expect(wrapper.html()).toContain('q-btn__content--hidden');
       wrapper.unmount();
     });
   });
