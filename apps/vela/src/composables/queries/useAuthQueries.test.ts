@@ -340,5 +340,42 @@ describe('useAuthQueries', () => {
       // The cache should remain empty — no optimistic write was applied
       expect(queryClient.getQueryData(authKeys.profile('u2'))).toBeUndefined();
     });
+
+    it('normalizes empty-string username and avatar_url to null in optimistic update', async () => {
+      mockAuthService.updateUserProfile.mockResolvedValueOnce({ success: true });
+      const { useUpdateProfileMutation, authKeys } = await import('./useAuthQueries');
+      const { result, queryClient } = withQueryClient(() => useUpdateProfileMutation());
+
+      const previousProfile = {
+        id: 'u3',
+        username: 'existing',
+        email: 'c@d.com',
+        avatar_url: 'https://old.avatar/img.png',
+        native_language: 'en',
+        current_level: 1,
+        total_experience: 0,
+        learning_streak: 0,
+        last_activity: null,
+        preferences: { dailyGoal: 10, difficulty: 'Beginner' as const, notifications: false },
+        created_at: '2024-01-01',
+        updated_at: '2024-01-01',
+      };
+
+      queryClient.setQueryData(authKeys.profile('u3'), previousProfile);
+
+      const mutatePromise = result.mutateAsync({
+        userId: 'u3',
+        profileData: { username: '', avatar_url: '' },
+      });
+
+      await flushPromises();
+
+      const optimistic = queryClient.getQueryData(authKeys.profile('u3')) as typeof previousProfile;
+      // Empty strings should be coerced to null via the `|| null` branch
+      expect(optimistic.username).toBeNull();
+      expect(optimistic.avatar_url).toBeNull();
+
+      await mutatePromise;
+    });
   });
 });

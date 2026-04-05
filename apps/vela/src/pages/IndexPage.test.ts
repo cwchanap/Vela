@@ -293,6 +293,26 @@ describe('IndexPage', () => {
       await wrapper.vm.handleActionKeydown('/games/vocabulary', event as any);
       expect(routerPushSpy).not.toHaveBeenCalled();
     });
+
+    it('navigateTo logs error and notifies for non-duplicated navigation failures', async () => {
+      wrapper = mountComponent();
+      const notifyMock = vi.fn();
+      (wrapper.vm as any).$q.notify = notifyMock;
+      const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      const navigationError = new Error('Navigation aborted');
+      vi.spyOn(router, 'push').mockRejectedValueOnce(navigationError);
+
+      await wrapper.vm.navigateTo('/games');
+
+      expect(consoleErrorSpy).toHaveBeenCalledWith('Navigation failed:', navigationError);
+      expect(notifyMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: 'negative',
+          message: 'Navigation failed. Please try again.',
+        }),
+      );
+      consoleErrorSpy.mockRestore();
+    });
   });
 
   describe('achievements loading', () => {

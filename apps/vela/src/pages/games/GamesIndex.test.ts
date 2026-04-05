@@ -98,6 +98,13 @@ describe('GamesIndex', () => {
       await wrapper.vm.$nextTick();
       expect(wrapper.vm.challengeProgress).toBeCloseTo(1 / 3);
     });
+    it('returns 0 when ratio is non-finite (e.g. Infinity / goal)', async () => {
+      wrapper = mountComponent();
+      wrapper.vm.gamesCompletedToday = Infinity;
+      wrapper.vm.dailyChallengeGoal = 1;
+      await wrapper.vm.$nextTick();
+      expect(wrapper.vm.challengeProgress).toBe(0);
+    });
   });
 
   describe('challengeText computed', () => {
