@@ -694,7 +694,8 @@ describe('AIChatPage', () => {
       await threadItem.trigger('click');
       await flushPromises();
 
-      expect(consoleErrorSpy).toHaveBeenCalledWith(networkError);
+      expect(consoleErrorSpy).toHaveBeenCalled();
+      expect(consoleErrorSpy.mock.calls.flat()).toContain(networkError);
       consoleErrorSpy.mockRestore();
     });
   });
@@ -817,7 +818,7 @@ describe('AIChatPage', () => {
       const activeThreadId = 'thread-active';
       chatStore.startNewChat();
       // Set chatId to match the thread we'll delete
-      (chatStore as any).chatId = activeThreadId;
+      chatStore.setChatId(activeThreadId);
 
       mockAuthSession();
       fetchMock

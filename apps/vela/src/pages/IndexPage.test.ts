@@ -299,19 +299,22 @@ describe('IndexPage', () => {
       const notifyMock = vi.fn();
       (wrapper.vm as any).$q.notify = notifyMock;
       const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
-      const navigationError = new Error('Navigation aborted');
-      vi.spyOn(router, 'push').mockRejectedValueOnce(navigationError);
+      try {
+        const navigationError = new Error('Navigation aborted');
+        vi.spyOn(router, 'push').mockRejectedValueOnce(navigationError);
 
-      await wrapper.vm.navigateTo('/games');
+        await wrapper.vm.navigateTo('/games');
 
-      expect(consoleErrorSpy).toHaveBeenCalledWith('Navigation failed:', navigationError);
-      expect(notifyMock).toHaveBeenCalledWith(
-        expect.objectContaining({
-          type: 'negative',
-          message: 'Navigation failed. Please try again.',
-        }),
-      );
-      consoleErrorSpy.mockRestore();
+        expect(consoleErrorSpy).toHaveBeenCalledWith('Navigation failed:', navigationError);
+        expect(notifyMock).toHaveBeenCalledWith(
+          expect.objectContaining({
+            type: 'negative',
+            message: 'Navigation failed. Please try again.',
+          }),
+        );
+      } finally {
+        consoleErrorSpy.mockRestore();
+      }
     });
   });
 

@@ -527,7 +527,7 @@ describe('SettingsPage', () => {
       expect(wrapper.vm.showApiKey).toBe(false);
     });
 
-    it('toggles showApiKey to true when clicked', async () => {
+    it('showApiKey can be set to true', async () => {
       wrapper.vm.showApiKey = true;
       await wrapper.vm.$nextTick();
       expect(wrapper.vm.showApiKey).toBe(true);
@@ -537,7 +537,7 @@ describe('SettingsPage', () => {
       expect(wrapper.vm.showTtsApiKey).toBe(false);
     });
 
-    it('toggles showTtsApiKey to true when clicked', async () => {
+    it('showTtsApiKey can be set to true', async () => {
       wrapper.vm.showTtsApiKey = true;
       await wrapper.vm.$nextTick();
       expect(wrapper.vm.showTtsApiKey).toBe(true);

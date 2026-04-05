@@ -262,10 +262,22 @@ describe('MainLayout – normalizePath', () => {
     expect(vm.normalizePath('  /foo  ')).toBe('/foo');
   });
 
-  it('falls back to raw.split when URL constructor throws (e.g. null byte)', () => {
+  it('falls back to raw.split when URL constructor throws', () => {
     const vm = mountComponent().vm as any;
-    // A null byte makes new URL() throw; the catch splits on ?/# and returns the first segment
-    expect(vm.normalizePath('\x00')).toBe('/');
+    const OriginalURL = globalThis.URL;
+    vi.stubGlobal(
+      'URL',
+      class {
+        constructor() {
+          throw new TypeError('Invalid URL');
+        }
+      } as unknown as typeof URL,
+    );
+    try {
+      expect(vm.normalizePath('/foo?x=1#frag')).toBe('/foo');
+    } finally {
+      vi.stubGlobal('URL', OriginalURL);
+    }
   });
 });
 
