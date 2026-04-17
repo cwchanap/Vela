@@ -72,6 +72,12 @@ describe('POST /from-word', () => {
     expect(typeof body.vocabulary_id).toBe('string');
     expect(mockVocabulary.create).toHaveBeenCalledTimes(1);
     expect(mockUserVocabularyProgress.initializeProgress).toHaveBeenCalledTimes(1);
+    expect(mockVocabulary.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        japanese_word: '食べる',
+        source_url: 'https://example.com',
+      }),
+    );
   });
 
   test('reuses existing vocabulary entry when word already exists', async () => {

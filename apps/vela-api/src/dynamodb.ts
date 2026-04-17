@@ -446,6 +446,7 @@ export const vocabulary = {
     hiragana?: string;
     english_translation: string;
     example_sentence_jp?: string;
+    source_url?: string;
     jlpt_level?: number;
     created_at: string;
   }): Promise<void> {
