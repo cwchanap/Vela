@@ -417,6 +417,48 @@ export const vocabulary = {
     }
     return [];
   },
+
+  /**
+   * Find a vocabulary item by its Japanese word (full scan with filter).
+   * Returns the first matching item, or undefined if not found.
+   */
+  async findByWord(japaneseWord: string): Promise<Record<string, unknown> | undefined> {
+    try {
+      const command = new ScanCommand({
+        TableName: TABLE_NAMES.VOCABULARY,
+        FilterExpression: 'japanese_word = :word',
+        ExpressionAttributeValues: { ':word': japaneseWord },
+        Limit: 1,
+      });
+      const response = await docClient.send(command);
+      return response.Items?.[0] as Record<string, unknown> | undefined;
+    } catch (error) {
+      handleDynamoError(error);
+    }
+  },
+
+  /**
+   * Create a new vocabulary entry.
+   */
+  async create(item: {
+    id: string;
+    japanese_word: string;
+    hiragana?: string;
+    english_translation: string;
+    example_sentence_jp?: string;
+    jlpt_level?: number;
+    created_at: string;
+  }): Promise<void> {
+    try {
+      const command = new PutCommand({
+        TableName: TABLE_NAMES.VOCABULARY,
+        Item: item,
+      });
+      await docClient.send(command);
+    } catch (error) {
+      handleDynamoError(error);
+    }
+  },
 };
 
 // Sentences operations
