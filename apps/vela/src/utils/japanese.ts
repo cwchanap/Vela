@@ -1,3 +1,5 @@
+import type { Token } from '@vela/common';
+
 // Japanese language utilities
 
 // Character type detection
@@ -174,3 +176,25 @@ export const parseFurigana = (text: string): FuriganaSegment[] => {
 
   return segments;
 };
+
+const CONTENT_POS = new Set(['名詞', '動詞', '形容詞']);
+const KANJI_RE = /[\u4E00-\u9FAF]/;
+
+/**
+ * Compute a JLPT-style difficulty label from kuromoji tokens.
+ * Counts kanji-containing content words (名詞/動詞/形容詞):
+ *   0 → N5, 1–2 → N4, 3–4 → N3, 5–7 → N2, 8+ → N1
+ * Returns "—" when there are no content words at all.
+ */
+export function computeDifficulty(tokens: Token[]): string {
+  const contentWords = tokens.filter((t) => CONTENT_POS.has(t.pos));
+  if (contentWords.length === 0) return '—';
+
+  const kanjiCount = contentWords.filter((t) => KANJI_RE.test(t.surface_form)).length;
+
+  if (kanjiCount === 0) return 'N5';
+  if (kanjiCount <= 2) return 'N4';
+  if (kanjiCount <= 4) return 'N3';
+  if (kanjiCount <= 7) return 'N2';
+  return 'N1';
+}

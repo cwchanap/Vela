@@ -8,7 +8,9 @@ import {
   hiraganaToRomaji,
   assessDifficulty,
   parseFurigana,
+  computeDifficulty,
 } from './japanese';
+import type { Token } from '@vela/common';
 
 describe('isHiragana', () => {
   it('returns true for hiragana characters', () => {
@@ -278,5 +280,62 @@ describe('parseFurigana', () => {
   it('does not set reading field', () => {
     const result = parseFurigana('猫');
     expect(result[0]?.reading).toBeUndefined();
+  });
+});
+
+describe('computeDifficulty', () => {
+  const makeToken = (pos: string, surface: string): Token => ({
+    surface_form: surface,
+    reading: surface,
+    dictionary_form: surface,
+    pos,
+    pos_detail_1: '一般',
+  });
+
+  it('returns — when there are no content words', () => {
+    const tokens = [makeToken('助詞', 'は'), makeToken('記号', '。')];
+    expect(computeDifficulty(tokens)).toBe('—');
+  });
+
+  it('returns N5 when content words have no kanji', () => {
+    const tokens = [makeToken('名詞', 'これ'), makeToken('助詞', 'は')];
+    expect(computeDifficulty(tokens)).toBe('N5');
+  });
+
+  it('returns N4 for 1 kanji content word', () => {
+    expect(computeDifficulty([makeToken('名詞', '猫')])).toBe('N4');
+  });
+
+  it('returns N4 for 2 kanji content words', () => {
+    expect(computeDifficulty([makeToken('名詞', '猫'), makeToken('動詞', '食べる')])).toBe('N4');
+  });
+
+  it('returns N3 for 3–4 kanji content words', () => {
+    const tokens = [
+      makeToken('名詞', '猫'),
+      makeToken('動詞', '食べる'),
+      makeToken('名詞', '学校'),
+    ];
+    expect(computeDifficulty(tokens)).toBe('N3');
+  });
+
+  it('returns N2 for 5–7 kanji content words', () => {
+    const tokens = Array.from({ length: 5 }, (_, i) => makeToken('名詞', `漢字${i}`));
+    expect(computeDifficulty(tokens)).toBe('N2');
+  });
+
+  it('returns N1 for 8+ kanji content words', () => {
+    const tokens = Array.from({ length: 8 }, (_, i) => makeToken('名詞', `漢字${i}`));
+    expect(computeDifficulty(tokens)).toBe('N1');
+  });
+
+  it('ignores particles and punctuation', () => {
+    const tokens = [
+      makeToken('名詞', '日本'), // kanji content word
+      makeToken('助詞', 'の'), // particle — ignored
+      makeToken('動詞', '行く'), // content word, no kanji — doesn't count
+      makeToken('記号', '。'), // punctuation — ignored
+    ];
+    expect(computeDifficulty(tokens)).toBe('N4'); // 1 kanji content word
   });
 });
