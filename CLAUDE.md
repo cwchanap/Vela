@@ -60,6 +60,8 @@ bun run zip           # Create distribution zip
 bun run compile       # Type-check via vue-tsc
 ```
 
+WXT uses an `entrypoints/` directory: `popup/` (Vue SPA), `background.ts` (service worker), `content.ts` (content script). Shared utilities live in `entrypoints/utils/`.
+
 ### CDK (from packages/cdk/)
 
 ```bash
@@ -82,8 +84,8 @@ bun run build --filter=@vela/common
 ### Vela App
 
 - **Boot**: `src/boot/query.ts` initializes TanStack Query (stale: 5m, gc: 10m); `src/boot/main.ts` is minimal
-- **State**: Pinia stores in `src/stores/` — `auth.ts` manages the full Cognito session lifecycle
-- **Services**: `src/services/` contains business logic; components call services, not the API directly
+- **State**: Pinia stores in `src/stores/` — `auth.ts` manages the full Cognito session lifecycle via AWS Amplify (`aws-amplify/auth`)
+- **Layer order**: components → composables (`src/composables/queries/`) → services (`src/services/`) → API. Composables expose TanStack Query hooks; services contain the raw HTTP/Amplify calls.
 - **Config**: `src/config/index.ts` validates all env vars at startup — misconfigured env fails fast
 - **Routing**: Protected routes use `requiresAuth: true` meta; guest-only use `requiresGuest: true`
 
@@ -126,6 +128,7 @@ StaticWebStack → [all above]   # CloudFront + S3 static hosting
 - **Vitest** uses jsdom environment with globals enabled; setup file at `src/test/setup.ts`
 - **Vitest aliases**: `@vela/common` is aliased directly to the source (`packages/common/src/index.ts`) — no build step needed for unit tests
 - **API tests** use Bun's built-in test runner (no Vitest)
+- **Composable testing**: use `withQueryClient` from `src/test-utils/withQueryClient.ts` to mount composables inside a Vue component with a fresh isolated QueryClient (retry and gcTime set to 0)
 
 ## Environment Variables
 
