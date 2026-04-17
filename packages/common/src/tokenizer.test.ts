@@ -13,6 +13,11 @@ vi.mock('kuromoji', () => ({
   },
 }));
 
+// NOTE: The tokenizer uses a module-level singleton. All tests in this describe
+// block share the same initialized tokenizer instance. The mock's build() is
+// synchronous, so the singleton resolves on first call and is reused thereafter.
+// Tests that need a fresh singleton (e.g., error paths) must use vi.resetModules()
+// and re-import the module — see the "builder error path" describe block below.
 const { tokenize } = await import('./tokenizer');
 
 describe('tokenize', () => {
@@ -76,5 +81,26 @@ describe('tokenize', () => {
     const result = await tokenize('笑');
     expect(result[0]?.reading).toBe('笑');
     expect(result[0]?.dictionary_form).toBe('笑');
+  });
+});
+
+describe('tokenize — builder error path', () => {
+  it('rejects when kuromoji builder fails to load dictionary', async () => {
+    vi.resetModules();
+    vi.doMock('kuromoji', () => ({
+      default: {
+        builder: vi.fn(() => ({
+          build: vi.fn((cb: (err: Error | null, t: any) => void) => {
+            // eslint-disable-line no-unused-vars
+            cb(new Error('dict not found'), null);
+          }),
+        })),
+      },
+    }));
+
+    const { tokenize: freshTokenize } = await import('./tokenizer');
+    await expect(freshTokenize('テスト')).rejects.toThrow('dict not found');
+
+    vi.resetModules();
   });
 });
