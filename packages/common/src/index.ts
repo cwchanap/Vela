@@ -13,3 +13,6 @@ export { authKeys, gameKeys, progressKeys, savedSentencesKeys, srsKeys, ttsKeys 
 
 // Export shared constants
 export { DEFAULT_DAILY_LESSON_GOAL, DEFAULT_LESSON_DURATION_MINUTES } from './constants';
+
+// Export tokenizer
+export { tokenize, configureDicPath, type Token } from './tokenizer';
