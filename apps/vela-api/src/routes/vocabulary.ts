@@ -43,6 +43,7 @@ app.post('/from-word', zValidator('json', fromWordSchema), async (c) => {
       hiragana: body.reading,
       english_translation: body.english_translation,
       example_sentence_jp: body.example_sentence_jp,
+      source_url: body.source_url,
       jlpt_level: body.jlpt_level,
       created_at: new Date().toISOString(),
     });
