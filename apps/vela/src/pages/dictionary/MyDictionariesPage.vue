@@ -57,7 +57,29 @@
       <q-card v-for="item in entries" :key="item.sentence_id" flat bordered class="entry-card">
         <q-card-section>
           <div class="row items-start q-mb-sm">
-            <div class="col entry-text">{{ item.sentence }}</div>
+            <div class="col entry-text">
+              <template
+                v-if="tokenMap.has(item.sentence_id)"
+                v-for="token in tokenMap.get(item.sentence_id)"
+                :key="token.surface_form + token.pos + token.pos_detail_1"
+              >
+                <span
+                  v-if="isContentWord(token)"
+                  class="clickable-token"
+                  @click="(e) => handleTokenClick(item.sentence_id, token, e)"
+                  >{{ token.surface_form }}</span
+                >
+                <span v-else>{{ token.surface_form }}</span>
+              </template>
+              <span v-else>{{ item.sentence }}</span>
+            </div>
+            <q-badge
+              v-if="tokenMap.has(item.sentence_id)"
+              :color="difficultyColor(computeDifficulty(tokenMap.get(item.sentence_id)!))"
+              class="q-ml-sm"
+              :label="computeDifficulty(tokenMap.get(item.sentence_id)!)"
+              data-testid="difficulty-badge"
+            />
             <q-btn
               flat
               round
@@ -113,6 +135,61 @@
         </q-card-actions>
       </q-card>
     </div>
+
+    <!-- Definition popover (single shared instance) -->
+    <q-menu
+      v-model="popoverOpen"
+      :target="popoverTarget ?? undefined"
+      anchor="bottom left"
+      self="top left"
+      :offset="[0, 4]"
+    >
+      <q-card style="min-width: 240px; max-width: 320px" class="q-pa-sm">
+        <q-card-section v-if="popoverLookup === 'loading'" class="text-center q-py-md">
+          <q-spinner color="primary" size="1.5em" />
+        </q-card-section>
+
+        <q-card-section v-else-if="popoverLookup === 'notfound'">
+          <div class="text-grey-7 text-sm">No definition found</div>
+        </q-card-section>
+
+        <q-card-section v-else>
+          <div class="row items-baseline q-mb-xs">
+            <span class="text-h6 q-mr-sm">{{ (popoverLookup as JishoResult).word }}</span>
+            <span class="text-grey-7 text-caption">{{
+              (popoverLookup as JishoResult).reading
+            }}</span>
+          </div>
+          <q-badge
+            v-if="(popoverLookup as JishoResult).jlpt"
+            color="primary"
+            class="q-mb-sm"
+            :label="(popoverLookup as JishoResult).jlpt!.toUpperCase()"
+          />
+          <ol class="q-mt-xs q-pl-md q-mb-sm">
+            <li
+              v-for="meaning in (popoverLookup as JishoResult).meanings"
+              :key="meaning"
+              class="text-sm"
+            >
+              {{ meaning }}
+            </li>
+          </ol>
+          <q-btn
+            dense
+            flat
+            color="primary"
+            icon="add"
+            :label="flashcardBtnLabel"
+            :loading="flashcardState === 'loading'"
+            :disable="flashcardState === 'added' || flashcardState === 'exists'"
+            size="sm"
+            @click="handleAddFlashcard"
+            data-testid="btn-add-flashcard"
+          />
+        </q-card-section>
+      </q-card>
+    </q-menu>
 
     <!-- AI Analysis Dialog -->
     <q-dialog v-model="aiDialog" position="standard">
@@ -190,6 +267,9 @@ import {
   type MyDictionaryEntry,
   type SentenceAnalysis,
 } from 'src/services/myDictionariesService';
+import { tokenize, type Token } from '@vela/common';
+import { computeDifficulty } from 'src/utils/japanese';
+import { lookupWord, addFlashcard, type JishoResult } from 'src/services/vocabularyService';
 import { useLLMSettingsStore } from 'src/stores/llmSettings';
 import { useAuthStore } from 'src/stores/auth';
 import { generatePronunciation, playAudio } from 'src/services/ttsService';
@@ -214,6 +294,16 @@ const analyzingSentence = ref<MyDictionaryEntry | null>(null);
 const analysisResult = ref<SentenceAnalysis | null>(null);
 const analysisError = ref('');
 const streamingText = ref('');
+
+// Tokenization — sentence_id → Token[]
+const tokenMap = ref(new Map<string, Token[]>());
+
+// Definition popover (single shared instance)
+const popoverOpen = ref(false);
+const popoverTarget = ref<HTMLElement | null>(null);
+const activeToken = ref<{ token: Token; sentenceId: string } | null>(null);
+const popoverLookup = ref<JishoResult | null | 'loading' | 'notfound'>('notfound');
+const flashcardState = ref<'idle' | 'loading' | 'added' | 'exists' | 'error'>('idle');
 
 // Configure marked options
 marked.setOptions({
@@ -262,9 +352,40 @@ const renderedMarkdown = computed(() => {
   });
 });
 
+const flashcardBtnLabel = computed(() => {
+  switch (flashcardState.value) {
+    case 'added':
+      return 'Added!';
+    case 'exists':
+      return 'Already in your deck';
+    case 'loading':
+      return '';
+    default:
+      return 'Add to flashcards';
+  }
+});
+
 onMounted(() => {
   loadEntries();
 });
+
+const CONTENT_POS_SET = new Set(['名詞', '動詞', '形容詞']);
+
+function isContentWord(token: Token): boolean {
+  return CONTENT_POS_SET.has(token.pos);
+}
+
+function difficultyColor(level: string): string {
+  const map: Record<string, string> = {
+    N5: 'green',
+    N4: 'teal',
+    N3: 'blue',
+    N2: 'orange',
+    N1: 'red',
+    '—': 'grey',
+  };
+  return map[level] ?? 'grey';
+}
 
 async function loadEntries() {
   loading.value = true;
@@ -272,10 +393,66 @@ async function loadEntries() {
 
   try {
     entries.value = await getMyDictionaries();
+
+    // Tokenize all sentences in parallel; failures are non-fatal
+    const newMap = new Map<string, Token[]>();
+    await Promise.all(
+      entries.value.map(async (item) => {
+        try {
+          const tokens = await tokenize(item.sentence);
+          newMap.set(item.sentence_id, tokens);
+        } catch {
+          // Tokenization failure is non-fatal — entry renders as plain text
+        }
+      }),
+    );
+    tokenMap.value = newMap;
   } catch (err) {
     error.value = err instanceof Error ? err.message : 'Failed to load dictionary entries';
   } finally {
     loading.value = false;
+  }
+}
+
+async function handleTokenClick(sentenceId: string, token: Token, event: MouseEvent) {
+  popoverTarget.value = event.currentTarget as HTMLElement;
+  activeToken.value = { token, sentenceId };
+  popoverLookup.value = 'loading';
+  flashcardState.value = 'idle';
+  popoverOpen.value = true;
+
+  const result = await lookupWord(token.dictionary_form);
+  popoverLookup.value = result ?? 'notfound';
+}
+
+async function handleAddFlashcard() {
+  if (
+    !activeToken.value ||
+    popoverLookup.value === 'loading' ||
+    popoverLookup.value === 'notfound' ||
+    popoverLookup.value === null
+  )
+    return;
+
+  const lookup = popoverLookup.value as JishoResult;
+  const entry = entries.value.find((e) => e.sentence_id === activeToken.value!.sentenceId);
+
+  flashcardState.value = 'loading';
+  try {
+    const result = await addFlashcard({
+      japanese_word: activeToken.value.token.dictionary_form,
+      reading: lookup.reading,
+      english_translation: lookup.meanings[0] ?? '',
+      example_sentence_jp: entry?.sentence,
+      source_url: entry?.source_url,
+      jlpt_level: lookup.jlpt
+        ? (parseInt(lookup.jlpt.replace('jlpt-n', ''), 10) as 1 | 2 | 3 | 4 | 5)
+        : undefined,
+    });
+    flashcardState.value = result.alreadyInSRS ? 'exists' : 'added';
+  } catch {
+    flashcardState.value = 'error';
+    $q.notify({ type: 'negative', message: 'Failed to add flashcard', position: 'top' });
   }
 }
 
@@ -471,6 +648,17 @@ async function handlePronounce(entry: MyDictionaryEntry) {
 </script>
 
 <style scoped>
+.clickable-token {
+  cursor: pointer;
+  border-bottom: 1px dotted var(--q-primary, #1976d2);
+  transition: background-color 0.15s;
+}
+
+.clickable-token:hover {
+  background-color: rgba(25, 118, 210, 0.1);
+  border-radius: 2px;
+}
+
 .entries-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));

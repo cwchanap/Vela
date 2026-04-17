@@ -9,6 +9,8 @@ import * as myDictionariesService from 'src/services/myDictionariesService';
 import * as ttsService from 'src/services/ttsService';
 import type { MyDictionaryEntry } from 'src/services/myDictionariesService';
 import { useAuthStore } from 'src/stores/auth';
+import type { Token } from '@vela/common';
+import { tokenize } from '@vela/common';
 
 let notifyCreateSpy: ReturnType<typeof vi.fn>;
 
@@ -38,6 +40,71 @@ vi.mock('src/services/myDictionariesService', () => ({
 vi.mock('src/services/ttsService', () => ({
   generatePronunciation: vi.fn().mockResolvedValue({ audioUrl: 'http://example.com/audio.mp3' }),
   playAudio: vi.fn().mockResolvedValue(undefined),
+}));
+
+vi.mock('@vela/common', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@vela/common')>();
+  return {
+    ...actual,
+    tokenize: vi.fn().mockResolvedValue([
+      {
+        surface_form: '日本語',
+        reading: 'ニホンゴ',
+        dictionary_form: '日本語',
+        pos: '名詞',
+        pos_detail_1: '一般',
+      },
+      {
+        surface_form: 'を',
+        reading: 'ヲ',
+        dictionary_form: 'を',
+        pos: '助詞',
+        pos_detail_1: '格助詞',
+      },
+      {
+        surface_form: '勉強',
+        reading: 'ベンキョウ',
+        dictionary_form: '勉強',
+        pos: '名詞',
+        pos_detail_1: 'サ変接続',
+      },
+      {
+        surface_form: 'し',
+        reading: 'シ',
+        dictionary_form: 'する',
+        pos: '動詞',
+        pos_detail_1: '自立',
+      },
+      {
+        surface_form: 'て',
+        reading: 'テ',
+        dictionary_form: 'て',
+        pos: '助詞',
+        pos_detail_1: '接続助詞',
+      },
+      {
+        surface_form: 'い',
+        reading: 'イ',
+        dictionary_form: 'いる',
+        pos: '動詞',
+        pos_detail_1: '非自立',
+      },
+      {
+        surface_form: 'ます',
+        reading: 'マス',
+        dictionary_form: 'ます',
+        pos: '助動詞',
+        pos_detail_1: '*',
+      },
+    ] as Token[]),
+    configureDicPath: vi.fn(),
+  };
+});
+
+vi.mock('src/services/vocabularyService', () => ({
+  lookupWord: vi.fn().mockResolvedValue(null),
+  addFlashcard: vi.fn(),
+  clearLookupCache: vi.fn(),
 }));
 
 vi.mock('src/config', () => ({
@@ -98,6 +165,57 @@ describe('MyDictionariesPage', () => {
     vi.mocked(fetchAuthSession).mockResolvedValue({
       tokens: { idToken: { toString: () => 'mock-token' } },
     } as Awaited<ReturnType<typeof fetchAuthSession>>);
+    vi.mocked(tokenize).mockResolvedValue([
+      {
+        surface_form: '日本語',
+        reading: 'ニホンゴ',
+        dictionary_form: '日本語',
+        pos: '名詞',
+        pos_detail_1: '一般',
+      },
+      {
+        surface_form: 'を',
+        reading: 'ヲ',
+        dictionary_form: 'を',
+        pos: '助詞',
+        pos_detail_1: '格助詞',
+      },
+      {
+        surface_form: '勉強',
+        reading: 'ベンキョウ',
+        dictionary_form: '勉強',
+        pos: '名詞',
+        pos_detail_1: 'サ変接続',
+      },
+      {
+        surface_form: 'し',
+        reading: 'シ',
+        dictionary_form: 'する',
+        pos: '動詞',
+        pos_detail_1: '自立',
+      },
+      {
+        surface_form: 'て',
+        reading: 'テ',
+        dictionary_form: 'て',
+        pos: '助詞',
+        pos_detail_1: '接続助詞',
+      },
+      {
+        surface_form: 'い',
+        reading: 'イ',
+        dictionary_form: 'いる',
+        pos: '動詞',
+        pos_detail_1: '非自立',
+      },
+      {
+        surface_form: 'ます',
+        reading: 'マス',
+        dictionary_form: 'ます',
+        pos: '助動詞',
+        pos_detail_1: '*',
+      },
+    ] as Token[]);
     notifyCreateSpy = vi.fn();
   });
 
@@ -616,6 +734,27 @@ describe('MyDictionariesPage', () => {
       expect(wrapper.vm.streamingText).toBe('Recovered output');
       expect(wrapper.vm.analysisResult?.analysis).toBe('Recovered output');
       expect(wrapper.vm.analyzing).toBe(false);
+    });
+  });
+
+  describe('word highlighting', () => {
+    it('renders clickable spans for content word tokens after load', async () => {
+      vi.mocked(myDictionariesService.getMyDictionaries).mockResolvedValue([mockEntry]);
+
+      wrapper = mountComponent();
+      await flushPromises();
+
+      const clickableTokens = wrapper.findAll('.clickable-token');
+      expect(clickableTokens.length).toBeGreaterThan(0);
+    });
+
+    it('renders difficulty badge when tokenization completes', async () => {
+      vi.mocked(myDictionariesService.getMyDictionaries).mockResolvedValue([mockEntry]);
+
+      wrapper = mountComponent();
+      await flushPromises();
+
+      expect(wrapper.find('[data-testid="difficulty-badge"]').exists()).toBe(true);
     });
   });
 });

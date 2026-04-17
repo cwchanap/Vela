@@ -1,0 +1,64 @@
+import { config } from 'src/config';
+import { httpJson, httpJsonAuth } from 'src/utils/httpClient';
+
+export interface JishoResult {
+  word: string;
+  reading: string;
+  meanings: string[];
+  jlpt?: string;
+  common: boolean;
+}
+
+export interface AddFlashcardPayload {
+  japanese_word: string;
+  reading: string;
+  english_translation: string;
+  example_sentence_jp?: string;
+  source_url?: string;
+  jlpt_level?: 1 | 2 | 3 | 4 | 5;
+}
+
+export interface AddFlashcardResult {
+  vocabulary_id: string;
+  created: boolean;
+  alreadyInSRS: boolean;
+}
+
+// Session-level cache keyed by dictionary_form to avoid duplicate lookups
+const lookupCache = new Map<string, JishoResult>();
+
+/** Exported for tests only — clears the in-memory lookup cache. */
+export function clearLookupCache(): void {
+  lookupCache.clear();
+}
+
+/**
+ * Look up a word via the Jisho proxy. Returns null if not found.
+ * Results are cached for the lifetime of the page session.
+ */
+export async function lookupWord(dictionaryForm: string): Promise<JishoResult | null> {
+  if (lookupCache.has(dictionaryForm)) {
+    return lookupCache.get(dictionaryForm)!;
+  }
+
+  try {
+    const encoded = encodeURIComponent(dictionaryForm);
+    const result = await httpJson<JishoResult>(
+      `${config.api.url}dictionary/lookup?word=${encoded}`,
+    );
+    lookupCache.set(dictionaryForm, result);
+    return result;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Add a word to the user's SRS flashcard deck.
+ */
+export async function addFlashcard(payload: AddFlashcardPayload): Promise<AddFlashcardResult> {
+  return httpJsonAuth<AddFlashcardResult>(`${config.api.url}vocabulary/from-word`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
