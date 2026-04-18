@@ -168,7 +168,7 @@
           />
           <ol class="q-mt-xs q-pl-md q-mb-sm">
             <li
-              v-for="meaning in (popoverLookup as JishoResult).meanings"
+              v-for="meaning in (popoverLookup as JishoResult).meanings.slice(0, 3)"
               :key="meaning"
               class="text-sm"
             >
@@ -449,7 +449,7 @@ async function handleAddFlashcard() {
         ? (parseInt(lookup.jlpt.replace('jlpt-n', ''), 10) as 1 | 2 | 3 | 4 | 5)
         : undefined,
     });
-    flashcardState.value = result.alreadyInSRS ? 'exists' : 'added';
+    flashcardState.value = result.alreadyInSRS ? 'exists' : result.created ? 'added' : 'idle';
   } catch {
     flashcardState.value = 'error';
     $q.notify({ type: 'negative', message: 'Failed to add flashcard', position: 'top' });
