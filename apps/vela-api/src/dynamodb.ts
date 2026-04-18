@@ -428,7 +428,6 @@ export const vocabulary = {
         TableName: TABLE_NAMES.VOCABULARY,
         FilterExpression: 'japanese_word = :word',
         ExpressionAttributeValues: { ':word': japaneseWord },
-        Limit: 1,
       });
       const response = await docClient.send(command);
       return response.Items?.[0] as Record<string, unknown> | undefined;
