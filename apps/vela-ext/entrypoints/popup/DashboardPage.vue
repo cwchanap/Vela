@@ -35,7 +35,9 @@
 
         <div class="my-dictionaries">
           <div class="section-header">
-            <h3>Your Dictionary Entries</h3>
+            <h3>Your Dictionary Entries<span v-if="pendingCount > 0" class="pending-badge" :title="`${pendingCount} sentence(s) waiting to sync`">
+              {{ pendingCount }}
+            </span></h3>
             <button @click="loadEntries" :disabled="loading" class="refresh-button">
               {{ loading ? 'Loading...' : 'Refresh' }}
             </button>
@@ -85,6 +87,7 @@
 import { ref, onMounted, watch, computed } from 'vue';
 import { getMyDictionaries } from '../utils/api';
 import { getValidIdToken, refreshIdToken, getUserEmail, clearAuthData } from '../utils/storage';
+import { getPendingQueueCount } from '../utils/pendingQueue';
 
 const emit = defineEmits<{
   logout: [];
@@ -96,6 +99,7 @@ const loading = ref(false);
 const error = ref('');
 const isDarkMode = ref(false);
 const instructionsExpanded = ref(false);
+const pendingCount = ref(0);
 
 onMounted(async () => {
   const email = await getUserEmail();
@@ -106,6 +110,8 @@ onMounted(async () => {
   // Load theme preference
   const savedTheme = await browser.storage.local.get('theme_preference');
   isDarkMode.value = savedTheme.theme_preference === 'dark';
+
+  pendingCount.value = await getPendingQueueCount();
 
   await loadEntries();
 });
@@ -492,5 +498,21 @@ const recentEntries = computed(() => {
 
 .view-all-button:hover {
   background-color: var(--accent-hover);
+}
+
+.pending-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background-color: #e55;
+  color: #fff;
+  border-radius: 10px;
+  padding: 0 7px;
+  font-size: 11px;
+  font-weight: 600;
+  min-width: 18px;
+  height: 18px;
+  margin-left: 6px;
+  vertical-align: middle;
 }
 </style>
