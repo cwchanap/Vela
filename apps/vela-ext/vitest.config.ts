@@ -10,6 +10,7 @@ export default defineConfig({
   test: {
     globals: true,
     environment: 'happy-dom',
+    setupFiles: ['./entrypoints/test-setup.ts'],
     include: ['{components,entrypoints}/**/*.{test,spec}.ts'],
     coverage: {
       provider: 'v8',
