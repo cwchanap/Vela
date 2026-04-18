@@ -1,103 +1,226 @@
 import { getValidIdToken, refreshIdToken } from './utils/storage';
 
-// Get API URL from environment or use default
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'https://vela.cwchanap.dev/api';
+
+// ── IndexedDB queue ──────────────────────────────────────────────────────────
+
+const DB_NAME = 'vela-offline-queue';
+const STORE_NAME = 'vela-pending-sentences';
+const DB_VERSION = 1;
+
+export interface PendingSentenceRecord {
+  id?: number;
+  sentence: string;
+  sourceUrl?: string;
+  context?: string;
+  timestamp: number;
+  retries: number;
+}
+
+/** Pure factory — exported for unit tests. */
+export function buildPendingSentenceRecord(
+  sentence: string,
+  sourceUrl?: string,
+  context?: string,
+): Omit<PendingSentenceRecord, 'id'> {
+  return { sentence, sourceUrl, context, timestamp: Date.now(), retries: 0 };
+}
+
+function openDB(): Promise<IDBDatabase> {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(DB_NAME, DB_VERSION);
+    req.onupgradeneeded = () => {
+      req.result.createObjectStore(STORE_NAME, { autoIncrement: true, keyPath: 'id' });
+    };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+async function enqueue(record: Omit<PendingSentenceRecord, 'id'>): Promise<void> {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE_NAME, 'readwrite');
+    const store = tx.objectStore(STORE_NAME);
+    const req = store.add(record);
+    req.onsuccess = () => resolve();
+    req.onerror = () => reject(req.error);
+  });
+}
+
+async function getAllPending(): Promise<PendingSentenceRecord[]> {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE_NAME, 'readonly');
+    const store = tx.objectStore(STORE_NAME);
+    const req = store.getAll();
+    req.onsuccess = () => resolve(req.result as PendingSentenceRecord[]);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+async function deletePending(id: number): Promise<void> {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE_NAME, 'readwrite');
+    const store = tx.objectStore(STORE_NAME);
+    const req = store.delete(id);
+    req.onsuccess = () => resolve();
+    req.onerror = () => reject(req.error);
+  });
+}
+
+async function incrementRetry(record: PendingSentenceRecord): Promise<void> {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE_NAME, 'readwrite');
+    const store = tx.objectStore(STORE_NAME);
+    const updated = { ...record, retries: record.retries + 1 };
+    const req = store.put(updated);
+    req.onsuccess = () => resolve();
+    req.onerror = () => reject(req.error);
+  });
+}
+
+// ── API save (offline-aware) ─────────────────────────────────────────────────
+
+async function saveSentenceToAPI(
+  sentence: string,
+  sourceUrl?: string,
+  context?: string,
+): Promise<void> {
+  let idToken: string;
+  try {
+    idToken = await getValidIdToken();
+  } catch {
+    await enqueue(buildPendingSentenceRecord(sentence, sourceUrl, context));
+    return;
+  }
+
+  let response = await fetch(`${API_BASE_URL}/my-dictionaries`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${idToken}` },
+    body: JSON.stringify({ sentence, sourceUrl, context }),
+  });
+
+  if (response.status === 401) {
+    try {
+      idToken = await refreshIdToken();
+    } catch {
+      await enqueue(buildPendingSentenceRecord(sentence, sourceUrl, context));
+      return;
+    }
+    response = await fetch(`${API_BASE_URL}/my-dictionaries`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${idToken}` },
+      body: JSON.stringify({ sentence, sourceUrl, context }),
+    });
+  }
+
+  if (!response.ok) {
+    await enqueue(buildPendingSentenceRecord(sentence, sourceUrl, context));
+  }
+}
+
+// ── Flush queue ──────────────────────────────────────────────────────────────
+
+const MAX_RETRIES = 3;
+
+async function flushQueue(): Promise<void> {
+  const pending = await getAllPending();
+  if (pending.length === 0) return;
+
+  for (const record of pending) {
+    try {
+      let idToken: string;
+      try {
+        idToken = await getValidIdToken();
+      } catch {
+        // Still not authenticated — skip this flush cycle
+        return;
+      }
+
+      let response = await fetch(`${API_BASE_URL}/my-dictionaries`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${idToken}` },
+        body: JSON.stringify({
+          sentence: record.sentence,
+          sourceUrl: record.sourceUrl,
+          context: record.context,
+        }),
+      });
+
+      if (response.status === 401) {
+        try {
+          idToken = await refreshIdToken();
+        } catch {
+          return;
+        }
+        response = await fetch(`${API_BASE_URL}/my-dictionaries`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${idToken}` },
+          body: JSON.stringify({
+            sentence: record.sentence,
+            sourceUrl: record.sourceUrl,
+            context: record.context,
+          }),
+        });
+      }
+
+      if (response.ok) {
+        await deletePending(record.id!);
+      } else if (record.retries >= MAX_RETRIES - 1) {
+        await deletePending(record.id!);
+        browser.notifications.create({
+          type: 'basic',
+          iconUrl: browser.runtime.getURL('/icon/128.png'),
+          title: 'Vela — Sync failed',
+          message: '1 saved sentence could not be synced and was discarded.',
+        });
+      } else {
+        await incrementRetry(record);
+      }
+    } catch {
+      if (record.retries >= MAX_RETRIES - 1) {
+        await deletePending(record.id!);
+      } else {
+        await incrementRetry(record);
+      }
+    }
+  }
+}
+
+// ── Extension entry point ────────────────────────────────────────────────────
 
 export default defineBackground(() => {
   console.log('Vela extension background script loaded', { id: browser.runtime.id });
 
-  // Create context menu when extension is installed
   browser.runtime.onInstalled.addListener(() => {
     browser.contextMenus.create({
       id: 'save-to-vela',
       title: 'Save to My Dictionaries',
       contexts: ['selection'],
     });
-    console.log('Context menu created');
+    browser.contextMenus.create({
+      id: 'scan-page-vela',
+      title: 'Scan page for Japanese',
+      contexts: ['page'],
+    });
+    console.log('Context menus created');
   });
 
-  // Handle context menu clicks
   browser.contextMenus.onClicked.addListener(async (info, tab) => {
+    if (info.menuItemId === 'scan-page-vela' && tab?.id) {
+      browser.tabs.sendMessage(tab.id, { type: 'SCAN_PAGE' });
+      return;
+    }
+
     if (info.menuItemId === 'save-to-vela' && info.selectionText) {
       const selectedText = info.selectionText.trim();
-
-      if (!selectedText) {
-        console.log('No text selected');
-        return;
-      }
+      if (!selectedText) return;
 
       try {
-        let idToken: string;
-
-        // Try to get valid ID token, handle auth errors specifically
-        try {
-          idToken = await getValidIdToken();
-        } catch (authError) {
-          // Handle authentication errors from getValidIdToken
-          const errorMessage = authError instanceof Error ? authError.message : String(authError);
-          console.error('Authentication error:', errorMessage);
-          browser.notifications.create({
-            type: 'basic',
-            iconUrl: browser.runtime.getURL('/icon/128.png'),
-            title: 'Vela - Authentication Required',
-            message: 'Please log in to save sentences to your dictionary.',
-          });
-          return;
-        }
-
-        // Try to save the dictionary entry
-        let response = await fetch(`${API_BASE_URL}/my-dictionaries`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${idToken}`,
-          },
-          body: JSON.stringify({
-            sentence: selectedText,
-            sourceUrl: tab?.url,
-            context: tab?.title,
-          }),
-        });
-
-        // If unauthorized, try to refresh token and retry once
-        if (response.status === 401) {
-          try {
-            idToken = await refreshIdToken();
-          } catch (refreshError) {
-            // Handle authentication errors from refreshIdToken
-            const errorMessage =
-              refreshError instanceof Error ? refreshError.message : String(refreshError);
-            console.error('Token refresh error:', errorMessage);
-            browser.notifications.create({
-              type: 'basic',
-              iconUrl: browser.runtime.getURL('/icon/128.png'),
-              title: 'Vela - Session Expired',
-              message: 'Please log in again to save sentences.',
-            });
-            return;
-          }
-
-          // Retry the request with new token
-          response = await fetch(`${API_BASE_URL}/my-dictionaries`, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              Authorization: `Bearer ${idToken}`,
-            },
-            body: JSON.stringify({
-              sentence: selectedText,
-              sourceUrl: tab?.url,
-              context: tab?.title,
-            }),
-          });
-        }
-
-        if (!response.ok) {
-          const error = await response.json();
-          throw new Error(error.error || 'Failed to save dictionary entry');
-        }
-
-        // Show success notification
+        await saveSentenceToAPI(selectedText, tab?.url, tab?.title);
         browser.notifications.create({
           type: 'basic',
           iconUrl: browser.runtime.getURL('/icon/128.png'),
@@ -105,9 +228,6 @@ export default defineBackground(() => {
           message: `Saved: ${selectedText.substring(0, 50)}${selectedText.length > 50 ? '...' : ''}`,
         });
       } catch (error) {
-        console.error('Error saving sentence:', error);
-
-        // Show error notification
         browser.notifications.create({
           type: 'basic',
           iconUrl: browser.runtime.getURL('/icon/128.png'),
@@ -117,4 +237,22 @@ export default defineBackground(() => {
       }
     }
   });
+
+  // Handle batch save from content script
+  browser.runtime.onMessage.addListener(async (message: any) => {
+    if (message.type !== 'SAVE_SENTENCES') return;
+    const { sentences, sourceUrl, context } = message as {
+      sentences: string[];
+      sourceUrl: string;
+      context: string;
+    };
+    await Promise.all(
+      sentences.map((sentence) => saveSentenceToAPI(sentence, sourceUrl, context)),
+    );
+  });
+
+  // Flush on startup and when browser regains focus
+  browser.runtime.onStartup.addListener(() => flushQueue());
+  browser.windows.onFocusChanged.addListener(() => flushQueue());
+  self.addEventListener('online', () => flushQueue());
 });
