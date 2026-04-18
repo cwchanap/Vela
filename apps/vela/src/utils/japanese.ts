@@ -180,6 +180,10 @@ export const parseFurigana = (text: string): FuriganaSegment[] => {
 const CONTENT_POS = new Set(['名詞', '動詞', '形容詞']);
 const KANJI_RE = /[\u4E00-\u9FAF]/;
 
+export function isContentWord(token: Token): boolean {
+  return CONTENT_POS.has(token.pos);
+}
+
 /**
  * Compute a JLPT-style difficulty label from kuromoji tokens.
  * Counts kanji-containing content words (名詞/動詞/形容詞):
@@ -187,7 +191,7 @@ const KANJI_RE = /[\u4E00-\u9FAF]/;
  * Returns "—" when there are no content words at all.
  */
 export function computeDifficulty(tokens: Token[]): string {
-  const contentWords = tokens.filter((t) => CONTENT_POS.has(t.pos));
+  const contentWords = tokens.filter((t) => isContentWord(t));
   if (contentWords.length === 0) return '—';
 
   const kanjiCount = contentWords.filter((t) => KANJI_RE.test(t.surface_form)).length;
