@@ -1,18 +1,18 @@
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
 import { mount, flushPromises, VueWrapper } from '@vue/test-utils';
 import type { ComponentPublicInstance } from 'vue';
-import LoginPage from './LoginPage.vue';
+import LoginPage from '../../entrypoints/popup/LoginPage.vue';
 
 const { mockSignIn, mockSaveAuthTokens } = vi.hoisted(() => ({
   mockSignIn: vi.fn(),
   mockSaveAuthTokens: vi.fn(),
 }));
 
-vi.mock('../utils/api', () => ({
+vi.mock('../../entrypoints/utils/api', () => ({
   signIn: mockSignIn,
 }));
 
-vi.mock('../utils/storage', () => ({
+vi.mock('../../entrypoints/utils/storage', () => ({
   saveAuthTokens: mockSaveAuthTokens,
 }));
 

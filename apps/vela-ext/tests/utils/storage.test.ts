@@ -6,8 +6,8 @@ import {
   clearAuthData,
   getValidAccessToken,
   refreshAccessToken,
-} from './storage';
-import type { AuthTokens } from './api';
+} from '../../entrypoints/utils/storage';
+import type { AuthTokens } from '../../entrypoints/utils/api';
 
 const { mockRefreshToken } = vi.hoisted(() => {
   const mockRefreshToken = vi.fn(
@@ -23,8 +23,8 @@ const { mockRefreshToken } = vi.hoisted(() => {
 
 defineBrowserMocks();
 
-vi.mock('./api', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('./api')>();
+vi.mock('../../entrypoints/utils/api', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../entrypoints/utils/api')>();
   return {
     ...actual,
     refreshToken: mockRefreshToken,

@@ -10,14 +10,14 @@ export default defineConfig({
   test: {
     globals: true,
     environment: 'happy-dom',
-    setupFiles: ['./entrypoints/test-setup.ts'],
-    include: ['{components,entrypoints}/**/*.{test,spec}.ts'],
+    setupFiles: ['./tests/test-setup.ts'],
+    include: ['{components,tests}/**/*.{test,spec}.ts'],
     coverage: {
       provider: 'v8',
       reporter: ['text', 'json', 'html'],
       all: true,
       include: ['{components,entrypoints}/**/*.{ts,vue}'],
-      exclude: ['{components,entrypoints}/**/*.test.ts', '{components,entrypoints}/**/*.spec.ts'],
+      exclude: ['{components,tests}/**/*.test.ts', '{components,tests}/**/*.spec.ts'],
     },
   },
   resolve: {

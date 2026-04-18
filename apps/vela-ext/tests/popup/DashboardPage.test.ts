@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mount, VueWrapper, flushPromises } from '@vue/test-utils';
-import DashboardPage from './DashboardPage.vue';
+import DashboardPage from '../../entrypoints/popup/DashboardPage.vue';
 import type { ComponentPublicInstance } from 'vue';
 
 // Mock dependencies
@@ -17,11 +17,11 @@ const { mockGetValidIdToken, mockRefreshIdToken, mockGetUserEmail, mockClearAuth
   }),
 );
 
-vi.mock('../utils/api', () => ({
+vi.mock('../../entrypoints/utils/api', () => ({
   getMyDictionaries: mockGetMyDictionaries,
 }));
 
-vi.mock('../utils/storage', () => ({
+vi.mock('../../entrypoints/utils/storage', () => ({
   getValidIdToken: mockGetValidIdToken,
   refreshIdToken: mockRefreshIdToken,
   getUserEmail: mockGetUserEmail,

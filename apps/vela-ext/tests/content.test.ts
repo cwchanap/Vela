@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 // Import the pure functions we'll export for testing
-import { scanJapaneseSentences } from './content';
+import { scanJapaneseSentences } from '../entrypoints/content';
 
 describe('scanJapaneseSentences', () => {
   beforeEach(() => {
