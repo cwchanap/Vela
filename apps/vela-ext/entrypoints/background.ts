@@ -1,12 +1,9 @@
 import { getValidIdToken, refreshIdToken } from './utils/storage';
+import { openDB, STORE_NAME } from './utils/idb';
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'https://vela.cwchanap.dev/api';
 
 // ── IndexedDB queue ──────────────────────────────────────────────────────────
-
-const DB_NAME = 'vela-offline-queue';
-const STORE_NAME = 'vela-pending-sentences';
-const DB_VERSION = 1;
 
 export interface PendingSentenceRecord {
   id?: number;
@@ -24,17 +21,6 @@ export function buildPendingSentenceRecord(
   context?: string,
 ): Omit<PendingSentenceRecord, 'id'> {
   return { sentence, sourceUrl, context, timestamp: Date.now(), retries: 0 };
-}
-
-function openDB(): Promise<IDBDatabase> {
-  return new Promise((resolve, reject) => {
-    const req = indexedDB.open(DB_NAME, DB_VERSION);
-    req.onupgradeneeded = () => {
-      req.result.createObjectStore(STORE_NAME, { autoIncrement: true, keyPath: 'id' });
-    };
-    req.onsuccess = () => resolve(req.result);
-    req.onerror = () => reject(req.error);
-  });
 }
 
 async function enqueue(record: Omit<PendingSentenceRecord, 'id'>): Promise<void> {
@@ -255,21 +241,31 @@ export default defineBackground(() => {
     }
   });
 
-  // Handle batch save from content script
-  browser.runtime.onMessage.addListener(async (message: any) => {
-    if (message.type !== 'SAVE_SENTENCES') return;
+  // Handle batch save from content script (fire-and-forget; no sendResponse needed)
+  browser.runtime.onMessage.addListener((message: unknown) => {
+    if (
+      typeof message !== 'object' ||
+      message === null ||
+      (message as { type?: string }).type !== 'SAVE_SENTENCES'
+    )
+      return;
     const { sentences, sourceUrl, context } = message as {
-      sentences: string[];
-      sourceUrl: string;
-      context: string;
+      sentences: unknown;
+      sourceUrl?: string;
+      context?: string;
     };
-    await Promise.all(
-      sentences.map((sentence) => saveSentenceToAPI(sentence, sourceUrl, context)),
+    if (!Array.isArray(sentences)) return;
+    void Promise.all(
+      (sentences as string[]).map((sentence) =>
+        saveSentenceToAPI(sentence, sourceUrl, context),
+      ),
     );
   });
 
-  // Flush on startup and when browser regains focus
+  // Flush on startup and when browser regains focus (not on focus-loss)
   browser.runtime.onStartup.addListener(() => flushQueue());
-  browser.windows.onFocusChanged.addListener(() => flushQueue());
+  browser.windows.onFocusChanged.addListener((windowId) => {
+    if (windowId !== browser.windows.WINDOW_ID_NONE) flushQueue();
+  });
   self.addEventListener('online', () => flushQueue());
 });
