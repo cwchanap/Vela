@@ -449,7 +449,7 @@ async function handleAddFlashcard() {
         ? (parseInt(lookup.jlpt.replace('jlpt-n', ''), 10) as 1 | 2 | 3 | 4 | 5)
         : undefined,
     });
-    flashcardState.value = result.alreadyInSRS ? 'exists' : result.created ? 'added' : 'idle';
+    flashcardState.value = result.alreadyInSRS ? 'exists' : 'added';
   } catch {
     flashcardState.value = 'error';
     $q.notify({ type: 'negative', message: 'Failed to add flashcard', position: 'top' });
