@@ -1,5 +1,5 @@
 import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { signIn, checkSession, refreshToken, saveDictionaryEntry, getMyDictionaries } from './api';
+import { signIn, checkSession, refreshToken, saveDictionaryEntry, getMyDictionaries } from '../../entrypoints/utils/api';
 
 const mockFetch = vi.fn();
 vi.stubGlobal('fetch', mockFetch);

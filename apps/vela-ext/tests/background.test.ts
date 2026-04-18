@@ -31,7 +31,7 @@ global.browser = {
 } as any;
 
 // Import the pure utility functions from background (once implemented)
-import { buildPendingSentenceRecord } from './background';
+import { buildPendingSentenceRecord } from '../entrypoints/background';
 
 describe('buildPendingSentenceRecord', () => {
   it('creates a record with retries: 0 and a timestamp', () => {
