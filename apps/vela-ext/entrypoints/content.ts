@@ -4,6 +4,8 @@ export function scanJapaneseSentences(): string[] {
   const seen = new Set<string>();
   const result: string[] = [];
 
+  if (!document.body) return [];
+
   const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
   let node: Node | null;
 
@@ -113,12 +115,16 @@ function buildOverlay(sentences: string[]): ShadowRoot {
   saveBtn.textContent = `Save selected (${sentences.length})`;
   saveBtn.addEventListener('click', () => {
     const selected = sentences.filter((_, i) => checked.has(i));
-    browser.runtime.sendMessage({
-      type: 'SAVE_SENTENCES',
-      sentences: selected,
-      sourceUrl: window.location.href,
-      context: document.title,
-    });
+    browser.runtime
+      .sendMessage({
+        type: 'SAVE_SENTENCES',
+        sentences: selected,
+        sourceUrl: window.location.href,
+        context: document.title,
+      })
+      .catch((err: unknown) => {
+        console.error('[Vela] Failed to send SAVE_SENTENCES:', err);
+      });
 
     overlay.innerHTML = '';
     const done = document.createElement('div');
