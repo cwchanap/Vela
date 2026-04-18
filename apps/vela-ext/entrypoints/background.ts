@@ -97,11 +97,17 @@ async function saveSentenceToAPI(
     return;
   }
 
-  let response = await fetch(`${API_BASE_URL}/my-dictionaries`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${idToken}` },
-    body: JSON.stringify({ sentence, sourceUrl, context }),
-  });
+  let response: Response;
+  try {
+    response = await fetch(`${API_BASE_URL}/my-dictionaries`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${idToken}` },
+      body: JSON.stringify({ sentence, sourceUrl, context }),
+    });
+  } catch {
+    await enqueue(buildPendingSentenceRecord(sentence, sourceUrl, context));
+    return;
+  }
 
   if (response.status === 401) {
     try {
@@ -110,11 +116,16 @@ async function saveSentenceToAPI(
       await enqueue(buildPendingSentenceRecord(sentence, sourceUrl, context));
       return;
     }
-    response = await fetch(`${API_BASE_URL}/my-dictionaries`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${idToken}` },
-      body: JSON.stringify({ sentence, sourceUrl, context }),
-    });
+    try {
+      response = await fetch(`${API_BASE_URL}/my-dictionaries`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${idToken}` },
+        body: JSON.stringify({ sentence, sourceUrl, context }),
+      });
+    } catch {
+      await enqueue(buildPendingSentenceRecord(sentence, sourceUrl, context));
+      return;
+    }
   }
 
   if (!response.ok) {
@@ -169,7 +180,7 @@ async function flushQueue(): Promise<void> {
 
       if (response.ok) {
         await deletePending(record.id!);
-      } else if (record.retries >= MAX_RETRIES - 1) {
+      } else if (record.retries >= MAX_RETRIES) {
         await deletePending(record.id!);
         browser.notifications.create({
           type: 'basic',
@@ -181,8 +192,14 @@ async function flushQueue(): Promise<void> {
         await incrementRetry(record);
       }
     } catch {
-      if (record.retries >= MAX_RETRIES - 1) {
+      if (record.retries >= MAX_RETRIES) {
         await deletePending(record.id!);
+        browser.notifications.create({
+          type: 'basic',
+          iconUrl: browser.runtime.getURL('/icon/128.png'),
+          title: 'Vela — Sync failed',
+          message: '1 saved sentence could not be synced and was discarded.',
+        });
       } else {
         await incrementRetry(record);
       }
