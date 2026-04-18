@@ -58,26 +58,27 @@
         <q-card-section>
           <div class="row items-start q-mb-sm">
             <div class="col entry-text">
-              <template
-                v-if="tokenMap.has(item.sentence_id)"
-                v-for="token in tokenMap.get(item.sentence_id)"
-                :key="token.surface_form + token.pos + token.pos_detail_1"
-              >
-                <span
-                  v-if="isContentWord(token)"
-                  class="clickable-token"
-                  @click="(e) => handleTokenClick(item.sentence_id, token, e)"
-                  >{{ token.surface_form }}</span
+              <template v-if="tokenMap.has(item.sentence_id)">
+                <template
+                  v-for="(token, index) in tokenMap.get(item.sentence_id)"
+                  :key="index"
                 >
-                <span v-else>{{ token.surface_form }}</span>
+                  <span
+                    v-if="isContentWord(token)"
+                    class="clickable-token"
+                    @click="handleTokenClick($event, token)"
+                    >{{ token.surface_form }}</span
+                  >
+                  <span v-else>{{ token.surface_form }}</span>
+                </template>
               </template>
               <span v-else>{{ item.sentence }}</span>
             </div>
             <q-badge
-              v-if="tokenMap.has(item.sentence_id)"
-              :color="difficultyColor(computeDifficulty(tokenMap.get(item.sentence_id)!))"
+              v-if="difficultyMap.has(item.sentence_id)"
+              :color="difficultyColor(difficultyMap.get(item.sentence_id)!)"
               class="q-ml-sm"
-              :label="computeDifficulty(tokenMap.get(item.sentence_id)!)"
+              :label="difficultyMap.get(item.sentence_id)"
               data-testid="difficulty-badge"
             />
             <q-btn
@@ -268,7 +269,7 @@ import {
   type SentenceAnalysis,
 } from 'src/services/myDictionariesService';
 import { tokenize, type Token } from '@vela/common';
-import { computeDifficulty } from 'src/utils/japanese';
+import { computeDifficulty, isContentWord } from 'src/utils/japanese';
 import { lookupWord, addFlashcard, type JishoResult } from 'src/services/vocabularyService';
 import { useLLMSettingsStore } from 'src/stores/llmSettings';
 import { useAuthStore } from 'src/stores/auth';
@@ -297,12 +298,13 @@ const streamingText = ref('');
 
 // Tokenization — sentence_id → Token[]
 const tokenMap = ref(new Map<string, Token[]>());
+const difficultyMap = ref(new Map<string, string>());
 
 // Definition popover (single shared instance)
 const popoverOpen = ref(false);
 const popoverTarget = ref<HTMLElement | null>(null);
 const activeToken = ref<{ token: Token; sentenceId: string } | null>(null);
-const popoverLookup = ref<JishoResult | null | 'loading' | 'notfound'>('notfound');
+const popoverLookup = ref<JishoResult | 'loading' | 'notfound'>('notfound');
 const flashcardState = ref<'idle' | 'loading' | 'added' | 'exists' | 'error'>('idle');
 
 // Configure marked options
@@ -369,12 +371,6 @@ onMounted(() => {
   loadEntries();
 });
 
-const CONTENT_POS_SET = new Set(['名詞', '動詞', '形容詞']);
-
-function isContentWord(token: Token): boolean {
-  return CONTENT_POS_SET.has(token.pos);
-}
-
 function difficultyColor(level: string): string {
   const map: Record<string, string> = {
     N5: 'green',
@@ -396,17 +392,20 @@ async function loadEntries() {
 
     // Tokenize all sentences in parallel; failures are non-fatal
     const newMap = new Map<string, Token[]>();
+    const newDifficultyMap = new Map<string, string>();
     await Promise.all(
       entries.value.map(async (item) => {
         try {
           const tokens = await tokenize(item.sentence);
           newMap.set(item.sentence_id, tokens);
+          newDifficultyMap.set(item.sentence_id, computeDifficulty(tokens));
         } catch {
           // Tokenization failure is non-fatal — entry renders as plain text
         }
       }),
     );
     tokenMap.value = newMap;
+    difficultyMap.value = newDifficultyMap;
   } catch (err) {
     error.value = err instanceof Error ? err.message : 'Failed to load dictionary entries';
   } finally {
@@ -414,8 +413,10 @@ async function loadEntries() {
   }
 }
 
-async function handleTokenClick(sentenceId: string, token: Token, event: MouseEvent) {
+async function handleTokenClick(event: MouseEvent, token: Token) {
   popoverTarget.value = event.currentTarget as HTMLElement;
+  const sentenceId =
+    [...tokenMap.value.entries()].find(([, tokens]) => tokens.includes(token))?.[0] ?? '';
   activeToken.value = { token, sentenceId };
   popoverLookup.value = 'loading';
   flashcardState.value = 'idle';
@@ -429,8 +430,7 @@ async function handleAddFlashcard() {
   if (
     !activeToken.value ||
     popoverLookup.value === 'loading' ||
-    popoverLookup.value === 'notfound' ||
-    popoverLookup.value === null
+    popoverLookup.value === 'notfound'
   )
     return;
 
@@ -724,10 +724,6 @@ async function handlePronounce(entry: MyDictionaryEntry) {
 
 .provider-info {
   color: #757575;
-}
-
-.entry-text {
-  color: #1a1a1a;
 }
 
 /* Dark mode support */
