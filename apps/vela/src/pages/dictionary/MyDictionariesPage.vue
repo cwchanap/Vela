@@ -443,11 +443,11 @@ async function handleAddFlashcard() {
       japanese_word: activeToken.value.token.dictionary_form,
       reading: lookup.reading,
       english_translation: lookup.meanings[0] ?? '',
-      example_sentence_jp: entry?.sentence,
-      source_url: entry?.source_url,
-      jlpt_level: lookup.jlpt
-        ? (parseInt(lookup.jlpt.replace('jlpt-n', ''), 10) as 1 | 2 | 3 | 4 | 5)
-        : undefined,
+      ...(entry?.sentence ? { example_sentence_jp: entry.sentence } : {}),
+      ...(entry?.source_url ? { source_url: entry.source_url } : {}),
+      ...(lookup.jlpt
+        ? { jlpt_level: parseInt(lookup.jlpt.replace('jlpt-n', ''), 10) as 1 | 2 | 3 | 4 | 5 }
+        : {}),
     });
     flashcardState.value = result.alreadyInSRS ? 'exists' : 'added';
   } catch {
