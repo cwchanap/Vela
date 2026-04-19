@@ -482,6 +482,85 @@ describe('DynamoDB Operations', () => {
 
       expect(result).toHaveLength(1);
     });
+
+    test('findByWord should paginate until it finds a later-page match', async () => {
+      mockSend
+        .mockResolvedValueOnce({
+          Items: [],
+          LastEvaluatedKey: { id: 'page-1' },
+        })
+        .mockResolvedValueOnce({
+          Items: [{ id: 'v2', japanese_word: '食べる' }],
+          LastEvaluatedKey: undefined,
+        });
+
+      const result = await vocabulary.findByWord('食べる');
+
+      expect(result).toEqual({ id: 'v2', japanese_word: '食べる' });
+      expect(mockSend).toHaveBeenCalledTimes(2);
+      expect(mockScanCommand).toHaveBeenNthCalledWith(
+        1,
+        expect.objectContaining({
+          TableName: 'vela-vocabulary',
+          FilterExpression: 'japanese_word = :word',
+          ExpressionAttributeValues: { ':word': '食べる' },
+        }),
+      );
+      expect(mockScanCommand).toHaveBeenNthCalledWith(
+        2,
+        expect.objectContaining({
+          TableName: 'vela-vocabulary',
+          FilterExpression: 'japanese_word = :word',
+          ExpressionAttributeValues: { ':word': '食べる' },
+          ExclusiveStartKey: { id: 'page-1' },
+        }),
+      );
+    });
+
+    test('create should use a normalized id and reuse an existing item on conditional failure', async () => {
+      const err = Object.assign(new Error('Condition failed'), {
+        name: 'ConditionalCheckFailedException',
+      });
+      mockSend.mockRejectedValueOnce(err).mockResolvedValueOnce({
+        Item: {
+          id: '食べる',
+          japanese_word: '食べる',
+          normalized_japanese_word: '食べる',
+          english_translation: 'to eat',
+        },
+      });
+
+      const result = await vocabulary.create({
+        japanese_word: ' 食べる ',
+        hiragana: 'たべる',
+        english_translation: 'to eat',
+        created_at: '2026-04-19T00:00:00.000Z',
+      });
+
+      expect(mockPutCommand).toHaveBeenCalledWith(
+        expect.objectContaining({
+          TableName: 'vela-vocabulary',
+          ConditionExpression: 'attribute_not_exists(id)',
+          Item: expect.objectContaining({
+            id: '食べる',
+            normalized_japanese_word: '食べる',
+          }),
+        }),
+      );
+      expect(mockGetCommand).toHaveBeenCalledWith(
+        expect.objectContaining({
+          TableName: 'vela-vocabulary',
+          Key: { id: '食べる' },
+        }),
+      );
+      expect(result).toEqual({
+        item: expect.objectContaining({
+          id: '食べる',
+          normalized_japanese_word: '食べる',
+        }),
+        created: false,
+      });
+    });
   });
 
   describe('Sentences operations', () => {

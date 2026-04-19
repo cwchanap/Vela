@@ -56,6 +56,8 @@ const sanitize = (v?: string) => {
   return s;
 };
 
+const normalizeJapaneseWord = (word: string): string => word.trim().normalize('NFKC').toLowerCase();
+
 const endpointSanitized = sanitize(process.env.DDB_ENDPOINT);
 const isLocalDdb =
   !!endpointSanitized &&
@@ -424,13 +426,28 @@ export const vocabulary = {
    */
   async findByWord(japaneseWord: string): Promise<Record<string, unknown> | undefined> {
     try {
-      const command = new ScanCommand({
-        TableName: TABLE_NAMES.VOCABULARY,
-        FilterExpression: 'japanese_word = :word',
-        ExpressionAttributeValues: { ':word': japaneseWord },
-      });
-      const response = await docClient.send(command);
-      return response.Items?.[0] as Record<string, unknown> | undefined;
+      const normalizedWord = normalizeJapaneseWord(japaneseWord);
+      let lastEvaluatedKey: Record<string, unknown> | undefined;
+
+      do {
+        const command = new ScanCommand({
+          TableName: TABLE_NAMES.VOCABULARY,
+          FilterExpression: 'japanese_word = :word',
+          ExpressionAttributeValues: { ':word': japaneseWord },
+          ...(lastEvaluatedKey ? { ExclusiveStartKey: lastEvaluatedKey } : {}),
+        });
+        const response = await docClient.send(command);
+        const match = response.Items?.find((item) => {
+          const word = item?.japanese_word;
+          return typeof word === 'string' && normalizeJapaneseWord(word) === normalizedWord;
+        });
+
+        if (match) {
+          return match as Record<string, unknown>;
+        }
+
+        lastEvaluatedKey = response.LastEvaluatedKey as Record<string, unknown> | undefined;
+      } while (lastEvaluatedKey);
     } catch (error) {
       handleDynamoError(error);
     }
@@ -440,7 +457,7 @@ export const vocabulary = {
    * Create a new vocabulary entry.
    */
   async create(item: {
-    id: string;
+    id?: string;
     japanese_word: string;
     hiragana?: string;
     english_translation: string;
@@ -448,14 +465,32 @@ export const vocabulary = {
     source_url?: string;
     jlpt_level?: number;
     created_at: string;
-  }): Promise<void> {
+    normalized_japanese_word?: string;
+  }): Promise<{ item: Record<string, unknown>; created: boolean }> {
+    const normalizedJapaneseWord =
+      item.normalized_japanese_word ?? normalizeJapaneseWord(item.japanese_word);
+    const vocabularyItem = {
+      ...item,
+      id: item.id ?? normalizedJapaneseWord,
+      japanese_word: item.japanese_word.trim(),
+      normalized_japanese_word: normalizedJapaneseWord,
+    };
+
     try {
       const command = new PutCommand({
         TableName: TABLE_NAMES.VOCABULARY,
-        Item: item,
+        Item: vocabularyItem,
+        ConditionExpression: 'attribute_not_exists(id)',
       });
       await docClient.send(command);
+      return { item: vocabularyItem, created: true };
     } catch (error) {
+      if ((error as { name?: string }).name === 'ConditionalCheckFailedException') {
+        const existing = await this.getById(vocabularyItem.id);
+        if (existing) {
+          return { item: existing, created: false };
+        }
+      }
       handleDynamoError(error);
     }
   },

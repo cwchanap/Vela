@@ -178,7 +178,6 @@ export const parseFurigana = (text: string): FuriganaSegment[] => {
 };
 
 const CONTENT_POS = new Set(['名詞', '動詞', '形容詞']);
-const KANJI_RE = /[\u4E00-\u9FAF]/;
 
 export function isContentWord(token: Token): boolean {
   return CONTENT_POS.has(token.pos);
@@ -194,7 +193,7 @@ export function computeDifficulty(tokens: Token[]): string {
   const contentWords = tokens.filter((t) => isContentWord(t));
   if (contentWords.length === 0) return '—';
 
-  const kanjiCount = contentWords.filter((t) => KANJI_RE.test(t.surface_form)).length;
+  const kanjiCount = contentWords.filter((t) => Array.from(t.surface_form).some(isKanji)).length;
 
   if (kanjiCount === 0) return 'N5';
   if (kanjiCount <= 2) return 'N4';

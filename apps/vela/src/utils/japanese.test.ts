@@ -333,9 +333,18 @@ describe('computeDifficulty', () => {
     const tokens = [
       makeToken('名詞', '日本'), // kanji content word
       makeToken('助詞', 'の'), // particle — ignored
-      makeToken('動詞', '行く'), // content word, no kanji — doesn't count
+      makeToken('動詞', 'いく'), // content word, no kanji — doesn't count
       makeToken('記号', '。'), // punctuation — ignored
     ];
     expect(computeDifficulty(tokens)).toBe('N4'); // 1 kanji content word
+  });
+
+  it('counts extension-a kanji the same way as isKanji', () => {
+    const tokens = [
+      makeToken('名詞', '㐂び'),
+      makeToken('動詞', 'みる'),
+    ];
+
+    expect(computeDifficulty(tokens)).toBe('N4');
   });
 });

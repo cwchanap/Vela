@@ -8,6 +8,10 @@ const { mockGetMyDictionaries } = vi.hoisted(() => ({
   mockGetMyDictionaries: vi.fn(),
 }));
 
+const { mockGetPendingQueueCount } = vi.hoisted(() => ({
+  mockGetPendingQueueCount: vi.fn(),
+}));
+
 const { mockGetValidIdToken, mockRefreshIdToken, mockGetUserEmail, mockClearAuthData } = vi.hoisted(
   () => ({
     mockGetValidIdToken: vi.fn(),
@@ -19,6 +23,10 @@ const { mockGetValidIdToken, mockRefreshIdToken, mockGetUserEmail, mockClearAuth
 
 vi.mock('../../entrypoints/utils/api', () => ({
   getMyDictionaries: mockGetMyDictionaries,
+}));
+
+vi.mock('../../entrypoints/utils/pendingQueue', () => ({
+  getPendingQueueCount: mockGetPendingQueueCount,
 }));
 
 vi.mock('../../entrypoints/utils/storage', () => ({
@@ -81,10 +89,17 @@ describe('DashboardPage', () => {
     mockRefreshIdToken.mockClear();
     mockGetUserEmail.mockClear();
     mockClearAuthData.mockClear();
+    mockGetPendingQueueCount.mockClear();
 
     // Set up browser API mocks
     // Using 'as any' to assign mock implementation to the global browser object in the test environment.
     (globalThis as any).browser = {
+      runtime: {
+        onMessage: {
+          addListener: vi.fn(),
+          removeListener: vi.fn(),
+        },
+      },
       storage: {
         local: {
           set: vi.fn(async (data: Record<string, unknown>) => {
@@ -112,6 +127,7 @@ describe('DashboardPage', () => {
     mockGetUserEmail.mockResolvedValue('test@example.com');
     mockGetValidIdToken.mockResolvedValue('valid-token');
     mockGetMyDictionaries.mockResolvedValue(mockEntries);
+    mockGetPendingQueueCount.mockResolvedValue(0);
   });
 
   afterEach(() => {
@@ -141,6 +157,15 @@ describe('DashboardPage', () => {
 
       expect(mockGetValidIdToken).toHaveBeenCalled();
       expect(mockGetMyDictionaries).toHaveBeenCalledWith('valid-token');
+    });
+
+    it('should show the pending queue badge using the mocked queue count', async () => {
+      mockGetPendingQueueCount.mockResolvedValueOnce(3);
+
+      wrapper = mount(DashboardPage);
+      await flushPromises();
+
+      expect(wrapper.find('.pending-badge').text()).toContain('3');
     });
 
     it('should load theme preference from storage on mount', async () => {
@@ -431,6 +456,42 @@ describe('DashboardPage', () => {
       await refreshButton.trigger('click');
 
       expect(mockGetMyDictionaries).toHaveBeenCalled();
+    });
+
+    it('should refresh the pending queue count when entries are refreshed', async () => {
+      mockGetPendingQueueCount.mockResolvedValueOnce(2).mockResolvedValueOnce(0);
+
+      wrapper = mount(DashboardPage);
+      await flushPromises();
+      expect(wrapper.find('.pending-badge').text()).toContain('2');
+
+      const refreshButton = wrapper.find('.refresh-button');
+      await refreshButton.trigger('click');
+      await flushPromises();
+
+      expect(mockGetPendingQueueCount).toHaveBeenCalledTimes(2);
+      expect(wrapper.find('.pending-badge').exists()).toBe(false);
+    });
+
+    it('should refresh the pending queue count when background sync reports queue changes', async () => {
+      mockGetPendingQueueCount.mockResolvedValueOnce(1).mockResolvedValueOnce(0);
+
+      wrapper = mount(DashboardPage);
+      await flushPromises();
+      expect(wrapper.find('.pending-badge').text()).toContain('1');
+
+      const listener = vi.mocked(browser.runtime.onMessage.addListener).mock.calls[0]?.[0] as
+        | ((message: unknown) => void)
+        | undefined;
+      if (!listener) {
+        throw new Error('Expected DashboardPage to register a runtime message listener');
+      }
+
+      listener({ type: 'PENDING_QUEUE_UPDATED' });
+      await flushPromises();
+
+      expect(mockGetPendingQueueCount).toHaveBeenCalledTimes(2);
+      expect(wrapper.find('.pending-badge').exists()).toBe(false);
     });
 
     it('should disable refresh button while loading', async () => {

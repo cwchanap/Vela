@@ -9,12 +9,21 @@ const app = new Hono<{ Bindings: Env } & AuthContext>();
 
 app.use('*', requireAuth);
 
+const safeSourceUrlSchema = z
+  .string()
+  .trim()
+  .url()
+  .refine((value) => {
+    const url = new URL(value);
+    return url.protocol === 'http:' || url.protocol === 'https:';
+  }, 'source_url must use http or https');
+
 const fromWordSchema = z.object({
-  japanese_word: z.string().min(1),
+  japanese_word: z.string().trim().min(1),
   reading: z.string(),
-  english_translation: z.string().min(1),
+  english_translation: z.string().trim().min(1),
   example_sentence_jp: z.string().optional(),
-  source_url: z.string().optional(),
+  source_url: safeSourceUrlSchema.optional(),
   jlpt_level: z
     .union([z.literal(1), z.literal(2), z.literal(3), z.literal(4), z.literal(5)])
     .optional(),
@@ -26,29 +35,17 @@ app.post('/from-word', zValidator('json', fromWordSchema), async (c) => {
 
   const body = c.req.valid('json');
 
-  // Check if word already exists in the shared vocabulary table
-  const existing = await vocabulary.findByWord(body.japanese_word);
+  const { item, created } = await vocabulary.create({
+    japanese_word: body.japanese_word,
+    hiragana: body.reading,
+    english_translation: body.english_translation,
+    example_sentence_jp: body.example_sentence_jp,
+    source_url: body.source_url,
+    jlpt_level: body.jlpt_level,
+    created_at: new Date().toISOString(),
+  });
 
-  let vocabularyId: string;
-  let created: boolean;
-
-  if (existing) {
-    vocabularyId = existing.id as string;
-    created = false;
-  } else {
-    vocabularyId = crypto.randomUUID();
-    await vocabulary.create({
-      id: vocabularyId,
-      japanese_word: body.japanese_word,
-      hiragana: body.reading,
-      english_translation: body.english_translation,
-      example_sentence_jp: body.example_sentence_jp,
-      source_url: body.source_url,
-      jlpt_level: body.jlpt_level,
-      created_at: new Date().toISOString(),
-    });
-    created = true;
-  }
+  const vocabularyId = item.id as string;
 
   // Check if this user already has SRS progress for this word
   const existingProgress = await userVocabularyProgress.get(userId, vocabularyId);

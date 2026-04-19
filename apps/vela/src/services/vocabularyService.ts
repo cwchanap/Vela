@@ -24,30 +24,15 @@ export interface AddFlashcardResult {
   alreadyInSRS: boolean;
 }
 
-// Session-level cache keyed by dictionary_form to avoid duplicate lookups
-const lookupCache = new Map<string, JishoResult>();
-
-/** Exported for tests only — clears the in-memory lookup cache. */
-export function clearLookupCache(): void {
-  lookupCache.clear();
-}
-
 /**
  * Look up a word via the Jisho proxy. Returns null if not found.
- * Results are cached for the lifetime of the page session.
  */
 export async function lookupWord(dictionaryForm: string): Promise<JishoResult | null> {
-  if (lookupCache.has(dictionaryForm)) {
-    return lookupCache.get(dictionaryForm)!;
-  }
-
   try {
     const encoded = encodeURIComponent(dictionaryForm);
-    const result = await httpJson<JishoResult>(
+    return await httpJson<JishoResult>(
       `${config.api.url}dictionary/lookup?word=${encoded}`,
     );
-    lookupCache.set(dictionaryForm, result);
-    return result;
   } catch {
     return null;
   }

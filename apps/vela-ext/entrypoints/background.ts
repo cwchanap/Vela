@@ -23,13 +23,30 @@ export function buildPendingSentenceRecord(
   return { sentence, sourceUrl, context, timestamp: Date.now(), retries: 0 };
 }
 
+async function notifyPendingQueueChanged(): Promise<void> {
+  try {
+    await browser.runtime.sendMessage({ type: 'PENDING_QUEUE_UPDATED' });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : '';
+    if (
+      !message.includes('Could not establish connection') &&
+      !message.includes('Receiving end does not exist')
+    ) {
+      console.error('[Vela] Failed to notify pending queue changes:', error);
+    }
+  }
+}
+
 async function enqueue(record: Omit<PendingSentenceRecord, 'id'>): Promise<void> {
   const db = await openDB();
   return new Promise((resolve, reject) => {
     const tx = db.transaction(STORE_NAME, 'readwrite');
     const store = tx.objectStore(STORE_NAME);
     const req = store.add(record);
-    req.onsuccess = () => resolve();
+    req.onsuccess = () => {
+      resolve();
+      void notifyPendingQueueChanged();
+    };
     req.onerror = () => reject(req.error);
   });
 }
@@ -51,7 +68,10 @@ async function deletePending(id: number): Promise<void> {
     const tx = db.transaction(STORE_NAME, 'readwrite');
     const store = tx.objectStore(STORE_NAME);
     const req = store.delete(id);
-    req.onsuccess = () => resolve();
+    req.onsuccess = () => {
+      resolve();
+      void notifyPendingQueueChanged();
+    };
     req.onerror = () => reject(req.error);
   });
 }
@@ -63,7 +83,10 @@ async function incrementRetry(record: PendingSentenceRecord): Promise<void> {
     const store = tx.objectStore(STORE_NAME);
     const updated = { ...record, retries: record.retries + 1 };
     const req = store.put(updated);
-    req.onsuccess = () => resolve();
+    req.onsuccess = () => {
+      resolve();
+      void notifyPendingQueueChanged();
+    };
     req.onerror = () => reject(req.error);
   });
 }
@@ -123,6 +146,33 @@ async function saveSentenceToAPI(
 
 const MAX_RETRIES = 3;
 
+export function shouldDiscardPendingRecord(record: Pick<PendingSentenceRecord, 'retries'>): boolean {
+  return record.retries + 1 >= MAX_RETRIES;
+}
+
+function notifyDiscardedSyncFailure(): void {
+  browser.notifications.create({
+    type: 'basic',
+    iconUrl: browser.runtime.getURL('/icon/128.png'),
+    title: 'Vela — Sync failed',
+    message: '1 saved sentence could not be synced and was discarded.',
+  });
+}
+
+export async function requestPageScan(tabId: number): Promise<void> {
+  try {
+    await browser.tabs.sendMessage(tabId, { type: 'SCAN_PAGE' });
+  } catch (error) {
+    console.error('[Vela] Failed to trigger page scan:', error);
+    browser.notifications.create({
+      type: 'basic',
+      iconUrl: browser.runtime.getURL('/icon/128.png'),
+      title: 'Vela - Error',
+      message: error instanceof Error ? error.message : 'Failed to scan page',
+    });
+  }
+}
+
 async function flushQueue(): Promise<void> {
   const pending = await getAllPending();
   if (pending.length === 0) return;
@@ -166,26 +216,16 @@ async function flushQueue(): Promise<void> {
 
       if (response.ok) {
         await deletePending(record.id!);
-      } else if (record.retries >= MAX_RETRIES) {
+      } else if (shouldDiscardPendingRecord(record)) {
         await deletePending(record.id!);
-        browser.notifications.create({
-          type: 'basic',
-          iconUrl: browser.runtime.getURL('/icon/128.png'),
-          title: 'Vela — Sync failed',
-          message: '1 saved sentence could not be synced and was discarded.',
-        });
+        notifyDiscardedSyncFailure();
       } else {
         await incrementRetry(record);
       }
     } catch {
-      if (record.retries >= MAX_RETRIES) {
+      if (shouldDiscardPendingRecord(record)) {
         await deletePending(record.id!);
-        browser.notifications.create({
-          type: 'basic',
-          iconUrl: browser.runtime.getURL('/icon/128.png'),
-          title: 'Vela — Sync failed',
-          message: '1 saved sentence could not be synced and was discarded.',
-        });
+        notifyDiscardedSyncFailure();
       } else {
         await incrementRetry(record);
       }
@@ -214,7 +254,7 @@ export default defineBackground(() => {
 
   browser.contextMenus.onClicked.addListener(async (info, tab) => {
     if (info.menuItemId === 'scan-page-vela' && tab?.id) {
-      browser.tabs.sendMessage(tab.id, { type: 'SCAN_PAGE' });
+      await requestPageScan(tab.id);
       return;
     }
 
