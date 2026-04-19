@@ -5,8 +5,8 @@ const mockTokenize = vi.fn();
 vi.mock('kuromoji', () => ({
   default: {
     builder: vi.fn(() => ({
+      // eslint-disable-next-line no-unused-vars
       build: vi.fn((cb: (err: Error | null, tokenizer: any) => void) => {
-        // eslint-disable-line no-unused-vars
         cb(null, { tokenize: mockTokenize });
       }),
     })),
@@ -90,8 +90,8 @@ describe('tokenize — builder error path', () => {
     vi.doMock('kuromoji', () => ({
       default: {
         builder: vi.fn(() => ({
+          // eslint-disable-next-line no-unused-vars
           build: vi.fn((cb: (err: Error | null, t: any) => void) => {
-            // eslint-disable-line no-unused-vars
             cb(new Error('dict not found'), null);
           }),
         })),
