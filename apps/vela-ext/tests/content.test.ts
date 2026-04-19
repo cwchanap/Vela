@@ -61,6 +61,21 @@ describe('scanJapaneseSentences', () => {
     expect(result).toContain('正常な長さのテキストです。');
   });
 
+  it('ignores text inside script, style, and noscript tags', () => {
+    document.body.innerHTML = `
+      <p>日本語を勉強しています。</p>
+      <script>var msg = "これはスクリプトの中のテキストです";</script>
+      <style>/* 日本語のスタイルコメント */</style>
+      <noscript>ブラウザでJavaScriptを有効にしてください。</noscript>
+    `;
+
+    const result = scanJapaneseSentences();
+    expect(result).toContain('日本語を勉強しています。');
+    expect(result).not.toContain('スクリプトの中のテキストです');
+    expect(result).not.toContain('スタイルコメント');
+    expect(result).not.toContain('JavaScriptを有効にしてください');
+  });
+
   it('ignores null and primitive runtime messages without throwing', () => {
     contentScript.main();
     const listener = getRegisteredMessageListener();

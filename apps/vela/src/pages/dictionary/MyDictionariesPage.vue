@@ -69,7 +69,7 @@
                       class="clickable-token"
                       :aria-label="`Look up ${token.surface_form}`"
                       :title="`Look up ${token.surface_form}`"
-                      @click="handleTokenClick($event, token)"
+                      @click="handleTokenClick($event, token, item.sentence_id)"
                     >
                       {{ token.surface_form }}
                     </button>
@@ -187,7 +187,7 @@
             icon="add"
             :label="flashcardBtnLabel"
             :loading="flashcardState === 'loading'"
-            :disable="flashcardState === 'added' || flashcardState === 'exists'"
+            :disable="flashcardState === 'added' || flashcardState === 'exists' || noMeaningAvailable"
             size="sm"
             @click="handleAddFlashcard"
             data-testid="btn-add-flashcard"
@@ -317,6 +317,12 @@ const popoverTarget = ref<HTMLElement | null>(null);
 const activeToken = ref<{ token: Token; sentenceId: string } | null>(null);
 const popoverLookup = ref<JishoResult | 'loading' | 'notfound'>('notfound');
 const flashcardState = ref<'idle' | 'loading' | 'added' | 'exists' | 'error'>('idle');
+const noMeaningAvailable = computed(
+  () =>
+    popoverLookup.value !== 'loading' &&
+    popoverLookup.value !== 'notfound' &&
+    popoverLookup.value.meanings.length === 0,
+);
 
 interface ActiveTokenIdentity {
   sentenceId: string;
@@ -443,10 +449,8 @@ async function loadEntries() {
   }
 }
 
-async function handleTokenClick(event: MouseEvent, token: Token) {
+async function handleTokenClick(event: MouseEvent, token: Token, sentenceId: string) {
   popoverTarget.value = event.currentTarget as HTMLElement;
-  const sentenceId =
-    [...tokenMap.value.entries()].find(([, tokens]) => tokens.includes(token))?.[0] ?? '';
   activeToken.value = { token, sentenceId };
   popoverLookup.value = 'loading';
   flashcardState.value = 'idle';
@@ -483,7 +487,10 @@ async function handleAddFlashcard() {
       ...(entry?.sentence ? { example_sentence_jp: entry.sentence } : {}),
       ...(entry?.source_url ? { source_url: entry.source_url } : {}),
       ...(lookup.jlpt
-        ? { jlpt_level: parseInt(lookup.jlpt.replace('jlpt-n', ''), 10) as 1 | 2 | 3 | 4 | 5 }
+        ? (() => {
+            const level = parseInt(lookup.jlpt.replace('jlpt-n', ''), 10);
+            return level >= 1 && level <= 5 ? { jlpt_level: level as 1 | 2 | 3 | 4 | 5 } : {};
+          })()
         : {}),
     });
 

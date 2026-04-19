@@ -490,19 +490,19 @@ describe('DynamoDB Operations', () => {
           LastEvaluatedKey: { id: 'page-1' },
         })
         .mockResolvedValueOnce({
-          Items: [{ id: 'v2', japanese_word: '食べる' }],
+          Items: [{ id: 'v2', japanese_word: '食べる', normalized_japanese_word: '食べる' }],
           LastEvaluatedKey: undefined,
         });
 
       const result = await vocabulary.findByWord('食べる');
 
-      expect(result).toEqual({ id: 'v2', japanese_word: '食べる' });
+      expect(result).toEqual({ id: 'v2', japanese_word: '食べる', normalized_japanese_word: '食べる' });
       expect(mockSend).toHaveBeenCalledTimes(2);
       expect(mockScanCommand).toHaveBeenNthCalledWith(
         1,
         expect.objectContaining({
           TableName: 'vela-vocabulary',
-          FilterExpression: 'japanese_word = :word',
+          FilterExpression: 'normalized_japanese_word = :word',
           ExpressionAttributeValues: { ':word': '食べる' },
         }),
       );
@@ -510,7 +510,7 @@ describe('DynamoDB Operations', () => {
         2,
         expect.objectContaining({
           TableName: 'vela-vocabulary',
-          FilterExpression: 'japanese_word = :word',
+          FilterExpression: 'normalized_japanese_word = :word',
           ExpressionAttributeValues: { ':word': '食べる' },
           ExclusiveStartKey: { id: 'page-1' },
         }),
