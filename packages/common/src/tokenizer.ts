@@ -24,11 +24,18 @@ export async function tokenize(text: string): Promise<Token[]> {
     tokenizerPromise = new Promise<kuromoji.Tokenizer<kuromoji.IpadicFeatures>>(
       (resolve, reject) => {
         kuromoji.builder({ dicPath: _dicPath }).build((err, tokenizer) => {
-          if (err) reject(err);
-          else resolve(tokenizer);
+          if (err) {
+            reject(err);
+            return;
+          }
+
+          resolve(tokenizer);
         });
       },
-    );
+    ).catch((error) => {
+      tokenizerPromise = null;
+      throw error;
+    });
   }
   const tokenizer = await tokenizerPromise;
   return tokenizer

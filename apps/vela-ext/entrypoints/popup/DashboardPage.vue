@@ -84,7 +84,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, watch, computed } from 'vue';
+import { ref, onMounted, onUnmounted, watch, computed } from 'vue';
 import { getMyDictionaries } from '../utils/api';
 import { getValidIdToken, refreshIdToken, getUserEmail, clearAuthData } from '../utils/storage';
 import { getPendingQueueCount } from '../utils/pendingQueue';
@@ -101,6 +101,24 @@ const isDarkMode = ref(false);
 const instructionsExpanded = ref(false);
 const pendingCount = ref(0);
 
+function isPendingQueueMessage(message: unknown): message is { type: 'PENDING_QUEUE_UPDATED' } {
+  return (
+    typeof message === 'object' &&
+    message !== null &&
+    'type' in message &&
+    message.type === 'PENDING_QUEUE_UPDATED'
+  );
+}
+
+async function refreshPendingCount() {
+  pendingCount.value = await getPendingQueueCount();
+}
+
+function handleRuntimeMessage(message: unknown) {
+  if (!isPendingQueueMessage(message)) return;
+  void refreshPendingCount();
+}
+
 onMounted(async () => {
   const email = await getUserEmail();
   if (email) {
@@ -111,9 +129,12 @@ onMounted(async () => {
   const savedTheme = await browser.storage.local.get('theme_preference');
   isDarkMode.value = savedTheme.theme_preference === 'dark';
 
-  pendingCount.value = await getPendingQueueCount();
-
+  browser.runtime.onMessage.addListener(handleRuntimeMessage);
   await loadEntries();
+});
+
+onUnmounted(() => {
+  browser.runtime.onMessage.removeListener(handleRuntimeMessage);
 });
 
 // Watch for theme changes and persist to storage
@@ -160,6 +181,7 @@ async function loadEntries() {
       }, 2000);
     }
   } finally {
+    await refreshPendingCount();
     loading.value = false;
   }
 }

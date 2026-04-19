@@ -41,6 +41,14 @@ export const savedSentencesKeys = {
 };
 
 /**
+ * Dictionary-related query keys
+ */
+export const dictionaryKeys = {
+  all: ['dictionary'] as const,
+  lookup: (word: string) => [...dictionaryKeys.all, 'lookup', word] as const,
+};
+
+/**
  * SRS (Spaced Repetition System) query keys
  */
 export const srsKeys = {

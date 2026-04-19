@@ -5,9 +5,8 @@ const mockTokenize = vi.fn();
 vi.mock('kuromoji', () => ({
   default: {
     builder: vi.fn(() => ({
-      // eslint-disable-next-line no-unused-vars
-      build: vi.fn((cb: (err: Error | null, tokenizer: any) => void) => {
-        cb(null, { tokenize: mockTokenize });
+      build: vi.fn((_cb: any) => {
+        _cb(null, { tokenize: mockTokenize });
       }),
     })),
   },
@@ -85,14 +84,30 @@ describe('tokenize', () => {
 });
 
 describe('tokenize — builder error path', () => {
-  it('rejects when kuromoji builder fails to load dictionary', async () => {
+  it('retries tokenizer initialization after a builder failure', async () => {
     vi.resetModules();
+    const retryTokenize = vi.fn().mockReturnValue([
+      {
+        surface_form: 'テスト',
+        reading: 'テスト',
+        basic_form: 'テスト',
+        pos: '名詞',
+        pos_detail_1: '一般',
+      },
+    ]);
+    let buildCalls = 0;
+
     vi.doMock('kuromoji', () => ({
       default: {
         builder: vi.fn(() => ({
-          // eslint-disable-next-line no-unused-vars
-          build: vi.fn((cb: (err: Error | null, t: any) => void) => {
-            cb(new Error('dict not found'), null);
+          build: vi.fn((_cb: any) => {
+            buildCalls += 1;
+            if (buildCalls === 1) {
+              _cb(new Error('dict not found'), null);
+              return;
+            }
+
+            _cb(null, { tokenize: retryTokenize });
           }),
         })),
       },
@@ -100,6 +115,16 @@ describe('tokenize — builder error path', () => {
 
     const { tokenize: freshTokenize } = await import('./tokenizer');
     await expect(freshTokenize('テスト')).rejects.toThrow('dict not found');
+    await expect(freshTokenize('テスト')).resolves.toEqual([
+      {
+        surface_form: 'テスト',
+        reading: 'テスト',
+        dictionary_form: 'テスト',
+        pos: '名詞',
+        pos_detail_1: '一般',
+      },
+    ]);
+    expect(buildCalls).toBe(2);
 
     vi.resetModules();
   });

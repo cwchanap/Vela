@@ -62,16 +62,20 @@
                 <template
                   v-for="(token, index) in tokenMap.get(item.sentence_id)"
                   :key="index"
-                >
-                  <span
-                    v-if="isContentWord(token)"
-                    class="clickable-token"
-                    @click="handleTokenClick($event, token)"
-                    >{{ token.surface_form }}</span
                   >
-                  <span v-else>{{ token.surface_form }}</span>
+                    <button
+                      v-if="isContentWord(token)"
+                      type="button"
+                      class="clickable-token"
+                      :aria-label="`Look up ${token.surface_form}`"
+                      :title="`Look up ${token.surface_form}`"
+                      @click="handleTokenClick($event, token)"
+                    >
+                      {{ token.surface_form }}
+                    </button>
+                    <span v-else>{{ token.surface_form }}</span>
+                  </template>
                 </template>
-              </template>
               <span v-else>{{ item.sentence }}</span>
             </div>
             <q-badge
@@ -258,6 +262,7 @@
 import { ref, onMounted, computed } from 'vue';
 import { useQuasar } from 'quasar';
 import { storeToRefs } from 'pinia';
+import { useQueryClient } from '@tanstack/vue-query';
 import { fetchAuthSession } from 'aws-amplify/auth';
 import { config } from 'src/config';
 import { marked } from 'marked';
@@ -270,12 +275,18 @@ import {
 } from 'src/services/myDictionariesService';
 import { tokenize, type Token } from '@vela/common';
 import { computeDifficulty, isContentWord } from 'src/utils/japanese';
-import { lookupWord, addFlashcard, type JishoResult } from 'src/services/vocabularyService';
+import type { JishoResult } from 'src/services/vocabularyService';
+import {
+  dictionaryLookupQueryOptions,
+  useAddFlashcardMutation,
+} from 'src/composables/queries/useVocabularyQueries';
 import { useLLMSettingsStore } from 'src/stores/llmSettings';
 import { useAuthStore } from 'src/stores/auth';
 import { generatePronunciation, playAudio } from 'src/services/ttsService';
 
 const $q = useQuasar();
+const queryClient = useQueryClient();
+const addFlashcardMutation = useAddFlashcardMutation();
 const llmSettings = useLLMSettingsStore();
 const authStore = useAuthStore();
 const { provider, currentModel, currentApiKey } = storeToRefs(llmSettings);
@@ -306,6 +317,25 @@ const popoverTarget = ref<HTMLElement | null>(null);
 const activeToken = ref<{ token: Token; sentenceId: string } | null>(null);
 const popoverLookup = ref<JishoResult | 'loading' | 'notfound'>('notfound');
 const flashcardState = ref<'idle' | 'loading' | 'added' | 'exists' | 'error'>('idle');
+
+interface ActiveTokenIdentity {
+  sentenceId: string;
+  token: string;
+}
+
+function getActiveTokenIdentity(token: Token, sentenceId: string): ActiveTokenIdentity {
+  return {
+    sentenceId,
+    token: token.surface_form,
+  };
+}
+
+function isActiveTokenIdentity(identity: ActiveTokenIdentity): boolean {
+  return (
+    activeToken.value?.sentenceId === identity.sentenceId &&
+    activeToken.value.token.surface_form === identity.token
+  );
+}
 
 // Configure marked options
 marked.setOptions({
@@ -422,7 +452,13 @@ async function handleTokenClick(event: MouseEvent, token: Token) {
   flashcardState.value = 'idle';
   popoverOpen.value = true;
 
-  const result = await lookupWord(token.dictionary_form);
+  const current = getActiveTokenIdentity(token, sentenceId);
+  const result = await queryClient.fetchQuery(dictionaryLookupQueryOptions(token.dictionary_form));
+
+  if (!isActiveTokenIdentity(current)) {
+    return;
+  }
+
   popoverLookup.value = result ?? 'notfound';
 }
 
@@ -436,10 +472,11 @@ async function handleAddFlashcard() {
 
   const lookup = popoverLookup.value as JishoResult;
   const entry = entries.value.find((e) => e.sentence_id === activeToken.value!.sentenceId);
+  const current = getActiveTokenIdentity(activeToken.value.token, activeToken.value.sentenceId);
 
   flashcardState.value = 'loading';
   try {
-    const result = await addFlashcard({
+    const result = await addFlashcardMutation.mutateAsync({
       japanese_word: activeToken.value.token.dictionary_form,
       reading: lookup.reading,
       english_translation: lookup.meanings[0] ?? '',
@@ -449,8 +486,17 @@ async function handleAddFlashcard() {
         ? { jlpt_level: parseInt(lookup.jlpt.replace('jlpt-n', ''), 10) as 1 | 2 | 3 | 4 | 5 }
         : {}),
     });
+
+    if (!isActiveTokenIdentity(current)) {
+      return;
+    }
+
     flashcardState.value = result.alreadyInSRS ? 'exists' : 'added';
   } catch {
+    if (!isActiveTokenIdentity(current)) {
+      return;
+    }
+
     flashcardState.value = 'error';
     $q.notify({ type: 'negative', message: 'Failed to add flashcard', position: 'top' });
   }
@@ -649,6 +695,11 @@ async function handlePronounce(entry: MyDictionaryEntry) {
 
 <style scoped>
 .clickable-token {
+  background: transparent;
+  border: none;
+  padding: 0;
+  color: inherit;
+  font: inherit;
   cursor: pointer;
   border-bottom: 1px dotted var(--q-primary, #1976d2);
   transition: background-color 0.15s;
@@ -656,6 +707,12 @@ async function handlePronounce(entry: MyDictionaryEntry) {
 
 .clickable-token:hover {
   background-color: rgba(25, 118, 210, 0.1);
+  border-radius: 2px;
+}
+
+.clickable-token:focus-visible {
+  outline: 2px solid var(--q-primary, #1976d2);
+  outline-offset: 2px;
   border-radius: 2px;
 }
 

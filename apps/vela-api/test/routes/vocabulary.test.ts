@@ -3,7 +3,6 @@ import { Hono } from 'hono';
 import type { Env } from '../../src/types';
 
 const mockVocabulary = {
-  findByWord: vi.fn(),
   create: vi.fn(),
 };
 
@@ -54,8 +53,10 @@ describe('POST /from-word', () => {
   });
 
   test('creates a new vocabulary entry and SRS record when word does not exist', async () => {
-    mockVocabulary.findByWord.mockResolvedValue(undefined);
-    mockVocabulary.create.mockResolvedValue(undefined);
+    mockVocabulary.create.mockResolvedValue({
+      item: { id: '食べる', japanese_word: '食べる' },
+      created: true,
+    });
     mockUserVocabularyProgress.get.mockResolvedValue(undefined);
 
     const app = createTestApp();
@@ -69,7 +70,7 @@ describe('POST /from-word', () => {
     const body = (await res.json()) as any;
     expect(body.created).toBe(true);
     expect(body.alreadyInSRS).toBe(false);
-    expect(typeof body.vocabulary_id).toBe('string');
+    expect(body.vocabulary_id).toBe('食べる');
     expect(mockVocabulary.create).toHaveBeenCalledTimes(1);
     expect(mockUserVocabularyProgress.initializeProgress).toHaveBeenCalledTimes(1);
     expect(mockVocabulary.create).toHaveBeenCalledWith(
@@ -81,9 +82,12 @@ describe('POST /from-word', () => {
   });
 
   test('reuses existing vocabulary entry when word already exists', async () => {
-    mockVocabulary.findByWord.mockResolvedValue({
-      id: 'existing-vocab-id',
-      japanese_word: '食べる',
+    mockVocabulary.create.mockResolvedValue({
+      item: {
+        id: 'existing-vocab-id',
+        japanese_word: '食べる',
+      },
+      created: false,
     });
     mockUserVocabularyProgress.get.mockResolvedValue(undefined);
 
@@ -98,12 +102,15 @@ describe('POST /from-word', () => {
     const body = (await res.json()) as any;
     expect(body.created).toBe(false);
     expect(body.vocabulary_id).toBe('existing-vocab-id');
-    expect(mockVocabulary.create).not.toHaveBeenCalled();
+    expect(mockVocabulary.create).toHaveBeenCalledTimes(1);
     expect(mockUserVocabularyProgress.initializeProgress).toHaveBeenCalledTimes(1);
   });
 
   test('returns alreadyInSRS: true when SRS progress already exists', async () => {
-    mockVocabulary.findByWord.mockResolvedValue({ id: 'vocab-id' });
+    mockVocabulary.create.mockResolvedValue({
+      item: { id: 'vocab-id', japanese_word: '食べる' },
+      created: false,
+    });
     mockUserVocabularyProgress.get.mockResolvedValue({
       user_id: 'user-123',
       vocabulary_id: 'vocab-id',
@@ -135,6 +142,17 @@ describe('POST /from-word', () => {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ japanese_word: '食べる' }), // missing english_translation
+    });
+
+    expect(res.status).toBe(400);
+  });
+
+  test('returns 400 when source_url uses a non-http scheme', async () => {
+    const app = createTestApp();
+    const res = await app.request('/from-word', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...validBody, source_url: 'ftp://example.com' }),
     });
 
     expect(res.status).toBe(400);

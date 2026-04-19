@@ -19,7 +19,6 @@ import { httpJson, httpJsonAuth } from 'src/utils/httpClient';
 import {
   lookupWord,
   addFlashcard,
-  clearLookupCache,
   type JishoResult,
   type AddFlashcardPayload,
 } from './vocabularyService';
@@ -27,7 +26,6 @@ import {
 describe('lookupWord', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    clearLookupCache();
   });
 
   it('calls the dictionary API with the encoded word', async () => {
@@ -54,7 +52,7 @@ describe('lookupWord', () => {
     expect(result).toBeNull();
   });
 
-  it('caches the result so the API is only called once per word', async () => {
+  it('does not add a bespoke cache on top of the shared query layer', async () => {
     vi.mocked(httpJson).mockResolvedValue({
       word: '猫',
       reading: 'ねこ',
@@ -65,7 +63,7 @@ describe('lookupWord', () => {
     await lookupWord('猫');
     await lookupWord('猫');
 
-    expect(vi.mocked(httpJson)).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(httpJson)).toHaveBeenCalledTimes(2);
   });
 });
 

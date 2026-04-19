@@ -1,4 +1,4 @@
-import { describe, test, expect, beforeEach, afterEach, vi } from 'bun:test';
+import { describe, test, expect, beforeEach, afterEach, mock } from 'bun:test';
 import { Hono } from 'hono';
 import type { Env } from '../../src/types';
 
@@ -13,10 +13,10 @@ function createTestApp() {
 }
 
 describe('GET /lookup', () => {
-  let mockFetch: ReturnType<typeof vi.fn>;
+  let mockFetch: ReturnType<typeof mock>;
 
   beforeEach(() => {
-    mockFetch = vi.fn();
+    mockFetch = mock(async () => ({ ok: true, json: async () => ({ data: [] }) }));
     globalThis.fetch = mockFetch as any;
   });
 
@@ -110,6 +110,29 @@ describe('GET /lookup', () => {
     expect(res.status).toBe(502);
   });
 
+  test('returns 502 when the Jisho fetch throws', async () => {
+    mockFetch.mockRejectedValue(new Error('network down'));
+
+    const app = createTestApp();
+    const res = await app.request('/lookup?word=test');
+
+    expect(res.status).toBe(502);
+  });
+
+  test('returns 502 when the Jisho response payload is invalid', async () => {
+    mockFetch.mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        invalid: true,
+      }),
+    });
+
+    const app = createTestApp();
+    const res = await app.request('/lookup?word=食べる');
+
+    expect(res.status).toBe(502);
+  });
+
   test('URL-encodes the word when calling Jisho', async () => {
     mockFetch.mockResolvedValue({
       ok: true,
@@ -128,7 +151,7 @@ describe('GET /lookup', () => {
     const app = createTestApp();
     await app.request('/lookup?word=東京');
 
-    const calledUrl = mockFetch.mock.calls[0][0] as string;
+    const calledUrl = mockFetch.mock.calls[0]?.[0] as string;
     expect(calledUrl).toBe('https://jisho.org/api/v1/search/words?keyword=%E6%9D%B1%E4%BA%AC');
   });
 });

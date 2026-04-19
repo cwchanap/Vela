@@ -4,3 +4,4 @@ export * from './useGameQueries';
 export * from './useProgressQueries';
 export * from './useMyDictionariesQueries';
 export * from './useTTSQueries';
+export * from './useVocabularyQueries';
