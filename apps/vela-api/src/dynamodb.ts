@@ -432,8 +432,8 @@ export const vocabulary = {
       do {
         const command = new ScanCommand({
           TableName: TABLE_NAMES.VOCABULARY,
-          FilterExpression: 'japanese_word = :word',
-          ExpressionAttributeValues: { ':word': japaneseWord },
+          FilterExpression: 'normalized_japanese_word = :word',
+          ExpressionAttributeValues: { ':word': normalizedWord },
           ...(lastEvaluatedKey ? { ExclusiveStartKey: lastEvaluatedKey } : {}),
         });
         const response = await docClient.send(command);

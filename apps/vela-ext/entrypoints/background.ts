@@ -281,8 +281,8 @@ export default defineBackground(() => {
     }
   });
 
-  // Handle batch save from content script (fire-and-forget; no sendResponse needed)
-  browser.runtime.onMessage.addListener((message: unknown) => {
+  // Handle batch save from content script — returns Promise so sendMessage resolves/rejects based on outcome
+  browser.runtime.onMessage.addListener((message: unknown): Promise<void> | undefined => {
     if (
       typeof message !== 'object' ||
       message === null ||
@@ -295,11 +295,11 @@ export default defineBackground(() => {
       context?: string;
     };
     if (!Array.isArray(sentences)) return;
-    void Promise.all(
+    return Promise.all(
       (sentences as string[]).map((sentence) =>
         saveSentenceToAPI(sentence, sourceUrl, context),
       ),
-    );
+    ).then(() => {});
   });
 
   // Flush on startup and when browser regains focus (not on focus-loss)

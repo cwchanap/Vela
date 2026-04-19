@@ -7,9 +7,11 @@ export function scanJapaneseSentences(): string[] {
   if (!document.body) return [];
 
   const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+  const denylist = new Set(['SCRIPT', 'STYLE', 'NOSCRIPT']);
   let node: Node | null;
 
   while ((node = walker.nextNode())) {
+    if (node.parentElement && denylist.has(node.parentElement.tagName)) continue;
     const text = (node.textContent ?? '').trim();
     if (
       text.length >= 5 &&
