@@ -1,7 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 vi.mock('src/utils/httpClient', () => ({
-  httpJson: vi.fn(),
   httpJsonAuth: vi.fn(),
 }));
 
@@ -15,7 +14,7 @@ vi.mock('aws-amplify/auth', () => ({
   }),
 }));
 
-import { httpJson, httpJsonAuth } from 'src/utils/httpClient';
+import { httpJsonAuth } from 'src/utils/httpClient';
 import {
   lookupWord,
   addFlashcard,
@@ -36,24 +35,25 @@ describe('lookupWord', () => {
       jlpt: 'jlpt-n5',
       common: true,
     };
-    vi.mocked(httpJson).mockResolvedValue(mockResult);
+    vi.mocked(httpJsonAuth).mockResolvedValue(mockResult);
 
     const result = await lookupWord('猫');
 
-    expect(vi.mocked(httpJson)).toHaveBeenCalledWith(
+    expect(vi.mocked(httpJsonAuth)).toHaveBeenCalledWith(
       'http://localhost:9005/api/dictionary/lookup?word=%E7%8C%AB',
     );
+
     expect(result).toEqual(mockResult);
   });
 
   it('returns null on error (word not found)', async () => {
-    vi.mocked(httpJson).mockRejectedValue(new Error('Not Found'));
+    vi.mocked(httpJsonAuth).mockRejectedValue(new Error('Not Found'));
     const result = await lookupWord('zzznotaword');
     expect(result).toBeNull();
   });
 
   it('does not add a bespoke cache on top of the shared query layer', async () => {
-    vi.mocked(httpJson).mockResolvedValue({
+    vi.mocked(httpJsonAuth).mockResolvedValue({
       word: '猫',
       reading: 'ねこ',
       meanings: ['cat'],
@@ -63,7 +63,7 @@ describe('lookupWord', () => {
     await lookupWord('猫');
     await lookupWord('猫');
 
-    expect(vi.mocked(httpJson)).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(httpJsonAuth)).toHaveBeenCalledTimes(2);
   });
 });
 
