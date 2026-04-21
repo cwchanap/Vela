@@ -193,7 +193,7 @@ function buildOverlay(sentences: string[]): ShadowRoot {
 
 // Content script entrypoint
 export default defineContentScript({
-  matches: ['<all_urls>'],
+  matches: ['*://*/*'],
   main() {
     browser.runtime.onMessage.addListener((message: unknown) => {
       if (

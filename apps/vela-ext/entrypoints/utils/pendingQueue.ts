@@ -10,7 +10,8 @@ export async function getPendingQueueCount(): Promise<number> {
       req.onsuccess = () => resolve(req.result);
       req.onerror = () => reject(req.error);
     });
-  } catch {
+  } catch (err) {
+    console.error('[Vela] getPendingQueueCount: Failed to read IndexedDB:', err);
     return 0;
   }
 }
