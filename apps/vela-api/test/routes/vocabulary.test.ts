@@ -157,4 +157,19 @@ describe('POST /from-word', () => {
 
     expect(res.status).toBe(400);
   });
+
+  test('returns 500 with structured error when vocabulary.create throws', async () => {
+    mockVocabulary.create.mockRejectedValue(new Error('DynamoDB connection error'));
+
+    const app = createTestApp();
+    const res = await app.request('/from-word', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(validBody),
+    });
+
+    expect(res.status).toBe(500);
+    const body = (await res.json()) as any;
+    expect(body).toEqual({ error: 'Failed to save vocabulary entry' });
+  });
 });

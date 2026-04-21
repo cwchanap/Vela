@@ -35,29 +35,38 @@ app.post('/from-word', zValidator('json', fromWordSchema), async (c) => {
 
   const body = c.req.valid('json');
 
-  const { item, created } = await vocabulary.create({
-    japanese_word: body.japanese_word,
-    hiragana: body.reading,
-    english_translation: body.english_translation,
-    example_sentence_jp: body.example_sentence_jp,
-    source_url: body.source_url,
-    jlpt_level: body.jlpt_level,
-    created_at: new Date().toISOString(),
-  });
+  try {
+    const { item, created } = await vocabulary.create({
+      japanese_word: body.japanese_word,
+      hiragana: body.reading,
+      english_translation: body.english_translation,
+      example_sentence_jp: body.example_sentence_jp,
+      source_url: body.source_url,
+      jlpt_level: body.jlpt_level,
+      created_at: new Date().toISOString(),
+    });
 
-  const vocabularyId = item.id as string;
+    const vocabularyId = item.id as string;
 
-  // Check if this user already has SRS progress for this word
-  const existingProgress = await userVocabularyProgress.get(userId, vocabularyId);
-  const alreadyInSRS = !!existingProgress;
+    // Check if this user already has SRS progress for this word
+    const existingProgress = await userVocabularyProgress.get(userId, vocabularyId);
+    const alreadyInSRS = !!existingProgress;
 
-  if (!alreadyInSRS) {
-    const tomorrow = new Date();
-    tomorrow.setDate(tomorrow.getDate() + 1);
-    await userVocabularyProgress.initializeProgress(userId, vocabularyId, tomorrow.toISOString());
+    if (!alreadyInSRS) {
+      const tomorrow = new Date();
+      tomorrow.setDate(tomorrow.getDate() + 1);
+      await userVocabularyProgress.initializeProgress(userId, vocabularyId, tomorrow.toISOString());
+    }
+
+    return c.json({ vocabulary_id: vocabularyId, created, alreadyInSRS });
+  } catch (err) {
+    console.error('[Vela] /vocabulary/from-word failed', {
+      userId,
+      word: body.japanese_word,
+      err,
+    });
+    return c.json({ error: 'Failed to save vocabulary entry' }, 500);
   }
-
-  return c.json({ vocabulary_id: vocabularyId, created, alreadyInSRS });
 });
 
 export default app;
