@@ -93,17 +93,18 @@ async function incrementRetry(record: PendingSentenceRecord): Promise<void> {
 
 // ── API save (offline-aware) ─────────────────────────────────────────────────
 
-async function saveSentenceToAPI(
+export async function saveSentenceToAPI(
   sentence: string,
   sourceUrl?: string,
   context?: string,
-): Promise<void> {
+): Promise<boolean> {
   let idToken: string;
   try {
     idToken = await getValidIdToken();
-  } catch {
+  } catch (err) {
+    console.error('[Vela] saveSentenceToAPI: auth token failed, queuing:', err);
     await enqueue(buildPendingSentenceRecord(sentence, sourceUrl, context));
-    return;
+    return false;
   }
 
   let response: Response;
@@ -113,17 +114,19 @@ async function saveSentenceToAPI(
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${idToken}` },
       body: JSON.stringify({ sentence, sourceUrl, context }),
     });
-  } catch {
+  } catch (err) {
+    console.error('[Vela] saveSentenceToAPI: fetch failed, queuing:', err);
     await enqueue(buildPendingSentenceRecord(sentence, sourceUrl, context));
-    return;
+    return false;
   }
 
   if (response.status === 401) {
     try {
       idToken = await refreshIdToken();
-    } catch {
+    } catch (err) {
+      console.error('[Vela] saveSentenceToAPI: token refresh failed, queuing:', err);
       await enqueue(buildPendingSentenceRecord(sentence, sourceUrl, context));
-      return;
+      return false;
     }
     try {
       response = await fetch(`${API_BASE_URL}/my-dictionaries`, {
@@ -131,15 +134,19 @@ async function saveSentenceToAPI(
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${idToken}` },
         body: JSON.stringify({ sentence, sourceUrl, context }),
       });
-    } catch {
+    } catch (err) {
+      console.error('[Vela] saveSentenceToAPI: retry fetch failed, queuing:', err);
       await enqueue(buildPendingSentenceRecord(sentence, sourceUrl, context));
-      return;
+      return false;
     }
   }
 
   if (!response.ok) {
     await enqueue(buildPendingSentenceRecord(sentence, sourceUrl, context));
+    return false;
   }
+
+  return true;
 }
 
 // ── Flush queue ──────────────────────────────────────────────────────────────
@@ -222,7 +229,8 @@ async function flushQueue(): Promise<void> {
       } else {
         await incrementRetry(record);
       }
-    } catch {
+    } catch (err) {
+      console.error('[Vela] flushQueue: failed to process record:', record.id, err);
       if (shouldDiscardPendingRecord(record)) {
         await deletePending(record.id!);
         notifyDiscardedSyncFailure();
@@ -263,14 +271,17 @@ export default defineBackground(() => {
       if (!selectedText) return;
 
       try {
-        await saveSentenceToAPI(selectedText, tab?.url, tab?.title);
+        const saved = await saveSentenceToAPI(selectedText, tab?.url, tab?.title);
         browser.notifications.create({
           type: 'basic',
           iconUrl: browser.runtime.getURL('/icon/128.png'),
-          title: 'Vela - Entry Saved',
-          message: `Saved: ${selectedText.substring(0, 50)}${selectedText.length > 50 ? '...' : ''}`,
+          title: saved ? 'Vela - Entry Saved' : 'Vela - Entry Queued',
+          message: saved
+            ? `Saved: ${selectedText.substring(0, 50)}${selectedText.length > 50 ? '...' : ''}`
+            : `Queued for sync: ${selectedText.substring(0, 50)}${selectedText.length > 50 ? '...' : ''}`,
         });
       } catch (error) {
+        console.error('[Vela] Error in save-to-vela handler:', error);
         browser.notifications.create({
           type: 'basic',
           iconUrl: browser.runtime.getURL('/icon/128.png'),
@@ -303,9 +314,15 @@ export default defineBackground(() => {
   });
 
   // Flush on startup and when browser regains focus (not on focus-loss)
-  browser.runtime.onStartup.addListener(() => flushQueue());
-  browser.windows.onFocusChanged.addListener((windowId) => {
-    if (windowId !== browser.windows.WINDOW_ID_NONE) flushQueue();
+  browser.runtime.onStartup.addListener(() => {
+    flushQueue().catch((err) => console.error('[Vela] flushQueue (onStartup) failed:', err));
   });
-  self.addEventListener('online', () => flushQueue());
+  browser.windows.onFocusChanged.addListener((windowId) => {
+    if (windowId !== browser.windows.WINDOW_ID_NONE) {
+      flushQueue().catch((err) => console.error('[Vela] flushQueue (onFocusChanged) failed:', err));
+    }
+  });
+  self.addEventListener('online', () => {
+    flushQueue().catch((err) => console.error('[Vela] flushQueue (online) failed:', err));
+  });
 });
