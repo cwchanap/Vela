@@ -457,13 +457,15 @@ async function handleTokenClick(event: MouseEvent, token: Token, sentenceId: str
   popoverOpen.value = true;
 
   const current = getActiveTokenIdentity(token, sentenceId);
-  const result = await queryClient.fetchQuery(dictionaryLookupQueryOptions(token.dictionary_form));
-
-  if (!isActiveTokenIdentity(current)) {
-    return;
+  try {
+    const result = await queryClient.fetchQuery(dictionaryLookupQueryOptions(token.dictionary_form));
+    if (!isActiveTokenIdentity(current)) return;
+    popoverLookup.value = result ?? 'notfound';
+  } catch (err) {
+    console.error('[Vela] Dictionary lookup failed:', err);
+    if (!isActiveTokenIdentity(current)) return;
+    popoverLookup.value = 'notfound';
   }
-
-  popoverLookup.value = result ?? 'notfound';
 }
 
 async function handleAddFlashcard() {
