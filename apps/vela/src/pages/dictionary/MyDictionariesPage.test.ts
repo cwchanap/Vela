@@ -880,6 +880,106 @@ describe('MyDictionariesPage', () => {
       expect(wrapper.vm.flashcardState).toBe('idle');
     });
 
+    describe('handleAddFlashcard', () => {
+      it("sets flashcardState to 'added' when alreadyInSRS is false", async () => {
+        vi.mocked(myDictionariesService.getMyDictionaries).mockResolvedValue([mockEntry]);
+        vi.mocked(vocabularyService.addFlashcard).mockResolvedValue({
+          vocabulary_id: 'vocab-1',
+          created: true,
+          alreadyInSRS: false,
+        });
+
+        wrapper = mountComponent();
+        await flushPromises();
+
+        wrapper.vm.activeToken = {
+          token: {
+            surface_form: '日本語',
+            reading: 'ニホンゴ',
+            dictionary_form: '日本語',
+            pos: '名詞',
+            pos_detail_1: '一般',
+          },
+          sentenceId: 'sent-1',
+        };
+        wrapper.vm.popoverLookup = {
+          word: '日本語',
+          reading: 'にほんご',
+          meanings: ['Japanese language'],
+          common: true,
+        };
+
+        await wrapper.vm.handleAddFlashcard();
+        await flushPromises();
+
+        expect(wrapper.vm.flashcardState).toBe('added');
+      });
+
+      it("sets flashcardState to 'exists' when alreadyInSRS is true", async () => {
+        vi.mocked(myDictionariesService.getMyDictionaries).mockResolvedValue([mockEntry]);
+        vi.mocked(vocabularyService.addFlashcard).mockResolvedValue({
+          vocabulary_id: 'vocab-1',
+          created: false,
+          alreadyInSRS: true,
+        });
+
+        wrapper = mountComponent();
+        await flushPromises();
+
+        wrapper.vm.activeToken = {
+          token: {
+            surface_form: '日本語',
+            reading: 'ニホンゴ',
+            dictionary_form: '日本語',
+            pos: '名詞',
+            pos_detail_1: '一般',
+          },
+          sentenceId: 'sent-1',
+        };
+        wrapper.vm.popoverLookup = {
+          word: '日本語',
+          reading: 'にほんご',
+          meanings: ['Japanese language'],
+          common: true,
+        };
+
+        await wrapper.vm.handleAddFlashcard();
+        await flushPromises();
+
+        expect(wrapper.vm.flashcardState).toBe('exists');
+      });
+
+      it("sets flashcardState to 'error' when the mutation throws", async () => {
+        vi.mocked(myDictionariesService.getMyDictionaries).mockResolvedValue([mockEntry]);
+        vi.mocked(vocabularyService.addFlashcard).mockRejectedValue(new Error('Server error'));
+
+        wrapper = mountComponent();
+        await flushPromises();
+
+        wrapper.vm.activeToken = {
+          token: {
+            surface_form: '日本語',
+            reading: 'ニホンゴ',
+            dictionary_form: '日本語',
+            pos: '名詞',
+            pos_detail_1: '一般',
+          },
+          sentenceId: 'sent-1',
+        };
+        wrapper.vm.popoverLookup = {
+          word: '日本語',
+          reading: 'にほんご',
+          meanings: ['Japanese language'],
+          common: true,
+        };
+
+        await wrapper.vm.handleAddFlashcard();
+        await flushPromises();
+
+        expect(wrapper.vm.flashcardState).toBe('error');
+      });
+    });
+
     it('sets popoverLookup to notfound (not loading) when fetchQuery throws', async () => {
       const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
       vi.mocked(myDictionariesService.getMyDictionaries).mockResolvedValue([mockEntry]);
