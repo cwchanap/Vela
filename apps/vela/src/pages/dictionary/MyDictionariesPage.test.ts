@@ -879,5 +879,26 @@ describe('MyDictionariesPage', () => {
       expect(wrapper.vm.activeToken.token.dictionary_form).toBe('勉強');
       expect(wrapper.vm.flashcardState).toBe('idle');
     });
+
+    it('sets popoverLookup to notfound (not loading) when fetchQuery throws', async () => {
+      const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      vi.mocked(myDictionariesService.getMyDictionaries).mockResolvedValue([mockEntry]);
+      vi.mocked(vocabularyService.lookupWord).mockRejectedValue(new Error('Network error'));
+
+      wrapper = mountComponent();
+      await flushPromises();
+
+      const clickableTokens = wrapper.findAll('button.clickable-token');
+      await clickableTokens[0]!.trigger('click');
+      await flushPromises();
+
+      expect(wrapper.vm.popoverLookup).toBe('notfound');
+      expect(consoleErrorSpy).toHaveBeenCalledWith(
+        '[Vela] Dictionary lookup failed:',
+        expect.any(Error),
+      );
+
+      consoleErrorSpy.mockRestore();
+    });
   });
 });
