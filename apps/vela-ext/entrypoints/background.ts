@@ -180,7 +180,7 @@ export async function requestPageScan(tabId: number): Promise<void> {
   }
 }
 
-async function flushQueue(): Promise<void> {
+export async function flushQueue(): Promise<void> {
   const pending = await getAllPending();
   if (pending.length === 0) return;
 

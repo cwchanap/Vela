@@ -1,6 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-const { mockNotificationsCreate, mockTabsSendMessage, mockRuntimeGetURL } = vi.hoisted(() => {
+const {
+  mockNotificationsCreate,
+  mockTabsSendMessage,
+  mockRuntimeGetURL,
+  mockIdbStore,
+  idbState,
+} = vi.hoisted(() => {
   const mockNotificationsCreate = vi.fn();
   const mockTabsSendMessage = vi.fn();
   const mockRuntimeGetURL = vi.fn((p: string) => `chrome-extension://abc123${p}`);
@@ -31,26 +37,42 @@ const { mockNotificationsCreate, mockTabsSendMessage, mockRuntimeGetURL } = vi.h
     storage: { local: { get: vi.fn(), set: vi.fn(), remove: vi.fn(), clear: vi.fn() } },
   };
 
-  return { mockNotificationsCreate, mockTabsSendMessage, mockRuntimeGetURL };
+  /** Shared mutable state for the IDB mock — tests configure this per-case. */
+  const idbState = {
+    getAllResult: [] as any[],
+  };
+
+  /** Build a fake IDBRequest-like object that immediately fires onsuccess with a given value. */
+  function makeSuccessRequest(result: any = undefined) {
+    return {
+      result,
+      get onsuccess() {
+        return null;
+      },
+      set onsuccess(cb: any) {
+        cb();
+      },
+      get onerror() {
+        return null;
+      },
+      set onerror(_: any) {},
+    };
+  }
+
+  const mockIdbStore = {
+    add: vi.fn(() => makeSuccessRequest()),
+    getAll: vi.fn(() => makeSuccessRequest(idbState.getAllResult)),
+    delete: vi.fn(() => makeSuccessRequest()),
+    put: vi.fn(() => makeSuccessRequest()),
+  };
+
+  return { mockNotificationsCreate, mockTabsSendMessage, mockRuntimeGetURL, mockIdbStore, idbState };
 });
 
 vi.mock('../entrypoints/utils/idb', () => ({
   openDB: vi.fn().mockResolvedValue({
     transaction: vi.fn().mockReturnValue({
-      objectStore: vi.fn().mockReturnValue({
-        add: vi.fn().mockReturnValue({
-          get onsuccess() {
-            return null;
-          },
-          set onsuccess(cb: any) {
-            cb();
-          },
-          get onerror() {
-            return null;
-          },
-          set onerror(_: any) {},
-        }),
-      }),
+      objectStore: vi.fn().mockReturnValue(mockIdbStore),
     }),
   }),
   STORE_NAME: 'pending-sentences',
@@ -63,6 +85,7 @@ vi.mock('../entrypoints/utils/storage', () => ({
 
 import {
   buildPendingSentenceRecord,
+  flushQueue,
   requestPageScan,
   saveSentenceToAPI,
   shouldDiscardPendingRecord,
@@ -174,5 +197,147 @@ describe('saveSentenceToAPI', () => {
     const result = await saveSentenceToAPI('テスト文');
 
     expect(result).toBe(false);
+  });
+});
+
+describe('flushQueue', () => {
+  beforeEach(() => {
+    idbState.getAllResult = [];
+    // Re-configure mocks to pick up fresh idbState.getAllResult at call time.
+    // The initial vi.hoisted setup already does this correctly, but we reset here
+    // to clear call counts from previous tests.
+    mockIdbStore.getAll.mockReset();
+    mockIdbStore.getAll.mockImplementation(function () {
+      const result = idbState.getAllResult;
+      const req = {
+        result,
+        get onsuccess() {
+          return null;
+        },
+        set onsuccess(cb: any) {
+          cb();
+        },
+        get onerror() {
+          return null;
+        },
+        set onerror(_: any) {},
+      };
+      return req;
+    });
+    mockIdbStore.delete.mockReset();
+    mockIdbStore.delete.mockImplementation(function () {
+      const req = {
+        result: undefined,
+        get onsuccess() {
+          return null;
+        },
+        set onsuccess(cb: any) {
+          cb();
+        },
+        get onerror() {
+          return null;
+        },
+        set onerror(_: any) {},
+      };
+      return req;
+    });
+    mockIdbStore.put.mockReset();
+    mockIdbStore.put.mockImplementation(function () {
+      const req = {
+        result: undefined,
+        get onsuccess() {
+          return null;
+        },
+        set onsuccess(cb: any) {
+          cb();
+        },
+        get onerror() {
+          return null;
+        },
+        set onerror(_: any) {},
+      };
+      return req;
+    });
+    mockNotificationsCreate.mockReset();
+    vi.mocked(getValidIdToken).mockReset();
+    vi.mocked(refreshIdToken).mockReset();
+    global.fetch = vi.fn();
+  });
+
+  it('does nothing when queue is empty', async () => {
+    idbState.getAllResult = [];
+
+    await flushQueue();
+
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+
+  it('deletes record on successful API call', async () => {
+    idbState.getAllResult = [{ id: 1, sentence: 'テスト', retries: 0, timestamp: Date.now() }];
+    vi.mocked(getValidIdToken).mockResolvedValue('valid-token');
+    vi.mocked(global.fetch as ReturnType<typeof vi.fn>).mockResolvedValue(
+      new Response(null, { status: 200 }),
+    );
+
+    await flushQueue();
+
+    expect(global.fetch).toHaveBeenCalledOnce();
+    expect(mockIdbStore.delete).toHaveBeenCalledWith(1);
+  });
+
+  it('discards record and notifies when at max retries (retries=2) and fetch fails', async () => {
+    idbState.getAllResult = [{ id: 2, sentence: 'テスト', retries: 2, timestamp: Date.now() }];
+    vi.mocked(getValidIdToken).mockResolvedValue('valid-token');
+    vi.mocked(global.fetch as ReturnType<typeof vi.fn>).mockResolvedValue(
+      new Response(null, { status: 500 }),
+    );
+
+    await flushQueue();
+
+    expect(mockNotificationsCreate).toHaveBeenCalledWith(
+      expect.objectContaining({ title: 'Vela — Sync failed' }),
+    );
+    expect(mockIdbStore.delete).toHaveBeenCalledWith(2);
+  });
+});
+
+describe('SAVE_SENTENCES message handler', () => {
+  // The handler is registered when the module is first imported (defineBackground runs immediately).
+  // Capture it from the first call to onMessage.addListener.
+  function getSaveSentencesHandler(): (message: unknown) => Promise<void> | undefined {
+    const calls = vi.mocked(browser.runtime.onMessage.addListener).mock.calls;
+    if (calls.length === 0) throw new Error('No onMessage listener was registered');
+    return calls[0][0] as (message: unknown) => Promise<void> | undefined;
+  }
+
+  beforeEach(() => {
+    vi.mocked(getValidIdToken).mockReset();
+    vi.mocked(refreshIdToken).mockReset();
+    global.fetch = vi.fn();
+  });
+
+  it('returns undefined for non-matching message types', () => {
+    const handler = getSaveSentencesHandler();
+    const result = handler({ type: 'OTHER' });
+    expect(result).toBeUndefined();
+  });
+
+  it('returns undefined when sentences is not an array', () => {
+    const handler = getSaveSentencesHandler();
+    const result = handler({ type: 'SAVE_SENTENCES', sentences: 'not-array' });
+    expect(result).toBeUndefined();
+  });
+
+  it('returns a Promise for a valid sentences array', async () => {
+    vi.mocked(getValidIdToken).mockResolvedValue('valid-token');
+    vi.mocked(global.fetch as ReturnType<typeof vi.fn>).mockResolvedValue(
+      new Response(null, { status: 200 }),
+    );
+
+    const handler = getSaveSentencesHandler();
+    const result = handler({ type: 'SAVE_SENTENCES', sentences: ['テスト1', 'テスト2'] });
+
+    expect(result).toBeInstanceOf(Promise);
+    await result;
   });
 });
