@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 const { mockNotificationsCreate, mockTabsSendMessage, mockRuntimeGetURL } = vi.hoisted(() => {
   const mockNotificationsCreate = vi.fn();
@@ -34,11 +34,40 @@ const { mockNotificationsCreate, mockTabsSendMessage, mockRuntimeGetURL } = vi.h
   return { mockNotificationsCreate, mockTabsSendMessage, mockRuntimeGetURL };
 });
 
+vi.mock('../entrypoints/utils/idb', () => ({
+  openDB: vi.fn().mockResolvedValue({
+    transaction: vi.fn().mockReturnValue({
+      objectStore: vi.fn().mockReturnValue({
+        add: vi.fn().mockReturnValue({
+          get onsuccess() {
+            return null;
+          },
+          set onsuccess(cb: any) {
+            cb();
+          },
+          get onerror() {
+            return null;
+          },
+          set onerror(_: any) {},
+        }),
+      }),
+    }),
+  }),
+  STORE_NAME: 'pending-sentences',
+}));
+
+vi.mock('../entrypoints/utils/storage', () => ({
+  getValidIdToken: vi.fn(),
+  refreshIdToken: vi.fn(),
+}));
+
 import {
   buildPendingSentenceRecord,
   requestPageScan,
+  saveSentenceToAPI,
   shouldDiscardPendingRecord,
 } from '../entrypoints/background';
+import { getValidIdToken, refreshIdToken } from '../entrypoints/utils/storage';
 
 describe('buildPendingSentenceRecord', () => {
   it('creates a record with retries: 0 and a timestamp', () => {
@@ -80,5 +109,70 @@ describe('requestPageScan', () => {
       }),
     );
     expect(mockRuntimeGetURL).toHaveBeenCalledWith('/icon/128.png');
+  });
+});
+
+describe('saveSentenceToAPI', () => {
+  beforeEach(() => {
+    vi.mocked(getValidIdToken).mockReset();
+    vi.mocked(refreshIdToken).mockReset();
+    global.fetch = vi.fn();
+  });
+
+  it('returns true when auth token is valid and API returns 200', async () => {
+    vi.mocked(getValidIdToken).mockResolvedValue('valid-token');
+    vi.mocked(global.fetch as ReturnType<typeof vi.fn>).mockResolvedValue(
+      new Response(null, { status: 200 }),
+    );
+
+    const result = await saveSentenceToAPI('テスト文', 'https://example.com', 'Test Page');
+
+    expect(result).toBe(true);
+    expect(getValidIdToken).toHaveBeenCalledOnce();
+    expect(global.fetch).toHaveBeenCalledOnce();
+  });
+
+  it('returns false when getValidIdToken() throws (offline / no token)', async () => {
+    vi.mocked(getValidIdToken).mockRejectedValue(new Error('No token available'));
+
+    const result = await saveSentenceToAPI('テスト文', 'https://example.com', 'Test Page');
+
+    expect(result).toBe(false);
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+
+  it('returns false when fetch() throws (network error)', async () => {
+    vi.mocked(getValidIdToken).mockResolvedValue('valid-token');
+    vi.mocked(global.fetch as ReturnType<typeof vi.fn>).mockRejectedValue(
+      new Error('Failed to fetch'),
+    );
+
+    const result = await saveSentenceToAPI('テスト文');
+
+    expect(result).toBe(false);
+  });
+
+  it('returns false when response is 401 and refreshIdToken() throws', async () => {
+    vi.mocked(getValidIdToken).mockResolvedValue('expired-token');
+    vi.mocked(global.fetch as ReturnType<typeof vi.fn>).mockResolvedValue(
+      new Response(null, { status: 401 }),
+    );
+    vi.mocked(refreshIdToken).mockRejectedValue(new Error('Refresh failed'));
+
+    const result = await saveSentenceToAPI('テスト文', 'https://example.com');
+
+    expect(result).toBe(false);
+    expect(refreshIdToken).toHaveBeenCalledOnce();
+  });
+
+  it('returns false when response is non-2xx (e.g. 500)', async () => {
+    vi.mocked(getValidIdToken).mockResolvedValue('valid-token');
+    vi.mocked(global.fetch as ReturnType<typeof vi.fn>).mockResolvedValue(
+      new Response(null, { status: 500 }),
+    );
+
+    const result = await saveSentenceToAPI('テスト文');
+
+    expect(result).toBe(false);
   });
 });
