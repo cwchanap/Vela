@@ -56,7 +56,7 @@ const sanitize = (v?: string) => {
   return s;
 };
 
-const normalizeJapaneseWord = (word: string): string => word.trim().normalize('NFKC').toLowerCase();
+const normalizeJapaneseWord = (word: string): string => word.trim().normalize('NFKC');
 
 const endpointSanitized = sanitize(process.env.DDB_ENDPOINT);
 const isLocalDdb =
@@ -490,6 +490,9 @@ export const vocabulary = {
         if (existing) {
           return { item: existing, created: false };
         }
+        throw new Error(
+          `Vocabulary item '${vocabularyItem.id}' failed conditional check but could not be retrieved`,
+        );
       }
       handleDynamoError(error);
     }
