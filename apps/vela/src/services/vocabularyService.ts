@@ -1,5 +1,5 @@
 import { config } from 'src/config';
-import { httpJson, httpJsonAuth } from 'src/utils/httpClient';
+import { httpJsonAuth } from 'src/utils/httpClient';
 
 export interface JishoResult {
   word: string;
@@ -30,10 +30,11 @@ export interface AddFlashcardResult {
 export async function lookupWord(dictionaryForm: string): Promise<JishoResult | null> {
   try {
     const encoded = encodeURIComponent(dictionaryForm);
-    return await httpJson<JishoResult>(
+    return await httpJsonAuth<JishoResult>(
       `${config.api.url}dictionary/lookup?word=${encoded}`,
     );
-  } catch {
+  } catch (err) {
+    console.error('[Vela] lookupWord failed for:', dictionaryForm, err);
     return null;
   }
 }

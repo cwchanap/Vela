@@ -1,8 +1,22 @@
-import { describe, test, expect, beforeEach, afterEach, mock } from 'bun:test';
+import { describe, test, expect, beforeEach, afterEach, mock, vi } from 'bun:test';
 import { Hono } from 'hono';
 import type { Env } from '../../src/types';
 
 const originalFetch = globalThis.fetch;
+
+// Mock auth middleware to pass for authenticated tests
+vi.mock('../../src/middleware/auth', () => ({
+  requireAuth: async (c: any, next: any) => {
+    const authHeader = c.req.header('Authorization');
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return c.json({ error: 'Unauthorized: Missing or invalid Authorization header' }, 401);
+    }
+    c.set('userId', 'test-user');
+    c.set('userEmail', 'user@example.com');
+    await next();
+  },
+  AuthContext: {},
+}));
 
 const { default: dictionaryRouter } = await import('../../src/routes/dictionary');
 
@@ -11,6 +25,8 @@ function createTestApp() {
   app.route('/', dictionaryRouter);
   return app;
 }
+
+const AUTH_HEADER = { Authorization: 'Bearer test-token' };
 
 describe('GET /lookup', () => {
   let mockFetch: ReturnType<typeof mock>;
@@ -42,7 +58,7 @@ describe('GET /lookup', () => {
     });
 
     const app = createTestApp();
-    const res = await app.request('/lookup?word=食べる');
+    const res = await app.request('/lookup?word=食べる', { headers: AUTH_HEADER });
 
     expect(res.status).toBe(200);
     expect(res.headers.get('Cache-Control')).toBe('public, max-age=86400');
@@ -74,7 +90,7 @@ describe('GET /lookup', () => {
     });
 
     const app = createTestApp();
-    const res = await app.request('/lookup?word=見る');
+    const res = await app.request('/lookup?word=見る', { headers: AUTH_HEADER });
     const body = (await res.json()) as any;
     expect(body.meanings).toHaveLength(3);
     expect(body.jlpt).toBeUndefined();
@@ -87,26 +103,26 @@ describe('GET /lookup', () => {
     });
 
     const app = createTestApp();
-    const res = await app.request('/lookup?word=xyzabc');
+    const res = await app.request('/lookup?word=xyzabc', { headers: AUTH_HEADER });
     expect(res.status).toBe(404);
   });
 
   test('returns 400 when word query param is missing', async () => {
     const app = createTestApp();
-    const res = await app.request('/lookup');
+    const res = await app.request('/lookup', { headers: AUTH_HEADER });
     expect(res.status).toBe(400);
   });
 
   test('returns 400 when word is empty string', async () => {
     const app = createTestApp();
-    const res = await app.request('/lookup?word=');
+    const res = await app.request('/lookup?word=', { headers: AUTH_HEADER });
     expect(res.status).toBe(400);
   });
 
   test('returns 502 when Jisho API request fails', async () => {
     mockFetch.mockResolvedValue({ ok: false, status: 500 });
     const app = createTestApp();
-    const res = await app.request('/lookup?word=test');
+    const res = await app.request('/lookup?word=test', { headers: AUTH_HEADER });
     expect(res.status).toBe(502);
   });
 
@@ -114,7 +130,7 @@ describe('GET /lookup', () => {
     mockFetch.mockRejectedValue(new Error('network down'));
 
     const app = createTestApp();
-    const res = await app.request('/lookup?word=test');
+    const res = await app.request('/lookup?word=test', { headers: AUTH_HEADER });
 
     expect(res.status).toBe(502);
   });
@@ -128,7 +144,7 @@ describe('GET /lookup', () => {
     });
 
     const app = createTestApp();
-    const res = await app.request('/lookup?word=食べる');
+    const res = await app.request('/lookup?word=食べる', { headers: AUTH_HEADER });
 
     expect(res.status).toBe(502);
   });
@@ -149,9 +165,15 @@ describe('GET /lookup', () => {
     });
 
     const app = createTestApp();
-    await app.request('/lookup?word=東京');
+    await app.request('/lookup?word=東京', { headers: AUTH_HEADER });
 
     const calledUrl = mockFetch.mock.calls[0]?.[0] as string;
     expect(calledUrl).toBe('https://jisho.org/api/v1/search/words?keyword=%E6%9D%B1%E4%BA%AC');
+  });
+
+  test('returns 401 when Authorization header is missing', async () => {
+    const app = createTestApp();
+    const res = await app.request('/lookup?word=食べる');
+    expect(res.status).toBe(401);
   });
 });

@@ -1,5 +1,6 @@
 import { Hono } from 'hono';
 import type { Env } from '../types';
+import { requireAuth, type AuthContext } from '../middleware/auth';
 import { zValidator } from '@hono/zod-validator';
 import { z } from 'zod';
 
@@ -11,7 +12,9 @@ export interface JishoResult {
   common: boolean;
 }
 
-const app = new Hono<{ Bindings: Env }>();
+const app = new Hono<{ Bindings: Env } & AuthContext>();
+
+app.use('*', requireAuth);
 
 const lookupQuerySchema = z.object({
   word: z.string().trim().min(1),
@@ -50,7 +53,8 @@ app.get('/lookup', zValidator('query', lookupQuerySchema), async (c) => {
     }
 
     payload = await res.json();
-  } catch {
+  } catch (err) {
+    console.error('[Vela] Jisho API fetch failed for word:', word, err);
     return c.json({ error: 'Jisho API request failed' }, 502);
   }
 
