@@ -517,6 +517,39 @@ describe('DynamoDB Operations', () => {
       );
     });
 
+    test('create should preserve uppercase in word id (no toLowerCase)', async () => {
+      mockSend.mockResolvedValueOnce({});
+
+      const result = await vocabulary.create({
+        japanese_word: 'Tシャツ',
+        hiragana: 'ティーシャツ',
+        english_translation: 'T-shirt',
+        created_at: '2026-04-20T00:00:00.000Z',
+      });
+
+      expect(result.item.id).toBe('Tシャツ');
+      expect(result.item.normalized_japanese_word).toBe('Tシャツ');
+    });
+
+    test('create should throw when ConditionalCheckFailedException fires and getById returns undefined', async () => {
+      const err = Object.assign(new Error('Condition failed'), {
+        name: 'ConditionalCheckFailedException',
+      });
+      // First call: PutCommand throws; second call: GetCommand returns undefined (Item missing)
+      mockSend.mockRejectedValueOnce(err).mockResolvedValueOnce({ Item: undefined });
+
+      await expect(
+        vocabulary.create({
+          japanese_word: 'Tシャツ',
+          hiragana: 'ティーシャツ',
+          english_translation: 'T-shirt',
+          created_at: '2026-04-20T00:00:00.000Z',
+        }),
+      ).rejects.toThrow(
+        "Vocabulary item 'Tシャツ' failed conditional check but could not be retrieved",
+      );
+    });
+
     test('create should use a normalized id and reuse an existing item on conditional failure', async () => {
       const err = Object.assign(new Error('Condition failed'), {
         name: 'ConditionalCheckFailedException',
