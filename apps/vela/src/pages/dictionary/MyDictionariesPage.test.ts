@@ -830,6 +830,75 @@ describe('MyDictionariesPage', () => {
       );
     });
 
+    it('ignores stale lookups for a different token instance with the same surface form', async () => {
+      vi.mocked(myDictionariesService.getMyDictionaries).mockResolvedValue([mockEntry]);
+      vi.mocked(tokenize).mockResolvedValue([
+        {
+          surface_form: 'はし',
+          reading: 'ハシ',
+          dictionary_form: '橋',
+          pos: '名詞',
+          pos_detail_1: '一般',
+        },
+        {
+          surface_form: 'はし',
+          reading: 'ハシ',
+          dictionary_form: '箸',
+          pos: '名詞',
+          pos_detail_1: '一般',
+        },
+      ] as Token[]);
+
+      let resolveFirstLookup:
+        | ((_value: vocabularyService.JishoResult | null) => void)
+        | undefined;
+      let resolveSecondLookup:
+        | ((_value: vocabularyService.JishoResult | null) => void)
+        | undefined;
+      vi.mocked(vocabularyService.lookupWord)
+        .mockImplementationOnce(
+          () =>
+            new Promise((resolve) => {
+              resolveFirstLookup = resolve;
+            }),
+        )
+        .mockImplementationOnce(
+          () =>
+            new Promise((resolve) => {
+              resolveSecondLookup = resolve;
+            }),
+        );
+
+      wrapper = mountComponent();
+      await flushPromises();
+
+      const clickableTokens = wrapper.findAll('button.clickable-token');
+      await clickableTokens[0]!.trigger('click');
+      await clickableTokens[1]!.trigger('click');
+
+      resolveSecondLookup?.({
+        word: '箸',
+        reading: 'はし',
+        meanings: ['chopsticks'],
+        common: true,
+      });
+      await flushPromises();
+
+      resolveFirstLookup?.({
+        word: '橋',
+        reading: 'はし',
+        meanings: ['bridge'],
+        common: true,
+      });
+      await flushPromises();
+
+      expect(wrapper.vm.popoverLookup).toEqual(
+        expect.objectContaining({
+          word: '箸',
+        }),
+      );
+    });
+
     it('does not let a stale flashcard mutation overwrite the current token state', async () => {
       vi.mocked(myDictionariesService.getMyDictionaries).mockResolvedValue([mockEntry]);
       vi.mocked(vocabularyService.lookupWord)
@@ -947,6 +1016,45 @@ describe('MyDictionariesPage', () => {
         await flushPromises();
 
         expect(wrapper.vm.flashcardState).toBe('exists');
+      });
+
+      it('normalizes uppercase JLPT labels before sending flashcard payloads', async () => {
+        vi.mocked(myDictionariesService.getMyDictionaries).mockResolvedValue([mockEntry]);
+        vi.mocked(vocabularyService.addFlashcard).mockResolvedValue({
+          vocabulary_id: 'vocab-1',
+          created: true,
+          alreadyInSRS: false,
+        });
+
+        wrapper = mountComponent();
+        await flushPromises();
+
+        wrapper.vm.activeToken = {
+          token: {
+            surface_form: '日本語',
+            reading: 'ニホンゴ',
+            dictionary_form: '日本語',
+            pos: '名詞',
+            pos_detail_1: '一般',
+          },
+          sentenceId: 'sent-1',
+        };
+        wrapper.vm.popoverLookup = {
+          word: '日本語',
+          reading: 'にほんご',
+          meanings: ['Japanese language'],
+          jlpt: 'JLPT-N5',
+          common: true,
+        };
+
+        await wrapper.vm.handleAddFlashcard();
+        await flushPromises();
+
+        expect(vi.mocked(vocabularyService.addFlashcard)).toHaveBeenCalledWith(
+          expect.objectContaining({
+            jlpt_level: 5,
+          }),
+        );
       });
 
       it("sets flashcardState to 'error' when the mutation throws", async () => {

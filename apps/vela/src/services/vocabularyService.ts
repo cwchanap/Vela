@@ -24,6 +24,19 @@ export interface AddFlashcardResult {
   alreadyInSRS: boolean;
 }
 
+function getErrorStatus(error: unknown): number | undefined {
+  if (
+    typeof error === 'object' &&
+    error !== null &&
+    'status' in error &&
+    typeof error.status === 'number'
+  ) {
+    return error.status;
+  }
+
+  return undefined;
+}
+
 /**
  * Look up a word via the Jisho proxy. Returns null if not found.
  */
@@ -34,8 +47,12 @@ export async function lookupWord(dictionaryForm: string): Promise<JishoResult | 
       `${config.api.url}dictionary/lookup?word=${encoded}`,
     );
   } catch (err) {
+    if (getErrorStatus(err) === 404) {
+      return null;
+    }
+
     console.error('[Vela] lookupWord failed for:', dictionaryForm, err);
-    return null;
+    throw err;
   }
 }
 

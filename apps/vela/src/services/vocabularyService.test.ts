@@ -46,10 +46,23 @@ describe('lookupWord', () => {
     expect(result).toEqual(mockResult);
   });
 
-  it('returns null on error (word not found)', async () => {
-    vi.mocked(httpJsonAuth).mockRejectedValue(new Error('Not Found'));
+  it('returns null on 404 responses', async () => {
+    vi.mocked(httpJsonAuth).mockRejectedValue(
+      Object.assign(new Error('Not Found'), { status: 404 }),
+    );
     const result = await lookupWord('zzznotaword');
     expect(result).toBeNull();
+  });
+
+  it('rethrows non-404 errors so callers can handle retries', async () => {
+    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const error = Object.assign(new Error('Gateway Timeout'), { status: 504 });
+    vi.mocked(httpJsonAuth).mockRejectedValue(error);
+
+    await expect(lookupWord('猫')).rejects.toBe(error);
+    expect(consoleErrorSpy).toHaveBeenCalledWith('[Vela] lookupWord failed for:', '猫', error);
+
+    consoleErrorSpy.mockRestore();
   });
 
   it('does not add a bespoke cache on top of the shared query layer', async () => {

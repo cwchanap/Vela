@@ -43,10 +43,14 @@ const jishoResponseSchema = z.object({
 app.get('/lookup', zValidator('query', lookupQuerySchema), async (c) => {
   const { word } = c.req.valid('query');
   const encoded = encodeURIComponent(word);
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 5_000);
 
   let payload: unknown;
   try {
-    const res = await fetch(`https://jisho.org/api/v1/search/words?keyword=${encoded}`);
+    const res = await fetch(`https://jisho.org/api/v1/search/words?keyword=${encoded}`, {
+      signal: controller.signal,
+    });
 
     if (!res.ok) {
       return c.json({ error: 'Jisho API request failed' }, 502);
@@ -56,6 +60,8 @@ app.get('/lookup', zValidator('query', lookupQuerySchema), async (c) => {
   } catch (err) {
     console.error('[Vela] Jisho API fetch failed for word:', word, err);
     return c.json({ error: 'Jisho API request failed' }, 502);
+  } finally {
+    clearTimeout(timeoutId);
   }
 
   const parsed = jishoResponseSchema.safeParse(payload);

@@ -11,7 +11,7 @@ function getRegisteredMessageListener() {
     throw new Error('Expected content script to register a message listener');
   }
 
-  return call[0] as (message: unknown) => void;
+  return call[0] as (_message: unknown) => void;
 }
 
 describe('scanJapaneseSentences', () => {

@@ -122,6 +122,15 @@ function handleDynamoError(error: any): never {
   throw new Error(`DynamoDB operation failed: ${error.message}`);
 }
 
+function isConditionalCheckFailedError(error: unknown): error is { name: string } {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    'name' in error &&
+    error.name === 'ConditionalCheckFailedException'
+  );
+}
+
 // Fisher-Yates shuffle algorithm for uniform random shuffling
 function shuffleArray<T>(array: T[]): T[] {
   const result = [...array];
@@ -998,6 +1007,44 @@ export const userVocabularyProgress = {
       correct_count: 0,
     };
     return this.put(progress);
+  },
+
+  /**
+   * Initialize progress for a new vocabulary item only if it does not already exist
+   */
+  async initializeProgressIfNotExists(
+    userId: string,
+    vocabularyId: string,
+    nextReviewDate: string,
+  ): Promise<UserVocabularyProgress> {
+    const progress: UserVocabularyProgress = {
+      user_id: userId,
+      vocabulary_id: vocabularyId,
+      next_review_date: nextReviewDate,
+      ease_factor: 2.5, // SM-2 default
+      interval: 0,
+      repetitions: 0,
+      first_learned_at: new Date().toISOString(),
+      total_reviews: 0,
+      correct_count: 0,
+    };
+
+    try {
+      const command = new PutCommand({
+        TableName: TABLE_NAMES.USER_VOCABULARY_PROGRESS,
+        Item: progress,
+        ConditionExpression: 'attribute_not_exists(user_id) AND attribute_not_exists(vocabulary_id)',
+      });
+      await docClient.send(command);
+      return progress;
+    } catch (error) {
+      if (isConditionalCheckFailedError(error)) {
+        throw error;
+      }
+      handleDynamoError(error);
+    }
+
+    return progress;
   },
 
   /**
