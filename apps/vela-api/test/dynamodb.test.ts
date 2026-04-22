@@ -960,6 +960,41 @@ describe('DynamoDB Operations', () => {
       expect(result.correct_count).toBe(0);
     });
 
+    test('should initialize progress conditionally for new vocabulary', async () => {
+      mockSend.mockResolvedValueOnce({});
+
+      const result = await userVocabularyProgress.initializeProgressIfNotExists(
+        mockUserId,
+        'vocab-new',
+        '2024-01-08T00:00:00Z',
+      );
+
+      expect(result.user_id).toBe(mockUserId);
+      expect(result.vocabulary_id).toBe('vocab-new');
+      expect(mockPutCommand).toHaveBeenCalledWith(
+        expect.objectContaining({
+          TableName: 'vela-user-vocabulary-progress',
+          ConditionExpression:
+            'attribute_not_exists(user_id) AND attribute_not_exists(vocabulary_id)',
+        }),
+      );
+    });
+
+    test('initializeProgressIfNotExists should rethrow ConditionalCheckFailedException', async () => {
+      const err = Object.assign(new Error('Condition failed'), {
+        name: 'ConditionalCheckFailedException',
+      });
+      mockSend.mockRejectedValueOnce(err);
+
+      await expect(
+        userVocabularyProgress.initializeProgressIfNotExists(
+          mockUserId,
+          'vocab-existing',
+          '2024-01-08T00:00:00Z',
+        ),
+      ).rejects.toMatchObject({ name: 'ConditionalCheckFailedException' });
+    });
+
     test('should delete a progress record', async () => {
       mockSend.mockResolvedValueOnce({});
 

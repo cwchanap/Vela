@@ -1,5 +1,9 @@
 import { fetchAuthSession } from 'aws-amplify/auth';
 
+export interface HttpError extends Error {
+  status: number;
+}
+
 /**
  * Normalize headers to a plain object to handle both Headers instances and plain objects
  */
@@ -19,6 +23,10 @@ function normalizeHeaders(
   }
   // Otherwise, it's already a plain object
   return headers;
+}
+
+function createHttpError(message: string, status: number): HttpError {
+  return Object.assign(new Error(message), { status });
 }
 
 /**
@@ -47,7 +55,7 @@ export async function httpJson<T = unknown>(input: RequestInfo, init?: RequestIn
     } catch {
       // ignore parse error
     }
-    throw new Error(msg);
+    throw createHttpError(msg, res.status);
   }
 
   return res.json() as Promise<T>;
@@ -108,7 +116,7 @@ export async function httpJsonAuth<T = unknown>(
     } catch {
       // ignore parse error
     }
-    throw new Error(msg);
+    throw createHttpError(msg, res.status);
   }
 
   return res.json() as Promise<T>;

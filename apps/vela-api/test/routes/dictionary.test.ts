@@ -171,6 +171,39 @@ describe('GET /lookup', () => {
     expect(calledUrl).toBe('https://jisho.org/api/v1/search/words?keyword=%E6%9D%B1%E4%BA%AC');
   });
 
+  test('passes an AbortSignal to the Jisho fetch request', async () => {
+    mockFetch.mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        data: [
+          {
+            japanese: [{ word: '東京', reading: 'とうきょう' }],
+            senses: [{ english_definitions: ['Tokyo'] }],
+            jlpt: [],
+            is_common: true,
+          },
+        ],
+      }),
+    });
+
+    const app = createTestApp();
+    await app.request('/lookup?word=東京', { headers: AUTH_HEADER });
+
+    const fetchInit = mockFetch.mock.calls[0]?.[1] as RequestInit | undefined;
+    expect(fetchInit?.signal).toBeInstanceOf(AbortSignal);
+  });
+
+  test('returns 502 when the Jisho fetch aborts', async () => {
+    mockFetch.mockImplementation(() => {
+      throw new Error('AbortError: The operation was aborted');
+    });
+
+    const app = createTestApp();
+    const res = await app.request('/lookup?word=test', { headers: AUTH_HEADER });
+
+    expect(res.status).toBe(502);
+  });
+
   test('returns 401 when Authorization header is missing', async () => {
     const app = createTestApp();
     const res = await app.request('/lookup?word=食べる');

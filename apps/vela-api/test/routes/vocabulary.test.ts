@@ -9,6 +9,7 @@ const mockVocabulary = {
 const mockUserVocabularyProgress = {
   get: vi.fn(),
   initializeProgress: vi.fn(),
+  initializeProgressIfNotExists: vi.fn(),
 };
 
 vi.mock('../../src/dynamodb', () => ({
@@ -50,6 +51,7 @@ describe('POST /from-word', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockUserVocabularyProgress.initializeProgress.mockResolvedValue({});
+    mockUserVocabularyProgress.initializeProgressIfNotExists.mockResolvedValue({});
   });
 
   test('creates a new vocabulary entry and SRS record when word does not exist', async () => {
@@ -57,7 +59,6 @@ describe('POST /from-word', () => {
       item: { id: '食べる', japanese_word: '食べる' },
       created: true,
     });
-    mockUserVocabularyProgress.get.mockResolvedValue(undefined);
 
     const app = createTestApp();
     const res = await app.request('/from-word', {
@@ -72,7 +73,7 @@ describe('POST /from-word', () => {
     expect(body.alreadyInSRS).toBe(false);
     expect(body.vocabulary_id).toBe('食べる');
     expect(mockVocabulary.create).toHaveBeenCalledTimes(1);
-    expect(mockUserVocabularyProgress.initializeProgress).toHaveBeenCalledTimes(1);
+    expect(mockUserVocabularyProgress.initializeProgressIfNotExists).toHaveBeenCalledTimes(1);
     expect(mockVocabulary.create).toHaveBeenCalledWith(
       expect.objectContaining({
         japanese_word: '食べる',
@@ -89,7 +90,6 @@ describe('POST /from-word', () => {
       },
       created: false,
     });
-    mockUserVocabularyProgress.get.mockResolvedValue(undefined);
 
     const app = createTestApp();
     const res = await app.request('/from-word', {
@@ -103,25 +103,19 @@ describe('POST /from-word', () => {
     expect(body.created).toBe(false);
     expect(body.vocabulary_id).toBe('existing-vocab-id');
     expect(mockVocabulary.create).toHaveBeenCalledTimes(1);
-    expect(mockUserVocabularyProgress.initializeProgress).toHaveBeenCalledTimes(1);
+    expect(mockUserVocabularyProgress.initializeProgressIfNotExists).toHaveBeenCalledTimes(1);
   });
 
-  test('returns alreadyInSRS: true when SRS progress already exists', async () => {
+  test('returns alreadyInSRS: true when conditional put detects existing progress', async () => {
     mockVocabulary.create.mockResolvedValue({
       item: { id: 'vocab-id', japanese_word: '食べる' },
       created: false,
     });
-    mockUserVocabularyProgress.get.mockResolvedValue({
-      user_id: 'user-123',
-      vocabulary_id: 'vocab-id',
-      next_review_date: '2026-04-20T00:00:00.000Z',
-      ease_factor: 2.5,
-      interval: 3,
-      repetitions: 2,
-      first_learned_at: '2026-04-17T00:00:00.000Z',
-      total_reviews: 2,
-      correct_count: 2,
-    });
+    mockUserVocabularyProgress.initializeProgressIfNotExists.mockRejectedValue(
+      Object.assign(new Error('Condition failed'), {
+        name: 'ConditionalCheckFailedException',
+      }),
+    );
 
     const app = createTestApp();
     const res = await app.request('/from-word', {
@@ -133,7 +127,7 @@ describe('POST /from-word', () => {
     expect(res.status).toBe(200);
     const body = (await res.json()) as any;
     expect(body.alreadyInSRS).toBe(true);
-    expect(mockUserVocabularyProgress.initializeProgress).not.toHaveBeenCalled();
+    expect(mockUserVocabularyProgress.initializeProgressIfNotExists).toHaveBeenCalledTimes(1);
   });
 
   test('returns 400 when request body is invalid', async () => {
@@ -171,5 +165,36 @@ describe('POST /from-word', () => {
     expect(res.status).toBe(500);
     const body = (await res.json()) as any;
     expect(body).toEqual({ error: 'Failed to save vocabulary entry' });
+  });
+
+  test('logs only sanitized error metadata for failures', async () => {
+    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    mockVocabulary.create.mockRejectedValue(new Error('DynamoDB connection error'));
+
+    const app = createTestApp();
+    const res = await app.request('/from-word', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-request-id': 'req-123',
+      },
+      body: JSON.stringify(validBody),
+    });
+
+    expect(res.status).toBe(500);
+    expect(consoleErrorSpy).toHaveBeenCalledWith(
+      '[Vela] /vocabulary/from-word failed',
+      expect.objectContaining({
+        requestId: 'req-123',
+        err: expect.objectContaining({
+          code: 'Error',
+          message: 'DynamoDB connection error',
+        }),
+      }),
+    );
+    expect(consoleErrorSpy.mock.calls[0]?.[1]).not.toHaveProperty('userId');
+    expect(consoleErrorSpy.mock.calls[0]?.[1]).not.toHaveProperty('word');
+
+    consoleErrorSpy.mockRestore();
   });
 });

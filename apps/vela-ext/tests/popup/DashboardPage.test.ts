@@ -481,7 +481,7 @@ describe('DashboardPage', () => {
       expect(wrapper.find('.pending-badge').text()).toContain('1');
 
       const listener = vi.mocked(browser.runtime.onMessage.addListener).mock.calls[0]?.[0] as
-        | ((message: unknown) => void)
+        | ((_message: unknown) => void)
         | undefined;
       if (!listener) {
         throw new Error('Expected DashboardPage to register a runtime message listener');

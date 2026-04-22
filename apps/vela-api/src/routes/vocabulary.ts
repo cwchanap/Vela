@@ -29,11 +29,35 @@ const fromWordSchema = z.object({
     .optional(),
 });
 
+function isConditionalCheckFailedError(error: unknown): error is { name: string } {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    'name' in error &&
+    error.name === 'ConditionalCheckFailedException'
+  );
+}
+
+function sanitizeError(error: unknown): { code: string; message: string } {
+  if (error instanceof Error) {
+    return {
+      code: error.name || 'Error',
+      message: error.message,
+    };
+  }
+
+  return {
+    code: 'UnknownError',
+    message: String(error),
+  };
+}
+
 app.post('/from-word', zValidator('json', fromWordSchema), async (c) => {
   const userId = c.get('userId');
   if (!userId) return c.json({ error: 'Unauthorized' }, 401);
 
   const body = c.req.valid('json');
+  const requestId = c.req.header('x-request-id') ?? globalThis.crypto.randomUUID();
 
   try {
     const { item, created } = await vocabulary.create({
@@ -47,23 +71,29 @@ app.post('/from-word', zValidator('json', fromWordSchema), async (c) => {
     });
 
     const vocabularyId = item.id as string;
+    let alreadyInSRS = false;
+    const tomorrow = new Date();
+    tomorrow.setDate(tomorrow.getDate() + 1);
 
-    // Check if this user already has SRS progress for this word
-    const existingProgress = await userVocabularyProgress.get(userId, vocabularyId);
-    const alreadyInSRS = !!existingProgress;
-
-    if (!alreadyInSRS) {
-      const tomorrow = new Date();
-      tomorrow.setDate(tomorrow.getDate() + 1);
-      await userVocabularyProgress.initializeProgress(userId, vocabularyId, tomorrow.toISOString());
+    try {
+      await userVocabularyProgress.initializeProgressIfNotExists(
+        userId,
+        vocabularyId,
+        tomorrow.toISOString(),
+      );
+    } catch (error) {
+      if (isConditionalCheckFailedError(error)) {
+        alreadyInSRS = true;
+      } else {
+        throw error;
+      }
     }
 
     return c.json({ vocabulary_id: vocabularyId, created, alreadyInSRS });
   } catch (err) {
     console.error('[Vela] /vocabulary/from-word failed', {
-      userId,
-      word: body.japanese_word,
-      err,
+      requestId,
+      err: sanitizeError(err),
     });
     return c.json({ error: 'Failed to save vocabulary entry' }, 500);
   }

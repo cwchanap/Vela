@@ -179,6 +179,27 @@ describe('httpJsonAuth', () => {
     await expect(httpJsonAuth('/api/protected')).rejects.toThrow('Access denied');
   });
 
+  it('includes the response status on authenticated request errors', async () => {
+    mockFetchAuthSession.mockResolvedValue({
+      tokens: { idToken: { toString: () => 'token' } },
+    } as any);
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: false,
+        status: 404,
+        statusText: 'Not Found',
+        json: async () => ({ error: 'Missing word' }),
+      }),
+    );
+
+    await expect(httpJsonAuth('/api/protected')).rejects.toMatchObject({
+      message: 'Missing word',
+      status: 404,
+    });
+  });
+
   it('stringifies non-string error payloads for authenticated requests', async () => {
     mockFetchAuthSession.mockResolvedValue({
       tokens: { idToken: { toString: () => 'token' } },

@@ -326,21 +326,18 @@ const noMeaningAvailable = computed(
 
 interface ActiveTokenIdentity {
   sentenceId: string;
-  token: string;
+  token: Token;
 }
 
 function getActiveTokenIdentity(token: Token, sentenceId: string): ActiveTokenIdentity {
   return {
     sentenceId,
-    token: token.surface_form,
+    token,
   };
 }
 
 function isActiveTokenIdentity(identity: ActiveTokenIdentity): boolean {
-  return (
-    activeToken.value?.sentenceId === identity.sentenceId &&
-    activeToken.value.token.surface_form === identity.token
-  );
+  return activeToken.value?.sentenceId === identity.sentenceId && activeToken.value.token === identity.token;
 }
 
 // Configure marked options
@@ -490,7 +487,12 @@ async function handleAddFlashcard() {
       ...(entry?.source_url ? { source_url: entry.source_url } : {}),
       ...(lookup.jlpt
         ? (() => {
-            const level = parseInt(lookup.jlpt.replace('jlpt-n', ''), 10);
+            const normalizedJlpt = String(lookup.jlpt)
+              .toLowerCase()
+              .replace(/[^a-z0-9]/g, '');
+            const levelMatch = normalizedJlpt.match(/([1-5])/);
+            const levelText = levelMatch?.[1];
+            const level = levelText ? Number.parseInt(levelText, 10) : Number.NaN;
             return level >= 1 && level <= 5 ? { jlpt_level: level as 1 | 2 | 3 | 4 | 5 } : {};
           })()
         : {}),
