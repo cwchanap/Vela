@@ -1,3 +1,4 @@
+import { createHash } from 'crypto';
 import { DynamoDBClient, type DynamoDBClientConfig } from '@aws-sdk/client-dynamodb';
 import {
   DynamoDBDocumentClient,
@@ -684,7 +685,10 @@ export const dailyProgress = {
 export const myDictionaries = {
   async create(userId: string, sentence: string, sourceUrl?: string, context?: string) {
     try {
-      const sentenceId = `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+      const sentenceId = createHash('sha256')
+        .update(`${userId}:${sentence}`)
+        .digest('hex')
+        .substring(0, 24);
       const timestamp = Date.now();
 
       const command = new PutCommand({
