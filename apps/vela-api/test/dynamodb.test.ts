@@ -185,15 +185,25 @@ describe('DynamoDB Operations', () => {
       expect(result.sentence_id).toBeDefined();
     });
 
-    test('should generate unique sentence IDs', async () => {
+    test('should generate deterministic sentence IDs based on userId and sentence', async () => {
       mockSend.mockResolvedValue({});
 
-      const result1 = await savedSentences.create(mockUserId, 'mock sentence');
-      const result2 = await savedSentences.create(mockUserId, 'mock sentence');
+      const result1 = await myDictionaries.create(mockUserId, 'mock sentence');
+      const result2 = await myDictionaries.create(mockUserId, 'mock sentence');
 
       expect(mockPutCommand).toHaveBeenCalledTimes(2);
       expect(result1.sentence_id).toBeDefined();
       expect(result2.sentence_id).toBeDefined();
+      // Same user + same sentence → same ID (idempotent)
+      expect(result1.sentence_id).toBe(result2.sentence_id);
+    });
+
+    test('should generate different sentence IDs for different sentences', async () => {
+      mockSend.mockResolvedValue({});
+
+      const result1 = await myDictionaries.create(mockUserId, 'sentence one');
+      const result2 = await myDictionaries.create(mockUserId, 'sentence two');
+
       expect(result1.sentence_id).not.toBe(result2.sentence_id);
     });
   });

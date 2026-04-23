@@ -313,12 +313,6 @@ export default defineBackground(() => {
     ).then((results) => {
       const saved = results.filter((ok) => ok).length;
       const total = results.length;
-      // Reject when nothing was persisted so the content script can show an error.
-      if (saved === 0) {
-        throw new Error(
-          `All ${total} sentence(s) failed to save — queued for later sync`,
-        );
-      }
       return { saved, total } as const;
     });
   });

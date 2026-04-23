@@ -3,7 +3,7 @@ import { openDB, STORE_NAME } from './idb';
 export async function getPendingQueueCount(): Promise<number> {
   try {
     const db = await openDB();
-    return new Promise((resolve, reject) => {
+    return await new Promise((resolve, reject) => {
       const tx = db.transaction(STORE_NAME, 'readonly');
       const store = tx.objectStore(STORE_NAME);
       const req = store.count();

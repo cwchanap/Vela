@@ -365,12 +365,12 @@ describe('SAVE_SENTENCES message handler', () => {
     expect(result).toEqual({ saved: 1, total: 2 });
   });
 
-  it('rejects when all saves fail', async () => {
+  it('resolves with { saved: 0, total } when all saves are queued (offline)', async () => {
     vi.mocked(getValidIdToken).mockRejectedValue(new Error('No token'));
 
     const handler = getSaveSentencesHandler();
-    const promise = handler({ type: 'SAVE_SENTENCES', sentences: ['テスト1', 'テスト2'] });
+    const result = await handler({ type: 'SAVE_SENTENCES', sentences: ['テスト1', 'テスト2'] });
 
-    await expect(promise).rejects.toThrow('failed to save');
+    expect(result).toEqual({ saved: 0, total: 2 });
   });
 });
