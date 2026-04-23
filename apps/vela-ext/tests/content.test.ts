@@ -88,9 +88,9 @@ describe('scanJapaneseSentences', () => {
 
   it('shows success only after SAVE_SENTENCES resolves', async () => {
     document.body.innerHTML = '<p>日本語を勉強しています。</p>';
-    let resolveMessage: (() => void) | undefined;
+    let resolveMessage: ((value?: unknown) => void) | undefined;
     (globalThis as any).browser.runtime.sendMessage.mockReturnValue(
-      new Promise<void>((resolve) => {
+      new Promise((resolve) => {
         resolveMessage = resolve;
       }),
     );
@@ -111,10 +111,36 @@ describe('scanJapaneseSentences', () => {
     expect(shadowRoot.textContent).toContain('Found 1 Japanese sentence');
     expect(shadowRoot.textContent).not.toContain('Saved 1 sentence');
 
-    resolveMessage?.();
+    resolveMessage?.({ saved: 1, total: 1 });
     await new Promise((resolve) => setTimeout(resolve, 0));
 
     expect(shadowRoot.textContent).toContain('Saved 1 sentence');
+  });
+
+  it('shows partial save info when some sentences are queued', async () => {
+    document.body.innerHTML =
+      '<p>日本語を勉強しています。</p><p>東京は大きな都市です。</p>';
+    (globalThis as any).browser.runtime.sendMessage.mockResolvedValueOnce({
+      saved: 1,
+      total: 2,
+    });
+
+    contentScript.main();
+    const listener = getRegisteredMessageListener();
+    listener({ type: 'SCAN_PAGE' });
+
+    const host = document.getElementById('vela-ext-overlay-host');
+    const shadowRoot = host?.shadowRoot;
+    const saveBtn = shadowRoot?.querySelector('.vela-btn-save') as HTMLButtonElement | null;
+    if (!saveBtn || !shadowRoot) {
+      throw new Error('Expected save overlay to be rendered');
+    }
+
+    saveBtn.click();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(shadowRoot.textContent).toContain('Saved 1 sentence');
+    expect(shadowRoot.textContent).toContain('queued 1 for later sync');
   });
 
   it('shows an error state when SAVE_SENTENCES rejects', async () => {

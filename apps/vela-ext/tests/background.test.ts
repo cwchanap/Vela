@@ -340,4 +340,37 @@ describe('SAVE_SENTENCES message handler', () => {
     expect(result).toBeInstanceOf(Promise);
     await result;
   });
+
+  it('resolves with { saved, total } when all saves succeed', async () => {
+    vi.mocked(getValidIdToken).mockResolvedValue('valid-token');
+    vi.mocked(global.fetch as ReturnType<typeof vi.fn>).mockResolvedValue(
+      new Response(null, { status: 200 }),
+    );
+
+    const handler = getSaveSentencesHandler();
+    const result = await handler({ type: 'SAVE_SENTENCES', sentences: ['テスト1', 'テスト2'] });
+
+    expect(result).toEqual({ saved: 2, total: 2 });
+  });
+
+  it('resolves with partial results when some saves fail', async () => {
+    vi.mocked(getValidIdToken).mockResolvedValueOnce('valid-token');
+    vi.mocked(global.fetch as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce(new Response(null, { status: 200 }))
+      .mockResolvedValueOnce(new Response(null, { status: 500 }));
+
+    const handler = getSaveSentencesHandler();
+    const result = await handler({ type: 'SAVE_SENTENCES', sentences: ['テスト1', 'テスト2'] });
+
+    expect(result).toEqual({ saved: 1, total: 2 });
+  });
+
+  it('rejects when all saves fail', async () => {
+    vi.mocked(getValidIdToken).mockRejectedValue(new Error('No token'));
+
+    const handler = getSaveSentencesHandler();
+    const promise = handler({ type: 'SAVE_SENTENCES', sentences: ['テスト1', 'テスト2'] });
+
+    await expect(promise).rejects.toThrow('failed to save');
+  });
 });
