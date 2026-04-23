@@ -75,11 +75,16 @@ function buildOverlay(sentences: string[]): ShadowRoot {
   const overlay = document.createElement('div');
   overlay.className = 'vela-overlay';
 
-  function renderSuccessState(selectedCount: number) {
+  function renderSuccessState(savedCount: number, total?: number) {
     overlay.innerHTML = '';
     const done = document.createElement('div');
     done.className = 'vela-done';
-    done.textContent = `Saved ${selectedCount} sentence${selectedCount !== 1 ? 's' : ''}`;
+    if (total !== undefined && savedCount < total) {
+      const queued = total - savedCount;
+      done.textContent = `Saved ${savedCount} sentence${savedCount !== 1 ? 's' : ''}, queued ${queued} for later sync`;
+    } else {
+      done.textContent = `Saved ${savedCount} sentence${savedCount !== 1 ? 's' : ''}`;
+    }
     overlay.appendChild(done);
 
     setTimeout(() => host.remove(), 2000);
@@ -132,13 +137,17 @@ function buildOverlay(sentences: string[]): ShadowRoot {
       const selected = sentences.filter((_, i) => checked.has(i));
 
       try {
-        await browser.runtime.sendMessage({
+        const result = await browser.runtime.sendMessage({
           type: 'SAVE_SENTENCES',
           sentences: selected,
           sourceUrl: window.location.href,
           context: document.title,
         });
-        renderSuccessState(selected.length);
+        if (result && typeof result === 'object' && 'saved' in result) {
+          renderSuccessState(result.saved as number, (result as { saved: number; total: number }).total);
+        } else {
+          renderSuccessState(selected.length);
+        }
       } catch (err: unknown) {
         console.error('[Vela] Failed to send SAVE_SENTENCES:', err);
         renderErrorState();

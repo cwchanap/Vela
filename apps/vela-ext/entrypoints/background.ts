@@ -310,7 +310,17 @@ export default defineBackground(() => {
       (sentences as string[]).map((sentence) =>
         saveSentenceToAPI(sentence, sourceUrl, context),
       ),
-    ).then(() => {});
+    ).then((results) => {
+      const saved = results.filter((ok) => ok).length;
+      const total = results.length;
+      // Reject when nothing was persisted so the content script can show an error.
+      if (saved === 0) {
+        throw new Error(
+          `All ${total} sentence(s) failed to save — queued for later sync`,
+        );
+      }
+      return { saved, total } as const;
+    });
   });
 
   // Flush on startup and when browser regains focus (not on focus-loss)

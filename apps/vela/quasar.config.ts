@@ -79,16 +79,29 @@ export default defineConfig((/* ctx */) => {
 
         if (Array.isArray(viteConf.resolve.alias)) {
           viteConf.resolve.alias = [
-            ...viteConf.resolve.alias.filter((a) => a.find !== '@vela/common'),
+            ...viteConf.resolve.alias.filter(
+              (a) => a.find !== '@vela/common' && a.find !== 'path',
+            ),
             {
               find: '@vela/common',
               replacement: commonPath,
+            },
+            {
+              // kuromoji's DictionaryLoader uses require("path") internally.
+              // Vite externalises Node builtins in browser builds, so we
+              // provide the standard browser-compatible implementation.
+              find: 'path',
+              replacement: 'path-browserify',
             },
           ];
         } else {
           viteConf.resolve.alias = {
             ...(viteConf.resolve.alias || {}),
             '@vela/common': commonPath,
+            // kuromoji's DictionaryLoader uses require("path") internally.
+            // Vite externalises Node builtins in browser builds, so we
+            // provide the standard browser-compatible implementation.
+            path: 'path-browserify',
           };
         }
 
