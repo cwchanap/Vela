@@ -218,12 +218,9 @@ export default defineContentScript({
 
       const sentences = scanJapaneseSentences();
       if (sentences.length === 0) {
-        browser.notifications?.create?.({
-          type: 'basic',
-          iconUrl: browser.runtime.getURL('/icon/128.png'),
-          title: 'Vela — No sentences found',
-          message: 'No Japanese sentences were detected on this page.',
-        });
+        // Content scripts can't use browser.notifications — ask the background
+        // script to show the "no sentences found" notification.
+        browser.runtime.sendMessage({ type: 'NO_JAPANESE_FOUND' }).catch(() => {});
         return;
       }
 

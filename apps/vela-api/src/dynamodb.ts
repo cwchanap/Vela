@@ -479,9 +479,15 @@ export const vocabulary = {
   }): Promise<{ item: Record<string, unknown>; created: boolean }> {
     const normalizedJapaneseWord =
       item.normalized_japanese_word ?? normalizeJapaneseWord(item.japanese_word);
+    // Include hiragana in the key to disambiguate homographs
+    // (e.g. 今日 きょう vs こんにち).
+    const normalizedReading = item.hiragana?.trim().normalize('NFKC') ?? '';
+    const defaultId = normalizedReading
+      ? `${normalizedJapaneseWord}:${normalizedReading}`
+      : normalizedJapaneseWord;
     const vocabularyItem = {
       ...item,
-      id: item.id ?? normalizedJapaneseWord,
+      id: item.id ?? defaultId,
       japanese_word: item.japanese_word.trim(),
       normalized_japanese_word: normalizedJapaneseWord,
     };
@@ -685,11 +691,10 @@ export const dailyProgress = {
 export const myDictionaries = {
   async create(userId: string, sentence: string, sourceUrl?: string, context?: string) {
     try {
-      const sentenceId = createHash('sha256')
-        .update(`${userId}:${sentence}`)
-        .digest('hex')
-        .substring(0, 24);
+      // ULID-like sort key: zero-padded millisecond timestamp keeps the key
+      // lexicographically ordered so ScanIndexForward:false returns newest first.
       const timestamp = Date.now();
+      const sentenceId = timestamp.toString(36).padStart(12, '0');
 
       const command = new PutCommand({
         TableName: TABLE_NAMES.MY_DICTIONARIES,

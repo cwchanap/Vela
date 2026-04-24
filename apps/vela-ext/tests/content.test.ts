@@ -86,6 +86,24 @@ describe('scanJapaneseSentences', () => {
     expect(document.getElementById('vela-ext-overlay-host')).toBeNull();
   });
 
+  it('sends NO_JAPANESE_FOUND message to background when no Japanese is detected', () => {
+    document.body.innerHTML = '<p>Hello world</p><p>No Japanese here</p>';
+    (globalThis as any).browser.runtime.sendMessage.mockReset();
+    // sendMessage must return a Promise (the real API does)
+    (globalThis as any).browser.runtime.sendMessage.mockResolvedValue(undefined);
+
+    contentScript.main();
+    const listener = getRegisteredMessageListener();
+    listener({ type: 'SCAN_PAGE' });
+
+    // Should NOT show the overlay
+    expect(document.getElementById('vela-ext-overlay-host')).toBeNull();
+    // Should send a message to the background script so it can show the notification
+    expect((globalThis as any).browser.runtime.sendMessage).toHaveBeenCalledWith({
+      type: 'NO_JAPANESE_FOUND',
+    });
+  });
+
   it('shows success only after SAVE_SENTENCES resolves', async () => {
     document.body.innerHTML = '<p>日本語を勉強しています。</p>';
     let resolveMessage: ((value?: unknown) => void) | undefined;
