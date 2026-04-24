@@ -294,12 +294,23 @@ export default defineBackground(() => {
 
   // Handle batch save from content script — returns Promise so sendMessage resolves/rejects based on outcome
   browser.runtime.onMessage.addListener((message: unknown): Promise<void> | undefined => {
-    if (
-      typeof message !== 'object' ||
-      message === null ||
-      (message as { type?: string }).type !== 'SAVE_SENTENCES'
-    )
+    const msg = message as { type?: string } | null;
+    if (typeof message !== 'object' || message === null) return;
+
+    // Content script signals that no Japanese text was found on the page.
+    // Show the notification from the background script because the
+    // browser.notifications API is not available in content scripts.
+    if (msg.type === 'NO_JAPANESE_FOUND') {
+      browser.notifications.create({
+        type: 'basic',
+        iconUrl: browser.runtime.getURL('/icon/128.png'),
+        title: 'Vela — No sentences found',
+        message: 'No Japanese sentences were detected on this page.',
+      });
       return;
+    }
+
+    if (msg.type !== 'SAVE_SENTENCES') return;
     const { sentences, sourceUrl, context } = message as {
       sentences: unknown;
       sourceUrl?: string;

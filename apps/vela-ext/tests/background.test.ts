@@ -374,3 +374,35 @@ describe('SAVE_SENTENCES message handler', () => {
     expect(result).toEqual({ saved: 0, total: 2 });
   });
 });
+
+describe('NO_JAPANESE_FOUND message handler', () => {
+  function getOnMessageHandler(): (message: unknown) => Promise<void> | undefined {
+    const calls = vi.mocked(browser.runtime.onMessage.addListener).mock.calls;
+    if (calls.length === 0) throw new Error('No onMessage listener was registered');
+    return calls[0][0] as (message: unknown) => Promise<void> | undefined;
+  }
+
+  beforeEach(() => {
+    mockNotificationsCreate.mockClear();
+  });
+
+  it('shows notification when NO_JAPANESE_FOUND is received', () => {
+    const handler = getOnMessageHandler();
+    handler({ type: 'NO_JAPANESE_FOUND' });
+
+    expect(mockNotificationsCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'basic',
+        title: 'Vela — No sentences found',
+        message: 'No Japanese sentences were detected on this page.',
+      }),
+    );
+  });
+
+  it('does not show notification for other message types', () => {
+    const handler = getOnMessageHandler();
+    handler({ type: 'SCAN_PAGE' });
+
+    expect(mockNotificationsCreate).not.toHaveBeenCalled();
+  });
+});

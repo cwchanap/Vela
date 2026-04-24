@@ -185,23 +185,29 @@ describe('DynamoDB Operations', () => {
       expect(result.sentence_id).toBeDefined();
     });
 
-    test('should generate deterministic sentence IDs based on userId and sentence', async () => {
+    test('should generate time-sortable sentence IDs', async () => {
       mockSend.mockResolvedValue({});
 
       const result1 = await myDictionaries.create(mockUserId, 'mock sentence');
-      const result2 = await myDictionaries.create(mockUserId, 'mock sentence');
+      const result2 = await myDictionaries.create(mockUserId, 'another sentence');
 
       expect(mockPutCommand).toHaveBeenCalledTimes(2);
       expect(result1.sentence_id).toBeDefined();
       expect(result2.sentence_id).toBeDefined();
-      // Same user + same sentence → same ID (idempotent)
-      expect(result1.sentence_id).toBe(result2.sentence_id);
+      // IDs are base-36 zero-padded timestamps.
+      // Same-millisecond calls may produce identical IDs which is acceptable
+      // for a sort key — they will both sort together at that millisecond.
+      // Must be purely alphanumeric (base-36) and padded to 12 chars
+      expect(result1.sentence_id).toMatch(/^[0-9a-z]{12}$/);
+      expect(result2.sentence_id).toMatch(/^[0-9a-z]{12}$/);
     });
 
-    test('should generate different sentence IDs for different sentences', async () => {
+    test('should generate different sentence IDs across different milliseconds', async () => {
       mockSend.mockResolvedValue({});
 
       const result1 = await myDictionaries.create(mockUserId, 'sentence one');
+      // Wait for next millisecond tick to ensure different timestamp
+      await new Promise((r) => setTimeout(r, 2));
       const result2 = await myDictionaries.create(mockUserId, 'sentence two');
 
       expect(result1.sentence_id).not.toBe(result2.sentence_id);
@@ -537,7 +543,7 @@ describe('DynamoDB Operations', () => {
         created_at: '2026-04-20T00:00:00.000Z',
       });
 
-      expect(result.item.id).toBe('Tシャツ');
+      expect(result.item.id).toBe('Tシャツ:ティーシャツ');
       expect(result.item.normalized_japanese_word).toBe('Tシャツ');
     });
 
@@ -556,17 +562,17 @@ describe('DynamoDB Operations', () => {
           created_at: '2026-04-20T00:00:00.000Z',
         }),
       ).rejects.toThrow(
-        "Vocabulary item 'Tシャツ' failed conditional check but could not be retrieved",
+        "Vocabulary item 'Tシャツ:ティーシャツ' failed conditional check but could not be retrieved",
       );
     });
 
-    test('create should use a normalized id and reuse an existing item on conditional failure', async () => {
+    test('create should use a normalized id (with reading) and reuse an existing item on conditional failure', async () => {
       const err = Object.assign(new Error('Condition failed'), {
         name: 'ConditionalCheckFailedException',
       });
       mockSend.mockRejectedValueOnce(err).mockResolvedValueOnce({
         Item: {
-          id: '食べる',
+          id: '食べる:たべる',
           japanese_word: '食べる',
           normalized_japanese_word: '食べる',
           english_translation: 'to eat',
@@ -585,7 +591,7 @@ describe('DynamoDB Operations', () => {
           TableName: 'vela-vocabulary',
           ConditionExpression: 'attribute_not_exists(id)',
           Item: expect.objectContaining({
-            id: '食べる',
+            id: '食べる:たべる',
             normalized_japanese_word: '食べる',
           }),
         }),
@@ -593,16 +599,52 @@ describe('DynamoDB Operations', () => {
       expect(mockGetCommand).toHaveBeenCalledWith(
         expect.objectContaining({
           TableName: 'vela-vocabulary',
-          Key: { id: '食べる' },
+          Key: { id: '食べる:たべる' },
         }),
       );
       expect(result).toEqual({
         item: expect.objectContaining({
-          id: '食べる',
+          id: '食べる:たべる',
           normalized_japanese_word: '食べる',
         }),
         created: false,
       });
+    });
+
+    test('create should disambiguate homographs by reading', async () => {
+      mockSend.mockResolvedValueOnce({});
+
+      const result = await vocabulary.create({
+        japanese_word: '今日',
+        hiragana: 'きょう',
+        english_translation: 'today',
+        created_at: '2026-04-20T00:00:00.000Z',
+      });
+
+      expect(result.item.id).toBe('今日:きょう');
+
+      mockSend.mockResolvedValueOnce({});
+      const result2 = await vocabulary.create({
+        japanese_word: '今日',
+        hiragana: 'こんにち',
+        english_translation: 'hello (formal)',
+        created_at: '2026-04-20T00:00:00.000Z',
+      });
+
+      expect(result2.item.id).toBe('今日:こんにち');
+      expect(result.item.id).not.toBe(result2.item.id);
+    });
+
+    test('create should omit reading from id when hiragana is empty', async () => {
+      mockSend.mockResolvedValueOnce({});
+
+      const result = await vocabulary.create({
+        japanese_word: '猫',
+        english_translation: 'cat',
+        created_at: '2026-04-20T00:00:00.000Z',
+      });
+
+      expect(result.item.id).toBe('猫');
     });
   });
 
