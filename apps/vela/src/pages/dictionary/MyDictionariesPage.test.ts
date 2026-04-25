@@ -14,6 +14,58 @@ import { useAuthStore } from 'src/stores/auth';
 import type { Token } from '@vela/common';
 import { tokenize } from '@vela/common';
 
+const SAMPLE_TOKENS: Token[] = [
+  {
+    surface_form: '日本語',
+    reading: 'ニホンゴ',
+    dictionary_form: '日本語',
+    pos: '名詞',
+    pos_detail_1: '一般',
+  },
+  {
+    surface_form: 'を',
+    reading: 'ヲ',
+    dictionary_form: 'を',
+    pos: '助詞',
+    pos_detail_1: '格助詞',
+  },
+  {
+    surface_form: '勉強',
+    reading: 'ベンキョウ',
+    dictionary_form: '勉強',
+    pos: '名詞',
+    pos_detail_1: 'サ変接続',
+  },
+  {
+    surface_form: 'し',
+    reading: 'シ',
+    dictionary_form: 'する',
+    pos: '動詞',
+    pos_detail_1: '自立',
+  },
+  {
+    surface_form: 'て',
+    reading: 'テ',
+    dictionary_form: 'て',
+    pos: '助詞',
+    pos_detail_1: '接続助詞',
+  },
+  {
+    surface_form: 'い',
+    reading: 'イ',
+    dictionary_form: 'いる',
+    pos: '動詞',
+    pos_detail_1: '非自立',
+  },
+  {
+    surface_form: 'ます',
+    reading: 'マス',
+    dictionary_form: 'ます',
+    pos: '助動詞',
+    pos_detail_1: '*',
+  },
+];
+
 let notifyCreateSpy: ReturnType<typeof vi.fn>;
 
 // Mock aws-amplify (must be before any imports that trigger amplify)
@@ -46,59 +98,60 @@ vi.mock('src/services/ttsService', () => ({
 
 vi.mock('@vela/common', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@vela/common')>();
+  const tokens: import('@vela/common').Token[] = [
+    {
+      surface_form: '日本語',
+      reading: 'ニホンゴ',
+      dictionary_form: '日本語',
+      pos: '名詞',
+      pos_detail_1: '一般',
+    },
+    {
+      surface_form: 'を',
+      reading: 'ヲ',
+      dictionary_form: 'を',
+      pos: '助詞',
+      pos_detail_1: '格助詞',
+    },
+    {
+      surface_form: '勉強',
+      reading: 'ベンキョウ',
+      dictionary_form: '勉強',
+      pos: '名詞',
+      pos_detail_1: 'サ変接続',
+    },
+    {
+      surface_form: 'し',
+      reading: 'シ',
+      dictionary_form: 'する',
+      pos: '動詞',
+      pos_detail_1: '自立',
+    },
+    {
+      surface_form: 'て',
+      reading: 'テ',
+      dictionary_form: 'て',
+      pos: '助詞',
+      pos_detail_1: '接続助詞',
+    },
+    {
+      surface_form: 'い',
+      reading: 'イ',
+      dictionary_form: 'いる',
+      pos: '動詞',
+      pos_detail_1: '非自立',
+    },
+    {
+      surface_form: 'ます',
+      reading: 'マス',
+      dictionary_form: 'ます',
+      pos: '助動詞',
+      pos_detail_1: '*',
+    },
+  ];
   return {
     ...actual,
-    tokenize: vi.fn().mockResolvedValue([
-      {
-        surface_form: '日本語',
-        reading: 'ニホンゴ',
-        dictionary_form: '日本語',
-        pos: '名詞',
-        pos_detail_1: '一般',
-      },
-      {
-        surface_form: 'を',
-        reading: 'ヲ',
-        dictionary_form: 'を',
-        pos: '助詞',
-        pos_detail_1: '格助詞',
-      },
-      {
-        surface_form: '勉強',
-        reading: 'ベンキョウ',
-        dictionary_form: '勉強',
-        pos: '名詞',
-        pos_detail_1: 'サ変接続',
-      },
-      {
-        surface_form: 'し',
-        reading: 'シ',
-        dictionary_form: 'する',
-        pos: '動詞',
-        pos_detail_1: '自立',
-      },
-      {
-        surface_form: 'て',
-        reading: 'テ',
-        dictionary_form: 'て',
-        pos: '助詞',
-        pos_detail_1: '接続助詞',
-      },
-      {
-        surface_form: 'い',
-        reading: 'イ',
-        dictionary_form: 'いる',
-        pos: '動詞',
-        pos_detail_1: '非自立',
-      },
-      {
-        surface_form: 'ます',
-        reading: 'マス',
-        dictionary_form: 'ます',
-        pos: '助動詞',
-        pos_detail_1: '*',
-      },
-    ] as Token[]),
+    tokenize: vi.fn().mockResolvedValue(tokens),
     configureDicPath: vi.fn(),
   };
 });
@@ -180,57 +233,7 @@ describe('MyDictionariesPage', () => {
       created: true,
       alreadyInSRS: false,
     });
-    vi.mocked(tokenize).mockResolvedValue([
-      {
-        surface_form: '日本語',
-        reading: 'ニホンゴ',
-        dictionary_form: '日本語',
-        pos: '名詞',
-        pos_detail_1: '一般',
-      },
-      {
-        surface_form: 'を',
-        reading: 'ヲ',
-        dictionary_form: 'を',
-        pos: '助詞',
-        pos_detail_1: '格助詞',
-      },
-      {
-        surface_form: '勉強',
-        reading: 'ベンキョウ',
-        dictionary_form: '勉強',
-        pos: '名詞',
-        pos_detail_1: 'サ変接続',
-      },
-      {
-        surface_form: 'し',
-        reading: 'シ',
-        dictionary_form: 'する',
-        pos: '動詞',
-        pos_detail_1: '自立',
-      },
-      {
-        surface_form: 'て',
-        reading: 'テ',
-        dictionary_form: 'て',
-        pos: '助詞',
-        pos_detail_1: '接続助詞',
-      },
-      {
-        surface_form: 'い',
-        reading: 'イ',
-        dictionary_form: 'いる',
-        pos: '動詞',
-        pos_detail_1: '非自立',
-      },
-      {
-        surface_form: 'ます',
-        reading: 'マス',
-        dictionary_form: 'ます',
-        pos: '助動詞',
-        pos_detail_1: '*',
-      },
-    ] as Token[]);
+    vi.mocked(tokenize).mockResolvedValue(SAMPLE_TOKENS);
     notifyCreateSpy = vi.fn();
   });
 
@@ -778,12 +781,8 @@ describe('MyDictionariesPage', () => {
     it('keeps the newest token lookup when an earlier lookup resolves late', async () => {
       vi.mocked(myDictionariesService.getMyDictionaries).mockResolvedValue([mockEntry]);
 
-      let resolveFirstLookup:
-        | ((_value: vocabularyService.JishoResult | null) => void)
-        | undefined;
-      let resolveSecondLookup:
-        | ((_value: vocabularyService.JishoResult | null) => void)
-        | undefined;
+      let resolveFirstLookup: ((_value: vocabularyService.JishoResult | null) => void) | undefined;
+      let resolveSecondLookup: ((_value: vocabularyService.JishoResult | null) => void) | undefined;
       vi.mocked(vocabularyService.lookupWord)
         .mockImplementationOnce(
           () =>
@@ -849,12 +848,8 @@ describe('MyDictionariesPage', () => {
         },
       ] as Token[]);
 
-      let resolveFirstLookup:
-        | ((_value: vocabularyService.JishoResult | null) => void)
-        | undefined;
-      let resolveSecondLookup:
-        | ((_value: vocabularyService.JishoResult | null) => void)
-        | undefined;
+      let resolveFirstLookup: ((_value: vocabularyService.JishoResult | null) => void) | undefined;
+      let resolveSecondLookup: ((_value: vocabularyService.JishoResult | null) => void) | undefined;
       vi.mocked(vocabularyService.lookupWord)
         .mockImplementationOnce(
           () =>
@@ -915,9 +910,7 @@ describe('MyDictionariesPage', () => {
           common: true,
         });
 
-      let resolveAddFlashcard:
-        | ((_value: vocabularyService.AddFlashcardResult) => void)
-        | undefined;
+      let resolveAddFlashcard: ((_value: vocabularyService.AddFlashcardResult) => void) | undefined;
       vi.mocked(vocabularyService.addFlashcard).mockImplementationOnce(
         () =>
           new Promise((resolve) => {

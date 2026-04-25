@@ -1,73 +1,74 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-const {
-  mockNotificationsCreate,
-  mockTabsSendMessage,
-  mockRuntimeGetURL,
-  mockIdbStore,
-  idbState,
-} = vi.hoisted(() => {
-  const mockNotificationsCreate = vi.fn();
-  const mockTabsSendMessage = vi.fn();
-  const mockRuntimeGetURL = vi.fn((p: string) => `chrome-extension://abc123${p}`);
+const { mockNotificationsCreate, mockTabsSendMessage, mockRuntimeGetURL, mockIdbStore, idbState } =
+  vi.hoisted(() => {
+    const mockNotificationsCreate = vi.fn();
+    const mockTabsSendMessage = vi.fn();
+    const mockRuntimeGetURL = vi.fn((p: string) => `chrome-extension://abc123${p}`);
 
-  (globalThis as any).browser = {
-    runtime: {
-      id: 'test-ext-id',
-      onInstalled: { addListener: vi.fn() },
-      onMessage: { addListener: vi.fn() },
-      onStartup: { addListener: vi.fn() },
-      getURL: mockRuntimeGetURL,
-      sendMessage: vi.fn(),
-    },
-    contextMenus: {
-      create: vi.fn(),
-      onClicked: { addListener: vi.fn() },
-    },
-    notifications: {
-      create: mockNotificationsCreate,
-    },
-    tabs: {
-      sendMessage: mockTabsSendMessage,
-    },
-    windows: {
-      WINDOW_ID_NONE: -1,
-      onFocusChanged: { addListener: vi.fn() },
-    },
-    storage: { local: { get: vi.fn(), set: vi.fn(), remove: vi.fn(), clear: vi.fn() } },
-  };
-
-  /** Shared mutable state for the IDB mock — tests configure this per-case. */
-  const idbState = {
-    getAllResult: [] as any[],
-  };
-
-  /** Build a fake IDBRequest-like object that immediately fires onsuccess with a given value. */
-  function makeSuccessRequest(result: any = undefined) {
-    return {
-      result,
-      get onsuccess() {
-        return null;
+    (globalThis as any).browser = {
+      runtime: {
+        id: 'test-ext-id',
+        onInstalled: { addListener: vi.fn() },
+        onMessage: { addListener: vi.fn() },
+        onStartup: { addListener: vi.fn() },
+        getURL: mockRuntimeGetURL,
+        sendMessage: vi.fn(),
       },
-      set onsuccess(cb: any) {
-        cb();
+      contextMenus: {
+        create: vi.fn(),
+        onClicked: { addListener: vi.fn() },
       },
-      get onerror() {
-        return null;
+      notifications: {
+        create: mockNotificationsCreate,
       },
-      set onerror(_: any) {},
+      tabs: {
+        sendMessage: mockTabsSendMessage,
+      },
+      windows: {
+        WINDOW_ID_NONE: -1,
+        onFocusChanged: { addListener: vi.fn() },
+      },
+      storage: { local: { get: vi.fn(), set: vi.fn(), remove: vi.fn(), clear: vi.fn() } },
     };
-  }
 
-  const mockIdbStore = {
-    add: vi.fn(() => makeSuccessRequest()),
-    getAll: vi.fn(() => makeSuccessRequest(idbState.getAllResult)),
-    delete: vi.fn(() => makeSuccessRequest()),
-    put: vi.fn(() => makeSuccessRequest()),
-  };
+    /** Shared mutable state for the IDB mock — tests configure this per-case. */
+    const idbState = {
+      getAllResult: [] as any[],
+    };
 
-  return { mockNotificationsCreate, mockTabsSendMessage, mockRuntimeGetURL, mockIdbStore, idbState };
-});
+    /** Build a fake IDBRequest-like object that immediately fires onsuccess with a given value. */
+    function makeSuccessRequest(result: any = undefined) {
+      return {
+        result,
+        get onsuccess() {
+          return null;
+        },
+        set onsuccess(cb: any) {
+          cb();
+        },
+        get onerror() {
+          return null;
+        },
+        set onerror(_: any) {},
+      };
+    }
+
+    const mockIdbStore = {
+      add: vi.fn(() => makeSuccessRequest()),
+      getAll: vi.fn(() => makeSuccessRequest(idbState.getAllResult)),
+      delete: vi.fn(() => makeSuccessRequest()),
+      put: vi.fn(() => makeSuccessRequest()),
+    };
+
+    return {
+      mockNotificationsCreate,
+      mockTabsSendMessage,
+      mockRuntimeGetURL,
+      mockIdbStore,
+      idbState,
+    };
+  });
 
 vi.mock('../entrypoints/utils/idb', () => ({
   openDB: vi.fn().mockResolvedValue({
@@ -304,10 +305,10 @@ describe('flushQueue', () => {
 describe('SAVE_SENTENCES message handler', () => {
   // The handler is registered when the module is first imported (defineBackground runs immediately).
   // Capture it from the first call to onMessage.addListener.
-  function getSaveSentencesHandler(): (message: unknown) => Promise<void> | undefined {
+  function getSaveSentencesHandler(): (_message: unknown) => Promise<void> | undefined {
     const calls = vi.mocked(browser.runtime.onMessage.addListener).mock.calls;
     if (calls.length === 0) throw new Error('No onMessage listener was registered');
-    return calls[0][0] as (message: unknown) => Promise<void> | undefined;
+    return calls[0][0] as (_message: unknown) => Promise<void> | undefined;
   }
 
   beforeEach(() => {
@@ -376,10 +377,10 @@ describe('SAVE_SENTENCES message handler', () => {
 });
 
 describe('NO_JAPANESE_FOUND message handler', () => {
-  function getOnMessageHandler(): (message: unknown) => Promise<void> | undefined {
+  function getOnMessageHandler(): (_message: unknown) => Promise<void> | undefined {
     const calls = vi.mocked(browser.runtime.onMessage.addListener).mock.calls;
     if (calls.length === 0) throw new Error('No onMessage listener was registered');
-    return calls[0][0] as (message: unknown) => Promise<void> | undefined;
+    return calls[0][0] as (_message: unknown) => Promise<void> | undefined;
   }
 
   beforeEach(() => {

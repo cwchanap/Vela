@@ -1,6 +1,6 @@
 // Export for unit testing
 export function scanJapaneseSentences(): string[] {
-  const japaneseRe = /[\u3040-\u9FAF]/;
+  const japaneseRe = /[\u3040-\u9FAF\uFF66-\uFF9F]/;
   const seen = new Set<string>();
   const result: string[] = [];
 
@@ -13,12 +13,7 @@ export function scanJapaneseSentences(): string[] {
   while ((node = walker.nextNode())) {
     if (node.parentElement && denylist.has(node.parentElement.tagName)) continue;
     const text = (node.textContent ?? '').trim();
-    if (
-      text.length >= 5 &&
-      text.length <= 200 &&
-      japaneseRe.test(text) &&
-      !seen.has(text)
-    ) {
+    if (text.length >= 5 && text.length <= 200 && japaneseRe.test(text) && !seen.has(text)) {
       seen.add(text);
       result.push(text);
     }
@@ -144,7 +139,10 @@ function buildOverlay(sentences: string[]): ShadowRoot {
           context: document.title,
         });
         if (result && typeof result === 'object' && 'saved' in result) {
-          renderSuccessState(result.saved as number, (result as { saved: number; total: number }).total);
+          renderSuccessState(
+            result.saved as number,
+            (result as { saved: number; total: number }).total,
+          );
         } else {
           renderSuccessState(selected.length);
         }

@@ -61,6 +61,14 @@ describe('scanJapaneseSentences', () => {
     expect(result).toContain('正常な長さのテキストです。');
   });
 
+  it('collects sentences containing half-width katakana', () => {
+    // Half-width katakana U+FF66–FF9F (e.g. ﾊﾝｶｸ)
+    document.body.innerHTML = `<p>ﾊﾝｶｸﾀﾞｲﾅﾘで入力されています。</p>`;
+
+    const result = scanJapaneseSentences();
+    expect(result).toContain('ﾊﾝｶｸﾀﾞｲﾅﾘで入力されています。');
+  });
+
   it('ignores text inside script, style, and noscript tags', () => {
     document.body.innerHTML = `
       <p>日本語を勉強しています。</p>
@@ -106,7 +114,7 @@ describe('scanJapaneseSentences', () => {
 
   it('shows success only after SAVE_SENTENCES resolves', async () => {
     document.body.innerHTML = '<p>日本語を勉強しています。</p>';
-    let resolveMessage: ((value?: unknown) => void) | undefined;
+    let resolveMessage: ((_value?: unknown) => void) | undefined;
     (globalThis as any).browser.runtime.sendMessage.mockReturnValue(
       new Promise((resolve) => {
         resolveMessage = resolve;
@@ -136,8 +144,7 @@ describe('scanJapaneseSentences', () => {
   });
 
   it('shows partial save info when some sentences are queued', async () => {
-    document.body.innerHTML =
-      '<p>日本語を勉強しています。</p><p>東京は大きな都市です。</p>';
+    document.body.innerHTML = '<p>日本語を勉強しています。</p><p>東京は大きな都市です。</p>';
     (globalThis as any).browser.runtime.sendMessage.mockResolvedValueOnce({
       saved: 1,
       total: 2,

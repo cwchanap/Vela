@@ -189,7 +189,7 @@ describe('GET /lookup', () => {
     const app = createTestApp();
     await app.request('/lookup?word=東京', { headers: AUTH_HEADER });
 
-    const fetchInit = mockFetch.mock.calls[0]?.[1] as RequestInit | undefined;
+    const fetchInit = mockFetch.mock.calls[0]?.[1] as Parameters<typeof fetch>[1] | undefined;
     expect(fetchInit?.signal).toBeInstanceOf(AbortSignal);
   });
 

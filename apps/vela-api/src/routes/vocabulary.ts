@@ -20,7 +20,7 @@ const safeSourceUrlSchema = z
 
 const fromWordSchema = z.object({
   japanese_word: z.string().trim().min(1),
-  reading: z.string(),
+  reading: z.string().trim().min(1),
   english_translation: z.string().trim().min(1),
   example_sentence_jp: z.string().optional(),
   source_url: safeSourceUrlSchema.optional(),
