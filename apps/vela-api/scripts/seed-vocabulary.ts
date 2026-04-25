@@ -7,6 +7,7 @@ import { DynamoDBDocumentClient, PutCommand, BatchWriteCommand } from '@aws-sdk/
 import { readFileSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
+import { normalizeJapaneseWord } from '../src/dynamodb';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -71,6 +72,7 @@ const VOCABULARY_TABLE = process.env.VOCABULARY_TABLE_NAME || 'vela-vocabulary';
 interface VocabularyItem {
   id: string;
   japanese_word: string;
+  normalized_japanese_word: string;
   hiragana: string;
   romaji: string;
   english_translation: string;
@@ -440,7 +442,7 @@ async function seedVocabulary() {
   // Use the same deterministic ID scheme as vocabulary.create() in dynamodb.ts
   // so that POST /vocabulary/from-word deduplicates against seeded data.
   const items: VocabularyItem[] = sampleVocabulary.map((v) => {
-    const normalizedWord = v.japanese_word.trim().normalize('NFKC');
+    const normalizedWord = normalizeJapaneseWord(v.japanese_word);
     const normalizedReading = v.hiragana?.trim().normalize('NFKC') ?? '';
     const deterministicId = normalizedReading
       ? `${normalizedWord}:${normalizedReading}`
@@ -448,6 +450,7 @@ async function seedVocabulary() {
     return {
       ...v,
       id: deterministicId,
+      normalized_japanese_word: normalizedWord,
       created_at: now,
       updated_at: now,
     };

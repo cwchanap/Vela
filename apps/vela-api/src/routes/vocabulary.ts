@@ -9,14 +9,10 @@ const app = new Hono<{ Bindings: Env } & AuthContext>();
 
 app.use('*', requireAuth);
 
-const safeSourceUrlSchema = z
-  .string()
-  .trim()
-  .url()
-  .refine((value) => {
-    const url = new URL(value);
-    return url.protocol === 'http:' || url.protocol === 'https:';
-  }, 'source_url must use http or https');
+const safeSourceUrlSchema = z.url().refine((value) => {
+  const url = new URL(value);
+  return url.protocol === 'http:' || url.protocol === 'https:';
+}, 'source_url must use http or https');
 
 const fromWordSchema = z.object({
   japanese_word: z.string().trim().min(1),
@@ -24,9 +20,7 @@ const fromWordSchema = z.object({
   english_translation: z.string().trim().min(1),
   example_sentence_jp: z.string().optional(),
   source_url: safeSourceUrlSchema.optional(),
-  jlpt_level: z
-    .union([z.literal(1), z.literal(2), z.literal(3), z.literal(4), z.literal(5)])
-    .optional(),
+  jlpt_level: z.number().int().min(1).max(5).optional(),
 });
 
 function isConditionalCheckFailedError(error: unknown): error is { name: string } {
@@ -54,8 +48,6 @@ function sanitizeError(error: unknown): { code: string; message: string } {
 
 app.post('/from-word', zValidator('json', fromWordSchema), async (c) => {
   const userId = c.get('userId');
-  if (!userId) return c.json({ error: 'Unauthorized' }, 401);
-
   const body = c.req.valid('json');
   const requestId = c.req.header('x-request-id') ?? globalThis.crypto.randomUUID();
 

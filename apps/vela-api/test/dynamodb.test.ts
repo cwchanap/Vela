@@ -200,6 +200,12 @@ describe('DynamoDB Operations', () => {
       expect(result2.sentence_id).toMatch(/^[0-9a-z]{20}$/);
       // Even within the same millisecond, the random suffix makes IDs unique.
       expect(result1.sentence_id).not.toBe(result2.sentence_id);
+      // Timestamp prefix ensures lexicographic ordering when timestamps differ.
+      // When created in the same millisecond the prefixes may be equal, but the
+      // full IDs are still unique thanks to the random suffix.
+      const prefix1 = result1!.sentence_id.slice(0, 12);
+      const prefix2 = result2!.sentence_id.slice(0, 12);
+      expect(prefix1 <= prefix2).toBe(true);
     });
 
     test('should generate different sentence IDs across different milliseconds', async () => {
@@ -211,6 +217,8 @@ describe('DynamoDB Operations', () => {
       const result2 = await myDictionaries.create(mockUserId, 'sentence two');
 
       expect(result1.sentence_id).not.toBe(result2.sentence_id);
+      // The 12-character timestamp prefixes should differ across milliseconds.
+      expect(result1!.sentence_id.slice(0, 12)).not.toBe(result2!.sentence_id.slice(0, 12));
     });
   });
 
