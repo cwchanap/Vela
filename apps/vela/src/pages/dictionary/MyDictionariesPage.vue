@@ -59,23 +59,20 @@
           <div class="row items-start q-mb-sm">
             <div class="col entry-text">
               <template v-if="tokenMap.has(item.sentence_id)">
-                <template
-                  v-for="(token, index) in tokenMap.get(item.sentence_id)"
-                  :key="index"
+                <template v-for="(token, index) in tokenMap.get(item.sentence_id)" :key="index">
+                  <button
+                    v-if="isContentWord(token)"
+                    type="button"
+                    class="clickable-token"
+                    :aria-label="`Look up ${token.surface_form}`"
+                    :title="`Look up ${token.surface_form}`"
+                    @click="handleTokenClick($event, token, item.sentence_id)"
                   >
-                    <button
-                      v-if="isContentWord(token)"
-                      type="button"
-                      class="clickable-token"
-                      :aria-label="`Look up ${token.surface_form}`"
-                      :title="`Look up ${token.surface_form}`"
-                      @click="handleTokenClick($event, token, item.sentence_id)"
-                    >
-                      {{ token.surface_form }}
-                    </button>
-                    <span v-else>{{ token.surface_form }}</span>
-                  </template>
+                    {{ token.surface_form }}
+                  </button>
+                  <span v-else>{{ token.surface_form }}</span>
                 </template>
+              </template>
               <span v-else>{{ item.sentence }}</span>
             </div>
             <q-badge
@@ -187,7 +184,9 @@
             icon="add"
             :label="flashcardBtnLabel"
             :loading="flashcardState === 'loading'"
-            :disable="flashcardState === 'added' || flashcardState === 'exists' || noMeaningAvailable"
+            :disable="
+              flashcardState === 'added' || flashcardState === 'exists' || noMeaningAvailable
+            "
             size="sm"
             @click="handleAddFlashcard"
             data-testid="btn-add-flashcard"
@@ -337,7 +336,10 @@ function getActiveTokenIdentity(token: Token, sentenceId: string): ActiveTokenId
 }
 
 function isActiveTokenIdentity(identity: ActiveTokenIdentity): boolean {
-  return activeToken.value?.sentenceId === identity.sentenceId && activeToken.value.token === identity.token;
+  return (
+    activeToken.value?.sentenceId === identity.sentenceId &&
+    activeToken.value.token === identity.token
+  );
 }
 
 // Configure marked options
@@ -455,7 +457,9 @@ async function handleTokenClick(event: MouseEvent, token: Token, sentenceId: str
 
   const current = getActiveTokenIdentity(token, sentenceId);
   try {
-    const result = await queryClient.fetchQuery(dictionaryLookupQueryOptions(token.dictionary_form));
+    const result = await queryClient.fetchQuery(
+      dictionaryLookupQueryOptions(token.dictionary_form),
+    );
     if (!isActiveTokenIdentity(current)) return;
     popoverLookup.value = result ?? 'notfound';
   } catch (err) {
@@ -466,11 +470,7 @@ async function handleTokenClick(event: MouseEvent, token: Token, sentenceId: str
 }
 
 async function handleAddFlashcard() {
-  if (
-    !activeToken.value ||
-    popoverLookup.value === 'loading' ||
-    popoverLookup.value === 'notfound'
-  )
+  if (!activeToken.value || popoverLookup.value === 'loading' || popoverLookup.value === 'notfound')
     return;
 
   const lookup = popoverLookup.value as JishoResult;
@@ -481,7 +481,9 @@ async function handleAddFlashcard() {
   try {
     const result = await addFlashcardMutation.mutateAsync({
       japanese_word: activeToken.value.token.dictionary_form,
-      reading: lookup.reading,
+      // Prefer the kuromoji token reading (contextual) over Jisho's first result.
+      // Kuromoji disambiguates homographs correctly (e.g. 今日→こんにち vs きょう).
+      reading: activeToken.value.token.reading || lookup.reading,
       english_translation: lookup.meanings[0] ?? '',
       ...(entry?.sentence ? { example_sentence_jp: entry.sentence } : {}),
       ...(entry?.source_url ? { source_url: entry.source_url } : {}),

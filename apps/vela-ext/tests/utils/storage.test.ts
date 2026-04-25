@@ -9,7 +9,7 @@ import {
 } from '../../entrypoints/utils/storage';
 import type { AuthTokens } from '../../entrypoints/utils/api';
 
-const { mockRefreshToken } = vi.hoisted(() => {
+const { mockRefreshToken, mockClearAllPending } = vi.hoisted(() => {
   const mockRefreshToken = vi.fn(
     async (token: string): Promise<AuthTokens> => ({
       accessToken: `${token}-access`,
@@ -17,8 +17,9 @@ const { mockRefreshToken } = vi.hoisted(() => {
       idToken: `${token}-id`,
     }),
   );
+  const mockClearAllPending = vi.fn().mockResolvedValue(undefined);
 
-  return { mockRefreshToken };
+  return { mockRefreshToken, mockClearAllPending };
 });
 
 defineBrowserMocks();
@@ -31,12 +32,21 @@ vi.mock('../../entrypoints/utils/api', async (importOriginal) => {
   };
 });
 
+vi.mock('../../entrypoints/utils/idb', () => ({
+  clearAllPending: mockClearAllPending,
+  openDB: vi.fn(),
+  STORE_NAME: 'vela-pending-sentences',
+  DB_NAME: 'vela-offline-queue',
+  DB_VERSION: 1,
+}));
+
 function defineBrowserMocks() {
   const storageState: Record<string, any> = {};
 
   beforeEach(() => {
     Object.keys(storageState).forEach((key) => delete storageState[key]);
     mockRefreshToken.mockClear();
+    mockClearAllPending.mockClear();
 
     (globalThis as any).browser = {
       storage: {
@@ -86,6 +96,13 @@ describe('storage utils', () => {
 
     await expect(getAuthTokens()).resolves.toBeNull();
     await expect(getUserEmail()).resolves.toBeNull();
+  });
+
+  it('clears the offline queue when clearing auth data', async () => {
+    await saveAuthTokens(tokens, 'user@example.com');
+    await clearAuthData();
+
+    expect(mockClearAllPending).toHaveBeenCalledOnce();
   });
 
   it('returns valid access token when available', async () => {

@@ -4,7 +4,6 @@
  */
 import { DynamoDBClient, type DynamoDBClientConfig } from '@aws-sdk/client-dynamodb';
 import { DynamoDBDocumentClient, PutCommand, BatchWriteCommand } from '@aws-sdk/lib-dynamodb';
-import { randomUUID } from 'crypto';
 import { readFileSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
@@ -438,12 +437,21 @@ async function seedVocabulary() {
   const now = new Date().toISOString();
 
   // Add items in batches of 25 (DynamoDB limit)
-  const items: VocabularyItem[] = sampleVocabulary.map((v) => ({
-    ...v,
-    id: randomUUID(),
-    created_at: now,
-    updated_at: now,
-  }));
+  // Use the same deterministic ID scheme as vocabulary.create() in dynamodb.ts
+  // so that POST /vocabulary/from-word deduplicates against seeded data.
+  const items: VocabularyItem[] = sampleVocabulary.map((v) => {
+    const normalizedWord = v.japanese_word.trim().normalize('NFKC');
+    const normalizedReading = v.hiragana?.trim().normalize('NFKC') ?? '';
+    const deterministicId = normalizedReading
+      ? `${normalizedWord}:${normalizedReading}`
+      : normalizedWord;
+    return {
+      ...v,
+      id: deterministicId,
+      created_at: now,
+      updated_at: now,
+    };
+  });
 
   // Split into batches of 25
   const batches: VocabularyItem[][] = [];
