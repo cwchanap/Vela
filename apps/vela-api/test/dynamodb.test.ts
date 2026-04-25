@@ -194,12 +194,12 @@ describe('DynamoDB Operations', () => {
       expect(mockPutCommand).toHaveBeenCalledTimes(2);
       expect(result1.sentence_id).toBeDefined();
       expect(result2.sentence_id).toBeDefined();
-      // IDs are base-36 zero-padded timestamps.
-      // Same-millisecond calls may produce identical IDs which is acceptable
-      // for a sort key — they will both sort together at that millisecond.
-      // Must be purely alphanumeric (base-36) and padded to 12 chars
-      expect(result1.sentence_id).toMatch(/^[0-9a-z]{12}$/);
-      expect(result2.sentence_id).toMatch(/^[0-9a-z]{12}$/);
+      // IDs are base-36 zero-padded timestamps with a random suffix to prevent
+      // same-millisecond collisions. Format: 12-char timestamp + 8-char random.
+      expect(result1.sentence_id).toMatch(/^[0-9a-z]{20}$/);
+      expect(result2.sentence_id).toMatch(/^[0-9a-z]{20}$/);
+      // Even within the same millisecond, the random suffix makes IDs unique.
+      expect(result1.sentence_id).not.toBe(result2.sentence_id);
     });
 
     test('should generate different sentence IDs across different milliseconds', async () => {
@@ -512,7 +512,11 @@ describe('DynamoDB Operations', () => {
 
       const result = await vocabulary.findByWord('食べる');
 
-      expect(result).toEqual({ id: 'v2', japanese_word: '食べる', normalized_japanese_word: '食べる' });
+      expect(result).toEqual({
+        id: 'v2',
+        japanese_word: '食べる',
+        normalized_japanese_word: '食べる',
+      });
       expect(mockSend).toHaveBeenCalledTimes(2);
       expect(mockScanCommand).toHaveBeenNthCalledWith(
         1,
@@ -1026,8 +1030,7 @@ describe('DynamoDB Operations', () => {
       expect(mockPutCommand).toHaveBeenCalledWith(
         expect.objectContaining({
           TableName: 'vela-user-vocabulary-progress',
-          ConditionExpression:
-            'attribute_not_exists(user_id) AND attribute_not_exists(vocabulary_id)',
+          ConditionExpression: 'attribute_not_exists(user_id)',
         }),
       );
     });

@@ -1,4 +1,4 @@
-import { createHash } from 'crypto';
+import { randomUUID } from 'crypto';
 import { DynamoDBClient, type DynamoDBClientConfig } from '@aws-sdk/client-dynamodb';
 import {
   DynamoDBDocumentClient,
@@ -501,7 +501,7 @@ export const vocabulary = {
       await docClient.send(command);
       return { item: vocabularyItem, created: true };
     } catch (error) {
-      if ((error as { name?: string }).name === 'ConditionalCheckFailedException') {
+      if (isConditionalCheckFailedError(error)) {
         const existing = await this.getById(vocabularyItem.id);
         if (existing) {
           return { item: existing, created: false };
@@ -693,8 +693,10 @@ export const myDictionaries = {
     try {
       // ULID-like sort key: zero-padded millisecond timestamp keeps the key
       // lexicographically ordered so ScanIndexForward:false returns newest first.
+      // A short random suffix prevents same-millisecond collisions.
       const timestamp = Date.now();
-      const sentenceId = timestamp.toString(36).padStart(12, '0');
+      const suffix = randomUUID().slice(0, 8);
+      const sentenceId = `${timestamp.toString(36).padStart(12, '0')}${suffix}`;
 
       const command = new PutCommand({
         TableName: TABLE_NAMES.MY_DICTIONARIES,
@@ -707,6 +709,7 @@ export const myDictionaries = {
           created_at: timestamp,
           updated_at: timestamp,
         },
+        ConditionExpression: 'attribute_not_exists(user_id)',
       });
       await docClient.send(command);
       return {
@@ -1042,7 +1045,7 @@ export const userVocabularyProgress = {
       const command = new PutCommand({
         TableName: TABLE_NAMES.USER_VOCABULARY_PROGRESS,
         Item: progress,
-        ConditionExpression: 'attribute_not_exists(user_id) AND attribute_not_exists(vocabulary_id)',
+        ConditionExpression: 'attribute_not_exists(user_id)',
       });
       await docClient.send(command);
       return progress;

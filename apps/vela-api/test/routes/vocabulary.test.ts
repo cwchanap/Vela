@@ -8,7 +8,6 @@ const mockVocabulary = {
 
 const mockUserVocabularyProgress = {
   get: vi.fn(),
-  initializeProgress: vi.fn(),
   initializeProgressIfNotExists: vi.fn(),
 };
 
@@ -50,7 +49,6 @@ const validBody = {
 describe('POST /from-word', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockUserVocabularyProgress.initializeProgress.mockResolvedValue({});
     mockUserVocabularyProgress.initializeProgressIfNotExists.mockResolvedValue({});
   });
 
@@ -139,6 +137,24 @@ describe('POST /from-word', () => {
     });
 
     expect(res.status).toBe(400);
+  });
+
+  test('returns 400 when reading is empty or whitespace-only', async () => {
+    const app = createTestApp();
+
+    const res1 = await app.request('/from-word', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...validBody, reading: '' }),
+    });
+    expect(res1.status).toBe(400);
+
+    const res2 = await app.request('/from-word', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...validBody, reading: '   ' }),
+    });
+    expect(res2.status).toBe(400);
   });
 
   test('returns 400 when source_url uses a non-http scheme', async () => {
