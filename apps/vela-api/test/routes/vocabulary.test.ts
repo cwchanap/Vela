@@ -7,7 +7,6 @@ const mockVocabulary = {
 };
 
 const mockUserVocabularyProgress = {
-  get: vi.fn(),
   initializeProgressIfNotExists: vi.fn(),
 };
 

@@ -57,7 +57,7 @@ const sanitize = (v?: string) => {
   return s;
 };
 
-const normalizeJapaneseWord = (word: string): string => word.trim().normalize('NFKC');
+export const normalizeJapaneseWord = (word: string): string => word.trim().normalize('NFKC');
 
 const endpointSanitized = sanitize(process.env.DDB_ENDPOINT);
 const isLocalDdb =

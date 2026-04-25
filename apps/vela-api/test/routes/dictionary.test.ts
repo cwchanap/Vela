@@ -194,8 +194,9 @@ describe('GET /lookup', () => {
   });
 
   test('returns 502 when the Jisho fetch aborts', async () => {
+    const abortError = new DOMException('The operation was aborted', 'AbortError');
     mockFetch.mockImplementation(() => {
-      throw new Error('AbortError: The operation was aborted');
+      throw abortError;
     });
 
     const app = createTestApp();
