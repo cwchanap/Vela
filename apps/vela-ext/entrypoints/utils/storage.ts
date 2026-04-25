@@ -1,5 +1,6 @@
 import type { AuthTokens } from './api';
 import { refreshToken as refreshTokenAPI } from './api';
+import { clearAllPending } from './idb';
 
 const STORAGE_KEYS = {
   AUTH_TOKENS: 'vela_auth_tokens',
@@ -33,7 +34,10 @@ export async function getUserEmail(): Promise<string | null> {
 }
 
 export async function clearAuthData(): Promise<void> {
-  await browser.storage.local.remove([STORAGE_KEYS.AUTH_TOKENS, STORAGE_KEYS.USER_EMAIL]);
+  await Promise.all([
+    browser.storage.local.remove([STORAGE_KEYS.AUTH_TOKENS, STORAGE_KEYS.USER_EMAIL]),
+    clearAllPending().catch((err) => console.error('[Vela] Failed to clear pending queue:', err)),
+  ]);
 }
 
 export async function isAuthenticated(): Promise<boolean> {

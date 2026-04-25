@@ -1079,6 +1079,82 @@ describe('MyDictionariesPage', () => {
 
         expect(wrapper.vm.flashcardState).toBe('error');
       });
+
+      it('sends the kuromoji token reading instead of Jisho reading', async () => {
+        vi.mocked(myDictionariesService.getMyDictionaries).mockResolvedValue([mockEntry]);
+        vi.mocked(vocabularyService.addFlashcard).mockResolvedValue({
+          vocabulary_id: 'vocab-1',
+          created: true,
+          alreadyInSRS: false,
+        });
+
+        wrapper = mountComponent();
+        await flushPromises();
+
+        wrapper.vm.activeToken = {
+          token: {
+            surface_form: '今日',
+            reading: 'こんにち', // kuromoji contextual reading
+            dictionary_form: '今日',
+            pos: '名詞',
+            pos_detail_1: '副詞可能',
+          },
+          sentenceId: 'sent-1',
+        };
+        wrapper.vm.popoverLookup = {
+          word: '今日',
+          reading: 'きょう', // Jisho's first result — wrong for 今日は greeting
+          meanings: ['today'],
+          common: true,
+        };
+
+        await wrapper.vm.handleAddFlashcard();
+        await flushPromises();
+
+        expect(vi.mocked(vocabularyService.addFlashcard)).toHaveBeenCalledWith(
+          expect.objectContaining({
+            reading: 'こんにち', // kuromoji reading, NOT Jisho's きょう
+          }),
+        );
+      });
+
+      it('falls back to Jisho reading when token reading is empty', async () => {
+        vi.mocked(myDictionariesService.getMyDictionaries).mockResolvedValue([mockEntry]);
+        vi.mocked(vocabularyService.addFlashcard).mockResolvedValue({
+          vocabulary_id: 'vocab-1',
+          created: true,
+          alreadyInSRS: false,
+        });
+
+        wrapper = mountComponent();
+        await flushPromises();
+
+        wrapper.vm.activeToken = {
+          token: {
+            surface_form: '日本語',
+            reading: '', // empty reading
+            dictionary_form: '日本語',
+            pos: '名詞',
+            pos_detail_1: '一般',
+          },
+          sentenceId: 'sent-1',
+        };
+        wrapper.vm.popoverLookup = {
+          word: '日本語',
+          reading: 'にほんご',
+          meanings: ['Japanese language'],
+          common: true,
+        };
+
+        await wrapper.vm.handleAddFlashcard();
+        await flushPromises();
+
+        expect(vi.mocked(vocabularyService.addFlashcard)).toHaveBeenCalledWith(
+          expect.objectContaining({
+            reading: 'にほんご', // falls back to Jisho when token reading is empty
+          }),
+        );
+      });
     });
 
     it('sets popoverLookup to notfound (not loading) when fetchQuery throws', async () => {

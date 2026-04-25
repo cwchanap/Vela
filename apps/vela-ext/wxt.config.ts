@@ -12,7 +12,8 @@ export default defineConfig({
     permissions: ['contextMenus', 'storage', 'notifications', 'tabs'],
     host_permissions: [
       'https://vela.cwchanap.dev/*',
-      'http://localhost:9000/*', // Allow localhost in development
+      'http://localhost:9000/*', // Allow localhost in development (Quasar dev server)
+      'http://localhost:9005/*', // Allow localhost API in development
     ],
   },
 });

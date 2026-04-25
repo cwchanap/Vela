@@ -153,7 +153,9 @@ export async function saveSentenceToAPI(
 
 const MAX_RETRIES = 3;
 
-export function shouldDiscardPendingRecord(record: Pick<PendingSentenceRecord, 'retries'>): boolean {
+export function shouldDiscardPendingRecord(
+  record: Pick<PendingSentenceRecord, 'retries'>,
+): boolean {
   return record.retries + 1 >= MAX_RETRIES;
 }
 
@@ -180,37 +182,26 @@ export async function requestPageScan(tabId: number): Promise<void> {
   }
 }
 
+let isFlushing = false;
+
 export async function flushQueue(): Promise<void> {
-  const pending = await getAllPending();
-  if (pending.length === 0) return;
+  if (isFlushing) return;
+  isFlushing = true;
+  try {
+    const pending = await getAllPending();
+    if (pending.length === 0) return;
 
-  for (const record of pending) {
-    try {
-      let idToken: string;
+    for (const record of pending) {
       try {
-        idToken = await getValidIdToken();
-      } catch {
-        // Still not authenticated — skip this flush cycle
-        return;
-      }
-
-      let response = await fetch(`${API_BASE_URL}/my-dictionaries`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${idToken}` },
-        body: JSON.stringify({
-          sentence: record.sentence,
-          sourceUrl: record.sourceUrl,
-          context: record.context,
-        }),
-      });
-
-      if (response.status === 401) {
+        let idToken: string;
         try {
-          idToken = await refreshIdToken();
+          idToken = await getValidIdToken();
         } catch {
+          // Still not authenticated — skip this flush cycle
           return;
         }
-        response = await fetch(`${API_BASE_URL}/my-dictionaries`, {
+
+        let response = await fetch(`${API_BASE_URL}/my-dictionaries`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${idToken}` },
           body: JSON.stringify({
@@ -219,25 +210,44 @@ export async function flushQueue(): Promise<void> {
             context: record.context,
           }),
         });
-      }
 
-      if (response.ok) {
-        await deletePending(record.id!);
-      } else if (shouldDiscardPendingRecord(record)) {
-        await deletePending(record.id!);
-        notifyDiscardedSyncFailure();
-      } else {
-        await incrementRetry(record);
-      }
-    } catch (err) {
-      console.error('[Vela] flushQueue: failed to process record:', record.id, err);
-      if (shouldDiscardPendingRecord(record)) {
-        await deletePending(record.id!);
-        notifyDiscardedSyncFailure();
-      } else {
-        await incrementRetry(record);
+        if (response.status === 401) {
+          try {
+            idToken = await refreshIdToken();
+          } catch {
+            return;
+          }
+          response = await fetch(`${API_BASE_URL}/my-dictionaries`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${idToken}` },
+            body: JSON.stringify({
+              sentence: record.sentence,
+              sourceUrl: record.sourceUrl,
+              context: record.context,
+            }),
+          });
+        }
+
+        if (response.ok) {
+          await deletePending(record.id!);
+        } else if (shouldDiscardPendingRecord(record)) {
+          await deletePending(record.id!);
+          notifyDiscardedSyncFailure();
+        } else {
+          await incrementRetry(record);
+        }
+      } catch (err) {
+        console.error('[Vela] flushQueue: failed to process record:', record.id, err);
+        if (shouldDiscardPendingRecord(record)) {
+          await deletePending(record.id!);
+          notifyDiscardedSyncFailure();
+        } else {
+          await incrementRetry(record);
+        }
       }
     }
+  } finally {
+    isFlushing = false;
   }
 }
 
@@ -318,9 +328,7 @@ export default defineBackground(() => {
     };
     if (!Array.isArray(sentences)) return;
     return Promise.all(
-      (sentences as string[]).map((sentence) =>
-        saveSentenceToAPI(sentence, sourceUrl, context),
-      ),
+      (sentences as string[]).map((sentence) => saveSentenceToAPI(sentence, sourceUrl, context)),
     ).then((results) => {
       const saved = results.filter((ok) => ok).length;
       const total = results.length;

@@ -77,6 +77,7 @@ vi.mock('../entrypoints/utils/idb', () => ({
     }),
   }),
   STORE_NAME: 'pending-sentences',
+  clearAllPending: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock('../entrypoints/utils/storage', () => ({
@@ -299,6 +300,33 @@ describe('flushQueue', () => {
       expect.objectContaining({ title: 'Vela — Sync failed' }),
     );
     expect(mockIdbStore.delete).toHaveBeenCalledWith(2);
+  });
+
+  it('skips re-entrant flush calls while a flush is already in progress', async () => {
+    let resolveFetch: (() => void) | undefined;
+    idbState.getAllResult = [{ id: 1, sentence: 'テスト1', retries: 0, timestamp: Date.now() }];
+    vi.mocked(getValidIdToken).mockResolvedValue('valid-token');
+    vi.mocked(global.fetch as ReturnType<typeof vi.fn>).mockImplementation(
+      () =>
+        new Promise<Response>((resolve) => {
+          resolveFetch = () => resolve(new Response(null, { status: 200 }));
+        }),
+    );
+
+    // Start first flush (will hang at fetch until we resolve it)
+    const firstFlush = flushQueue();
+    // Give microtasks a chance to run so first flush enters the for-loop
+    await new Promise((r) => setTimeout(r, 0));
+
+    // Second flush should return immediately without calling fetch again
+    await flushQueue();
+
+    // Resolve the hanging fetch so the first flush can complete
+    resolveFetch?.();
+    await firstFlush;
+
+    // fetch was called only once — the re-entrant call was skipped
+    expect(global.fetch).toHaveBeenCalledOnce();
   });
 });
 
