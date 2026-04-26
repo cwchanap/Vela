@@ -59,6 +59,11 @@ const sanitize = (v?: string) => {
 
 export const normalizeJapaneseWord = (word: string): string => word.trim().normalize('NFKC');
 
+/** Convert hiragana to katakana so readings from different sources (kuromoji vs Jisho)
+ *  produce the same deterministic vocabulary key. */
+const toKatakana = (str: string): string =>
+  str.replace(/[\u3041-\u3096]/g, (ch) => String.fromCharCode(ch.charCodeAt(0) + 0x60));
+
 const endpointSanitized = sanitize(process.env.DDB_ENDPOINT);
 const isLocalDdb =
   !!endpointSanitized &&
@@ -481,7 +486,9 @@ export const vocabulary = {
       item.normalized_japanese_word ?? normalizeJapaneseWord(item.japanese_word);
     // Include hiragana in the key to disambiguate homographs
     // (e.g. 今日 きょう vs こんにち).
-    const normalizedReading = item.hiragana?.trim().normalize('NFKC') ?? '';
+    // Convert to katakana so kuromoji (カタカナ) and Jisho (ひらがな) readings
+    // produce the same key.
+    const normalizedReading = toKatakana(item.hiragana?.trim().normalize('NFKC') ?? '');
     const defaultId = normalizedReading
       ? `${normalizedJapaneseWord}:${normalizedReading}`
       : normalizedJapaneseWord;
