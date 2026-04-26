@@ -141,6 +141,7 @@ describe('POST /from-word', () => {
   test('returns 400 when reading is empty or whitespace-only', async () => {
     const app = createTestApp();
 
+    // Empty string reading should still be rejected
     const res1 = await app.request('/from-word', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -148,12 +149,41 @@ describe('POST /from-word', () => {
     });
     expect(res1.status).toBe(400);
 
+    // Whitespace-only reading should still be rejected
     const res2 = await app.request('/from-word', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ ...validBody, reading: '   ' }),
     });
     expect(res2.status).toBe(400);
+  });
+
+  test('creates vocabulary without reading when reading is omitted', async () => {
+    mockVocabulary.create.mockResolvedValue({
+      item: { id: '食べる', japanese_word: '食べる' },
+      created: true,
+    });
+
+    const app = createTestApp();
+    const bodyWithoutReading = {
+      japanese_word: validBody.japanese_word,
+      english_translation: validBody.english_translation,
+    };
+    const res = await app.request('/from-word', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(bodyWithoutReading),
+    });
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as any;
+    expect(body.created).toBe(true);
+    expect(mockVocabulary.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        japanese_word: '食べる',
+        hiragana: undefined,
+      }),
+    );
   });
 
   test('returns 400 when source_url uses a non-http scheme', async () => {
