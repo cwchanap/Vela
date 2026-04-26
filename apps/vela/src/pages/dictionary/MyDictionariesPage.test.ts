@@ -1118,7 +1118,7 @@ describe('MyDictionariesPage', () => {
         );
       });
 
-      it('falls back to Jisho reading when token reading is empty', async () => {
+      it('falls back to Jisho reading when token reading equals surface_form', async () => {
         vi.mocked(myDictionariesService.getMyDictionaries).mockResolvedValue([mockEntry]);
         vi.mocked(vocabularyService.addFlashcard).mockResolvedValue({
           vocabulary_id: 'vocab-1',
@@ -1132,7 +1132,8 @@ describe('MyDictionariesPage', () => {
         wrapper.vm.activeToken = {
           token: {
             surface_form: '日本語',
-            reading: '', // empty reading
+            // Kuromoji doesn't know the reading so tokenizer substitutes surface_form
+            reading: '日本語',
             dictionary_form: '日本語',
             pos: '名詞',
             pos_detail_1: '一般',
@@ -1151,7 +1152,7 @@ describe('MyDictionariesPage', () => {
 
         expect(vi.mocked(vocabularyService.addFlashcard)).toHaveBeenCalledWith(
           expect.objectContaining({
-            reading: 'にほんご', // falls back to Jisho when token reading is empty
+            reading: 'にほんご', // Jisho reading, not the surface_form fallback
           }),
         );
       });

@@ -584,7 +584,7 @@ describe('DynamoDB Operations', () => {
       });
       mockSend.mockRejectedValueOnce(err).mockResolvedValueOnce({
         Item: {
-          id: '食べる:たべる',
+          id: '食べる:タベル',
           japanese_word: '食べる',
           normalized_japanese_word: '食べる',
           english_translation: 'to eat',
@@ -603,7 +603,7 @@ describe('DynamoDB Operations', () => {
           TableName: 'vela-vocabulary',
           ConditionExpression: 'attribute_not_exists(id)',
           Item: expect.objectContaining({
-            id: '食べる:たべる',
+            id: '食べる:タベル',
             normalized_japanese_word: '食べる',
           }),
         }),
@@ -611,12 +611,12 @@ describe('DynamoDB Operations', () => {
       expect(mockGetCommand).toHaveBeenCalledWith(
         expect.objectContaining({
           TableName: 'vela-vocabulary',
-          Key: { id: '食べる:たべる' },
+          Key: { id: '食べる:タベル' },
         }),
       );
       expect(result).toEqual({
         item: expect.objectContaining({
-          id: '食べる:たべる',
+          id: '食べる:タベル',
           normalized_japanese_word: '食べる',
         }),
         created: false,
@@ -633,7 +633,7 @@ describe('DynamoDB Operations', () => {
         created_at: '2026-04-20T00:00:00.000Z',
       });
 
-      expect(result.item.id).toBe('今日:きょう');
+      expect(result.item.id).toBe('今日:キョウ');
 
       mockSend.mockResolvedValueOnce({});
       const result2 = await vocabulary.create({
@@ -643,7 +643,7 @@ describe('DynamoDB Operations', () => {
         created_at: '2026-04-20T00:00:00.000Z',
       });
 
-      expect(result2.item.id).toBe('今日:こんにち');
+      expect(result2.item.id).toBe('今日:コンニチ');
       expect(result.item.id).not.toBe(result2.item.id);
     });
 
@@ -657,6 +657,30 @@ describe('DynamoDB Operations', () => {
       });
 
       expect(result.item.id).toBe('猫');
+    });
+
+    test('create should produce the same id regardless of hiragana vs katakana reading', async () => {
+      mockSend.mockResolvedValueOnce({});
+
+      const result = await vocabulary.create({
+        japanese_word: '食べる',
+        hiragana: 'たべる', // hiragana input
+        english_translation: 'to eat',
+        created_at: '2026-04-20T00:00:00.000Z',
+      });
+
+      expect(result.item.id).toBe('食べる:タベル');
+
+      mockSend.mockResolvedValueOnce({});
+      const result2 = await vocabulary.create({
+        japanese_word: '食べる',
+        hiragana: 'タベル', // katakana input
+        english_translation: 'to eat',
+        created_at: '2026-04-20T00:00:00.000Z',
+      });
+
+      expect(result2.item.id).toBe('食べる:タベル');
+      expect(result.item.id).toBe(result2.item.id);
     });
   });
 

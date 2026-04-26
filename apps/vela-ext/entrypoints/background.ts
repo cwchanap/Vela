@@ -303,38 +303,40 @@ export default defineBackground(() => {
   });
 
   // Handle batch save from content script — returns Promise so sendMessage resolves/rejects based on outcome
-  browser.runtime.onMessage.addListener((message: unknown): Promise<void> | undefined => {
-    const msg = message as { type?: string } | null;
-    if (typeof message !== 'object' || message === null) return;
+  browser.runtime.onMessage.addListener(
+    (message: unknown): Promise<{ saved: number; total: number }> | undefined => {
+      if (typeof message !== 'object' || message === null) return;
+      const msg = message as Record<string, unknown>;
 
-    // Content script signals that no Japanese text was found on the page.
-    // Show the notification from the background script because the
-    // browser.notifications API is not available in content scripts.
-    if (msg.type === 'NO_JAPANESE_FOUND') {
-      browser.notifications.create({
-        type: 'basic',
-        iconUrl: browser.runtime.getURL('/icon/128.png'),
-        title: 'Vela — No sentences found',
-        message: 'No Japanese sentences were detected on this page.',
+      // Content script signals that no Japanese text was found on the page.
+      // Show the notification from the background script because the
+      // browser.notifications API is not available in content scripts.
+      if (msg.type === 'NO_JAPANESE_FOUND') {
+        browser.notifications.create({
+          type: 'basic',
+          iconUrl: browser.runtime.getURL('/icon/128.png'),
+          title: 'Vela — No sentences found',
+          message: 'No Japanese sentences were detected on this page.',
+        });
+        return;
+      }
+
+      if (msg.type !== 'SAVE_SENTENCES') return;
+      const { sentences, sourceUrl, context } = message as {
+        sentences: unknown;
+        sourceUrl?: string;
+        context?: string;
+      };
+      if (!Array.isArray(sentences)) return;
+      return Promise.all(
+        (sentences as string[]).map((sentence) => saveSentenceToAPI(sentence, sourceUrl, context)),
+      ).then((results) => {
+        const saved = results.filter((ok) => ok).length;
+        const total = results.length;
+        return { saved, total } as const;
       });
-      return;
-    }
-
-    if (msg.type !== 'SAVE_SENTENCES') return;
-    const { sentences, sourceUrl, context } = message as {
-      sentences: unknown;
-      sourceUrl?: string;
-      context?: string;
-    };
-    if (!Array.isArray(sentences)) return;
-    return Promise.all(
-      (sentences as string[]).map((sentence) => saveSentenceToAPI(sentence, sourceUrl, context)),
-    ).then((results) => {
-      const saved = results.filter((ok) => ok).length;
-      const total = results.length;
-      return { saved, total } as const;
-    });
-  });
+    },
+  );
 
   // Flush on startup and when browser regains focus (not on focus-loss)
   browser.runtime.onStartup.addListener(() => {

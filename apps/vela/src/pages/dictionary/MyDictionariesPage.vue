@@ -483,7 +483,13 @@ async function handleAddFlashcard() {
       japanese_word: activeToken.value.token.dictionary_form,
       // Prefer the kuromoji token reading (contextual) over Jisho's first result.
       // Kuromoji disambiguates homographs correctly (e.g. 今日→こんにち vs きょう).
-      reading: activeToken.value.token.reading || lookup.reading,
+      // When kuromoji doesn't know a word it falls back to surface_form as reading;
+      // in that case prefer Jisho's reading instead.
+      reading:
+        activeToken.value.token.reading &&
+        activeToken.value.token.reading !== activeToken.value.token.surface_form
+          ? activeToken.value.token.reading
+          : lookup.reading,
       english_translation: lookup.meanings[0] ?? '',
       ...(entry?.sentence ? { example_sentence_jp: entry.sentence } : {}),
       ...(entry?.source_url ? { source_url: entry.source_url } : {}),
