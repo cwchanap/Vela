@@ -187,38 +187,45 @@ describe('DynamoDB Operations', () => {
 
     test('should generate time-sortable sentence IDs', async () => {
       mockSend.mockResolvedValue({});
+      const timestamp1 = 1_710_000_000_000;
+      const timestamp2 = timestamp1 + 1;
+      const dateNowSpy = vi.spyOn(Date, 'now');
+      dateNowSpy.mockReturnValueOnce(timestamp1).mockReturnValueOnce(timestamp2);
 
-      const result1 = await myDictionaries.create(mockUserId, 'mock sentence');
-      const result2 = await myDictionaries.create(mockUserId, 'another sentence');
+      try {
+        const result1 = await myDictionaries.create(mockUserId, 'mock sentence');
+        const result2 = await myDictionaries.create(mockUserId, 'another sentence');
 
-      expect(mockPutCommand).toHaveBeenCalledTimes(2);
-      expect(result1.sentence_id).toBeDefined();
-      expect(result2.sentence_id).toBeDefined();
-      // IDs are base-36 zero-padded timestamps with a random suffix to prevent
-      // same-millisecond collisions. Format: 12-char timestamp + 8-char random.
-      expect(result1.sentence_id).toMatch(/^[0-9a-z]{20}$/);
-      expect(result2.sentence_id).toMatch(/^[0-9a-z]{20}$/);
-      // Even within the same millisecond, the random suffix makes IDs unique.
-      expect(result1.sentence_id).not.toBe(result2.sentence_id);
-      // Timestamp prefix ensures lexicographic ordering when timestamps differ.
-      // When created in the same millisecond the prefixes may be equal, but the
-      // full IDs are still unique thanks to the random suffix.
-      const prefix1 = result1!.sentence_id.slice(0, 12);
-      const prefix2 = result2!.sentence_id.slice(0, 12);
-      expect(prefix1 <= prefix2).toBe(true);
+        expect(mockPutCommand).toHaveBeenCalledTimes(2);
+        expect(result1.sentence_id).toBeDefined();
+        expect(result2.sentence_id).toBeDefined();
+        // IDs are base-36 zero-padded timestamps with a random suffix to prevent
+        // same-millisecond collisions. Format: 12-char timestamp + 8-char random.
+        expect(result1.sentence_id).toMatch(/^[0-9a-z]{20}$/);
+        expect(result2.sentence_id).toMatch(/^[0-9a-z]{20}$/);
+        expect(result1.sentence_id).not.toBe(result2.sentence_id);
+        expect(result1.sentence_id < result2.sentence_id).toBe(true);
+      } finally {
+        dateNowSpy.mockRestore();
+      }
     });
 
     test('should generate different sentence IDs across different milliseconds', async () => {
       mockSend.mockResolvedValue({});
+      const timestamp1 = 1_710_000_000_100;
+      const timestamp2 = timestamp1 + 1;
+      const dateNowSpy = vi.spyOn(Date, 'now');
+      dateNowSpy.mockReturnValueOnce(timestamp1).mockReturnValueOnce(timestamp2);
 
-      const result1 = await myDictionaries.create(mockUserId, 'sentence one');
-      // Wait for next millisecond tick to ensure different timestamp
-      await new Promise((r) => setTimeout(r, 2));
-      const result2 = await myDictionaries.create(mockUserId, 'sentence two');
+      try {
+        const result1 = await myDictionaries.create(mockUserId, 'sentence one');
+        const result2 = await myDictionaries.create(mockUserId, 'sentence two');
 
-      expect(result1.sentence_id).not.toBe(result2.sentence_id);
-      // The 12-character timestamp prefixes should differ across milliseconds.
-      expect(result1!.sentence_id.slice(0, 12)).not.toBe(result2!.sentence_id.slice(0, 12));
+        expect(result1.sentence_id).not.toBe(result2.sentence_id);
+        expect(result1.sentence_id.slice(0, 12)).not.toBe(result2.sentence_id.slice(0, 12));
+      } finally {
+        dateNowSpy.mockRestore();
+      }
     });
   });
 
@@ -575,6 +582,30 @@ describe('DynamoDB Operations', () => {
         }),
       ).rejects.toThrow(
         "Vocabulary item 'Tシャツ:ティーシャツ' failed conditional check but could not be retrieved",
+      );
+    });
+
+    test('create should throw when the retrieved existing item is missing a string id', async () => {
+      const err = Object.assign(new Error('Condition failed'), {
+        name: 'ConditionalCheckFailedException',
+      });
+      mockSend.mockRejectedValueOnce(err).mockResolvedValueOnce({
+        Item: {
+          japanese_word: '食べる',
+          normalized_japanese_word: '食べる',
+          english_translation: 'to eat',
+        },
+      });
+
+      await expect(
+        vocabulary.create({
+          japanese_word: '食べる',
+          hiragana: 'たべる',
+          english_translation: 'to eat',
+          created_at: '2026-04-20T00:00:00.000Z',
+        }),
+      ).rejects.toThrow(
+        "Vocabulary item '食べる:タベル' failed conditional check because the existing item is missing a string id",
       );
     });
 

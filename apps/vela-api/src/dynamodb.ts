@@ -49,6 +49,15 @@ export interface DailyProgress {
   accuracy_percentage: number;
 }
 
+export type VocabularyCreateItem = Record<string, unknown> & {
+  id: string;
+};
+
+export interface VocabularyCreateResult {
+  item: VocabularyCreateItem;
+  created: boolean;
+}
+
 // Create DynamoDB client
 const sanitize = (v?: string) => {
   if (!v) return undefined;
@@ -135,6 +144,10 @@ function isConditionalCheckFailedError(error: unknown): error is { name: string 
     'name' in error &&
     error.name === 'ConditionalCheckFailedException'
   );
+}
+
+function hasVocabularyItemId(item: unknown): item is VocabularyCreateItem {
+  return typeof item === 'object' && item !== null && 'id' in item && typeof item.id === 'string';
 }
 
 // Fisher-Yates shuffle algorithm for uniform random shuffling
@@ -481,7 +494,7 @@ export const vocabulary = {
     jlpt_level?: number;
     created_at: string;
     normalized_japanese_word?: string;
-  }): Promise<{ item: Record<string, unknown>; created: boolean }> {
+  }): Promise<VocabularyCreateResult> {
     const normalizedJapaneseWord =
       item.normalized_japanese_word ?? normalizeJapaneseWord(item.japanese_word);
     // Include hiragana in the key to disambiguate homographs
@@ -492,7 +505,7 @@ export const vocabulary = {
     const defaultId = normalizedReading
       ? `${normalizedJapaneseWord}:${normalizedReading}`
       : normalizedJapaneseWord;
-    const vocabularyItem = {
+    const vocabularyItem: VocabularyCreateItem = {
       ...item,
       id: item.id ?? defaultId,
       japanese_word: item.japanese_word.trim(),
@@ -511,6 +524,11 @@ export const vocabulary = {
       if (isConditionalCheckFailedError(error)) {
         const existing = await this.getById(vocabularyItem.id);
         if (existing) {
+          if (!hasVocabularyItemId(existing)) {
+            throw new Error(
+              `Vocabulary item '${vocabularyItem.id}' failed conditional check because the existing item is missing a string id`,
+            );
+          }
           return { item: existing, created: false };
         }
         throw new Error(

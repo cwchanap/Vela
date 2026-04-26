@@ -1,11 +1,11 @@
-import { describe, test, expect, beforeEach, afterEach, mock, vi } from 'bun:test';
+import { describe, test, expect, beforeEach, afterEach, mock } from 'bun:test';
 import { Hono } from 'hono';
 import type { Env } from '../../src/types';
 
 const originalFetch = globalThis.fetch;
 
-// Mock auth middleware to pass for authenticated tests
-vi.mock('../../src/middleware/auth', () => ({
+// Mock auth middleware before importing the router so the dynamic import sees it.
+mock.module('../../src/middleware/auth', () => ({
   requireAuth: async (c: any, next: any) => {
     const authHeader = c.req.header('Authorization');
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
