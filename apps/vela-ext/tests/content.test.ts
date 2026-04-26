@@ -14,13 +14,13 @@ function getRegisteredMessageListener() {
   return call[0] as (_message: unknown) => void;
 }
 
-describe('scanJapaneseSentences', () => {
-  beforeEach(() => {
-    document.body.innerHTML = '';
-    (globalThis as any).browser.runtime.onMessage.addListener.mockClear();
-    (globalThis as any).browser.runtime.sendMessage.mockReset();
-  });
+beforeEach(() => {
+  document.body.innerHTML = '';
+  (globalThis as any).browser.runtime.onMessage.addListener.mockClear();
+  (globalThis as any).browser.runtime.sendMessage.mockReset();
+});
 
+describe('scanJapaneseSentences', () => {
   it('collects Japanese text nodes matching the regex', () => {
     document.body.innerHTML = `
       <p>日本語を勉強しています。</p>
@@ -83,7 +83,9 @@ describe('scanJapaneseSentences', () => {
     expect(result).not.toContain('スタイルコメント');
     expect(result).not.toContain('JavaScriptを有効にしてください');
   });
+});
 
+describe('content script message listener', () => {
   it('ignores null and primitive runtime messages without throwing', () => {
     contentScript.main();
     const listener = getRegisteredMessageListener();

@@ -62,7 +62,7 @@ app.post('/from-word', zValidator('json', fromWordSchema), async (c) => {
       created_at: new Date().toISOString(),
     });
 
-    const vocabularyId = item.id as string;
+    const vocabularyId = item.id;
     let alreadyInSRS = false;
     const tomorrow = new Date();
     tomorrow.setDate(tomorrow.getDate() + 1);

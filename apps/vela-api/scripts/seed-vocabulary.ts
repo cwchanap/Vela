@@ -82,8 +82,13 @@ interface VocabularyItem {
   updated_at: string;
 }
 
+type SampleVocabularyItem = Omit<
+  VocabularyItem,
+  'id' | 'normalized_japanese_word' | 'created_at' | 'updated_at'
+>;
+
 // Sample vocabulary data with JLPT levels
-const sampleVocabulary: Omit<VocabularyItem, 'id' | 'created_at' | 'updated_at'>[] = [
+const sampleVocabulary: SampleVocabularyItem[] = [
   // N5 (Beginner) - Most basic vocabulary
   {
     japanese_word: '食べる',
