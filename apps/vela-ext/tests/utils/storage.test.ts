@@ -98,11 +98,11 @@ describe('storage utils', () => {
     await expect(getUserEmail()).resolves.toBeNull();
   });
 
-  it('clears the offline queue when clearing auth data', async () => {
+  it('does not clear the offline queue when clearing auth data', async () => {
     await saveAuthTokens(tokens, 'user@example.com');
     await clearAuthData();
 
-    expect(mockClearAllPending).toHaveBeenCalledOnce();
+    expect(mockClearAllPending).not.toHaveBeenCalled();
   });
 
   it('returns valid access token when available', async () => {

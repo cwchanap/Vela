@@ -70,7 +70,7 @@ export const normalizeJapaneseWord = (word: string): string => word.trim().norma
 
 /** Convert hiragana to katakana so readings from different sources (kuromoji vs Jisho)
  *  produce the same deterministic vocabulary key. */
-const toKatakana = (str: string): string =>
+export const toKatakana = (str: string): string =>
   str.replace(/[\u3041-\u3096]/g, (ch) => String.fromCharCode(ch.charCodeAt(0) + 0x60));
 
 const endpointSanitized = sanitize(process.env.DDB_ENDPOINT);

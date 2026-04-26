@@ -35,9 +35,15 @@
 
         <div class="my-dictionaries">
           <div class="section-header">
-            <h3>Your Dictionary Entries<span v-if="pendingCount > 0" class="pending-badge" :title="`${pendingCount} sentence(s) waiting to sync`">
-              {{ pendingCount }}
-            </span></h3>
+            <h3>
+              Your Dictionary Entries<span
+                v-if="pendingCount > 0"
+                class="pending-badge"
+                :title="`${pendingCount} sentence(s) waiting to sync`"
+              >
+                {{ pendingCount }}
+              </span>
+            </h3>
             <button @click="loadEntries" :disabled="loading" class="refresh-button">
               {{ loading ? 'Loading...' : 'Refresh' }}
             </button>
@@ -87,6 +93,7 @@
 import { ref, onMounted, onUnmounted, watch, computed } from 'vue';
 import { getMyDictionaries } from '../utils/api';
 import { getValidIdToken, refreshIdToken, getUserEmail, clearAuthData } from '../utils/storage';
+import { clearAllPending } from '../utils/idb';
 import { getPendingQueueCount } from '../utils/pendingQueue';
 
 const emit = defineEmits<{
@@ -192,6 +199,9 @@ function toggleTheme() {
 
 async function handleLogout() {
   await clearAuthData();
+  await clearAllPending().catch((err) =>
+    console.error('[Vela] Failed to clear pending queue:', err),
+  );
   emit('logout');
 }
 

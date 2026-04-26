@@ -12,14 +12,19 @@ const { mockGetPendingQueueCount } = vi.hoisted(() => ({
   mockGetPendingQueueCount: vi.fn(),
 }));
 
-const { mockGetValidIdToken, mockRefreshIdToken, mockGetUserEmail, mockClearAuthData } = vi.hoisted(
-  () => ({
-    mockGetValidIdToken: vi.fn(),
-    mockRefreshIdToken: vi.fn(),
-    mockGetUserEmail: vi.fn(),
-    mockClearAuthData: vi.fn(),
-  }),
-);
+const {
+  mockGetValidIdToken,
+  mockRefreshIdToken,
+  mockGetUserEmail,
+  mockClearAuthData,
+  mockClearAllPending,
+} = vi.hoisted(() => ({
+  mockGetValidIdToken: vi.fn(),
+  mockRefreshIdToken: vi.fn(),
+  mockGetUserEmail: vi.fn(),
+  mockClearAuthData: vi.fn(),
+  mockClearAllPending: vi.fn().mockResolvedValue(undefined),
+}));
 
 vi.mock('../../entrypoints/utils/api', () => ({
   getMyDictionaries: mockGetMyDictionaries,
@@ -34,6 +39,10 @@ vi.mock('../../entrypoints/utils/storage', () => ({
   refreshIdToken: mockRefreshIdToken,
   getUserEmail: mockGetUserEmail,
   clearAuthData: mockClearAuthData,
+}));
+
+vi.mock('../../entrypoints/utils/idb', () => ({
+  clearAllPending: mockClearAllPending,
 }));
 
 describe('DashboardPage', () => {
@@ -89,6 +98,7 @@ describe('DashboardPage', () => {
     mockRefreshIdToken.mockClear();
     mockGetUserEmail.mockClear();
     mockClearAuthData.mockClear();
+    mockClearAllPending.mockClear();
     mockGetPendingQueueCount.mockClear();
 
     // Set up browser API mocks
@@ -242,14 +252,16 @@ describe('DashboardPage', () => {
   });
 
   describe('Logout Functionality', () => {
-    it('should call clearAuthData when logout button is clicked', async () => {
+    it('should call clearAuthData and clearAllPending when logout button is clicked', async () => {
       wrapper = mount(DashboardPage);
       await flushPromises();
 
       const logoutButton = wrapper.find('[title="Logout"]');
       await logoutButton.trigger('click');
+      await flushPromises();
 
       expect(mockClearAuthData).toHaveBeenCalled();
+      expect(mockClearAllPending).toHaveBeenCalled();
     });
 
     it('should emit logout event when logout button is clicked', async () => {

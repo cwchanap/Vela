@@ -7,7 +7,7 @@ import { DynamoDBDocumentClient, PutCommand, BatchWriteCommand } from '@aws-sdk/
 import { readFileSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
-import { normalizeJapaneseWord } from '../src/dynamodb';
+import { normalizeJapaneseWord, toKatakana } from '../src/dynamodb';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -448,7 +448,7 @@ async function seedVocabulary() {
   // so that POST /vocabulary/from-word deduplicates against seeded data.
   const items: VocabularyItem[] = sampleVocabulary.map((v) => {
     const normalizedWord = normalizeJapaneseWord(v.japanese_word);
-    const normalizedReading = v.hiragana?.trim().normalize('NFKC') ?? '';
+    const normalizedReading = toKatakana(v.hiragana?.trim().normalize('NFKC') ?? '');
     const deterministicId = normalizedReading
       ? `${normalizedWord}:${normalizedReading}`
       : normalizedWord;
