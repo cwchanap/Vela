@@ -272,7 +272,7 @@ import {
   type MyDictionaryEntry,
   type SentenceAnalysis,
 } from 'src/services/myDictionariesService';
-import { tokenize, type Token } from '@vela/common';
+import { tokenize, type Token } from '@vela/common/tokenizer';
 import { computeDifficulty, isContentWord } from 'src/utils/japanese';
 import type { JishoResult } from 'src/services/vocabularyService';
 import {

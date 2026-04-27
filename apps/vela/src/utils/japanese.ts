@@ -1,4 +1,4 @@
-import type { Token } from '@vela/common';
+import type { Token } from '@vela/common/tokenizer';
 
 // Japanese language utilities
 

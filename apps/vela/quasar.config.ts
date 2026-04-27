@@ -76,12 +76,20 @@ export default defineConfig((/* ctx */) => {
         viteConf.resolve = viteConf.resolve || {};
 
         const commonPath = resolve(__dirname, '../../packages/common/src/index.ts');
+        const commonTokenizerPath = resolve(__dirname, '../../packages/common/src/tokenizer.ts');
 
         if (Array.isArray(viteConf.resolve.alias)) {
           viteConf.resolve.alias = [
             ...viteConf.resolve.alias.filter(
-              (a) => a.find !== '@vela/common' && a.find !== 'path',
+              (a) =>
+                a.find !== '@vela/common' &&
+                a.find !== '@vela/common/tokenizer' &&
+                a.find !== 'path',
             ),
+            {
+              find: '@vela/common/tokenizer',
+              replacement: commonTokenizerPath,
+            },
             {
               find: '@vela/common',
               replacement: commonPath,
@@ -97,6 +105,7 @@ export default defineConfig((/* ctx */) => {
         } else {
           viteConf.resolve.alias = {
             ...(viteConf.resolve.alias || {}),
+            '@vela/common/tokenizer': commonTokenizerPath,
             '@vela/common': commonPath,
             // kuromoji's DictionaryLoader uses require("path") internally.
             // Vite externalises Node builtins in browser builds, so we

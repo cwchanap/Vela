@@ -10,7 +10,7 @@ import {
   parseFurigana,
   computeDifficulty,
 } from './japanese';
-import type { Token } from '@vela/common';
+import type { Token } from '@vela/common/tokenizer';
 
 describe('isHiragana', () => {
   it('returns true for hiragana characters', () => {
@@ -340,10 +340,7 @@ describe('computeDifficulty', () => {
   });
 
   it('counts extension-a kanji the same way as isKanji', () => {
-    const tokens = [
-      makeToken('名詞', '㐂び'),
-      makeToken('動詞', 'みる'),
-    ];
+    const tokens = [makeToken('名詞', '㐂び'), makeToken('動詞', 'みる')];
 
     expect(computeDifficulty(tokens)).toBe('N4');
   });
