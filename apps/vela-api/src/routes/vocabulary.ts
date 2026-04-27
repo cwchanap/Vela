@@ -77,7 +77,14 @@ app.post('/from-word', zValidator('json', fromWordSchema), async (c) => {
       if (isConditionalCheckFailedError(error)) {
         alreadyInSRS = true;
       } else {
-        throw error;
+        // Best-effort: the vocabulary item is already persisted.
+        // Log the failure but do not surface a 500 — the client should
+        // see a successful response so it does not retry indefinitely.
+        console.error('[Vela] SRS progress init failed (best-effort)', {
+          requestId,
+          vocabularyId,
+          err: sanitizeError(error),
+        });
       }
     }
 
