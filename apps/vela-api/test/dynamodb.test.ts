@@ -185,16 +185,47 @@ describe('DynamoDB Operations', () => {
       expect(result.sentence_id).toBeDefined();
     });
 
-    test('should generate unique sentence IDs', async () => {
+    test('should generate time-sortable sentence IDs', async () => {
       mockSend.mockResolvedValue({});
+      const timestamp1 = 1_710_000_000_000;
+      const timestamp2 = timestamp1 + 1;
+      const dateNowSpy = vi.spyOn(Date, 'now');
+      dateNowSpy.mockReturnValueOnce(timestamp1).mockReturnValueOnce(timestamp2);
 
-      const result1 = await savedSentences.create(mockUserId, 'mock sentence');
-      const result2 = await savedSentences.create(mockUserId, 'mock sentence');
+      try {
+        const result1 = await myDictionaries.create(mockUserId, 'mock sentence');
+        const result2 = await myDictionaries.create(mockUserId, 'another sentence');
 
-      expect(mockPutCommand).toHaveBeenCalledTimes(2);
-      expect(result1.sentence_id).toBeDefined();
-      expect(result2.sentence_id).toBeDefined();
-      expect(result1.sentence_id).not.toBe(result2.sentence_id);
+        expect(mockPutCommand).toHaveBeenCalledTimes(2);
+        expect(result1.sentence_id).toBeDefined();
+        expect(result2.sentence_id).toBeDefined();
+        // Format: decimal timestamp + hyphen + 8-char random suffix.
+        expect(result1.sentence_id).toMatch(/^\d+-[0-9a-f]{8}$/);
+        expect(result2.sentence_id).toMatch(/^\d+-[0-9a-f]{8}$/);
+        expect(result1.sentence_id).not.toBe(result2.sentence_id);
+        expect(result1.sentence_id < result2.sentence_id).toBe(true);
+      } finally {
+        dateNowSpy.mockRestore();
+      }
+    });
+
+    test('should generate different sentence IDs across different milliseconds', async () => {
+      mockSend.mockResolvedValue({});
+      const timestamp1 = 1_710_000_000_100;
+      const timestamp2 = timestamp1 + 1;
+      const dateNowSpy = vi.spyOn(Date, 'now');
+      dateNowSpy.mockReturnValueOnce(timestamp1).mockReturnValueOnce(timestamp2);
+
+      try {
+        const result1 = await myDictionaries.create(mockUserId, 'sentence one');
+        const result2 = await myDictionaries.create(mockUserId, 'sentence two');
+
+        expect(result1.sentence_id).not.toBe(result2.sentence_id);
+        // Timestamp prefixes (before the hyphen) differ across milliseconds
+        expect(result1.sentence_id.split('-')[0]).not.toBe(result2.sentence_id.split('-')[0]);
+      } finally {
+        dateNowSpy.mockRestore();
+      }
     });
   });
 
@@ -481,6 +512,206 @@ describe('DynamoDB Operations', () => {
       const result = await vocabulary.getRandom(5, [5]);
 
       expect(result).toHaveLength(1);
+    });
+
+    test('findByWord should paginate until it finds a later-page match', async () => {
+      mockSend
+        .mockResolvedValueOnce({
+          Items: [],
+          LastEvaluatedKey: { id: 'page-1' },
+        })
+        .mockResolvedValueOnce({
+          Items: [{ id: 'v2', japanese_word: '食べる', normalized_japanese_word: '食べる' }],
+          LastEvaluatedKey: undefined,
+        });
+
+      const result = await vocabulary.findByWord('食べる');
+
+      expect(result).toEqual({
+        id: 'v2',
+        japanese_word: '食べる',
+        normalized_japanese_word: '食べる',
+      });
+      expect(mockSend).toHaveBeenCalledTimes(2);
+      expect(mockScanCommand).toHaveBeenNthCalledWith(
+        1,
+        expect.objectContaining({
+          TableName: 'vela-vocabulary',
+          FilterExpression: 'normalized_japanese_word = :word',
+          ExpressionAttributeValues: { ':word': '食べる' },
+        }),
+      );
+      expect(mockScanCommand).toHaveBeenNthCalledWith(
+        2,
+        expect.objectContaining({
+          TableName: 'vela-vocabulary',
+          FilterExpression: 'normalized_japanese_word = :word',
+          ExpressionAttributeValues: { ':word': '食べる' },
+          ExclusiveStartKey: { id: 'page-1' },
+        }),
+      );
+    });
+
+    test('create should preserve uppercase in word id (no toLowerCase)', async () => {
+      mockSend.mockResolvedValueOnce({});
+
+      const result = await vocabulary.create({
+        japanese_word: 'Tシャツ',
+        hiragana: 'ティーシャツ',
+        english_translation: 'T-shirt',
+        created_at: '2026-04-20T00:00:00.000Z',
+      });
+
+      expect(result.item.id).toBe('Tシャツ:ティーシャツ');
+      expect(result.item.normalized_japanese_word).toBe('Tシャツ');
+    });
+
+    test('create should throw when ConditionalCheckFailedException fires and getById returns undefined', async () => {
+      const err = Object.assign(new Error('Condition failed'), {
+        name: 'ConditionalCheckFailedException',
+      });
+      // First call: PutCommand throws; second call: GetCommand returns undefined (Item missing)
+      mockSend.mockRejectedValueOnce(err).mockResolvedValueOnce({ Item: undefined });
+
+      await expect(
+        vocabulary.create({
+          japanese_word: 'Tシャツ',
+          hiragana: 'ティーシャツ',
+          english_translation: 'T-shirt',
+          created_at: '2026-04-20T00:00:00.000Z',
+        }),
+      ).rejects.toThrow(
+        "Vocabulary item 'Tシャツ:ティーシャツ' failed conditional check but could not be retrieved",
+      );
+    });
+
+    test('create should throw when the retrieved existing item is missing a string id', async () => {
+      const err = Object.assign(new Error('Condition failed'), {
+        name: 'ConditionalCheckFailedException',
+      });
+      mockSend.mockRejectedValueOnce(err).mockResolvedValueOnce({
+        Item: {
+          japanese_word: '食べる',
+          normalized_japanese_word: '食べる',
+          english_translation: 'to eat',
+        },
+      });
+
+      await expect(
+        vocabulary.create({
+          japanese_word: '食べる',
+          hiragana: 'たべる',
+          english_translation: 'to eat',
+          created_at: '2026-04-20T00:00:00.000Z',
+        }),
+      ).rejects.toThrow(
+        "Vocabulary item '食べる:タベル' failed conditional check because the existing item is missing a string id",
+      );
+    });
+
+    test('create should use a normalized id (with reading) and reuse an existing item on conditional failure', async () => {
+      const err = Object.assign(new Error('Condition failed'), {
+        name: 'ConditionalCheckFailedException',
+      });
+      mockSend.mockRejectedValueOnce(err).mockResolvedValueOnce({
+        Item: {
+          id: '食べる:タベル',
+          japanese_word: '食べる',
+          normalized_japanese_word: '食べる',
+          english_translation: 'to eat',
+        },
+      });
+
+      const result = await vocabulary.create({
+        japanese_word: ' 食べる ',
+        hiragana: 'たべる',
+        english_translation: 'to eat',
+        created_at: '2026-04-19T00:00:00.000Z',
+      });
+
+      expect(mockPutCommand).toHaveBeenCalledWith(
+        expect.objectContaining({
+          TableName: 'vela-vocabulary',
+          ConditionExpression: 'attribute_not_exists(id)',
+          Item: expect.objectContaining({
+            id: '食べる:タベル',
+            normalized_japanese_word: '食べる',
+          }),
+        }),
+      );
+      expect(mockGetCommand).toHaveBeenCalledWith(
+        expect.objectContaining({
+          TableName: 'vela-vocabulary',
+          Key: { id: '食べる:タベル' },
+        }),
+      );
+      expect(result).toEqual({
+        item: expect.objectContaining({
+          id: '食べる:タベル',
+          normalized_japanese_word: '食べる',
+        }),
+        created: false,
+      });
+    });
+
+    test('create should disambiguate homographs by reading', async () => {
+      mockSend.mockResolvedValueOnce({});
+
+      const result = await vocabulary.create({
+        japanese_word: '今日',
+        hiragana: 'きょう',
+        english_translation: 'today',
+        created_at: '2026-04-20T00:00:00.000Z',
+      });
+
+      expect(result.item.id).toBe('今日:キョウ');
+
+      mockSend.mockResolvedValueOnce({});
+      const result2 = await vocabulary.create({
+        japanese_word: '今日',
+        hiragana: 'こんにち',
+        english_translation: 'hello (formal)',
+        created_at: '2026-04-20T00:00:00.000Z',
+      });
+
+      expect(result2.item.id).toBe('今日:コンニチ');
+      expect(result.item.id).not.toBe(result2.item.id);
+    });
+
+    test('create should omit reading from id when hiragana is empty', async () => {
+      mockSend.mockResolvedValueOnce({});
+
+      const result = await vocabulary.create({
+        japanese_word: '猫',
+        english_translation: 'cat',
+        created_at: '2026-04-20T00:00:00.000Z',
+      });
+
+      expect(result.item.id).toBe('猫');
+    });
+
+    test('create should produce the same id regardless of hiragana vs katakana reading', async () => {
+      mockSend.mockResolvedValueOnce({});
+
+      const result = await vocabulary.create({
+        japanese_word: '食べる',
+        hiragana: 'たべる', // hiragana input
+        english_translation: 'to eat',
+        created_at: '2026-04-20T00:00:00.000Z',
+      });
+
+      expect(result.item.id).toBe('食べる:タベル');
+
+      mockSend.mockResolvedValueOnce({});
+      const result2 = await vocabulary.create({
+        japanese_word: '食べる',
+        hiragana: 'タベル', // katakana input
+        english_translation: 'to eat',
+        created_at: '2026-04-20T00:00:00.000Z',
+      });
+
+      expect(result2.item.id).toBe('食べる:タベル');
+      expect(result.item.id).toBe(result2.item.id);
     });
   });
 
@@ -846,6 +1077,40 @@ describe('DynamoDB Operations', () => {
       expect(result.repetitions).toBe(0);
       expect(result.total_reviews).toBe(0);
       expect(result.correct_count).toBe(0);
+    });
+
+    test('should initialize progress conditionally for new vocabulary', async () => {
+      mockSend.mockResolvedValueOnce({});
+
+      const result = await userVocabularyProgress.initializeProgressIfNotExists(
+        mockUserId,
+        'vocab-new',
+        '2024-01-08T00:00:00Z',
+      );
+
+      expect(result.user_id).toBe(mockUserId);
+      expect(result.vocabulary_id).toBe('vocab-new');
+      expect(mockPutCommand).toHaveBeenCalledWith(
+        expect.objectContaining({
+          TableName: 'vela-user-vocabulary-progress',
+          ConditionExpression: 'attribute_not_exists(user_id)',
+        }),
+      );
+    });
+
+    test('initializeProgressIfNotExists should rethrow ConditionalCheckFailedException', async () => {
+      const err = Object.assign(new Error('Condition failed'), {
+        name: 'ConditionalCheckFailedException',
+      });
+      mockSend.mockRejectedValueOnce(err);
+
+      await expect(
+        userVocabularyProgress.initializeProgressIfNotExists(
+          mockUserId,
+          'vocab-existing',
+          '2024-01-08T00:00:00Z',
+        ),
+      ).rejects.toMatchObject({ name: 'ConditionalCheckFailedException' });
     });
 
     test('should delete a progress record', async () => {

@@ -1,10 +1,12 @@
 import { boot } from 'quasar/wrappers';
+import { configureDicPath } from '@vela/common/tokenizer';
 import { useThemeStore } from 'src/stores/theme';
 import { useAuthStore } from 'src/stores/auth';
 
 export default boot(async ({ store }) => {
-  // Boot file for additional app initialization
-  // Pinia is now initialized via stores/index.ts
+  // Set kuromoji dictionary path (served from public/kuromoji-dict/)
+  configureDicPath('/kuromoji-dict');
+
   console.log('✅ App boot initialized');
 
   // Initialize theme

@@ -1,3 +1,4 @@
+import { randomUUID } from 'crypto';
 import { DynamoDBClient, type DynamoDBClientConfig } from '@aws-sdk/client-dynamodb';
 import {
   DynamoDBDocumentClient,
@@ -48,6 +49,15 @@ export interface DailyProgress {
   accuracy_percentage: number;
 }
 
+export type VocabularyCreateItem = Record<string, unknown> & {
+  id: string;
+};
+
+export interface VocabularyCreateResult {
+  item: VocabularyCreateItem;
+  created: boolean;
+}
+
 // Create DynamoDB client
 const sanitize = (v?: string) => {
   if (!v) return undefined;
@@ -55,6 +65,13 @@ const sanitize = (v?: string) => {
   if (!s || s === 'undefined' || s === 'null') return undefined;
   return s;
 };
+
+export const normalizeJapaneseWord = (word: string): string => word.trim().normalize('NFKC');
+
+/** Convert hiragana to katakana so readings from different sources (kuromoji vs Jisho)
+ *  produce the same deterministic vocabulary key. */
+export const toKatakana = (str: string): string =>
+  str.replace(/[\u3041-\u3096]/g, (ch) => String.fromCharCode(ch.charCodeAt(0) + 0x60));
 
 const endpointSanitized = sanitize(process.env.DDB_ENDPOINT);
 const isLocalDdb =
@@ -118,6 +135,19 @@ function handleDynamoError(error: any): never {
     throw new Error('Item not found or condition not met');
   }
   throw new Error(`DynamoDB operation failed: ${error.message}`);
+}
+
+function isConditionalCheckFailedError(error: unknown): error is { name: string } {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    'name' in error &&
+    error.name === 'ConditionalCheckFailedException'
+  );
+}
+
+function hasVocabularyItemId(item: unknown): item is VocabularyCreateItem {
+  return typeof item === 'object' && item !== null && 'id' in item && typeof item.id === 'string';
 }
 
 // Fisher-Yates shuffle algorithm for uniform random shuffling
@@ -417,6 +447,97 @@ export const vocabulary = {
     }
     return [];
   },
+
+  /**
+   * Find a vocabulary item by its Japanese word (full scan with filter).
+   * Returns the first matching item, or undefined if not found.
+   */
+  async findByWord(japaneseWord: string): Promise<Record<string, unknown> | undefined> {
+    try {
+      const normalizedWord = normalizeJapaneseWord(japaneseWord);
+      let lastEvaluatedKey: Record<string, unknown> | undefined;
+
+      do {
+        const command = new ScanCommand({
+          TableName: TABLE_NAMES.VOCABULARY,
+          FilterExpression: 'normalized_japanese_word = :word',
+          ExpressionAttributeValues: { ':word': normalizedWord },
+          ...(lastEvaluatedKey ? { ExclusiveStartKey: lastEvaluatedKey } : {}),
+        });
+        const response = await docClient.send(command);
+        const match = response.Items?.find((item) => {
+          const word = item?.japanese_word;
+          return typeof word === 'string' && normalizeJapaneseWord(word) === normalizedWord;
+        });
+
+        if (match) {
+          return match as Record<string, unknown>;
+        }
+
+        lastEvaluatedKey = response.LastEvaluatedKey as Record<string, unknown> | undefined;
+      } while (lastEvaluatedKey);
+    } catch (error) {
+      handleDynamoError(error);
+    }
+  },
+
+  /**
+   * Create a new vocabulary entry.
+   */
+  async create(item: {
+    id?: string;
+    japanese_word: string;
+    hiragana?: string;
+    english_translation: string;
+    example_sentence_jp?: string;
+    source_url?: string;
+    jlpt_level?: number;
+    created_at: string;
+    normalized_japanese_word?: string;
+  }): Promise<VocabularyCreateResult> {
+    const normalizedJapaneseWord =
+      item.normalized_japanese_word ?? normalizeJapaneseWord(item.japanese_word);
+    // Include hiragana in the key to disambiguate homographs
+    // (e.g. 今日 きょう vs こんにち).
+    // Convert to katakana so kuromoji (カタカナ) and Jisho (ひらがな) readings
+    // produce the same key.
+    const normalizedReading = toKatakana(item.hiragana?.trim().normalize('NFKC') ?? '');
+    const defaultId = normalizedReading
+      ? `${normalizedJapaneseWord}:${normalizedReading}`
+      : normalizedJapaneseWord;
+    const vocabularyItem: VocabularyCreateItem = {
+      ...item,
+      id: item.id ?? defaultId,
+      japanese_word: item.japanese_word.trim(),
+      normalized_japanese_word: normalizedJapaneseWord,
+    };
+
+    try {
+      const command = new PutCommand({
+        TableName: TABLE_NAMES.VOCABULARY,
+        Item: vocabularyItem,
+        ConditionExpression: 'attribute_not_exists(id)',
+      });
+      await docClient.send(command);
+      return { item: vocabularyItem, created: true };
+    } catch (error) {
+      if (isConditionalCheckFailedError(error)) {
+        const existing = await this.getById(vocabularyItem.id);
+        if (existing) {
+          if (!hasVocabularyItemId(existing)) {
+            throw new Error(
+              `Vocabulary item '${vocabularyItem.id}' failed conditional check because the existing item is missing a string id`,
+            );
+          }
+          return { item: existing, created: false };
+        }
+        throw new Error(
+          `Vocabulary item '${vocabularyItem.id}' failed conditional check but could not be retrieved`,
+        );
+      }
+      handleDynamoError(error);
+    }
+  },
 };
 
 // Sentences operations
@@ -595,8 +716,13 @@ export const dailyProgress = {
 export const myDictionaries = {
   async create(userId: string, sentence: string, sourceUrl?: string, context?: string) {
     try {
-      const sentenceId = `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+      // Sort key: millisecond timestamp with random suffix for same-ms collision
+      // resistance. The decimal timestamp prefix keeps the key lexicographically
+      // compatible with existing entries stored by the previous format so
+      // ScanIndexForward:false continues to return newest-first.
       const timestamp = Date.now();
+      const suffix = randomUUID().slice(0, 8);
+      const sentenceId = `${timestamp}-${suffix}`;
 
       const command = new PutCommand({
         TableName: TABLE_NAMES.MY_DICTIONARIES,
@@ -609,6 +735,7 @@ export const myDictionaries = {
           created_at: timestamp,
           updated_at: timestamp,
         },
+        ConditionExpression: 'attribute_not_exists(user_id)',
       });
       await docClient.send(command);
       return {
@@ -918,6 +1045,44 @@ export const userVocabularyProgress = {
       correct_count: 0,
     };
     return this.put(progress);
+  },
+
+  /**
+   * Initialize progress for a new vocabulary item only if it does not already exist
+   */
+  async initializeProgressIfNotExists(
+    userId: string,
+    vocabularyId: string,
+    nextReviewDate: string,
+  ): Promise<UserVocabularyProgress> {
+    const progress: UserVocabularyProgress = {
+      user_id: userId,
+      vocabulary_id: vocabularyId,
+      next_review_date: nextReviewDate,
+      ease_factor: 2.5, // SM-2 default
+      interval: 0,
+      repetitions: 0,
+      first_learned_at: new Date().toISOString(),
+      total_reviews: 0,
+      correct_count: 0,
+    };
+
+    try {
+      const command = new PutCommand({
+        TableName: TABLE_NAMES.USER_VOCABULARY_PROGRESS,
+        Item: progress,
+        ConditionExpression: 'attribute_not_exists(user_id)',
+      });
+      await docClient.send(command);
+      return progress;
+    } catch (error) {
+      if (isConditionalCheckFailedError(error)) {
+        throw error;
+      }
+      handleDynamoError(error);
+    }
+
+    return progress;
   },
 
   /**

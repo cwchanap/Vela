@@ -57,7 +57,31 @@
       <q-card v-for="item in entries" :key="item.sentence_id" flat bordered class="entry-card">
         <q-card-section>
           <div class="row items-start q-mb-sm">
-            <div class="col entry-text">{{ item.sentence }}</div>
+            <div class="col entry-text">
+              <template v-if="tokenMap.has(item.sentence_id)">
+                <template v-for="(token, index) in tokenMap.get(item.sentence_id)" :key="index">
+                  <button
+                    v-if="isContentWord(token)"
+                    type="button"
+                    class="clickable-token"
+                    :aria-label="`Look up ${token.surface_form}`"
+                    :title="`Look up ${token.surface_form}`"
+                    @click="handleTokenClick($event, token, item.sentence_id)"
+                  >
+                    {{ token.surface_form }}
+                  </button>
+                  <span v-else>{{ token.surface_form }}</span>
+                </template>
+              </template>
+              <span v-else>{{ item.sentence }}</span>
+            </div>
+            <q-badge
+              v-if="difficultyMap.has(item.sentence_id)"
+              :color="difficultyColor(difficultyMap.get(item.sentence_id)!)"
+              class="q-ml-sm"
+              :label="difficultyMap.get(item.sentence_id)"
+              data-testid="difficulty-badge"
+            />
             <q-btn
               flat
               round
@@ -113,6 +137,63 @@
         </q-card-actions>
       </q-card>
     </div>
+
+    <!-- Definition popover (single shared instance) -->
+    <q-menu
+      v-model="popoverOpen"
+      :target="popoverTarget ?? undefined"
+      anchor="bottom left"
+      self="top left"
+      :offset="[0, 4]"
+    >
+      <q-card style="min-width: 240px; max-width: 320px" class="q-pa-sm">
+        <q-card-section v-if="popoverLookup === 'loading'" class="text-center q-py-md">
+          <q-spinner color="primary" size="1.5em" />
+        </q-card-section>
+
+        <q-card-section v-else-if="popoverLookup === 'notfound'">
+          <div class="text-grey-7 text-sm">No definition found</div>
+        </q-card-section>
+
+        <q-card-section v-else>
+          <div class="row items-baseline q-mb-xs">
+            <span class="text-h6 q-mr-sm">{{ (popoverLookup as JishoResult).word }}</span>
+            <span class="text-grey-7 text-caption">{{
+              (popoverLookup as JishoResult).reading
+            }}</span>
+          </div>
+          <q-badge
+            v-if="(popoverLookup as JishoResult).jlpt"
+            color="primary"
+            class="q-mb-sm"
+            :label="(popoverLookup as JishoResult).jlpt!.toUpperCase()"
+          />
+          <ol class="q-mt-xs q-pl-md q-mb-sm">
+            <li
+              v-for="meaning in (popoverLookup as JishoResult).meanings.slice(0, 3)"
+              :key="meaning"
+              class="text-sm"
+            >
+              {{ meaning }}
+            </li>
+          </ol>
+          <q-btn
+            dense
+            flat
+            color="primary"
+            icon="add"
+            :label="flashcardBtnLabel"
+            :loading="flashcardState === 'loading'"
+            :disable="
+              flashcardState === 'added' || flashcardState === 'exists' || noMeaningAvailable
+            "
+            size="sm"
+            @click="handleAddFlashcard"
+            data-testid="btn-add-flashcard"
+          />
+        </q-card-section>
+      </q-card>
+    </q-menu>
 
     <!-- AI Analysis Dialog -->
     <q-dialog v-model="aiDialog" position="standard">
@@ -180,6 +261,7 @@
 import { ref, onMounted, computed } from 'vue';
 import { useQuasar } from 'quasar';
 import { storeToRefs } from 'pinia';
+import { useQueryClient } from '@tanstack/vue-query';
 import { fetchAuthSession } from 'aws-amplify/auth';
 import { config } from 'src/config';
 import { marked } from 'marked';
@@ -190,11 +272,20 @@ import {
   type MyDictionaryEntry,
   type SentenceAnalysis,
 } from 'src/services/myDictionariesService';
+import { tokenize, type Token } from '@vela/common/tokenizer';
+import { computeDifficulty, isContentWord } from 'src/utils/japanese';
+import type { JishoResult } from 'src/services/vocabularyService';
+import {
+  dictionaryLookupQueryOptions,
+  useAddFlashcardMutation,
+} from 'src/composables/queries/useVocabularyQueries';
 import { useLLMSettingsStore } from 'src/stores/llmSettings';
 import { useAuthStore } from 'src/stores/auth';
 import { generatePronunciation, playAudio } from 'src/services/ttsService';
 
 const $q = useQuasar();
+const queryClient = useQueryClient();
+const addFlashcardMutation = useAddFlashcardMutation();
 const llmSettings = useLLMSettingsStore();
 const authStore = useAuthStore();
 const { provider, currentModel, currentApiKey } = storeToRefs(llmSettings);
@@ -214,6 +305,42 @@ const analyzingSentence = ref<MyDictionaryEntry | null>(null);
 const analysisResult = ref<SentenceAnalysis | null>(null);
 const analysisError = ref('');
 const streamingText = ref('');
+
+// Tokenization — sentence_id → Token[]
+const tokenMap = ref(new Map<string, Token[]>());
+const difficultyMap = ref(new Map<string, string>());
+
+// Definition popover (single shared instance)
+const popoverOpen = ref(false);
+const popoverTarget = ref<HTMLElement | null>(null);
+const activeToken = ref<{ token: Token; sentenceId: string } | null>(null);
+const popoverLookup = ref<JishoResult | 'loading' | 'notfound'>('notfound');
+const flashcardState = ref<'idle' | 'loading' | 'added' | 'exists' | 'error'>('idle');
+const noMeaningAvailable = computed(
+  () =>
+    popoverLookup.value !== 'loading' &&
+    popoverLookup.value !== 'notfound' &&
+    popoverLookup.value.meanings.length === 0,
+);
+
+interface ActiveTokenIdentity {
+  sentenceId: string;
+  token: Token;
+}
+
+function getActiveTokenIdentity(token: Token, sentenceId: string): ActiveTokenIdentity {
+  return {
+    sentenceId,
+    token,
+  };
+}
+
+function isActiveTokenIdentity(identity: ActiveTokenIdentity): boolean {
+  return (
+    activeToken.value?.sentenceId === identity.sentenceId &&
+    activeToken.value.token === identity.token
+  );
+}
 
 // Configure marked options
 marked.setOptions({
@@ -262,9 +389,34 @@ const renderedMarkdown = computed(() => {
   });
 });
 
+const flashcardBtnLabel = computed(() => {
+  switch (flashcardState.value) {
+    case 'added':
+      return 'Added!';
+    case 'exists':
+      return 'Already in your deck';
+    case 'loading':
+      return '';
+    default:
+      return 'Add to flashcards';
+  }
+});
+
 onMounted(() => {
   loadEntries();
 });
+
+function difficultyColor(level: string): string {
+  const map: Record<string, string> = {
+    N5: 'green',
+    N4: 'teal',
+    N3: 'blue',
+    N2: 'orange',
+    N1: 'red',
+    '—': 'grey',
+  };
+  return map[level] ?? 'grey';
+}
 
 async function loadEntries() {
   loading.value = true;
@@ -272,10 +424,100 @@ async function loadEntries() {
 
   try {
     entries.value = await getMyDictionaries();
+
+    // Tokenize all sentences in parallel; failures are non-fatal
+    const newMap = new Map<string, Token[]>();
+    const newDifficultyMap = new Map<string, string>();
+    await Promise.all(
+      entries.value.map(async (item) => {
+        try {
+          const tokens = await tokenize(item.sentence);
+          newMap.set(item.sentence_id, tokens);
+          newDifficultyMap.set(item.sentence_id, computeDifficulty(tokens));
+        } catch {
+          // Tokenization failure is non-fatal — entry renders as plain text
+        }
+      }),
+    );
+    tokenMap.value = newMap;
+    difficultyMap.value = newDifficultyMap;
   } catch (err) {
     error.value = err instanceof Error ? err.message : 'Failed to load dictionary entries';
   } finally {
     loading.value = false;
+  }
+}
+
+async function handleTokenClick(event: MouseEvent, token: Token, sentenceId: string) {
+  popoverTarget.value = event.currentTarget as HTMLElement;
+  activeToken.value = { token, sentenceId };
+  popoverLookup.value = 'loading';
+  flashcardState.value = 'idle';
+  popoverOpen.value = true;
+
+  const current = getActiveTokenIdentity(token, sentenceId);
+  try {
+    const result = await queryClient.fetchQuery(
+      dictionaryLookupQueryOptions(token.dictionary_form),
+    );
+    if (!isActiveTokenIdentity(current)) return;
+    popoverLookup.value = result ?? 'notfound';
+  } catch (err) {
+    console.error('[Vela] Dictionary lookup failed:', err);
+    if (!isActiveTokenIdentity(current)) return;
+    popoverLookup.value = 'notfound';
+  }
+}
+
+async function handleAddFlashcard() {
+  if (!activeToken.value || popoverLookup.value === 'loading' || popoverLookup.value === 'notfound')
+    return;
+
+  const lookup = popoverLookup.value as JishoResult;
+  const entry = entries.value.find((e) => e.sentence_id === activeToken.value!.sentenceId);
+  const current = getActiveTokenIdentity(activeToken.value.token, activeToken.value.sentenceId);
+
+  flashcardState.value = 'loading';
+  try {
+    const result = await addFlashcardMutation.mutateAsync({
+      japanese_word: activeToken.value.token.dictionary_form,
+      // Prefer the kuromoji token reading (contextual) over Jisho's first result.
+      // Kuromoji disambiguates homographs correctly (e.g. 今日→こんにち vs きょう).
+      // When kuromoji doesn't know a word it falls back to surface_form as reading;
+      // in that case prefer Jisho's reading instead.
+      reading:
+        activeToken.value.token.reading &&
+        activeToken.value.token.reading !== activeToken.value.token.surface_form
+          ? activeToken.value.token.reading
+          : lookup.reading,
+      english_translation: lookup.meanings[0] ?? '',
+      ...(entry?.sentence ? { example_sentence_jp: entry.sentence } : {}),
+      ...(entry?.source_url ? { source_url: entry.source_url } : {}),
+      ...(lookup.jlpt
+        ? (() => {
+            const normalizedJlpt = String(lookup.jlpt)
+              .toLowerCase()
+              .replace(/[^a-z0-9]/g, '');
+            const levelMatch = normalizedJlpt.match(/([1-5])/);
+            const levelText = levelMatch?.[1];
+            const level = levelText ? Number.parseInt(levelText, 10) : Number.NaN;
+            return level >= 1 && level <= 5 ? { jlpt_level: level as 1 | 2 | 3 | 4 | 5 } : {};
+          })()
+        : {}),
+    });
+
+    if (!isActiveTokenIdentity(current)) {
+      return;
+    }
+
+    flashcardState.value = result.alreadyInSRS ? 'exists' : 'added';
+  } catch {
+    if (!isActiveTokenIdentity(current)) {
+      return;
+    }
+
+    flashcardState.value = 'error';
+    $q.notify({ type: 'negative', message: 'Failed to add flashcard', position: 'top' });
   }
 }
 
@@ -471,6 +713,28 @@ async function handlePronounce(entry: MyDictionaryEntry) {
 </script>
 
 <style scoped>
+.clickable-token {
+  background: transparent;
+  border: none;
+  padding: 0;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  border-bottom: 1px dotted var(--q-primary, #1976d2);
+  transition: background-color 0.15s;
+}
+
+.clickable-token:hover {
+  background-color: rgba(25, 118, 210, 0.1);
+  border-radius: 2px;
+}
+
+.clickable-token:focus-visible {
+  outline: 2px solid var(--q-primary, #1976d2);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
 .entries-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
@@ -536,10 +800,6 @@ async function handlePronounce(entry: MyDictionaryEntry) {
 
 .provider-info {
   color: #757575;
-}
-
-.entry-text {
-  color: #1a1a1a;
 }
 
 /* Dark mode support */

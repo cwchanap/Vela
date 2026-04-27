@@ -4,10 +4,10 @@
  */
 import { DynamoDBClient, type DynamoDBClientConfig } from '@aws-sdk/client-dynamodb';
 import { DynamoDBDocumentClient, PutCommand, BatchWriteCommand } from '@aws-sdk/lib-dynamodb';
-import { randomUUID } from 'crypto';
 import { readFileSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
+import { normalizeJapaneseWord, toKatakana } from '../src/dynamodb';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -72,6 +72,7 @@ const VOCABULARY_TABLE = process.env.VOCABULARY_TABLE_NAME || 'vela-vocabulary';
 interface VocabularyItem {
   id: string;
   japanese_word: string;
+  normalized_japanese_word: string;
   hiragana: string;
   romaji: string;
   english_translation: string;
@@ -81,8 +82,13 @@ interface VocabularyItem {
   updated_at: string;
 }
 
+type SampleVocabularyItem = Omit<
+  VocabularyItem,
+  'id' | 'normalized_japanese_word' | 'created_at' | 'updated_at'
+>;
+
 // Sample vocabulary data with JLPT levels
-const sampleVocabulary: Omit<VocabularyItem, 'id' | 'created_at' | 'updated_at'>[] = [
+const sampleVocabulary: SampleVocabularyItem[] = [
   // N5 (Beginner) - Most basic vocabulary
   {
     japanese_word: '食べる',
@@ -438,12 +444,22 @@ async function seedVocabulary() {
   const now = new Date().toISOString();
 
   // Add items in batches of 25 (DynamoDB limit)
-  const items: VocabularyItem[] = sampleVocabulary.map((v) => ({
-    ...v,
-    id: randomUUID(),
-    created_at: now,
-    updated_at: now,
-  }));
+  // Use the same deterministic ID scheme as vocabulary.create() in dynamodb.ts
+  // so that POST /vocabulary/from-word deduplicates against seeded data.
+  const items: VocabularyItem[] = sampleVocabulary.map((v) => {
+    const normalizedWord = normalizeJapaneseWord(v.japanese_word);
+    const normalizedReading = toKatakana(v.hiragana?.trim().normalize('NFKC') ?? '');
+    const deterministicId = normalizedReading
+      ? `${normalizedWord}:${normalizedReading}`
+      : normalizedWord;
+    return {
+      ...v,
+      id: deterministicId,
+      normalized_japanese_word: normalizedWord,
+      created_at: now,
+      updated_at: now,
+    };
+  });
 
   // Split into batches of 25
   const batches: VocabularyItem[][] = [];

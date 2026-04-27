@@ -35,7 +35,15 @@
 
         <div class="my-dictionaries">
           <div class="section-header">
-            <h3>Your Dictionary Entries</h3>
+            <h3>
+              Your Dictionary Entries<span
+                v-if="pendingCount > 0"
+                class="pending-badge"
+                :title="`${pendingCount} sentence(s) waiting to sync`"
+              >
+                {{ pendingCount }}
+              </span>
+            </h3>
             <button @click="loadEntries" :disabled="loading" class="refresh-button">
               {{ loading ? 'Loading...' : 'Refresh' }}
             </button>
@@ -82,9 +90,11 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, watch, computed } from 'vue';
+import { ref, onMounted, onUnmounted, watch, computed } from 'vue';
 import { getMyDictionaries } from '../utils/api';
 import { getValidIdToken, refreshIdToken, getUserEmail, clearAuthData } from '../utils/storage';
+import { clearAllPending } from '../utils/idb';
+import { getPendingQueueCount } from '../utils/pendingQueue';
 
 const emit = defineEmits<{
   logout: [];
@@ -96,6 +106,25 @@ const loading = ref(false);
 const error = ref('');
 const isDarkMode = ref(false);
 const instructionsExpanded = ref(false);
+const pendingCount = ref(0);
+
+function isPendingQueueMessage(message: unknown): message is { type: 'PENDING_QUEUE_UPDATED' } {
+  return (
+    typeof message === 'object' &&
+    message !== null &&
+    'type' in message &&
+    message.type === 'PENDING_QUEUE_UPDATED'
+  );
+}
+
+async function refreshPendingCount() {
+  pendingCount.value = await getPendingQueueCount();
+}
+
+function handleRuntimeMessage(message: unknown) {
+  if (!isPendingQueueMessage(message)) return;
+  void refreshPendingCount();
+}
 
 onMounted(async () => {
   const email = await getUserEmail();
@@ -107,7 +136,12 @@ onMounted(async () => {
   const savedTheme = await browser.storage.local.get('theme_preference');
   isDarkMode.value = savedTheme.theme_preference === 'dark';
 
+  browser.runtime.onMessage.addListener(handleRuntimeMessage);
   await loadEntries();
+});
+
+onUnmounted(() => {
+  browser.runtime.onMessage.removeListener(handleRuntimeMessage);
 });
 
 // Watch for theme changes and persist to storage
@@ -154,6 +188,7 @@ async function loadEntries() {
       }, 2000);
     }
   } finally {
+    await refreshPendingCount();
     loading.value = false;
   }
 }
@@ -164,6 +199,9 @@ function toggleTheme() {
 
 async function handleLogout() {
   await clearAuthData();
+  await clearAllPending().catch((err) =>
+    console.error('[Vela] Failed to clear pending queue:', err),
+  );
   emit('logout');
 }
 
@@ -492,5 +530,21 @@ const recentEntries = computed(() => {
 
 .view-all-button:hover {
   background-color: var(--accent-hover);
+}
+
+.pending-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background-color: #e55;
+  color: #fff;
+  border-radius: 10px;
+  padding: 0 7px;
+  font-size: 11px;
+  font-weight: 600;
+  min-width: 18px;
+  height: 18px;
+  margin-left: 6px;
+  vertical-align: middle;
 }
 </style>

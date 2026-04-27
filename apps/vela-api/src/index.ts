@@ -8,6 +8,8 @@ import { profiles as createProfilesRoute } from './routes/profiles';
 import auth from './routes/auth';
 import myDictionaries from './routes/my-dictionaries';
 import srsRouter from './routes/srs';
+import dictionaryRouter from './routes/dictionary';
+import vocabularyRouter from './routes/vocabulary';
 import createTTSRoute from './routes/tts';
 import { dsqlHealth } from './routes/dsql-health';
 import type { Env } from './types';
@@ -165,5 +167,11 @@ app.route('/api/my-dictionaries', myDictionaries);
 
 // Mount the SRS (Spaced Repetition System) routes
 app.route('/api/srs', srsRouter);
+
+// Mount the dictionary (Jisho proxy) routes
+app.route('/api/dictionary', dictionaryRouter);
+
+// Mount the vocabulary routes (flashcard creation)
+app.route('/api/vocabulary', vocabularyRouter);
 
 export const handler = handle(app);

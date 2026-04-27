@@ -1,0 +1,127 @@
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import {
+  saveAuthTokens,
+  getAuthTokens,
+  getUserEmail,
+  clearAuthData,
+  getValidAccessToken,
+  refreshAccessToken,
+} from '../../entrypoints/utils/storage';
+import type { AuthTokens } from '../../entrypoints/utils/api';
+
+const { mockRefreshToken, mockClearAllPending } = vi.hoisted(() => {
+  const mockRefreshToken = vi.fn(
+    async (token: string): Promise<AuthTokens> => ({
+      accessToken: `${token}-access`,
+      refreshToken: `${token}-refresh`,
+      idToken: `${token}-id`,
+    }),
+  );
+  const mockClearAllPending = vi.fn().mockResolvedValue(undefined);
+
+  return { mockRefreshToken, mockClearAllPending };
+});
+
+defineBrowserMocks();
+
+vi.mock('../../entrypoints/utils/api', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../entrypoints/utils/api')>();
+  return {
+    ...actual,
+    refreshToken: mockRefreshToken,
+  };
+});
+
+vi.mock('../../entrypoints/utils/idb', () => ({
+  clearAllPending: mockClearAllPending,
+  openDB: vi.fn(),
+  STORE_NAME: 'vela-pending-sentences',
+  DB_NAME: 'vela-offline-queue',
+  DB_VERSION: 1,
+}));
+
+function defineBrowserMocks() {
+  const storageState: Record<string, any> = {};
+
+  beforeEach(() => {
+    Object.keys(storageState).forEach((key) => delete storageState[key]);
+    mockRefreshToken.mockClear();
+    mockClearAllPending.mockClear();
+
+    (globalThis as any).browser = {
+      storage: {
+        local: {
+          set: vi.fn(async (data: Record<string, unknown>) => {
+            Object.assign(storageState, data);
+          }),
+          get: vi.fn(async (key: string | string[]) => {
+            if (Array.isArray(key)) {
+              return key.reduce<Record<string, unknown>>((acc, current) => {
+                acc[current] = storageState[current];
+                return acc;
+              }, {});
+            }
+
+            return { [key]: storageState[key] };
+          }),
+          remove: vi.fn(async (keys: string | string[]) => {
+            const list = Array.isArray(keys) ? keys : [keys];
+            list.forEach((current) => {
+              delete storageState[current];
+            });
+          }),
+        },
+      },
+    };
+  });
+}
+
+describe('storage utils', () => {
+  const tokens: AuthTokens = {
+    accessToken: 'access-token',
+    refreshToken: 'refresh-token',
+    idToken: 'id-token',
+  };
+
+  it('saves and retrieves auth tokens with optional email', async () => {
+    await saveAuthTokens(tokens, 'user@example.com');
+
+    await expect(getAuthTokens()).resolves.toStrictEqual(tokens);
+    await expect(getUserEmail()).resolves.toBe('user@example.com');
+  });
+
+  it('clears stored auth data', async () => {
+    await saveAuthTokens(tokens, 'user@example.com');
+    await clearAuthData();
+
+    await expect(getAuthTokens()).resolves.toBeNull();
+    await expect(getUserEmail()).resolves.toBeNull();
+  });
+
+  it('does not clear the offline queue when clearing auth data', async () => {
+    await saveAuthTokens(tokens, 'user@example.com');
+    await clearAuthData();
+
+    expect(mockClearAllPending).not.toHaveBeenCalled();
+  });
+
+  it('returns valid access token when available', async () => {
+    await saveAuthTokens(tokens);
+
+    await expect(getValidAccessToken()).resolves.toBe(tokens.accessToken);
+  });
+
+  it('refreshes access token and persists new credentials', async () => {
+    await saveAuthTokens(tokens);
+
+    const newAccessToken = await refreshAccessToken();
+
+    expect(newAccessToken).toBe('refresh-token-access');
+    await expect(getAuthTokens()).resolves.toStrictEqual({
+      accessToken: 'refresh-token-access',
+      refreshToken: 'refresh-token-refresh',
+      idToken: 'refresh-token-id',
+    });
+    expect(mockRefreshToken).toHaveBeenCalledWith('refresh-token');
+  });
+});
