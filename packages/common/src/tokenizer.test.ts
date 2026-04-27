@@ -81,6 +81,22 @@ describe('tokenize', () => {
     expect(result[0]?.reading).toBe('笑');
     expect(result[0]?.dictionary_form).toBe('笑');
   });
+
+  it('treats kuromoji "*" placeholders as missing and falls back to surface_form', async () => {
+    mockTokenize.mockReturnValue([
+      {
+        surface_form: '＆',
+        reading: '*',
+        basic_form: '*',
+        pos: '名詞',
+        pos_detail_1: '一般',
+      },
+    ]);
+
+    const result = await tokenize('＆');
+    expect(result[0]?.reading).toBe('＆');
+    expect(result[0]?.dictionary_form).toBe('＆');
+  });
 });
 
 describe('tokenize — builder error path', () => {

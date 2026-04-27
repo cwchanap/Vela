@@ -212,6 +212,42 @@ describe('POST /from-word', () => {
     expect(body).toEqual({ error: 'Failed to save vocabulary entry' });
   });
 
+  test('returns 200 when vocabulary is created but SRS progress init fails (best-effort)', async () => {
+    mockVocabulary.create.mockResolvedValue({
+      item: { id: 'vocab-id', japanese_word: '食べる' },
+      created: true,
+    });
+    mockUserVocabularyProgress.initializeProgressIfNotExists.mockRejectedValue(
+      new Error('Transient DynamoDB error'),
+    );
+    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    const app = createTestApp();
+    const res = await app.request('/from-word', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-request-id': 'req-srs-fail',
+      },
+      body: JSON.stringify(validBody),
+    });
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as any;
+    expect(body.vocabulary_id).toBe('vocab-id');
+    expect(body.created).toBe(true);
+    expect(body.alreadyInSRS).toBe(false);
+    expect(consoleErrorSpy).toHaveBeenCalledWith(
+      '[Vela] SRS progress init failed (best-effort)',
+      expect.objectContaining({
+        requestId: 'req-srs-fail',
+        vocabularyId: 'vocab-id',
+      }),
+    );
+
+    consoleErrorSpy.mockRestore();
+  });
+
   test('logs only sanitized error metadata for failures', async () => {
     const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
     mockVocabulary.create.mockRejectedValue(new Error('DynamoDB connection error'));

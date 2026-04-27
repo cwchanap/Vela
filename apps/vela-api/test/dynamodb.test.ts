@@ -199,10 +199,9 @@ describe('DynamoDB Operations', () => {
         expect(mockPutCommand).toHaveBeenCalledTimes(2);
         expect(result1.sentence_id).toBeDefined();
         expect(result2.sentence_id).toBeDefined();
-        // IDs are base-36 zero-padded timestamps with a random suffix to prevent
-        // same-millisecond collisions. Format: 12-char timestamp + 8-char random.
-        expect(result1.sentence_id).toMatch(/^[0-9a-z]{20}$/);
-        expect(result2.sentence_id).toMatch(/^[0-9a-z]{20}$/);
+        // Format: decimal timestamp + hyphen + 8-char random suffix.
+        expect(result1.sentence_id).toMatch(/^\d+-[0-9a-f]{8}$/);
+        expect(result2.sentence_id).toMatch(/^\d+-[0-9a-f]{8}$/);
         expect(result1.sentence_id).not.toBe(result2.sentence_id);
         expect(result1.sentence_id < result2.sentence_id).toBe(true);
       } finally {
@@ -222,7 +221,8 @@ describe('DynamoDB Operations', () => {
         const result2 = await myDictionaries.create(mockUserId, 'sentence two');
 
         expect(result1.sentence_id).not.toBe(result2.sentence_id);
-        expect(result1.sentence_id.slice(0, 12)).not.toBe(result2.sentence_id.slice(0, 12));
+        // Timestamp prefixes (before the hyphen) differ across milliseconds
+        expect(result1.sentence_id.split('-')[0]).not.toBe(result2.sentence_id.split('-')[0]);
       } finally {
         dateNowSpy.mockRestore();
       }

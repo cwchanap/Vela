@@ -716,12 +716,13 @@ export const dailyProgress = {
 export const myDictionaries = {
   async create(userId: string, sentence: string, sourceUrl?: string, context?: string) {
     try {
-      // ULID-like sort key: zero-padded millisecond timestamp keeps the key
-      // lexicographically ordered so ScanIndexForward:false returns newest first.
-      // A short random suffix prevents same-millisecond collisions.
+      // Sort key: millisecond timestamp with random suffix for same-ms collision
+      // resistance. The decimal timestamp prefix keeps the key lexicographically
+      // compatible with existing entries stored by the previous format so
+      // ScanIndexForward:false continues to return newest-first.
       const timestamp = Date.now();
       const suffix = randomUUID().slice(0, 8);
-      const sentenceId = `${timestamp.toString(36).padStart(12, '0')}${suffix}`;
+      const sentenceId = `${timestamp}-${suffix}`;
 
       const command = new PutCommand({
         TableName: TABLE_NAMES.MY_DICTIONARIES,
