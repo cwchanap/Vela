@@ -83,6 +83,7 @@ vi.mock('../entrypoints/utils/idb', () => ({
 vi.mock('../entrypoints/utils/storage', () => ({
   getValidIdToken: vi.fn(),
   refreshIdToken: vi.fn(),
+  getUserEmail: vi.fn().mockResolvedValue(null),
 }));
 
 import {
@@ -92,22 +93,33 @@ import {
   saveSentenceToAPI,
   shouldDiscardPendingRecord,
 } from '../entrypoints/background';
-import { getValidIdToken, refreshIdToken } from '../entrypoints/utils/storage';
+import { getValidIdToken, refreshIdToken, getUserEmail } from '../entrypoints/utils/storage';
 
 describe('buildPendingSentenceRecord', () => {
-  it('creates a record with retries: 0 and a timestamp', () => {
-    const record = buildPendingSentenceRecord('テスト文', 'https://example.com', 'Example Page');
+  it('creates a record with retries: 0, a timestamp, and an idempotencyKey', () => {
+    const record = buildPendingSentenceRecord(
+      'テスト文',
+      'https://example.com',
+      'Example Page',
+      'user@test.com',
+    );
     expect(record.sentence).toBe('テスト文');
     expect(record.sourceUrl).toBe('https://example.com');
     expect(record.context).toBe('Example Page');
+    expect(record.userEmail).toBe('user@test.com');
     expect(record.retries).toBe(0);
     expect(typeof record.timestamp).toBe('number');
+    expect(record.idempotencyKey).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/,
+    );
   });
 
-  it('allows missing sourceUrl and context', () => {
+  it('allows missing sourceUrl, context, and userEmail', () => {
     const record = buildPendingSentenceRecord('テスト');
     expect(record.sourceUrl).toBeUndefined();
     expect(record.context).toBeUndefined();
+    expect(record.userEmail).toBeUndefined();
+    expect(record.idempotencyKey).toBeDefined();
   });
 });
 
@@ -141,6 +153,7 @@ describe('saveSentenceToAPI', () => {
   beforeEach(() => {
     vi.mocked(getValidIdToken).mockReset();
     vi.mocked(refreshIdToken).mockReset();
+    vi.mocked(getUserEmail).mockReset().mockResolvedValue('user@test.com');
     global.fetch = vi.fn();
   });
 
@@ -263,6 +276,7 @@ describe('flushQueue', () => {
     mockNotificationsCreate.mockReset();
     vi.mocked(getValidIdToken).mockReset();
     vi.mocked(refreshIdToken).mockReset();
+    vi.mocked(getUserEmail).mockReset().mockResolvedValue('user@test.com');
     global.fetch = vi.fn();
   });
 
@@ -275,7 +289,9 @@ describe('flushQueue', () => {
   });
 
   it('deletes record on successful API call', async () => {
-    idbState.getAllResult = [{ id: 1, sentence: 'テスト', retries: 0, timestamp: Date.now() }];
+    idbState.getAllResult = [
+      { id: 1, sentence: 'テスト', retries: 0, timestamp: Date.now(), idempotencyKey: 'key-1' },
+    ];
     vi.mocked(getValidIdToken).mockResolvedValue('valid-token');
     vi.mocked(global.fetch as ReturnType<typeof vi.fn>).mockResolvedValue(
       new Response(null, { status: 200 }),
@@ -288,7 +304,9 @@ describe('flushQueue', () => {
   });
 
   it('discards record and notifies when at max retries (retries=2) and fetch fails', async () => {
-    idbState.getAllResult = [{ id: 2, sentence: 'テスト', retries: 2, timestamp: Date.now() }];
+    idbState.getAllResult = [
+      { id: 2, sentence: 'テスト', retries: 2, timestamp: Date.now(), idempotencyKey: 'key-2' },
+    ];
     vi.mocked(getValidIdToken).mockResolvedValue('valid-token');
     vi.mocked(global.fetch as ReturnType<typeof vi.fn>).mockResolvedValue(
       new Response(null, { status: 500 }),
@@ -304,7 +322,9 @@ describe('flushQueue', () => {
 
   it('skips re-entrant flush calls while a flush is already in progress', async () => {
     let resolveFetch: (() => void) | undefined;
-    idbState.getAllResult = [{ id: 1, sentence: 'テスト1', retries: 0, timestamp: Date.now() }];
+    idbState.getAllResult = [
+      { id: 1, sentence: 'テスト1', retries: 0, timestamp: Date.now(), idempotencyKey: 'key-3' },
+    ];
     vi.mocked(getValidIdToken).mockResolvedValue('valid-token');
     vi.mocked(global.fetch as ReturnType<typeof vi.fn>).mockImplementation(
       () =>
@@ -328,6 +348,65 @@ describe('flushQueue', () => {
     // fetch was called only once — the re-entrant call was skipped
     expect(global.fetch).toHaveBeenCalledOnce();
   });
+
+  it('deletes and skips records queued by a different user', async () => {
+    idbState.getAllResult = [
+      {
+        id: 1,
+        sentence: 'テスト',
+        retries: 0,
+        timestamp: Date.now(),
+        userEmail: 'other@test.com',
+        idempotencyKey: 'key-4',
+      },
+    ];
+    vi.mocked(getValidIdToken).mockResolvedValue('valid-token');
+    vi.mocked(getUserEmail).mockResolvedValue('current@test.com');
+
+    await flushQueue();
+
+    // Should NOT attempt to POST — record is discarded instead
+    expect(global.fetch).not.toHaveBeenCalled();
+    expect(mockIdbStore.delete).toHaveBeenCalledWith(1);
+  });
+
+  it('processes records with no userEmail (backward compat)', async () => {
+    idbState.getAllResult = [
+      { id: 1, sentence: 'テスト', retries: 0, timestamp: Date.now(), idempotencyKey: 'key-5' },
+    ];
+    vi.mocked(getValidIdToken).mockResolvedValue('valid-token');
+    vi.mocked(global.fetch as ReturnType<typeof vi.fn>).mockResolvedValue(
+      new Response(null, { status: 200 }),
+    );
+
+    await flushQueue();
+
+    expect(global.fetch).toHaveBeenCalledOnce();
+    expect(mockIdbStore.delete).toHaveBeenCalledWith(1);
+  });
+
+  it('processes records when userEmail matches current user', async () => {
+    idbState.getAllResult = [
+      {
+        id: 1,
+        sentence: 'テスト',
+        retries: 0,
+        timestamp: Date.now(),
+        userEmail: 'user@test.com',
+        idempotencyKey: 'key-6',
+      },
+    ];
+    vi.mocked(getValidIdToken).mockResolvedValue('valid-token');
+    vi.mocked(getUserEmail).mockResolvedValue('user@test.com');
+    vi.mocked(global.fetch as ReturnType<typeof vi.fn>).mockResolvedValue(
+      new Response(null, { status: 200 }),
+    );
+
+    await flushQueue();
+
+    expect(global.fetch).toHaveBeenCalledOnce();
+    expect(mockIdbStore.delete).toHaveBeenCalledWith(1);
+  });
 });
 
 describe('SAVE_SENTENCES message handler', () => {
@@ -342,6 +421,7 @@ describe('SAVE_SENTENCES message handler', () => {
   beforeEach(() => {
     vi.mocked(getValidIdToken).mockReset();
     vi.mocked(refreshIdToken).mockReset();
+    vi.mocked(getUserEmail).mockReset().mockResolvedValue('user@test.com');
     global.fetch = vi.fn();
   });
 

@@ -1,5 +1,5 @@
 import { boot } from 'quasar/wrappers';
-import { configureDicPath } from '@vela/common';
+import { configureDicPath } from '@vela/common/tokenizer';
 import { useThemeStore } from 'src/stores/theme';
 import { useAuthStore } from 'src/stores/auth';
 

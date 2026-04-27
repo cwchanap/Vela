@@ -1,5 +1,15 @@
 import { vi } from 'vitest';
 
+// Ensure crypto.randomUUID is available (happy-dom may not provide it)
+if (typeof crypto.randomUUID !== 'function') {
+  Object.defineProperty(crypto, 'randomUUID', {
+    value: () =>
+      `${'00000000'.replace(/0/g, () => Math.floor(Math.random() * 16).toString(16))}-${'0000'.replace(/0/g, () => Math.floor(Math.random() * 16).toString(16))}-4${'000'.replace(/0/g, () => Math.floor(Math.random() * 16).toString(16))}-a${'000'.replace(/0/g, () => Math.floor(Math.random() * 16).toString(16))}-${'000000000000'.replace(/0/g, () => Math.floor(Math.random() * 16).toString(16))}`,
+    writable: true,
+    configurable: true,
+  });
+}
+
 // Stub WXT globals that are injected at runtime but not available in the test environment
 vi.stubGlobal('defineContentScript', (config: { matches: string[]; main(): void }) => config);
 vi.stubGlobal('defineBackground', (fn: () => void) => fn());

@@ -11,8 +11,8 @@ import * as ttsService from 'src/services/ttsService';
 import * as vocabularyService from 'src/services/vocabularyService';
 import type { MyDictionaryEntry } from 'src/services/myDictionariesService';
 import { useAuthStore } from 'src/stores/auth';
-import type { Token } from '@vela/common';
-import { tokenize } from '@vela/common';
+import type { Token } from '@vela/common/tokenizer';
+import { tokenize } from '@vela/common/tokenizer';
 
 const SAMPLE_TOKENS: Token[] = [
   {
@@ -96,9 +96,9 @@ vi.mock('src/services/ttsService', () => ({
   playAudio: vi.fn().mockResolvedValue(undefined),
 }));
 
-vi.mock('@vela/common', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@vela/common')>();
-  const tokens: import('@vela/common').Token[] = [
+vi.mock('@vela/common/tokenizer', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@vela/common/tokenizer')>();
+  const tokens: import('@vela/common/tokenizer').Token[] = [
     {
       surface_form: '日本語',
       reading: 'ニホンゴ',

@@ -3,6 +3,9 @@
  *
  * This package provides shared query configuration, cache timing constants,
  * and query key factories for use across Vela apps (web app and extension).
+ *
+ * The tokenizer is exported via a separate sub-path (`@vela/common/tokenizer`)
+ * to avoid pulling kuromoji into bundles that only need query helpers.
  */
 
 // Export query client configuration
@@ -21,6 +24,3 @@ export {
 
 // Export shared constants
 export { DEFAULT_DAILY_LESSON_GOAL, DEFAULT_LESSON_DURATION_MINUTES } from './constants';
-
-// Export tokenizer
-export { tokenize, configureDicPath, type Token } from './tokenizer';

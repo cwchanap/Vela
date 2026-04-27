@@ -1,4 +1,4 @@
-import { getValidIdToken, refreshIdToken } from './utils/storage';
+import { getValidIdToken, refreshIdToken, getUserEmail } from './utils/storage';
 import { openDB, STORE_NAME } from './utils/idb';
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'https://vela.cwchanap.dev/api';
@@ -10,8 +10,15 @@ export interface PendingSentenceRecord {
   sentence: string;
   sourceUrl?: string;
   context?: string;
+  userEmail?: string;
+  idempotencyKey: string;
   timestamp: number;
   retries: number;
+}
+
+/** Generate a client-side idempotency key for deduplication on retries. */
+function generateIdempotencyKey(): string {
+  return crypto.randomUUID();
 }
 
 /** Pure factory — exported for unit tests. */
@@ -19,8 +26,17 @@ export function buildPendingSentenceRecord(
   sentence: string,
   sourceUrl?: string,
   context?: string,
+  userEmail?: string,
 ): Omit<PendingSentenceRecord, 'id'> {
-  return { sentence, sourceUrl, context, timestamp: Date.now(), retries: 0 };
+  return {
+    sentence,
+    sourceUrl,
+    context,
+    userEmail,
+    idempotencyKey: generateIdempotencyKey(),
+    timestamp: Date.now(),
+    retries: 0,
+  };
 }
 
 async function notifyPendingQueueChanged(): Promise<void> {
@@ -99,11 +115,24 @@ export async function saveSentenceToAPI(
   context?: string,
 ): Promise<boolean> {
   let idToken: string;
+  // Capture the current user email upfront so queued records are attributed correctly.
+  const currentUserEmail = await getUserEmail();
+  // Generate a stable idempotency key for the entire save attempt — reused if
+  // we fall through to the offline queue so the server can dedup on replay.
+  const idempotencyKey = generateIdempotencyKey();
   try {
     idToken = await getValidIdToken();
   } catch (err) {
     console.error('[Vela] saveSentenceToAPI: auth token failed, queuing:', err);
-    await enqueue(buildPendingSentenceRecord(sentence, sourceUrl, context));
+    await enqueue({
+      sentence,
+      sourceUrl,
+      context,
+      userEmail: currentUserEmail ?? undefined,
+      idempotencyKey,
+      timestamp: Date.now(),
+      retries: 0,
+    });
     return false;
   }
 
@@ -112,11 +141,19 @@ export async function saveSentenceToAPI(
     response = await fetch(`${API_BASE_URL}/my-dictionaries`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${idToken}` },
-      body: JSON.stringify({ sentence, sourceUrl, context }),
+      body: JSON.stringify({ sentence, sourceUrl, context, idempotencyKey }),
     });
   } catch (err) {
     console.error('[Vela] saveSentenceToAPI: fetch failed, queuing:', err);
-    await enqueue(buildPendingSentenceRecord(sentence, sourceUrl, context));
+    await enqueue({
+      sentence,
+      sourceUrl,
+      context,
+      userEmail: currentUserEmail ?? undefined,
+      idempotencyKey,
+      timestamp: Date.now(),
+      retries: 0,
+    });
     return false;
   }
 
@@ -125,24 +162,48 @@ export async function saveSentenceToAPI(
       idToken = await refreshIdToken();
     } catch (err) {
       console.error('[Vela] saveSentenceToAPI: token refresh failed, queuing:', err);
-      await enqueue(buildPendingSentenceRecord(sentence, sourceUrl, context));
+      await enqueue({
+        sentence,
+        sourceUrl,
+        context,
+        userEmail: currentUserEmail ?? undefined,
+        idempotencyKey,
+        timestamp: Date.now(),
+        retries: 0,
+      });
       return false;
     }
     try {
       response = await fetch(`${API_BASE_URL}/my-dictionaries`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${idToken}` },
-        body: JSON.stringify({ sentence, sourceUrl, context }),
+        body: JSON.stringify({ sentence, sourceUrl, context, idempotencyKey }),
       });
     } catch (err) {
       console.error('[Vela] saveSentenceToAPI: retry fetch failed, queuing:', err);
-      await enqueue(buildPendingSentenceRecord(sentence, sourceUrl, context));
+      await enqueue({
+        sentence,
+        sourceUrl,
+        context,
+        userEmail: currentUserEmail ?? undefined,
+        idempotencyKey,
+        timestamp: Date.now(),
+        retries: 0,
+      });
       return false;
     }
   }
 
   if (!response.ok) {
-    await enqueue(buildPendingSentenceRecord(sentence, sourceUrl, context));
+    await enqueue({
+      sentence,
+      sourceUrl,
+      context,
+      userEmail: currentUserEmail ?? undefined,
+      idempotencyKey,
+      timestamp: Date.now(),
+      retries: 0,
+    });
     return false;
   }
 
@@ -201,6 +262,16 @@ export async function flushQueue(): Promise<void> {
           return;
         }
 
+        // Skip records queued by a different user to prevent cross-account
+        // contamination when accounts change between enqueue and flush.
+        if (record.userEmail) {
+          const currentUserEmail = await getUserEmail();
+          if (currentUserEmail !== record.userEmail) {
+            await deletePending(record.id!);
+            continue;
+          }
+        }
+
         let response = await fetch(`${API_BASE_URL}/my-dictionaries`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${idToken}` },
@@ -208,6 +279,7 @@ export async function flushQueue(): Promise<void> {
             sentence: record.sentence,
             sourceUrl: record.sourceUrl,
             context: record.context,
+            idempotencyKey: record.idempotencyKey,
           }),
         });
 
@@ -224,6 +296,7 @@ export async function flushQueue(): Promise<void> {
               sentence: record.sentence,
               sourceUrl: record.sourceUrl,
               context: record.context,
+              idempotencyKey: record.idempotencyKey,
             }),
           });
         }
