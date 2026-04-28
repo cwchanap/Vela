@@ -901,6 +901,35 @@ describe('DynamoDB Operations', () => {
       expect(result?.context).toBeUndefined();
     });
 
+    test('should use idempotencyKey as sentence_id when provided', async () => {
+      mockSend.mockResolvedValueOnce({});
+
+      const result = await myDictionaries.create(
+        mockUserId,
+        'テスト',
+        undefined,
+        undefined,
+        'stable-idempotency-key',
+      );
+
+      expect(result?.sentence_id).toBe('stable-idempotency-key');
+      expect(mockPutCommand).toHaveBeenCalledWith(
+        expect.objectContaining({
+          Item: expect.objectContaining({
+            sentence_id: 'stable-idempotency-key',
+          }),
+        }),
+      );
+    });
+
+    test('should generate a timestamp-based sentence_id when no idempotencyKey', async () => {
+      mockSend.mockResolvedValueOnce({});
+
+      const result = await myDictionaries.create(mockUserId, 'テスト');
+
+      expect(result?.sentence_id).toMatch(/^\d+-[0-9a-f]{8}$/);
+    });
+
     test('should get entries by user', async () => {
       const mockItems = [{ user_id: mockUserId, sentence_id: 'sent-1', sentence: '猫がいる' }];
       mockSend.mockResolvedValueOnce({ Items: mockItems });

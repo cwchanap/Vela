@@ -515,3 +515,87 @@ describe('NO_JAPANESE_FOUND message handler', () => {
     expect(mockNotificationsCreate).not.toHaveBeenCalled();
   });
 });
+
+describe('LOGIN_SUCCESS message handler', () => {
+  function getOnMessageHandler(): (_message: unknown) => Promise<void> | undefined {
+    const calls = vi.mocked(browser.runtime.onMessage.addListener).mock.calls;
+    if (calls.length === 0) throw new Error('No onMessage listener was registered');
+    return calls[0][0] as (_message: unknown) => Promise<void> | undefined;
+  }
+
+  beforeEach(() => {
+    mockNotificationsCreate.mockClear();
+    mockIdbStore.getAll.mockReset();
+    mockIdbStore.getAll.mockImplementation(function () {
+      const result = idbState.getAllResult;
+      const req = {
+        result,
+        get onsuccess() {
+          return null;
+        },
+        set onsuccess(cb: any) {
+          cb();
+        },
+        get onerror() {
+          return null;
+        },
+        set onerror(_: any) {},
+      };
+      return req;
+    });
+    mockIdbStore.delete.mockReset();
+    mockIdbStore.delete.mockImplementation(function () {
+      const req = {
+        result: undefined,
+        get onsuccess() {
+          return null;
+        },
+        set onsuccess(cb: any) {
+          cb();
+        },
+        get onerror() {
+          return null;
+        },
+        set onerror(_: any) {},
+      };
+      return req;
+    });
+    vi.mocked(getValidIdToken).mockReset();
+    vi.mocked(getUserEmail).mockReset().mockResolvedValue('user@test.com');
+    global.fetch = vi.fn() as unknown as typeof fetch;
+  });
+
+  it('triggers flushQueue when LOGIN_SUCCESS is received', async () => {
+    idbState.getAllResult = [
+      { id: 1, sentence: 'テスト', retries: 0, timestamp: Date.now(), idempotencyKey: 'key-1' },
+    ];
+    vi.mocked(getValidIdToken).mockResolvedValue('valid-token');
+    vi.mocked(global.fetch as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(
+      new Response(null, { status: 200 }),
+    );
+
+    const handler = getOnMessageHandler();
+    const result = handler({ type: 'LOGIN_SUCCESS' });
+
+    // LOGIN_SUCCESS is fire-and-forget — handler returns undefined
+    expect(result).toBeUndefined();
+
+    // Wait for the async flushQueue to complete
+    await new Promise((r) => setTimeout(r, 10));
+
+    // flushQueue should have processed the pending record
+    expect(global.fetch).toHaveBeenCalledOnce();
+    expect(mockIdbStore.delete).toHaveBeenCalledWith(1);
+  });
+
+  it('does nothing when queue is empty and LOGIN_SUCCESS is received', async () => {
+    idbState.getAllResult = [];
+
+    const handler = getOnMessageHandler();
+    const result = handler({ type: 'LOGIN_SUCCESS' });
+
+    expect(result).toBeUndefined();
+    await new Promise((r) => setTimeout(r, 10));
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+});

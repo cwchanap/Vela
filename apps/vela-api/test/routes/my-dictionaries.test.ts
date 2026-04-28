@@ -104,6 +104,7 @@ describe('My Dictionaries Route', () => {
         '日本語を勉強しています',
         'https://example.com',
         'test context',
+        undefined,
       );
     });
 
@@ -168,6 +169,52 @@ describe('My Dictionaries Route', () => {
       expect(mockMyDictionaries.create).toHaveBeenCalledWith(
         expect.any(String),
         '日本語',
+        undefined,
+        undefined,
+        undefined,
+      );
+    });
+
+    test('passes idempotencyKey to create for stable dedup on retries', async () => {
+      mockMyDictionaries.create.mockResolvedValueOnce({
+        sentence_id: 'stable-key-123',
+      });
+
+      const app = createTestApp();
+      const res = await app.request('/', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          sentence: 'テスト',
+          idempotencyKey: 'stable-key-123',
+        }),
+      });
+
+      expect(res.status).toBe(200);
+      expect(mockMyDictionaries.create).toHaveBeenCalledWith(
+        'test@example.com',
+        'テスト',
+        undefined,
+        undefined,
+        'stable-key-123',
+      );
+    });
+
+    test('ignores non-string idempotencyKey', async () => {
+      mockMyDictionaries.create.mockResolvedValueOnce({});
+
+      const app = createTestApp();
+      const res = await app.request('/', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sentence: 'テスト', idempotencyKey: 12345 }),
+      });
+
+      expect(res.status).toBe(200);
+      expect(mockMyDictionaries.create).toHaveBeenCalledWith(
+        expect.any(String),
+        'テスト',
+        undefined,
         undefined,
         undefined,
       );
