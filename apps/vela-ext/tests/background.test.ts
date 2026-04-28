@@ -154,12 +154,12 @@ describe('saveSentenceToAPI', () => {
     vi.mocked(getValidIdToken).mockReset();
     vi.mocked(refreshIdToken).mockReset();
     vi.mocked(getUserEmail).mockReset().mockResolvedValue('user@test.com');
-    global.fetch = vi.fn();
+    global.fetch = vi.fn() as unknown as typeof fetch;
   });
 
   it('returns true when auth token is valid and API returns 200', async () => {
     vi.mocked(getValidIdToken).mockResolvedValue('valid-token');
-    vi.mocked(global.fetch as ReturnType<typeof vi.fn>).mockResolvedValue(
+    vi.mocked(global.fetch as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(
       new Response(null, { status: 200 }),
     );
 
@@ -181,7 +181,7 @@ describe('saveSentenceToAPI', () => {
 
   it('returns false when fetch() throws (network error)', async () => {
     vi.mocked(getValidIdToken).mockResolvedValue('valid-token');
-    vi.mocked(global.fetch as ReturnType<typeof vi.fn>).mockRejectedValue(
+    vi.mocked(global.fetch as unknown as ReturnType<typeof vi.fn>).mockRejectedValue(
       new Error('Failed to fetch'),
     );
 
@@ -192,7 +192,7 @@ describe('saveSentenceToAPI', () => {
 
   it('returns false when response is 401 and refreshIdToken() throws', async () => {
     vi.mocked(getValidIdToken).mockResolvedValue('expired-token');
-    vi.mocked(global.fetch as ReturnType<typeof vi.fn>).mockResolvedValue(
+    vi.mocked(global.fetch as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(
       new Response(null, { status: 401 }),
     );
     vi.mocked(refreshIdToken).mockRejectedValue(new Error('Refresh failed'));
@@ -205,7 +205,7 @@ describe('saveSentenceToAPI', () => {
 
   it('returns false when response is non-2xx (e.g. 500)', async () => {
     vi.mocked(getValidIdToken).mockResolvedValue('valid-token');
-    vi.mocked(global.fetch as ReturnType<typeof vi.fn>).mockResolvedValue(
+    vi.mocked(global.fetch as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(
       new Response(null, { status: 500 }),
     );
 
@@ -277,7 +277,7 @@ describe('flushQueue', () => {
     vi.mocked(getValidIdToken).mockReset();
     vi.mocked(refreshIdToken).mockReset();
     vi.mocked(getUserEmail).mockReset().mockResolvedValue('user@test.com');
-    global.fetch = vi.fn();
+    global.fetch = vi.fn() as unknown as typeof fetch;
   });
 
   it('does nothing when queue is empty', async () => {
@@ -293,7 +293,7 @@ describe('flushQueue', () => {
       { id: 1, sentence: 'テスト', retries: 0, timestamp: Date.now(), idempotencyKey: 'key-1' },
     ];
     vi.mocked(getValidIdToken).mockResolvedValue('valid-token');
-    vi.mocked(global.fetch as ReturnType<typeof vi.fn>).mockResolvedValue(
+    vi.mocked(global.fetch as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(
       new Response(null, { status: 200 }),
     );
 
@@ -308,7 +308,7 @@ describe('flushQueue', () => {
       { id: 2, sentence: 'テスト', retries: 2, timestamp: Date.now(), idempotencyKey: 'key-2' },
     ];
     vi.mocked(getValidIdToken).mockResolvedValue('valid-token');
-    vi.mocked(global.fetch as ReturnType<typeof vi.fn>).mockResolvedValue(
+    vi.mocked(global.fetch as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(
       new Response(null, { status: 500 }),
     );
 
@@ -326,7 +326,7 @@ describe('flushQueue', () => {
       { id: 1, sentence: 'テスト1', retries: 0, timestamp: Date.now(), idempotencyKey: 'key-3' },
     ];
     vi.mocked(getValidIdToken).mockResolvedValue('valid-token');
-    vi.mocked(global.fetch as ReturnType<typeof vi.fn>).mockImplementation(
+    vi.mocked(global.fetch as unknown as ReturnType<typeof vi.fn>).mockImplementation(
       () =>
         new Promise<Response>((resolve) => {
           resolveFetch = () => resolve(new Response(null, { status: 200 }));
@@ -375,7 +375,7 @@ describe('flushQueue', () => {
       { id: 1, sentence: 'テスト', retries: 0, timestamp: Date.now(), idempotencyKey: 'key-5' },
     ];
     vi.mocked(getValidIdToken).mockResolvedValue('valid-token');
-    vi.mocked(global.fetch as ReturnType<typeof vi.fn>).mockResolvedValue(
+    vi.mocked(global.fetch as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(
       new Response(null, { status: 200 }),
     );
 
@@ -398,7 +398,7 @@ describe('flushQueue', () => {
     ];
     vi.mocked(getValidIdToken).mockResolvedValue('valid-token');
     vi.mocked(getUserEmail).mockResolvedValue('user@test.com');
-    vi.mocked(global.fetch as ReturnType<typeof vi.fn>).mockResolvedValue(
+    vi.mocked(global.fetch as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(
       new Response(null, { status: 200 }),
     );
 
@@ -422,7 +422,7 @@ describe('SAVE_SENTENCES message handler', () => {
     vi.mocked(getValidIdToken).mockReset();
     vi.mocked(refreshIdToken).mockReset();
     vi.mocked(getUserEmail).mockReset().mockResolvedValue('user@test.com');
-    global.fetch = vi.fn();
+    global.fetch = vi.fn() as unknown as typeof fetch;
   });
 
   it('returns undefined for non-matching message types', () => {
@@ -439,7 +439,7 @@ describe('SAVE_SENTENCES message handler', () => {
 
   it('returns a Promise for a valid sentences array', async () => {
     vi.mocked(getValidIdToken).mockResolvedValue('valid-token');
-    vi.mocked(global.fetch as ReturnType<typeof vi.fn>).mockResolvedValue(
+    vi.mocked(global.fetch as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(
       new Response(null, { status: 200 }),
     );
 
@@ -452,7 +452,7 @@ describe('SAVE_SENTENCES message handler', () => {
 
   it('resolves with { saved, total } when all saves succeed', async () => {
     vi.mocked(getValidIdToken).mockResolvedValue('valid-token');
-    vi.mocked(global.fetch as ReturnType<typeof vi.fn>).mockResolvedValue(
+    vi.mocked(global.fetch as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(
       new Response(null, { status: 200 }),
     );
 
@@ -464,7 +464,7 @@ describe('SAVE_SENTENCES message handler', () => {
 
   it('resolves with partial results when some saves fail', async () => {
     vi.mocked(getValidIdToken).mockResolvedValueOnce('valid-token');
-    vi.mocked(global.fetch as ReturnType<typeof vi.fn>)
+    vi.mocked(global.fetch as unknown as ReturnType<typeof vi.fn>)
       .mockResolvedValueOnce(new Response(null, { status: 200 }))
       .mockResolvedValueOnce(new Response(null, { status: 500 }));
 

@@ -273,7 +273,7 @@ import {
   type SentenceAnalysis,
 } from 'src/services/myDictionariesService';
 import { tokenize, type Token } from '@vela/common/tokenizer';
-import { computeDifficulty, isContentWord } from 'src/utils/japanese';
+import { computeDifficulty, isContentWord, katakanaToHiragana } from 'src/utils/japanese';
 import type { JishoResult } from 'src/services/vocabularyService';
 import {
   dictionaryLookupQueryOptions,
@@ -482,13 +482,15 @@ async function handleAddFlashcard() {
     const result = await addFlashcardMutation.mutateAsync({
       japanese_word: activeToken.value.token.dictionary_form,
       // Prefer the kuromoji token reading (contextual) over Jisho's first result.
-      // Kuromoji disambiguates homographs correctly (e.g. 今日→こんにち vs きょう).
+      // Kuromoji disambiguates homographs correctly (e.g. 今日→こんいち vs きょう).
       // When kuromoji doesn't know a word it falls back to surface_form as reading;
       // in that case prefer Jisho's reading instead.
+      // Kuromoji returns readings in katakana — convert to hiragana so the
+      // downstream API stores the correct script in the `hiragana` field.
       reading:
         activeToken.value.token.reading &&
         activeToken.value.token.reading !== activeToken.value.token.surface_form
-          ? activeToken.value.token.reading
+          ? katakanaToHiragana(activeToken.value.token.reading)
           : lookup.reading,
       english_translation: lookup.meanings[0] ?? '',
       ...(entry?.sentence ? { example_sentence_jp: entry.sentence } : {}),

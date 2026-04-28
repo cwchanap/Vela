@@ -9,6 +9,7 @@ import {
   assessDifficulty,
   parseFurigana,
   computeDifficulty,
+  katakanaToHiragana,
 } from './japanese';
 import type { Token } from '@vela/common/tokenizer';
 
@@ -343,5 +344,48 @@ describe('computeDifficulty', () => {
     const tokens = [makeToken('名詞', '㐂び'), makeToken('動詞', 'みる')];
 
     expect(computeDifficulty(tokens)).toBe('N4');
+  });
+});
+
+describe('katakanaToHiragana', () => {
+  it('converts basic katakana to hiragana', () => {
+    expect(katakanaToHiragana('コンニチ')).toBe('こんにち');
+  });
+
+  it('converts full katakana word', () => {
+    expect(katakanaToHiragana('ネコ')).toBe('ねこ');
+  });
+
+  it('leaves hiragana unchanged', () => {
+    expect(katakanaToHiragana('ねこ')).toBe('ねこ');
+  });
+
+  it('leaves kanji unchanged', () => {
+    expect(katakanaToHiragana('猫')).toBe('猫');
+  });
+
+  it('leaves ASCII unchanged', () => {
+    expect(katakanaToHiragana('cat')).toBe('cat');
+  });
+
+  it('handles mixed katakana and kanji', () => {
+    expect(katakanaToHiragana('日本語')).toBe('日本語');
+  });
+
+  it('converts voiced katakana (dakuten)', () => {
+    expect(katakanaToHiragana('ガギグゲゴ')).toBe('がぎぐげご');
+  });
+
+  it('converts semi-voiced katakana (handakuten)', () => {
+    expect(katakanaToHiragana('パピプペポ')).toBe('ぱぴぷぺぽ');
+  });
+
+  it('handles empty string', () => {
+    expect(katakanaToHiragana('')).toBe('');
+  });
+
+  it('handles katakana reading from kuromoji (typical case)', () => {
+    // Kuromoji returns キョウ for 今日
+    expect(katakanaToHiragana('キョウ')).toBe('きょう');
   });
 });
