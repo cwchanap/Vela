@@ -3,6 +3,11 @@ import type { Token } from '@vela/common/tokenizer';
 // Japanese language utilities
 
 // Character type detection
+
+/** Convert katakana characters to their hiragana equivalents. */
+export const katakanaToHiragana = (str: string): string =>
+  str.replace(/[\u30a1-\u30f6]/g, (ch) => String.fromCharCode(ch.charCodeAt(0) - 0x60));
+
 export const isHiragana = (char: string): boolean => {
   const code = char.charCodeAt(0);
   return code >= 0x3040 && code <= 0x309f;
