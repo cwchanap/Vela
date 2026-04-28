@@ -394,6 +394,12 @@ export default defineBackground(() => {
         return;
       }
 
+      // Popup signals a successful login — flush any queued offline saves.
+      if (msg.type === 'LOGIN_SUCCESS') {
+        flushQueue().catch((err) => console.error('[Vela] flushQueue (loginSuccess) failed:', err));
+        return;
+      }
+
       if (msg.type !== 'SAVE_SENTENCES') return;
       const { sentences, sourceUrl, context } = message as {
         sentences: unknown;

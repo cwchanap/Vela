@@ -714,15 +714,19 @@ export const dailyProgress = {
 
 // My dictionaries operations
 export const myDictionaries = {
-  async create(userId: string, sentence: string, sourceUrl?: string, context?: string) {
+  async create(
+    userId: string,
+    sentence: string,
+    sourceUrl?: string,
+    context?: string,
+    idempotencyKey?: string,
+  ) {
     try {
-      // Sort key: millisecond timestamp with random suffix for same-ms collision
-      // resistance. The decimal timestamp prefix keeps the key lexicographically
-      // compatible with existing entries stored by the previous format so
-      // ScanIndexForward:false continues to return newest-first.
       const timestamp = Date.now();
-      const suffix = randomUUID().slice(0, 8);
-      const sentenceId = `${timestamp}-${suffix}`;
+      // When the client provides an idempotency key, use it as the sort key
+      // so retries collapse to the same DynamoDB item instead of creating
+      // duplicates.
+      const sentenceId = idempotencyKey ?? `${timestamp}-${randomUUID().slice(0, 8)}`;
 
       const command = new PutCommand({
         TableName: TABLE_NAMES.MY_DICTIONARIES,

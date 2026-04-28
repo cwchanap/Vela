@@ -212,7 +212,7 @@ describe('POST /from-word', () => {
     expect(body).toEqual({ error: 'Failed to save vocabulary entry' });
   });
 
-  test('returns 200 when vocabulary is created but SRS progress init fails (best-effort)', async () => {
+  test('returns 500 when vocabulary is created but SRS progress init fails (transient error)', async () => {
     mockVocabulary.create.mockResolvedValue({
       item: { id: 'vocab-id', japanese_word: '食べる' },
       created: true,
@@ -232,13 +232,11 @@ describe('POST /from-word', () => {
       body: JSON.stringify(validBody),
     });
 
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(500);
     const body = (await res.json()) as any;
-    expect(body.vocabulary_id).toBe('vocab-id');
-    expect(body.created).toBe(true);
-    expect(body.alreadyInSRS).toBe(false);
+    expect(body).toEqual({ error: 'Failed to initialize SRS progress' });
     expect(consoleErrorSpy).toHaveBeenCalledWith(
-      '[Vela] SRS progress init failed (best-effort)',
+      '[Vela] SRS progress init failed',
       expect.objectContaining({
         requestId: 'req-srs-fail',
         vocabularyId: 'vocab-id',

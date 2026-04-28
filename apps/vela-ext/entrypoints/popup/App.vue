@@ -14,6 +14,10 @@ onMounted(async () => {
 
 function handleLoginSuccess() {
   authenticated.value = true;
+  // Notify the background script so it can flush any queued offline saves.
+  browser.runtime.sendMessage({ type: 'LOGIN_SUCCESS' }).catch(() => {
+    // Ignore — background may not be listening (e.g. during development).
+  });
 }
 
 function handleLogout() {
