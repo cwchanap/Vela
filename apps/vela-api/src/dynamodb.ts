@@ -721,36 +721,50 @@ export const myDictionaries = {
     context?: string,
     idempotencyKey?: string,
   ) {
-    try {
-      const timestamp = Date.now();
-      // When the client provides an idempotency key, use it as the sort key
-      // so retries collapse to the same DynamoDB item instead of creating
-      // duplicates.
-      const sentenceId = idempotencyKey ?? `${timestamp}-${randomUUID().slice(0, 8)}`;
+    const timestamp = Date.now();
+    // When the client provides an idempotency key, use it as the sort key
+    // so retries collapse to the same DynamoDB item instead of creating
+    // duplicates.
+    const sentenceId = idempotencyKey ?? `${timestamp}-${randomUUID().slice(0, 8)}`;
+    const item = {
+      user_id: userId,
+      sentence_id: sentenceId,
+      sentence,
+      source_url: sourceUrl,
+      context,
+      created_at: timestamp,
+      updated_at: timestamp,
+    };
 
+    try {
       const command = new PutCommand({
         TableName: TABLE_NAMES.MY_DICTIONARIES,
-        Item: {
-          user_id: userId,
-          sentence_id: sentenceId,
-          sentence,
-          source_url: sourceUrl,
-          context,
-          created_at: timestamp,
-          updated_at: timestamp,
-        },
+        Item: item,
         ConditionExpression: 'attribute_not_exists(user_id)',
       });
       await docClient.send(command);
-      return {
-        user_id: userId,
-        sentence_id: sentenceId,
-        sentence,
-        source_url: sourceUrl,
-        context,
-        created_at: timestamp,
-        updated_at: timestamp,
-      };
+      return item;
+    } catch (error) {
+      if (isConditionalCheckFailedError(error)) {
+        // Idempotent replay: the item already exists. Read and return it.
+        const existing = await this.getByKey(userId, sentenceId);
+        if (existing) {
+          return existing;
+        }
+        // Should not happen, but fall through to generic handler.
+      }
+      handleDynamoError(error);
+    }
+  },
+
+  async getByKey(userId: string, sentenceId: string) {
+    try {
+      const command = new GetCommand({
+        TableName: TABLE_NAMES.MY_DICTIONARIES,
+        Key: { user_id: userId, sentence_id: sentenceId },
+      });
+      const response = await docClient.send(command);
+      return response.Item;
     } catch (error) {
       handleDynamoError(error);
     }

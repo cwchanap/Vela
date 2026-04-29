@@ -87,7 +87,7 @@ app.get('/lookup', zValidator('query', lookupQuerySchema), async (c) => {
     common: first.is_common,
   };
 
-  c.header('Cache-Control', 'public, max-age=86400');
+  c.header('Cache-Control', 'private, max-age=86400');
   return c.json(result);
 });
 
