@@ -958,6 +958,64 @@ describe('DynamoDB Operations', () => {
       );
       expect(result).toEqual({ success: true });
     });
+
+    test('should return existing item on idempotent replay (ConditionalCheckFailedException)', async () => {
+      const existingItem = {
+        user_id: mockUserId,
+        sentence_id: 'idem-key-1',
+        sentence: 'テスト文',
+        source_url: 'https://example.com',
+        context: 'test',
+        created_at: 1710000000000,
+        updated_at: 1710000000000,
+      };
+
+      // First call: PutCommand throws ConditionalCheckFailedException
+      // Second call: GetCommand returns the existing item
+      const conditionalError = Object.assign(new Error('Condition failed'), {
+        name: 'ConditionalCheckFailedException',
+      });
+      mockSend
+        .mockRejectedValueOnce(conditionalError)
+        .mockResolvedValueOnce({ Item: existingItem });
+
+      const result = await myDictionaries.create(
+        mockUserId,
+        'テスト文',
+        'https://example.com',
+        'test',
+        'idem-key-1',
+      );
+
+      expect(mockPutCommand).toHaveBeenCalledWith(
+        expect.objectContaining({
+          TableName: 'vela-saved-sentences',
+          ConditionExpression: 'attribute_not_exists(user_id)',
+          Item: expect.objectContaining({
+            user_id: mockUserId,
+            sentence_id: 'idem-key-1',
+          }),
+        }),
+      );
+      expect(mockGetCommand).toHaveBeenCalledWith(
+        expect.objectContaining({
+          TableName: 'vela-saved-sentences',
+          Key: { user_id: mockUserId, sentence_id: 'idem-key-1' },
+        }),
+      );
+      expect(result).toEqual(existingItem);
+    });
+
+    test('should throw on ConditionalCheckFailedException when getByKey returns undefined', async () => {
+      const conditionalError = Object.assign(new Error('Condition failed'), {
+        name: 'ConditionalCheckFailedException',
+      });
+      mockSend.mockRejectedValueOnce(conditionalError).mockResolvedValueOnce({ Item: undefined });
+
+      await expect(
+        myDictionaries.create(mockUserId, 'テスト', undefined, undefined, 'idem-key-2'),
+      ).rejects.toThrow('Item not found or condition not met');
+    });
   });
 
   describe('TTS Settings', () => {
