@@ -39,12 +39,17 @@ function getErrorStatus(error: unknown): number | undefined {
 
 /**
  * Look up a word via the Jisho proxy. Returns null if not found.
+ * Optional reading parameter helps disambiguate homographs (e.g. 今日→きょう vs こんにち).
  */
-export async function lookupWord(dictionaryForm: string): Promise<JishoResult | null> {
+export async function lookupWord(
+  dictionaryForm: string,
+  reading?: string,
+): Promise<JishoResult | null> {
   try {
     const encoded = encodeURIComponent(dictionaryForm);
+    const readingParam = reading ? `&reading=${encodeURIComponent(reading)}` : '';
     return await httpJsonAuth<JishoResult>(
-      `${config.api.url}dictionary/lookup?word=${encoded}`,
+      `${config.api.url}dictionary/lookup?word=${encoded}${readingParam}`,
     );
   } catch (err) {
     if (getErrorStatus(err) === 404) {

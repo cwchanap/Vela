@@ -210,4 +210,93 @@ describe('GET /lookup', () => {
     const res = await app.request('/lookup?word=食べる');
     expect(res.status).toBe(401);
   });
+
+  test('picks Jisho entry matching the reading hint for homographs', async () => {
+    // Simulate Jisho returning multiple entries for 今日 — first one is
+    // こんにち (hello), second is きょう (today). When the client sends
+    // reading=きょう, the API should pick the second entry.
+    mockFetch.mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        data: [
+          {
+            japanese: [{ word: '今日', reading: 'こんにち' }],
+            senses: [{ english_definitions: ['hello', 'good day'] }],
+            jlpt: [],
+            is_common: true,
+          },
+          {
+            japanese: [{ word: '今日', reading: 'きょう' }],
+            senses: [{ english_definitions: ['today', 'this day'] }],
+            jlpt: ['jlpt-n5'],
+            is_common: true,
+          },
+        ],
+      }),
+    });
+
+    const app = createTestApp();
+    const res = await app.request('/lookup?word=今日&reading=きょう', { headers: AUTH_HEADER });
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as any;
+    expect(body.reading).toBe('きょう');
+    expect(body.meanings).toEqual(['today', 'this day']);
+    expect(body.jlpt).toBe('jlpt-n5');
+  });
+
+  test('picks Jisho entry matching katakana reading hint (normalised)', async () => {
+    // Client sends reading in katakana (from kuromoji), API normalises to hiragana
+    mockFetch.mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        data: [
+          {
+            japanese: [{ word: '今日', reading: 'こんにち' }],
+            senses: [{ english_definitions: ['hello'] }],
+            jlpt: [],
+            is_common: true,
+          },
+          {
+            japanese: [{ word: '今日', reading: 'きょう' }],
+            senses: [{ english_definitions: ['today'] }],
+            jlpt: [],
+            is_common: true,
+          },
+        ],
+      }),
+    });
+
+    const app = createTestApp();
+    const res = await app.request('/lookup?word=今日&reading=キョウ', { headers: AUTH_HEADER });
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as any;
+    expect(body.reading).toBe('きょう');
+    expect(body.meanings).toEqual(['today']);
+  });
+
+  test('falls back to first Jisho entry when reading hint does not match', async () => {
+    mockFetch.mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        data: [
+          {
+            japanese: [{ word: '今日', reading: 'こんにち' }],
+            senses: [{ english_definitions: ['hello'] }],
+            jlpt: [],
+            is_common: true,
+          },
+        ],
+      }),
+    });
+
+    const app = createTestApp();
+    const res = await app.request('/lookup?word=今日&reading=きょう', { headers: AUTH_HEADER });
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as any;
+    // Falls back to first entry since no reading matches
+    expect(body.reading).toBe('こんにち');
+  });
 });

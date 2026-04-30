@@ -61,6 +61,38 @@ describe('scanJapaneseSentences', () => {
     expect(result).toContain('正常な長さのテキストです。');
   });
 
+  it('splits long text nodes at sentence-ending punctuation', () => {
+    const sentence1 = '日本語を勉強しています。';
+    const sentence2 = '毎日練習しています。';
+    // Combined length > 200 but each sentence is < 200
+    const padding = 'あ'.repeat(180);
+    const longParagraph = `${sentence1}${padding}。${sentence2}`;
+    document.body.innerHTML = `<p>${longParagraph}</p>`;
+
+    const result = scanJapaneseSentences();
+    // Both sentences should be extracted individually
+    expect(result).toContain(sentence1);
+    expect(result).toContain(sentence2);
+  });
+
+  it('extracts individual sentences from a paragraph with multiple sentences', () => {
+    document.body.innerHTML = '<p>今日はいい天気です。散歩に行きました。楽しかったです。</p>';
+
+    const result = scanJapaneseSentences();
+    expect(result).toContain('今日はいい天気です。');
+    expect(result).toContain('散歩に行きました。');
+    expect(result).toContain('楽しかったです。');
+  });
+
+  it('splits on exclamation marks and question marks', () => {
+    document.body.innerHTML = '<p>これはすごいですね！本当にそうですか？そうですね。</p>';
+
+    const result = scanJapaneseSentences();
+    expect(result).toContain('これはすごいですね！');
+    expect(result).toContain('本当にそうですか？');
+    expect(result).toContain('そうですね。');
+  });
+
   it('collects sentences containing half-width katakana', () => {
     // Half-width katakana U+FF66–FF9F (e.g. ﾊﾝｶｸ)
     document.body.innerHTML = `<p>ﾊﾝｶｸﾀﾞｲﾅﾘで入力されています。</p>`;

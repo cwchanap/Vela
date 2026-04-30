@@ -22,7 +22,18 @@ describe('useVocabularyQueries', () => {
     expect(options.queryKey).toEqual(['dictionary', 'lookup', '猫']);
 
     await options.queryFn();
-    expect(mockLookupWord).toHaveBeenCalledWith('猫');
+    expect(mockLookupWord).toHaveBeenCalledWith('猫', undefined);
+  });
+
+  it('includes reading in query key and passes it to lookupWord', async () => {
+    mockLookupWord.mockResolvedValue(null);
+    const { dictionaryLookupQueryOptions } = await import('./useVocabularyQueries');
+
+    const options = dictionaryLookupQueryOptions('今日', 'キョウ');
+    expect(options.queryKey).toEqual(['dictionary', 'lookup', '今日', 'キョウ']);
+
+    await options.queryFn();
+    expect(mockLookupWord).toHaveBeenCalledWith('今日', 'キョウ');
   });
 
   it('calls addFlashcard through the mutation wrapper', async () => {

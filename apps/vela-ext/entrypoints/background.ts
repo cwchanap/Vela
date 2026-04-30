@@ -119,7 +119,10 @@ export async function saveSentenceToAPI(
   const currentUserEmail = await getUserEmail();
   // Generate a stable idempotency key for the entire save attempt — reused if
   // we fall through to the offline queue so the server can dedup on replay.
+  // Capture the client timestamp upfront too so the server can build a
+  // chronologically sortable sort key that remains stable across retries.
   const idempotencyKey = generateIdempotencyKey();
+  const clientTimestamp = Date.now();
   try {
     idToken = await getValidIdToken();
   } catch (err) {
@@ -130,7 +133,7 @@ export async function saveSentenceToAPI(
       context,
       userEmail: currentUserEmail ?? undefined,
       idempotencyKey,
-      timestamp: Date.now(),
+      timestamp: clientTimestamp,
       retries: 0,
     });
     return false;
@@ -141,7 +144,13 @@ export async function saveSentenceToAPI(
     response = await fetch(`${API_BASE_URL}/my-dictionaries`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${idToken}` },
-      body: JSON.stringify({ sentence, sourceUrl, context, idempotencyKey }),
+      body: JSON.stringify({
+        sentence,
+        sourceUrl,
+        context,
+        idempotencyKey,
+        timestamp: clientTimestamp,
+      }),
     });
   } catch (err) {
     console.error('[Vela] saveSentenceToAPI: fetch failed, queuing:', err);
@@ -151,7 +160,7 @@ export async function saveSentenceToAPI(
       context,
       userEmail: currentUserEmail ?? undefined,
       idempotencyKey,
-      timestamp: Date.now(),
+      timestamp: clientTimestamp,
       retries: 0,
     });
     return false;
@@ -168,7 +177,7 @@ export async function saveSentenceToAPI(
         context,
         userEmail: currentUserEmail ?? undefined,
         idempotencyKey,
-        timestamp: Date.now(),
+        timestamp: clientTimestamp,
         retries: 0,
       });
       return false;
@@ -177,7 +186,13 @@ export async function saveSentenceToAPI(
       response = await fetch(`${API_BASE_URL}/my-dictionaries`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${idToken}` },
-        body: JSON.stringify({ sentence, sourceUrl, context, idempotencyKey }),
+        body: JSON.stringify({
+          sentence,
+          sourceUrl,
+          context,
+          idempotencyKey,
+          timestamp: clientTimestamp,
+        }),
       });
     } catch (err) {
       console.error('[Vela] saveSentenceToAPI: retry fetch failed, queuing:', err);
@@ -187,7 +202,7 @@ export async function saveSentenceToAPI(
         context,
         userEmail: currentUserEmail ?? undefined,
         idempotencyKey,
-        timestamp: Date.now(),
+        timestamp: clientTimestamp,
         retries: 0,
       });
       return false;
@@ -201,7 +216,7 @@ export async function saveSentenceToAPI(
       context,
       userEmail: currentUserEmail ?? undefined,
       idempotencyKey,
-      timestamp: Date.now(),
+      timestamp: clientTimestamp,
       retries: 0,
     });
     return false;
@@ -280,6 +295,7 @@ export async function flushQueue(): Promise<void> {
             sourceUrl: record.sourceUrl,
             context: record.context,
             idempotencyKey: record.idempotencyKey,
+            timestamp: record.timestamp,
           }),
         });
 
@@ -297,6 +313,7 @@ export async function flushQueue(): Promise<void> {
               sourceUrl: record.sourceUrl,
               context: record.context,
               idempotencyKey: record.idempotencyKey,
+              timestamp: record.timestamp,
             }),
           });
         }

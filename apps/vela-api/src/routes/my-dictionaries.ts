@@ -114,7 +114,7 @@ app.post('/', async (c) => {
     }
 
     const body = await c.req.json();
-    const { sentence, sourceUrl, context, idempotencyKey } = body;
+    const { sentence, sourceUrl, context, idempotencyKey, timestamp: clientTimestamp } = body;
 
     if (!sentence || typeof sentence !== 'string' || sentence.trim().length === 0) {
       return c.json({ error: 'Sentence is required' }, 400);
@@ -126,6 +126,7 @@ app.post('/', async (c) => {
       sourceUrl,
       context,
       typeof idempotencyKey === 'string' ? idempotencyKey : undefined,
+      typeof clientTimestamp === 'number' ? clientTimestamp : undefined,
     );
 
     return c.json({
