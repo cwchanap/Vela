@@ -1,6 +1,9 @@
 // Export for unit testing
 export function scanJapaneseSentences(): string[] {
   const japaneseRe = /[\u3040-\u9FAF\uFF66-\uFF9F]/;
+  // Split after sentence-ending punctuation so the delimiter stays with the
+  // preceding segment (e.g. "A。B。" → ["A。", "B。"]).
+  const sentenceSplitRe = /(?<=[。！？!?])/;
   const seen = new Set<string>();
   const result: string[] = [];
 
@@ -13,9 +16,18 @@ export function scanJapaneseSentences(): string[] {
   while ((node = walker.nextNode())) {
     if (node.parentElement && denylist.has(node.parentElement.tagName)) continue;
     const text = (node.textContent ?? '').trim();
-    if (text.length >= 5 && text.length <= 200 && japaneseRe.test(text) && !seen.has(text)) {
-      seen.add(text);
-      result.push(text);
+    if (!japaneseRe.test(text)) continue;
+
+    // Split the text node into candidate sentences at sentence-ending
+    // punctuation boundaries. This ensures paragraphs longer than 200 chars
+    // are still mined for individual sentences rather than dropped entirely.
+    const candidates = text.split(sentenceSplitRe).map((s) => s.trim());
+
+    for (const candidate of candidates) {
+      if (candidate.length >= 5 && candidate.length <= 200 && !seen.has(candidate)) {
+        seen.add(candidate);
+        result.push(candidate);
+      }
     }
   }
 

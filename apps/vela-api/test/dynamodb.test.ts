@@ -901,7 +901,7 @@ describe('DynamoDB Operations', () => {
       expect(result?.context).toBeUndefined();
     });
 
-    test('should use idempotencyKey as sentence_id when provided', async () => {
+    test('should use idempotencyKey as part of timestamp-prefixed sentence_id when provided', async () => {
       mockSend.mockResolvedValueOnce({});
 
       const result = await myDictionaries.create(
@@ -910,16 +910,33 @@ describe('DynamoDB Operations', () => {
         undefined,
         undefined,
         'stable-idempotency-key',
+        1710000000000,
       );
 
-      expect(result?.sentence_id).toBe('stable-idempotency-key');
+      // sentence_id should be timestamp-idempotencyKey for chronological sorting
+      expect(result?.sentence_id).toBe('1710000000000-stable-idempotency-key');
       expect(mockPutCommand).toHaveBeenCalledWith(
         expect.objectContaining({
           Item: expect.objectContaining({
-            sentence_id: 'stable-idempotency-key',
+            sentence_id: '1710000000000-stable-idempotency-key',
           }),
         }),
       );
+    });
+
+    test('should use server timestamp prefix for idempotencyKey when no client timestamp', async () => {
+      mockSend.mockResolvedValueOnce({});
+
+      const result = await myDictionaries.create(
+        mockUserId,
+        'テスト',
+        undefined,
+        undefined,
+        'stable-key',
+      );
+
+      // Should still have timestamp prefix even without client timestamp
+      expect(result?.sentence_id).toMatch(/^\d+-stable-key$/);
     });
 
     test('should generate a timestamp-based sentence_id when no idempotencyKey', async () => {
@@ -962,7 +979,7 @@ describe('DynamoDB Operations', () => {
     test('should return existing item on idempotent replay (ConditionalCheckFailedException)', async () => {
       const existingItem = {
         user_id: mockUserId,
-        sentence_id: 'idem-key-1',
+        sentence_id: '1710000000000-idem-key-1',
         sentence: 'テスト文',
         source_url: 'https://example.com',
         context: 'test',
@@ -985,6 +1002,7 @@ describe('DynamoDB Operations', () => {
         'https://example.com',
         'test',
         'idem-key-1',
+        1710000000000,
       );
 
       expect(mockPutCommand).toHaveBeenCalledWith(
@@ -993,14 +1011,14 @@ describe('DynamoDB Operations', () => {
           ConditionExpression: 'attribute_not_exists(user_id)',
           Item: expect.objectContaining({
             user_id: mockUserId,
-            sentence_id: 'idem-key-1',
+            sentence_id: '1710000000000-idem-key-1',
           }),
         }),
       );
       expect(mockGetCommand).toHaveBeenCalledWith(
         expect.objectContaining({
           TableName: 'vela-saved-sentences',
-          Key: { user_id: mockUserId, sentence_id: 'idem-key-1' },
+          Key: { user_id: mockUserId, sentence_id: '1710000000000-idem-key-1' },
         }),
       );
       expect(result).toEqual(existingItem);
@@ -1013,7 +1031,14 @@ describe('DynamoDB Operations', () => {
       mockSend.mockRejectedValueOnce(conditionalError).mockResolvedValueOnce({ Item: undefined });
 
       await expect(
-        myDictionaries.create(mockUserId, 'テスト', undefined, undefined, 'idem-key-2'),
+        myDictionaries.create(
+          mockUserId,
+          'テスト',
+          undefined,
+          undefined,
+          'idem-key-2',
+          1710000000000,
+        ),
       ).rejects.toThrow('Item not found or condition not met');
     });
   });

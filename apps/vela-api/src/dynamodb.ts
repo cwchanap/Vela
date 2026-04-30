@@ -720,12 +720,17 @@ export const myDictionaries = {
     sourceUrl?: string,
     context?: string,
     idempotencyKey?: string,
+    clientTimestamp?: number,
   ) {
     const timestamp = Date.now();
-    // When the client provides an idempotency key, use it as the sort key
-    // so retries collapse to the same DynamoDB item instead of creating
-    // duplicates.
-    const sentenceId = idempotencyKey ?? `${timestamp}-${randomUUID().slice(0, 8)}`;
+    // When the client provides an idempotency key, include a timestamp prefix
+    // in the sort key so getByUser() returns entries in chronological order.
+    // Use the client-provided timestamp when available (so retries with the
+    // same idempotency key produce the same sort key) otherwise fall back to
+    // the server timestamp.
+    const sentenceId = idempotencyKey
+      ? `${clientTimestamp ?? timestamp}-${idempotencyKey}`
+      : `${timestamp}-${randomUUID().slice(0, 8)}`;
     const item = {
       user_id: userId,
       sentence_id: sentenceId,

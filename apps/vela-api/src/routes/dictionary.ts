@@ -12,12 +12,17 @@ export interface JishoResult {
   common: boolean;
 }
 
+/** Convert katakana to hiragana for normalising readings during comparison. */
+const katakanaToHiragana = (str: string): string =>
+  str.replace(/[\u30A1-\u30F6]/g, (ch) => String.fromCharCode(ch.charCodeAt(0) - 0x60));
+
 const app = new Hono<{ Bindings: Env } & AuthContext>();
 
 app.use('*', requireAuth);
 
 const lookupQuerySchema = z.object({
   word: z.string().trim().min(1),
+  reading: z.string().trim().optional(),
 });
 
 const jishoWordSchema = z.object({
@@ -41,7 +46,7 @@ const jishoResponseSchema = z.object({
 });
 
 app.get('/lookup', zValidator('query', lookupQuerySchema), async (c) => {
-  const { word } = c.req.valid('query');
+  const { word, reading } = c.req.valid('query');
   const encoded = encodeURIComponent(word);
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 5_000);
@@ -75,16 +80,42 @@ app.get('/lookup', zValidator('query', lookupQuerySchema), async (c) => {
     return c.json({ error: 'No results found' }, 404);
   }
 
-  const first = items[0];
-  const japanese = first.japanese[0];
-  const senses = first.senses[0];
+  // When a reading hint is provided, try to find the Jisho entry whose
+  // reading matches the contextual reading. This disambiguates homographs
+  // (e.g. 今日 → きょう / today vs こんにち / hello). Normalize both
+  // sides to hiragana for comparison since Jisho and kuromoji may use
+  // different kana scripts.
+  let bestEntry = items[0];
+  if (reading) {
+    const normalised = katakanaToHiragana(reading);
+    for (const entry of items) {
+      for (const jp of entry.japanese) {
+        if (jp.reading && katakanaToHiragana(jp.reading) === normalised) {
+          bestEntry = entry;
+          break;
+        }
+      }
+      if (
+        bestEntry !== items[0] ||
+        (bestEntry === items[0] &&
+          bestEntry.japanese.some(
+            (jp) => jp.reading && katakanaToHiragana(jp.reading) === normalised,
+          ))
+      ) {
+        break;
+      }
+    }
+  }
+
+  const japanese = bestEntry.japanese[0];
+  const senses = bestEntry.senses[0];
 
   const result: JishoResult = {
     word: japanese?.word ?? word,
     reading: japanese?.reading ?? '',
     meanings: (senses?.english_definitions ?? []).slice(0, 3),
-    jlpt: first.jlpt[0],
-    common: first.is_common,
+    jlpt: bestEntry.jlpt[0],
+    common: bestEntry.is_common,
   };
 
   c.header('Cache-Control', 'private, max-age=86400');

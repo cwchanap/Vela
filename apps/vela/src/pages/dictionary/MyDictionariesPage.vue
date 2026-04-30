@@ -458,7 +458,12 @@ async function handleTokenClick(event: MouseEvent, token: Token, sentenceId: str
   const current = getActiveTokenIdentity(token, sentenceId);
   try {
     const result = await queryClient.fetchQuery(
-      dictionaryLookupQueryOptions(token.dictionary_form),
+      dictionaryLookupQueryOptions(
+        token.dictionary_form,
+        // Pass the contextual reading so the API can pick the matching
+        // Jisho entry for homographs (e.g. 今日 → きょう vs こんにち).
+        token.reading && token.reading !== token.surface_form ? token.reading : undefined,
+      ),
     );
     if (!isActiveTokenIdentity(current)) return;
     popoverLookup.value = result ?? 'notfound';
@@ -488,8 +493,14 @@ async function handleAddFlashcard() {
       // Kuromoji returns readings in katakana — convert to hiragana so the
       // downstream API stores the correct script in the `hiragana` field.
       reading:
+        // Use kuromoji reading only when the token is in dictionary (non-inflected)
+        // form. For inflected tokens (surface_form !== dictionary_form), kuromoji
+        // returns the reading of the inflected surface (e.g. タベタ for 食べた)
+        // rather than the lemma reading (たべる), so we prefer the Jisho result
+        // which was queried with the dictionary_form.
         activeToken.value.token.reading &&
-        activeToken.value.token.reading !== activeToken.value.token.surface_form
+        activeToken.value.token.reading !== activeToken.value.token.surface_form &&
+        activeToken.value.token.surface_form === activeToken.value.token.dictionary_form
           ? katakanaToHiragana(activeToken.value.token.reading)
           : lookup.reading,
       english_translation: lookup.meanings[0] ?? '',

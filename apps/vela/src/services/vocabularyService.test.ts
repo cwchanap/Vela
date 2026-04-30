@@ -46,6 +46,23 @@ describe('lookupWord', () => {
     expect(result).toEqual(mockResult);
   });
 
+  it('calls the dictionary API with reading parameter when provided', async () => {
+    const mockResult: JishoResult = {
+      word: '今日',
+      reading: 'きょう',
+      meanings: ['today'],
+      jlpt: 'jlpt-n5',
+      common: true,
+    };
+    vi.mocked(httpJsonAuth).mockResolvedValue(mockResult);
+
+    await lookupWord('今日', 'きょう');
+
+    expect(vi.mocked(httpJsonAuth)).toHaveBeenCalledWith(
+      'http://localhost:9005/api/dictionary/lookup?word=%E4%BB%8A%E6%97%A5&reading=%E3%81%8D%E3%82%87%E3%81%86',
+    );
+  });
+
   it('returns null on 404 responses', async () => {
     vi.mocked(httpJsonAuth).mockRejectedValue(
       Object.assign(new Error('Not Found'), { status: 404 }),
