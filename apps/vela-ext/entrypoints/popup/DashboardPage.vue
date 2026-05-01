@@ -93,7 +93,6 @@
 import { ref, onMounted, onUnmounted, watch, computed } from 'vue';
 import { getMyDictionaries } from '../utils/api';
 import { getValidIdToken, refreshIdToken, getUserEmail, clearAuthData } from '../utils/storage';
-import { clearAllPending } from '../utils/idb';
 import { getPendingQueueCount } from '../utils/pendingQueue';
 
 const emit = defineEmits<{
@@ -199,9 +198,10 @@ function toggleTheme() {
 
 async function handleLogout() {
   await clearAuthData();
-  await clearAllPending().catch((err) =>
-    console.error('[Vela] Failed to clear pending queue:', err),
-  );
+  // Don't clear the pending queue on logout — queued records are attributed
+  // to a specific userEmail and flushQueue() already discards mismatched
+  // records when a different user signs in. Wiping here silently loses saves
+  // if the same user re-authenticates (e.g. after a session-expiry auto-logout).
   emit('logout');
 }
 

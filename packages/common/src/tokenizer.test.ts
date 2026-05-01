@@ -48,7 +48,7 @@ describe('tokenize', () => {
     ]);
   });
 
-  it('filters out pure-whitespace tokens', async () => {
+  it('preserves whitespace tokens for display fidelity', async () => {
     mockTokenize.mockReturnValue([
       {
         surface_form: '私',
@@ -62,8 +62,10 @@ describe('tokenize', () => {
     ]);
 
     const result = await tokenize('私 は');
-    expect(result).toHaveLength(2);
-    expect(result.map((t) => t.surface_form)).toEqual(['私', 'は']);
+    expect(result).toHaveLength(3);
+    expect(result.map((t) => t.surface_form)).toEqual(['私', ' ', 'は']);
+    // Whitespace tokens keep their pos so downstream code can handle them
+    expect(result[1]!.pos).toBe('記号');
   });
 
   it('falls back to surface_form when reading or basic_form is missing', async () => {

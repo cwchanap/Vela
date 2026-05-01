@@ -151,11 +151,22 @@ function buildOverlay(sentences: string[]): ShadowRoot {
   const overlay = document.createElement('div');
   overlay.className = 'vela-overlay';
 
-  function renderSuccessState(savedCount: number, total?: number) {
+  function renderSuccessState(savedCount: number, total?: number, dropped?: number) {
     overlay.innerHTML = '';
     const done = document.createElement('div');
     done.className = 'vela-done';
-    if (total !== undefined && savedCount < total) {
+    if (dropped && dropped > 0) {
+      const queued = (total ?? savedCount + dropped) - savedCount - dropped;
+      const parts: string[] = [];
+      if (savedCount > 0) {
+        parts.push(`Saved ${savedCount} sentence${savedCount !== 1 ? 's' : ''}`);
+      }
+      if (queued > 0) {
+        parts.push(`queued ${queued} for later sync`);
+      }
+      parts.push(`${dropped} could not be saved (not signed in)`);
+      done.textContent = parts.join(', ');
+    } else if (total !== undefined && savedCount < total) {
       const queued = total - savedCount;
       done.textContent = `Saved ${savedCount} sentence${savedCount !== 1 ? 's' : ''}, queued ${queued} for later sync`;
     } else {
@@ -223,6 +234,7 @@ function buildOverlay(sentences: string[]): ShadowRoot {
           renderSuccessState(
             result.saved as number,
             (result as { saved: number; total: number }).total,
+            (result as { dropped?: number }).dropped,
           );
         } else {
           renderSuccessState(selected.length);

@@ -158,7 +158,7 @@ describe('saveSentenceToAPI', () => {
     global.fetch = vi.fn() as unknown as typeof fetch;
   });
 
-  it('returns true when auth token is valid and API returns 200', async () => {
+  it('returns "saved" when auth token is valid and API returns 200', async () => {
     vi.mocked(getValidIdToken).mockResolvedValue('valid-token');
     vi.mocked(global.fetch as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(
       new Response(null, { status: 200 }),
@@ -166,27 +166,27 @@ describe('saveSentenceToAPI', () => {
 
     const result = await saveSentenceToAPI('テスト文', 'https://example.com', 'Test Page');
 
-    expect(result).toBe(true);
+    expect(result).toBe('saved');
     expect(getValidIdToken).toHaveBeenCalledOnce();
     expect(global.fetch).toHaveBeenCalledOnce();
   });
 
-  it('returns false when getValidIdToken() throws (offline / no token)', async () => {
+  it('returns "queued" when getValidIdToken() throws (offline / no token)', async () => {
     vi.mocked(getValidIdToken).mockRejectedValue(new Error('No token available'));
 
     const result = await saveSentenceToAPI('テスト文', 'https://example.com', 'Test Page');
 
-    expect(result).toBe(false);
+    expect(result).toBe('queued');
     expect(global.fetch).not.toHaveBeenCalled();
   });
 
-  it('returns false without queuing when getValidIdToken() throws and no user email', async () => {
+  it('returns "dropped" without queuing when getValidIdToken() throws and no user email', async () => {
     vi.mocked(getValidIdToken).mockRejectedValue(new Error('No token available'));
     vi.mocked(getUserEmail).mockResolvedValue(null);
 
     const result = await saveSentenceToAPI('テスト文', 'https://example.com', 'Test Page');
 
-    expect(result).toBe(false);
+    expect(result).toBe('dropped');
     expect(global.fetch).not.toHaveBeenCalled();
     // Should NOT have queued — no user identity available
     expect(mockIdbStore.add).not.toHaveBeenCalled();
@@ -198,12 +198,12 @@ describe('saveSentenceToAPI', () => {
 
     const result = await saveSentenceToAPI('テスト文', 'https://example.com', 'Test Page');
 
-    expect(result).toBe(false);
+    expect(result).toBe('queued');
     expect(global.fetch).not.toHaveBeenCalled();
     expect(mockIdbStore.add).toHaveBeenCalled();
   });
 
-  it('returns false when fetch() throws (network error)', async () => {
+  it('returns "queued" when fetch() throws (network error)', async () => {
     vi.mocked(getValidIdToken).mockResolvedValue('valid-token');
     vi.mocked(global.fetch as unknown as ReturnType<typeof vi.fn>).mockRejectedValue(
       new Error('Failed to fetch'),
@@ -211,10 +211,10 @@ describe('saveSentenceToAPI', () => {
 
     const result = await saveSentenceToAPI('テスト文');
 
-    expect(result).toBe(false);
+    expect(result).toBe('queued');
   });
 
-  it('returns false when response is 401 and refreshIdToken() throws', async () => {
+  it('returns "queued" when response is 401 and refreshIdToken() throws', async () => {
     vi.mocked(getValidIdToken).mockResolvedValue('expired-token');
     vi.mocked(global.fetch as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(
       new Response(null, { status: 401 }),
@@ -223,11 +223,11 @@ describe('saveSentenceToAPI', () => {
 
     const result = await saveSentenceToAPI('テスト文', 'https://example.com');
 
-    expect(result).toBe(false);
+    expect(result).toBe('queued');
     expect(refreshIdToken).toHaveBeenCalledOnce();
   });
 
-  it('returns false when response is non-2xx (e.g. 500)', async () => {
+  it('returns "queued" when response is non-2xx (e.g. 500)', async () => {
     vi.mocked(getValidIdToken).mockResolvedValue('valid-token');
     vi.mocked(global.fetch as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(
       new Response(null, { status: 500 }),
@@ -235,7 +235,7 @@ describe('saveSentenceToAPI', () => {
 
     const result = await saveSentenceToAPI('テスト文');
 
-    expect(result).toBe(false);
+    expect(result).toBe('queued');
   });
 });
 
@@ -474,7 +474,7 @@ describe('SAVE_SENTENCES message handler', () => {
     await result;
   });
 
-  it('resolves with { saved, total } when all saves succeed', async () => {
+  it('resolves with { saved, dropped, total } when all saves succeed', async () => {
     vi.mocked(getValidIdToken).mockResolvedValue('valid-token');
     vi.mocked(global.fetch as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(
       new Response(null, { status: 200 }),
@@ -483,7 +483,7 @@ describe('SAVE_SENTENCES message handler', () => {
     const handler = getSaveSentencesHandler();
     const result = await handler({ type: 'SAVE_SENTENCES', sentences: ['テスト1', 'テスト2'] });
 
-    expect(result).toEqual({ saved: 2, total: 2 });
+    expect(result).toEqual({ saved: 2, dropped: 0, total: 2 });
   });
 
   it('resolves with partial results when some saves fail', async () => {
@@ -495,16 +495,16 @@ describe('SAVE_SENTENCES message handler', () => {
     const handler = getSaveSentencesHandler();
     const result = await handler({ type: 'SAVE_SENTENCES', sentences: ['テスト1', 'テスト2'] });
 
-    expect(result).toEqual({ saved: 1, total: 2 });
+    expect(result).toEqual({ saved: 1, dropped: 0, total: 2 });
   });
 
-  it('resolves with { saved: 0, total } when all saves are queued (offline)', async () => {
+  it('resolves with { saved: 0, dropped: 0, total } when all saves are queued (offline)', async () => {
     vi.mocked(getValidIdToken).mockRejectedValue(new Error('No token'));
 
     const handler = getSaveSentencesHandler();
     const result = await handler({ type: 'SAVE_SENTENCES', sentences: ['テスト1', 'テスト2'] });
 
-    expect(result).toEqual({ saved: 0, total: 2 });
+    expect(result).toEqual({ saved: 0, dropped: 0, total: 2 });
   });
 });
 
