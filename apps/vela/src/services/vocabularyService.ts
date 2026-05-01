@@ -11,7 +11,7 @@ export interface JishoResult {
 
 export interface AddFlashcardPayload {
   japanese_word: string;
-  reading: string;
+  reading?: string;
   english_translation: string;
   example_sentence_jp?: string;
   source_url?: string;

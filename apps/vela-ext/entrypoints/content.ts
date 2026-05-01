@@ -43,6 +43,9 @@ export function scanJapaneseSentences(): string[] {
     'FONT',
   ]);
   const denylist = new Set(['SCRIPT', 'STYLE', 'NOSCRIPT']);
+  // Ruby annotation elements whose text nodes (furigana) must be excluded
+  // to avoid corrupting sentences (e.g. <ruby>漢<rt>かん</rt>字 → "漢かん字").
+  const rubyAnnotationTags = new Set(['RT', 'RP']);
 
   // Walk all text nodes, then group them by their nearest block-level
   // ancestor.  This ensures sentences split across inline markup (e.g.
@@ -64,6 +67,17 @@ export function scanJapaneseSentences(): string[] {
         break;
       }
       ancestor = ancestor.parentElement;
+    }
+    if (denied) continue;
+
+    // Skip text nodes inside <rt> or <rp> ruby annotations
+    let rubyAncestor: Element | null = node.parentElement;
+    while (rubyAncestor && rubyAncestor !== document.body && inlineTags.has(rubyAncestor.tagName)) {
+      if (rubyAnnotationTags.has(rubyAncestor.tagName)) {
+        denied = true;
+        break;
+      }
+      rubyAncestor = rubyAncestor.parentElement;
     }
     if (denied) continue;
 
