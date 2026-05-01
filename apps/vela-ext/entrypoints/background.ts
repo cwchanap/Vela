@@ -126,12 +126,19 @@ export async function saveSentenceToAPI(
   try {
     idToken = await getValidIdToken();
   } catch (err) {
+    // Don't queue if we can't identify the user — anonymous records would
+    // leak across accounts since flushQueue skips the ownership check when
+    // userEmail is absent.
+    if (!currentUserEmail) {
+      console.error('[Vela] saveSentenceToAPI: no user identity, discarding save');
+      return false;
+    }
     console.error('[Vela] saveSentenceToAPI: auth token failed, queuing:', err);
     await enqueue({
       sentence,
       sourceUrl,
       context,
-      userEmail: currentUserEmail ?? undefined,
+      userEmail: currentUserEmail,
       idempotencyKey,
       timestamp: clientTimestamp,
       retries: 0,

@@ -9,19 +9,88 @@ export function scanJapaneseSentences(): string[] {
 
   if (!document.body) return [];
 
-  const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+  // Inline tags that should NOT break text grouping.  Any element not in
+  // this set (or <body>) acts as a block-level boundary.
+  const inlineTags = new Set([
+    'SPAN',
+    'A',
+    'B',
+    'I',
+    'EM',
+    'STRONG',
+    'SMALL',
+    'SUB',
+    'SUP',
+    'ABBR',
+    'MARK',
+    'CODE',
+    'TIME',
+    'U',
+    'RUBY',
+    'RT',
+    'RP',
+    'BDI',
+    'BDO',
+    'CITE',
+    'DFN',
+    'KBD',
+    'SAMP',
+    'VAR',
+    'WBR',
+    'DATA',
+    'Q',
+    'BR',
+    'FONT',
+  ]);
   const denylist = new Set(['SCRIPT', 'STYLE', 'NOSCRIPT']);
+
+  // Walk all text nodes, then group them by their nearest block-level
+  // ancestor.  This ensures sentences split across inline markup (e.g.
+  // 私は<span>日本語</span>を勉強します。) are collected as one continuous
+  // string rather than individual fragments.
+  const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+  const blockGroups = new Map<Element, string[]>();
   let node: Node | null;
 
   while ((node = walker.nextNode())) {
-    if (node.parentElement && denylist.has(node.parentElement.tagName)) continue;
-    const text = (node.textContent ?? '').trim();
-    if (!japaneseRe.test(text)) continue;
+    if (!node.parentElement) continue;
 
-    // Split the text node into candidate sentences at sentence-ending
-    // punctuation boundaries. This ensures paragraphs longer than 200 chars
-    // are still mined for individual sentences rather than dropped entirely.
-    const candidates = text.split(sentenceSplitRe).map((s) => s.trim());
+    // Skip denylisted elements at any ancestor level
+    let ancestor: Element | null = node.parentElement;
+    let denied = false;
+    while (ancestor && ancestor !== document.body) {
+      if (denylist.has(ancestor.tagName)) {
+        denied = true;
+        break;
+      }
+      ancestor = ancestor.parentElement;
+    }
+    if (denied) continue;
+
+    // Find the nearest block-level (non-inline) ancestor
+    let blockAncestor = node.parentElement;
+    while (blockAncestor !== document.body && inlineTags.has(blockAncestor.tagName)) {
+      const parent = blockAncestor.parentElement;
+      if (!parent) break;
+      blockAncestor = parent;
+    }
+
+    const text = (node.textContent ?? '').trim();
+    if (!text) continue;
+
+    let group = blockGroups.get(blockAncestor);
+    if (!group) {
+      group = [];
+      blockGroups.set(blockAncestor, group);
+    }
+    group.push(text);
+  }
+
+  for (const [, parts] of blockGroups) {
+    const combined = parts.join('');
+    if (!japaneseRe.test(combined)) continue;
+
+    const candidates = combined.split(sentenceSplitRe).map((s) => s.trim());
 
     for (const candidate of candidates) {
       if (candidate.length >= 5 && candidate.length <= 200 && !seen.has(candidate)) {

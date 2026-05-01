@@ -154,6 +154,7 @@ describe('saveSentenceToAPI', () => {
     vi.mocked(getValidIdToken).mockReset();
     vi.mocked(refreshIdToken).mockReset();
     vi.mocked(getUserEmail).mockReset().mockResolvedValue('user@test.com');
+    mockIdbStore.add.mockClear();
     global.fetch = vi.fn() as unknown as typeof fetch;
   });
 
@@ -177,6 +178,29 @@ describe('saveSentenceToAPI', () => {
 
     expect(result).toBe(false);
     expect(global.fetch).not.toHaveBeenCalled();
+  });
+
+  it('returns false without queuing when getValidIdToken() throws and no user email', async () => {
+    vi.mocked(getValidIdToken).mockRejectedValue(new Error('No token available'));
+    vi.mocked(getUserEmail).mockResolvedValue(null);
+
+    const result = await saveSentenceToAPI('テスト文', 'https://example.com', 'Test Page');
+
+    expect(result).toBe(false);
+    expect(global.fetch).not.toHaveBeenCalled();
+    // Should NOT have queued — no user identity available
+    expect(mockIdbStore.add).not.toHaveBeenCalled();
+  });
+
+  it('queues with userEmail when getValidIdToken() throws but email is known', async () => {
+    vi.mocked(getValidIdToken).mockRejectedValue(new Error('No token available'));
+    vi.mocked(getUserEmail).mockResolvedValue('known@test.com');
+
+    const result = await saveSentenceToAPI('テスト文', 'https://example.com', 'Test Page');
+
+    expect(result).toBe(false);
+    expect(global.fetch).not.toHaveBeenCalled();
+    expect(mockIdbStore.add).toHaveBeenCalled();
   });
 
   it('returns false when fetch() throws (network error)', async () => {
