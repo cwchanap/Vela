@@ -252,7 +252,7 @@ describe('DashboardPage', () => {
   });
 
   describe('Logout Functionality', () => {
-    it('should call clearAuthData and clearAllPending when logout button is clicked', async () => {
+    it('should call clearAuthData (but NOT clear pending queue) when logout button is clicked', async () => {
       wrapper = mount(DashboardPage);
       await flushPromises();
 
@@ -261,7 +261,9 @@ describe('DashboardPage', () => {
       await flushPromises();
 
       expect(mockClearAuthData).toHaveBeenCalled();
-      expect(mockClearAllPending).toHaveBeenCalled();
+      // Pending queue is NOT cleared on logout — flushQueue handles
+      // cross-account cleanup via userEmail ownership checks.
+      expect(mockClearAllPending).not.toHaveBeenCalled();
     });
 
     it('should emit logout event when logout button is clicked', async () => {
@@ -579,6 +581,8 @@ describe('DashboardPage', () => {
         await vi.advanceTimersByTimeAsync(2000);
 
         expect(mockClearAuthData).toHaveBeenCalled();
+        // Pending queue should NOT be cleared on session-expiry auto-logout
+        expect(mockClearAllPending).not.toHaveBeenCalled();
         expect(wrapper.emitted('logout')).toBeTruthy();
       } finally {
         vi.useRealTimers();

@@ -462,7 +462,15 @@ async function handleTokenClick(event: MouseEvent, token: Token, sentenceId: str
         token.dictionary_form,
         // Pass the contextual reading so the API can pick the matching
         // Jisho entry for homographs (e.g. 今日 → きょう vs こんにち).
-        token.reading && token.reading !== token.surface_form ? token.reading : undefined,
+        // Only use the kuromoji reading when the token is in its dictionary
+        // (un-inflected) form — for inflected tokens the reading is the
+        // surface form's pronunciation, not the lemma's, so it would not
+        // match Jisho's lemma reading.
+        token.reading &&
+          token.reading !== token.surface_form &&
+          token.surface_form === token.dictionary_form
+          ? token.reading
+          : undefined,
       ),
     );
     if (!isActiveTokenIdentity(current)) return;

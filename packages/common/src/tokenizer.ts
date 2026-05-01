@@ -38,14 +38,11 @@ export async function tokenize(text: string): Promise<Token[]> {
     });
   }
   const tokenizer = await tokenizerPromise;
-  return tokenizer
-    .tokenize(text)
-    .filter((t) => t.surface_form.trim() !== '')
-    .map((t) => ({
-      surface_form: t.surface_form,
-      reading: t.reading && t.reading !== '*' ? t.reading : t.surface_form,
-      dictionary_form: t.basic_form && t.basic_form !== '*' ? t.basic_form : t.surface_form,
-      pos: t.pos,
-      pos_detail_1: t.pos_detail_1 ?? '',
-    }));
+  return tokenizer.tokenize(text).map((t) => ({
+    surface_form: t.surface_form,
+    reading: t.reading && t.reading !== '*' ? t.reading : t.surface_form,
+    dictionary_form: t.basic_form && t.basic_form !== '*' ? t.basic_form : t.surface_form,
+    pos: t.pos,
+    pos_detail_1: t.pos_detail_1 ?? '',
+  }));
 }

@@ -109,11 +109,13 @@ async function incrementRetry(record: PendingSentenceRecord): Promise<void> {
 
 // ── API save (offline-aware) ─────────────────────────────────────────────────
 
+export type SaveResult = 'saved' | 'queued' | 'dropped';
+
 export async function saveSentenceToAPI(
   sentence: string,
   sourceUrl?: string,
   context?: string,
-): Promise<boolean> {
+): Promise<SaveResult> {
   let idToken: string;
   // Capture the current user email upfront so queued records are attributed correctly.
   const currentUserEmail = await getUserEmail();
@@ -131,7 +133,7 @@ export async function saveSentenceToAPI(
     // userEmail is absent.
     if (!currentUserEmail) {
       console.error('[Vela] saveSentenceToAPI: no user identity, discarding save');
-      return false;
+      return 'dropped';
     }
     console.error('[Vela] saveSentenceToAPI: auth token failed, queuing:', err);
     await enqueue({
@@ -143,7 +145,7 @@ export async function saveSentenceToAPI(
       timestamp: clientTimestamp,
       retries: 0,
     });
-    return false;
+    return 'queued';
   }
 
   let response: Response;
@@ -170,7 +172,7 @@ export async function saveSentenceToAPI(
       timestamp: clientTimestamp,
       retries: 0,
     });
-    return false;
+    return 'queued';
   }
 
   if (response.status === 401) {
@@ -187,7 +189,7 @@ export async function saveSentenceToAPI(
         timestamp: clientTimestamp,
         retries: 0,
       });
-      return false;
+      return 'queued';
     }
     try {
       response = await fetch(`${API_BASE_URL}/my-dictionaries`, {
@@ -212,7 +214,7 @@ export async function saveSentenceToAPI(
         timestamp: clientTimestamp,
         retries: 0,
       });
-      return false;
+      return 'queued';
     }
   }
 
@@ -226,10 +228,10 @@ export async function saveSentenceToAPI(
       timestamp: clientTimestamp,
       retries: 0,
     });
-    return false;
+    return 'queued';
   }
 
-  return true;
+  return 'saved';
 }
 
 // ── Flush queue ──────────────────────────────────────────────────────────────
@@ -378,14 +380,24 @@ export default defineBackground(() => {
       if (!selectedText) return;
 
       try {
-        const saved = await saveSentenceToAPI(selectedText, tab?.url, tab?.title);
+        const result = await saveSentenceToAPI(selectedText, tab?.url, tab?.title);
+        const title =
+          result === 'saved'
+            ? 'Vela - Entry Saved'
+            : result === 'queued'
+              ? 'Vela - Entry Queued'
+              : 'Vela - Save Failed';
+        const message =
+          result === 'saved'
+            ? `Saved: ${selectedText.substring(0, 50)}${selectedText.length > 50 ? '...' : ''}`
+            : result === 'queued'
+              ? `Queued for sync: ${selectedText.substring(0, 50)}${selectedText.length > 50 ? '...' : ''}`
+              : `Could not save (not signed in): ${selectedText.substring(0, 50)}${selectedText.length > 50 ? '...' : ''}`;
         browser.notifications.create({
           type: 'basic',
           iconUrl: browser.runtime.getURL('/icon/128.png'),
-          title: saved ? 'Vela - Entry Saved' : 'Vela - Entry Queued',
-          message: saved
-            ? `Saved: ${selectedText.substring(0, 50)}${selectedText.length > 50 ? '...' : ''}`
-            : `Queued for sync: ${selectedText.substring(0, 50)}${selectedText.length > 50 ? '...' : ''}`,
+          title,
+          message,
         });
       } catch (error) {
         console.error('[Vela] Error in save-to-vela handler:', error);
@@ -434,9 +446,10 @@ export default defineBackground(() => {
       return Promise.all(
         (sentences as string[]).map((sentence) => saveSentenceToAPI(sentence, sourceUrl, context)),
       ).then((results) => {
-        const saved = results.filter((ok) => ok).length;
+        const saved = results.filter((r) => r === 'saved').length;
+        const dropped = results.filter((r) => r === 'dropped').length;
         const total = results.length;
-        return { saved, total } as const;
+        return { saved, dropped, total } as const;
       });
     },
   );
