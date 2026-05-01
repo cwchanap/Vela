@@ -1156,6 +1156,41 @@ describe('MyDictionariesPage', () => {
           }),
         );
       });
+
+      it('omits reading from payload when Jisho returns an empty reading', async () => {
+        vi.mocked(myDictionariesService.getMyDictionaries).mockResolvedValue([mockEntry]);
+        vi.mocked(vocabularyService.addFlashcard).mockResolvedValue({
+          vocabulary_id: 'vocab-1',
+          created: true,
+          alreadyInSRS: false,
+        });
+
+        wrapper = mountComponent();
+        await flushPromises();
+
+        wrapper.vm.activeToken = {
+          token: {
+            surface_form: '日本語',
+            reading: '日本語', // kuromoji doesn't know the reading
+            dictionary_form: '日本語',
+            pos: '名詞',
+            pos_detail_1: '一般',
+          },
+          sentenceId: 'sent-1',
+        };
+        wrapper.vm.popoverLookup = {
+          word: '日本語',
+          reading: '', // Jisho returns empty string
+          meanings: ['Japanese language'],
+          common: true,
+        };
+
+        await wrapper.vm.handleAddFlashcard();
+        await flushPromises();
+
+        const callArgs = vi.mocked(vocabularyService.addFlashcard).mock.calls[0]![0];
+        expect(callArgs).not.toHaveProperty('reading');
+      });
     });
 
     it('sets popoverLookup to notfound (not loading) when fetchQuery throws', async () => {

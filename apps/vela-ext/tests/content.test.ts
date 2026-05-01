@@ -129,6 +129,26 @@ describe('scanJapaneseSentences', () => {
     const result = scanJapaneseSentences();
     expect(result).toContain('彼は本当に優しい人です。');
   });
+
+  it('excludes ruby annotation text (rt/rp elements)', () => {
+    document.body.innerHTML = '<p><ruby>漢<rt>かん</rt>字<rt>じ</rt></ruby>を勉強しています。</p>';
+
+    const result = scanJapaneseSentences();
+    expect(result).toContain('漢字を勉強しています。');
+    expect(result).not.toContain('かん');
+    expect(result).not.toContain('じ');
+  });
+
+  it('excludes rp fallback text from ruby annotations', () => {
+    document.body.innerHTML =
+      '<p><ruby>日本語<rp>(</rp><rt>にほんご</rt><rp>)</rp></ruby>を学びます。</p>';
+
+    const result = scanJapaneseSentences();
+    expect(result).toContain('日本語を学びます。');
+    expect(result).not.toContain('にほんご');
+    expect(result).not.toContain('(');
+    expect(result).not.toContain(')');
+  });
 });
 
 describe('content script message listener', () => {

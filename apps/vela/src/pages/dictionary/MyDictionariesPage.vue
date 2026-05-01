@@ -492,25 +492,29 @@ async function handleAddFlashcard() {
 
   flashcardState.value = 'loading';
   try {
+    // Prefer the kuromoji token reading (contextual) over Jisho's first result.
+    // Kuromoji disambiguates homographs correctly (e.g. 今日→こんいち vs きょう).
+    // When kuromoji doesn't know a word it falls back to surface_form as reading;
+    // in that case prefer Jisho's reading instead.
+    // Kuromoji returns readings in katakana — convert to hiragana so the
+    // downstream API stores the correct script in the `hiragana` field.
+    const reading =
+      // Use kuromoji reading only when the token is in dictionary (non-inflected)
+      // form. For inflected tokens (surface_form !== dictionary_form), kuromoji
+      // returns the reading of the inflected surface (e.g. タベタ for 食べた)
+      // rather than the lemma reading (たべる), so we prefer the Jisho result
+      // which was queried with the dictionary_form.
+      activeToken.value.token.reading &&
+      activeToken.value.token.reading !== activeToken.value.token.surface_form &&
+      activeToken.value.token.surface_form === activeToken.value.token.dictionary_form
+        ? katakanaToHiragana(activeToken.value.token.reading)
+        : lookup.reading;
+
     const result = await addFlashcardMutation.mutateAsync({
       japanese_word: activeToken.value.token.dictionary_form,
-      // Prefer the kuromoji token reading (contextual) over Jisho's first result.
-      // Kuromoji disambiguates homographs correctly (e.g. 今日→こんいち vs きょう).
-      // When kuromoji doesn't know a word it falls back to surface_form as reading;
-      // in that case prefer Jisho's reading instead.
-      // Kuromoji returns readings in katakana — convert to hiragana so the
-      // downstream API stores the correct script in the `hiragana` field.
-      reading:
-        // Use kuromoji reading only when the token is in dictionary (non-inflected)
-        // form. For inflected tokens (surface_form !== dictionary_form), kuromoji
-        // returns the reading of the inflected surface (e.g. タベタ for 食べた)
-        // rather than the lemma reading (たべる), so we prefer the Jisho result
-        // which was queried with the dictionary_form.
-        activeToken.value.token.reading &&
-        activeToken.value.token.reading !== activeToken.value.token.surface_form &&
-        activeToken.value.token.surface_form === activeToken.value.token.dictionary_form
-          ? katakanaToHiragana(activeToken.value.token.reading)
-          : lookup.reading,
+      // Omit reading when empty — the API schema rejects empty strings (min(1))
+      // but accepts the field being absent (optional).
+      ...(reading ? { reading } : {}),
       english_translation: lookup.meanings[0] ?? '',
       ...(entry?.sentence ? { example_sentence_jp: entry.sentence } : {}),
       ...(entry?.source_url ? { source_url: entry.source_url } : {}),
