@@ -61,7 +61,7 @@ describe('GET /lookup', () => {
     const res = await app.request('/lookup?word=食べる', { headers: AUTH_HEADER });
 
     expect(res.status).toBe(200);
-    expect(res.headers.get('Cache-Control')).toBe('public, max-age=86400');
+    expect(res.headers.get('Cache-Control')).toBe('private, max-age=86400');
     const body = (await res.json()) as any;
     expect(body).toEqual({
       word: '食べる',
@@ -298,5 +298,34 @@ describe('GET /lookup', () => {
     const body = (await res.json()) as any;
     // Falls back to first entry since no reading matches
     expect(body.reading).toBe('こんにち');
+  });
+
+  test('returns the matched japanese variant, not always japanese[0]', async () => {
+    // Single entry with multiple japanese variants — the second variant
+    // matches the reading hint but japanese[0] has a different reading.
+    mockFetch.mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        data: [
+          {
+            japanese: [
+              { word: '大人', reading: 'おとな' },
+              { word: '大人', reading: 'だいにん' },
+            ],
+            senses: [{ english_definitions: ['adult'] }],
+            jlpt: ['jlpt-n3'],
+            is_common: true,
+          },
+        ],
+      }),
+    });
+
+    const app = createTestApp();
+    const res = await app.request('/lookup?word=大人&reading=だいにん', { headers: AUTH_HEADER });
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as any;
+    expect(body.reading).toBe('だいにん');
+    expect(body.word).toBe('大人');
   });
 });

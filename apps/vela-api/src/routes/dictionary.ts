@@ -86,33 +86,28 @@ app.get('/lookup', zValidator('query', lookupQuerySchema), async (c) => {
   // sides to hiragana for comparison since Jisho and kuromoji may use
   // different kana scripts.
   let bestEntry = items[0];
+  let bestJp = bestEntry.japanese[0];
   if (reading) {
     const normalised = katakanaToHiragana(reading);
     for (const entry of items) {
       for (const jp of entry.japanese) {
         if (jp.reading && katakanaToHiragana(jp.reading) === normalised) {
           bestEntry = entry;
+          bestJp = jp;
           break;
         }
       }
-      if (
-        bestEntry !== items[0] ||
-        (bestEntry === items[0] &&
-          bestEntry.japanese.some(
-            (jp) => jp.reading && katakanaToHiragana(jp.reading) === normalised,
-          ))
-      ) {
+      if (bestJp?.reading && katakanaToHiragana(bestJp.reading) === normalised) {
         break;
       }
     }
   }
 
-  const japanese = bestEntry.japanese[0];
   const senses = bestEntry.senses[0];
 
   const result: JishoResult = {
-    word: japanese?.word ?? word,
-    reading: japanese?.reading ?? '',
+    word: bestJp?.word ?? word,
+    reading: bestJp?.reading ?? '',
     meanings: (senses?.english_definitions ?? []).slice(0, 3),
     jlpt: bestEntry.jlpt[0],
     common: bestEntry.is_common,

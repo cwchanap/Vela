@@ -115,6 +115,20 @@ describe('scanJapaneseSentences', () => {
     expect(result).not.toContain('スタイルコメント');
     expect(result).not.toContain('JavaScriptを有効にしてください');
   });
+
+  it('merges text across inline elements into a single sentence', () => {
+    document.body.innerHTML = '<p>私は<span>日本語</span>を勉強します。</p>';
+
+    const result = scanJapaneseSentences();
+    expect(result).toContain('私は日本語を勉強します。');
+  });
+
+  it('merges text across nested inline elements', () => {
+    document.body.innerHTML = '<p>彼は<em><strong>本当に</strong></em>優しい人です。</p>';
+
+    const result = scanJapaneseSentences();
+    expect(result).toContain('彼は本当に優しい人です。');
+  });
 });
 
 describe('content script message listener', () => {
