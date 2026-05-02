@@ -740,6 +740,44 @@ describe('DynamoDB Operations', () => {
       expect(result.item.id).not.toBe(result2.item.id);
     });
 
+    test('create should not reuse a different homograph found by findByWord', async () => {
+      // Simulate an existing 今日:キョウ row (post-migration, has normalized_japanese_word)
+      const existingKyoo = {
+        id: '今日:キョウ',
+        japanese_word: '今日',
+        normalized_japanese_word: '今日',
+        hiragana: 'きょう',
+        english_translation: 'today',
+        created_at: '2026-01-01T00:00:00.000Z',
+      };
+
+      // findByWord returns the existing 今日:キョウ row
+      mockSend.mockResolvedValueOnce({
+        Items: [existingKyoo],
+        LastEvaluatedKey: undefined,
+      });
+      // PutCommand succeeds for 今日:コンニチ
+      mockSend.mockResolvedValueOnce({});
+
+      const result = await vocabulary.create({
+        japanese_word: '今日',
+        hiragana: 'こんにち',
+        english_translation: 'hello (formal)',
+        created_at: '2026-04-20T00:00:00.000Z',
+      });
+
+      // Should NOT reuse 今日:キョウ — must create 今日:コンニチ
+      expect(result.item.id).toBe('今日:コンニチ');
+      expect(result.created).toBe(true);
+      expect(mockPutCommand).toHaveBeenCalledWith(
+        expect.objectContaining({
+          TableName: 'vela-vocabulary',
+          ConditionExpression: 'attribute_not_exists(id)',
+          Item: expect.objectContaining({ id: '今日:コンニチ' }),
+        }),
+      );
+    });
+
     test('create should omit reading from id when hiragana is empty', async () => {
       // findByWord (empty) + PutCommand
       mockSend.mockResolvedValueOnce({}).mockResolvedValueOnce({});
