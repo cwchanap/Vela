@@ -745,7 +745,7 @@ export const myDictionaries = {
       const command = new PutCommand({
         TableName: TABLE_NAMES.MY_DICTIONARIES,
         Item: item,
-        ConditionExpression: 'attribute_not_exists(user_id)',
+        ConditionExpression: 'attribute_not_exists(sentence_id)',
       });
       await docClient.send(command);
       return item;
@@ -1104,8 +1104,6 @@ export const userVocabularyProgress = {
       }
       handleDynamoError(error);
     }
-
-    return progress;
   },
 
   /**

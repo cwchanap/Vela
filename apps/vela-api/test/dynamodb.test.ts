@@ -1008,7 +1008,7 @@ describe('DynamoDB Operations', () => {
       expect(mockPutCommand).toHaveBeenCalledWith(
         expect.objectContaining({
           TableName: 'vela-saved-sentences',
-          ConditionExpression: 'attribute_not_exists(user_id)',
+          ConditionExpression: 'attribute_not_exists(sentence_id)',
           Item: expect.objectContaining({
             user_id: mockUserId,
             sentence_id: '1710000000000-idem-key-1',

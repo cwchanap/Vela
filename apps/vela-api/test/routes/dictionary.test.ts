@@ -96,6 +96,32 @@ describe('GET /lookup', () => {
     expect(body.jlpt).toBeUndefined();
   });
 
+  test('collects definitions from all senses and dedupes', async () => {
+    mockFetch.mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        data: [
+          {
+            japanese: [{ word: '上', reading: 'うえ' }],
+            senses: [
+              { english_definitions: ['above', 'up'] },
+              { english_definitions: ['top', 'above'] },
+              { english_definitions: ['over'] },
+            ],
+            jlpt: [],
+            is_common: true,
+          },
+        ],
+      }),
+    });
+
+    const app = createTestApp();
+    const res = await app.request('/lookup?word=上', { headers: AUTH_HEADER });
+    const body = (await res.json()) as any;
+    // 'above' should be deduped, result should be: ['above', 'up', 'top']
+    expect(body.meanings).toEqual(['above', 'up', 'top']);
+  });
+
   test('returns 404 when Jisho returns empty data', async () => {
     mockFetch.mockResolvedValue({
       ok: true,

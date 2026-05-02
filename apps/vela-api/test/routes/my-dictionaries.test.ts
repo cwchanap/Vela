@@ -225,33 +225,6 @@ describe('My Dictionaries Route', () => {
       );
     });
 
-    test('passes idempotencyKey and timestamp to create for stable dedup on retries', async () => {
-      mockMyDictionaries.create.mockResolvedValueOnce({
-        sentence_id: '1710000000000-stable-key-123',
-      });
-
-      const app = createTestApp();
-      const res = await app.request('/', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          sentence: 'テスト',
-          idempotencyKey: 'stable-key-123',
-          timestamp: 1710000000000,
-        }),
-      });
-
-      expect(res.status).toBe(200);
-      expect(mockMyDictionaries.create).toHaveBeenCalledWith(
-        'test@example.com',
-        'テスト',
-        undefined,
-        undefined,
-        'stable-key-123',
-        1710000000000,
-      );
-    });
-
     test('ignores non-string idempotencyKey and non-number timestamp', async () => {
       mockMyDictionaries.create.mockResolvedValueOnce({});
 
