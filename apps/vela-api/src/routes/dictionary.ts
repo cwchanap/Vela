@@ -103,12 +103,16 @@ app.get('/lookup', zValidator('query', lookupQuerySchema), async (c) => {
     }
   }
 
-  const senses = bestEntry.senses[0];
+  // Collect english_definitions from ALL senses, dedupe, then cap at 3.
+  const allDefinitions = bestEntry.senses.flatMap(
+    (s: { english_definitions?: string[] }) => s.english_definitions ?? [],
+  );
+  const meanings = [...new Set(allDefinitions)].slice(0, 3);
 
   const result: JishoResult = {
     word: bestJp?.word ?? word,
     reading: bestJp?.reading ?? '',
-    meanings: (senses?.english_definitions ?? []).slice(0, 3),
+    meanings,
     jlpt: bestEntry.jlpt[0],
     common: bestEntry.is_common,
   };

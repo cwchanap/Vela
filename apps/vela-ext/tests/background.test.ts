@@ -233,6 +233,19 @@ describe('saveSentenceToAPI', () => {
     expect(result).toBe('queued');
   });
 
+  it('returns "dropped" when fetch() throws and no user email', async () => {
+    vi.mocked(getValidIdToken).mockResolvedValue('valid-token');
+    vi.mocked(getUserEmail).mockResolvedValue(null);
+    vi.mocked(global.fetch as unknown as ReturnType<typeof vi.fn>).mockRejectedValue(
+      new Error('Failed to fetch'),
+    );
+
+    const result = await saveSentenceToAPI('テスト文');
+
+    expect(result).toBe('dropped');
+    expect(mockIdbStore.add).not.toHaveBeenCalled();
+  });
+
   it('returns "queued" when response is 401 and refreshIdToken() throws', async () => {
     vi.mocked(getValidIdToken).mockResolvedValue('expired-token');
     vi.mocked(global.fetch as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(
@@ -246,6 +259,20 @@ describe('saveSentenceToAPI', () => {
     expect(refreshIdToken).toHaveBeenCalledOnce();
   });
 
+  it('returns "dropped" when 401, refreshIdToken() throws, and no user email', async () => {
+    vi.mocked(getValidIdToken).mockResolvedValue('expired-token');
+    vi.mocked(getUserEmail).mockResolvedValue(null);
+    vi.mocked(global.fetch as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(
+      new Response(null, { status: 401 }),
+    );
+    vi.mocked(refreshIdToken).mockRejectedValue(new Error('Refresh failed'));
+
+    const result = await saveSentenceToAPI('テスト文', 'https://example.com');
+
+    expect(result).toBe('dropped');
+    expect(mockIdbStore.add).not.toHaveBeenCalled();
+  });
+
   it('returns "queued" when response is non-2xx (e.g. 500)', async () => {
     vi.mocked(getValidIdToken).mockResolvedValue('valid-token');
     vi.mocked(global.fetch as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(
@@ -255,6 +282,19 @@ describe('saveSentenceToAPI', () => {
     const result = await saveSentenceToAPI('テスト文');
 
     expect(result).toBe('queued');
+  });
+
+  it('returns "dropped" when response is non-2xx and no user email', async () => {
+    vi.mocked(getValidIdToken).mockResolvedValue('valid-token');
+    vi.mocked(getUserEmail).mockResolvedValue(null);
+    vi.mocked(global.fetch as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(
+      new Response(null, { status: 500 }),
+    );
+
+    const result = await saveSentenceToAPI('テスト文');
+
+    expect(result).toBe('dropped');
+    expect(mockIdbStore.add).not.toHaveBeenCalled();
   });
 });
 

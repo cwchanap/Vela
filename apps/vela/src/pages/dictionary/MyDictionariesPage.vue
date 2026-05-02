@@ -342,6 +342,17 @@ function isActiveTokenIdentity(identity: ActiveTokenIdentity): boolean {
   );
 }
 
+/** Return the token's reading when it is a reliable dictionary-form reading:
+ *  - reading exists and differs from surface_form (not a fallback)
+ *  - surface_form === dictionary_form (token is un-inflected) */
+function getDictionaryFormReading(token: Token): string | undefined {
+  return token.reading &&
+    token.reading !== token.surface_form &&
+    token.surface_form === token.dictionary_form
+    ? token.reading
+    : undefined;
+}
+
 // Configure marked options
 marked.setOptions({
   breaks: true,
@@ -466,11 +477,7 @@ async function handleTokenClick(event: MouseEvent, token: Token, sentenceId: str
         // (un-inflected) form — for inflected tokens the reading is the
         // surface form's pronunciation, not the lemma's, so it would not
         // match Jisho's lemma reading.
-        token.reading &&
-          token.reading !== token.surface_form &&
-          token.surface_form === token.dictionary_form
-          ? token.reading
-          : undefined,
+        getDictionaryFormReading(token),
       ),
     );
     if (!isActiveTokenIdentity(current)) return;
@@ -504,11 +511,10 @@ async function handleAddFlashcard() {
       // returns the reading of the inflected surface (e.g. タベタ for 食べた)
       // rather than the lemma reading (たべる), so we prefer the Jisho result
       // which was queried with the dictionary_form.
-      activeToken.value.token.reading &&
-      activeToken.value.token.reading !== activeToken.value.token.surface_form &&
-      activeToken.value.token.surface_form === activeToken.value.token.dictionary_form
-        ? katakanaToHiragana(activeToken.value.token.reading)
-        : lookup.reading;
+      (() => {
+        const dictReading = getDictionaryFormReading(activeToken.value.token);
+        return dictReading ? katakanaToHiragana(dictReading) : lookup.reading;
+      })();
 
     const result = await addFlashcardMutation.mutateAsync({
       japanese_word: activeToken.value.token.dictionary_form,

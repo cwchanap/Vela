@@ -163,11 +163,15 @@ export async function saveSentenceToAPI(
     });
   } catch (err) {
     console.error('[Vela] saveSentenceToAPI: fetch failed, queuing:', err);
+    if (!currentUserEmail) {
+      console.error('[Vela] saveSentenceToAPI: no user identity, discarding save');
+      return 'dropped';
+    }
     await enqueue({
       sentence,
       sourceUrl,
       context,
-      userEmail: currentUserEmail ?? undefined,
+      userEmail: currentUserEmail,
       idempotencyKey,
       timestamp: clientTimestamp,
       retries: 0,
@@ -180,11 +184,15 @@ export async function saveSentenceToAPI(
       idToken = await refreshIdToken();
     } catch (err) {
       console.error('[Vela] saveSentenceToAPI: token refresh failed, queuing:', err);
+      if (!currentUserEmail) {
+        console.error('[Vela] saveSentenceToAPI: no user identity, discarding save');
+        return 'dropped';
+      }
       await enqueue({
         sentence,
         sourceUrl,
         context,
-        userEmail: currentUserEmail ?? undefined,
+        userEmail: currentUserEmail,
         idempotencyKey,
         timestamp: clientTimestamp,
         retries: 0,
@@ -205,11 +213,15 @@ export async function saveSentenceToAPI(
       });
     } catch (err) {
       console.error('[Vela] saveSentenceToAPI: retry fetch failed, queuing:', err);
+      if (!currentUserEmail) {
+        console.error('[Vela] saveSentenceToAPI: no user identity, discarding save');
+        return 'dropped';
+      }
       await enqueue({
         sentence,
         sourceUrl,
         context,
-        userEmail: currentUserEmail ?? undefined,
+        userEmail: currentUserEmail,
         idempotencyKey,
         timestamp: clientTimestamp,
         retries: 0,
@@ -219,11 +231,15 @@ export async function saveSentenceToAPI(
   }
 
   if (!response.ok) {
+    if (!currentUserEmail) {
+      console.error('[Vela] saveSentenceToAPI: no user identity, discarding save');
+      return 'dropped';
+    }
     await enqueue({
       sentence,
       sourceUrl,
       context,
-      userEmail: currentUserEmail ?? undefined,
+      userEmail: currentUserEmail,
       idempotencyKey,
       timestamp: clientTimestamp,
       retries: 0,
