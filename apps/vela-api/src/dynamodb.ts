@@ -458,10 +458,12 @@ export const vocabulary = {
       let lastEvaluatedKey: Record<string, unknown> | undefined;
 
       do {
+        // Match rows with the new normalized_japanese_word field OR legacy
+        // rows that only have japanese_word (seeded before the migration).
         const command = new ScanCommand({
           TableName: TABLE_NAMES.VOCABULARY,
-          FilterExpression: 'normalized_japanese_word = :word',
-          ExpressionAttributeValues: { ':word': normalizedWord },
+          FilterExpression: 'normalized_japanese_word = :norm OR japanese_word = :raw',
+          ExpressionAttributeValues: { ':norm': normalizedWord, ':raw': japaneseWord.trim() },
           ...(lastEvaluatedKey ? { ExclusiveStartKey: lastEvaluatedKey } : {}),
         });
         const response = await docClient.send(command);
@@ -511,6 +513,19 @@ export const vocabulary = {
       japanese_word: item.japanese_word.trim(),
       normalized_japanese_word: normalizedJapaneseWord,
     };
+
+    // Fallback: check for legacy rows seeded before the deterministic-id
+    // migration.  Those rows have a random UUID `id` and no
+    // `normalized_japanese_word`, so the conditional-put below would miss
+    // them and create a duplicate.
+    const legacy = await this.findByWord(item.japanese_word.trim());
+    if (legacy) {
+      if (hasVocabularyItemId(legacy)) {
+        return { item: legacy, created: false };
+      }
+      // Legacy row without a string id — shouldn't happen, but fall through
+      // to the normal insert path.
+    }
 
     try {
       const command = new PutCommand({
@@ -753,7 +768,7 @@ export const myDictionaries = {
     } catch (error) {
       if (isConditionalCheckFailedError(error)) {
         // Idempotent replay: the item already exists. Read and return it.
-        const existing = await this.getByKey(userId, sentenceId);
+        const existing = await myDictionaries.getByKey(userId, sentenceId);
         if (existing) {
           return existing;
         }
