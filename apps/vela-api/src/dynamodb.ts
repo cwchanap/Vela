@@ -726,10 +726,11 @@ export const myDictionaries = {
     // When the client provides an idempotency key, include a timestamp prefix
     // in the sort key so getByUser() returns entries in chronological order.
     // Use the client-provided timestamp when available (so retries with the
-    // same idempotency key produce the same sort key) otherwise fall back to
-    // the server timestamp.
+    // same idempotency key produce the same sort key) otherwise use 0 as a
+    // stable fallback — Date.now() would differ on each retry, breaking
+    // the conditional-check dedup.
     const sentenceId = idempotencyKey
-      ? `${clientTimestamp ?? timestamp}-${idempotencyKey}`
+      ? `${clientTimestamp ?? 0}-${idempotencyKey}`
       : `${timestamp}-${randomUUID().slice(0, 8)}`;
     const item = {
       user_id: userId,
