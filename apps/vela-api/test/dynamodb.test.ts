@@ -924,7 +924,7 @@ describe('DynamoDB Operations', () => {
       );
     });
 
-    test('should use server timestamp prefix for idempotencyKey when no client timestamp', async () => {
+    test('should use deterministic 0 prefix for idempotencyKey when no client timestamp', async () => {
       mockSend.mockResolvedValueOnce({});
 
       const result = await myDictionaries.create(
@@ -935,8 +935,33 @@ describe('DynamoDB Operations', () => {
         'stable-key',
       );
 
-      // Should still have timestamp prefix even without client timestamp
-      expect(result?.sentence_id).toMatch(/^\d+-stable-key$/);
+      // Falls back to 0 prefix (deterministic) so retries produce the same sort key
+      expect(result?.sentence_id).toBe('0-stable-key');
+    });
+
+    test('should produce stable sentence_id across retries when idempotencyKey is provided without clientTimestamp', async () => {
+      mockSend.mockResolvedValue({});
+
+      const result1 = await myDictionaries.create(
+        mockUserId,
+        'テスト',
+        undefined,
+        undefined,
+        'retry-key',
+        // No clientTimestamp — simulating API caller without timestamp
+      );
+      const result2 = await myDictionaries.create(
+        mockUserId,
+        'テスト',
+        undefined,
+        undefined,
+        'retry-key',
+      );
+
+      // Both calls must produce the exact same sentence_id for dedup to work
+      expect(result1?.sentence_id).toBe('0-retry-key');
+      expect(result2?.sentence_id).toBe('0-retry-key');
+      expect(result1?.sentence_id).toBe(result2?.sentence_id);
     });
 
     test('should generate a timestamp-based sentence_id when no idempotencyKey', async () => {

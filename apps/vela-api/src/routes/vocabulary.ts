@@ -9,17 +9,10 @@ const app = new Hono<{ Bindings: Env } & AuthContext>();
 
 app.use('*', requireAuth);
 
-const safeSourceUrlSchema = z.url().refine((value) => {
-  const url = new URL(value);
-  return url.protocol === 'http:' || url.protocol === 'https:';
-}, 'source_url must use http or https');
-
 const fromWordSchema = z.object({
   japanese_word: z.string().trim().min(1),
   reading: z.string().trim().min(1).optional(),
   english_translation: z.string().trim().min(1),
-  example_sentence_jp: z.string().optional(),
-  source_url: safeSourceUrlSchema.optional(),
   jlpt_level: z.number().int().min(1).max(5).optional(),
 });
 
@@ -56,8 +49,6 @@ app.post('/from-word', zValidator('json', fromWordSchema), async (c) => {
       japanese_word: body.japanese_word,
       hiragana: body.reading,
       english_translation: body.english_translation,
-      example_sentence_jp: body.example_sentence_jp,
-      source_url: body.source_url,
       jlpt_level: body.jlpt_level,
       created_at: new Date().toISOString(),
     });

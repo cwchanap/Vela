@@ -40,8 +40,6 @@ const validBody = {
   japanese_word: '食べる',
   reading: 'たべる',
   english_translation: 'to eat',
-  example_sentence_jp: '私は毎日ご飯を食べる。',
-  source_url: 'https://example.com',
   jlpt_level: 5,
 };
 
@@ -74,7 +72,6 @@ describe('POST /from-word', () => {
     expect(mockVocabulary.create).toHaveBeenCalledWith(
       expect.objectContaining({
         japanese_word: '食べる',
-        source_url: 'https://example.com',
       }),
     );
   });
@@ -186,17 +183,6 @@ describe('POST /from-word', () => {
     );
   });
 
-  test('returns 400 when source_url uses a non-http scheme', async () => {
-    const app = createTestApp();
-    const res = await app.request('/from-word', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ...validBody, source_url: 'ftp://example.com' }),
-    });
-
-    expect(res.status).toBe(400);
-  });
-
   test('returns 500 with structured error when vocabulary.create throws', async () => {
     mockVocabulary.create.mockRejectedValue(new Error('DynamoDB connection error'));
 
@@ -210,6 +196,37 @@ describe('POST /from-word', () => {
     expect(res.status).toBe(500);
     const body = (await res.json()) as any;
     expect(body).toEqual({ error: 'Failed to save vocabulary entry' });
+  });
+
+  test('does not leak user-scoped metadata into shared vocabulary table', async () => {
+    mockVocabulary.create.mockResolvedValue({
+      item: { id: '食べる', japanese_word: '食べる' },
+      created: true,
+    });
+
+    const app = createTestApp();
+    // Client sends example_sentence_jp and source_url (e.g. from My Dictionaries),
+    // but these should NOT be written to the shared vocabulary table.
+    const res = await app.request('/from-word', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        ...validBody,
+        example_sentence_jp: '私は毎日ご飯を食べる。',
+        source_url: 'https://example.com/private-page',
+      }),
+    });
+
+    expect(res.status).toBe(200);
+    expect(mockVocabulary.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        japanese_word: '食べる',
+      }),
+    );
+    // Verify user-scoped fields are NOT passed to vocabulary.create
+    const createCall = mockVocabulary.create.mock.calls[0][0] as Record<string, unknown>;
+    expect(createCall).not.toHaveProperty('example_sentence_jp');
+    expect(createCall).not.toHaveProperty('source_url');
   });
 
   test('returns 500 when vocabulary is created but SRS progress init fails (transient error)', async () => {
