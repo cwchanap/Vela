@@ -518,13 +518,12 @@ export const vocabulary = {
     // migration.  Those rows have a random UUID `id` and no
     // `normalized_japanese_word`, so the conditional-put below would miss
     // them and create a duplicate.
+    // Only return true legacy rows (missing normalized_japanese_word).
+    // Post-migration rows with deterministic word:reading ids are handled
+    // by the conditional put below, which correctly disambiguates homographs.
     const legacy = await this.findByWord(item.japanese_word.trim());
-    if (legacy) {
-      if (hasVocabularyItemId(legacy)) {
-        return { item: legacy, created: false };
-      }
-      // Legacy row without a string id — shouldn't happen, but fall through
-      // to the normal insert path.
+    if (legacy && hasVocabularyItemId(legacy) && !('normalized_japanese_word' in legacy)) {
+      return { item: legacy, created: false };
     }
 
     try {
