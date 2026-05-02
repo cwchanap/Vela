@@ -227,6 +227,39 @@ describe('DynamoDB Operations', () => {
         dateNowSpy.mockRestore();
       }
     });
+
+    test('savedSentences alias should handle idempotent replay via getByKey', async () => {
+      const existingItem = {
+        user_id: mockUserId,
+        sentence_id: expect.stringMatching(/^\d+-[0-9a-f]{8}$/),
+        sentence: 'replay sentence',
+        source_url: undefined,
+        context: undefined,
+        created_at: expect.any(Number),
+        updated_at: expect.any(Number),
+      };
+
+      const conditionalError = Object.assign(new Error('Condition failed'), {
+        name: 'ConditionalCheckFailedException',
+      });
+      // First call: PutCommand throws; second call: GetCommand returns existing item
+      mockSend
+        .mockRejectedValueOnce(conditionalError)
+        .mockResolvedValueOnce({ Item: existingItem });
+
+      const result = await savedSentences.create(mockUserId, 'replay sentence');
+
+      expect(mockGetCommand).toHaveBeenCalledWith(
+        expect.objectContaining({
+          TableName: 'vela-saved-sentences',
+          Key: {
+            user_id: mockUserId,
+            sentence_id: expect.any(String),
+          },
+        }),
+      );
+      expect(result).toEqual(existingItem);
+    });
   });
 
   describe('User Vocabulary Progress', () => {
@@ -537,23 +570,39 @@ describe('DynamoDB Operations', () => {
         1,
         expect.objectContaining({
           TableName: 'vela-vocabulary',
-          FilterExpression: 'normalized_japanese_word = :word',
-          ExpressionAttributeValues: { ':word': '食べる' },
+          FilterExpression: 'normalized_japanese_word = :norm OR japanese_word = :raw',
+          ExpressionAttributeValues: { ':norm': '食べる', ':raw': '食べる' },
         }),
       );
       expect(mockScanCommand).toHaveBeenNthCalledWith(
         2,
         expect.objectContaining({
           TableName: 'vela-vocabulary',
-          FilterExpression: 'normalized_japanese_word = :word',
-          ExpressionAttributeValues: { ':word': '食べる' },
+          FilterExpression: 'normalized_japanese_word = :norm OR japanese_word = :raw',
+          ExpressionAttributeValues: { ':norm': '食べる', ':raw': '食べる' },
           ExclusiveStartKey: { id: 'page-1' },
         }),
       );
     });
 
+    test('findByWord should find legacy rows without normalized_japanese_word', async () => {
+      mockSend.mockResolvedValueOnce({
+        Items: [{ id: 'legacy-uuid-1', japanese_word: '食べる', english_translation: 'to eat' }],
+        LastEvaluatedKey: undefined,
+      });
+
+      const result = await vocabulary.findByWord('食べる');
+
+      expect(result).toEqual({
+        id: 'legacy-uuid-1',
+        japanese_word: '食べる',
+        english_translation: 'to eat',
+      });
+    });
+
     test('create should preserve uppercase in word id (no toLowerCase)', async () => {
-      mockSend.mockResolvedValueOnce({});
+      // findByWord scan returns no match, then PutCommand succeeds
+      mockSend.mockResolvedValueOnce({}).mockResolvedValueOnce({});
 
       const result = await vocabulary.create({
         japanese_word: 'Tシャツ',
@@ -570,8 +619,11 @@ describe('DynamoDB Operations', () => {
       const err = Object.assign(new Error('Condition failed'), {
         name: 'ConditionalCheckFailedException',
       });
-      // First call: PutCommand throws; second call: GetCommand returns undefined (Item missing)
-      mockSend.mockRejectedValueOnce(err).mockResolvedValueOnce({ Item: undefined });
+      // First call: findByWord scan (empty); second call: PutCommand throws; third call: GetCommand returns undefined (Item missing)
+      mockSend
+        .mockResolvedValueOnce({})
+        .mockRejectedValueOnce(err)
+        .mockResolvedValueOnce({ Item: undefined });
 
       await expect(
         vocabulary.create({
@@ -589,13 +641,17 @@ describe('DynamoDB Operations', () => {
       const err = Object.assign(new Error('Condition failed'), {
         name: 'ConditionalCheckFailedException',
       });
-      mockSend.mockRejectedValueOnce(err).mockResolvedValueOnce({
-        Item: {
-          japanese_word: '食べる',
-          normalized_japanese_word: '食べる',
-          english_translation: 'to eat',
-        },
-      });
+      // findByWord scan (empty), then PutCommand throws, then GetCommand returns item without string id
+      mockSend
+        .mockResolvedValueOnce({})
+        .mockRejectedValueOnce(err)
+        .mockResolvedValueOnce({
+          Item: {
+            japanese_word: '食べる',
+            normalized_japanese_word: '食べる',
+            english_translation: 'to eat',
+          },
+        });
 
       await expect(
         vocabulary.create({
@@ -613,14 +669,18 @@ describe('DynamoDB Operations', () => {
       const err = Object.assign(new Error('Condition failed'), {
         name: 'ConditionalCheckFailedException',
       });
-      mockSend.mockRejectedValueOnce(err).mockResolvedValueOnce({
-        Item: {
-          id: '食べる:タベル',
-          japanese_word: '食べる',
-          normalized_japanese_word: '食べる',
-          english_translation: 'to eat',
-        },
-      });
+      // findByWord scan (empty), then PutCommand throws, then GetCommand returns existing item
+      mockSend
+        .mockResolvedValueOnce({})
+        .mockRejectedValueOnce(err)
+        .mockResolvedValueOnce({
+          Item: {
+            id: '食べる:タベル',
+            japanese_word: '食べる',
+            normalized_japanese_word: '食べる',
+            english_translation: 'to eat',
+          },
+        });
 
       const result = await vocabulary.create({
         japanese_word: ' 食べる ',
@@ -655,7 +715,8 @@ describe('DynamoDB Operations', () => {
     });
 
     test('create should disambiguate homographs by reading', async () => {
-      mockSend.mockResolvedValueOnce({});
+      // First create: findByWord (empty) + PutCommand
+      mockSend.mockResolvedValueOnce({}).mockResolvedValueOnce({});
 
       const result = await vocabulary.create({
         japanese_word: '今日',
@@ -666,7 +727,8 @@ describe('DynamoDB Operations', () => {
 
       expect(result.item.id).toBe('今日:キョウ');
 
-      mockSend.mockResolvedValueOnce({});
+      // Second create: findByWord (empty) + PutCommand
+      mockSend.mockResolvedValueOnce({}).mockResolvedValueOnce({});
       const result2 = await vocabulary.create({
         japanese_word: '今日',
         hiragana: 'こんにち',
@@ -679,7 +741,8 @@ describe('DynamoDB Operations', () => {
     });
 
     test('create should omit reading from id when hiragana is empty', async () => {
-      mockSend.mockResolvedValueOnce({});
+      // findByWord (empty) + PutCommand
+      mockSend.mockResolvedValueOnce({}).mockResolvedValueOnce({});
 
       const result = await vocabulary.create({
         japanese_word: '猫',
@@ -691,7 +754,8 @@ describe('DynamoDB Operations', () => {
     });
 
     test('create should produce the same id regardless of hiragana vs katakana reading', async () => {
-      mockSend.mockResolvedValueOnce({});
+      // First create: findByWord (empty) + PutCommand
+      mockSend.mockResolvedValueOnce({}).mockResolvedValueOnce({});
 
       const result = await vocabulary.create({
         japanese_word: '食べる',
@@ -702,7 +766,8 @@ describe('DynamoDB Operations', () => {
 
       expect(result.item.id).toBe('食べる:タベル');
 
-      mockSend.mockResolvedValueOnce({});
+      // Second create: findByWord (empty) + PutCommand
+      mockSend.mockResolvedValueOnce({}).mockResolvedValueOnce({});
       const result2 = await vocabulary.create({
         japanese_word: '食べる',
         hiragana: 'タベル', // katakana input
@@ -712,6 +777,34 @@ describe('DynamoDB Operations', () => {
 
       expect(result2.item.id).toBe('食べる:タベル');
       expect(result.item.id).toBe(result2.item.id);
+    });
+
+    test('create should return existing legacy row instead of inserting a duplicate', async () => {
+      const legacyRow = {
+        id: 'random-uuid-legacy',
+        japanese_word: '食べる',
+        english_translation: 'to eat',
+        jlpt_level: 4,
+        // No normalized_japanese_word — seeded before the migration
+      };
+
+      // findByWord scan returns the legacy row
+      mockSend.mockResolvedValueOnce({
+        Items: [legacyRow],
+        LastEvaluatedKey: undefined,
+      });
+
+      const result = await vocabulary.create({
+        japanese_word: '食べる',
+        hiragana: 'たべる',
+        english_translation: 'to eat',
+        created_at: '2026-04-20T00:00:00.000Z',
+      });
+
+      // Should return the legacy row without inserting
+      expect(result).toEqual({ item: legacyRow, created: false });
+      // PutCommand should NOT have been called
+      expect(mockPutCommand).not.toHaveBeenCalled();
     });
   });
 
