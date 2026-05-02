@@ -237,6 +237,11 @@ function buildOverlay(sentences: string[]): ShadowRoot {
     saveBtn.addEventListener('click', async () => {
       const selected = sentences.filter((_, i) => checked.has(i));
 
+      // Disable the button immediately to prevent duplicate submissions.
+      // Each SAVE_SENTENCES generates fresh idempotency keys, so double-clicks
+      // would create duplicate entries.
+      saveBtn.disabled = true;
+
       try {
         const result = await browser.runtime.sendMessage({
           type: 'SAVE_SENTENCES',

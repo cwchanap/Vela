@@ -124,12 +124,31 @@ describe('buildPendingSentenceRecord', () => {
 });
 
 describe('shouldDiscardPendingRecord', () => {
-  it('discards when the current failed attempt reaches the retry limit', () => {
-    expect(shouldDiscardPendingRecord({ retries: 2 })).toBe(true);
+  it('discards when at max retries AND the failure is a permanent client error (4xx)', () => {
+    expect(shouldDiscardPendingRecord({ retries: 2 }, 400)).toBe(true);
+    expect(shouldDiscardPendingRecord({ retries: 2 }, 404)).toBe(true);
+    expect(shouldDiscardPendingRecord({ retries: 2 }, 422)).toBe(true);
   });
 
-  it('keeps the record when retries remain after the current failed attempt', () => {
-    expect(shouldDiscardPendingRecord({ retries: 1 })).toBe(false);
+  it('keeps the record when retries remain even on permanent client errors', () => {
+    expect(shouldDiscardPendingRecord({ retries: 1 }, 400)).toBe(false);
+    expect(shouldDiscardPendingRecord({ retries: 0 }, 404)).toBe(false);
+  });
+
+  it('never discards on transient server errors (5xx)', () => {
+    expect(shouldDiscardPendingRecord({ retries: 2 }, 500)).toBe(false);
+    expect(shouldDiscardPendingRecord({ retries: 2 }, 502)).toBe(false);
+    expect(shouldDiscardPendingRecord({ retries: 2 }, 503)).toBe(false);
+    expect(shouldDiscardPendingRecord({ retries: 100 }, 500)).toBe(false);
+  });
+
+  it('never discards on network errors (no status)', () => {
+    expect(shouldDiscardPendingRecord({ retries: 2 })).toBe(false);
+    expect(shouldDiscardPendingRecord({ retries: 100 })).toBe(false);
+  });
+
+  it('never discards on 429 (rate-limit, transient)', () => {
+    expect(shouldDiscardPendingRecord({ retries: 2 }, 429)).toBe(false);
   });
 });
 
@@ -327,7 +346,7 @@ describe('flushQueue', () => {
     expect(mockIdbStore.delete).toHaveBeenCalledWith(1);
   });
 
-  it('discards record and notifies when at max retries (retries=2) and fetch fails', async () => {
+  it('increments retry on 5xx (transient) even at max retries — never auto-discards', async () => {
     idbState.getAllResult = [
       { id: 2, sentence: 'テスト', retries: 2, timestamp: Date.now(), idempotencyKey: 'key-2' },
     ];
@@ -338,10 +357,57 @@ describe('flushQueue', () => {
 
     await flushQueue();
 
+    // Transient 5xx should NOT discard — increment retry instead
+    expect(mockIdbStore.delete).not.toHaveBeenCalled();
+    expect(mockIdbStore.put).toHaveBeenCalled();
+  });
+
+  it('discards and notifies on permanent client error (4xx) at max retries', async () => {
+    idbState.getAllResult = [
+      { id: 3, sentence: 'テスト', retries: 2, timestamp: Date.now(), idempotencyKey: 'key-3' },
+    ];
+    vi.mocked(getValidIdToken).mockResolvedValue('valid-token');
+    vi.mocked(global.fetch as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(
+      new Response(null, { status: 400 }),
+    );
+
+    await flushQueue();
+
     expect(mockNotificationsCreate).toHaveBeenCalledWith(
       expect.objectContaining({ title: 'Vela — Sync failed' }),
     );
-    expect(mockIdbStore.delete).toHaveBeenCalledWith(2);
+    expect(mockIdbStore.delete).toHaveBeenCalledWith(3);
+  });
+
+  it('increments retry on 4xx when retries remain', async () => {
+    idbState.getAllResult = [
+      { id: 4, sentence: 'テスト', retries: 0, timestamp: Date.now(), idempotencyKey: 'key-4' },
+    ];
+    vi.mocked(getValidIdToken).mockResolvedValue('valid-token');
+    vi.mocked(global.fetch as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(
+      new Response(null, { status: 400 }),
+    );
+
+    await flushQueue();
+
+    expect(mockIdbStore.delete).not.toHaveBeenCalled();
+    expect(mockIdbStore.put).toHaveBeenCalled();
+  });
+
+  it('increments retry on network error (fetch throws) without discarding', async () => {
+    idbState.getAllResult = [
+      { id: 5, sentence: 'テスト', retries: 2, timestamp: Date.now(), idempotencyKey: 'key-5' },
+    ];
+    vi.mocked(getValidIdToken).mockResolvedValue('valid-token');
+    vi.mocked(global.fetch as unknown as ReturnType<typeof vi.fn>).mockRejectedValue(
+      new Error('Failed to fetch'),
+    );
+
+    await flushQueue();
+
+    // Network errors are transient — never auto-discard
+    expect(mockIdbStore.delete).not.toHaveBeenCalled();
+    expect(mockIdbStore.put).toHaveBeenCalled();
   });
 
   it('skips re-entrant flush calls while a flush is already in progress', async () => {
