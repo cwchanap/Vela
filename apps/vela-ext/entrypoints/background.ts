@@ -238,10 +238,19 @@ export async function saveSentenceToAPI(
 
 const MAX_RETRIES = 3;
 
+/** Determine whether a failed flush attempt should permanently discard the record. */
 export function shouldDiscardPendingRecord(
   record: Pick<PendingSentenceRecord, 'retries'>,
+  status?: number,
 ): boolean {
-  return record.retries + 1 >= MAX_RETRIES;
+  // Permanent client errors (4xx) are never going to succeed on retry — discard
+  // once we've exhausted retries.  429 (rate-limit) is transient, not permanent.
+  if (status !== undefined && status >= 400 && status < 500 && status !== 429) {
+    return record.retries + 1 >= MAX_RETRIES;
+  }
+  // Transient failures (5xx, network errors, 429) should never auto-discard.
+  // The data is valid; the server was just temporarily unavailable.
+  return false;
 }
 
 function notifyDiscardedSyncFailure(): void {
@@ -329,20 +338,16 @@ export async function flushQueue(): Promise<void> {
 
         if (response.ok) {
           await deletePending(record.id!);
-        } else if (shouldDiscardPendingRecord(record)) {
+        } else if (shouldDiscardPendingRecord(record, response.status)) {
           await deletePending(record.id!);
           notifyDiscardedSyncFailure();
         } else {
           await incrementRetry(record);
         }
       } catch (err) {
+        // Network error (fetch threw) — transient, never auto-discard.
         console.error('[Vela] flushQueue: failed to process record:', record.id, err);
-        if (shouldDiscardPendingRecord(record)) {
-          await deletePending(record.id!);
-          notifyDiscardedSyncFailure();
-        } else {
-          await incrementRetry(record);
-        }
+        await incrementRetry(record);
       }
     }
   } finally {

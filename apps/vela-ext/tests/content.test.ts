@@ -257,4 +257,37 @@ describe('content script message listener', () => {
     expect(shadowRoot.textContent).toContain('Failed to save selected sentences');
     expect(document.getElementById('vela-ext-overlay-host')).not.toBeNull();
   });
+
+  it('disables save button while SAVE_SENTENCES is in flight', async () => {
+    document.body.innerHTML = '<p>日本語を勉強しています。</p>';
+    let resolveMessage: ((_value?: unknown) => void) | undefined;
+    (globalThis as any).browser.runtime.sendMessage.mockReturnValue(
+      new Promise((resolve) => {
+        resolveMessage = resolve;
+      }),
+    );
+
+    contentScript.main();
+    const listener = getRegisteredMessageListener();
+    listener({ type: 'SCAN_PAGE' });
+
+    const host = document.getElementById('vela-ext-overlay-host');
+    const shadowRoot = host?.shadowRoot;
+    const saveBtn = shadowRoot?.querySelector('.vela-btn-save') as HTMLButtonElement | null;
+    if (!saveBtn || !shadowRoot) {
+      throw new Error('Expected save overlay to be rendered');
+    }
+
+    expect(saveBtn.disabled).toBe(false);
+    saveBtn.click();
+
+    // Button should be disabled while the message is in flight
+    expect(saveBtn.disabled).toBe(true);
+
+    // Resolve the message — the overlay transitions to success state
+    resolveMessage?.({ saved: 1, total: 1 });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(shadowRoot.textContent).toContain('Saved 1 sentence');
+  });
 });
