@@ -1,6 +1,9 @@
 // Test setup file for Vitest
 // Mock browser APIs that are not implemented in jsdom
-import { vi } from 'vitest';
+import { afterEach, vi } from 'vitest';
+import { enableAutoUnmount } from '@vue/test-utils';
+
+enableAutoUnmount(afterEach);
 
 // Mock localStorage with a working implementation.
 // Quasar's @quasar/vite-plugin passes --localstorage-file to jsdom without a
