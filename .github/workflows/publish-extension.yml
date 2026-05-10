@@ -11,9 +11,6 @@ on:
 env:
   BUN_VERSION: "1.3.1"
 
-permissions:
-  contents: write
-
 jobs:
   release:
     runs-on: ubuntu-latest
@@ -30,18 +27,21 @@ jobs:
         run: bun install --frozen-lockfile
 
       - name: Build shared packages
-        run: bun --cwd packages/common run build
+        working-directory: packages/common
+        run: bun run build
 
       - name: Build and zip extension
-        run: bun --cwd apps/vela-ext run zip
+        working-directory: apps/vela-ext
+        run: bun run zip
 
-      - name: Get version and zip filename
+      - name: Verify zip output
+        run: ls -la apps/vela-ext/.output/*.zip
+
+      - name: Get version
         id: meta
         run: |
           VERSION=$(jq -r .version apps/vela-ext/package.json)
-          ZIP_FILE=$(basename apps/vela-ext/.output/*.zip)
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "zip_file=$ZIP_FILE" >> "$GITHUB_OUTPUT"
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
