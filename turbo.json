@@ -4,7 +4,11 @@
   "tasks": {
     "build": {
       "dependsOn": ["^build"],
-      "outputs": ["dist/**", ".next/**", "!.next/cache/**"]
+      "outputs": ["dist/**", ".next/**", ".output/**", "!.next/cache/**"]
+    },
+    "zip": {
+      "dependsOn": ["^build"],
+      "outputs": [".output/*.zip"]
     },
     "dev": {
       "cache": false,
