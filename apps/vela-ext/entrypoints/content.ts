@@ -327,7 +327,11 @@ export default defineContentScript({
           return;
 
         if (message.type === 'GET_VELA_WEBAPP_SESSION') {
-          sendResponse(readCognitoSessionFromStorage(window.localStorage));
+          try {
+            sendResponse(readCognitoSessionFromStorage(window.localStorage));
+          } catch {
+            sendResponse(null);
+          }
           return;
         }
 

@@ -13,7 +13,15 @@ onMounted(async () => {
     authenticated.value = await isAuthenticated();
     if (!authenticated.value) {
       authenticated.value = await importWebappSession();
+      if (authenticated.value) {
+        // Notify the background script so it can flush any queued offline saves.
+        browser.runtime.sendMessage({ type: 'LOGIN_SUCCESS' }).catch(() => {
+          // Background may not be listening during tests or development reloads.
+        });
+      }
     }
+  } catch (error: unknown) {
+    console.error('[Vela] Failed to initialise session:', error);
   } finally {
     loading.value = false;
   }

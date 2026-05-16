@@ -104,21 +104,21 @@ export async function importWebappSession(): Promise<boolean> {
   for (const tab of orderedTabs) {
     if (typeof tab.id !== 'number') continue;
 
+    let session: unknown;
     try {
-      const session = await browser.tabs.sendMessage(tab.id, { type: 'GET_VELA_WEBAPP_SESSION' });
-      if (!isWebappSession(session)) continue;
-
-      const isValid = await checkSession(session.tokens.idToken);
-      if (!isValid) continue;
-
-      await saveAuthTokens(session.tokens, session.email ?? undefined);
-      await browser.runtime.sendMessage({ type: 'LOGIN_SUCCESS' }).catch(() => {
-        // Background may not be listening during tests or development reloads.
-      });
-      return true;
+      session = await browser.tabs.sendMessage(tab.id, { type: 'GET_VELA_WEBAPP_SESSION' });
     } catch {
       // A Vela tab might exist before the content script is ready. Try the next tab.
+      continue;
     }
+
+    if (!isWebappSession(session)) continue;
+
+    const isValid = await checkSession(session.tokens.idToken);
+    if (!isValid) continue;
+
+    await saveAuthTokens(session.tokens, session.email ?? undefined);
+    return true;
   }
 
   return false;

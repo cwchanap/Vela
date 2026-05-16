@@ -249,6 +249,24 @@ describe('content script message listener', () => {
     });
   });
 
+  it('responds with null when localStorage access throws a SecurityError', () => {
+    // Override localStorage.getItem to throw
+    const originalGetItem = window.localStorage.getItem;
+    vi.spyOn(window.localStorage, 'getItem').mockImplementation(() => {
+      throw new DOMException('The operation is insecure.', 'SecurityError');
+    });
+
+    contentScript.main();
+    const listener = getRegisteredMessageListener();
+    const sendResponse = vi.fn();
+    listener({ type: 'GET_VELA_WEBAPP_SESSION' }, {}, sendResponse);
+
+    expect(sendResponse).toHaveBeenCalledWith(null);
+
+    vi.restoreAllMocks();
+    window.localStorage.getItem = originalGetItem;
+  });
+
   it('shows success only after SAVE_SENTENCES resolves', async () => {
     document.body.innerHTML = '<p>日本語を勉強しています。</p>';
     let resolveMessage: ((_value?: unknown) => void) | undefined;
