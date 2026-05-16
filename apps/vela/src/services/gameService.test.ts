@@ -1,4 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { gameService, InsufficientVocabularyError } from './gameService';
 import type { Vocabulary, Sentence } from 'src/types/database';
 import type { LegacyVocabularyPayload } from 'src/utils/vocabulary';
@@ -29,6 +31,18 @@ describe('gameService', () => {
       expect(error).toBeInstanceOf(Error);
       expect(error.name).toBe('InsufficientVocabularyError');
       expect(error.message).toBe('Insufficient vocabulary for generating questions');
+    });
+  });
+
+  describe('module boundaries', () => {
+    it('keeps service and utility types independent from Pinia stores', () => {
+      const appRoot = resolve(__dirname, '..');
+      const files = ['services/gameService.ts', 'utils/vocabulary.ts'];
+
+      for (const file of files) {
+        const source = readFileSync(resolve(appRoot, file), 'utf8');
+        expect(source).not.toContain('src/stores/games');
+      }
     });
   });
 

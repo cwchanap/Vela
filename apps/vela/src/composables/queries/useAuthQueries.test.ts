@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, beforeAll } from 'vitest';
 import { flushPromises } from '@vue/test-utils';
 import { withQueryClient } from 'src/test-utils/withQueryClient';
+import { authKeys as sharedAuthKeys } from '@vela/common';
 
 const mockAuthService = {
   getCurrentSession: vi.fn(),
@@ -30,6 +31,10 @@ describe('useAuthQueries', () => {
   });
 
   describe('authKeys', () => {
+    it('re-exports the shared auth query keys', async () => {
+      expect(authKeys).toBe(sharedAuthKeys);
+    });
+
     it('generates correct session key', async () => {
       expect(authKeys.session()).toEqual(['auth', 'session']);
     });

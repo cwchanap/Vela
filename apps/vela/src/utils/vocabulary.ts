@@ -1,4 +1,4 @@
-import type { VocabularyOption } from 'src/stores/games';
+import type { VocabularyOption } from 'src/types/games';
 import type { Vocabulary } from 'src/types/database';
 import { shuffleArray } from './array';
 

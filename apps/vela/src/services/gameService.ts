@@ -1,4 +1,4 @@
-import type { Question, SentenceQuestion, VocabularyOption } from 'src/stores/games';
+import type { Question, SentenceQuestion, VocabularyOption } from 'src/types/games';
 import type { Vocabulary, Sentence } from 'src/types/database';
 import { getApiUrl } from 'src/utils/api';
 import { shuffleArray } from 'src/utils/array';

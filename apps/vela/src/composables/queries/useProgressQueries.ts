@@ -1,13 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query';
 import { progressService } from 'src/services/progressService';
+import { progressKeys } from '@vela/common';
 
-/**
- * Query key factory for progress-related queries
- */
-export const progressKeys = {
-  all: ['progress'] as const,
-  analytics: (userId: string | null) => [...progressKeys.all, 'analytics', userId] as const,
-};
+export { progressKeys };
 
 /**
  * Hook to fetch progress analytics for the current user

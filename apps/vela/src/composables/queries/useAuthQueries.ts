@@ -6,16 +6,9 @@ import {
   type ProfileData,
 } from 'src/services/authService';
 import type { Profile, UserPreferences } from 'src/types/shared';
+import { authKeys } from '@vela/common';
 
-/**
- * Query key factory for auth-related queries
- */
-export const authKeys = {
-  all: ['auth'] as const,
-  session: () => [...authKeys.all, 'session'] as const,
-  user: () => [...authKeys.all, 'user'] as const,
-  profile: (userId: string) => [...authKeys.all, 'profile', userId] as const,
-};
+export { authKeys };
 
 /**
  * Hook to get the current user session
