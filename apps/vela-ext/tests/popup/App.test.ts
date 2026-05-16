@@ -65,4 +65,44 @@ describe('popup App', () => {
     expect(wrapper.find('[data-testid="dashboard-page"]').exists()).toBe(true);
     expect(wrapper.find('[data-testid="login-page"]').exists()).toBe(false);
   });
+
+  it('sends LOGIN_SUCCESS to background after successful auto-import', async () => {
+    mockIsAuthenticated.mockResolvedValue(false);
+    mockImportWebappSession.mockResolvedValue(true);
+
+    mount(App);
+    await flushPromises();
+
+    expect((globalThis as any).browser.runtime.sendMessage).toHaveBeenCalledWith({
+      type: 'LOGIN_SUCCESS',
+    });
+  });
+
+  it('does not send LOGIN_SUCCESS when no session is imported', async () => {
+    mockIsAuthenticated.mockResolvedValue(false);
+    mockImportWebappSession.mockResolvedValue(false);
+
+    mount(App);
+    await flushPromises();
+
+    expect((globalThis as any).browser.runtime.sendMessage).not.toHaveBeenCalled();
+  });
+
+  it('logs error and recovers when initialisation throws', async () => {
+    const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    mockIsAuthenticated.mockRejectedValue(new Error('Storage corrupted'));
+
+    const wrapper = mount(App);
+    await flushPromises();
+
+    expect(consoleSpy).toHaveBeenCalledWith(
+      '[Vela] Failed to initialise session:',
+      expect.any(Error),
+    );
+    // Loading should complete even after error
+    expect(wrapper.find('[data-testid="login-page"]').exists()).toBe(true);
+    expect(wrapper.find('.loading').exists()).toBe(false);
+
+    consoleSpy.mockRestore();
+  });
 });

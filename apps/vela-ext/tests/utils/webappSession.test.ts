@@ -98,7 +98,6 @@ describe('importWebappSession', () => {
     expect(browser.tabs.sendMessage).toHaveBeenCalledWith(10, { type: 'GET_VELA_WEBAPP_SESSION' });
     expect(mockCheckSession).toHaveBeenCalledWith('id-token');
     expect(mockSaveAuthTokens).toHaveBeenCalledWith(tokens, 'user@example.com');
-    expect(browser.runtime.sendMessage).toHaveBeenCalledWith({ type: 'LOGIN_SUCCESS' });
   });
 
   it('does not import a session that the API rejects', async () => {
@@ -107,5 +106,33 @@ describe('importWebappSession', () => {
     await expect(importWebappSession()).resolves.toBe(false);
 
     expect(mockSaveAuthTokens).not.toHaveBeenCalled();
+  });
+
+  it('skips a tab when sendMessage rejects (content script not ready)', async () => {
+    (browser.tabs.sendMessage as ReturnType<typeof vi.fn>).mockRejectedValue(
+      new Error('Could not establish connection'),
+    );
+    mockCheckSession.mockResolvedValue(true);
+
+    await expect(importWebappSession()).resolves.toBe(false);
+
+    expect(mockSaveAuthTokens).not.toHaveBeenCalled();
+  });
+
+  it('skips a tab without an id', async () => {
+    (browser.tabs.query as ReturnType<typeof vi.fn>).mockResolvedValue([
+      { id: undefined, active: true },
+    ]);
+
+    await expect(importWebappSession()).resolves.toBe(false);
+
+    expect(browser.tabs.sendMessage).not.toHaveBeenCalled();
+  });
+
+  it('propagates saveAuthTokens errors instead of swallowing them', async () => {
+    mockCheckSession.mockResolvedValue(true);
+    mockSaveAuthTokens.mockRejectedValue(new Error('Storage full'));
+
+    await expect(importWebappSession()).rejects.toThrow('Storage full');
   });
 });
