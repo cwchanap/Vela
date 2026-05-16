@@ -1,4 +1,4 @@
-import { checkSession, type AuthTokens } from './api';
+import { checkSession, refreshToken, type AuthTokens } from './api';
 import { saveAuthTokens } from './storage';
 
 export interface WebappSession {
@@ -115,7 +115,17 @@ export async function importWebappSession(): Promise<boolean> {
     if (!isWebappSession(session)) continue;
 
     const isValid = await checkSession(session.tokens.idToken);
-    if (!isValid) continue;
+    if (!isValid) {
+      // ID token may be expired — try refreshing with the refresh token
+      // before skipping, since the user may still be signed in on the web app
+      try {
+        const newTokens = await refreshToken(session.tokens.refreshToken);
+        await saveAuthTokens(newTokens, session.email ?? undefined);
+        return true;
+      } catch {
+        continue;
+      }
+    }
 
     await saveAuthTokens(session.tokens, session.email ?? undefined);
     return true;
