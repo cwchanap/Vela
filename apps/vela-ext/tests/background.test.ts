@@ -129,6 +129,13 @@ describe('registerContextMenus', () => {
       contexts: ['page'],
     });
   });
+
+  it('deduplicates concurrent calls — removeAll called only once', async () => {
+    await Promise.all([registerContextMenus(), registerContextMenus()]);
+
+    expect(mockContextMenusRemoveAll).toHaveBeenCalledOnce();
+    expect(mockContextMenusCreate).toHaveBeenCalledTimes(2);
+  });
 });
 
 describe('buildPendingSentenceRecord', () => {
