@@ -1,13 +1,15 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AuthTokens } from '../../entrypoints/utils/api';
 
-const { mockCheckSession, mockSaveAuthTokens } = vi.hoisted(() => ({
+const { mockCheckSession, mockRefreshToken, mockSaveAuthTokens } = vi.hoisted(() => ({
   mockCheckSession: vi.fn(),
+  mockRefreshToken: vi.fn(),
   mockSaveAuthTokens: vi.fn(),
 }));
 
 vi.mock('../../entrypoints/utils/api', () => ({
   checkSession: mockCheckSession,
+  refreshToken: mockRefreshToken,
 }));
 
 vi.mock('../../entrypoints/utils/storage', () => ({
@@ -74,6 +76,7 @@ describe('importWebappSession', () => {
 
   beforeEach(() => {
     mockCheckSession.mockReset();
+    mockRefreshToken.mockReset();
     mockSaveAuthTokens.mockReset();
 
     (globalThis as any).browser = {
@@ -102,9 +105,36 @@ describe('importWebappSession', () => {
 
   it('does not import a session that the API rejects', async () => {
     mockCheckSession.mockResolvedValue(false);
+    mockRefreshToken.mockRejectedValue(new Error('Refresh failed'));
 
     await expect(importWebappSession()).resolves.toBe(false);
 
+    expect(mockSaveAuthTokens).not.toHaveBeenCalled();
+  });
+
+  it('imports a session by refreshing an expired ID token', async () => {
+    const newTokens: AuthTokens = {
+      accessToken: 'new-access-token',
+      refreshToken: 'new-refresh-token',
+      idToken: 'new-id-token',
+    };
+
+    mockCheckSession.mockResolvedValue(false);
+    mockRefreshToken.mockResolvedValue(newTokens);
+
+    await expect(importWebappSession()).resolves.toBe(true);
+
+    expect(mockRefreshToken).toHaveBeenCalledWith('refresh-token');
+    expect(mockSaveAuthTokens).toHaveBeenCalledWith(newTokens, 'user@example.com');
+  });
+
+  it('skips when both checkSession and refreshToken fail', async () => {
+    mockCheckSession.mockResolvedValue(false);
+    mockRefreshToken.mockRejectedValue(new Error('Refresh token expired'));
+
+    await expect(importWebappSession()).resolves.toBe(false);
+
+    expect(mockRefreshToken).toHaveBeenCalledWith('refresh-token');
     expect(mockSaveAuthTokens).not.toHaveBeenCalled();
   });
 
