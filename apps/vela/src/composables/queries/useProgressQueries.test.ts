@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { flushPromises } from '@vue/test-utils';
 import { isRef } from 'vue';
 import { withQueryClient } from 'src/test-utils/withQueryClient';
+import { progressKeys as sharedProgressKeys } from '@vela/common';
 
 const mockProgressService = {
   getProgressAnalytics: vi.fn(),
@@ -16,6 +17,11 @@ describe('useProgressQueries', () => {
   });
 
   describe('progressKeys', () => {
+    it('re-exports the shared progress query keys', async () => {
+      const { progressKeys } = await import('./useProgressQueries');
+      expect(progressKeys).toBe(sharedProgressKeys);
+    });
+
     it('generates correct all key', async () => {
       const { progressKeys } = await import('./useProgressQueries');
       expect(progressKeys.all).toEqual(['progress']);

@@ -9,7 +9,7 @@ export default defineConfig({
       template: { transformAssetUrls },
     }),
     quasar({
-      sassVariables: 'src/quasar-variables.sass',
+      sassVariables: 'src/css/quasar.variables.scss',
     }) as unknown as any,
   ],
   test: {

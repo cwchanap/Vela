@@ -53,8 +53,8 @@ describe('LoginPage', () => {
 
   beforeEach(() => {
     Object.keys(storageState).forEach((k) => delete storageState[k]);
-    mockSignIn.mockClear();
-    mockSaveAuthTokens.mockClear();
+    mockSignIn.mockReset();
+    mockSaveAuthTokens.mockReset();
     mockImportWebappSession.mockReset();
     mockOpenWebappLogin.mockReset();
     setupBrowserMocks();

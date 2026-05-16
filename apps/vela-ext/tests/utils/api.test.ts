@@ -67,10 +67,10 @@ describe('signIn', () => {
     await expect(signIn('bad@example.com', 'wrong')).rejects.toThrow('Invalid credentials');
   });
 
-  it('throws generic error when response has no error field', async () => {
+  it('throws generic error with status when response has no error field', async () => {
     mockFetch.mockResolvedValue(mockJsonResponse({}, 500));
 
-    await expect(signIn('user@example.com', 'pass')).rejects.toThrow('Sign in failed');
+    await expect(signIn('user@example.com', 'pass')).rejects.toThrow('Sign in failed (HTTP 500)');
   });
 
   it('throws a readable error when the sign in endpoint returns non-JSON HTML', async () => {
@@ -162,10 +162,10 @@ describe('refreshToken', () => {
     await expect(refreshToken('bad-refresh')).rejects.toThrow('Token expired');
   });
 
-  it('throws generic error when response has no error field', async () => {
+  it('throws generic error with status when response has no error field', async () => {
     mockFetch.mockResolvedValue(mockJsonResponse({}, 500));
 
-    await expect(refreshToken('token')).rejects.toThrow('Token refresh failed');
+    await expect(refreshToken('token')).rejects.toThrow('Token refresh failed (HTTP 500)');
   });
 });
 
@@ -207,11 +207,11 @@ describe('saveDictionaryEntry', () => {
     );
   });
 
-  it('throws generic error when response has no error field', async () => {
+  it('throws generic error with status when response has no error field', async () => {
     mockFetch.mockResolvedValue(mockJsonResponse({}, 500));
 
     await expect(saveDictionaryEntry('token', { sentence: 'テスト' })).rejects.toThrow(
-      'Failed to save dictionary entry',
+      'Failed to save dictionary entry (HTTP 500)',
     );
   });
 
@@ -260,9 +260,11 @@ describe('getMyDictionaries', () => {
     await expect(getMyDictionaries('bad-token')).rejects.toThrow('Unauthorized');
   });
 
-  it('throws generic error when response has no error field', async () => {
+  it('throws generic error with status when response has no error field', async () => {
     mockFetch.mockResolvedValue(mockJsonResponse({}, 500));
 
-    await expect(getMyDictionaries('token')).rejects.toThrow('Failed to fetch dictionary entries');
+    await expect(getMyDictionaries('token')).rejects.toThrow(
+      'Failed to fetch dictionary entries (HTTP 500)',
+    );
   });
 });

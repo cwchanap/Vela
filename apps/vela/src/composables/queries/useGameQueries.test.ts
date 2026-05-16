@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { flushPromises } from '@vue/test-utils';
 import { withQueryClient } from 'src/test-utils/withQueryClient';
+import { gameKeys as sharedGameKeys } from '@vela/common';
 
 const mockGameService = {
   getVocabularyQuestions: vi.fn(),
@@ -15,6 +16,11 @@ describe('useGameQueries', () => {
   });
 
   describe('gameKeys', () => {
+    it('re-exports the shared game query keys', async () => {
+      const { gameKeys } = await import('./useGameQueries');
+      expect(gameKeys).toBe(sharedGameKeys);
+    });
+
     it('generates correct vocabulary key', async () => {
       const { gameKeys } = await import('./useGameQueries');
       expect(gameKeys.vocabulary(10)).toEqual(['games', 'vocabulary', 10]);

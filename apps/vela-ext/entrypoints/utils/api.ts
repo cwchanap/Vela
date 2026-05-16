@@ -30,7 +30,7 @@ async function getErrorMessage(response: Response, fallback: string): Promise<st
     if (typeof error.message === 'string' && error.message.length > 0) {
       return error.message;
     }
-    return fallback;
+    return fallbackWithStatus;
   } catch {
     return fallbackWithStatus;
   }

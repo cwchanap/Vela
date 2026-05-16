@@ -1,27 +1,8 @@
 import { defineStore } from 'pinia';
-import type { Vocabulary, Sentence, JLPTLevel } from 'src/types/database';
+import type { JLPTLevel } from 'src/types/database';
+import type { Question, SentenceQuestion } from 'src/types/games';
 
-export interface SentenceQuestion {
-  sentence: Sentence;
-  scrambled: string[];
-  correctAnswer: string;
-}
-
-export interface VocabularyOption {
-  /** Unique identifier for the vocabulary item */
-  id: string;
-  /** Japanese word text (may contain kanji) */
-  text: string;
-  /** Hiragana reading for furigana display */
-  reading?: string;
-}
-
-export interface Question {
-  word: Vocabulary;
-  options: VocabularyOption[];
-  /** id of the correct answer vocabulary */
-  correctAnswer: string;
-}
+export type { Question, SentenceQuestion, VocabularyOption } from 'src/types/games';
 
 export interface GameState {
   score: number;

@@ -1,14 +1,8 @@
 import { useQuery } from '@tanstack/vue-query';
 import { gameService } from 'src/services/gameService';
+import { gameKeys } from '@vela/common';
 
-/**
- * Query key factory for game-related queries
- */
-export const gameKeys = {
-  all: ['games'] as const,
-  vocabulary: (count: number) => [...gameKeys.all, 'vocabulary', count] as const,
-  sentences: (count: number) => [...gameKeys.all, 'sentences', count] as const,
-};
+export { gameKeys };
 
 /**
  * Hook to fetch vocabulary questions for games
