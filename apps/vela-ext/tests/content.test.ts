@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 
 import contentScriptConfig, { scanJapaneseSentences } from '../entrypoints/content';
 
@@ -32,8 +32,14 @@ function getRegisteredMessageListener() {
     throw new Error('Expected content script to register a message listener');
   }
 
-  return call[0] as (_message: unknown) => void;
+  return call[0] as (
+    _message: unknown,
+    _sender: unknown,
+    _sendResponse: (_response?: unknown) => void,
+  ) => void;
 }
+
+const noopSendResponse = vi.fn();
 
 beforeEach(() => {
   document.body.innerHTML = '';
@@ -185,9 +191,9 @@ describe('content script message listener', () => {
     contentScript.main();
     const listener = getRegisteredMessageListener();
 
-    expect(() => listener(undefined)).not.toThrow();
-    expect(() => listener(null)).not.toThrow();
-    expect(() => listener('SCAN_PAGE')).not.toThrow();
+    expect(() => listener(undefined, undefined, noopSendResponse)).not.toThrow();
+    expect(() => listener(null, undefined, noopSendResponse)).not.toThrow();
+    expect(() => listener('SCAN_PAGE', undefined, noopSendResponse)).not.toThrow();
     expect(document.getElementById('vela-ext-overlay-host')).toBeNull();
   });
 
@@ -199,7 +205,7 @@ describe('content script message listener', () => {
 
     contentScript.main();
     const listener = getRegisteredMessageListener();
-    listener({ type: 'SCAN_PAGE' });
+    listener({ type: 'SCAN_PAGE' }, undefined, noopSendResponse);
 
     // Should NOT show the overlay
     expect(document.getElementById('vela-ext-overlay-host')).toBeNull();
@@ -209,7 +215,7 @@ describe('content script message listener', () => {
     });
   });
 
-  it('returns the web-app Cognito session from localStorage when requested by the popup', () => {
+  it('sends the web-app Cognito session from localStorage via sendResponse when requested by the popup', () => {
     const idToken = jwtWithPayload({ email: 'user@example.com' });
     localStorage.setItem(
       'CognitoIdentityServiceProvider.client-id.LastAuthUser',
@@ -230,8 +236,10 @@ describe('content script message listener', () => {
 
     contentScript.main();
     const listener = getRegisteredMessageListener();
+    const sendResponse = vi.fn();
+    listener({ type: 'GET_VELA_WEBAPP_SESSION' }, {}, sendResponse);
 
-    expect(listener({ type: 'GET_VELA_WEBAPP_SESSION' })).toEqual({
+    expect(sendResponse).toHaveBeenCalledWith({
       tokens: {
         accessToken: 'access-token',
         refreshToken: 'refresh-token',
@@ -252,7 +260,7 @@ describe('content script message listener', () => {
 
     contentScript.main();
     const listener = getRegisteredMessageListener();
-    listener({ type: 'SCAN_PAGE' });
+    listener({ type: 'SCAN_PAGE' }, undefined, noopSendResponse);
 
     const host = document.getElementById('vela-ext-overlay-host');
     const shadowRoot = host?.shadowRoot;
@@ -281,7 +289,7 @@ describe('content script message listener', () => {
 
     contentScript.main();
     const listener = getRegisteredMessageListener();
-    listener({ type: 'SCAN_PAGE' });
+    listener({ type: 'SCAN_PAGE' }, undefined, noopSendResponse);
 
     const host = document.getElementById('vela-ext-overlay-host');
     const shadowRoot = host?.shadowRoot;
@@ -303,7 +311,7 @@ describe('content script message listener', () => {
 
     contentScript.main();
     const listener = getRegisteredMessageListener();
-    listener({ type: 'SCAN_PAGE' });
+    listener({ type: 'SCAN_PAGE' }, undefined, noopSendResponse);
 
     const host = document.getElementById('vela-ext-overlay-host');
     const shadowRoot = host?.shadowRoot;
@@ -330,7 +338,7 @@ describe('content script message listener', () => {
 
     contentScript.main();
     const listener = getRegisteredMessageListener();
-    listener({ type: 'SCAN_PAGE' });
+    listener({ type: 'SCAN_PAGE' }, undefined, noopSendResponse);
 
     const host = document.getElementById('vela-ext-overlay-host');
     const shadowRoot = host?.shadowRoot;
