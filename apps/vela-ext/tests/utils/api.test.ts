@@ -1,6 +1,5 @@
 import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
-  signIn,
   checkSession,
   refreshToken,
   saveDictionaryEntry,
@@ -23,86 +22,12 @@ function mockJsonResponse(data: unknown, status = 200) {
   };
 }
 
-function mockHtmlErrorResponse(status = 502) {
-  return {
-    ok: false,
-    status,
-    headers: {
-      get: vi.fn((name: string) => (name.toLowerCase() === 'content-type' ? 'text/html' : null)),
-    },
-    text: vi.fn().mockResolvedValue('<!doctype html><title>Bad Gateway</title>'),
-    json: vi.fn().mockRejectedValue(new SyntaxError('Unexpected token < in JSON')),
-  };
-}
-
 beforeEach(() => {
   mockFetch.mockReset();
 });
 
 afterAll(() => {
   vi.unstubAllGlobals();
-});
-
-describe('signIn', () => {
-  it('returns tokens on successful sign in', async () => {
-    const tokens = { accessToken: 'access', refreshToken: 'refresh', idToken: 'id' };
-    mockFetch.mockResolvedValue(mockJsonResponse({ tokens }));
-
-    const result = await signIn('user@example.com', 'password123');
-
-    expect(result).toEqual(tokens);
-    expect(mockFetch).toHaveBeenCalledOnce();
-    const [url, options] = mockFetch.mock.calls[0];
-    expect(url).toContain('/auth/signin');
-    expect(options.method).toBe('POST');
-    expect(JSON.parse(options.body)).toEqual({
-      email: 'user@example.com',
-      password: 'password123',
-    });
-  });
-
-  it('throws an error with message from response when sign in fails', async () => {
-    mockFetch.mockResolvedValue(mockJsonResponse({ error: 'Invalid credentials' }, 401));
-
-    await expect(signIn('bad@example.com', 'wrong')).rejects.toThrow('Invalid credentials');
-  });
-
-  it('throws generic error with status when response has no error field', async () => {
-    mockFetch.mockResolvedValue(mockJsonResponse({}, 500));
-
-    await expect(signIn('user@example.com', 'pass')).rejects.toThrow('Sign in failed (HTTP 500)');
-  });
-
-  it('throws a readable error when the sign in endpoint returns non-JSON HTML', async () => {
-    mockFetch.mockResolvedValue(mockHtmlErrorResponse(502));
-
-    await expect(signIn('user@example.com', 'pass')).rejects.toThrow('Sign in failed (HTTP 502)');
-  });
-
-  it('throws a readable error when a successful sign in response is not JSON', async () => {
-    mockFetch.mockResolvedValue({
-      ok: true,
-      status: 200,
-      headers: {
-        get: vi.fn((name: string) => (name.toLowerCase() === 'content-type' ? 'text/html' : null)),
-      },
-      json: vi.fn().mockRejectedValue(new SyntaxError('Unexpected token < in JSON')),
-    });
-
-    await expect(signIn('user@example.com', 'pass')).rejects.toThrow(
-      'Sign in failed: invalid response from server',
-    );
-  });
-
-  it('sends Content-Type: application/json header', async () => {
-    const tokens = { accessToken: 'a', refreshToken: 'r', idToken: 'i' };
-    mockFetch.mockResolvedValue(mockJsonResponse({ tokens }));
-
-    await signIn('user@example.com', 'pass');
-
-    const [, options] = mockFetch.mock.calls[0];
-    expect(options.headers['Content-Type']).toBe('application/json');
-  });
 });
 
 describe('checkSession', () => {

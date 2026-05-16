@@ -44,24 +44,6 @@ async function getJsonBody<T>(response: Response, fallback: string): Promise<T> 
   }
 }
 
-// Authentication API
-export async function signIn(email: string, password: string): Promise<AuthTokens> {
-  const response = await fetch(`${API_BASE_URL}/auth/signin`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({ email, password }),
-  });
-
-  if (!response.ok) {
-    throw new Error(await getErrorMessage(response, 'Sign in failed'));
-  }
-
-  const data = await getJsonBody<{ tokens: AuthTokens }>(response, 'Sign in failed');
-  return data.tokens;
-}
-
 export async function checkSession(idToken: string): Promise<boolean> {
   try {
     const response = await fetch(`${API_BASE_URL}/auth/session`, {

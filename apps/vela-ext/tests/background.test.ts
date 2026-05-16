@@ -1,74 +1,86 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-const { mockNotificationsCreate, mockTabsSendMessage, mockRuntimeGetURL, mockIdbStore, idbState } =
-  vi.hoisted(() => {
-    const mockNotificationsCreate = vi.fn();
-    const mockTabsSendMessage = vi.fn();
-    const mockRuntimeGetURL = vi.fn((p: string) => `chrome-extension://abc123${p}`);
+const {
+  mockContextMenusCreate,
+  mockContextMenusRemoveAll,
+  mockNotificationsCreate,
+  mockTabsSendMessage,
+  mockRuntimeGetURL,
+  mockIdbStore,
+  idbState,
+} = vi.hoisted(() => {
+  const mockContextMenusCreate = vi.fn();
+  const mockContextMenusRemoveAll = vi.fn().mockResolvedValue(undefined);
+  const mockNotificationsCreate = vi.fn();
+  const mockTabsSendMessage = vi.fn();
+  const mockRuntimeGetURL = vi.fn((p: string) => `chrome-extension://abc123${p}`);
 
-    (globalThis as any).browser = {
-      runtime: {
-        id: 'test-ext-id',
-        onInstalled: { addListener: vi.fn() },
-        onMessage: { addListener: vi.fn() },
-        onStartup: { addListener: vi.fn() },
-        getURL: mockRuntimeGetURL,
-        sendMessage: vi.fn(),
-      },
-      contextMenus: {
-        create: vi.fn(),
-        onClicked: { addListener: vi.fn() },
-      },
-      notifications: {
-        create: mockNotificationsCreate,
-      },
-      tabs: {
-        sendMessage: mockTabsSendMessage,
-      },
-      windows: {
-        WINDOW_ID_NONE: -1,
-        onFocusChanged: { addListener: vi.fn() },
-      },
-      storage: { local: { get: vi.fn(), set: vi.fn(), remove: vi.fn(), clear: vi.fn() } },
-    };
+  (globalThis as any).browser = {
+    runtime: {
+      id: 'test-ext-id',
+      onInstalled: { addListener: vi.fn() },
+      onMessage: { addListener: vi.fn() },
+      onStartup: { addListener: vi.fn() },
+      getURL: mockRuntimeGetURL,
+      sendMessage: vi.fn(),
+    },
+    contextMenus: {
+      create: mockContextMenusCreate,
+      removeAll: mockContextMenusRemoveAll,
+      onClicked: { addListener: vi.fn() },
+    },
+    notifications: {
+      create: mockNotificationsCreate,
+    },
+    tabs: {
+      sendMessage: mockTabsSendMessage,
+    },
+    windows: {
+      WINDOW_ID_NONE: -1,
+      onFocusChanged: { addListener: vi.fn() },
+    },
+    storage: { local: { get: vi.fn(), set: vi.fn(), remove: vi.fn(), clear: vi.fn() } },
+  };
 
-    /** Shared mutable state for the IDB mock — tests configure this per-case. */
-    const idbState = {
-      getAllResult: [] as any[],
-    };
+  /** Shared mutable state for the IDB mock — tests configure this per-case. */
+  const idbState = {
+    getAllResult: [] as any[],
+  };
 
-    /** Build a fake IDBRequest-like object that immediately fires onsuccess with a given value. */
-    function makeSuccessRequest(result: any = undefined) {
-      return {
-        result,
-        get onsuccess() {
-          return null;
-        },
-        set onsuccess(cb: any) {
-          cb();
-        },
-        get onerror() {
-          return null;
-        },
-        set onerror(_: any) {},
-      };
-    }
-
-    const mockIdbStore = {
-      add: vi.fn(() => makeSuccessRequest()),
-      getAll: vi.fn(() => makeSuccessRequest(idbState.getAllResult)),
-      delete: vi.fn(() => makeSuccessRequest()),
-      put: vi.fn(() => makeSuccessRequest()),
-    };
-
+  /** Build a fake IDBRequest-like object that immediately fires onsuccess with a given value. */
+  function makeSuccessRequest(result: any = undefined) {
     return {
-      mockNotificationsCreate,
-      mockTabsSendMessage,
-      mockRuntimeGetURL,
-      mockIdbStore,
-      idbState,
+      result,
+      get onsuccess() {
+        return null;
+      },
+      set onsuccess(cb: any) {
+        cb();
+      },
+      get onerror() {
+        return null;
+      },
+      set onerror(_: any) {},
     };
-  });
+  }
+
+  const mockIdbStore = {
+    add: vi.fn(() => makeSuccessRequest()),
+    getAll: vi.fn(() => makeSuccessRequest(idbState.getAllResult)),
+    delete: vi.fn(() => makeSuccessRequest()),
+    put: vi.fn(() => makeSuccessRequest()),
+  };
+
+  return {
+    mockContextMenusCreate,
+    mockContextMenusRemoveAll,
+    mockNotificationsCreate,
+    mockTabsSendMessage,
+    mockRuntimeGetURL,
+    mockIdbStore,
+    idbState,
+  };
+});
 
 vi.mock('../entrypoints/utils/idb', () => ({
   openDB: vi.fn().mockResolvedValue({
@@ -89,11 +101,35 @@ vi.mock('../entrypoints/utils/storage', () => ({
 import {
   buildPendingSentenceRecord,
   flushQueue,
+  registerContextMenus,
   requestPageScan,
   saveSentenceToAPI,
   shouldDiscardPendingRecord,
 } from '../entrypoints/background';
 import { getValidIdToken, refreshIdToken, getUserEmail } from '../entrypoints/utils/storage';
+
+describe('registerContextMenus', () => {
+  beforeEach(() => {
+    mockContextMenusCreate.mockClear();
+    mockContextMenusRemoveAll.mockClear();
+  });
+
+  it('recreates context menus when the background script starts', async () => {
+    await registerContextMenus();
+
+    expect(mockContextMenusRemoveAll).toHaveBeenCalledOnce();
+    expect(mockContextMenusCreate).toHaveBeenCalledWith({
+      id: 'add-vocab-to-vela',
+      title: 'Add vocab to Vela',
+      contexts: ['selection'],
+    });
+    expect(mockContextMenusCreate).toHaveBeenCalledWith({
+      id: 'scan-page-vela',
+      title: 'Scan page for Japanese',
+      contexts: ['page'],
+    });
+  });
+});
 
 describe('buildPendingSentenceRecord', () => {
   it('creates a record with retries: 0, a timestamp, and an idempotencyKey', () => {

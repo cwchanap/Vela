@@ -12,7 +12,6 @@
             >
               {{ isDarkMode ? '☀️' : '🌙' }}
             </button>
-            <button @click="handleLogout" class="icon-button" title="Logout">🚪</button>
           </div>
         </div>
         <p>Logged in as: {{ userEmail }}</p>
@@ -29,7 +28,7 @@
           <ol v-show="instructionsExpanded">
             <li>Select any text on a webpage</li>
             <li>Right-click to open the context menu</li>
-            <li>Click "Save to My Dictionaries"</li>
+            <li>Click "Add vocab to Vela"</li>
           </ol>
         </div>
 
@@ -92,11 +91,11 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, watch, computed } from 'vue';
 import { getMyDictionaries } from '../utils/api';
-import { getValidIdToken, refreshIdToken, getUserEmail, clearAuthData } from '../utils/storage';
+import { getValidIdToken, refreshIdToken, getUserEmail } from '../utils/storage';
 import { getPendingQueueCount } from '../utils/pendingQueue';
 
 const emit = defineEmits<{
-  logout: [];
+  sessionExpired: [];
 }>();
 
 const userEmail = ref('');
@@ -180,10 +179,9 @@ async function loadEntries() {
   } catch (err) {
     error.value = err instanceof Error ? err.message : 'Failed to load dictionary entries';
 
-    // If session expired, log out the user
-    if (err instanceof Error && err.message.includes('Session expired')) {
+    if (err instanceof Error && isAuthenticationError(err)) {
       setTimeout(() => {
-        handleLogout();
+        emit('sessionExpired');
       }, 2000);
     }
   } finally {
@@ -196,13 +194,13 @@ function toggleTheme() {
   isDarkMode.value = !isDarkMode.value;
 }
 
-async function handleLogout() {
-  await clearAuthData();
-  // Don't clear the pending queue on logout — queued records are attributed
-  // to a specific userEmail and flushQueue() already discards mismatched
-  // records when a different user signs in. Wiping here silently loses saves
-  // if the same user re-authenticates (e.g. after a session-expiry auto-logout).
-  emit('logout');
+function isAuthenticationError(error: Error): boolean {
+  return [
+    'Session expired',
+    'Not authenticated',
+    'No refresh token available',
+    'No ID token available',
+  ].some((message) => error.message.includes(message));
 }
 
 function formatDate(timestamp: number): string {

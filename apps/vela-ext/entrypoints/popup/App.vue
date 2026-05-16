@@ -35,7 +35,7 @@ function handleLoginSuccess() {
   });
 }
 
-function handleLogout() {
+function handleSessionExpired() {
   authenticated.value = false;
 }
 </script>
@@ -43,7 +43,7 @@ function handleLogout() {
 <template>
   <div v-if="loading" class="loading">Loading...</div>
   <LoginPage v-else-if="!authenticated" @login-success="handleLoginSuccess" />
-  <DashboardPage v-else @logout="handleLogout" />
+  <DashboardPage v-else @session-expired="handleSessionExpired" />
 </template>
 
 <style scoped>
