@@ -1,13 +1,15 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushPromises, mount } from '@vue/test-utils';
 
-const { mockIsAuthenticated, mockImportWebappSession } = vi.hoisted(() => ({
+const { mockIsAuthenticated, mockImportWebappSession, mockClearAuthData } = vi.hoisted(() => ({
   mockIsAuthenticated: vi.fn(),
   mockImportWebappSession: vi.fn(),
+  mockClearAuthData: vi.fn(),
 }));
 
 vi.mock('../../entrypoints/utils/storage', () => ({
   isAuthenticated: mockIsAuthenticated,
+  clearAuthData: mockClearAuthData,
 }));
 
 vi.mock('../../entrypoints/utils/webappSession', () => ({
@@ -36,6 +38,7 @@ describe('popup App', () => {
   beforeEach(() => {
     mockIsAuthenticated.mockReset();
     mockImportWebappSession.mockReset();
+    mockClearAuthData.mockReset().mockResolvedValue(undefined);
 
     (globalThis as any).browser = {
       runtime: {
@@ -113,9 +116,30 @@ describe('popup App', () => {
     await flushPromises();
 
     wrapper.findComponent({ name: 'DashboardPage' }).vm.$emit('sessionExpired');
-    await wrapper.vm.$nextTick();
+    await flushPromises();
 
     expect(wrapper.find('[data-testid="login-page"]').exists()).toBe(true);
     expect(wrapper.find('[data-testid="dashboard-page"]').exists()).toBe(false);
+    expect(mockClearAuthData).toHaveBeenCalledOnce();
+  });
+
+  it('logs error when clearAuthData fails during session expiry', async () => {
+    const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    mockIsAuthenticated.mockResolvedValue(true);
+    mockClearAuthData.mockRejectedValue(new Error('Storage corrupted'));
+
+    const wrapper = mount(App);
+    await flushPromises();
+
+    wrapper.findComponent({ name: 'DashboardPage' }).vm.$emit('sessionExpired');
+    await flushPromises();
+
+    expect(wrapper.find('[data-testid="login-page"]').exists()).toBe(true);
+    expect(consoleSpy).toHaveBeenCalledWith(
+      '[Vela] Failed to clear auth data on session expiry:',
+      expect.any(Error),
+    );
+
+    consoleSpy.mockRestore();
   });
 });

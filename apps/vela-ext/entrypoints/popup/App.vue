@@ -2,7 +2,7 @@
 import { ref, onMounted } from 'vue';
 import LoginPage from './LoginPage.vue';
 import DashboardPage from './DashboardPage.vue';
-import { isAuthenticated } from '../utils/storage';
+import { isAuthenticated, clearAuthData } from '../utils/storage';
 import { importWebappSession } from '../utils/webappSession';
 
 const authenticated = ref(false);
@@ -35,8 +35,13 @@ function handleLoginSuccess() {
   });
 }
 
-function handleSessionExpired() {
+async function handleSessionExpired() {
   authenticated.value = false;
+  try {
+    await clearAuthData();
+  } catch (error: unknown) {
+    console.error('[Vela] Failed to clear auth data on session expiry:', error);
+  }
 }
 </script>
 

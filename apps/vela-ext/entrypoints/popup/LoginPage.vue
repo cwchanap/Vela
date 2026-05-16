@@ -79,7 +79,12 @@ function toggleTheme() {
 
 async function handleOpenWebappLogin() {
   error.value = '';
-  await openWebappLogin();
+  try {
+    await openWebappLogin();
+  } catch (err) {
+    console.error('[Vela] Failed to open webapp login:', err);
+    error.value = err instanceof Error ? err.message : 'Failed to open login page';
+  }
 }
 
 async function handleUseWebappSession() {

@@ -378,16 +378,18 @@ export async function flushQueue(): Promise<void> {
 
 async function recreateContextMenus(): Promise<void> {
   await browser.contextMenus.removeAll();
-  browser.contextMenus.create({
-    id: ADD_VOCAB_CONTEXT_MENU_ID,
-    title: 'Add vocab to Vela',
-    contexts: ['selection'],
-  });
-  browser.contextMenus.create({
-    id: SCAN_PAGE_CONTEXT_MENU_ID,
-    title: 'Scan page for Japanese',
-    contexts: ['page'],
-  });
+  await Promise.all([
+    browser.contextMenus.create({
+      id: ADD_VOCAB_CONTEXT_MENU_ID,
+      title: 'Add vocab to Vela',
+      contexts: ['selection'],
+    }),
+    browser.contextMenus.create({
+      id: SCAN_PAGE_CONTEXT_MENU_ID,
+      title: 'Scan page for Japanese',
+      contexts: ['page'],
+    }),
+  ]);
 }
 
 export function registerContextMenus(): Promise<void> {

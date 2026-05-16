@@ -124,6 +124,17 @@ describe('LoginPage', () => {
       expect(mockOpenWebappLogin).toHaveBeenCalledOnce();
     });
 
+    it('shows error when opening webapp login fails', async () => {
+      mockOpenWebappLogin.mockRejectedValue(new Error('tabs.create failed'));
+      wrapper = mount(LoginPage);
+      await flushPromises();
+
+      await wrapper.find('.open-webapp-button').trigger('click');
+      await flushPromises();
+
+      expect(wrapper.find('.error-message').text()).toBe('tabs.create failed');
+    });
+
     it('imports the web-app session when the user has signed in there', async () => {
       mockImportWebappSession.mockResolvedValue(true);
       wrapper = mount(LoginPage);
