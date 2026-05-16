@@ -12,6 +12,7 @@
   "scripts": {
     "build": "turbo build",
     "dev": "turbo dev --parallel",
+    "dev:extension-test": "turbo run dev:extension-test --parallel --filter=./apps/vela --filter=./apps/vela-api --filter=./apps/vela-ext",
     "dev:vela-ext": "turbo run dev --filter=./apps/vela-ext",
     "build:vela-ext": "turbo run build --filter=./apps/vela-ext",
     "zip:vela-ext": "turbo run zip --filter=./apps/vela-ext",

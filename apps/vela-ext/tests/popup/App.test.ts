@@ -25,7 +25,7 @@ vi.mock('../../entrypoints/popup/LoginPage.vue', () => ({
 vi.mock('../../entrypoints/popup/DashboardPage.vue', () => ({
   default: {
     name: 'DashboardPage',
-    emits: ['logout'],
+    emits: ['sessionExpired'],
     template: '<div data-testid="dashboard-page" />',
   },
 }));
@@ -104,5 +104,18 @@ describe('popup App', () => {
     expect(wrapper.find('.loading').exists()).toBe(false);
 
     consoleSpy.mockRestore();
+  });
+
+  it('returns to the redirect page when the dashboard reports an expired session', async () => {
+    mockIsAuthenticated.mockResolvedValue(true);
+
+    const wrapper = mount(App);
+    await flushPromises();
+
+    wrapper.findComponent({ name: 'DashboardPage' }).vm.$emit('sessionExpired');
+    await wrapper.vm.$nextTick();
+
+    expect(wrapper.find('[data-testid="login-page"]').exists()).toBe(true);
+    expect(wrapper.find('[data-testid="dashboard-page"]').exists()).toBe(false);
   });
 });

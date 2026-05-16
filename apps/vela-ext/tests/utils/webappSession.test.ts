@@ -17,6 +17,7 @@ vi.mock('../../entrypoints/utils/storage', () => ({
 }));
 
 import {
+  getWebappLoginUrl,
   importWebappSession,
   readCognitoSessionFromStorage,
 } from '../../entrypoints/utils/webappSession';
@@ -64,6 +65,12 @@ describe('readCognitoSessionFromStorage', () => {
     });
 
     expect(readCognitoSessionFromStorage(storage)).toBeNull();
+  });
+});
+
+describe('getWebappLoginUrl', () => {
+  it('returns the web-app auth redirect URL for unauthenticated extension users', () => {
+    expect(getWebappLoginUrl()).toBe('https://vela.cwchanap.dev/auth/login');
   });
 });
 

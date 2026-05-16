@@ -1,10 +1,18 @@
 import { defineConfig } from 'wxt';
 
+const isExtensionTestMode = process.env.VELA_EXT_TEST_MODE === '1';
+
 // See https://wxt.dev/api/config.html
 export default defineConfig({
   modules: ['@wxt-dev/module-vue'],
-  runner: {
-    disabled: true, // Don't automatically open browser on dev server start
+  webExt: {
+    disabled: !isExtensionTestMode,
+    startUrls: ['http://localhost:9000/auth/login', 'http://localhost:9000/extension-test.html'],
+    chromiumArgs: [
+      '--user-data-dir=.wxt/chrome-data',
+      '--remote-debugging-port=9222',
+      '--window-size=1280,900',
+    ],
   },
   manifest: {
     name: 'Vela Japanese Dictionary',

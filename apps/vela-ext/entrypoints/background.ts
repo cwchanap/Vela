@@ -2,6 +2,9 @@ import { getValidIdToken, refreshIdToken, getUserEmail } from './utils/storage';
 import { openDB, STORE_NAME } from './utils/idb';
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'https://vela.cwchanap.dev/api';
+const ADD_VOCAB_CONTEXT_MENU_ID = 'add-vocab-to-vela';
+const SCAN_PAGE_CONTEXT_MENU_ID = 'scan-page-vela';
+let contextMenuRegistrationPromise: Promise<void> | null = null;
 
 // ── IndexedDB queue ──────────────────────────────────────────────────────────
 
@@ -373,30 +376,47 @@ export async function flushQueue(): Promise<void> {
 
 // ── Extension entry point ────────────────────────────────────────────────────
 
+async function recreateContextMenus(): Promise<void> {
+  await browser.contextMenus.removeAll();
+  browser.contextMenus.create({
+    id: ADD_VOCAB_CONTEXT_MENU_ID,
+    title: 'Add vocab to Vela',
+    contexts: ['selection'],
+  });
+  browser.contextMenus.create({
+    id: SCAN_PAGE_CONTEXT_MENU_ID,
+    title: 'Scan page for Japanese',
+    contexts: ['page'],
+  });
+}
+
+export function registerContextMenus(): Promise<void> {
+  contextMenuRegistrationPromise ??= recreateContextMenus().finally(() => {
+    contextMenuRegistrationPromise = null;
+  });
+  return contextMenuRegistrationPromise;
+}
+
 export default defineBackground(() => {
   console.log('Vela extension background script loaded', { id: browser.runtime.id });
 
   browser.runtime.onInstalled.addListener(() => {
-    browser.contextMenus.create({
-      id: 'save-to-vela',
-      title: 'Save to My Dictionaries',
-      contexts: ['selection'],
-    });
-    browser.contextMenus.create({
-      id: 'scan-page-vela',
-      title: 'Scan page for Japanese',
-      contexts: ['page'],
-    });
-    console.log('Context menus created');
+    registerContextMenus()
+      .then(() => console.log('Context menus created'))
+      .catch((error) => console.error('[Vela] Failed to create context menus:', error));
   });
 
+  registerContextMenus()
+    .then(() => console.log('Context menus ready'))
+    .catch((error) => console.error('[Vela] Failed to initialise context menus:', error));
+
   browser.contextMenus.onClicked.addListener(async (info, tab) => {
-    if (info.menuItemId === 'scan-page-vela' && tab?.id) {
+    if (info.menuItemId === SCAN_PAGE_CONTEXT_MENU_ID && tab?.id) {
       await requestPageScan(tab.id);
       return;
     }
 
-    if (info.menuItemId === 'save-to-vela' && info.selectionText) {
+    if (info.menuItemId === ADD_VOCAB_CONTEXT_MENU_ID && info.selectionText) {
       const selectedText = info.selectionText.trim();
       if (!selectedText) return;
 
@@ -421,7 +441,7 @@ export default defineBackground(() => {
           message,
         });
       } catch (error) {
-        console.error('[Vela] Error in save-to-vela handler:', error);
+        console.error('[Vela] Error in add-vocab-to-vela handler:', error);
         browser.notifications.create({
           type: 'basic',
           iconUrl: browser.runtime.getURL('/icon/128.png'),

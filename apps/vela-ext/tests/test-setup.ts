@@ -27,6 +27,7 @@ vi.stubGlobal('browser', {
   },
   contextMenus: {
     create: vi.fn(),
+    removeAll: vi.fn(async () => undefined),
     onClicked: {
       addListener: vi.fn(),
     },

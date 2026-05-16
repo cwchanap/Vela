@@ -3,7 +3,7 @@
     <div class="login-card">
       <div class="login-header">
         <div class="header-top">
-          <h2>Vela Login</h2>
+          <h2>Sign in on Vela</h2>
           <button
             @click="toggleTheme"
             class="theme-toggle"
@@ -16,83 +16,51 @@
         <p>Save Japanese sentences to your dictionary</p>
       </div>
 
-      <form @submit.prevent="handleLogin" class="login-form">
-        <div class="form-group">
-          <label for="email">Email</label>
-          <input
-            id="email"
-            v-model="email"
-            type="email"
-            name="username"
-            autocomplete="username"
-            inputmode="email"
-            placeholder="your@email.com"
-            required
-            :disabled="loading || webSessionLoading"
-          />
-        </div>
-
-        <div class="form-group">
-          <label for="password">Password</label>
-          <input
-            id="password"
-            v-model="password"
-            type="password"
-            name="password"
-            autocomplete="current-password"
-            placeholder="Enter your password"
-            required
-            :disabled="loading || webSessionLoading"
-          />
-        </div>
+      <div class="session-panel">
+        <p class="session-copy">Sign in with the Vela web app, then return here.</p>
+        <a class="login-url" :href="loginUrl" @click.prevent="handleOpenWebappLogin">
+          {{ loginUrl }}
+        </a>
 
         <div v-if="error" class="error-message">
           {{ error }}
         </div>
 
-        <button type="submit" class="login-button" :disabled="loading || webSessionLoading">
-          {{ loading ? 'Signing in...' : 'Sign In' }}
-        </button>
-
         <div class="web-session-actions">
           <button
             type="button"
-            class="web-session-button"
-            :disabled="loading || webSessionLoading"
-            @click="handleUseWebappSession"
+            class="open-webapp-button"
+            :disabled="webSessionLoading"
+            @click="handleOpenWebappLogin"
           >
-            {{ webSessionLoading ? 'Checking...' : 'Use Web App Session' }}
+            Open Vela Login
           </button>
           <button
             type="button"
-            class="open-webapp-button"
-            :disabled="loading || webSessionLoading"
-            @click="openWebappLogin"
+            class="web-session-button"
+            :disabled="webSessionLoading"
+            @click="handleUseWebappSession"
           >
-            Open Web App Login
+            {{ webSessionLoading ? 'Checking...' : 'Refresh Session' }}
           </button>
         </div>
-      </form>
+      </div>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, onMounted, watch } from 'vue';
-import { signIn } from '../utils/api';
-import { saveAuthTokens } from '../utils/storage';
-import { importWebappSession, openWebappLogin } from '../utils/webappSession';
+import { getWebappLoginUrl, importWebappSession, openWebappLogin } from '../utils/webappSession';
 
 const emit = defineEmits<{
   loginSuccess: [];
 }>();
 
-const email = ref('');
-const password = ref('');
-const loading = ref(false);
 const webSessionLoading = ref(false);
 const error = ref('');
 const isDarkMode = ref(false);
+const loginUrl = getWebappLoginUrl();
 
 onMounted(async () => {
   // Load theme preference
@@ -109,6 +77,11 @@ function toggleTheme() {
   isDarkMode.value = !isDarkMode.value;
 }
 
+async function handleOpenWebappLogin() {
+  error.value = '';
+  await openWebappLogin();
+}
+
 async function handleUseWebappSession() {
   webSessionLoading.value = true;
   error.value = '';
@@ -120,31 +93,11 @@ async function handleUseWebappSession() {
       return;
     }
 
-    error.value = 'Open Vela in a browser tab and sign in, then try again.';
+    error.value = 'Sign in at the URL above, then return here and refresh the session.';
   } catch (err) {
     error.value = err instanceof Error ? err.message : 'Failed to import web app session';
   } finally {
     webSessionLoading.value = false;
-  }
-}
-
-async function handleLogin() {
-  if (!email.value || !password.value) {
-    error.value = 'Please enter both email and password';
-    return;
-  }
-
-  loading.value = true;
-  error.value = '';
-
-  try {
-    const tokens = await signIn(email.value, password.value);
-    await saveAuthTokens(tokens, email.value);
-    emit('loginSuccess');
-  } catch (err) {
-    error.value = err instanceof Error ? err.message : 'Login failed';
-  } finally {
-    loading.value = false;
   }
 }
 </script>
@@ -159,13 +112,11 @@ async function handleLogin() {
   --text-secondary: #333;
   --text-tertiary: #666;
   --border-color: #ddd;
-  --border-focus: #4a90e2;
   --accent-color: #4a90e2;
   --accent-hover: #357abd;
   --error-bg: #fee;
   --error-border: #fcc;
   --error-text: #c33;
-  --input-disabled-bg: #f5f5f5;
 }
 
 .login-container.dark {
@@ -176,13 +127,11 @@ async function handleLogin() {
   --text-secondary: #d0d0d0;
   --text-tertiary: #a0a0a0;
   --border-color: #404040;
-  --border-focus: #5ba3f5;
   --accent-color: #5ba3f5;
   --accent-hover: #4a90e2;
   --error-bg: #3d1a1a;
   --error-border: #5c2828;
   --error-text: #ff6b6b;
-  --input-disabled-bg: #2a2a2a;
 }
 
 .login-container {
@@ -246,48 +195,34 @@ async function handleLogin() {
   text-align: center;
 }
 
-.login-form {
+.session-panel {
   display: flex;
   flex-direction: column;
   gap: 16px;
 }
 
-.form-group {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.form-group label {
+.session-copy {
+  margin: 0;
   font-size: 14px;
-  font-weight: 500;
+  line-height: 1.45;
   color: var(--text-secondary);
 }
 
-.form-group input {
+.login-url {
+  display: block;
   padding: 10px 12px;
+  background-color: var(--bg-secondary);
   border: 1px solid var(--border-color);
   border-radius: 6px;
-  font-size: 14px;
-  background-color: var(--bg-primary);
-  color: var(--text-primary);
-  transition: border-color 0.2s;
+  color: var(--accent-color);
+  font-size: 13px;
+  line-height: 1.35;
+  text-decoration: none;
+  word-break: break-all;
 }
 
-.form-group input:focus {
-  outline: none;
-  border-color: var(--border-focus);
-}
-
-.form-group input:disabled {
-  background-color: var(--input-disabled-bg);
-  cursor: not-allowed;
-  opacity: 0.6;
-}
-
-.form-group input::placeholder {
-  color: var(--text-tertiary);
-  opacity: 0.6;
+.login-url:hover {
+  background-color: var(--bg-hover);
 }
 
 .error-message {
@@ -297,28 +232,6 @@ async function handleLogin() {
   border-radius: 6px;
   color: var(--error-text);
   font-size: 14px;
-}
-
-.login-button {
-  padding: 12px;
-  background-color: var(--accent-color);
-  color: white;
-  border: none;
-  border-radius: 6px;
-  font-size: 15px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: background-color 0.2s;
-}
-
-.login-button:hover:not(:disabled) {
-  background-color: var(--accent-hover);
-}
-
-.login-button:disabled {
-  background-color: var(--border-color);
-  cursor: not-allowed;
-  opacity: 0.6;
 }
 
 .web-session-actions {

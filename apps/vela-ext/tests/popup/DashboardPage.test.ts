@@ -12,19 +12,13 @@ const { mockGetPendingQueueCount } = vi.hoisted(() => ({
   mockGetPendingQueueCount: vi.fn(),
 }));
 
-const {
-  mockGetValidIdToken,
-  mockRefreshIdToken,
-  mockGetUserEmail,
-  mockClearAuthData,
-  mockClearAllPending,
-} = vi.hoisted(() => ({
-  mockGetValidIdToken: vi.fn(),
-  mockRefreshIdToken: vi.fn(),
-  mockGetUserEmail: vi.fn(),
-  mockClearAuthData: vi.fn(),
-  mockClearAllPending: vi.fn().mockResolvedValue(undefined),
-}));
+const { mockGetValidIdToken, mockRefreshIdToken, mockGetUserEmail, mockClearAllPending } =
+  vi.hoisted(() => ({
+    mockGetValidIdToken: vi.fn(),
+    mockRefreshIdToken: vi.fn(),
+    mockGetUserEmail: vi.fn(),
+    mockClearAllPending: vi.fn().mockResolvedValue(undefined),
+  }));
 
 vi.mock('../../entrypoints/utils/api', () => ({
   getMyDictionaries: mockGetMyDictionaries,
@@ -38,7 +32,6 @@ vi.mock('../../entrypoints/utils/storage', () => ({
   getValidIdToken: mockGetValidIdToken,
   refreshIdToken: mockRefreshIdToken,
   getUserEmail: mockGetUserEmail,
-  clearAuthData: mockClearAuthData,
 }));
 
 vi.mock('../../entrypoints/utils/idb', () => ({
@@ -97,7 +90,6 @@ describe('DashboardPage', () => {
     mockGetValidIdToken.mockClear();
     mockRefreshIdToken.mockClear();
     mockGetUserEmail.mockClear();
-    mockClearAuthData.mockClear();
     mockClearAllPending.mockClear();
     mockGetPendingQueueCount.mockClear();
 
@@ -251,30 +243,13 @@ describe('DashboardPage', () => {
     });
   });
 
-  describe('Logout Functionality', () => {
-    it('should call clearAuthData (but NOT clear pending queue) when logout button is clicked', async () => {
+  describe('Session Actions', () => {
+    it('does not render a logout button in the extension popup', async () => {
       wrapper = mount(DashboardPage);
       await flushPromises();
 
-      const logoutButton = wrapper.find('[title="Logout"]');
-      await logoutButton.trigger('click');
-      await flushPromises();
-
-      expect(mockClearAuthData).toHaveBeenCalled();
-      // Pending queue is NOT cleared on logout — flushQueue handles
-      // cross-account cleanup via userEmail ownership checks.
+      expect(wrapper.find('[title="Logout"]').exists()).toBe(false);
       expect(mockClearAllPending).not.toHaveBeenCalled();
-    });
-
-    it('should emit logout event when logout button is clicked', async () => {
-      wrapper = mount(DashboardPage);
-      await flushPromises();
-
-      const logoutButton = wrapper.find('[title="Logout"]');
-      await logoutButton.trigger('click');
-
-      expect(wrapper.emitted('logout')).toBeTruthy();
-      expect(wrapper.emitted('logout')?.length).toBe(1);
     });
   });
 
@@ -566,7 +541,7 @@ describe('DashboardPage', () => {
       expect(mockGetMyDictionaries).toHaveBeenCalledTimes(2);
     });
 
-    it('should logout user after 2 seconds when session expired', async () => {
+    it('reports an expired session after 2 seconds without clearing extension auth data directly', async () => {
       vi.useFakeTimers();
 
       try {
@@ -577,13 +552,11 @@ describe('DashboardPage', () => {
 
         expect(wrapper.find('.error-message').exists()).toBe(true);
 
-        // Fast-forward time by 2 seconds to trigger the logout timeout
+        // Fast-forward time by 2 seconds to trigger the expired-session transition
         await vi.advanceTimersByTimeAsync(2000);
 
-        expect(mockClearAuthData).toHaveBeenCalled();
-        // Pending queue should NOT be cleared on session-expiry auto-logout
         expect(mockClearAllPending).not.toHaveBeenCalled();
-        expect(wrapper.emitted('logout')).toBeTruthy();
+        expect(wrapper.emitted('sessionExpired')).toBeTruthy();
       } finally {
         vi.useRealTimers();
       }

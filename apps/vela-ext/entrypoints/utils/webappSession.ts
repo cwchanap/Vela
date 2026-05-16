@@ -18,6 +18,10 @@ function getWebappBaseUrl(): string {
     : 'https://vela.cwchanap.dev';
 }
 
+export function getWebappLoginUrl(): string {
+  return `${getWebappBaseUrl()}/auth/login`;
+}
+
 function decodeJwtPayload(token: string): Record<string, unknown> | null {
   const payload = token.split('.')[1];
   if (!payload) return null;
@@ -135,5 +139,5 @@ export async function importWebappSession(): Promise<boolean> {
 }
 
 export async function openWebappLogin(): Promise<void> {
-  await browser.tabs.create({ url: `${getWebappBaseUrl()}/auth/login` });
+  await browser.tabs.create({ url: getWebappLoginUrl() });
 }

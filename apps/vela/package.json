@@ -18,6 +18,7 @@
     "test:debug": "playwright test --debug",
     "test:report": "playwright show-report",
     "dev": "quasar dev",
+    "dev:extension-test": "bun run dev",
     "build": "quasar build",
     "postinstall": "quasar prepare"
   },
