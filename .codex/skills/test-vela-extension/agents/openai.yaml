@@ -1,0 +1,4 @@
+interface:
+  display_name: "Test Vela Extension"
+  short_description: "Run the Vela extension debug loop"
+  default_prompt: "Use $test-vela-extension to start and verify the Vela browser extension workflow with browser MCP."
