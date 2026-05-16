@@ -23,9 +23,12 @@
             id="email"
             v-model="email"
             type="email"
+            name="username"
+            autocomplete="username"
+            inputmode="email"
             placeholder="your@email.com"
             required
-            :disabled="loading"
+            :disabled="loading || webSessionLoading"
           />
         </div>
 
@@ -35,9 +38,11 @@
             id="password"
             v-model="password"
             type="password"
+            name="password"
+            autocomplete="current-password"
             placeholder="Enter your password"
             required
-            :disabled="loading"
+            :disabled="loading || webSessionLoading"
           />
         </div>
 
@@ -45,9 +50,28 @@
           {{ error }}
         </div>
 
-        <button type="submit" class="login-button" :disabled="loading">
+        <button type="submit" class="login-button" :disabled="loading || webSessionLoading">
           {{ loading ? 'Signing in...' : 'Sign In' }}
         </button>
+
+        <div class="web-session-actions">
+          <button
+            type="button"
+            class="web-session-button"
+            :disabled="loading || webSessionLoading"
+            @click="handleUseWebappSession"
+          >
+            {{ webSessionLoading ? 'Checking...' : 'Use Web App Session' }}
+          </button>
+          <button
+            type="button"
+            class="open-webapp-button"
+            :disabled="loading || webSessionLoading"
+            @click="openWebappLogin"
+          >
+            Open Web App Login
+          </button>
+        </div>
       </form>
     </div>
   </div>
@@ -57,6 +81,7 @@
 import { ref, onMounted, watch } from 'vue';
 import { signIn } from '../utils/api';
 import { saveAuthTokens } from '../utils/storage';
+import { importWebappSession, openWebappLogin } from '../utils/webappSession';
 
 const emit = defineEmits<{
   loginSuccess: [];
@@ -65,6 +90,7 @@ const emit = defineEmits<{
 const email = ref('');
 const password = ref('');
 const loading = ref(false);
+const webSessionLoading = ref(false);
 const error = ref('');
 const isDarkMode = ref(false);
 
@@ -81,6 +107,25 @@ watch(isDarkMode, async (newValue) => {
 
 function toggleTheme() {
   isDarkMode.value = !isDarkMode.value;
+}
+
+async function handleUseWebappSession() {
+  webSessionLoading.value = true;
+  error.value = '';
+
+  try {
+    const imported = await importWebappSession();
+    if (imported) {
+      emit('loginSuccess');
+      return;
+    }
+
+    error.value = 'Open Vela in a browser tab and sign in, then try again.';
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : 'Failed to import web app session';
+  } finally {
+    webSessionLoading.value = false;
+  }
 }
 
 async function handleLogin() {
@@ -272,6 +317,35 @@ async function handleLogin() {
 
 .login-button:disabled {
   background-color: var(--border-color);
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.web-session-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.web-session-button,
+.open-webapp-button {
+  padding: 10px 8px;
+  background-color: var(--bg-secondary);
+  color: var(--text-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.web-session-button:hover:not(:disabled),
+.open-webapp-button:hover:not(:disabled) {
+  background-color: var(--bg-hover);
+}
+
+.web-session-button:disabled,
+.open-webapp-button:disabled {
   cursor: not-allowed;
   opacity: 0.6;
 }

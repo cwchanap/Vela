@@ -1,3 +1,5 @@
+import { readCognitoSessionFromStorage } from './utils/webappSession';
+
 // Export for unit testing
 export function scanJapaneseSentences(): string[] {
   const japaneseRe = /[\u3040-\u9FAF\uFF66-\uFF9F]/;
@@ -319,9 +321,13 @@ export default defineContentScript({
         typeof message !== 'object' ||
         message === null ||
         !('type' in message) ||
-        message.type !== 'SCAN_PAGE'
+        (message.type !== 'SCAN_PAGE' && message.type !== 'GET_VELA_WEBAPP_SESSION')
       )
         return;
+
+      if (message.type === 'GET_VELA_WEBAPP_SESSION') {
+        return readCognitoSessionFromStorage(window.localStorage);
+      }
 
       // Remove any existing overlay before creating a new one
       document.getElementById('vela-ext-overlay-host')?.remove();

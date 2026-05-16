@@ -3,6 +3,27 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import contentScriptConfig, { scanJapaneseSentences } from '../entrypoints/content';
 
 const contentScript = contentScriptConfig as unknown as { main(): void };
+const localStorageState: Record<string, string> = {};
+
+Object.defineProperty(window, 'localStorage', {
+  value: {
+    get length() {
+      return Object.keys(localStorageState).length;
+    },
+    key: (index: number) => Object.keys(localStorageState)[index] ?? null,
+    getItem: (key: string) => localStorageState[key] ?? null,
+    setItem: (key: string, value: string) => {
+      localStorageState[key] = value;
+    },
+    removeItem: (key: string) => {
+      delete localStorageState[key];
+    },
+    clear: () => {
+      Object.keys(localStorageState).forEach((key) => delete localStorageState[key]);
+    },
+  },
+  configurable: true,
+});
 
 function getRegisteredMessageListener() {
   const addListener = (globalThis as any).browser.runtime.onMessage.addListener;
@@ -16,9 +37,17 @@ function getRegisteredMessageListener() {
 
 beforeEach(() => {
   document.body.innerHTML = '';
+  localStorage.clear();
   (globalThis as any).browser.runtime.onMessage.addListener.mockClear();
   (globalThis as any).browser.runtime.sendMessage.mockReset();
 });
+
+function jwtWithPayload(payload: Record<string, unknown>) {
+  return `header.${btoa(JSON.stringify(payload))
+    .replaceAll('+', '-')
+    .replaceAll('/', '_')
+    .replace(/=+$/, '')}.signature`;
+}
 
 describe('scanJapaneseSentences', () => {
   it('collects Japanese text nodes matching the regex', () => {
@@ -177,6 +206,38 @@ describe('content script message listener', () => {
     // Should send a message to the background script so it can show the notification
     expect((globalThis as any).browser.runtime.sendMessage).toHaveBeenCalledWith({
       type: 'NO_JAPANESE_FOUND',
+    });
+  });
+
+  it('returns the web-app Cognito session from localStorage when requested by the popup', () => {
+    const idToken = jwtWithPayload({ email: 'user@example.com' });
+    localStorage.setItem(
+      'CognitoIdentityServiceProvider.client-id.LastAuthUser',
+      'user@example.com',
+    );
+    localStorage.setItem(
+      'CognitoIdentityServiceProvider.client-id.user@example.com.accessToken',
+      'access-token',
+    );
+    localStorage.setItem(
+      'CognitoIdentityServiceProvider.client-id.user@example.com.refreshToken',
+      'refresh-token',
+    );
+    localStorage.setItem(
+      'CognitoIdentityServiceProvider.client-id.user@example.com.idToken',
+      idToken,
+    );
+
+    contentScript.main();
+    const listener = getRegisteredMessageListener();
+
+    expect(listener({ type: 'GET_VELA_WEBAPP_SESSION' })).toEqual({
+      tokens: {
+        accessToken: 'access-token',
+        refreshToken: 'refresh-token',
+        idToken,
+      },
+      email: 'user@example.com',
     });
   });
 
