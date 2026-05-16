@@ -1,5 +1,11 @@
 import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { signIn, checkSession, refreshToken, saveDictionaryEntry, getMyDictionaries } from '../../entrypoints/utils/api';
+import {
+  signIn,
+  checkSession,
+  refreshToken,
+  saveDictionaryEntry,
+  getMyDictionaries,
+} from '../../entrypoints/utils/api';
 
 const mockFetch = vi.fn();
 vi.stubGlobal('fetch', mockFetch);
@@ -8,7 +14,24 @@ function mockJsonResponse(data: unknown, status = 200) {
   return {
     ok: status >= 200 && status < 300,
     status,
+    headers: {
+      get: vi.fn((name: string) =>
+        name.toLowerCase() === 'content-type' ? 'application/json' : null,
+      ),
+    },
     json: vi.fn().mockResolvedValue(data),
+  };
+}
+
+function mockHtmlErrorResponse(status = 502) {
+  return {
+    ok: false,
+    status,
+    headers: {
+      get: vi.fn((name: string) => (name.toLowerCase() === 'content-type' ? 'text/html' : null)),
+    },
+    text: vi.fn().mockResolvedValue('<!doctype html><title>Bad Gateway</title>'),
+    json: vi.fn().mockRejectedValue(new SyntaxError('Unexpected token < in JSON')),
   };
 }
 
@@ -48,6 +71,27 @@ describe('signIn', () => {
     mockFetch.mockResolvedValue(mockJsonResponse({}, 500));
 
     await expect(signIn('user@example.com', 'pass')).rejects.toThrow('Sign in failed');
+  });
+
+  it('throws a readable error when the sign in endpoint returns non-JSON HTML', async () => {
+    mockFetch.mockResolvedValue(mockHtmlErrorResponse(502));
+
+    await expect(signIn('user@example.com', 'pass')).rejects.toThrow('Sign in failed (HTTP 502)');
+  });
+
+  it('throws a readable error when a successful sign in response is not JSON', async () => {
+    mockFetch.mockResolvedValue({
+      ok: true,
+      status: 200,
+      headers: {
+        get: vi.fn((name: string) => (name.toLowerCase() === 'content-type' ? 'text/html' : null)),
+      },
+      json: vi.fn().mockRejectedValue(new SyntaxError('Unexpected token < in JSON')),
+    });
+
+    await expect(signIn('user@example.com', 'pass')).rejects.toThrow(
+      'Sign in failed: invalid response from server',
+    );
   });
 
   it('sends Content-Type: application/json header', async () => {

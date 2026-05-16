@@ -3,13 +3,20 @@ import { ref, onMounted } from 'vue';
 import LoginPage from './LoginPage.vue';
 import DashboardPage from './DashboardPage.vue';
 import { isAuthenticated } from '../utils/storage';
+import { importWebappSession } from '../utils/webappSession';
 
 const authenticated = ref(false);
 const loading = ref(true);
 
 onMounted(async () => {
-  authenticated.value = await isAuthenticated();
-  loading.value = false;
+  try {
+    authenticated.value = await isAuthenticated();
+    if (!authenticated.value) {
+      authenticated.value = await importWebappSession();
+    }
+  } finally {
+    loading.value = false;
+  }
 });
 
 function handleLoginSuccess() {

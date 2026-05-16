@@ -3,10 +3,14 @@ import { mount, flushPromises, VueWrapper } from '@vue/test-utils';
 import type { ComponentPublicInstance } from 'vue';
 import LoginPage from '../../entrypoints/popup/LoginPage.vue';
 
-const { mockSignIn, mockSaveAuthTokens } = vi.hoisted(() => ({
-  mockSignIn: vi.fn(),
-  mockSaveAuthTokens: vi.fn(),
-}));
+const { mockSignIn, mockSaveAuthTokens, mockImportWebappSession, mockOpenWebappLogin } = vi.hoisted(
+  () => ({
+    mockSignIn: vi.fn(),
+    mockSaveAuthTokens: vi.fn(),
+    mockImportWebappSession: vi.fn(),
+    mockOpenWebappLogin: vi.fn(),
+  }),
+);
 
 vi.mock('../../entrypoints/utils/api', () => ({
   signIn: mockSignIn,
@@ -14,6 +18,11 @@ vi.mock('../../entrypoints/utils/api', () => ({
 
 vi.mock('../../entrypoints/utils/storage', () => ({
   saveAuthTokens: mockSaveAuthTokens,
+}));
+
+vi.mock('../../entrypoints/utils/webappSession', () => ({
+  importWebappSession: mockImportWebappSession,
+  openWebappLogin: mockOpenWebappLogin,
 }));
 
 const storageState: Record<string, unknown> = {};
@@ -46,6 +55,8 @@ describe('LoginPage', () => {
     Object.keys(storageState).forEach((k) => delete storageState[k]);
     mockSignIn.mockClear();
     mockSaveAuthTokens.mockClear();
+    mockImportWebappSession.mockReset();
+    mockOpenWebappLogin.mockReset();
     setupBrowserMocks();
   });
 
@@ -73,6 +84,19 @@ describe('LoginPage', () => {
     it('renders the page title', () => {
       wrapper = mount(LoginPage);
       expect(wrapper.text()).toContain('Vela Login');
+    });
+
+    it('marks credentials fields for browser and password-manager autofill', () => {
+      wrapper = mount(LoginPage);
+
+      expect(wrapper.find('#email').attributes()).toMatchObject({
+        name: 'username',
+        autocomplete: 'username',
+      });
+      expect(wrapper.find('#password').attributes()).toMatchObject({
+        name: 'password',
+        autocomplete: 'current-password',
+      });
     });
 
     it('does not show error message initially', () => {
@@ -284,6 +308,50 @@ describe('LoginPage', () => {
       expect(wrapper.find('.error-message').exists()).toBe(true);
       expect(wrapper.find('.error-message').text()).toContain('email and password');
       expect(mockSignIn).not.toHaveBeenCalled();
+    });
+
+    it('does not prevent native paste events on credential inputs', async () => {
+      wrapper = mount(LoginPage);
+      await flushPromises();
+
+      const preventEmailPaste = vi.fn();
+      const preventPasswordPaste = vi.fn();
+
+      await wrapper.find('#email').trigger('paste', {
+        clipboardData: { getData: () => 'pasted@example.com' },
+        preventDefault: preventEmailPaste,
+      });
+      await wrapper.find('#password').trigger('paste', {
+        clipboardData: { getData: () => 'pasted-password' },
+        preventDefault: preventPasswordPaste,
+      });
+
+      expect(preventEmailPaste).not.toHaveBeenCalled();
+      expect(preventPasswordPaste).not.toHaveBeenCalled();
+    });
+
+    it('imports the web-app session when the user clicks use web app session', async () => {
+      mockImportWebappSession.mockResolvedValue(true);
+      wrapper = mount(LoginPage);
+      await flushPromises();
+
+      await wrapper.find('.web-session-button').trigger('click');
+      await flushPromises();
+
+      expect(mockImportWebappSession).toHaveBeenCalledOnce();
+      expect(wrapper.emitted('loginSuccess')).toBeTruthy();
+    });
+
+    it('shows a readable message when no web-app session can be imported', async () => {
+      mockImportWebappSession.mockResolvedValue(false);
+      wrapper = mount(LoginPage);
+      await flushPromises();
+
+      await wrapper.find('.web-session-button').trigger('click');
+      await flushPromises();
+
+      expect(wrapper.find('.error-message').text()).toContain('Open Vela in a browser tab');
+      expect(wrapper.emitted('loginSuccess')).toBeUndefined();
     });
   });
 });
