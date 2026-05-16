@@ -316,31 +316,34 @@ function buildOverlay(sentences: string[]): ShadowRoot {
 export default defineContentScript({
   matches: ['*://*/*'],
   main() {
-    browser.runtime.onMessage.addListener((message: unknown) => {
-      if (
-        typeof message !== 'object' ||
-        message === null ||
-        !('type' in message) ||
-        (message.type !== 'SCAN_PAGE' && message.type !== 'GET_VELA_WEBAPP_SESSION')
-      )
-        return;
+    browser.runtime.onMessage.addListener(
+      (message: unknown, _sender: unknown, sendResponse: (_response?: unknown) => void) => {
+        if (
+          typeof message !== 'object' ||
+          message === null ||
+          !('type' in message) ||
+          (message.type !== 'SCAN_PAGE' && message.type !== 'GET_VELA_WEBAPP_SESSION')
+        )
+          return;
 
-      if (message.type === 'GET_VELA_WEBAPP_SESSION') {
-        return readCognitoSessionFromStorage(window.localStorage);
-      }
+        if (message.type === 'GET_VELA_WEBAPP_SESSION') {
+          sendResponse(readCognitoSessionFromStorage(window.localStorage));
+          return;
+        }
 
-      // Remove any existing overlay before creating a new one
-      document.getElementById('vela-ext-overlay-host')?.remove();
+        // Remove any existing overlay before creating a new one
+        document.getElementById('vela-ext-overlay-host')?.remove();
 
-      const sentences = scanJapaneseSentences();
-      if (sentences.length === 0) {
-        // Content scripts can't use browser.notifications — ask the background
-        // script to show the "no sentences found" notification.
-        browser.runtime.sendMessage({ type: 'NO_JAPANESE_FOUND' }).catch(() => {});
-        return;
-      }
+        const sentences = scanJapaneseSentences();
+        if (sentences.length === 0) {
+          // Content scripts can't use browser.notifications — ask the background
+          // script to show the "no sentences found" notification.
+          browser.runtime.sendMessage({ type: 'NO_JAPANESE_FOUND' }).catch(() => {});
+          return;
+        }
 
-      buildOverlay(sentences);
-    });
+        buildOverlay(sentences);
+      },
+    );
   },
 });
