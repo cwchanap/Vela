@@ -9,7 +9,7 @@ const {
   mockIdbStore,
   idbState,
 } = vi.hoisted(() => {
-  const mockContextMenusCreate = vi.fn();
+  const mockContextMenusCreate = vi.fn().mockResolvedValue(undefined);
   const mockContextMenusRemoveAll = vi.fn().mockResolvedValue(undefined);
   const mockNotificationsCreate = vi.fn();
   const mockTabsSendMessage = vi.fn();
