@@ -30,7 +30,9 @@ describe('extension local testing workflow', () => {
     );
     expect(appPackage.scripts?.['dev:extension-test']).toBe('bun run dev');
     expect(apiPackage.scripts?.['dev:extension-test']).toBe('bun run dev');
-    expect(extensionPackage.scripts?.['dev:extension-test']).toBe('VELA_EXT_TEST_MODE=1 wxt');
+    expect(extensionPackage.scripts?.['dev:extension-test']).toBe(
+      'VITE_API_URL=http://localhost:9005/api VELA_EXT_TEST_MODE=1 wxt',
+    );
   });
 
   it('configures WXT to auto-launch Chrome only for extension test mode', () => {

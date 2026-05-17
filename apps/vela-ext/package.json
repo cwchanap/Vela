@@ -6,7 +6,7 @@
   "type": "module",
   "scripts": {
     "dev": "wxt",
-    "dev:extension-test": "VELA_EXT_TEST_MODE=1 wxt",
+    "dev:extension-test": "VITE_API_URL=http://localhost:9005/api VELA_EXT_TEST_MODE=1 wxt",
     "dev:firefox": "wxt -b firefox",
     "build": "wxt build",
     "build:firefox": "wxt build -b firefox",

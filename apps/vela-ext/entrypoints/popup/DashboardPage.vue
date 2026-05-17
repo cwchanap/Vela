@@ -5,6 +5,7 @@
         <div class="header-top">
           <h2>Vela Dictionary</h2>
           <div class="header-actions">
+            <button @click="handleSignOut" class="icon-button" title="Sign Out">🚪</button>
             <button
               @click="toggleTheme"
               class="icon-button"
@@ -91,7 +92,7 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, watch, computed } from 'vue';
 import { getMyDictionaries } from '../utils/api';
-import { getValidIdToken, refreshIdToken, getUserEmail } from '../utils/storage';
+import { getValidIdToken, refreshIdToken, getUserEmail, clearAuthData } from '../utils/storage';
 import { getPendingQueueCount } from '../utils/pendingQueue';
 
 const emit = defineEmits<{
@@ -192,6 +193,15 @@ async function loadEntries() {
 
 function toggleTheme() {
   isDarkMode.value = !isDarkMode.value;
+}
+
+async function handleSignOut() {
+  try {
+    await clearAuthData();
+  } catch (error: unknown) {
+    console.error('[Vela] Failed to clear auth data on sign out:', error);
+  }
+  emit('sessionExpired');
 }
 
 function isAuthenticationError(error: Error): boolean {

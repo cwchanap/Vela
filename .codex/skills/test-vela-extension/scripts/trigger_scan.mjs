@@ -26,8 +26,13 @@ try {
           resolve({ ok: false, error: 'Fixture tab not found: ${fixtureUrl}' });
           return;
         }
-        chrome.tabs.sendMessage(tabs[0].id, { type: 'SCAN_PAGE' });
-        resolve({ ok: true, tabId: tabs[0].id, url: tabs[0].url });
+        chrome.tabs.sendMessage(tabs[0].id, { type: 'SCAN_PAGE' }, (response) => {
+          if (chrome.runtime.lastError) {
+            resolve({ ok: false, error: chrome.runtime.lastError.message });
+            return;
+          }
+          resolve({ ok: true, tabId: tabs[0].id, url: tabs[0].url });
+        });
       });
     })
   `;
