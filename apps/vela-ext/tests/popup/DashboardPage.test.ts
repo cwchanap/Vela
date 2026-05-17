@@ -12,13 +12,19 @@ const { mockGetPendingQueueCount } = vi.hoisted(() => ({
   mockGetPendingQueueCount: vi.fn(),
 }));
 
-const { mockGetValidIdToken, mockRefreshIdToken, mockGetUserEmail, mockClearAllPending } =
-  vi.hoisted(() => ({
-    mockGetValidIdToken: vi.fn(),
-    mockRefreshIdToken: vi.fn(),
-    mockGetUserEmail: vi.fn(),
-    mockClearAllPending: vi.fn().mockResolvedValue(undefined),
-  }));
+const {
+  mockGetValidIdToken,
+  mockRefreshIdToken,
+  mockGetUserEmail,
+  mockClearAllPending,
+  mockClearAuthData,
+} = vi.hoisted(() => ({
+  mockGetValidIdToken: vi.fn(),
+  mockRefreshIdToken: vi.fn(),
+  mockGetUserEmail: vi.fn(),
+  mockClearAllPending: vi.fn().mockResolvedValue(undefined),
+  mockClearAuthData: vi.fn().mockResolvedValue(undefined),
+}));
 
 vi.mock('../../entrypoints/utils/api', () => ({
   getMyDictionaries: mockGetMyDictionaries,
@@ -32,6 +38,7 @@ vi.mock('../../entrypoints/utils/storage', () => ({
   getValidIdToken: mockGetValidIdToken,
   refreshIdToken: mockRefreshIdToken,
   getUserEmail: mockGetUserEmail,
+  clearAuthData: mockClearAuthData,
 }));
 
 vi.mock('../../entrypoints/utils/idb', () => ({
@@ -92,6 +99,7 @@ describe('DashboardPage', () => {
     mockGetUserEmail.mockClear();
     mockClearAllPending.mockClear();
     mockGetPendingQueueCount.mockClear();
+    mockClearAuthData.mockClear().mockResolvedValue(undefined);
 
     // Set up browser API mocks
     // Using 'as any' to assign mock implementation to the global browser object in the test environment.
@@ -244,12 +252,39 @@ describe('DashboardPage', () => {
   });
 
   describe('Session Actions', () => {
-    it('does not render a logout button in the extension popup', async () => {
+    it('renders a sign-out button that clears auth data and emits sessionExpired', async () => {
       wrapper = mount(DashboardPage);
       await flushPromises();
 
-      expect(wrapper.find('[title="Logout"]').exists()).toBe(false);
-      expect(mockClearAllPending).not.toHaveBeenCalled();
+      const signOutButton = wrapper.find('[title="Sign Out"]');
+      expect(signOutButton.exists()).toBe(true);
+
+      await signOutButton.trigger('click');
+      await flushPromises();
+
+      expect(mockClearAuthData).toHaveBeenCalledOnce();
+      expect(wrapper.emitted('sessionExpired')).toBeTruthy();
+    });
+
+    it('emits sessionExpired even if clearAuthData fails on sign-out', async () => {
+      const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      mockClearAuthData.mockRejectedValue(new Error('Storage corrupted'));
+
+      wrapper = mount(DashboardPage);
+      await flushPromises();
+
+      const signOutButton = wrapper.find('[title="Sign Out"]');
+      await signOutButton.trigger('click');
+      await flushPromises();
+
+      expect(mockClearAuthData).toHaveBeenCalledOnce();
+      expect(wrapper.emitted('sessionExpired')).toBeTruthy();
+      expect(consoleSpy).toHaveBeenCalledWith(
+        '[Vela] Failed to clear auth data on sign out:',
+        expect.any(Error),
+      );
+
+      consoleSpy.mockRestore();
     });
   });
 
