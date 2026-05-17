@@ -52,6 +52,7 @@
 <script setup lang="ts">
 import { ref, onMounted, watch } from 'vue';
 import { getWebappLoginUrl, importWebappSession, openWebappLogin } from '../utils/webappSession';
+import { clearExplicitSignout } from '../utils/storage';
 
 const emit = defineEmits<{
   loginSuccess: [];
@@ -94,6 +95,7 @@ async function handleUseWebappSession() {
   try {
     const imported = await importWebappSession();
     if (imported) {
+      await clearExplicitSignout();
       emit('loginSuccess');
       return;
     }

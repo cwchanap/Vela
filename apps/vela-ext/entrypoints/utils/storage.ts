@@ -4,6 +4,7 @@ import { refreshToken as refreshTokenAPI } from './api';
 const STORAGE_KEYS = {
   AUTH_TOKENS: 'vela_auth_tokens',
   USER_EMAIL: 'vela_user_email',
+  EXPLICIT_SIGNOUT: 'vela_explicit_signout',
 };
 
 export async function saveAuthTokens(tokens: AuthTokens, email?: string): Promise<void> {
@@ -92,6 +93,31 @@ export async function refreshAccessToken(): Promise<string> {
     await clearAuthData();
     throw new Error('Session expired. Please log in again.');
   }
+}
+
+/**
+ * Record that the user explicitly signed out from the extension popup.
+ * Prevents auto-import from the web-app session on the next popup open.
+ */
+export async function setExplicitSignout(): Promise<void> {
+  await browser.storage.local.set({ [STORAGE_KEYS.EXPLICIT_SIGNOUT]: true });
+}
+
+/**
+ * Check whether the user explicitly signed out (suppresses auto-import).
+ */
+export async function isExplicitSignout(): Promise<boolean> {
+  const result = (await browser.storage.local.get(STORAGE_KEYS.EXPLICIT_SIGNOUT)) as {
+    [STORAGE_KEYS.EXPLICIT_SIGNOUT]?: boolean;
+  };
+  return result[STORAGE_KEYS.EXPLICIT_SIGNOUT] === true;
+}
+
+/**
+ * Clear the explicit-signout flag so auto-import can resume.
+ */
+export async function clearExplicitSignout(): Promise<void> {
+  await browser.storage.local.remove(STORAGE_KEYS.EXPLICIT_SIGNOUT);
 }
 
 /**

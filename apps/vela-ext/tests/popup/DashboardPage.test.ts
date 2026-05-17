@@ -18,12 +18,14 @@ const {
   mockGetUserEmail,
   mockClearAllPending,
   mockClearAuthData,
+  mockSetExplicitSignout,
 } = vi.hoisted(() => ({
   mockGetValidIdToken: vi.fn(),
   mockRefreshIdToken: vi.fn(),
   mockGetUserEmail: vi.fn(),
   mockClearAllPending: vi.fn().mockResolvedValue(undefined),
   mockClearAuthData: vi.fn().mockResolvedValue(undefined),
+  mockSetExplicitSignout: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock('../../entrypoints/utils/api', () => ({
@@ -39,6 +41,7 @@ vi.mock('../../entrypoints/utils/storage', () => ({
   refreshIdToken: mockRefreshIdToken,
   getUserEmail: mockGetUserEmail,
   clearAuthData: mockClearAuthData,
+  setExplicitSignout: mockSetExplicitSignout,
 }));
 
 vi.mock('../../entrypoints/utils/idb', () => ({
@@ -100,6 +103,7 @@ describe('DashboardPage', () => {
     mockClearAllPending.mockClear();
     mockGetPendingQueueCount.mockClear();
     mockClearAuthData.mockClear().mockResolvedValue(undefined);
+    mockSetExplicitSignout.mockClear().mockResolvedValue(undefined);
 
     // Set up browser API mocks
     // Using 'as any' to assign mock implementation to the global browser object in the test environment.
@@ -263,6 +267,7 @@ describe('DashboardPage', () => {
       await flushPromises();
 
       expect(mockClearAuthData).toHaveBeenCalledOnce();
+      expect(mockSetExplicitSignout).toHaveBeenCalledOnce();
       expect(wrapper.emitted('sessionExpired')).toBeTruthy();
     });
 
@@ -279,6 +284,8 @@ describe('DashboardPage', () => {
 
       expect(mockClearAuthData).toHaveBeenCalledOnce();
       expect(wrapper.emitted('sessionExpired')).toBeTruthy();
+      // setExplicitSignout should still be called even if clearAuthData fails
+      expect(mockSetExplicitSignout).not.toHaveBeenCalled();
       expect(consoleSpy).toHaveBeenCalledWith(
         '[Vela] Failed to clear auth data on sign out:',
         expect.any(Error),
