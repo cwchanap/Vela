@@ -92,7 +92,13 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, watch, computed } from 'vue';
 import { getMyDictionaries } from '../utils/api';
-import { getValidIdToken, refreshIdToken, getUserEmail, clearAuthData } from '../utils/storage';
+import {
+  getValidIdToken,
+  refreshIdToken,
+  getUserEmail,
+  clearAuthData,
+  setExplicitSignout,
+} from '../utils/storage';
 import { getPendingQueueCount } from '../utils/pendingQueue';
 
 const emit = defineEmits<{
@@ -198,6 +204,7 @@ function toggleTheme() {
 async function handleSignOut() {
   try {
     await clearAuthData();
+    await setExplicitSignout();
   } catch (error: unknown) {
     console.error('[Vela] Failed to clear auth data on sign out:', error);
   }

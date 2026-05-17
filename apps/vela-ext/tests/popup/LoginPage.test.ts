@@ -15,6 +15,14 @@ vi.mock('../../entrypoints/utils/webappSession', () => ({
   getWebappLoginUrl: mockGetWebappLoginUrl,
 }));
 
+const { mockClearExplicitSignout } = vi.hoisted(() => ({
+  mockClearExplicitSignout: vi.fn().mockResolvedValue(undefined),
+}));
+
+vi.mock('../../entrypoints/utils/storage', () => ({
+  clearExplicitSignout: mockClearExplicitSignout,
+}));
+
 const storageState: Record<string, unknown> = {};
 
 function setupBrowserMocks() {
@@ -46,6 +54,7 @@ describe('LoginPage', () => {
     mockImportWebappSession.mockReset();
     mockOpenWebappLogin.mockReset();
     mockGetWebappLoginUrl.mockReset().mockReturnValue('https://vela.cwchanap.dev/auth/login');
+    mockClearExplicitSignout.mockClear().mockResolvedValue(undefined);
     setupBrowserMocks();
   });
 
@@ -144,7 +153,19 @@ describe('LoginPage', () => {
       await flushPromises();
 
       expect(mockImportWebappSession).toHaveBeenCalledOnce();
+      expect(mockClearExplicitSignout).toHaveBeenCalledOnce();
       expect(wrapper.emitted('loginSuccess')).toBeTruthy();
+    });
+
+    it('does not clear explicit signout flag when import fails', async () => {
+      mockImportWebappSession.mockResolvedValue(false);
+      wrapper = mount(LoginPage);
+      await flushPromises();
+
+      await wrapper.find('.web-session-button').trigger('click');
+      await flushPromises();
+
+      expect(mockClearExplicitSignout).not.toHaveBeenCalled();
     });
 
     it('shows a readable message when no web-app session can be imported', async () => {

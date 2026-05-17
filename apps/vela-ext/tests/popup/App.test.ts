@@ -1,15 +1,18 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushPromises, mount } from '@vue/test-utils';
 
-const { mockIsAuthenticated, mockImportWebappSession, mockClearAuthData } = vi.hoisted(() => ({
-  mockIsAuthenticated: vi.fn(),
-  mockImportWebappSession: vi.fn(),
-  mockClearAuthData: vi.fn(),
-}));
+const { mockIsAuthenticated, mockImportWebappSession, mockClearAuthData, mockIsExplicitSignout } =
+  vi.hoisted(() => ({
+    mockIsAuthenticated: vi.fn(),
+    mockImportWebappSession: vi.fn(),
+    mockClearAuthData: vi.fn(),
+    mockIsExplicitSignout: vi.fn(),
+  }));
 
 vi.mock('../../entrypoints/utils/storage', () => ({
   isAuthenticated: mockIsAuthenticated,
   clearAuthData: mockClearAuthData,
+  isExplicitSignout: mockIsExplicitSignout,
 }));
 
 vi.mock('../../entrypoints/utils/webappSession', () => ({
@@ -39,6 +42,7 @@ describe('popup App', () => {
     mockIsAuthenticated.mockReset();
     mockImportWebappSession.mockReset();
     mockClearAuthData.mockReset().mockResolvedValue(undefined);
+    mockIsExplicitSignout.mockReset().mockResolvedValue(false);
 
     (globalThis as any).browser = {
       runtime: {
@@ -141,5 +145,29 @@ describe('popup App', () => {
     );
 
     consoleSpy.mockRestore();
+  });
+
+  it('skips web-app auto-import when the user explicitly signed out', async () => {
+    mockIsAuthenticated.mockResolvedValue(false);
+    mockIsExplicitSignout.mockResolvedValue(true);
+
+    const wrapper = mount(App);
+    await flushPromises();
+
+    expect(mockImportWebappSession).not.toHaveBeenCalled();
+    expect(wrapper.find('[data-testid="login-page"]').exists()).toBe(true);
+    expect(wrapper.find('[data-testid="dashboard-page"]').exists()).toBe(false);
+  });
+
+  it('attempts web-app auto-import when explicit signout flag is not set', async () => {
+    mockIsAuthenticated.mockResolvedValue(false);
+    mockIsExplicitSignout.mockResolvedValue(false);
+    mockImportWebappSession.mockResolvedValue(false);
+
+    const wrapper = mount(App);
+    await flushPromises();
+
+    expect(mockImportWebappSession).toHaveBeenCalledOnce();
+    expect(wrapper.find('[data-testid="login-page"]').exists()).toBe(true);
   });
 });

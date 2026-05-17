@@ -6,6 +6,9 @@ import {
   clearAuthData,
   getValidAccessToken,
   refreshAccessToken,
+  setExplicitSignout,
+  isExplicitSignout,
+  clearExplicitSignout,
 } from '../../entrypoints/utils/storage';
 import type { AuthTokens } from '../../entrypoints/utils/api';
 
@@ -123,5 +126,28 @@ describe('storage utils', () => {
       idToken: 'refresh-token-id',
     });
     expect(mockRefreshToken).toHaveBeenCalledWith('refresh-token');
+  });
+
+  describe('explicit signout flag', () => {
+    it('is false by default', async () => {
+      await expect(isExplicitSignout()).resolves.toBe(false);
+    });
+
+    it('is true after setExplicitSignout is called', async () => {
+      await setExplicitSignout();
+      await expect(isExplicitSignout()).resolves.toBe(true);
+    });
+
+    it('is false after clearExplicitSignout is called', async () => {
+      await setExplicitSignout();
+      await clearExplicitSignout();
+      await expect(isExplicitSignout()).resolves.toBe(false);
+    });
+
+    it('is not affected by clearAuthData', async () => {
+      await setExplicitSignout();
+      await clearAuthData();
+      await expect(isExplicitSignout()).resolves.toBe(true);
+    });
   });
 });
