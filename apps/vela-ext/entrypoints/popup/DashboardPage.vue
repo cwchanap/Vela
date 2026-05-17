@@ -204,10 +204,10 @@ function toggleTheme() {
 async function handleSignOut() {
   try {
     await clearAuthData();
-    await setExplicitSignout();
   } catch (error: unknown) {
     console.error('[Vela] Failed to clear auth data on sign out:', error);
   }
+  await setExplicitSignout();
   emit('sessionExpired');
 }
 

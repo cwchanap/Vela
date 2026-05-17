@@ -284,8 +284,8 @@ describe('DashboardPage', () => {
 
       expect(mockClearAuthData).toHaveBeenCalledOnce();
       expect(wrapper.emitted('sessionExpired')).toBeTruthy();
-      // setExplicitSignout should still be called even if clearAuthData fails
-      expect(mockSetExplicitSignout).not.toHaveBeenCalled();
+      // setExplicitSignout is always called regardless of clearAuthData outcome
+      expect(mockSetExplicitSignout).toHaveBeenCalledOnce();
       expect(consoleSpy).toHaveBeenCalledWith(
         '[Vela] Failed to clear auth data on sign out:',
         expect.any(Error),
