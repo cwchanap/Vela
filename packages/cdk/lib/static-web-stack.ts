@@ -184,6 +184,11 @@ function handler(event) {
       description: 'Cognito User Pool Client ID',
     });
 
+    new CfnOutput(this, 'CognitoOAuthDomain', {
+      value: auth.oauthDomain,
+      description: 'Cognito Hosted UI OAuth domain',
+    });
+
     new CfnOutput(this, 'CognitoRegion', {
       value: Stack.of(this).region,
       description: 'AWS Region for Cognito',
