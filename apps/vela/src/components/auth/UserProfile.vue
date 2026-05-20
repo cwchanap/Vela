@@ -196,7 +196,6 @@
 
     <q-card-actions v-if="!editMode" align="right">
       <q-btn flat label="Edit Profile" color="primary" @click="startEdit" />
-      <q-btn flat label="Change Password" color="secondary" @click="showPasswordDialog = true" />
       <q-btn
         flat
         label="Sign Out"
@@ -205,69 +204,6 @@
         :loading="signOutLoading"
       />
     </q-card-actions>
-
-    <!-- Change Password Dialog -->
-    <q-dialog v-model="showPasswordDialog">
-      <q-card style="min-width: 350px">
-        <q-card-section>
-          <div class="text-h6">Change Password</div>
-        </q-card-section>
-
-        <q-card-section class="q-pt-none">
-          <q-form @submit="handlePasswordChange" class="q-gutter-md">
-            <!-- Hidden username field for password managers and accessibility -->
-            <q-input
-              :model-value="authStore.user?.email || authStore.user?.username || ''"
-              autocomplete="username"
-              readonly
-              dense
-              aria-hidden="true"
-              tabindex="-1"
-              style="
-                position: absolute;
-                left: -10000px;
-                top: auto;
-                width: 1px;
-                height: 1px;
-                overflow: hidden;
-                opacity: 0;
-              "
-            />
-            <q-input
-              v-model="passwordForm.newPassword"
-              label="New Password"
-              type="password"
-              autocomplete="new-password"
-              outlined
-              :rules="[(val) => val.length >= 6 || 'Password must be at least 6 characters']"
-            />
-
-            <q-input
-              v-model="passwordForm.confirmPassword"
-              label="Confirm Password"
-              type="password"
-              autocomplete="new-password"
-              outlined
-              :rules="[(val) => val === passwordForm.newPassword || 'Passwords do not match']"
-            />
-          </q-form>
-        </q-card-section>
-
-        <q-card-actions align="right">
-          <q-btn flat label="Cancel" color="grey-6" v-close-popup />
-          <q-btn
-            flat
-            label="Update Password"
-            color="primary"
-            @click="handlePasswordChange"
-            :loading="passwordLoading"
-            :disable="
-              !passwordForm.newPassword || passwordForm.newPassword !== passwordForm.confirmPassword
-            "
-          />
-        </q-card-actions>
-      </q-card>
-    </q-dialog>
   </q-card>
 </template>
 
@@ -285,9 +221,7 @@ const authStore = useAuthStore();
 
 // State
 const editMode = ref(false);
-const showPasswordDialog = ref(false);
 const signOutLoading = ref(false);
-const passwordLoading = ref(false);
 
 const editForm = reactive({
   username: '',
@@ -298,11 +232,6 @@ const editForm = reactive({
   difficulty: 'Beginner',
   notifications: true,
   avatar_url: '',
-});
-
-const passwordForm = reactive({
-  newPassword: '',
-  confirmPassword: '',
 });
 
 // Computed
@@ -415,35 +344,6 @@ const handleSave = async () => {
       type: 'negative',
       message: authStore.error,
     });
-  }
-};
-
-const handlePasswordChange = async () => {
-  if (passwordForm.newPassword !== passwordForm.confirmPassword) {
-    return;
-  }
-
-  passwordLoading.value = true;
-
-  try {
-    const success = await authStore.updatePassword(passwordForm.newPassword);
-
-    if (success) {
-      $q.notify({
-        type: 'positive',
-        message: 'Password updated successfully!',
-      });
-      showPasswordDialog.value = false;
-      passwordForm.newPassword = '';
-      passwordForm.confirmPassword = '';
-    } else if (authStore.error) {
-      $q.notify({
-        type: 'negative',
-        message: authStore.error,
-      });
-    }
-  } finally {
-    passwordLoading.value = false;
   }
 };
 

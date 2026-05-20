@@ -13,6 +13,7 @@ const createTestRouter = () =>
       { path: '/', component: { template: '<div />' } },
       { path: '/auth/login', component: { template: '<div />' } },
       { path: '/auth/signup', component: { template: '<div />' } },
+      { path: '/auth/callback', component: { template: '<div />' } },
     ],
   });
 
@@ -81,20 +82,27 @@ describe('LoginPage', () => {
       expect(wrapper.vm.authMode).toBe('signin');
     });
 
-    it('sets signup mode when route includes signup', async () => {
+    it('keeps signin mode when route includes signup', async () => {
       await router.push('/auth/signup');
       wrapper = mountComponent();
-      // onMounted runs and checks if route includes signup
       await flushPromises();
-      expect(wrapper.vm.authMode).toBe('signup');
+      expect(wrapper.vm.authMode).toBe('signin');
+    });
+
+    it('keeps signin mode on callback route', async () => {
+      await router.push('/auth/callback');
+      wrapper = mountComponent();
+      await flushPromises();
+      expect(wrapper.vm.authMode).toBe('signin');
     });
   });
 
   describe('handleAuthSuccess', () => {
-    it('sets authMode to signin on signup success', async () => {
+    it('ignores legacy signup success events', async () => {
       wrapper = mountComponent();
+      const routerPushSpy = vi.spyOn(router, 'push');
       await wrapper.vm.handleAuthSuccess('signup');
-      expect(wrapper.vm.authMode).toBe('signin');
+      expect(routerPushSpy).not.toHaveBeenCalled();
     });
 
     it('redirects to "/" after signin success', async () => {

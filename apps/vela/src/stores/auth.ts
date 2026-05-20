@@ -1,11 +1,6 @@
 import { defineStore } from 'pinia';
 import { ref, computed } from 'vue';
-import {
-  authService,
-  type SignUpData,
-  type SignInData,
-  type ProfileData,
-} from '../services/authService';
+import { authService, type ProfileData } from '../services/authService';
 import type { UserPreferences, Profile } from '../types/shared';
 import type { AppSession } from '../services/authService';
 import { queryClient, QUERY_STALE_TIME } from '../boot/query';
@@ -34,7 +29,6 @@ export const useAuthStore = defineStore('auth', () => {
   const isLoading = ref(false);
   const error = ref<string | null>(null);
   const isInitialized = ref(false);
-  const pendingVerificationEmail = ref<string | null>(null);
 
   // Getters
   const isAuthenticated = computed(() => !!user.value && !!session.value);
@@ -163,113 +157,18 @@ export const useAuthStore = defineStore('auth', () => {
   };
 
   /**
-   * Sign up a new user
+   * Start Google sign-in through Cognito Hosted UI.
    */
-  const signUp = async (signUpData: SignUpData) => {
+  const signInWithGoogle = async () => {
     setLoading(true);
     setError(null);
 
     try {
-      const response = await authService.signUp(signUpData);
-
-      if (!response.success) {
-        setError(response.error || 'Sign up failed');
-        return false;
-      }
-
-      // Session and user will be set via auth state change listener
+      await authService.signInWithGoogle();
       return true;
     } catch (err) {
-      console.error('Sign up error:', err);
-      setError('An unexpected error occurred during sign up');
-      return false;
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  /**
-   * Sign in with email and password
-   */
-  const signIn = async (signInData: SignInData) => {
-    setLoading(true);
-    setError(null);
-
-    try {
-      const response = await authService.signIn(signInData);
-
-      if (!response.success) {
-        // Handle specific error cases
-        if (
-          response.error?.includes('verify your email address') ||
-          response.error?.includes('User is not confirmed') ||
-          response.error?.includes('CONFIRM_SIGN_UP')
-        ) {
-          setError(response.error);
-          // Store the email for verification
-          if (response.user?.email) {
-            pendingVerificationEmail.value = response.user.email;
-          }
-          return false;
-        }
-
-        setError(response.error || 'Sign in failed');
-        return false;
-      }
-
-      // Invalidate auth-related queries to refetch fresh data
-      if (response.success && response.user) {
-        queryClient.invalidateQueries({ queryKey: authKeys.session() });
-        queryClient.invalidateQueries({ queryKey: authKeys.user() });
-        queryClient.invalidateQueries({ queryKey: authKeys.profile(response.user.id) });
-      }
-
-      // Session and user will be set via auth state change listener
-      return true;
-    } catch (err) {
-      console.error('Sign in error:', err);
-      setError('An unexpected error occurred during sign in');
-      return false;
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // Cognito signup verification: confirm and resend code
-  const confirmSignUp = async (email: string, code: string) => {
-    setLoading(true);
-    setError(null);
-
-    try {
-      const response = await authService.confirmSignUp(email, code);
-      if (!response.success) {
-        setError(response.error || 'Verification failed');
-        return false;
-      }
-      return true;
-    } catch (err) {
-      console.error('Confirm signup error:', err);
-      setError('An unexpected error occurred during verification');
-      return false;
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const resendSignUpCode = async (email: string) => {
-    setLoading(true);
-    setError(null);
-
-    try {
-      const response = await authService.resendSignUpCode(email);
-      if (!response.success) {
-        setError(response.error || 'Resend verification code failed');
-        return false;
-      }
-      return true;
-    } catch (err) {
-      console.error('Resend code error:', err);
-      setError('An unexpected error occurred while resending verification code');
+      console.error('Google sign-in error:', err);
+      setError(err instanceof Error ? err.message : 'An unexpected error occurred during sign in');
       return false;
     } finally {
       setLoading(false);
@@ -300,56 +199,6 @@ export const useAuthStore = defineStore('auth', () => {
     } catch (err) {
       console.error('Sign out error:', err);
       setError('An unexpected error occurred during sign out');
-      return false;
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  /**
-   * Reset password
-   */
-  const resetPassword = async (email: string) => {
-    setLoading(true);
-    setError(null);
-
-    try {
-      const response = await authService.resetPassword(email);
-
-      if (!response.success) {
-        setError(response.error || 'Password reset failed');
-        return false;
-      }
-
-      return true;
-    } catch (err) {
-      console.error('Password reset error:', err);
-      setError('An unexpected error occurred during password reset');
-      return false;
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  /**
-   * Update user password
-   */
-  const updatePassword = async (newPassword: string) => {
-    setLoading(true);
-    setError(null);
-
-    try {
-      const response = await authService.updatePassword(newPassword);
-
-      if (!response.success) {
-        setError(response.error || 'Password update failed');
-        return false;
-      }
-
-      return true;
-    } catch (err) {
-      console.error('Password update error:', err);
-      setError('An unexpected error occurred during password update');
       return false;
     } finally {
       setLoading(false);
@@ -484,7 +333,6 @@ export const useAuthStore = defineStore('auth', () => {
     isLoading,
     error,
     isInitialized,
-    pendingVerificationEmail,
     // Getters
     isAuthenticated,
     userLevel,
@@ -500,13 +348,8 @@ export const useAuthStore = defineStore('auth', () => {
     clearAuth,
     initialize,
     loadUserProfile,
-    signUp,
-    signIn,
+    signInWithGoogle,
     signOut,
-    resetPassword,
-    updatePassword,
-    confirmSignUp,
-    resendSignUpCode,
     updateProfile,
     updateExperience,
     updateStreak,
