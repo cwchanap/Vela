@@ -168,6 +168,27 @@ describe('AuthService', () => {
       expect(result?.provider).toBe('cognito');
     });
 
+    it('should use user attributes email when OAuth user has no signInDetails', async () => {
+      const mockUser = {
+        userId: 'oauth-user-123',
+      } as any;
+      const mockSession = { tokens: { accessToken: 'valid-token' as any } } as any;
+
+      vi.mocked(fetchAuthSession).mockResolvedValue(mockSession);
+      vi.mocked(getCurrentUser).mockResolvedValue(mockUser);
+      vi.mocked(fetchUserAttributes).mockResolvedValue({
+        email: 'test@example.com',
+        preferred_username: 'oauthuser',
+      } as any);
+
+      const result = await authService.getCurrentSession();
+
+      expect(result).not.toBeNull();
+      expect(result?.user?.id).toBe('oauth-user-123');
+      expect(result?.user?.email).toBe('test@example.com');
+      expect(result?.provider).toBe('cognito');
+    });
+
     it('should return null when no access token', async () => {
       vi.mocked(fetchAuthSession).mockResolvedValue({ tokens: undefined } as any);
 
@@ -198,6 +219,24 @@ describe('AuthService', () => {
 
       expect(result).not.toBeNull();
       expect(result?.id).toBe('user-123');
+      expect(result?.email).toBe('test@example.com');
+    });
+
+    it('should use user attributes email when OAuth user has no signInDetails', async () => {
+      const mockUser = {
+        userId: 'oauth-user-123',
+      } as any;
+
+      vi.mocked(getCurrentUser).mockResolvedValue(mockUser);
+      vi.mocked(fetchUserAttributes).mockResolvedValue({
+        email: 'test@example.com',
+        preferred_username: 'oauthuser',
+      } as any);
+
+      const result = await authService.getCurrentUser();
+
+      expect(result).not.toBeNull();
+      expect(result?.id).toBe('oauth-user-123');
       expect(result?.email).toBe('test@example.com');
     });
 
@@ -401,6 +440,45 @@ describe('AuthService', () => {
         expect.objectContaining({ user: expect.objectContaining({ id: 'user-123' }) }),
       );
       expect(fetchUserAttributes).toHaveBeenCalled();
+    });
+
+    it('should preserve attribute email and username for OAuth signedIn events without signInDetails', async () => {
+      const mockUser = {
+        userId: 'oauth-user-123',
+      } as any;
+      const mockSession = { tokens: { accessToken: 'token' as any } } as any;
+
+      vi.mocked(getCurrentUser).mockResolvedValue(mockUser);
+      vi.mocked(fetchAuthSession).mockResolvedValue(mockSession);
+      vi.mocked(fetchUserAttributes).mockResolvedValue({
+        email: 'test@example.com',
+        preferred_username: 'oauthuser',
+      } as any);
+
+      const createProfileSpy = vi
+        .spyOn(authService as any, 'createUserProfile')
+        .mockResolvedValue(undefined);
+      const callback = vi.fn();
+      let capturedListener: ((_data: any) => void) | null = null;
+
+      vi.mocked(Hub.listen).mockImplementation((_channel: any, listener: any) => {
+        capturedListener = listener;
+        return vi.fn() as any;
+      });
+
+      authService.onAuthStateChange(callback);
+      capturedListener!({ payload: { event: 'signedIn' } });
+
+      await vi.waitFor(() => expect(callback).toHaveBeenCalled());
+
+      expect(createProfileSpy).toHaveBeenCalledWith('oauth-user-123', {
+        email: 'test@example.com',
+        username: 'oauthuser',
+      });
+      expect(callback).toHaveBeenCalledWith('SIGNED_IN', {
+        user: { id: 'oauth-user-123', email: 'test@example.com' },
+        provider: 'cognito',
+      });
     });
 
     it('should log error when getCurrentUser throws during signedIn Hub event', async () => {
