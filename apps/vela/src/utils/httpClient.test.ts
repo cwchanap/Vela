@@ -117,6 +117,26 @@ describe('httpJson', () => {
       }),
     );
   });
+
+  it('throws a controlled error when a successful response is HTML', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        headers: new Headers({ 'Content-Type': 'text/html; charset=utf-8' }),
+        text: async () => '<!doctype html>',
+        json: async () => {
+          throw new SyntaxError('Unexpected token <');
+        },
+      }),
+    );
+
+    await expect(httpJson('/api/test')).rejects.toMatchObject({
+      message: expect.stringContaining('Expected JSON response'),
+      status: 200,
+    });
+  });
 });
 
 describe('httpJsonAuth', () => {
@@ -234,5 +254,29 @@ describe('httpJsonAuth', () => {
         headers: expect.objectContaining({ Authorization: 'Bearer override-token' }),
       }),
     );
+  });
+
+  it('throws a controlled error when an authenticated response is HTML', async () => {
+    mockFetchAuthSession.mockResolvedValue({
+      tokens: { idToken: { toString: () => 'token' } },
+    } as any);
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        headers: new Headers({ 'Content-Type': 'text/html' }),
+        text: async () => '<!doctype html>',
+        json: async () => {
+          throw new SyntaxError('Unexpected token <');
+        },
+      }),
+    );
+
+    await expect(httpJsonAuth('/api/protected')).rejects.toMatchObject({
+      message: expect.stringContaining('Expected JSON response'),
+      status: 200,
+    });
   });
 });

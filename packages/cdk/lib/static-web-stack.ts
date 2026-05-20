@@ -7,6 +7,9 @@ import {
   CachePolicy,
   AllowedMethods,
   OriginRequestPolicy,
+  Function as CloudFrontFunction,
+  FunctionCode,
+  FunctionEventType,
 } from 'aws-cdk-lib/aws-cloudfront';
 import { S3Origin, RestApiOrigin } from 'aws-cdk-lib/aws-cloudfront-origins';
 import {
@@ -64,12 +67,33 @@ export class StaticWebStack extends Stack {
     });
 
     const apiOrigin = new RestApiOrigin(api.api);
+    const spaRewriteFunction = new CloudFrontFunction(this, 'VelaSpaRewriteFunction', {
+      code: FunctionCode.fromInline(`
+function handler(event) {
+  var request = event.request;
+  var uri = request.uri;
+  var isApiRequest = uri === '/api' || uri.startsWith('/api/');
+
+  if (!isApiRequest && !uri.includes('.')) {
+    request.uri = '/index.html';
+  }
+
+  return request;
+}
+`),
+    });
 
     const distribution = new Distribution(this, 'VelaDistributionNew', {
       defaultBehavior: {
         origin: new S3Origin(websiteBucket),
         viewerProtocolPolicy: ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
         cachePolicy: CachePolicy.CACHING_OPTIMIZED,
+        functionAssociations: [
+          {
+            function: spaRewriteFunction,
+            eventType: FunctionEventType.VIEWER_REQUEST,
+          },
+        ],
       },
       ...(domainName && certificate
         ? {
@@ -77,18 +101,6 @@ export class StaticWebStack extends Stack {
             certificate,
           }
         : {}),
-      errorResponses: [
-        {
-          httpStatus: 404,
-          responseHttpStatus: 200,
-          responsePagePath: '/index.html',
-        },
-        {
-          httpStatus: 403,
-          responseHttpStatus: 200,
-          responsePagePath: '/index.html',
-        },
-      ],
     });
 
     distribution.addBehavior('api/*', apiOrigin, {

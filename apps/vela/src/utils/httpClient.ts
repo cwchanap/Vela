@@ -29,6 +29,51 @@ function createHttpError(message: string, status: number): HttpError {
   return Object.assign(new Error(message), { status });
 }
 
+function getResponseContentType(res: Response): string {
+  return res.headers?.get('content-type')?.toLowerCase() ?? '';
+}
+
+function isJsonResponse(res: Response): boolean {
+  const contentType = getResponseContentType(res);
+  return !contentType || contentType.includes('application/json');
+}
+
+async function readJsonResponse<T>(res: Response): Promise<T> {
+  if (!isJsonResponse(res)) {
+    throw createHttpError(
+      `Expected JSON response, received ${getResponseContentType(res)}`,
+      res.status,
+    );
+  }
+
+  try {
+    return (await res.json()) as T;
+  } catch {
+    throw createHttpError('Invalid JSON response', res.status);
+  }
+}
+
+async function getErrorMessage(res: Response): Promise<string> {
+  let msg = res.statusText;
+  if (!isJsonResponse(res)) {
+    return msg;
+  }
+
+  try {
+    const data = await res.json();
+    if (typeof data?.error === 'string') {
+      msg = data.error;
+    } else if (data?.error !== undefined && data?.error !== null) {
+      // Convert non-string error to readable string
+      msg = JSON.stringify(data.error);
+    }
+  } catch {
+    // ignore parse error
+  }
+
+  return msg;
+}
+
 /**
  * Make an unauthenticated JSON request
  */
@@ -43,22 +88,11 @@ export async function httpJson<T = unknown>(input: RequestInfo, init?: RequestIn
   });
 
   if (!res.ok) {
-    let msg = res.statusText;
-    try {
-      const data = await res.json();
-      if (typeof data?.error === 'string') {
-        msg = data.error;
-      } else if (data?.error !== undefined && data?.error !== null) {
-        // Convert non-string error to readable string
-        msg = JSON.stringify(data.error);
-      }
-    } catch {
-      // ignore parse error
-    }
+    const msg = await getErrorMessage(res);
     throw createHttpError(msg, res.status);
   }
 
-  return res.json() as Promise<T>;
+  return readJsonResponse<T>(res);
 }
 
 /**
@@ -104,20 +138,9 @@ export async function httpJsonAuth<T = unknown>(
   });
 
   if (!res.ok) {
-    let msg = res.statusText;
-    try {
-      const data = await res.json();
-      if (typeof data?.error === 'string') {
-        msg = data.error;
-      } else if (data?.error !== undefined && data?.error !== null) {
-        // Convert non-string error to readable string
-        msg = JSON.stringify(data.error);
-      }
-    } catch {
-      // ignore parse error
-    }
+    const msg = await getErrorMessage(res);
     throw createHttpError(msg, res.status);
   }
 
-  return res.json() as Promise<T>;
+  return readJsonResponse<T>(res);
 }
