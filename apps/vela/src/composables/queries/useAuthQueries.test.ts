@@ -7,12 +7,8 @@ const mockAuthService = {
   getCurrentSession: vi.fn(),
   getCurrentUser: vi.fn(),
   getUserProfile: vi.fn(),
-  signUp: vi.fn(),
-  signIn: vi.fn(),
+  signInWithGoogle: vi.fn(),
   signOut: vi.fn(),
-  confirmSignUp: vi.fn(),
-  resendSignUpCode: vi.fn(),
-  resetPassword: vi.fn(),
   updateUserProfile: vi.fn(),
 };
 
@@ -86,35 +82,27 @@ describe('useAuthQueries', () => {
     });
   });
 
-  describe('useSignInMutation', () => {
-    it('calls authService.signIn with provided data', async () => {
-      mockAuthService.signIn.mockResolvedValueOnce({
-        success: true,
-        user: { id: 'u1', email: 'a@b.com' },
-      });
-      const { useSignInMutation } = await import('./useAuthQueries');
-      const { result } = withQueryClient(() => useSignInMutation());
-      await result.mutateAsync({ email: 'a@b.com', password: 'pass' });
-      expect(mockAuthService.signIn).toHaveBeenCalledWith({ email: 'a@b.com', password: 'pass' });
+  describe('useSignInWithGoogleMutation', () => {
+    it('calls authService.signInWithGoogle', async () => {
+      mockAuthService.signInWithGoogle.mockResolvedValueOnce(undefined);
+      const { useSignInWithGoogleMutation } = await import('./useAuthQueries');
+      const { result } = withQueryClient(() => useSignInWithGoogleMutation());
+      await result.mutateAsync();
+      expect(mockAuthService.signInWithGoogle).toHaveBeenCalledTimes(1);
     });
 
-    it('invalidates session and user queries on successful sign in', async () => {
-      mockAuthService.signIn.mockResolvedValueOnce({
-        success: true,
-        user: { id: 'u1', email: 'a@b.com' },
-      });
-      const { useSignInMutation } = await import('./useAuthQueries');
-      const { result, queryClient } = withQueryClient(() => useSignInMutation());
+    it('invalidates session and user queries after starting Google sign in', async () => {
+      mockAuthService.signInWithGoogle.mockResolvedValueOnce(undefined);
+      const { useSignInWithGoogleMutation } = await import('./useAuthQueries');
+      const { result, queryClient } = withQueryClient(() => useSignInWithGoogleMutation());
       const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries');
-      await result.mutateAsync({ email: 'a@b.com', password: 'pass' });
+      await result.mutateAsync();
       expect(invalidateSpy).toHaveBeenCalled();
-      // Verify session key is invalidated
       const sessionCall = invalidateSpy.mock.calls.find((call) => {
         const options = call[0] as { queryKey?: readonly unknown[] };
         return options?.queryKey?.includes('session');
       });
       expect(sessionCall).toBeDefined();
-      // Verify user key is invalidated
       const userCall = invalidateSpy.mock.calls.find((call) => {
         const options = call[0] as { queryKey?: readonly unknown[] };
         return options?.queryKey?.includes('user');
@@ -122,15 +110,12 @@ describe('useAuthQueries', () => {
       expect(userCall).toBeDefined();
     });
 
-    it('does not invalidate queries when sign in returns success: false', async () => {
-      mockAuthService.signIn.mockResolvedValueOnce({
-        success: false,
-        error: 'Invalid credentials',
-      });
-      const { useSignInMutation } = await import('./useAuthQueries');
-      const { result, queryClient } = withQueryClient(() => useSignInMutation());
+    it('does not invalidate queries when Google sign in throws', async () => {
+      mockAuthService.signInWithGoogle.mockRejectedValueOnce(new Error('redirect failed'));
+      const { useSignInWithGoogleMutation } = await import('./useAuthQueries');
+      const { result, queryClient } = withQueryClient(() => useSignInWithGoogleMutation());
       const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries');
-      await result.mutateAsync({ email: 'bad@example.com', password: 'wrong' });
+      await expect(result.mutateAsync()).rejects.toThrow('redirect failed');
       expect(invalidateSpy).not.toHaveBeenCalled();
     });
   });
@@ -144,83 +129,6 @@ describe('useAuthQueries', () => {
       await result.mutateAsync();
       expect(mockAuthService.signOut).toHaveBeenCalled();
       expect(clearSpy).toHaveBeenCalled();
-    });
-  });
-
-  describe('useSignUpMutation', () => {
-    it('calls authService.signUp with provided data', async () => {
-      mockAuthService.signUp.mockResolvedValueOnce({ success: true });
-      const { useSignUpMutation } = await import('./useAuthQueries');
-      const { result } = withQueryClient(() => useSignUpMutation());
-      await result.mutateAsync({ email: 'new@example.com', password: 'pass', username: 'user' });
-      expect(mockAuthService.signUp).toHaveBeenCalledWith({
-        email: 'new@example.com',
-        password: 'pass',
-        username: 'user',
-      });
-    });
-
-    it('invalidates session and user queries on success', async () => {
-      mockAuthService.signUp.mockResolvedValueOnce({ success: true });
-      const { useSignUpMutation } = await import('./useAuthQueries');
-      const { result, queryClient } = withQueryClient(() => useSignUpMutation());
-      const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries');
-      await result.mutateAsync({ email: 'new@example.com', password: 'pass', username: 'user' });
-      expect(invalidateSpy).toHaveBeenCalled();
-      // Verify session key is invalidated
-      const sessionCall = invalidateSpy.mock.calls.find((call) => {
-        const options = call[0] as { queryKey?: readonly unknown[] };
-        return options?.queryKey?.includes('session');
-      });
-      expect(sessionCall).toBeDefined();
-      // Verify user key is invalidated
-      const userCall = invalidateSpy.mock.calls.find((call) => {
-        const options = call[0] as { queryKey?: readonly unknown[] };
-        return options?.queryKey?.includes('user');
-      });
-      expect(userCall).toBeDefined();
-    });
-
-    it('does not invalidate queries when sign up returns success: false', async () => {
-      mockAuthService.signUp.mockResolvedValueOnce({
-        success: false,
-        error: 'Email already exists',
-      });
-      const { useSignUpMutation } = await import('./useAuthQueries');
-      const { result, queryClient } = withQueryClient(() => useSignUpMutation());
-      const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries');
-      await result.mutateAsync({ email: 'exists@example.com', password: 'pass', username: 'user' });
-      expect(invalidateSpy).not.toHaveBeenCalled();
-    });
-  });
-
-  describe('useConfirmSignUpMutation', () => {
-    it('calls authService.confirmSignUp', async () => {
-      mockAuthService.confirmSignUp.mockResolvedValueOnce({ success: true });
-      const { useConfirmSignUpMutation } = await import('./useAuthQueries');
-      const { result } = withQueryClient(() => useConfirmSignUpMutation());
-      await result.mutateAsync({ email: 'a@b.com', code: '123456' });
-      expect(mockAuthService.confirmSignUp).toHaveBeenCalledWith('a@b.com', '123456');
-    });
-  });
-
-  describe('useResendSignUpCodeMutation', () => {
-    it('calls authService.resendSignUpCode', async () => {
-      mockAuthService.resendSignUpCode.mockResolvedValueOnce({ success: true });
-      const { useResendSignUpCodeMutation } = await import('./useAuthQueries');
-      const { result } = withQueryClient(() => useResendSignUpCodeMutation());
-      await result.mutateAsync('a@b.com');
-      expect(mockAuthService.resendSignUpCode).toHaveBeenCalledWith('a@b.com');
-    });
-  });
-
-  describe('useResetPasswordMutation', () => {
-    it('calls authService.resetPassword', async () => {
-      mockAuthService.resetPassword.mockResolvedValueOnce({ success: true });
-      const { useResetPasswordMutation } = await import('./useAuthQueries');
-      const { result } = withQueryClient(() => useResetPasswordMutation());
-      await result.mutateAsync('a@b.com');
-      expect(mockAuthService.resetPassword).toHaveBeenCalledWith('a@b.com');
     });
   });
 

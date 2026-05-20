@@ -1,10 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query';
-import {
-  authService,
-  type SignUpData,
-  type SignInData,
-  type ProfileData,
-} from 'src/services/authService';
+import { authService, type ProfileData } from 'src/services/authService';
 import type { Profile, UserPreferences } from 'src/types/shared';
 import { authKeys } from '@vela/common';
 
@@ -48,38 +43,16 @@ export function useUserProfileQuery(userId: string | null | undefined) {
 }
 
 /**
- * Hook to sign up a new user
+ * Hook to start Google sign-in through Cognito Hosted UI.
  */
-export function useSignUpMutation() {
+export function useSignInWithGoogleMutation() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: (data: SignUpData) => authService.signUp(data),
-    onSuccess: (result) => {
-      if (result.success) {
-        // Invalidate session and user queries
-        queryClient.invalidateQueries({ queryKey: authKeys.session() });
-        queryClient.invalidateQueries({ queryKey: authKeys.user() });
-      }
-    },
-  });
-}
-
-/**
- * Hook to sign in
- */
-export function useSignInMutation() {
-  const queryClient = useQueryClient();
-
-  return useMutation({
-    mutationFn: (data: SignInData) => authService.signIn(data),
-    onSuccess: (result) => {
-      if (result.success && result.user) {
-        // Invalidate and refetch session, user, and profile queries
-        queryClient.invalidateQueries({ queryKey: authKeys.session() });
-        queryClient.invalidateQueries({ queryKey: authKeys.user() });
-        queryClient.invalidateQueries({ queryKey: authKeys.profile(result.user.id) });
-      }
+    mutationFn: () => authService.signInWithGoogle(),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: authKeys.session() });
+      queryClient.invalidateQueries({ queryKey: authKeys.user() });
     },
   });
 }
@@ -96,34 +69,6 @@ export function useSignOutMutation() {
       // Clear all queries on sign out
       queryClient.clear();
     },
-  });
-}
-
-/**
- * Hook to confirm sign up
- */
-export function useConfirmSignUpMutation() {
-  return useMutation({
-    mutationFn: ({ email, code }: { email: string; code: string }) =>
-      authService.confirmSignUp(email, code),
-  });
-}
-
-/**
- * Hook to resend sign up code
- */
-export function useResendSignUpCodeMutation() {
-  return useMutation({
-    mutationFn: (email: string) => authService.resendSignUpCode(email),
-  });
-}
-
-/**
- * Hook to reset password
- */
-export function useResetPasswordMutation() {
-  return useMutation({
-    mutationFn: (email: string) => authService.resetPassword(email),
   });
 }
 

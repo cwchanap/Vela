@@ -5,13 +5,8 @@ const mockAuthService = {
   getCurrentSession: vi.fn(),
   onAuthStateChange: vi.fn(),
   getUserProfile: vi.fn(),
-  signUp: vi.fn(),
-  signIn: vi.fn(),
+  signInWithGoogle: vi.fn(),
   signOut: vi.fn(),
-  confirmSignUp: vi.fn(),
-  resendSignUpCode: vi.fn(),
-  resetPassword: vi.fn(),
-  updatePassword: vi.fn(),
   updateUserProfile: vi.fn(),
 };
 
@@ -145,61 +140,31 @@ describe('useAuthStore', () => {
     });
   });
 
-  describe('signIn', () => {
-    it('returns true and invalidates 3 queries on success', async () => {
-      mockAuthService.signIn.mockResolvedValueOnce({
-        success: true,
-        user: { id: 'user-123', email: 'test@example.com' },
-      });
+  describe('signInWithGoogle', () => {
+    it('returns true after starting Google Hosted UI sign in', async () => {
+      mockAuthService.signInWithGoogle.mockResolvedValueOnce(undefined);
       const { useAuthStore } = await import('./auth');
       const store = useAuthStore();
-      const result = await store.signIn({ email: 'test@example.com', password: 'password' });
+      const result = await store.signInWithGoogle();
       expect(result).toBe(true);
-      expect(mockQueryClient.invalidateQueries).toHaveBeenCalledTimes(3);
-    });
-
-    it('returns false and sets error on failure', async () => {
-      mockAuthService.signIn.mockResolvedValueOnce({
-        success: false,
-        error: 'Invalid credentials',
-      });
-      const { useAuthStore } = await import('./auth');
-      const store = useAuthStore();
-      const result = await store.signIn({ email: 'bad@example.com', password: 'wrong' });
-      expect(result).toBe(false);
-      expect(store.error).toBe('Invalid credentials');
-    });
-
-    it('sets pendingVerificationEmail when user is not confirmed', async () => {
-      mockAuthService.signIn.mockResolvedValueOnce({
-        success: false,
-        error: 'User is not confirmed',
-        user: { email: 'unconfirmed@example.com' },
-      });
-      const { useAuthStore } = await import('./auth');
-      const store = useAuthStore();
-      await store.signIn({ email: 'unconfirmed@example.com', password: 'password' });
-      expect(store.pendingVerificationEmail).toBe('unconfirmed@example.com');
+      expect(mockAuthService.signInWithGoogle).toHaveBeenCalledTimes(1);
     });
 
     it('sets isLoading to false after completion', async () => {
-      mockAuthService.signIn.mockResolvedValueOnce({
-        success: true,
-        user: { id: 'u1', email: 'a@b.com' },
-      });
+      mockAuthService.signInWithGoogle.mockResolvedValueOnce(undefined);
       const { useAuthStore } = await import('./auth');
       const store = useAuthStore();
-      await store.signIn({ email: 'a@b.com', password: 'pass' });
+      await store.signInWithGoogle();
       expect(store.isLoading).toBe(false);
     });
 
     it('returns false and sets generic error on exception', async () => {
-      mockAuthService.signIn.mockRejectedValueOnce(new Error('network'));
+      mockAuthService.signInWithGoogle.mockRejectedValueOnce(new Error('network'));
       const { useAuthStore } = await import('./auth');
       const store = useAuthStore();
-      const result = await store.signIn({ email: 'test@example.com', password: 'pass' });
+      const result = await store.signInWithGoogle();
       expect(result).toBe(false);
-      expect(store.error).toContain('unexpected error');
+      expect(store.error).toBe('network');
     });
   });
 
@@ -231,77 +196,6 @@ describe('useAuthStore', () => {
       const { useAuthStore } = await import('./auth');
       const store = useAuthStore();
       const result = await store.signOut();
-      expect(result).toBe(false);
-      expect(store.error).toContain('unexpected error');
-    });
-  });
-
-  describe('signUp', () => {
-    it('returns true on success', async () => {
-      mockAuthService.signUp.mockResolvedValueOnce({ success: true });
-      const { useAuthStore } = await import('./auth');
-      const store = useAuthStore();
-      const result = await store.signUp({
-        email: 'new@example.com',
-        password: 'password',
-        username: 'newuser',
-      });
-      expect(result).toBe(true);
-    });
-
-    it('returns false and sets error on failure', async () => {
-      mockAuthService.signUp.mockResolvedValueOnce({ success: false, error: 'Email in use' });
-      const { useAuthStore } = await import('./auth');
-      const store = useAuthStore();
-      const result = await store.signUp({
-        email: 'existing@example.com',
-        password: 'password',
-        username: 'u',
-      });
-      expect(result).toBe(false);
-      expect(store.error).toBe('Email in use');
-    });
-
-    it('returns false and sets generic error on exception', async () => {
-      mockAuthService.signUp.mockRejectedValueOnce(new Error('network'));
-      const { useAuthStore } = await import('./auth');
-      const store = useAuthStore();
-      const result = await store.signUp({
-        email: 'test@example.com',
-        password: 'pass',
-        username: 'u',
-      });
-      expect(result).toBe(false);
-      expect(store.error).toContain('unexpected error');
-    });
-  });
-
-  describe('resetPassword', () => {
-    it('returns true on success', async () => {
-      mockAuthService.resetPassword.mockResolvedValueOnce({ success: true });
-      const { useAuthStore } = await import('./auth');
-      const store = useAuthStore();
-      const result = await store.resetPassword('test@example.com');
-      expect(result).toBe(true);
-    });
-
-    it('returns false and sets error on failure', async () => {
-      mockAuthService.resetPassword.mockResolvedValueOnce({
-        success: false,
-        error: 'User not found',
-      });
-      const { useAuthStore } = await import('./auth');
-      const store = useAuthStore();
-      const result = await store.resetPassword('noone@example.com');
-      expect(result).toBe(false);
-      expect(store.error).toBe('User not found');
-    });
-
-    it('returns false and sets generic error on exception', async () => {
-      mockAuthService.resetPassword.mockRejectedValueOnce(new Error('network'));
-      const { useAuthStore } = await import('./auth');
-      const store = useAuthStore();
-      const result = await store.resetPassword('test@example.com');
       expect(result).toBe(false);
       expect(store.error).toContain('unexpected error');
     });
@@ -443,99 +337,6 @@ describe('useAuthStore', () => {
       const result = await store.updateProfile({ username: 'new' });
       expect(result).toBe(false);
       expect(store.error).toBe('An unexpected error occurred during profile update');
-    });
-  });
-
-  describe('confirmSignUp', () => {
-    it('returns true on success', async () => {
-      mockAuthService.confirmSignUp.mockResolvedValueOnce({ success: true });
-      const { useAuthStore } = await import('./auth');
-      const store = useAuthStore();
-      const result = await store.confirmSignUp('test@example.com', '123456');
-      expect(result).toBe(true);
-    });
-
-    it('returns false and sets error on failure', async () => {
-      mockAuthService.confirmSignUp.mockResolvedValueOnce({
-        success: false,
-        error: 'Invalid code',
-      });
-      const { useAuthStore } = await import('./auth');
-      const store = useAuthStore();
-      const result = await store.confirmSignUp('test@example.com', 'wrong');
-      expect(result).toBe(false);
-      expect(store.error).toBe('Invalid code');
-    });
-
-    it('returns false and sets generic error on exception', async () => {
-      mockAuthService.confirmSignUp.mockRejectedValueOnce(new Error('network'));
-      const { useAuthStore } = await import('./auth');
-      const store = useAuthStore();
-      const result = await store.confirmSignUp('test@example.com', 'code');
-      expect(result).toBe(false);
-      expect(store.error).toContain('unexpected error');
-    });
-  });
-
-  describe('resendSignUpCode', () => {
-    it('returns true on success', async () => {
-      mockAuthService.resendSignUpCode.mockResolvedValueOnce({ success: true });
-      const { useAuthStore } = await import('./auth');
-      const store = useAuthStore();
-      const result = await store.resendSignUpCode('test@example.com');
-      expect(result).toBe(true);
-    });
-
-    it('returns false and sets error on failure', async () => {
-      mockAuthService.resendSignUpCode.mockResolvedValueOnce({
-        success: false,
-        error: 'Too many requests',
-      });
-      const { useAuthStore } = await import('./auth');
-      const store = useAuthStore();
-      const result = await store.resendSignUpCode('test@example.com');
-      expect(result).toBe(false);
-      expect(store.error).toBe('Too many requests');
-    });
-
-    it('returns false and sets generic error on exception', async () => {
-      mockAuthService.resendSignUpCode.mockRejectedValueOnce(new Error('network'));
-      const { useAuthStore } = await import('./auth');
-      const store = useAuthStore();
-      const result = await store.resendSignUpCode('test@example.com');
-      expect(result).toBe(false);
-      expect(store.error).toContain('unexpected error');
-    });
-  });
-
-  describe('updatePassword', () => {
-    it('returns true on success', async () => {
-      mockAuthService.updatePassword.mockResolvedValueOnce({ success: true });
-      const { useAuthStore } = await import('./auth');
-      const store = useAuthStore();
-      const result = await store.updatePassword('newPassword123');
-      expect(result).toBe(true);
-    });
-
-    it('returns false and sets error on failure', async () => {
-      mockAuthService.updatePassword.mockResolvedValueOnce({
-        success: false,
-        error: 'Password update requires current password',
-      });
-      const { useAuthStore } = await import('./auth');
-      const store = useAuthStore();
-      const result = await store.updatePassword('newPassword123');
-      expect(result).toBe(false);
-      expect(store.error).toContain('Password update requires current password');
-    });
-
-    it('returns false and sets generic error on exception', async () => {
-      mockAuthService.updatePassword.mockRejectedValueOnce(new Error('network'));
-      const { useAuthStore } = await import('./auth');
-      const store = useAuthStore();
-      const result = await store.updatePassword('newPassword123');
-      expect(result).toBe(false);
-      expect(store.error).toContain('unexpected error');
     });
   });
 

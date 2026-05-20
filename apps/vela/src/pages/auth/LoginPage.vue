@@ -69,26 +69,20 @@ const redirectTo = ref('/');
 const handleAuthSuccess = async (type: 'signin' | 'signup') => {
   console.log('Auth success:', type);
 
-  if (type === 'signup') {
-    $q.notify({
-      type: 'positive',
-      message: 'Account created successfully! You can now sign in.',
-      timeout: 5000,
-    });
-    // Navigate to sign-in mode since no verification is needed
-    authMode.value = 'signin';
-  } else if (type === 'signin') {
-    $q.notify({
-      type: 'positive',
-      message: 'Welcome back!',
-      timeout: 3000,
-    });
-    // Small delay to allow notification to show before redirect
-    await new Promise((resolve) => setTimeout(resolve, 1000));
-    // Explicitly redirect to desired target (respects ?redirect=...)
-    // This ensures navigation even if router guard timing is off
-    await router.push(redirectTo.value);
+  if (type !== 'signin') {
+    return;
   }
+
+  $q.notify({
+    type: 'positive',
+    message: 'Welcome back!',
+    timeout: 3000,
+  });
+  // Small delay to allow notification to show before redirect
+  await new Promise((resolve) => setTimeout(resolve, 1000));
+  // Explicitly redirect to desired target (respects ?redirect=...)
+  // This ensures navigation even if router guard timing is off
+  await router.push(redirectTo.value);
 };
 
 const handleAuthError = (message: string) => {
@@ -108,11 +102,6 @@ onMounted(async () => {
   if (authStore.session) {
     void router.push(redirectTo.value);
     return;
-  }
-
-  // Set auth mode based on route
-  if (route.path.includes('signup')) {
-    authMode.value = 'signup';
   }
 
   // Set redirect URL from query params

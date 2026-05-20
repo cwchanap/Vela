@@ -277,8 +277,8 @@ describe('UserProfile', () => {
     });
   });
 
-  describe('Change Password Dialog', () => {
-    it('should have change password button', () => {
+  describe('Password Surface', () => {
+    it('does not show change password controls for Google-only accounts', () => {
       const authStore = useAuthStore();
       authStore.user = mockUser;
 
@@ -288,14 +288,10 @@ describe('UserProfile', () => {
         return btn.text().includes('Change Password');
       });
 
-      expect(changePasswordButton?.exists()).toBe(true);
-    });
-
-    it('should have password dialog component', () => {
-      const wrapper = mountComponent();
-
-      const dialog = wrapper.findComponent({ name: 'QDialog' });
-      expect(dialog.exists()).toBe(true);
+      expect(changePasswordButton).toBeUndefined();
+      expect(wrapper.text()).not.toContain('Change Password');
+      expect(wrapper.text()).not.toContain('Update Password');
+      expect(wrapper.findComponent({ name: 'QDialog' }).exists()).toBe(false);
     });
   });
 
@@ -681,91 +677,6 @@ describe('UserProfile', () => {
 
       expect(notifySpy).not.toHaveBeenCalled();
       expect(vm.editMode).toBe(true);
-    });
-  });
-
-  describe('handlePasswordChange()', () => {
-    it('returns early when passwords do not match', async () => {
-      const authStore = useAuthStore();
-      authStore.user = mockUser;
-      vi.spyOn(authStore, 'updatePassword').mockResolvedValue(true);
-
-      const wrapper = mountComponent();
-      const vm = wrapper.vm as any;
-      vm.passwordForm.newPassword = 'password1';
-      vm.passwordForm.confirmPassword = 'password2';
-
-      await vm.handlePasswordChange();
-
-      expect(authStore.updatePassword).not.toHaveBeenCalled();
-      expect(notifySpy).not.toHaveBeenCalled();
-    });
-
-    it('success: calls store, notifies positively, closes dialog and clears fields', async () => {
-      const authStore = useAuthStore();
-      authStore.user = mockUser;
-      vi.spyOn(authStore, 'updatePassword').mockResolvedValue(true);
-
-      const wrapper = mountComponent();
-      const vm = wrapper.vm as any;
-      vm.showPasswordDialog = true;
-      vm.passwordForm.newPassword = 'newPass123';
-      vm.passwordForm.confirmPassword = 'newPass123';
-
-      await vm.handlePasswordChange();
-      await flushPromises();
-
-      expect(authStore.updatePassword).toHaveBeenCalledWith('newPass123');
-      expect(notifySpy).toHaveBeenCalledWith(
-        expect.objectContaining({
-          type: 'positive',
-          message: 'Password updated successfully!',
-        }),
-      );
-      expect(vm.showPasswordDialog).toBe(false);
-      expect(vm.passwordForm.newPassword).toBe('');
-      expect(vm.passwordForm.confirmPassword).toBe('');
-      expect(vm.passwordLoading).toBe(false);
-    });
-
-    it('failure: notifies negatively with store error and resets loading', async () => {
-      const authStore = useAuthStore();
-      authStore.user = mockUser;
-      vi.spyOn(authStore, 'updatePassword').mockImplementation(async () => {
-        authStore.error = 'Wrong password';
-        return false;
-      });
-
-      const wrapper = mountComponent();
-      const vm = wrapper.vm as any;
-      vm.passwordForm.newPassword = 'pass123';
-      vm.passwordForm.confirmPassword = 'pass123';
-
-      await vm.handlePasswordChange();
-      await flushPromises();
-
-      expect(notifySpy).toHaveBeenCalledWith(
-        expect.objectContaining({ type: 'negative', message: 'Wrong password' }),
-      );
-      expect(vm.passwordLoading).toBe(false);
-    });
-
-    it('does not notify when updatePassword returns false without an error message', async () => {
-      const authStore = useAuthStore();
-      authStore.user = mockUser;
-      vi.spyOn(authStore, 'updatePassword').mockResolvedValue(false);
-      authStore.error = null;
-
-      const wrapper = mountComponent();
-      const vm = wrapper.vm as any;
-      vm.passwordForm.newPassword = 'pass123';
-      vm.passwordForm.confirmPassword = 'pass123';
-
-      await vm.handlePasswordChange();
-      await flushPromises();
-
-      expect(notifySpy).not.toHaveBeenCalled();
-      expect(vm.passwordLoading).toBe(false);
     });
   });
 
