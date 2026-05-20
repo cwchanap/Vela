@@ -8,11 +8,6 @@ const mockCognitoSend = vi.fn();
 
 vi.mock('@aws-sdk/client-cognito-identity-provider', () => ({
   CognitoIdentityProviderClient: vi.fn(() => ({ send: mockCognitoSend })),
-  AdminConfirmSignUpCommand: vi.fn((params: object) => ({
-    ...params,
-    __type: 'AdminConfirmSignUpCommand',
-  })),
-  ListUsersCommand: vi.fn((params: object) => ({ ...params, __type: 'ListUsersCommand' })),
   InitiateAuthCommand: vi.fn((params: object) => ({ ...params, __type: 'InitiateAuthCommand' })),
   AdminUserGlobalSignOutCommand: vi.fn((params: object) => ({
     ...params,
@@ -219,130 +214,25 @@ describe('Auth Route', () => {
     });
   });
 
-  describe('POST /signin', () => {
-    test('returns 400 when email or password missing', async () => {
-      const app = createTestApp({ VITE_COGNITO_USER_POOL_ID: 'us-east-1_test123' });
-      const res = await app.request('/signin', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: 'test@example.com' }),
-      });
-      expect(res.status).toBe(400);
-    });
-
-    test('returns 500 when user pool ID is not configured', async () => {
-      await withTempEnv({ VITE_COGNITO_USER_POOL_ID: undefined }, async () => {
-        const app = createTestApp({});
-        const res = await app.request('/signin', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ email: 'user@example.com', password: 'password123' }),
-        });
-        expect(res.status).toBe(500);
-        const body = (await res.json()) as { error: string };
-        expect(body.error).toContain('User pool ID not configured');
-        expect(mockCognitoSend).not.toHaveBeenCalled();
-      });
-    });
-
-    test('returns 500 when Cognito client ID is not configured', async () => {
-      await withTempEnv(
-        { COGNITO_CLIENT_ID: undefined, VITE_COGNITO_USER_POOL_CLIENT_ID: undefined },
-        async () => {
-          const app = createTestApp({ VITE_COGNITO_USER_POOL_ID: 'us-east-1_test123' });
-          const res = await app.request('/signin', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ email: 'user@example.com', password: 'password123' }),
-          });
-          expect(res.status).toBe(500);
-          const body = (await res.json()) as { error: string };
-          expect(body.error).toContain('Cognito client ID not configured');
-          expect(mockCognitoSend).not.toHaveBeenCalled();
-        },
-      );
-    });
-
-    test('returns tokens on successful sign in', async () => {
-      mockCognitoSend.mockResolvedValueOnce({
-        AuthenticationResult: {
-          AccessToken: 'access-token',
-          RefreshToken: 'refresh-token',
-          IdToken: 'id-token',
-        },
-      });
-
+  describe('removed password auth routes', () => {
+    test('returns 404 for POST /signin', async () => {
       const app = createTestApp({ VITE_COGNITO_USER_POOL_ID: 'us-east-1_test123' });
       const res = await app.request('/signin', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email: 'user@example.com', password: 'password123' }),
       });
-      expect(res.status).toBe(200);
-      const body = (await res.json()) as { success: boolean; tokens: object };
-      expect(body.success).toBe(true);
-      expect(body.tokens).toBeDefined();
+      expect(res.status).toBe(404);
     });
 
-    test('returns 401 when AuthenticationResult is missing in signin', async () => {
-      mockCognitoSend.mockResolvedValueOnce({});
-
+    test('returns 404 for POST /auto-confirm', async () => {
       const app = createTestApp({ VITE_COGNITO_USER_POOL_ID: 'us-east-1_test123' });
-      const res = await app.request('/signin', {
+      const res = await app.request('/auto-confirm', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: 'user@example.com', password: 'password123' }),
+        body: JSON.stringify({ email: 'user@example.com' }),
       });
-      expect(res.status).toBe(401);
-      const body = (await res.json()) as { error: string };
-      expect(body.error).toContain('Authentication failed');
-    });
-
-    test('returns 401 on NotAuthorizedException', async () => {
-      const err = new Error('Wrong password');
-      (err as any).name = 'NotAuthorizedException';
-      mockCognitoSend.mockRejectedValueOnce(err);
-
-      const app = createTestApp({ VITE_COGNITO_USER_POOL_ID: 'us-east-1_test123' });
-      const res = await app.request('/signin', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: 'user@example.com', password: 'wrong' }),
-      });
-      expect(res.status).toBe(401);
-      const body = (await res.json()) as { error: string };
-      expect(body.error).toContain('Invalid email or password');
-    });
-
-    test('returns 401 on UserNotConfirmedException', async () => {
-      const err = new Error('User not confirmed');
-      (err as any).name = 'UserNotConfirmedException';
-      mockCognitoSend.mockRejectedValueOnce(err);
-
-      const app = createTestApp({ VITE_COGNITO_USER_POOL_ID: 'us-east-1_test123' });
-      const res = await app.request('/signin', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: 'user@example.com', password: 'pass' }),
-      });
-      expect(res.status).toBe(401);
-    });
-
-    test('returns 500 on generic error in signin', async () => {
-      const err = new Error('Internal error');
-      (err as any).name = 'InternalErrorException';
-      mockCognitoSend.mockRejectedValueOnce(err);
-
-      const app = createTestApp({ VITE_COGNITO_USER_POOL_ID: 'us-east-1_test123' });
-      const res = await app.request('/signin', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: 'user@example.com', password: 'pass' }),
-      });
-      expect(res.status).toBe(500);
-      const body = (await res.json()) as { error: string; name: string };
-      expect(body.error).toContain('Sign in failed');
-      expect(body.name).toBe('InternalErrorException');
+      expect(res.status).toBe(404);
     });
   });
 
@@ -363,94 +253,6 @@ describe('Auth Route', () => {
           expect(mockCognitoSend).not.toHaveBeenCalled();
         },
       );
-    });
-  });
-
-  describe('POST /auto-confirm', () => {
-    test('returns 400 when email is missing', async () => {
-      const app = createTestApp({ VITE_COGNITO_USER_POOL_ID: 'us-east-1_test123' });
-      const res = await app.request('/auto-confirm', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({}),
-      });
-      expect(res.status).toBe(400);
-      const body = (await res.json()) as { error: string };
-      expect(body.error).toContain('Email is required');
-    });
-
-    test('returns 500 when user pool ID is not configured', async () => {
-      await withTempEnv({ VITE_COGNITO_USER_POOL_ID: undefined }, async () => {
-        const app = createTestApp({});
-        const res = await app.request('/auto-confirm', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ email: 'user@example.com' }),
-        });
-        expect(res.status).toBe(500);
-        const body = (await res.json()) as { error: string };
-        expect(body.error).toContain('User pool ID not configured');
-        expect(mockCognitoSend).not.toHaveBeenCalled();
-      });
-    });
-
-    test('returns 404 when user not found', async () => {
-      mockCognitoSend.mockResolvedValueOnce({ Users: [] });
-
-      const app = createTestApp({ VITE_COGNITO_USER_POOL_ID: 'us-east-1_test123' });
-      const res = await app.request('/auto-confirm', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: 'unknown@example.com' }),
-      });
-      expect(res.status).toBe(404);
-      const body = (await res.json()) as { error: string };
-      expect(body.error).toContain('User not found');
-    });
-
-    test('returns 500 when user has no username', async () => {
-      mockCognitoSend.mockResolvedValueOnce({ Users: [{ Username: undefined }] });
-
-      const app = createTestApp({ VITE_COGNITO_USER_POOL_ID: 'us-east-1_test123' });
-      const res = await app.request('/auto-confirm', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: 'user@example.com' }),
-      });
-      expect(res.status).toBe(500);
-      const body = (await res.json()) as { error: string };
-      expect(body.error).toContain('User username not found');
-    });
-
-    test('returns success when user is auto-confirmed', async () => {
-      mockCognitoSend
-        .mockResolvedValueOnce({ Users: [{ Username: 'user-uuid-123' }] })
-        .mockResolvedValueOnce({});
-
-      const app = createTestApp({ VITE_COGNITO_USER_POOL_ID: 'us-east-1_test123' });
-      const res = await app.request('/auto-confirm', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: 'user@example.com' }),
-      });
-      expect(res.status).toBe(200);
-      const body = (await res.json()) as { success: boolean; message: string };
-      expect(body.success).toBe(true);
-      expect(body.message).toContain('auto-confirmed');
-    });
-
-    test('returns 500 on Cognito error', async () => {
-      mockCognitoSend.mockRejectedValueOnce(new Error('Cognito unavailable'));
-
-      const app = createTestApp({ VITE_COGNITO_USER_POOL_ID: 'us-east-1_test123' });
-      const res = await app.request('/auto-confirm', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: 'user@example.com' }),
-      });
-      expect(res.status).toBe(500);
-      const body = (await res.json()) as { error: string };
-      expect(body.error).toContain('Failed to auto-confirm user');
     });
   });
 });
