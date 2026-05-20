@@ -7,8 +7,8 @@
   "scripts": {
     "build": "bun run lambda:build",
     "lambda:build": "esbuild ../../apps/vela-api/src/index.ts --bundle --outfile=dist/lambda/index.js --platform=node --target=node20 --format=cjs --external:@aws-sdk/*",
-    "test:unit": "zsh -lc 'bun test test/**/*.test.ts'",
-    "cdk:synth": "bunx aws-cdk synth",
+    "test:unit": "bun test test",
+    "cdk:synth": "ALLOW_LOCAL_OAUTH_PLACEHOLDERS=true bunx aws-cdk synth",
     "cdk:deploy": "bunx aws-cdk deploy",
     "cdk:destroy": "bunx aws-cdk destroy",
     "cdk:diff": "bunx aws-cdk diff",
