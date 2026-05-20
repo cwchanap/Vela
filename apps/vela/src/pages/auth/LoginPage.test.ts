@@ -156,5 +156,43 @@ describe('LoginPage', () => {
       expect(initializeSpy).toHaveBeenCalled();
       expect(routerPushSpy).toHaveBeenCalledWith('/');
     });
+
+    it('redirects an existing session to the query redirect on mount', async () => {
+      await router.push('/auth/login?redirect=/progress');
+      const authStore = useAuthStore();
+      const initializeSpy = vi.spyOn(authStore, 'initialize').mockResolvedValue(undefined);
+      authStore.setSession({
+        user: { id: 'user-1', email: 'test@example.com' },
+        provider: 'cognito',
+      });
+      const routerPushSpy = vi.spyOn(router, 'push');
+
+      wrapper = mountComponent();
+      await flushPromises();
+
+      expect(initializeSpy).toHaveBeenCalled();
+      expect(routerPushSpy).toHaveBeenCalledWith('/progress');
+    });
+
+    it('uses the pending Hosted UI redirect on callback when a session exists', async () => {
+      await router.push('/auth/callback');
+      const authStore = useAuthStore();
+      const initializeSpy = vi.spyOn(authStore, 'initialize').mockResolvedValue(undefined);
+      const consumeRedirectSpy = vi
+        .spyOn(authStore, 'consumePendingAuthRedirect')
+        .mockReturnValue('/progress');
+      authStore.setSession({
+        user: { id: 'user-1', email: 'test@example.com' },
+        provider: 'cognito',
+      });
+      const routerPushSpy = vi.spyOn(router, 'push');
+
+      wrapper = mountComponent();
+      await flushPromises();
+
+      expect(initializeSpy).toHaveBeenCalled();
+      expect(consumeRedirectSpy).toHaveBeenCalledWith('/');
+      expect(routerPushSpy).toHaveBeenCalledWith('/progress');
+    });
   });
 });

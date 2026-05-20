@@ -66,6 +66,14 @@ const authMode = ref<'signin' | 'signup'>('signin');
 const redirectTo = ref('/');
 
 // Methods
+const getRouteRedirect = () => authStore.getSafeAuthRedirect(route.query.redirect);
+
+const getInitialRedirect = () => {
+  const routeRedirect = getRouteRedirect();
+  const isAuthCallback = route.name === 'auth-callback' || route.path === '/auth/callback';
+  return isAuthCallback ? authStore.consumePendingAuthRedirect(routeRedirect) : routeRedirect;
+};
+
 const handleAuthSuccess = async (type: 'signin' | 'signup') => {
   console.log('Auth success:', type);
 
@@ -95,6 +103,8 @@ const handleAuthError = (message: string) => {
 };
 
 onMounted(async () => {
+  redirectTo.value = getInitialRedirect();
+
   // Initialize auth store
   await authStore.initialize();
 
@@ -102,11 +112,6 @@ onMounted(async () => {
   if (authStore.session) {
     void router.push(redirectTo.value);
     return;
-  }
-
-  // Set redirect URL from query params
-  if (route.query.redirect && typeof route.query.redirect === 'string') {
-    redirectTo.value = route.query.redirect;
   }
 });
 </script>

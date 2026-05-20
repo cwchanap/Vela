@@ -69,11 +69,14 @@ const makeUser = (overrides = {}) => ({
   ...overrides,
 });
 
+const AUTH_REDIRECT_STORAGE_KEY = 'vela.auth.redirectTo';
+
 describe('useAuthStore', () => {
   beforeEach(async () => {
     setActivePinia(createPinia());
     vi.clearAllMocks();
     vi.resetModules();
+    window.sessionStorage.clear();
   });
 
   it('has correct initial state', async () => {
@@ -156,6 +159,45 @@ describe('useAuthStore', () => {
       const store = useAuthStore();
       await store.signInWithGoogle();
       expect(store.isLoading).toBe(false);
+    });
+
+    it('stores the internal redirect before starting Hosted UI sign in', async () => {
+      mockAuthService.signInWithGoogle.mockResolvedValueOnce(undefined);
+      const { useAuthStore } = await import('./auth');
+      const store = useAuthStore();
+
+      await store.signInWithGoogle('/progress?tab=weekly');
+
+      expect(window.sessionStorage.getItem(AUTH_REDIRECT_STORAGE_KEY)).toBe('/progress?tab=weekly');
+    });
+
+    it('sanitizes external redirects before storing Hosted UI state', async () => {
+      mockAuthService.signInWithGoogle.mockResolvedValueOnce(undefined);
+      const { useAuthStore } = await import('./auth');
+      const store = useAuthStore();
+
+      await store.signInWithGoogle('https://example.com/phishing');
+
+      expect(window.sessionStorage.getItem(AUTH_REDIRECT_STORAGE_KEY)).toBe('/');
+    });
+
+    it('clears the pending redirect when Hosted UI start fails', async () => {
+      mockAuthService.signInWithGoogle.mockRejectedValueOnce(new Error('network'));
+      const { useAuthStore } = await import('./auth');
+      const store = useAuthStore();
+
+      await store.signInWithGoogle('/progress');
+
+      expect(window.sessionStorage.getItem(AUTH_REDIRECT_STORAGE_KEY)).toBeNull();
+    });
+
+    it('consumes and clears the pending Hosted UI redirect', async () => {
+      window.sessionStorage.setItem(AUTH_REDIRECT_STORAGE_KEY, '/progress');
+      const { useAuthStore } = await import('./auth');
+      const store = useAuthStore();
+
+      expect(store.consumePendingAuthRedirect('/settings')).toBe('/progress');
+      expect(window.sessionStorage.getItem(AUTH_REDIRECT_STORAGE_KEY)).toBeNull();
     });
 
     it('returns false and sets generic error on exception', async () => {

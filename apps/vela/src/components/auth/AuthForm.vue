@@ -37,7 +37,7 @@ interface Props {
   redirectTo?: string;
 }
 
-withDefaults(defineProps<Props>(), {
+const props = withDefaults(defineProps<Props>(), {
   mode: 'signin',
   redirectTo: '/',
 });
@@ -50,7 +50,7 @@ const emit = defineEmits<{
 const authStore = useAuthStore();
 
 const handleGoogleSignIn = async () => {
-  const success = await authStore.signInWithGoogle();
+  const success = await authStore.signInWithGoogle(props.redirectTo);
 
   if (!success && authStore.error) {
     emit('error', authStore.error);
