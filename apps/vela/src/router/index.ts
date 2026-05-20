@@ -53,17 +53,6 @@ export default defineRouter(function (/* { store, ssrContext } */) {
       const requiresAuth = to.matched.some((record) => record.meta.requiresAuth);
       const requiresGuest = to.matched.some((record) => record.meta.requiresGuest);
 
-      // Dev-mode guest bypass for e2e/local testing
-      const isDev =
-        (typeof import.meta !== 'undefined' && import.meta.env?.DEV) ||
-        (typeof import.meta !== 'undefined' && import.meta.env?.VITE_DEV_MODE === 'true');
-
-      if (requiresAuth && !authStore.isAuthenticated && isDev) {
-        // Allow access in dev to facilitate E2E without full AWS setup
-        next();
-        return;
-      }
-
       if (requiresAuth && !authStore.isAuthenticated) {
         // Redirect to login with return URL
         next({
