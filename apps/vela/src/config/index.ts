@@ -1,10 +1,49 @@
 // Environment configuration
+type ConfigEnv = Record<string, unknown> | null | undefined;
+
+const getCurrentOrigin = (): string => {
+  if (typeof window !== 'undefined' && window.location?.origin) {
+    return window.location.origin;
+  }
+
+  return 'http://localhost:9000';
+};
+
+const parseCsvEnv = (value: unknown, fallback: string[]): string[] => {
+  if (typeof value !== 'string' || value.trim().length === 0) {
+    return fallback;
+  }
+
+  const entries = value
+    .split(',')
+    .map((entry) => entry.trim())
+    .filter((entry) => entry.length > 0);
+
+  return entries.length > 0 ? entries : fallback;
+};
+
+const defaultRedirectSignIn = [`${getCurrentOrigin()}/auth/callback`];
+const defaultRedirectSignOut = [`${getCurrentOrigin()}/auth/login`];
+
 export const config = {
   // Cognito configuration
   cognito: {
     userPoolId: import.meta.env.VITE_COGNITO_USER_POOL_ID || '',
     userPoolClientId: import.meta.env.VITE_COGNITO_USER_POOL_CLIENT_ID || '',
     region: import.meta.env.VITE_AWS_REGION || '',
+    oauth: {
+      domain: import.meta.env.VITE_COGNITO_OAUTH_DOMAIN || '',
+      redirectSignIn: parseCsvEnv(
+        import.meta.env.VITE_COGNITO_REDIRECT_SIGN_IN,
+        defaultRedirectSignIn,
+      ),
+      redirectSignOut: parseCsvEnv(
+        import.meta.env.VITE_COGNITO_REDIRECT_SIGN_OUT,
+        defaultRedirectSignOut,
+      ),
+      responseType: 'code' as const,
+      providers: ['Google'] as const,
+    },
   },
 
   // AI service configuration
@@ -35,8 +74,6 @@ export const config = {
   },
 } as const;
 
-type ConfigEnv = Record<string, unknown> | null | undefined;
-
 // Validation function to check required environment variables
 export const validateConfig = (env?: ConfigEnv) => {
   const resolvedEnv = env === undefined ? import.meta.env : env;
@@ -46,6 +83,7 @@ export const validateConfig = (env?: ConfigEnv) => {
       'VITE_COGNITO_USER_POOL_ID',
       'VITE_COGNITO_USER_POOL_CLIENT_ID',
       'VITE_AWS_REGION',
+      'VITE_COGNITO_OAUTH_DOMAIN',
     ];
 
     if (!resolvedEnv) {
