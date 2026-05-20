@@ -1,15 +1,11 @@
 // AWS Cognito authentication using Amplify
 import { Amplify } from 'aws-amplify';
 import {
-  signUp,
-  signIn,
+  signInWithRedirect,
   signOut,
   getCurrentUser,
-  confirmSignUp,
-  resendSignUpCode,
   fetchAuthSession,
   fetchUserAttributes,
-  resetPassword,
 } from 'aws-amplify/auth';
 import { Hub } from 'aws-amplify/utils';
 import type { Profile, ProfileInsert } from '../types/shared';
@@ -18,7 +14,7 @@ import { httpJsonAuth } from 'src/utils/httpClient';
 
 // Configure Amplify with Cognito
 const configureAmplify = () => {
-  const { userPoolId, userPoolClientId, region } = config.cognito;
+  const { userPoolId, userPoolClientId, region, oauth } = config.cognito;
   if (!userPoolId || !userPoolClientId || !region) {
     console.warn('⚠️ Missing Cognito configuration. Authentication will be disabled.');
     return false;
@@ -29,6 +25,16 @@ const configureAmplify = () => {
       Cognito: {
         userPoolId,
         userPoolClientId,
+        loginWith: {
+          oauth: {
+            domain: oauth.domain,
+            scopes: ['email', 'openid', 'profile'],
+            redirectSignIn: oauth.redirectSignIn,
+            redirectSignOut: oauth.redirectSignOut,
+            responseType: oauth.responseType,
+            providers: oauth.providers,
+          },
+        },
       },
     },
   });
@@ -67,17 +73,6 @@ export interface AuthResponse {
   session?: AppSession | null;
 }
 
-export interface SignUpData {
-  email: string;
-  password: string;
-  username?: string | undefined;
-}
-
-export interface SignInData {
-  email: string;
-  password: string;
-}
-
 export interface ProfileData {
   username?: string | undefined;
   avatar_url?: string | undefined;
@@ -97,154 +92,16 @@ export interface AppSession {
 
 class AuthService {
   /**
-   * Sign up a new user with email and password
+   * Start Cognito Hosted UI sign-in with Google.
    */
-  async signUp({ email, password, username }: SignUpData): Promise<AuthResponse> {
+  signInWithGoogle(): ReturnType<typeof signInWithRedirect> {
     if (!cognitoEnabled) {
-      return {
-        success: false,
-        error: 'Authentication is currently disabled. Please check Cognito configuration.',
-      };
+      return Promise.reject(
+        new Error('Authentication is currently disabled. Please check Cognito configuration.'),
+      );
     }
 
-    try {
-      const result = await signUp({
-        username: email,
-        password,
-        options: {
-          userAttributes: {
-            email,
-            // Store the provided username as a Cognito attribute for later retrieval
-            ...(username ? { preferred_username: username } : {}),
-          },
-          // Auto-confirm user since email verification is disabled
-          autoSignIn: false, // Disable auto-signin to avoid verification issues
-        },
-      });
-
-      if (result.userId) {
-        // Automatically confirm the user to bypass email verification
-        try {
-          await this.autoConfirmUser(email);
-        } catch (confirmError) {
-          console.warn('Auto-confirmation failed, but signup was successful:', confirmError);
-          // Don't fail the signup if auto-confirmation fails
-        }
-      }
-
-      return {
-        success: true,
-        user: { id: result.userId || '', email },
-        session: null,
-      };
-    } catch (error) {
-      return {
-        success: false,
-        error: error instanceof Error ? error.message : 'An unexpected error occurred',
-      };
-    }
-  }
-
-  /**
-   * Sign in with email and password
-   */
-  async signIn({ email, password }: SignInData): Promise<AuthResponse> {
-    if (!cognitoEnabled) {
-      return {
-        success: false,
-        error: 'Authentication is currently disabled. Please check Cognito configuration.',
-      };
-    }
-
-    const performSignIn = async (): Promise<any> => {
-      const result = await signIn({ username: email, password });
-      if (result.isSignedIn) {
-        return result;
-      } else if (result.nextStep?.signInStep === 'CONFIRM_SIGN_UP') {
-        // Auto-confirm user
-        await this.autoConfirmUser(email);
-        // Retry sign in
-        return await performSignIn();
-      } else {
-        throw new Error('Sign in failed');
-      }
-    };
-
-    try {
-      await performSignIn();
-      // Get current user to get the userId
-      const currentUser = await getCurrentUser();
-
-      // Fetch user attributes to get the stored username
-      let username: string | null = null;
-      try {
-        const attributes = await fetchUserAttributes();
-        username = attributes.preferred_username || null;
-      } catch {
-        // Ignore attribute fetch errors
-      }
-
-      // Ensure profile exists with username
-      await this.ensureProfileForCurrentUser(currentUser.userId, email, username);
-
-      return {
-        success: true,
-        user: { id: currentUser.userId, email },
-        session: {
-          user: { id: currentUser.userId, email },
-          provider: 'cognito',
-        },
-      };
-    } catch (error) {
-      // Handle specific Cognito errors
-      if (error instanceof Error) {
-        if (
-          error.name === 'UserNotConfirmedException' ||
-          error.message.includes('User is not confirmed') ||
-          error.message.includes('UserNotConfirmedException')
-        ) {
-          try {
-            // Auto-confirm user
-            await this.autoConfirmUser(email);
-            // Retry sign in
-            await performSignIn();
-            const currentUser = await getCurrentUser();
-
-            // Fetch user attributes to get the stored username
-            let username: string | null = null;
-            try {
-              const attributes = await fetchUserAttributes();
-              username = attributes.preferred_username || null;
-            } catch {
-              // Ignore attribute fetch errors
-            }
-
-            await this.ensureProfileForCurrentUser(currentUser.userId, email, username);
-            return {
-              success: true,
-              user: { id: currentUser.userId, email },
-              session: {
-                user: { id: currentUser.userId, email },
-                provider: 'cognito',
-              },
-            };
-          } catch {
-            return {
-              success: false,
-              error: 'Sign in failed after auto-confirmation',
-            };
-          }
-        }
-        return {
-          success: false,
-          error: error.message,
-        };
-      }
-      return {
-        success: false,
-        error: 'An unexpected error occurred',
-      };
-    }
+    return signInWithRedirect({ provider: 'Google' });
   }
 
   /**
@@ -308,114 +165,10 @@ class AuthService {
   }
 
   /**
-   * Automatically confirm user after signup (bypasses email verification)
+   * Check whether the current browser has a valid Cognito session.
    */
-  private async autoConfirmUser(email: string): Promise<void> {
-    try {
-      // Call our API endpoint to auto-confirm the user
-      const response = await fetch(`${config.api.url}auth/auto-confirm`, {
-        method: 'POST',
-        headers: {
-          'content-type': 'application/json',
-        },
-        body: JSON.stringify({
-          email,
-        }),
-      });
-
-      if (!response.ok) {
-        throw new Error('Failed to auto-confirm user');
-      }
-
-      console.log('✅ User auto-confirmed successfully');
-    } catch (error) {
-      console.warn('Auto-confirmation failed:', error);
-      throw error;
-    }
-  }
-
-  /**
-   * Confirm user signup with verification code
-   */
-  async confirmSignUp(email: string, code: string): Promise<AuthResponse> {
-    if (!cognitoEnabled) {
-      return {
-        success: false,
-        error: 'Authentication is currently disabled.',
-      };
-    }
-
-    try {
-      await confirmSignUp({ username: email, confirmationCode: code });
-      return { success: true };
-    } catch (error) {
-      return {
-        success: false,
-        error: error instanceof Error ? error.message : 'Failed to confirm sign up',
-      };
-    }
-  }
-
-  /**
-   * Resend verification code for signup
-   */
-  async resendSignUpCode(email: string): Promise<AuthResponse> {
-    if (!cognitoEnabled) {
-      return {
-        success: false,
-        error: 'Authentication is currently disabled.',
-      };
-    }
-
-    try {
-      await resendSignUpCode({ username: email });
-      return { success: true };
-    } catch (error) {
-      return {
-        success: false,
-        error: error instanceof Error ? error.message : 'Failed to resend verification code',
-      };
-    }
-  }
-
-  /**
-   * Reset password with email
-   */
-  async resetPassword(email: string): Promise<AuthResponse> {
-    if (!cognitoEnabled) {
-      return {
-        success: false,
-        error: 'Authentication is currently disabled.',
-      };
-    }
-
-    try {
-      await resetPassword({ username: email });
-      return { success: true };
-    } catch (error) {
-      return {
-        success: false,
-        error: error instanceof Error ? error.message : 'An unexpected error occurred',
-      };
-    }
-  }
-
-  /**
-   * Update user password (requires old password for Cognito)
-   */
-  async updatePassword(_newPassword: string): Promise<AuthResponse> {
-    if (!cognitoEnabled) {
-      return {
-        success: false,
-        error: 'Authentication is currently disabled.',
-      };
-    }
-
-    // Cognito requires old password for update, recommend reset flow instead
-    return {
-      success: false,
-      error: 'Password update requires current password with Cognito. Use reset password flow.',
-    };
+  async isAuthenticated(): Promise<boolean> {
+    return (await this.getCurrentSession()) !== null;
   }
 
   /**
