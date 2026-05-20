@@ -51,7 +51,9 @@ export default defineConfig({
       timeout: 120 * 1000,
     },
     {
-      command: 'bun --cwd ../vela-api run dev',
+      command:
+        "bun --eval \"process.env.NODE_ENV = 'development'; await import('./src/index.ts'); await new Promise(() => {})\"",
+      cwd: '../vela-api',
       url: 'http://localhost:9005',
       reuseExistingServer: !process.env.CI,
       timeout: 60 * 1000,

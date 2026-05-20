@@ -48,9 +48,16 @@ export class AuthStack extends Stack {
       );
     }
 
-    const googleClientSecretValue = SecretValue.secretsManager(
-      process.env.GOOGLE_OAUTH_CLIENT_SECRET_NAME || 'vela/google-oauth-client-secret',
-    );
+    const googleClientSecretName =
+      process.env.GOOGLE_OAUTH_CLIENT_SECRET_NAME ||
+      (allowLocalOAuthPlaceholders ? 'vela/google-oauth-client-secret' : '');
+    if (!googleClientSecretName) {
+      throw new Error(
+        'Missing GOOGLE_OAUTH_CLIENT_SECRET_NAME. Store the Google OAuth client secret in Secrets Manager and set GOOGLE_OAUTH_CLIENT_SECRET_NAME, or set ALLOW_LOCAL_OAUTH_PLACEHOLDERS=true for local-only synth.',
+      );
+    }
+
+    const googleClientSecretValue = SecretValue.secretsManager(googleClientSecretName);
 
     const userPool = new UserPool(this, 'VelaUserPool', {
       userPoolName: `vela-user-pool-${Stack.of(this).account}`,

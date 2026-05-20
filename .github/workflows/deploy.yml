@@ -88,6 +88,11 @@ jobs:
             exit 1
           fi
 
+          if [ -z "$GOOGLE_OAUTH_CLIENT_SECRET_NAME" ]; then
+            echo "::error::Missing repository/environment variable GOOGLE_OAUTH_CLIENT_SECRET_NAME"
+            exit 1
+          fi
+
       - name: Export CDK outputs to packages/cdk/cdk-outputs.json
         env:
           STACK_NAME: VelaStack

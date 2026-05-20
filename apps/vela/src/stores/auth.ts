@@ -22,6 +22,55 @@ export interface User {
   updated_at: string;
 }
 
+const AUTH_REDIRECT_STORAGE_KEY = 'vela.auth.redirectTo';
+
+const getSafeAuthRedirect = (redirectTo: unknown): string => {
+  if (typeof redirectTo !== 'string') {
+    return '/';
+  }
+
+  const trimmedRedirect = redirectTo.trim();
+  if (!trimmedRedirect.startsWith('/') || trimmedRedirect.startsWith('//')) {
+    return '/';
+  }
+
+  return trimmedRedirect;
+};
+
+const getSessionStorage = (): Storage | null => {
+  if (typeof window === 'undefined') {
+    return null;
+  }
+
+  try {
+    return window.sessionStorage;
+  } catch {
+    return null;
+  }
+};
+
+const savePendingAuthRedirect = (redirectTo: unknown) => {
+  const storage = getSessionStorage();
+  if (!storage) return;
+
+  try {
+    storage.setItem(AUTH_REDIRECT_STORAGE_KEY, getSafeAuthRedirect(redirectTo));
+  } catch {
+    // Ignore storage failures; the callback will fall back to '/'.
+  }
+};
+
+const clearPendingAuthRedirect = () => {
+  const storage = getSessionStorage();
+  if (!storage) return;
+
+  try {
+    storage.removeItem(AUTH_REDIRECT_STORAGE_KEY);
+  } catch {
+    // Ignore storage failures.
+  }
+};
+
 export const useAuthStore = defineStore('auth', () => {
   // State
   const user = ref<User | null>(null);
@@ -159,19 +208,35 @@ export const useAuthStore = defineStore('auth', () => {
   /**
    * Start Google sign-in through Cognito Hosted UI.
    */
-  const signInWithGoogle = async () => {
+  const signInWithGoogle = async (redirectTo: unknown = '/') => {
     setLoading(true);
     setError(null);
 
     try {
+      savePendingAuthRedirect(redirectTo);
       await authService.signInWithGoogle();
       return true;
     } catch (err) {
+      clearPendingAuthRedirect();
       console.error('Google sign-in error:', err);
       setError(err instanceof Error ? err.message : 'An unexpected error occurred during sign in');
       return false;
     } finally {
       setLoading(false);
+    }
+  };
+
+  const consumePendingAuthRedirect = (fallbackRedirect: unknown = '/') => {
+    const fallback = getSafeAuthRedirect(fallbackRedirect);
+    const storage = getSessionStorage();
+    if (!storage) return fallback;
+
+    try {
+      const storedRedirect = storage.getItem(AUTH_REDIRECT_STORAGE_KEY);
+      storage.removeItem(AUTH_REDIRECT_STORAGE_KEY);
+      return storedRedirect ? getSafeAuthRedirect(storedRedirect) : fallback;
+    } catch {
+      return fallback;
     }
   };
 
@@ -349,6 +414,8 @@ export const useAuthStore = defineStore('auth', () => {
     initialize,
     loadUserProfile,
     signInWithGoogle,
+    consumePendingAuthRedirect,
+    getSafeAuthRedirect,
     signOut,
     updateProfile,
     updateExperience,

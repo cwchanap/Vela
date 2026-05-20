@@ -105,4 +105,14 @@ describe('AuthStack', () => {
       'Missing GOOGLE_OAUTH_CLIENT_ID. Set it to your Google OAuth web client id, or set ALLOW_LOCAL_OAUTH_PLACEHOLDERS=true for local-only synth.',
     );
   });
+
+  test('requires a Google OAuth client secret name outside local placeholder mode', () => {
+    delete process.env.NODE_ENV;
+    delete process.env.ALLOW_LOCAL_OAUTH_PLACEHOLDERS;
+    delete process.env.GOOGLE_OAUTH_CLIENT_SECRET_NAME;
+
+    expect(() => synthesizeTemplate()).toThrow(
+      'Missing GOOGLE_OAUTH_CLIENT_SECRET_NAME. Store the Google OAuth client secret in Secrets Manager and set GOOGLE_OAUTH_CLIENT_SECRET_NAME, or set ALLOW_LOCAL_OAUTH_PLACEHOLDERS=true for local-only synth.',
+    );
+  });
 });

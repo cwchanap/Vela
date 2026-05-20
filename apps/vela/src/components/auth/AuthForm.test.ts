@@ -79,6 +79,19 @@ describe('AuthForm', () => {
     expect(wrapper.emitted('error')).toBeFalsy();
   });
 
+  it('passes redirectTo to Google sign-in', async () => {
+    const authStore = useAuthStore();
+    const signInSpy = vi.spyOn(authStore, 'signInWithGoogle').mockResolvedValue(true);
+    const wrapper = mountComponent({ redirectTo: '/progress' });
+
+    const button = wrapper
+      .findAllComponents({ name: 'QBtn' })
+      .find((btn) => btn.text().includes('Continue with Google'));
+    await button!.trigger('click');
+
+    expect(signInSpy).toHaveBeenCalledWith('/progress');
+  });
+
   it('emits an error when Google sign-in fails with a store error', async () => {
     const authStore = useAuthStore();
     vi.spyOn(authStore, 'signInWithGoogle').mockImplementation(async () => {
