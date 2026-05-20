@@ -22,14 +22,35 @@ export class AuthStack extends Stack {
   constructor(scope: Construct, id: string, props?: AuthStackProps) {
     super(scope, id, props);
 
-    const domainPrefix = process.env.COGNITO_DOMAIN_PREFIX || 'vela-local-auth';
+    const allowLocalOAuthPlaceholders =
+      process.env.ALLOW_LOCAL_OAUTH_PLACEHOLDERS === 'true' || process.env.NODE_ENV === 'test';
+
+    if (process.env.GOOGLE_OAUTH_CLIENT_SECRET) {
+      throw new Error(
+        'GOOGLE_OAUTH_CLIENT_SECRET is not supported for CDK synthesis. Store the secret in Secrets Manager and set GOOGLE_OAUTH_CLIENT_SECRET_NAME.',
+      );
+    }
+
+    const domainPrefix =
+      process.env.COGNITO_DOMAIN_PREFIX || (allowLocalOAuthPlaceholders ? 'vela-local-auth' : '');
+    if (!domainPrefix) {
+      throw new Error(
+        'Missing COGNITO_DOMAIN_PREFIX. Set it to the Cognito Hosted UI domain prefix, or set ALLOW_LOCAL_OAUTH_PLACEHOLDERS=true for local-only synth.',
+      );
+    }
+
     const googleClientId =
-      process.env.GOOGLE_OAUTH_CLIENT_ID || 'local-synth-only.apps.googleusercontent.com';
-    const googleClientSecretValue = process.env.GOOGLE_OAUTH_CLIENT_SECRET
-      ? SecretValue.unsafePlainText(process.env.GOOGLE_OAUTH_CLIENT_SECRET)
-      : SecretValue.secretsManager(
-          process.env.GOOGLE_OAUTH_CLIENT_SECRET_NAME || 'vela/google-oauth-client-secret',
-        );
+      process.env.GOOGLE_OAUTH_CLIENT_ID ||
+      (allowLocalOAuthPlaceholders ? 'local-synth-only.apps.googleusercontent.com' : '');
+    if (!googleClientId) {
+      throw new Error(
+        'Missing GOOGLE_OAUTH_CLIENT_ID. Set it to your Google OAuth web client id, or set ALLOW_LOCAL_OAUTH_PLACEHOLDERS=true for local-only synth.',
+      );
+    }
+
+    const googleClientSecretValue = SecretValue.secretsManager(
+      process.env.GOOGLE_OAUTH_CLIENT_SECRET_NAME || 'vela/google-oauth-client-secret',
+    );
 
     const userPool = new UserPool(this, 'VelaUserPool', {
       userPoolName: `vela-user-pool-${Stack.of(this).account}`,

@@ -47,6 +47,10 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     environment: production
+    env:
+      COGNITO_DOMAIN_PREFIX: ${{ vars.COGNITO_DOMAIN_PREFIX }}
+      GOOGLE_OAUTH_CLIENT_ID: ${{ vars.GOOGLE_OAUTH_CLIENT_ID }}
+      GOOGLE_OAUTH_CLIENT_SECRET_NAME: ${{ vars.GOOGLE_OAUTH_CLIENT_SECRET_NAME }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -71,6 +75,18 @@ jobs:
         with:
           name: lambda-function-${{ github.sha }}
           path: packages/cdk/dist/lambda/
+
+      - name: Validate Google OAuth deployment configuration
+        run: |
+          if [ -z "$COGNITO_DOMAIN_PREFIX" ]; then
+            echo "::error::Missing repository/environment variable COGNITO_DOMAIN_PREFIX"
+            exit 1
+          fi
+
+          if [ -z "$GOOGLE_OAUTH_CLIENT_ID" ]; then
+            echo "::error::Missing repository/environment variable GOOGLE_OAUTH_CLIENT_ID"
+            exit 1
+          fi
 
       - name: Export CDK outputs to packages/cdk/cdk-outputs.json
         env:
@@ -146,4 +162,3 @@ jobs:
           echo "🚀 Production deployment completed!"
           echo "📱 Website URL: ${{ steps.get-outputs.outputs.website-url }}"
           echo "🔗 API URL: ${{ steps.get-outputs.outputs.api-url }}"
-

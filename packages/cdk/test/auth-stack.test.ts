@@ -1,13 +1,22 @@
 import { App } from 'aws-cdk-lib';
 import { Match, Template } from 'aws-cdk-lib/assertions';
-import { beforeEach, describe, expect, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { AuthStack } from '../lib/auth-stack';
 
 describe('AuthStack', () => {
+  const originalEnv = { ...process.env };
+
   beforeEach(() => {
+    process.env = { ...originalEnv };
+    process.env.NODE_ENV = 'test';
     process.env.COGNITO_DOMAIN_PREFIX = 'vela-test-auth';
     process.env.GOOGLE_OAUTH_CLIENT_ID = 'test-google-client-id.apps.googleusercontent.com';
-    process.env.GOOGLE_OAUTH_CLIENT_SECRET = 'test-google-client-secret';
+    process.env.GOOGLE_OAUTH_CLIENT_SECRET_NAME = 'vela/test-google-oauth-client-secret';
+    delete process.env.GOOGLE_OAUTH_CLIENT_SECRET;
+  });
+
+  afterEach(() => {
+    process.env = originalEnv;
   });
 
   function synthesizeTemplate(): Template {
@@ -77,5 +86,23 @@ describe('AuthStack', () => {
     const client = Object.values(clients)[0];
 
     expect(client.Properties.AllowedOAuthScopes.toSorted()).toEqual(['email', 'openid', 'profile']);
+  });
+
+  test('rejects plaintext Google OAuth client secrets', () => {
+    process.env.GOOGLE_OAUTH_CLIENT_SECRET = 'plaintext-secret';
+
+    expect(() => synthesizeTemplate()).toThrow(
+      'GOOGLE_OAUTH_CLIENT_SECRET is not supported for CDK synthesis. Store the secret in Secrets Manager and set GOOGLE_OAUTH_CLIENT_SECRET_NAME.',
+    );
+  });
+
+  test('requires a Google OAuth client id outside local placeholder mode', () => {
+    delete process.env.NODE_ENV;
+    delete process.env.ALLOW_LOCAL_OAUTH_PLACEHOLDERS;
+    delete process.env.GOOGLE_OAUTH_CLIENT_ID;
+
+    expect(() => synthesizeTemplate()).toThrow(
+      'Missing GOOGLE_OAUTH_CLIENT_ID. Set it to your Google OAuth web client id, or set ALLOW_LOCAL_OAUTH_PLACEHOLDERS=true for local-only synth.',
+    );
   });
 });
