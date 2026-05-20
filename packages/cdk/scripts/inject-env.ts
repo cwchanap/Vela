@@ -52,6 +52,11 @@ function main(): void {
   const envVars = {
     VITE_COGNITO_USER_POOL_ID: outputs.CognitoUserPoolId,
     VITE_COGNITO_USER_POOL_CLIENT_ID: outputs.CognitoUserPoolClientId,
+    VITE_COGNITO_OAUTH_DOMAIN: outputs.CognitoOAuthDomain,
+    VITE_COGNITO_REDIRECT_SIGN_IN:
+      process.env.VITE_COGNITO_REDIRECT_SIGN_IN || 'https://vela.cwchanap.dev/auth/callback',
+    VITE_COGNITO_REDIRECT_SIGN_OUT:
+      process.env.VITE_COGNITO_REDIRECT_SIGN_OUT || 'https://vela.cwchanap.dev/auth/login',
     VITE_AWS_REGION:
       process.env.VITE_AWS_REGION || outputs.CognitoRegion || process.env.AWS_REGION || 'us-east-1',
     VITE_API_URL: '/api/',
@@ -63,6 +68,10 @@ function main(): void {
 
   if (!envVars.VITE_COGNITO_USER_POOL_CLIENT_ID) {
     throw new Error('Missing CognitoUserPoolClientId in CloudFormation outputs');
+  }
+
+  if (!envVars.VITE_COGNITO_OAUTH_DOMAIN) {
+    throw new Error('Missing CognitoOAuthDomain in CloudFormation outputs');
   }
 
   const repoRoot = path.resolve(process.cwd(), '..', '..');
