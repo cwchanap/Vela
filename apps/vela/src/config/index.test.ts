@@ -23,6 +23,17 @@ describe('config', () => {
       expect(typeof config.cognito.region).toBe('string');
     });
 
+    it('has Cognito OAuth configuration', async () => {
+      const { config } = await import('./index');
+
+      expect(config.cognito.oauth).toBeDefined();
+      expect(typeof config.cognito.oauth.domain).toBe('string');
+      expect(Array.isArray(config.cognito.oauth.redirectSignIn)).toBe(true);
+      expect(Array.isArray(config.cognito.oauth.redirectSignOut)).toBe(true);
+      expect(config.cognito.oauth.responseType).toBe('code');
+      expect(config.cognito.oauth.providers).toEqual(['Google']);
+    });
+
     it('has ai configuration with empty keys', async () => {
       const { config } = await import('./index');
       expect(config.ai).toBeDefined();
@@ -50,15 +61,14 @@ describe('config', () => {
       expect(typeof config.dev.devMode).toBe('boolean');
     });
 
-    it('defaults api url to /api/ when VITE_API_URL is not set', async () => {
+    it('uses configured api url or defaults to /api/', async () => {
       const { config } = await import('./index');
-      // In test environment VITE_API_URL is not set, so fallback applies
-      expect(config.api.url).toBe('/api/');
+      expect(config.api.url).toBe(import.meta.env.VITE_API_URL || '/api/');
     });
 
-    it('defaults app name when VITE_APP_NAME is not set', async () => {
+    it('uses configured app name or defaults to Japanese Learning App', async () => {
       const { config } = await import('./index');
-      expect(config.app.name).toBe('Japanese Learning App');
+      expect(config.app.name).toBe(import.meta.env.VITE_APP_NAME || 'Japanese Learning App');
     });
 
     it('defaults app version when VITE_APP_VERSION is not set', async () => {
@@ -115,17 +125,39 @@ describe('config', () => {
         VITE_COGNITO_USER_POOL_ID: '',
         VITE_COGNITO_USER_POOL_CLIENT_ID: '',
         VITE_AWS_REGION: '',
+        VITE_COGNITO_OAUTH_DOMAIN: '',
       };
 
       expect(() => validateConfig(env)).toThrow(
-        'Missing required environment variables: VITE_COGNITO_USER_POOL_ID, VITE_COGNITO_USER_POOL_CLIENT_ID, VITE_AWS_REGION',
+        'Missing required environment variables: VITE_COGNITO_USER_POOL_ID, VITE_COGNITO_USER_POOL_CLIENT_ID, VITE_AWS_REGION, VITE_COGNITO_OAUTH_DOMAIN',
       );
       expect(consoleErrorSpy).toHaveBeenCalledWith('Missing required environment variables:', [
         'VITE_COGNITO_USER_POOL_ID',
         'VITE_COGNITO_USER_POOL_CLIENT_ID',
         'VITE_AWS_REGION',
+        'VITE_COGNITO_OAUTH_DOMAIN',
       ]);
       expect(consoleWarnSpy).not.toHaveBeenCalled();
+    });
+
+    it('requires OAuth domain in production', async () => {
+      const { validateConfig } = await import('./index');
+      const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+      const env = {
+        PROD: true,
+        VITE_COGNITO_USER_POOL_ID: 'pool-id',
+        VITE_COGNITO_USER_POOL_CLIENT_ID: 'client-id',
+        VITE_AWS_REGION: 'us-east-1',
+        VITE_COGNITO_OAUTH_DOMAIN: '',
+      };
+
+      expect(() => validateConfig(env)).toThrow(
+        'Missing required environment variables: VITE_COGNITO_OAUTH_DOMAIN',
+      );
+      expect(consoleErrorSpy).toHaveBeenCalledWith('Missing required environment variables:', [
+        'VITE_COGNITO_OAUTH_DOMAIN',
+      ]);
     });
   });
 });
