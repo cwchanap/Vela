@@ -25,6 +25,12 @@ const parseCsvEnv = (value: unknown, fallback: string[]): string[] => {
 const defaultRedirectSignIn = [`${getCurrentOrigin()}/auth/callback`];
 const defaultRedirectSignOut = [`${getCurrentOrigin()}/auth/login`];
 
+const isMissingEnvValue = (value: unknown): boolean => {
+  return (
+    value === undefined || value === null || (typeof value === 'string' && value.trim() === '')
+  );
+};
+
 export const config = {
   // Cognito configuration
   cognito: {
@@ -32,7 +38,7 @@ export const config = {
     userPoolClientId: import.meta.env.VITE_COGNITO_USER_POOL_CLIENT_ID || '',
     region: import.meta.env.VITE_AWS_REGION || '',
     oauth: {
-      domain: import.meta.env.VITE_COGNITO_OAUTH_DOMAIN || '',
+      domain: import.meta.env.VITE_COGNITO_OAUTH_DOMAIN?.trim() || '',
       redirectSignIn: parseCsvEnv(
         import.meta.env.VITE_COGNITO_REDIRECT_SIGN_IN,
         defaultRedirectSignIn,
@@ -91,7 +97,7 @@ export const validateConfig = (env?: ConfigEnv) => {
       return true;
     }
 
-    const missingVars = requiredVars.filter((varName) => !resolvedEnv[varName]);
+    const missingVars = requiredVars.filter((varName) => isMissingEnvValue(resolvedEnv[varName]));
 
     if (missingVars.length > 0 && resolvedEnv.PROD) {
       console.error('Missing required environment variables:', missingVars);

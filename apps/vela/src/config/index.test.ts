@@ -1,5 +1,37 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+const importConfigWithEnv = async (envOverrides: Record<string, string | boolean | undefined>) => {
+  const env = import.meta.env as unknown as Record<string, unknown>;
+  const originalValues = new Map<string, unknown>();
+
+  for (const key of Object.keys(envOverrides)) {
+    originalValues.set(key, env[key]);
+    const value = envOverrides[key];
+
+    if (value === undefined) {
+      delete env[key];
+    } else {
+      env[key] = value;
+    }
+  }
+
+  vi.resetModules();
+
+  try {
+    return await import('./index');
+  } finally {
+    for (const [key, value] of originalValues) {
+      if (value === undefined) {
+        delete env[key];
+      } else {
+        env[key] = value;
+      }
+    }
+
+    vi.resetModules();
+  }
+};
+
 afterEach(() => {
   vi.restoreAllMocks();
 });
@@ -32,6 +64,44 @@ describe('config', () => {
       expect(Array.isArray(config.cognito.oauth.redirectSignOut)).toBe(true);
       expect(config.cognito.oauth.responseType).toBe('code');
       expect(config.cognito.oauth.providers).toEqual(['Google']);
+    });
+
+    it('trims Cognito OAuth domain', async () => {
+      const { config } = await importConfigWithEnv({
+        VITE_COGNITO_OAUTH_DOMAIN: ' vela-local-auth.auth.us-east-1.amazoncognito.com ',
+      });
+
+      expect(config.cognito.oauth.domain).toBe('vela-local-auth.auth.us-east-1.amazoncognito.com');
+    });
+
+    it('parses comma-separated OAuth redirect values', async () => {
+      const { config } = await importConfigWithEnv({
+        VITE_COGNITO_REDIRECT_SIGN_IN: ' https://a.example/cb, ,https://b.example/cb ',
+        VITE_COGNITO_REDIRECT_SIGN_OUT: ' https://a.example/out, ,https://b.example/out ',
+      });
+
+      expect(config.cognito.oauth.redirectSignIn).toEqual([
+        'https://a.example/cb',
+        'https://b.example/cb',
+      ]);
+      expect(config.cognito.oauth.redirectSignOut).toEqual([
+        'https://a.example/out',
+        'https://b.example/out',
+      ]);
+    });
+
+    it('falls back to current-origin OAuth redirects for empty redirect values', async () => {
+      const { config } = await importConfigWithEnv({
+        VITE_COGNITO_REDIRECT_SIGN_IN: '',
+        VITE_COGNITO_REDIRECT_SIGN_OUT: '   ',
+      });
+
+      expect(config.cognito.oauth.redirectSignIn).toEqual([
+        `${window.location.origin}/auth/callback`,
+      ]);
+      expect(config.cognito.oauth.redirectSignOut).toEqual([
+        `${window.location.origin}/auth/login`,
+      ]);
     });
 
     it('has ai configuration with empty keys', async () => {
@@ -150,6 +220,26 @@ describe('config', () => {
         VITE_COGNITO_USER_POOL_CLIENT_ID: 'client-id',
         VITE_AWS_REGION: 'us-east-1',
         VITE_COGNITO_OAUTH_DOMAIN: '',
+      };
+
+      expect(() => validateConfig(env)).toThrow(
+        'Missing required environment variables: VITE_COGNITO_OAUTH_DOMAIN',
+      );
+      expect(consoleErrorSpy).toHaveBeenCalledWith('Missing required environment variables:', [
+        'VITE_COGNITO_OAUTH_DOMAIN',
+      ]);
+    });
+
+    it('requires non-blank OAuth domain in production', async () => {
+      const { validateConfig } = await import('./index');
+      const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+      const env = {
+        PROD: true,
+        VITE_COGNITO_USER_POOL_ID: 'pool-id',
+        VITE_COGNITO_USER_POOL_CLIENT_ID: 'client-id',
+        VITE_AWS_REGION: 'us-east-1',
+        VITE_COGNITO_OAUTH_DOMAIN: '   ',
       };
 
       expect(() => validateConfig(env)).toThrow(
