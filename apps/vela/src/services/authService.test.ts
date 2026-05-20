@@ -3,14 +3,10 @@ import { authService } from './authService';
 
 // Mock Amplify modules
 vi.mock('aws-amplify/auth', () => ({
-  signUp: vi.fn(),
-  signIn: vi.fn(),
+  signInWithRedirect: vi.fn(),
   signOut: vi.fn(),
   getCurrentUser: vi.fn(),
-  confirmSignUp: vi.fn(),
-  resendSignUpCode: vi.fn(),
   fetchAuthSession: vi.fn(),
-  resetPassword: vi.fn(),
   fetchUserAttributes: vi.fn(),
 }));
 
@@ -33,6 +29,13 @@ vi.mock('../config', () => ({
       userPoolId: 'test-pool-id',
       userPoolClientId: 'test-client-id',
       region: 'us-east-1',
+      oauth: {
+        domain: 'test-domain.auth.us-east-1.amazoncognito.com',
+        redirectSignIn: ['http://localhost:9000/auth/callback'],
+        redirectSignOut: ['http://localhost:9000/auth/login'],
+        responseType: 'code',
+        providers: ['Google'],
+      },
     },
     api: {
       url: '/api/',
@@ -58,23 +61,21 @@ vi.mock('@aws-sdk/client-cognito-identity-provider', () => ({
 }));
 
 import {
-  signIn,
-  signUp,
+  signInWithRedirect,
   signOut,
   getCurrentUser,
   fetchAuthSession,
-  confirmSignUp,
-  resendSignUpCode,
-  resetPassword,
   fetchUserAttributes,
 } from 'aws-amplify/auth';
 import { Hub } from 'aws-amplify/utils';
+import { Amplify } from 'aws-amplify';
 
 describe('AuthService', () => {
   // Capture the top-level Hub listener registered during authService module initialization.
   // Must be done synchronously here (before any beforeEach can clear mock call records).
   const initialHubListenCalls = [...vi.mocked(Hub.listen).mock.calls];
   const topLevelHubListener = initialHubListenCalls[0]?.[1] as ((_data: any) => void) | undefined;
+  const initialAmplifyConfigureCalls = [...vi.mocked(Amplify.configure).mock.calls];
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -88,270 +89,43 @@ describe('AuthService', () => {
     vi.restoreAllMocks();
   });
 
-  describe('signIn', () => {
-    it('should sign in successfully when user is already confirmed', async () => {
-      const mockSignInResult = {
-        isSignedIn: true,
-        nextStep: { signInStep: 'DONE' },
-      } as any;
-      const mockUser = {
-        userId: 'user-123',
-        username: 'test@example.com',
-        signInDetails: { loginId: 'test@example.com' },
-      } as any;
-      const mockSession = {
-        tokens: { accessToken: 'token' as any },
-      } as any;
-
-      vi.mocked(signIn).mockResolvedValue(mockSignInResult);
-      vi.mocked(getCurrentUser).mockResolvedValue(mockUser);
-      vi.mocked(fetchAuthSession).mockResolvedValue(mockSession);
-
-      const result = await authService.signIn({
-        email: 'test@example.com',
-        password: 'password123',
+  describe('configureAmplify', () => {
+    it('includes Hosted UI Google OAuth configuration', () => {
+      expect(initialAmplifyConfigureCalls[0]?.[0]).toEqual({
+        Auth: {
+          Cognito: {
+            userPoolId: 'test-pool-id',
+            userPoolClientId: 'test-client-id',
+            loginWith: {
+              oauth: {
+                domain: 'test-domain.auth.us-east-1.amazoncognito.com',
+                scopes: ['email', 'openid', 'profile'],
+                redirectSignIn: ['http://localhost:9000/auth/callback'],
+                redirectSignOut: ['http://localhost:9000/auth/login'],
+                responseType: 'code',
+                providers: ['Google'],
+              },
+            },
+          },
+        },
       });
-
-      expect(result.success).toBe(true);
-      expect(result.user?.id).toBe('user-123');
-      expect(result.user?.email).toBe('test@example.com');
-      expect(signIn).toHaveBeenCalledWith({
-        username: 'test@example.com',
-        password: 'password123',
-      });
-    });
-
-    it('should auto-confirm user when signIn returns CONFIRM_SIGN_UP nextStep', async () => {
-      const mockSignInResult = {
-        isSignedIn: false,
-        nextStep: { signInStep: 'CONFIRM_SIGN_UP' },
-      } as any;
-      const mockRetrySignInResult = {
-        isSignedIn: true,
-        nextStep: { signInStep: 'DONE' },
-      } as any;
-      const mockUser = {
-        userId: 'user-123',
-        username: 'test@example.com',
-        signInDetails: { loginId: 'test@example.com' },
-      } as any;
-      const mockSession = {
-        tokens: { accessToken: 'token' as any },
-      } as any;
-
-      vi.mocked(signIn)
-        .mockResolvedValueOnce(mockSignInResult)
-        .mockResolvedValueOnce(mockRetrySignInResult);
-      vi.mocked(getCurrentUser).mockResolvedValue(mockUser);
-      vi.mocked(fetchAuthSession).mockResolvedValue(mockSession);
-      mockFetch.mockResolvedValue({ ok: true });
-
-      const result = await authService.signIn({
-        email: 'test@example.com',
-        password: 'password123',
-      });
-
-      expect(result.success).toBe(true);
-      expect(result.user?.id).toBe('user-123');
-      expect(signIn).toHaveBeenCalledTimes(2);
-      expect(mockFetch).toHaveBeenCalledWith('/api/auth/auto-confirm', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ email: 'test@example.com' }),
-      });
-    });
-
-    it('should auto-confirm user when signIn throws UserNotConfirmedException', async () => {
-      const mockRetrySignInResult = {
-        isSignedIn: true,
-        nextStep: { signInStep: 'DONE' },
-      } as any;
-      const mockUser = {
-        userId: 'user-123',
-        username: 'test@example.com',
-        signInDetails: { loginId: 'test@example.com' },
-      } as any;
-      const mockSession = {
-        tokens: { accessToken: 'token' as any },
-      } as any;
-
-      const userNotConfirmedError = new Error('User is not confirmed');
-      userNotConfirmedError.name = 'UserNotConfirmedException';
-
-      vi.mocked(signIn)
-        .mockRejectedValueOnce(userNotConfirmedError)
-        .mockResolvedValueOnce(mockRetrySignInResult);
-      vi.mocked(getCurrentUser).mockResolvedValue(mockUser);
-      vi.mocked(fetchAuthSession).mockResolvedValue(mockSession);
-      mockFetch.mockResolvedValue({ ok: true });
-
-      const result = await authService.signIn({
-        email: 'test@example.com',
-        password: 'password123',
-      });
-
-      expect(result.success).toBe(true);
-      expect(result.user?.id).toBe('user-123');
-      expect(signIn).toHaveBeenCalledTimes(2);
-      expect(mockFetch).toHaveBeenCalledWith('/api/auth/auto-confirm', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ email: 'test@example.com' }),
-      });
-    });
-
-    it('should return error when auto-confirmation fails', async () => {
-      const mockSignInResult = {
-        isSignedIn: false,
-        nextStep: { signInStep: 'CONFIRM_SIGN_UP' },
-      } as any;
-
-      vi.mocked(signIn).mockResolvedValue(mockSignInResult);
-      mockFetch.mockRejectedValue(new Error('Auto-confirm failed'));
-
-      const result = await authService.signIn({
-        email: 'test@example.com',
-        password: 'password123',
-      });
-
-      expect(result.success).toBe(false);
-      expect(result.error).toBe('Auto-confirm failed');
-      expect(mockFetch).toHaveBeenCalledWith('/api/auth/auto-confirm', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ email: 'test@example.com' }),
-      });
-    });
-
-    it('should return error when sign in fails after auto-confirmation', async () => {
-      const mockSignInResult = {
-        isSignedIn: false,
-        nextStep: { signInStep: 'CONFIRM_SIGN_UP' },
-      } as any;
-
-      vi.mocked(signIn)
-        .mockResolvedValueOnce(mockSignInResult)
-        .mockResolvedValueOnce({ isSignedIn: false, nextStep: { signInStep: 'DONE' } } as any);
-      mockFetch.mockResolvedValue({ ok: true });
-
-      const result = await authService.signIn({
-        email: 'test@example.com',
-        password: 'password123',
-      });
-
-      expect(result.success).toBe(false);
-      expect(result.error).toBe('Sign in failed');
-    });
-
-    it('should return generic error when signIn throws a non-Error value', async () => {
-      vi.mocked(signIn).mockRejectedValue('unexpected non-error string');
-
-      const result = await authService.signIn({
-        email: 'test@example.com',
-        password: 'password123',
-      });
-
-      expect(result.success).toBe(false);
-      expect(result.error).toBe('An unexpected error occurred');
-    });
-
-    it('should return "Sign in failed after auto-confirmation" when retry fails after UserNotConfirmedException', async () => {
-      const err = new Error('User is not confirmed');
-      err.name = 'UserNotConfirmedException';
-
-      vi.mocked(signIn)
-        .mockRejectedValueOnce(err) // first call → UserNotConfirmedException
-        .mockRejectedValueOnce(new Error('retry also failed')); // retry → fails too
-      mockFetch.mockResolvedValue({ ok: true }); // autoConfirmUser succeeds
-
-      const result = await authService.signIn({
-        email: 'test@example.com',
-        password: 'password123',
-      });
-
-      expect(result.success).toBe(false);
-      expect(result.error).toBe('Sign in failed after auto-confirmation');
     });
   });
 
-  describe('signUp', () => {
-    it('should sign up successfully', async () => {
-      vi.mocked(signUp).mockResolvedValue({
-        userId: 'new-user-123',
-        isSignUpComplete: false,
-      } as any);
-      mockFetch.mockResolvedValue({ ok: true });
+  describe('signInWithGoogle', () => {
+    it('starts the Google Hosted UI redirect', async () => {
+      vi.mocked(signInWithRedirect).mockResolvedValue(undefined);
 
-      const result = await authService.signUp({
-        email: 'new@example.com',
-        password: 'password123',
-      });
+      await authService.signInWithGoogle();
 
-      expect(result.success).toBe(true);
-      expect(result.user?.id).toBe('new-user-123');
-      expect(result.user?.email).toBe('new@example.com');
-      expect(signUp).toHaveBeenCalledWith(
-        expect.objectContaining({ username: 'new@example.com', password: 'password123' }),
-      );
+      expect(signInWithRedirect).toHaveBeenCalledWith({ provider: 'Google' });
     });
 
-    it('should include username as preferred_username when provided', async () => {
-      vi.mocked(signUp).mockResolvedValue({
-        userId: 'new-user-456',
-        isSignUpComplete: false,
-      } as any);
-      mockFetch.mockResolvedValue({ ok: true });
+    it('propagates redirect errors', async () => {
+      const redirectError = new Error('redirect failed');
+      vi.mocked(signInWithRedirect).mockRejectedValue(redirectError);
 
-      await authService.signUp({
-        email: 'user@example.com',
-        password: 'password123',
-        username: 'myusername',
-      });
-
-      expect(signUp).toHaveBeenCalledWith(
-        expect.objectContaining({
-          options: expect.objectContaining({
-            userAttributes: expect.objectContaining({ preferred_username: 'myusername' }),
-          }),
-        }),
-      );
-    });
-
-    it('should return error when signUp fails', async () => {
-      vi.mocked(signUp).mockRejectedValue(new Error('UsernameExistsException'));
-
-      const result = await authService.signUp({
-        email: 'existing@example.com',
-        password: 'password123',
-      });
-
-      expect(result.success).toBe(false);
-      expect(result.error).toBe('UsernameExistsException');
-    });
-
-    it('should handle signUp without userId', async () => {
-      vi.mocked(signUp).mockResolvedValue({ userId: undefined, isSignUpComplete: false } as any);
-
-      const result = await authService.signUp({
-        email: 'test@example.com',
-        password: 'password123',
-      });
-
-      expect(result.success).toBe(true);
-      expect(result.user?.id).toBe('');
-    });
-
-    it('should continue signup even when auto-confirmation fails', async () => {
-      vi.mocked(signUp).mockResolvedValue({ userId: 'user-789', isSignUpComplete: false } as any);
-      mockFetch.mockResolvedValue({ ok: false });
-
-      const result = await authService.signUp({
-        email: 'test@example.com',
-        password: 'password123',
-      });
-
-      // Should still succeed even if auto-confirm fails
-      expect(result.success).toBe(true);
+      await expect(authService.signInWithGoogle()).rejects.toThrow('redirect failed');
     });
   });
 
@@ -446,88 +220,6 @@ describe('AuthService', () => {
       const result = await authService.getCurrentUser();
 
       expect(result?.email).toBeNull();
-    });
-  });
-
-  describe('confirmSignUp', () => {
-    it('should confirm signup successfully', async () => {
-      vi.mocked(confirmSignUp).mockResolvedValue({ isSignUpComplete: true } as any);
-
-      const result = await authService.confirmSignUp('test@example.com', '123456');
-
-      expect(result.success).toBe(true);
-      expect(confirmSignUp).toHaveBeenCalledWith({
-        username: 'test@example.com',
-        confirmationCode: '123456',
-      });
-    });
-
-    it('should return error when confirmation fails', async () => {
-      vi.mocked(confirmSignUp).mockRejectedValue(new Error('CodeMismatchException'));
-
-      const result = await authService.confirmSignUp('test@example.com', 'wrong-code');
-
-      expect(result.success).toBe(false);
-      expect(result.error).toBe('CodeMismatchException');
-    });
-  });
-
-  describe('resendSignUpCode', () => {
-    it('should resend signup code successfully', async () => {
-      vi.mocked(resendSignUpCode).mockResolvedValue({
-        destination: 'email',
-        deliveryMedium: 'EMAIL',
-        attributeName: 'email',
-      } as any);
-
-      const result = await authService.resendSignUpCode('test@example.com');
-
-      expect(result.success).toBe(true);
-      expect(resendSignUpCode).toHaveBeenCalledWith({ username: 'test@example.com' });
-    });
-
-    it('should return error when resend fails', async () => {
-      vi.mocked(resendSignUpCode).mockRejectedValue(new Error('TooManyRequestsException'));
-
-      const result = await authService.resendSignUpCode('test@example.com');
-
-      expect(result.success).toBe(false);
-      expect(result.error).toBe('TooManyRequestsException');
-    });
-  });
-
-  describe('resetPassword', () => {
-    it('should initiate password reset successfully', async () => {
-      vi.mocked(resetPassword).mockResolvedValue({
-        isPasswordReset: false,
-        nextStep: {
-          resetPasswordStep: 'CONFIRM_RESET_PASSWORD_WITH_CODE',
-          codeDeliveryDetails: {},
-        },
-      } as any);
-
-      const result = await authService.resetPassword('test@example.com');
-
-      expect(result.success).toBe(true);
-      expect(resetPassword).toHaveBeenCalledWith({ username: 'test@example.com' });
-    });
-
-    it('should return error when reset password fails', async () => {
-      vi.mocked(resetPassword).mockRejectedValue(new Error('UserNotFoundException'));
-
-      const result = await authService.resetPassword('nonexistent@example.com');
-
-      expect(result.success).toBe(false);
-      expect(result.error).toBe('UserNotFoundException');
-    });
-  });
-
-  describe('updatePassword', () => {
-    it('should always return error directing to reset flow', async () => {
-      const result = await authService.updatePassword('newPassword123');
-
-      expect(result.success).toBe(false);
-      expect(result.error).toContain('reset password');
     });
   });
 
@@ -777,18 +469,6 @@ describe('AuthService', () => {
       vi.resetModules();
     });
 
-    it('signUp returns disabled error', async () => {
-      const result = await disabledAuthService.signUp({ email: 'a@b.com', password: 'pw' });
-      expect(result.success).toBe(false);
-      expect(result.error).toMatch(/disabled/i);
-    });
-
-    it('signIn returns disabled error', async () => {
-      const result = await disabledAuthService.signIn({ email: 'a@b.com', password: 'pw' });
-      expect(result.success).toBe(false);
-      expect(result.error).toMatch(/disabled/i);
-    });
-
     it('signOut returns success when auth is disabled', async () => {
       const result = await disabledAuthService.signOut();
       expect(result.success).toBe(true);
@@ -797,30 +477,6 @@ describe('AuthService', () => {
     it('getCurrentUser returns null when auth is disabled', async () => {
       const result = await disabledAuthService.getCurrentUser();
       expect(result).toBeNull();
-    });
-
-    it('confirmSignUp returns disabled error', async () => {
-      const result = await disabledAuthService.confirmSignUp('a@b.com', '123456');
-      expect(result.success).toBe(false);
-      expect(result.error).toMatch(/disabled/i);
-    });
-
-    it('resendSignUpCode returns disabled error', async () => {
-      const result = await disabledAuthService.resendSignUpCode('a@b.com');
-      expect(result.success).toBe(false);
-      expect(result.error).toMatch(/disabled/i);
-    });
-
-    it('resetPassword returns disabled error', async () => {
-      const result = await disabledAuthService.resetPassword('a@b.com');
-      expect(result.success).toBe(false);
-      expect(result.error).toMatch(/disabled/i);
-    });
-
-    it('updatePassword returns disabled error', async () => {
-      const result = await disabledAuthService.updatePassword('newpw');
-      expect(result.success).toBe(false);
-      expect(result.error).toMatch(/disabled/i);
     });
 
     it('onAuthStateChange returns noop unsubscribe when auth is disabled', () => {
@@ -869,6 +525,13 @@ describe('AuthService', () => {
             userPoolId: 'dev-pool-id',
             userPoolClientId: 'dev-client-id',
             region: 'us-east-1',
+            oauth: {
+              domain: 'test-domain.auth.us-east-1.amazoncognito.com',
+              redirectSignIn: ['http://localhost:9000/auth/callback'],
+              redirectSignOut: ['http://localhost:9000/auth/login'],
+              responseType: 'code',
+              providers: ['Google'],
+            },
           },
           api: {
             url: '/api/',
