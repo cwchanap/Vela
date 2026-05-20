@@ -32,7 +32,7 @@ const configureAmplify = () => {
             redirectSignIn: oauth.redirectSignIn,
             redirectSignOut: oauth.redirectSignOut,
             responseType: oauth.responseType,
-            providers: oauth.providers,
+            providers: [...oauth.providers],
           },
         },
       },
