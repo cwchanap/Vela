@@ -90,6 +90,14 @@ export interface AppSession {
   provider?: 'cognito';
 }
 
+type CognitoUser = Awaited<ReturnType<typeof getCurrentUser>>;
+
+interface HydratedAuthUser {
+  id: string;
+  email: string | null;
+  username: string | null;
+}
+
 class AuthService {
   /**
    * Start Cognito Hosted UI sign-in with Google.
@@ -134,9 +142,9 @@ class AuthService {
     try {
       const session = await fetchAuthSession();
       if (session.tokens?.accessToken) {
-        const user = await getCurrentUser();
+        const user = await this.hydrateCurrentUser();
         return {
-          user: { id: user.userId, email: user.signInDetails?.loginId || null },
+          user: { id: user.id, email: user.email },
           provider: 'cognito',
         };
       }
@@ -156,8 +164,8 @@ class AuthService {
     }
 
     try {
-      const user = await getCurrentUser();
-      return { id: user.userId, email: user.signInDetails?.loginId || null };
+      const user = await this.hydrateCurrentUser();
+      return { id: user.id, email: user.email };
     } catch (error) {
       console.error('Error getting user:', error);
       return null;
@@ -247,28 +255,15 @@ class AuthService {
 
       if (event === 'signedIn') {
         try {
-          const user = await getCurrentUser();
+          const user = await this.hydrateCurrentUser();
           const session = await fetchAuthSession();
 
           if (session.tokens?.accessToken) {
-            // Fetch user attributes to get the stored username
-            let username: string | null = null;
-            try {
-              const attributes = await fetchUserAttributes();
-              username = attributes.preferred_username || null;
-            } catch {
-              // Ignore attribute fetch errors
-            }
-
             // Ensure profile exists when user signs in
-            await this.ensureProfileForCurrentUser(
-              user.userId,
-              user.signInDetails?.loginId,
-              username,
-            );
+            await this.ensureProfileForCurrentUser(user.id, user.email, user.username);
 
             callback('SIGNED_IN', {
-              user: { id: user.userId, email: user.signInDetails?.loginId || null },
+              user: { id: user.id, email: user.email },
               provider: 'cognito',
             });
           }
@@ -282,6 +277,30 @@ class AuthService {
 
     return {
       unsubscribe: () => unsubscribe(),
+    };
+  }
+
+  private async hydrateCurrentUser(): Promise<HydratedAuthUser> {
+    const user = await getCurrentUser();
+    return this.hydrateUser(user);
+  }
+
+  private async hydrateUser(user: CognitoUser): Promise<HydratedAuthUser> {
+    let email = user.signInDetails?.loginId || null;
+    let username: string | null = null;
+
+    try {
+      const attributes = await fetchUserAttributes();
+      email = email || attributes.email || null;
+      username = attributes.preferred_username || null;
+    } catch {
+      // OAuth redirects should populate attributes, but preserve legacy loginId behavior if not.
+    }
+
+    return {
+      id: user.userId,
+      email,
+      username,
     };
   }
 
