@@ -58,6 +58,25 @@ describe('readCognitoSessionFromStorage', () => {
     });
   });
 
+  it('extracts email from ID token when LastAuthUser is an OAuth username', () => {
+    const idToken = jwtWithPayload({ email: 'google-user@example.com' });
+    const storage = makeStorage({
+      'CognitoIdentityServiceProvider.client-id.LastAuthUser': 'Google_1234567890',
+      'CognitoIdentityServiceProvider.client-id.Google_1234567890.accessToken': 'access-token',
+      'CognitoIdentityServiceProvider.client-id.Google_1234567890.refreshToken': 'refresh-token',
+      'CognitoIdentityServiceProvider.client-id.Google_1234567890.idToken': idToken,
+    });
+
+    expect(readCognitoSessionFromStorage(storage)).toEqual({
+      tokens: {
+        accessToken: 'access-token',
+        refreshToken: 'refresh-token',
+        idToken,
+      },
+      email: 'google-user@example.com',
+    });
+  });
+
   it('returns null when the web-app storage does not contain a complete Cognito session', () => {
     const storage = makeStorage({
       'CognitoIdentityServiceProvider.client-id.LastAuthUser': 'user@example.com',

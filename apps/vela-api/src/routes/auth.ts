@@ -1,8 +1,6 @@
 import { Hono } from 'hono';
 import {
   CognitoIdentityProviderClient,
-  AdminConfirmSignUpCommand,
-  ListUsersCommand,
   InitiateAuthCommand,
   AdminUserGlobalSignOutCommand,
   GetUserCommand,
@@ -15,119 +13,6 @@ const app = new Hono<{ Bindings: Env } & AuthContext>();
 
 const cognitoClient = new CognitoIdentityProviderClient({
   region: process.env.AWS_REGION || 'us-east-1',
-});
-
-// Auto-confirm user endpoint
-// This endpoint is used to bypass email verification for the signup flow
-app.post('/auto-confirm', async (c) => {
-  try {
-    const { email } = await c.req.json();
-
-    if (!email) {
-      return c.json({ error: 'Email is required' }, 400);
-    }
-
-    const userPoolId = process.env.VITE_COGNITO_USER_POOL_ID;
-    if (!userPoolId) {
-      return c.json({ error: 'User pool ID not configured' }, 500);
-    }
-
-    // First, find the user by email to get their username
-    const listUsersCommand = new ListUsersCommand({
-      UserPoolId: userPoolId,
-      Filter: `email = "${email}"`,
-    });
-
-    const usersResponse = await cognitoClient.send(listUsersCommand);
-
-    if (!usersResponse.Users || usersResponse.Users.length === 0) {
-      return c.json({ error: 'User not found' }, 404);
-    }
-
-    const user = usersResponse.Users[0];
-    const username = user.Username;
-
-    if (!username) {
-      return c.json({ error: 'User username not found' }, 500);
-    }
-
-    // Auto-confirm the user using admin API
-    const confirmCommand = new AdminConfirmSignUpCommand({
-      UserPoolId: userPoolId,
-      Username: username,
-    });
-
-    await cognitoClient.send(confirmCommand);
-
-    console.log(`✅ User ${email} (username: ${username}) auto-confirmed successfully`);
-    return c.json({ success: true, message: 'User auto-confirmed successfully' });
-  } catch (error) {
-    console.error('Auto-confirm error:', error);
-    return c.json({ error: 'Failed to auto-confirm user' }, 500);
-  }
-});
-
-// Sign in endpoint
-app.post('/signin', async (c) => {
-  try {
-    const { email, password } = await c.req.json();
-
-    if (!email || !password) {
-      return c.json({ error: 'Email and password are required' }, 400);
-    }
-
-    const userPoolId = c.env.VITE_COGNITO_USER_POOL_ID || process.env.VITE_COGNITO_USER_POOL_ID;
-    if (!userPoolId) {
-      return c.json({ error: 'User pool ID not configured' }, 500);
-    }
-
-    // Proceed with authentication
-    const clientId = process.env.COGNITO_CLIENT_ID || process.env.VITE_COGNITO_USER_POOL_CLIENT_ID;
-    if (!clientId) {
-      return c.json({ error: 'Cognito client ID not configured' }, 500);
-    }
-
-    console.log('Cognito signin params', {
-      userPoolId,
-      clientId,
-      region: process.env.AWS_REGION || 'us-east-1',
-    });
-
-    const authCommand = new InitiateAuthCommand({
-      AuthFlow: 'USER_PASSWORD_AUTH',
-      ClientId: clientId,
-      AuthParameters: {
-        USERNAME: email,
-        PASSWORD: password,
-      },
-    });
-
-    const authResponse = await cognitoClient.send(authCommand);
-
-    if (authResponse.AuthenticationResult) {
-      return c.json({
-        success: true,
-        message: 'Sign in successful',
-        tokens: {
-          accessToken: authResponse.AuthenticationResult.AccessToken,
-          refreshToken: authResponse.AuthenticationResult.RefreshToken,
-          idToken: authResponse.AuthenticationResult.IdToken,
-        },
-      });
-    } else {
-      return c.json({ error: 'Authentication failed' }, 401);
-    }
-  } catch (error: any) {
-    console.error('Sign in error:', error);
-
-    if (error.name === 'NotAuthorizedException') {
-      return c.json({ error: 'Invalid email or password' }, 401);
-    } else if (error.name === 'UserNotConfirmedException') {
-      return c.json({ error: 'User not confirmed. Please check your email.' }, 401);
-    }
-
-    return c.json({ error: 'Sign in failed', name: error?.name }, 500);
-  }
 });
 
 // Refresh token endpoint
