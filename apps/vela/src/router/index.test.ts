@@ -237,11 +237,11 @@ describe('router/index', () => {
       }
     });
 
-    // --- requiresAuth: dev-mode bypass ---
-    it('allows unauthenticated user through requiresAuth in dev mode (dev bypass)', async () => {
+    // --- requiresAuth: unauthenticated in dev mode ---
+    it('redirects unauthenticated user to login in dev mode', async () => {
       mockAuthStore.isInitialized = true;
       mockAuthStore.isAuthenticated = false;
-      // import.meta.env.DEV is true by default in Vitest — the dev bypass fires
+
       const next = vi.fn();
       await guard(
         makeRoute({
@@ -252,9 +252,8 @@ describe('router/index', () => {
         makeRoute({}),
         next,
       );
-      // Dev bypass calls next() without arguments and returns
-      expect(next).toHaveBeenCalledWith();
-      expect(next).not.toHaveBeenCalledWith(expect.objectContaining({ name: 'login' }));
+      expect(next).toHaveBeenCalledWith({ name: 'login', query: { redirect: '/protected' } });
+      expect(next).toHaveBeenCalledTimes(1);
     });
 
     // --- requiresGuest ---
