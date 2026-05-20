@@ -312,7 +312,7 @@ const syncLLMFromSettings = () => {
   llmService.setApiKey(currentApiKey.value);
 };
 
-const getUserId = () => auth.user?.id || 'anonymous';
+const getUserId = () => auth.user?.id || auth.session?.user?.id || 'anonymous';
 
 const ensureChatId = () => {
   if (!chat.chatId) {

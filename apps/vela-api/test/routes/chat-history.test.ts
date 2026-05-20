@@ -188,8 +188,9 @@ describe('Chat History Route', () => {
       expect(json.error).toContain('DynamoDB error');
     });
 
-    test('should handle missing AWS credentials', async () => {
-      const app = createTestApp({}); // No AWS credentials
+    test('should save without static AWS credentials in Hono bindings', async () => {
+      mockSend.mockResolvedValueOnce({});
+      const app = createTestApp({});
 
       const req = new Request('http://localhost/save', {
         method: 'POST',
@@ -206,9 +207,9 @@ describe('Chat History Route', () => {
       const res = await app.request(req);
       const json = await res.json();
 
-      expect(res.status).toBe(500);
-      expect(json.error).toContain('Missing AWS credentials');
-      expect(mockSend).not.toHaveBeenCalled();
+      expect(res.status).toBe(200);
+      expect(json.ok).toBe(true);
+      expect(mockSend).toHaveBeenCalledTimes(1);
     });
   });
 
@@ -410,7 +411,8 @@ describe('Chat History Route', () => {
       expect(json.error).toContain('Forbidden');
     });
 
-    test('should return 500 when AWS credentials missing for DELETE /thread', async () => {
+    test('should delete without static AWS credentials in Hono bindings', async () => {
+      mockSend.mockResolvedValueOnce({ Items: [] });
       const app = createTestApp({});
       const req = new Request('http://localhost/thread?thread_id=thread-123', {
         method: 'DELETE',
@@ -418,9 +420,9 @@ describe('Chat History Route', () => {
       const res = await app.request(req);
       const json = await res.json();
 
-      expect(res.status).toBe(500);
-      expect(json.error).toContain('Missing AWS credentials');
-      expect(mockSend).not.toHaveBeenCalled();
+      expect(res.status).toBe(200);
+      expect(json.ok).toBe(true);
+      expect(mockSend).toHaveBeenCalledTimes(1);
     });
 
     test('should return ok when thread is already empty', async () => {
@@ -530,15 +532,16 @@ describe('Chat History Route', () => {
   });
 
   describe('GET /threads - additional coverage', () => {
-    test('should return 500 when AWS credentials missing for GET /threads', async () => {
+    test('should list threads without static AWS credentials in Hono bindings', async () => {
+      mockSend.mockResolvedValueOnce({ Items: [] });
       const app = createTestApp({});
       const req = new Request('http://localhost/threads?user_id=user-123');
       const res = await app.request(req);
       const json = await res.json();
 
-      expect(res.status).toBe(500);
-      expect(json.error).toContain('Missing AWS credentials');
-      expect(mockSend).not.toHaveBeenCalled();
+      expect(res.status).toBe(200);
+      expect(json.threads).toEqual([]);
+      expect(mockSend).toHaveBeenCalledTimes(1);
     });
 
     test('should return 403 when accessing another user threads', async () => {
@@ -673,15 +676,16 @@ describe('Chat History Route', () => {
   });
 
   describe('GET /messages - additional coverage', () => {
-    test('should return 500 when AWS credentials missing for GET /messages', async () => {
+    test('should get messages without static AWS credentials in Hono bindings', async () => {
+      mockSend.mockResolvedValueOnce({ Items: [] });
       const app = createTestApp({});
       const req = new Request('http://localhost/messages?thread_id=thread-123');
       const res = await app.request(req);
       const json = await res.json();
 
-      expect(res.status).toBe(500);
-      expect(json.error).toContain('Missing AWS credentials');
-      expect(mockSend).not.toHaveBeenCalled();
+      expect(res.status).toBe(200);
+      expect(json.items).toEqual([]);
+      expect(mockSend).toHaveBeenCalledTimes(1);
     });
 
     test('should return 403 when messages belong to different user', async () => {

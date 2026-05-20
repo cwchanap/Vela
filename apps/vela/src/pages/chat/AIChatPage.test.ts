@@ -560,6 +560,34 @@ describe('AIChatPage', () => {
       expect(wrapper.text()).toContain('Test conversation');
     });
 
+    it('should use session user id for history when profile user is not loaded', async () => {
+      fetchMock.mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ threads: [] }),
+      });
+
+      const wrapper = mountComponent();
+      const authStore = useAuthStore();
+      authStore.user = null;
+      authStore.session = {
+        user: { id: 'session-user-123', email: 'test@example.com' },
+        provider: 'cognito',
+      };
+
+      const historyButton = wrapper.find('[data-testid="llm-chat-history"]');
+      await historyButton.trigger('click');
+      await flushPromises();
+
+      expect(fetchMock).toHaveBeenCalledWith(
+        expect.stringContaining('user_id=session-user-123'),
+        expect.any(Object),
+      );
+      expect(fetchMock).not.toHaveBeenCalledWith(
+        expect.stringContaining('user_id=anonymous'),
+        expect.any(Object),
+      );
+    });
+
     it('should show loading state while fetching threads', async () => {
       // Create a promise that we can control when it resolves
       type FetchResponse = MockResponse<{ threads: MockThread[] }>;

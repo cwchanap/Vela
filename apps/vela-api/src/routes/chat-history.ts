@@ -267,10 +267,6 @@ async function dynamodb_deleteThread(env: Env, thread_id: string): Promise<void>
 
 chatHistory.post('/save', zValidator('json', ChatHistoryItemSchema), async (c) => {
   try {
-    const hasAwsCredentials = c.env.AWS_ACCESS_KEY_ID && c.env.AWS_SECRET_ACCESS_KEY;
-    if (!hasAwsCredentials) {
-      return c.json({ error: 'Missing AWS credentials' }, 500);
-    }
     const authenticatedUserId = c.get('userId');
     const body = c.req.valid('json');
 
@@ -290,10 +286,6 @@ chatHistory.post('/save', zValidator('json', ChatHistoryItemSchema), async (c) =
 
 chatHistory.get('/threads', createQueryValidator(UserIdQuerySchema), async (c) => {
   try {
-    const hasAwsCredentials = c.env.AWS_ACCESS_KEY_ID && c.env.AWS_SECRET_ACCESS_KEY;
-    if (!hasAwsCredentials) {
-      return c.json({ error: 'Missing AWS credentials' }, 500);
-    }
     const authenticatedUserId = c.get('userId');
     const { user_id } = c.req.valid('query') as UserIdQuery;
 
@@ -313,10 +305,6 @@ chatHistory.get('/threads', createQueryValidator(UserIdQuerySchema), async (c) =
 
 chatHistory.get('/messages', createQueryValidator(ThreadIdQuerySchema), async (c) => {
   try {
-    const hasAwsCredentials = c.env.AWS_ACCESS_KEY_ID && c.env.AWS_SECRET_ACCESS_KEY;
-    if (!hasAwsCredentials) {
-      return c.json({ error: 'Missing AWS credentials' }, 500);
-    }
     const authenticatedUserId = c.get('userId');
     const { thread_id } = c.req.valid('query') as ThreadIdQuery;
     const items = await dynamodb_getMessages(c.env, thread_id);
@@ -336,10 +324,6 @@ chatHistory.get('/messages', createQueryValidator(ThreadIdQuerySchema), async (c
 
 chatHistory.delete('/thread', createQueryValidator(ThreadIdQuerySchema), async (c) => {
   try {
-    const hasAwsCredentials = c.env.AWS_ACCESS_KEY_ID && c.env.AWS_SECRET_ACCESS_KEY;
-    if (!hasAwsCredentials) {
-      return c.json({ error: 'Missing AWS credentials' }, 500);
-    }
     const userId = c.get('userId');
 
     const { thread_id } = c.req.valid('query') as ThreadIdQuery;
