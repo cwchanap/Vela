@@ -10,7 +10,6 @@ vi.mock('aws-amplify/auth', () => ({
   signOut: vi.fn(),
   getCurrentUser: vi.fn(),
   fetchAuthSession: vi.fn(),
-  fetchUserAttributes: vi.fn(),
 }));
 
 vi.mock('aws-amplify/utils', () => ({
@@ -63,13 +62,7 @@ vi.mock('@aws-sdk/client-cognito-identity-provider', () => ({
   ListUsersCommand: vi.fn(),
 }));
 
-import {
-  signInWithRedirect,
-  signOut,
-  getCurrentUser,
-  fetchAuthSession,
-  fetchUserAttributes,
-} from 'aws-amplify/auth';
+import { signInWithRedirect, signOut, getCurrentUser, fetchAuthSession } from 'aws-amplify/auth';
 import { Hub } from 'aws-amplify/utils';
 import { Amplify } from 'aws-amplify';
 
@@ -177,18 +170,22 @@ describe('AuthService', () => {
       expect(ensureProfileSpy).toHaveBeenCalledWith('user-123', 'test@example.com', null);
     });
 
-    it('should use user attributes email when OAuth user has no signInDetails', async () => {
+    it('should use ID token claims when OAuth user has no signInDetails', async () => {
       const mockUser = {
         userId: 'oauth-user-123',
       } as any;
-      const mockSession = { tokens: { accessToken: 'valid-token' as any } } as any;
+      const mockSession = {
+        tokens: {
+          accessToken: 'valid-token' as any,
+          idToken: {
+            payload: { email: 'test@example.com', preferred_username: 'oauthuser' },
+            toString: () => 'id-token',
+          },
+        } as any,
+      } as any;
 
       vi.mocked(fetchAuthSession).mockResolvedValue(mockSession);
       vi.mocked(getCurrentUser).mockResolvedValue(mockUser);
-      vi.mocked(fetchUserAttributes).mockResolvedValue({
-        email: 'test@example.com',
-        preferred_username: 'oauthuser',
-      } as any);
 
       const ensureProfileSpy = vi
         .spyOn(authService as any, 'ensureProfileForCurrentUser')
@@ -232,6 +229,9 @@ describe('AuthService', () => {
       } as any;
 
       vi.mocked(getCurrentUser).mockResolvedValue(mockUser);
+      vi.mocked(fetchAuthSession).mockResolvedValue({
+        tokens: { idToken: { payload: {}, toString: () => 'id' } as any },
+      } as any);
 
       const result = await authService.getCurrentUser();
 
@@ -240,15 +240,19 @@ describe('AuthService', () => {
       expect(result?.email).toBe('test@example.com');
     });
 
-    it('should use user attributes email when OAuth user has no signInDetails', async () => {
+    it('should use ID token claims when OAuth user has no signInDetails', async () => {
       const mockUser = {
         userId: 'oauth-user-123',
       } as any;
 
       vi.mocked(getCurrentUser).mockResolvedValue(mockUser);
-      vi.mocked(fetchUserAttributes).mockResolvedValue({
-        email: 'test@example.com',
-        preferred_username: 'oauthuser',
+      vi.mocked(fetchAuthSession).mockResolvedValue({
+        tokens: {
+          idToken: {
+            payload: { email: 'test@example.com', preferred_username: 'oauthuser' },
+            toString: () => 'id-token',
+          },
+        } as any,
       } as any);
 
       const result = await authService.getCurrentUser();
@@ -266,13 +270,16 @@ describe('AuthService', () => {
       expect(result).toBeNull();
     });
 
-    it('should return email as null when loginId is not set', async () => {
+    it('should return email as null when loginId is not set and no ID token email', async () => {
       const mockUser = {
         userId: 'user-456',
         signInDetails: {},
       } as any;
 
       vi.mocked(getCurrentUser).mockResolvedValue(mockUser);
+      vi.mocked(fetchAuthSession).mockResolvedValue({
+        tokens: { idToken: { payload: {}, toString: () => 'id' } as any },
+      } as any);
 
       const result = await authService.getCurrentUser();
 
@@ -393,11 +400,15 @@ describe('AuthService', () => {
         userId: 'user-123',
         signInDetails: { loginId: 'test@example.com' },
       } as any;
-      const mockSession = { tokens: { accessToken: 'token' as any } } as any;
+      const mockSession = {
+        tokens: {
+          accessToken: 'token' as any,
+          idToken: { payload: {}, toString: () => 'id' } as any,
+        },
+      } as any;
 
       vi.mocked(getCurrentUser).mockResolvedValue(mockUser);
       vi.mocked(fetchAuthSession).mockResolvedValue(mockSession);
-      vi.mocked(fetchUserAttributes).mockRejectedValue(new Error('no attrs'));
 
       const callback = vi.fn();
       let capturedListener: ((_data: any) => void) | null = null;
@@ -427,16 +438,23 @@ describe('AuthService', () => {
       );
     });
 
-    it('should fetch preferred_username when fetchUserAttributes succeeds in signedIn event', async () => {
+    it('should read preferred_username from ID token claims in signedIn event', async () => {
       const mockUser = {
         userId: 'user-123',
         signInDetails: { loginId: 'test@example.com' },
       } as any;
-      const mockSession = { tokens: { accessToken: 'token' as any } } as any;
+      const mockSession = {
+        tokens: {
+          accessToken: 'token' as any,
+          idToken: {
+            payload: { preferred_username: 'myuser' },
+            toString: () => 'id-token',
+          },
+        },
+      } as any;
 
       vi.mocked(getCurrentUser).mockResolvedValue(mockUser);
       vi.mocked(fetchAuthSession).mockResolvedValue(mockSession);
-      vi.mocked(fetchUserAttributes).mockResolvedValue({ preferred_username: 'myuser' } as any);
 
       const callback = vi.fn();
       let capturedListener: ((_data: any) => void) | null = null;
@@ -457,21 +475,24 @@ describe('AuthService', () => {
         'SIGNED_IN',
         expect.objectContaining({ user: expect.objectContaining({ id: 'user-123' }) }),
       );
-      expect(fetchUserAttributes).toHaveBeenCalled();
     });
 
-    it('should preserve attribute email and username for OAuth signedIn events without signInDetails', async () => {
+    it('should preserve ID token email and username for OAuth signedIn events without signInDetails', async () => {
       const mockUser = {
         userId: 'oauth-user-123',
       } as any;
-      const mockSession = { tokens: { accessToken: 'token' as any } } as any;
+      const mockSession = {
+        tokens: {
+          accessToken: 'token' as any,
+          idToken: {
+            payload: { email: 'test@example.com', preferred_username: 'oauthuser' },
+            toString: () => 'id-token',
+          },
+        },
+      } as any;
 
       vi.mocked(getCurrentUser).mockResolvedValue(mockUser);
       vi.mocked(fetchAuthSession).mockResolvedValue(mockSession);
-      vi.mocked(fetchUserAttributes).mockResolvedValue({
-        email: 'test@example.com',
-        preferred_username: 'oauthuser',
-      } as any);
 
       const createProfileSpy = vi
         .spyOn(authService as any, 'createUserProfile')
@@ -499,19 +520,23 @@ describe('AuthService', () => {
       });
     });
 
-    it('should fall back to name attribute when preferred_username is missing for Google users', async () => {
+    it('should fall back to name claim when preferred_username is missing for Google users', async () => {
       const mockUser = {
         userId: 'google-user-456',
       } as any;
-      const mockSession = { tokens: { accessToken: 'token' as any } } as any;
+      const mockSession = {
+        tokens: {
+          accessToken: 'token' as any,
+          idToken: {
+            // Google maps display name to "name", not "preferred_username"
+            payload: { email: 'google@example.com', name: 'Google Display Name' },
+            toString: () => 'id-token',
+          },
+        },
+      } as any;
 
       vi.mocked(getCurrentUser).mockResolvedValue(mockUser);
       vi.mocked(fetchAuthSession).mockResolvedValue(mockSession);
-      // Google maps display name to "name", not "preferred_username"
-      vi.mocked(fetchUserAttributes).mockResolvedValue({
-        email: 'google@example.com',
-        name: 'Google Display Name',
-      } as any);
 
       const createProfileSpy = vi
         .spyOn(authService as any, 'createUserProfile')
@@ -713,14 +738,14 @@ describe('AuthService', () => {
       expect(ensureProfileSpy).not.toHaveBeenCalled();
     });
 
-    it('does not call fetchUserAttributes', async () => {
+    it('does not make any network calls beyond fetchAuthSession', async () => {
       vi.mocked(fetchAuthSession).mockResolvedValue({
         tokens: { accessToken: 'valid-token' as any },
       } as any);
 
       await authService.isAuthenticated();
 
-      expect(fetchUserAttributes).not.toHaveBeenCalled();
+      expect(fetchAuthSession).toHaveBeenCalledTimes(1);
     });
   });
 

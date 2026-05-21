@@ -161,6 +161,7 @@ export class AuthStack extends Stack {
         userSrp: false,
       },
       preventUserExistenceErrors: true,
+      supportedIdentityProviders: [UserPoolClientIdentityProvider.COGNITO],
     });
 
     this.userPool = userPool;
