@@ -38,6 +38,13 @@ describe('extension local testing workflow', () => {
     expect(extensionTestScript).toContain('curl');
   });
 
+  it('overrides the local extension API URL for production builds', () => {
+    const productionEnv = readText(resolve(extensionRoot, '.env.production'));
+
+    expect(productionEnv).toContain('VITE_API_URL=https://vela.cwchanap.dev/api');
+    expect(productionEnv).not.toContain('localhost:9005');
+  });
+
   it('configures WXT to auto-launch Chrome only for extension test mode', () => {
     const config = readText(resolve(extensionRoot, 'wxt.config.ts'));
 
