@@ -19,6 +19,7 @@ const DEFAULT_COGNITO_DOMAIN_PREFIX = 'vela-cwchanap-auth';
 export class AuthStack extends Stack {
   public readonly userPool: UserPool;
   public readonly userPoolClient: UserPoolClient;
+  public readonly testUserPoolClient: UserPoolClient;
   public readonly userPoolDomain: UserPoolDomain;
   public readonly oauthDomain: string;
 
@@ -145,9 +146,27 @@ export class AuthStack extends Stack {
     });
     userPoolClient.node.addDependency(googleProvider);
 
+    // Separate client for e2e tests: enables ADMIN_NO_SRP_AUTH so Playwright
+    // fixtures can obtain tokens via AdminInitiateAuth without going through
+    // the Google Hosted UI. Only deployed alongside the production stack —
+    // the client secret is not needed; IAM permissions on the test runner
+    // provide admin-level access.
+    const testPoolClient = new UserPoolClient(this, 'VelaTestUserPoolClient', {
+      userPool,
+      userPoolClientName: 'vela-test-client',
+      authFlows: {
+        adminUserPassword: true,
+        custom: false,
+        userPassword: false,
+        userSrp: false,
+      },
+      preventUserExistenceErrors: true,
+    });
+
     this.userPool = userPool;
     this.userPoolClient = userPoolClient;
     this.userPoolDomain = userPoolDomain;
+    this.testUserPoolClient = testPoolClient;
     this.oauthDomain = `${domainPrefix}.auth.${Stack.of(this).region}.amazoncognito.com`;
   }
 }

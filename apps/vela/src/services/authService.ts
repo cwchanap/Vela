@@ -147,6 +147,9 @@ class AuthService {
       const session = await fetchAuthSession();
       if (session.tokens?.accessToken) {
         const user = await this.hydrateCurrentUser();
+        // Ensure profile exists with correct email/username before any GET
+        // auto-creates it with null values (e.g., first-time OAuth callback).
+        await this.ensureProfileForCurrentUser(user.id, user.email, user.username);
         return {
           user: { id: user.id, email: user.email },
           provider: 'cognito',

@@ -163,12 +163,17 @@ describe('AuthService', () => {
       vi.mocked(fetchAuthSession).mockResolvedValue(mockSession);
       vi.mocked(getCurrentUser).mockResolvedValue(mockUser);
 
+      const ensureProfileSpy = vi
+        .spyOn(authService as any, 'ensureProfileForCurrentUser')
+        .mockResolvedValue(undefined);
+
       const result = await authService.getCurrentSession();
 
       expect(result).not.toBeNull();
       expect(result?.user?.id).toBe('user-123');
       expect(result?.user?.email).toBe('test@example.com');
       expect(result?.provider).toBe('cognito');
+      expect(ensureProfileSpy).toHaveBeenCalledWith('user-123', 'test@example.com', null);
     });
 
     it('should use user attributes email when OAuth user has no signInDetails', async () => {
@@ -184,12 +189,21 @@ describe('AuthService', () => {
         preferred_username: 'oauthuser',
       } as any);
 
+      const ensureProfileSpy = vi
+        .spyOn(authService as any, 'ensureProfileForCurrentUser')
+        .mockResolvedValue(undefined);
+
       const result = await authService.getCurrentSession();
 
       expect(result).not.toBeNull();
       expect(result?.user?.id).toBe('oauth-user-123');
       expect(result?.user?.email).toBe('test@example.com');
       expect(result?.provider).toBe('cognito');
+      expect(ensureProfileSpy).toHaveBeenCalledWith(
+        'oauth-user-123',
+        'test@example.com',
+        'oauthuser',
+      );
     });
 
     it('should return null when no access token', async () => {

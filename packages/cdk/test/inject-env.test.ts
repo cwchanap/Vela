@@ -54,7 +54,7 @@ describe('inject-env', () => {
     );
   });
 
-  test('fails when OAuth domain output and derivable domain prefix are both missing', () => {
+  test('derives the OAuth domain from default prefix when stack output and env var are both missing', () => {
     writeOutputs([
       { OutputKey: 'CognitoUserPoolId', OutputValue: 'us-east-1_testPool' },
       { OutputKey: 'CognitoUserPoolClientId', OutputValue: 'test-client-id' },
@@ -63,11 +63,14 @@ describe('inject-env', () => {
 
     const result = runInjectEnv({
       COGNITO_DOMAIN_PREFIX: undefined,
+      VITE_AWS_REGION: undefined,
+      AWS_REGION: undefined,
     });
 
-    expect(result.status).toBe(1);
-    expect(result.stderr).toContain(
-      'Missing CognitoOAuthDomain in CloudFormation outputs and COGNITO_DOMAIN_PREFIX is not set',
+    expect(result.status).toBe(0);
+    const envFile = fs.readFileSync(path.join(tempRoot, 'apps', 'vela', '.env.production'), 'utf8');
+    expect(envFile).toContain(
+      'VITE_COGNITO_OAUTH_DOMAIN=vela-cwchanap-auth.auth.us-east-1.amazoncognito.com',
     );
   });
 

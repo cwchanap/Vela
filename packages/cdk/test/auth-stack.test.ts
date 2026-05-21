@@ -117,6 +117,36 @@ describe('AuthStack', () => {
     expect(client.Properties.AllowedOAuthScopes.toSorted()).toEqual(['email', 'openid', 'profile']);
   });
 
+  test('creates a separate test client with admin auth flow enabled', () => {
+    const template = synthesizeTemplate();
+    const clients = template.findResources('AWS::Cognito::UserPoolClient');
+
+    const allClients = Object.values(clients);
+    expect(allClients.length).toBe(2);
+
+    const testClient = allClients.find((c) => c.Properties.ClientName === 'vela-test-client');
+    expect(testClient).toBeDefined();
+    expect(testClient!.Properties.ExplicitAuthFlows).toContain('ALLOW_ADMIN_USER_PASSWORD_AUTH');
+    expect(testClient!.Properties.ExplicitAuthFlows).toContain('ALLOW_REFRESH_TOKEN_AUTH');
+  });
+
+  test('test client is distinct from the production web client', () => {
+    const template = synthesizeTemplate();
+    const clients = template.findResources('AWS::Cognito::UserPoolClient');
+
+    const allClients = Object.values(clients);
+    expect(allClients.length).toBe(2);
+
+    const webClient = allClients.find((c) => c.Properties.ClientName === 'vela-web-client');
+    const testClient = allClients.find((c) => c.Properties.ClientName === 'vela-test-client');
+
+    // Web client has Google identity provider and code flow; test client does not
+    expect(webClient!.Properties.SupportedIdentityProviders).toEqual(['Google']);
+    expect(webClient!.Properties.AllowedOAuthFlows).toEqual(['code']);
+    expect(testClient!.Properties.SupportedIdentityProviders).not.toContain('Google');
+    expect(testClient!.Properties.ExplicitAuthFlows).toContain('ALLOW_ADMIN_USER_PASSWORD_AUTH');
+  });
+
   test('does not synthesize the GitHub Actions secret value into the template', () => {
     process.env.GOOGLE_OAUTH_CLIENT_SECRET = 'plaintext-secret-from-github-actions';
 
