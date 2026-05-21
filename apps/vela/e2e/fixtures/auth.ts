@@ -22,7 +22,10 @@ export const TEST_USER = {
 
 const COGNITO_CONFIG = {
   userPoolId: requireTestEnv('VITE_COGNITO_USER_POOL_ID'),
-  clientId: requireTestEnv('VITE_COGNITO_USER_POOL_CLIENT_ID'),
+  // Prefer the dedicated test client (admin auth flow enabled) when available;
+  // fall back to the production web client for backwards compatibility.
+  clientId:
+    process.env.VITE_COGNITO_TEST_CLIENT_ID || requireTestEnv('VITE_COGNITO_USER_POOL_CLIENT_ID'),
   region: requireTestEnv('VITE_AWS_REGION'),
 };
 

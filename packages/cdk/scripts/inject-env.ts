@@ -37,6 +37,9 @@ function loadOutputs(outputsPath: string): OutputMap | null {
   return map;
 }
 
+// Must match the DEFAULT_COGNITO_DOMAIN_PREFIX in AuthStack
+const DEFAULT_COGNITO_DOMAIN_PREFIX = 'vela-cwchanap-auth';
+
 function main(): void {
   // cdk-outputs.json is written in the @vela/cdk package root
   const outputsPath = path.resolve(process.cwd(), 'cdk-outputs.json');
@@ -51,12 +54,9 @@ function main(): void {
 
   const awsRegion =
     process.env.VITE_AWS_REGION || outputs.CognitoRegion || process.env.AWS_REGION || 'us-east-1';
-  const cognitoDomainPrefix = process.env.COGNITO_DOMAIN_PREFIX;
+  const cognitoDomainPrefix = process.env.COGNITO_DOMAIN_PREFIX || DEFAULT_COGNITO_DOMAIN_PREFIX;
   const cognitoOAuthDomain =
-    outputs.CognitoOAuthDomain ||
-    (cognitoDomainPrefix
-      ? `${cognitoDomainPrefix}.auth.${awsRegion}.amazoncognito.com`
-      : undefined);
+    outputs.CognitoOAuthDomain || `${cognitoDomainPrefix}.auth.${awsRegion}.amazoncognito.com`;
 
   const envVars = {
     VITE_COGNITO_USER_POOL_ID: outputs.CognitoUserPoolId,
