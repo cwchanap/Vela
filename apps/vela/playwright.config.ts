@@ -1,11 +1,8 @@
 import { defineConfig, devices } from '@playwright/test';
 
-type E2EEnvSource = Pick<
-  NodeJS.ProcessEnv,
-  'VITE_COGNITO_TEST_CLIENT_ID' | 'VITE_COGNITO_USER_POOL_CLIENT_ID'
->;
-
-export function buildE2EWebServerEnv(env: E2EEnvSource = process.env): Record<string, string> {
+export function buildE2EWebServerEnv(
+  env: Record<string, string | undefined> = process.env,
+): Record<string, string> {
   const testClientId = env.VITE_COGNITO_TEST_CLIENT_ID;
   if (!testClientId) {
     return {};
