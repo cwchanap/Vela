@@ -1,4 +1,8 @@
 // AWS Cognito authentication using Amplify
+// Side-effect import: registers the OAuth redirect listener so that
+// the authorization code exchange completes when the browser returns
+// from the Cognito Hosted UI to /auth/callback.
+import 'aws-amplify/auth/enable-oauth-listener';
 import { Amplify } from 'aws-amplify';
 import {
   signInWithRedirect,
