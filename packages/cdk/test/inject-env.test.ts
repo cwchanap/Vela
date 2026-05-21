@@ -48,7 +48,7 @@ describe('inject-env', () => {
     });
 
     expect(result.status).toBe(0);
-    const envFile = fs.readFileSync(path.join(tempRoot, 'apps', 'vela', '.env.production'), 'utf8');
+    const envFile = fs.readFileSync(path.join(tempRoot, 'apps', 'vela', '.env.prod'), 'utf8');
     expect(envFile).toContain(
       'VITE_COGNITO_OAUTH_DOMAIN=vela-test-auth.auth.us-east-1.amazoncognito.com',
     );
@@ -68,7 +68,7 @@ describe('inject-env', () => {
     });
 
     expect(result.status).toBe(0);
-    const envFile = fs.readFileSync(path.join(tempRoot, 'apps', 'vela', '.env.production'), 'utf8');
+    const envFile = fs.readFileSync(path.join(tempRoot, 'apps', 'vela', '.env.prod'), 'utf8');
     expect(envFile).toContain(
       'VITE_COGNITO_OAUTH_DOMAIN=vela-cwchanap-auth.auth.us-east-1.amazoncognito.com',
     );
@@ -89,7 +89,7 @@ describe('inject-env', () => {
     });
 
     expect(result.status).toBe(0);
-    const envFile = fs.readFileSync(path.join(tempRoot, 'apps', 'vela', '.env.production'), 'utf8');
+    const envFile = fs.readFileSync(path.join(tempRoot, 'apps', 'vela', '.env.prod'), 'utf8');
     expect(envFile).toContain('VITE_COGNITO_OAUTH_DOMAIN=custom.auth.us-east-1.amazoncognito.com');
     expect(envFile).not.toContain('different-prefix');
   });
