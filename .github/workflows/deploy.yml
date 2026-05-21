@@ -48,7 +48,6 @@ jobs:
     runs-on: ubuntu-latest
     environment: production
     env:
-      COGNITO_DOMAIN_PREFIX: ${{ vars.COGNITO_DOMAIN_PREFIX }}
       GOOGLE_OAUTH_CLIENT_ID: ${{ vars.GOOGLE_OAUTH_CLIENT_ID }}
       GOOGLE_OAUTH_CLIENT_SECRET: ${{ secrets.GOOGLE_OAUTH_CLIENT_SECRET }}
     steps:
@@ -78,11 +77,6 @@ jobs:
 
       - name: Validate Google OAuth deployment configuration
         run: |
-          if [ -z "$COGNITO_DOMAIN_PREFIX" ]; then
-            echo "::error::Missing repository/environment variable COGNITO_DOMAIN_PREFIX"
-            exit 1
-          fi
-
           if [ -z "$GOOGLE_OAUTH_CLIENT_ID" ]; then
             echo "::error::Missing repository/environment variable GOOGLE_OAUTH_CLIENT_ID"
             exit 1
