@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach, beforeAll, afterAll } from 'vitest';
-import { authService } from './authService';
+import { authService, _resetProfileGuard } from './authService';
 
 // Mock the OAuth redirect listener side-effect import
 vi.mock('aws-amplify/auth/enable-oauth-listener', () => ({}));
@@ -82,6 +82,7 @@ describe('AuthService', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    _resetProfileGuard();
     mockFetch.mockResolvedValue({
       ok: true,
       json: vi.fn().mockResolvedValue({ profile: null }),
@@ -642,6 +643,84 @@ describe('AuthService', () => {
         'Profile creation completed (may already exist):',
         raceError,
       );
+    });
+
+    it('skips createUserProfile when profileEnsuredForUserId matches the user', async () => {
+      const createProfileSpy = vi
+        .spyOn(authService as any, 'createUserProfile')
+        .mockResolvedValue(undefined);
+
+      // First call — should hit createUserProfile
+      await (authService as any).ensureProfileForCurrentUser('user-abc', 'a@b.com', null);
+      expect(createProfileSpy).toHaveBeenCalledTimes(1);
+
+      // Second call for same user — should be skipped by the memo guard
+      await (authService as any).ensureProfileForCurrentUser('user-abc', 'a@b.com', null);
+      expect(createProfileSpy).toHaveBeenCalledTimes(1); // still 1
+    });
+
+    it('re-runs createUserProfile for a different user after reset', async () => {
+      const createProfileSpy = vi
+        .spyOn(authService as any, 'createUserProfile')
+        .mockResolvedValue(undefined);
+
+      await (authService as any).ensureProfileForCurrentUser('user-first', 'first@test.com', null);
+      expect(createProfileSpy).toHaveBeenCalledTimes(1);
+
+      // Different user — should trigger another POST
+      await (authService as any).ensureProfileForCurrentUser(
+        'user-second',
+        'second@test.com',
+        null,
+      );
+      expect(createProfileSpy).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  describe('isAuthenticated', () => {
+    it('returns true when a valid session exists', async () => {
+      vi.mocked(fetchAuthSession).mockResolvedValue({
+        tokens: { accessToken: 'valid-token' as any },
+      } as any);
+
+      const result = await authService.isAuthenticated();
+      expect(result).toBe(true);
+    });
+
+    it('returns false when no session exists', async () => {
+      vi.mocked(fetchAuthSession).mockResolvedValue({ tokens: undefined } as any);
+
+      const result = await authService.isAuthenticated();
+      expect(result).toBe(false);
+    });
+
+    it('returns false when fetchAuthSession throws', async () => {
+      vi.mocked(fetchAuthSession).mockRejectedValue(new Error('no session'));
+
+      const result = await authService.isAuthenticated();
+      expect(result).toBe(false);
+    });
+
+    it('does not trigger profile creation', async () => {
+      vi.mocked(fetchAuthSession).mockResolvedValue({
+        tokens: { accessToken: 'valid-token' as any },
+      } as any);
+
+      const ensureProfileSpy = vi.spyOn(authService as any, 'ensureProfileForCurrentUser');
+
+      await authService.isAuthenticated();
+
+      expect(ensureProfileSpy).not.toHaveBeenCalled();
+    });
+
+    it('does not call fetchUserAttributes', async () => {
+      vi.mocked(fetchAuthSession).mockResolvedValue({
+        tokens: { accessToken: 'valid-token' as any },
+      } as any);
+
+      await authService.isAuthenticated();
+
+      expect(fetchUserAttributes).not.toHaveBeenCalled();
     });
   });
 

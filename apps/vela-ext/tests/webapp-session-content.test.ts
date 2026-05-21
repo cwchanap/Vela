@@ -31,6 +31,9 @@ Object.defineProperty(window, 'localStorage', {
 
 function getRegisteredMessageListener() {
   const addListener = (globalThis as any).browser.runtime.onMessage.addListener;
+  if (!vi.isMockFunction(addListener)) {
+    throw new Error('browser.runtime.onMessage.addListener is not a mock function');
+  }
   const call = addListener.mock.calls.at(-1);
   if (!call) {
     throw new Error('Expected web-app session content script to register a message listener');

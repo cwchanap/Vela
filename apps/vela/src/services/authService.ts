@@ -56,6 +56,10 @@ const configureAmplify = () => {
 
 const cognitoEnabled = configureAmplify();
 
+// Per-user memo to avoid redundant profile-creation POSTs.
+// Reset to null on sign-out so a different user can trigger a fresh check.
+let profileEnsuredForUserId: string | null = null;
+
 // Listen to auth events
 if (cognitoEnabled) {
   Hub.listen('auth', (data) => {
@@ -63,6 +67,7 @@ if (cognitoEnabled) {
     if (event === 'signedIn') {
       console.log('✅ User signed in to Cognito');
     } else if (event === 'signedOut') {
+      profileEnsuredForUserId = null;
       console.log('✅ User signed out from Cognito');
     } else if (event === 'tokenRefresh') {
       console.log('✅ Cognito token refreshed successfully');
@@ -126,6 +131,7 @@ class AuthService {
 
     try {
       await signOut();
+      profileEnsuredForUserId = null;
       return { success: true };
     } catch (error) {
       return {
@@ -181,9 +187,19 @@ class AuthService {
 
   /**
    * Check whether the current browser has a valid Cognito session.
+   * Read-only — does not trigger profile creation or user attribute fetches.
    */
   async isAuthenticated(): Promise<boolean> {
-    return (await this.getCurrentSession()) !== null;
+    if (!cognitoEnabled) {
+      return false;
+    }
+
+    try {
+      const session = await fetchAuthSession();
+      return session.tokens?.accessToken !== undefined;
+    } catch {
+      return false;
+    }
   }
 
   /**
@@ -320,13 +336,20 @@ class AuthService {
     email?: string | null,
     username?: string | null,
   ): Promise<void> {
+    if (profileEnsuredForUserId === userId) {
+      return;
+    }
+
     try {
       // Always attempt to create the profile with username first
       // The backend will handle duplicates gracefully
       await this.createUserProfile(userId, { email: email || null, username: username || null });
+      profileEnsuredForUserId = userId;
     } catch (error) {
       // If create fails (e.g., profile already exists), that's fine
       // The profile was created either by us or by a concurrent request
+      // Still mark as ensured to avoid retrying on every call
+      profileEnsuredForUserId = userId;
       console.log('Profile creation completed (may already exist):', error);
     }
   }
@@ -334,3 +357,8 @@ class AuthService {
 
 // Export singleton instance
 export const authService = new AuthService();
+
+/** @internal Reset the per-user profile-ensured guard. For test isolation only. */
+export const _resetProfileGuard = () => {
+  profileEnsuredForUserId = null;
+};

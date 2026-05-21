@@ -73,7 +73,7 @@ async function seedAuthSession(page: Page, email: string, password: string): Pro
   if (!payloadB64) {
     throw new Error('Access token does not contain a valid JWT payload');
   }
-  const tokenPayload = JSON.parse(Buffer.from(payloadB64, 'base64').toString('utf-8'));
+  const tokenPayload = JSON.parse(Buffer.from(payloadB64, 'base64url').toString('utf-8'));
   const username: string = tokenPayload['cognito:username'] || tokenPayload['sub'];
 
   // 4. Inject tokens into localStorage using Amplify v6's key format
