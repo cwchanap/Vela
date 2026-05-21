@@ -4,13 +4,7 @@
 // from the Cognito Hosted UI to /auth/callback.
 import 'aws-amplify/auth/enable-oauth-listener';
 import { Amplify } from 'aws-amplify';
-import {
-  signInWithRedirect,
-  signOut,
-  getCurrentUser,
-  fetchAuthSession,
-  fetchUserAttributes,
-} from 'aws-amplify/auth';
+import { signInWithRedirect, signOut, getCurrentUser, fetchAuthSession } from 'aws-amplify/auth';
 import { Hub } from 'aws-amplify/utils';
 import type { Profile, ProfileInsert } from '../types/shared';
 import { config } from '../config';
@@ -98,8 +92,6 @@ export interface AppSession {
   user: AppUser | null;
   provider?: 'cognito';
 }
-
-type CognitoUser = Awaited<ReturnType<typeof getCurrentUser>>;
 
 interface HydratedAuthUser {
   id: string;
@@ -303,21 +295,29 @@ class AuthService {
     };
   }
 
+  /**
+   * Hydrate the current user by reading claims directly from the ID token.
+   *
+   * Uses the decoded JWT payload instead of `fetchUserAttributes()` because
+   * that method calls the Cognito `GetUser` API, which requires the
+   * `aws.cognito.signin.user.admin` scope — a scope the app deliberately
+   * omits. The ID token already contains email/name claims from the Google
+   * OIDC flow, so we avoid an extra network call and the missing-scope error.
+   */
   private async hydrateCurrentUser(): Promise<HydratedAuthUser> {
-    const user = await getCurrentUser();
-    return this.hydrateUser(user);
-  }
+    const [user, session] = await Promise.all([getCurrentUser(), fetchAuthSession()]);
 
-  private async hydrateUser(user: CognitoUser): Promise<HydratedAuthUser> {
     let email = user.signInDetails?.loginId || null;
     let username: string | null = null;
 
-    try {
-      const attributes = await fetchUserAttributes();
-      email = email || attributes.email || null;
-      username = attributes.preferred_username || attributes.name || null;
-    } catch {
-      // OAuth redirects should populate attributes, but preserve legacy loginId behavior if not.
+    const idToken = session.tokens?.idToken;
+    if (idToken) {
+      const claims = idToken.payload;
+      email = email || (claims.email as string | undefined) || null;
+      username =
+        (claims.preferred_username as string | undefined) ||
+        (claims.name as string | undefined) ||
+        null;
     }
 
     return {
