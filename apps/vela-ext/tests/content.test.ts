@@ -2,28 +2,11 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 
 import contentScriptConfig, { scanJapaneseSentences } from '../entrypoints/content';
 
-const contentScript = contentScriptConfig as unknown as { main(): void };
-const localStorageState: Record<string, string> = {};
-
-Object.defineProperty(window, 'localStorage', {
-  value: {
-    get length() {
-      return Object.keys(localStorageState).length;
-    },
-    key: (index: number) => Object.keys(localStorageState)[index] ?? null,
-    getItem: (key: string) => localStorageState[key] ?? null,
-    setItem: (key: string, value: string) => {
-      localStorageState[key] = value;
-    },
-    removeItem: (key: string) => {
-      delete localStorageState[key];
-    },
-    clear: () => {
-      Object.keys(localStorageState).forEach((key) => delete localStorageState[key]);
-    },
-  },
-  configurable: true,
-});
+const contentScript = contentScriptConfig as unknown as {
+  matches: string[];
+  excludeMatches?: string[];
+  main(): void;
+};
 
 function getRegisteredMessageListener() {
   const addListener = (globalThis as any).browser.runtime.onMessage.addListener;
@@ -43,17 +26,24 @@ const noopSendResponse = vi.fn();
 
 beforeEach(() => {
   document.body.innerHTML = '';
-  localStorage.clear();
   (globalThis as any).browser.runtime.onMessage.addListener.mockClear();
   (globalThis as any).browser.runtime.sendMessage.mockReset();
 });
 
-function jwtWithPayload(payload: Record<string, unknown>) {
-  return `header.${btoa(JSON.stringify(payload))
-    .replaceAll('+', '-')
-    .replaceAll('/', '_')
-    .replace(/=+$/, '')}.signature`;
-}
+describe('content script config', () => {
+  it('runs the scanner broadly but excludes Vela and OAuth surfaces', () => {
+    expect(contentScript.matches).toEqual(['*://*/*']);
+    expect(contentScript.excludeMatches).toEqual(
+      expect.arrayContaining([
+        'https://vela.cwchanap.dev/*',
+        'http://localhost:9000/*',
+        'http://127.0.0.1:9000/*',
+        'https://*.amazoncognito.com/*',
+        'https://*.google.com/*',
+      ]),
+    );
+  });
+});
 
 describe('scanJapaneseSentences', () => {
   it('collects Japanese text nodes matching the regex', () => {
@@ -215,56 +205,14 @@ describe('content script message listener', () => {
     });
   });
 
-  it('sends the web-app Cognito session from localStorage via sendResponse when requested by the popup', () => {
-    const idToken = jwtWithPayload({ email: 'user@example.com' });
-    localStorage.setItem(
-      'CognitoIdentityServiceProvider.client-id.LastAuthUser',
-      'user@example.com',
-    );
-    localStorage.setItem(
-      'CognitoIdentityServiceProvider.client-id.user@example.com.accessToken',
-      'access-token',
-    );
-    localStorage.setItem(
-      'CognitoIdentityServiceProvider.client-id.user@example.com.refreshToken',
-      'refresh-token',
-    );
-    localStorage.setItem(
-      'CognitoIdentityServiceProvider.client-id.user@example.com.idToken',
-      idToken,
-    );
-
+  it('leaves web-app session import messages to the Vela-only content script', () => {
     contentScript.main();
     const listener = getRegisteredMessageListener();
     const sendResponse = vi.fn();
     listener({ type: 'GET_VELA_WEBAPP_SESSION' }, {}, sendResponse);
 
-    expect(sendResponse).toHaveBeenCalledWith({
-      tokens: {
-        accessToken: 'access-token',
-        refreshToken: 'refresh-token',
-        idToken,
-      },
-      email: 'user@example.com',
-    });
-  });
-
-  it('responds with null when localStorage access throws a SecurityError', () => {
-    // Override localStorage.getItem to throw
-    const originalGetItem = window.localStorage.getItem;
-    vi.spyOn(window.localStorage, 'getItem').mockImplementation(() => {
-      throw new DOMException('The operation is insecure.', 'SecurityError');
-    });
-
-    contentScript.main();
-    const listener = getRegisteredMessageListener();
-    const sendResponse = vi.fn();
-    listener({ type: 'GET_VELA_WEBAPP_SESSION' }, {}, sendResponse);
-
-    expect(sendResponse).toHaveBeenCalledWith(null);
-
-    vi.restoreAllMocks();
-    window.localStorage.getItem = originalGetItem;
+    expect(sendResponse).not.toHaveBeenCalled();
+    expect(document.getElementById('vela-ext-overlay-host')).toBeNull();
   });
 
   it('shows success only after SAVE_SENTENCES resolves', async () => {
