@@ -1,5 +1,24 @@
 import { defineConfig, devices } from '@playwright/test';
 
+type E2EEnvSource = Pick<
+  NodeJS.ProcessEnv,
+  'VITE_COGNITO_TEST_CLIENT_ID' | 'VITE_COGNITO_USER_POOL_CLIENT_ID'
+>;
+
+export function buildE2EWebServerEnv(env: E2EEnvSource = process.env): Record<string, string> {
+  const testClientId = env.VITE_COGNITO_TEST_CLIENT_ID;
+  if (!testClientId) {
+    return {};
+  }
+
+  return {
+    VITE_COGNITO_USER_POOL_CLIENT_ID: testClientId,
+    COGNITO_CLIENT_ID: testClientId,
+  };
+}
+
+const e2eWebServerEnv = buildE2EWebServerEnv();
+
 /**
  * @see https://playwright.dev/docs/test-configuration
  */
@@ -47,6 +66,7 @@ export default defineConfig({
     {
       command: 'bun run dev',
       url: 'http://localhost:9000',
+      env: e2eWebServerEnv,
       reuseExistingServer: !process.env.CI,
       timeout: 120 * 1000,
     },
@@ -55,6 +75,7 @@ export default defineConfig({
         "bun --eval \"process.env.NODE_ENV = 'development'; await import('./src/index.ts'); await new Promise(() => {})\"",
       cwd: '../vela-api',
       url: 'http://localhost:9005',
+      env: e2eWebServerEnv,
       reuseExistingServer: !process.env.CI,
       timeout: 60 * 1000,
     },
