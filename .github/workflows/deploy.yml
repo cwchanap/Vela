@@ -50,7 +50,7 @@ jobs:
     env:
       COGNITO_DOMAIN_PREFIX: ${{ vars.COGNITO_DOMAIN_PREFIX }}
       GOOGLE_OAUTH_CLIENT_ID: ${{ vars.GOOGLE_OAUTH_CLIENT_ID }}
-      GOOGLE_OAUTH_CLIENT_SECRET_NAME: ${{ vars.GOOGLE_OAUTH_CLIENT_SECRET_NAME }}
+      GOOGLE_OAUTH_CLIENT_SECRET: ${{ secrets.GOOGLE_OAUTH_CLIENT_SECRET }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -88,8 +88,8 @@ jobs:
             exit 1
           fi
 
-          if [ -z "$GOOGLE_OAUTH_CLIENT_SECRET_NAME" ]; then
-            echo "::error::Missing repository/environment variable GOOGLE_OAUTH_CLIENT_SECRET_NAME"
+          if [ -z "$GOOGLE_OAUTH_CLIENT_SECRET" ]; then
+            echo "::error::Missing repository/environment secret GOOGLE_OAUTH_CLIENT_SECRET"
             exit 1
           fi
 
@@ -134,7 +134,9 @@ jobs:
         working-directory: packages/cdk
 
       - name: Deploy infrastructure with CDK
-        run: bunx aws-cdk deploy --all --require-approval never
+        run: |
+          bunx aws-cdk deploy --all --require-approval never \
+            --parameters AuthStack:GoogleOAuthClientSecret="$GOOGLE_OAUTH_CLIENT_SECRET"
         working-directory: packages/cdk
 
       - name: Get deployment outputs

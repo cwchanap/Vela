@@ -12,7 +12,6 @@ describe('AuthStack', () => {
     process.env.COGNITO_DOMAIN_PREFIX = 'vela-test-auth';
     process.env.GOOGLE_OAUTH_CLIENT_ID = 'test-google-client-id.apps.googleusercontent.com';
     process.env.GOOGLE_OAUTH_CLIENT_SECRET_NAME = 'vela/test-google-oauth-client-secret';
-    delete process.env.GOOGLE_OAUTH_CLIENT_SECRET;
   });
 
   afterEach(() => {
@@ -45,7 +44,27 @@ describe('AuthStack', () => {
       },
       ProviderDetails: {
         client_id: 'test-google-client-id.apps.googleusercontent.com',
+        client_secret: {
+          Ref: 'GoogleOAuthClientSecret',
+        },
         authorize_scopes: 'profile email openid',
+      },
+    });
+  });
+
+  test('creates a managed Secrets Manager secret from a no-echo deploy parameter', () => {
+    const template = synthesizeTemplate();
+
+    template.hasParameter('GoogleOAuthClientSecret', {
+      Type: 'String',
+      NoEcho: true,
+      Default: 'local-synth-only',
+    });
+
+    template.hasResourceProperties('AWS::SecretsManager::Secret', {
+      Name: 'vela/test-google-oauth-client-secret',
+      SecretString: {
+        Ref: 'GoogleOAuthClientSecret',
       },
     });
   });
@@ -88,12 +107,12 @@ describe('AuthStack', () => {
     expect(client.Properties.AllowedOAuthScopes.toSorted()).toEqual(['email', 'openid', 'profile']);
   });
 
-  test('rejects plaintext Google OAuth client secrets', () => {
-    process.env.GOOGLE_OAUTH_CLIENT_SECRET = 'plaintext-secret';
+  test('does not synthesize the GitHub Actions secret value into the template', () => {
+    process.env.GOOGLE_OAUTH_CLIENT_SECRET = 'plaintext-secret-from-github-actions';
 
-    expect(() => synthesizeTemplate()).toThrow(
-      'GOOGLE_OAUTH_CLIENT_SECRET is not supported for CDK synthesis. Store the secret in Secrets Manager and set GOOGLE_OAUTH_CLIENT_SECRET_NAME.',
-    );
+    const template = synthesizeTemplate();
+
+    expect(JSON.stringify(template.toJSON())).not.toContain('plaintext-secret-from-github-actions');
   });
 
   test('requires a Google OAuth client id outside local placeholder mode', () => {
@@ -106,13 +125,19 @@ describe('AuthStack', () => {
     );
   });
 
-  test('requires a Google OAuth client secret name outside local placeholder mode', () => {
+  test('defaults the managed Google OAuth client secret name outside local placeholder mode', () => {
     delete process.env.NODE_ENV;
     delete process.env.ALLOW_LOCAL_OAUTH_PLACEHOLDERS;
     delete process.env.GOOGLE_OAUTH_CLIENT_SECRET_NAME;
 
-    expect(() => synthesizeTemplate()).toThrow(
-      'Missing GOOGLE_OAUTH_CLIENT_SECRET_NAME. Store the Google OAuth client secret in Secrets Manager and set GOOGLE_OAUTH_CLIENT_SECRET_NAME, or set ALLOW_LOCAL_OAUTH_PLACEHOLDERS=true for local-only synth.',
-    );
+    const template = synthesizeTemplate();
+
+    template.hasParameter('GoogleOAuthClientSecret', {
+      Type: 'String',
+      NoEcho: true,
+    });
+    template.hasResourceProperties('AWS::SecretsManager::Secret', {
+      Name: 'vela/google-oauth-client-secret',
+    });
   });
 });
