@@ -99,6 +99,16 @@ describe('AuthStack', () => {
     });
   });
 
+  test('defaults the Cognito hosted UI domain prefix from CDK', () => {
+    delete process.env.COGNITO_DOMAIN_PREFIX;
+
+    const template = synthesizeTemplate();
+
+    template.hasResourceProperties('AWS::Cognito::UserPoolDomain', {
+      Domain: 'vela-cwchanap-auth',
+    });
+  });
+
   test('uses only the expected OAuth scopes', () => {
     const template = synthesizeTemplate();
     const clients = template.findResources('AWS::Cognito::UserPoolClient');

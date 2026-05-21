@@ -14,6 +14,8 @@ import { Construct } from 'constructs';
 
 export interface AuthStackProps extends StackProps {}
 
+const DEFAULT_COGNITO_DOMAIN_PREFIX = 'vela-cwchanap-auth';
+
 export class AuthStack extends Stack {
   public readonly userPool: UserPool;
   public readonly userPoolClient: UserPoolClient;
@@ -25,13 +27,7 @@ export class AuthStack extends Stack {
 
     const allowLocalOAuthPlaceholders = process.env.ALLOW_LOCAL_OAUTH_PLACEHOLDERS === 'true';
 
-    const domainPrefix =
-      process.env.COGNITO_DOMAIN_PREFIX || (allowLocalOAuthPlaceholders ? 'vela-local-auth' : '');
-    if (!domainPrefix) {
-      throw new Error(
-        'Missing COGNITO_DOMAIN_PREFIX. Set it to the Cognito Hosted UI domain prefix, or set ALLOW_LOCAL_OAUTH_PLACEHOLDERS=true for local-only synth.',
-      );
-    }
+    const domainPrefix = process.env.COGNITO_DOMAIN_PREFIX || DEFAULT_COGNITO_DOMAIN_PREFIX;
 
     const googleClientId =
       process.env.GOOGLE_OAUTH_CLIENT_ID ||
