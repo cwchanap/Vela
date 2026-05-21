@@ -122,9 +122,17 @@ ApiStack → [auth, db, storage] # Lambda + API Gateway
 StaticWebStack → [all above]   # CloudFront + S3 static hosting
 ```
 
+## Authentication
+
+Vela uses **Google-only OAuth** via Cognito Hosted UI. There is no password-based login.
+
+- **Local dev**: Requires a valid Cognito session. Run `bun run dev` and sign in through the Google OAuth flow on `http://localhost:9000/auth/login`. You need the Cognito Google IdP configured and your Google account allow-listed in the user pool.
+- **E2E tests**: Use the seeded-token fixture (`e2e/fixtures/auth.ts`) which calls `AdminInitiateAuth` via the AWS SDK to bypass Google's UI. This requires AWS credentials (`aws sso login` or env-injected) and the `VITE_COGNITO_TEST_CLIENT_ID` env var (see `.env.example`).
+- **Extension**: Imports tokens from the web app's localStorage via a content script restricted to Vela origins.
+
 ## Testing
 
-- **E2E tests** require `TEST_EMAIL` and `TEST_PASSWORD` env vars (see `.env.example`)
+- **E2E tests** require `TEST_EMAIL`, `TEST_PASSWORD`, and `VITE_COGNITO_TEST_CLIENT_ID` env vars (see `.env.example`). Also requires AWS credentials for `AdminInitiateAuth`.
 - **Vitest** uses jsdom environment with globals enabled; setup file at `src/test/setup.ts`
 - **Vitest aliases**: `@vela/common` is aliased directly to the source (`packages/common/src/index.ts`) — no build step needed for unit tests
 - **API tests** use Bun's built-in test runner (no Vitest)
