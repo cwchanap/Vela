@@ -43,7 +43,6 @@ const props = withDefaults(defineProps<Props>(), {
 });
 
 const emit = defineEmits<{
-  success: [type: 'signin' | 'signup'];
   error: [message: string];
 }>();
 

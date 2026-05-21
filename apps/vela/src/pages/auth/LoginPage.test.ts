@@ -42,10 +42,9 @@ describe('LoginPage', () => {
           'q-icon': true,
           AuthForm: {
             name: 'AuthForm',
-            template:
-              '<div data-testid="auth-form" /><button @click="$emit(\'success\', \'signin\')" data-testid="trigger-success">trigger</button>',
+            template: '<div data-testid="auth-form" />',
             props: ['mode', 'redirectTo'],
-            emits: ['success', 'error'],
+            emits: ['error'],
           },
         },
       },
@@ -94,30 +93,6 @@ describe('LoginPage', () => {
       wrapper = mountComponent();
       await flushPromises();
       expect(wrapper.vm.authMode).toBe('signin');
-    });
-  });
-
-  describe('handleAuthSuccess', () => {
-    it('ignores legacy signup success events', async () => {
-      wrapper = mountComponent();
-      const routerPushSpy = vi.spyOn(router, 'push');
-      await wrapper.vm.handleAuthSuccess('signup');
-      expect(routerPushSpy).not.toHaveBeenCalled();
-    });
-
-    it('redirects to "/" after signin success', async () => {
-      vi.useFakeTimers();
-      try {
-        wrapper = mountComponent();
-        const routerPushSpy = vi.spyOn(router, 'push');
-        // handleAuthSuccess with 'signin' waits 1 second then pushes
-        const promise = wrapper.vm.handleAuthSuccess('signin');
-        await vi.runAllTimersAsync();
-        await promise;
-        expect(routerPushSpy).toHaveBeenCalledWith('/');
-      } finally {
-        vi.useRealTimers();
-      }
     });
   });
 

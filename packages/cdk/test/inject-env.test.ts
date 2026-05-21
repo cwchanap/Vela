@@ -70,4 +70,24 @@ describe('inject-env', () => {
       'Missing CognitoOAuthDomain in CloudFormation outputs and COGNITO_DOMAIN_PREFIX is not set',
     );
   });
+
+  test('prefers CognitoOAuthDomain from CloudFormation outputs over derived prefix', () => {
+    writeOutputs([
+      { OutputKey: 'CognitoUserPoolId', OutputValue: 'us-east-1_testPool' },
+      { OutputKey: 'CognitoUserPoolClientId', OutputValue: 'test-client-id' },
+      { OutputKey: 'CognitoRegion', OutputValue: 'us-east-1' },
+      { OutputKey: 'CognitoOAuthDomain', OutputValue: 'custom.auth.us-east-1.amazoncognito.com' },
+    ]);
+
+    const result = runInjectEnv({
+      COGNITO_DOMAIN_PREFIX: 'different-prefix',
+      VITE_AWS_REGION: undefined,
+      AWS_REGION: undefined,
+    });
+
+    expect(result.status).toBe(0);
+    const envFile = fs.readFileSync(path.join(tempRoot, 'apps', 'vela', '.env.production'), 'utf8');
+    expect(envFile).toContain('VITE_COGNITO_OAUTH_DOMAIN=custom.auth.us-east-1.amazoncognito.com');
+    expect(envFile).not.toContain('different-prefix');
+  });
 });
