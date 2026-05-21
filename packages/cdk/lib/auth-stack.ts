@@ -1,4 +1,4 @@
-import { Stack, StackProps, RemovalPolicy, SecretValue } from 'aws-cdk-lib';
+import { Stack, StackProps, RemovalPolicy, SecretValue, CfnParameter } from 'aws-cdk-lib';
 import {
   UserPool,
   UserPoolClient,
@@ -9,6 +9,7 @@ import {
   UserPoolDomain,
   UserPoolIdentityProviderGoogle,
 } from 'aws-cdk-lib/aws-cognito';
+import * as secretsmanager from 'aws-cdk-lib/aws-secretsmanager';
 import { Construct } from 'constructs';
 
 export interface AuthStackProps extends StackProps {}
@@ -23,12 +24,6 @@ export class AuthStack extends Stack {
     super(scope, id, props);
 
     const allowLocalOAuthPlaceholders = process.env.ALLOW_LOCAL_OAUTH_PLACEHOLDERS === 'true';
-
-    if (process.env.GOOGLE_OAUTH_CLIENT_SECRET) {
-      throw new Error(
-        'GOOGLE_OAUTH_CLIENT_SECRET is not supported for CDK synthesis. Store the secret in Secrets Manager and set GOOGLE_OAUTH_CLIENT_SECRET_NAME.',
-      );
-    }
 
     const domainPrefix =
       process.env.COGNITO_DOMAIN_PREFIX || (allowLocalOAuthPlaceholders ? 'vela-local-auth' : '');
@@ -48,15 +43,32 @@ export class AuthStack extends Stack {
     }
 
     const googleClientSecretName =
-      process.env.GOOGLE_OAUTH_CLIENT_SECRET_NAME ||
-      (allowLocalOAuthPlaceholders ? 'vela/google-oauth-client-secret' : '');
-    if (!googleClientSecretName) {
-      throw new Error(
-        'Missing GOOGLE_OAUTH_CLIENT_SECRET_NAME. Store the Google OAuth client secret in Secrets Manager and set GOOGLE_OAUTH_CLIENT_SECRET_NAME, or set ALLOW_LOCAL_OAUTH_PLACEHOLDERS=true for local-only synth.',
-      );
+      process.env.GOOGLE_OAUTH_CLIENT_SECRET_NAME || 'vela/google-oauth-client-secret';
+    const googleClientSecretParameterProps: {
+      type: string;
+      noEcho: boolean;
+      description: string;
+      default?: string;
+    } = {
+      type: 'String',
+      noEcho: true,
+      description: 'Google OAuth web client secret supplied by GitHub Actions at deploy time.',
+    };
+    if (allowLocalOAuthPlaceholders) {
+      googleClientSecretParameterProps.default = 'local-synth-only';
     }
 
-    const googleClientSecretValue = SecretValue.secretsManager(googleClientSecretName);
+    const googleClientSecretParameter = new CfnParameter(
+      this,
+      'GoogleOAuthClientSecret',
+      googleClientSecretParameterProps,
+    );
+    const googleClientSecretValue = SecretValue.cfnParameter(googleClientSecretParameter);
+    const googleClientSecret = new secretsmanager.Secret(this, 'VelaGoogleOAuthClientSecret', {
+      secretName: googleClientSecretName,
+      secretStringValue: googleClientSecretValue,
+    });
+    googleClientSecret.applyRemovalPolicy(RemovalPolicy.RETAIN);
 
     const userPool = new UserPool(this, 'VelaUserPool', {
       userPoolName: `vela-user-pool-${Stack.of(this).account}`,
