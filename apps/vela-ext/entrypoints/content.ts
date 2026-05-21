@@ -315,8 +315,8 @@ export default defineContentScript({
   matches: ['*://*/*'],
   excludeMatches: [
     'https://vela.cwchanap.dev/*',
-    'http://localhost:9000/*',
-    'http://127.0.0.1:9000/*',
+    'http://localhost:9000/auth/*',
+    'http://127.0.0.1:9000/auth/*',
     'https://*.amazoncognito.com/*',
     'https://*.google.com/*',
   ],

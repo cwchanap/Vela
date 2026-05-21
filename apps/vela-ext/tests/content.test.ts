@@ -31,17 +31,19 @@ beforeEach(() => {
 });
 
 describe('content script config', () => {
-  it('runs the scanner broadly but excludes Vela and OAuth surfaces', () => {
+  it('runs the scanner broadly but excludes Vela and OAuth surfaces without blocking the local fixture', () => {
     expect(contentScript.matches).toEqual(['*://*/*']);
     expect(contentScript.excludeMatches).toEqual(
       expect.arrayContaining([
         'https://vela.cwchanap.dev/*',
-        'http://localhost:9000/*',
-        'http://127.0.0.1:9000/*',
+        'http://localhost:9000/auth/*',
+        'http://127.0.0.1:9000/auth/*',
         'https://*.amazoncognito.com/*',
         'https://*.google.com/*',
       ]),
     );
+    expect(contentScript.excludeMatches).not.toContain('http://localhost:9000/*');
+    expect(contentScript.excludeMatches).not.toContain('http://127.0.0.1:9000/*');
   });
 });
 
