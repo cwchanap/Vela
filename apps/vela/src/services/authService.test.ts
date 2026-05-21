@@ -1,6 +1,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach, beforeAll, afterAll } from 'vitest';
 import { authService } from './authService';
 
+// Mock the OAuth redirect listener side-effect import
+vi.mock('aws-amplify/auth/enable-oauth-listener', () => ({}));
+
 // Mock Amplify modules
 vi.mock('aws-amplify/auth', () => ({
   signInWithRedirect: vi.fn(),
