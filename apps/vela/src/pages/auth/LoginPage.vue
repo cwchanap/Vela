@@ -20,12 +20,7 @@
 
         <!-- Authentication Card -->
         <div class="auth-card">
-          <AuthForm
-            :mode="authMode"
-            :redirect-to="redirectTo"
-            @success="handleAuthSuccess"
-            @error="handleAuthError"
-          />
+          <AuthForm :mode="authMode" :redirect-to="redirectTo" @error="handleAuthError" />
         </div>
 
         <!-- Features Preview -->
@@ -72,25 +67,6 @@ const getInitialRedirect = () => {
   const routeRedirect = getRouteRedirect();
   const isAuthCallback = route.name === 'auth-callback' || route.path === '/auth/callback';
   return isAuthCallback ? authStore.consumePendingAuthRedirect(routeRedirect) : routeRedirect;
-};
-
-const handleAuthSuccess = async (type: 'signin' | 'signup') => {
-  console.log('Auth success:', type);
-
-  if (type !== 'signin') {
-    return;
-  }
-
-  $q.notify({
-    type: 'positive',
-    message: 'Welcome back!',
-    timeout: 3000,
-  });
-  // Small delay to allow notification to show before redirect
-  await new Promise((resolve) => setTimeout(resolve, 1000));
-  // Explicitly redirect to desired target (respects ?redirect=...)
-  // This ensures navigation even if router guard timing is off
-  await router.push(redirectTo.value);
 };
 
 const handleAuthError = (message: string) => {

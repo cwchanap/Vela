@@ -22,8 +22,7 @@ export class AuthStack extends Stack {
   constructor(scope: Construct, id: string, props?: AuthStackProps) {
     super(scope, id, props);
 
-    const allowLocalOAuthPlaceholders =
-      process.env.ALLOW_LOCAL_OAUTH_PLACEHOLDERS === 'true' || process.env.NODE_ENV === 'test';
+    const allowLocalOAuthPlaceholders = process.env.ALLOW_LOCAL_OAUTH_PLACEHOLDERS === 'true';
 
     if (process.env.GOOGLE_OAUTH_CLIENT_SECRET) {
       throw new Error(

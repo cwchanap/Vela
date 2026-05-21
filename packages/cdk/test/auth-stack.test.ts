@@ -8,7 +8,7 @@ describe('AuthStack', () => {
 
   beforeEach(() => {
     process.env = { ...originalEnv };
-    process.env.NODE_ENV = 'test';
+    process.env.ALLOW_LOCAL_OAUTH_PLACEHOLDERS = 'true';
     process.env.COGNITO_DOMAIN_PREFIX = 'vela-test-auth';
     process.env.GOOGLE_OAUTH_CLIENT_ID = 'test-google-client-id.apps.googleusercontent.com';
     process.env.GOOGLE_OAUTH_CLIENT_SECRET_NAME = 'vela/test-google-oauth-client-secret';
