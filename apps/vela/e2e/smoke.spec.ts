@@ -19,10 +19,12 @@ test.describe('Smoke Tests', () => {
   test('should navigate to login page', async ({ page }) => {
     await page.goto('/auth/login');
 
-    // Should show login form
-    await expect(page.locator('input[type="email"]')).toBeVisible();
-    await expect(page.locator('input[type="password"]')).toBeVisible();
-    await expect(page.locator('button[type="submit"]')).toBeVisible();
+    // Should show Google-only auth surface
+    await expect(page.getByRole('button', { name: /continue with google/i })).toBeVisible();
+
+    // Should not show email/password form controls
+    await expect(page.locator('input[type="email"]')).toHaveCount(0);
+    await expect(page.locator('input[type="password"]')).toHaveCount(0);
   });
 
   test('should handle JavaScript errors gracefully', async ({ page }) => {

@@ -21,21 +21,21 @@ export const test = base.extend<{
   authenticatedPage: Page;
 }>({
   authenticatedPage: async ({ page }, use) => {
-    // Navigate to login page
-    await page.goto('/auth/login');
+    // Navigate to the app first so Amplify is configured
+    await page.goto('/');
+    await page.waitForLoadState('networkidle');
 
-    // Wait for the auth form to be visible
-    await page.waitForSelector('.auth-form', { timeout: 10000 });
-
-    // Fill in login form - using label selectors for better reliability
-    await page.getByLabel('Email').fill(TEST_USER.email);
-    await page.getByLabel('Password').fill(TEST_USER.password);
-
-    // Submit login form by clicking the Sign In button
-    await page.getByRole('button', { name: 'Sign In' }).click();
+    // Programmatically sign in via Amplify's signIn (SRP)
+    // This bypasses the Google-only UI while still using real Cognito auth
+    await page.evaluate(
+      async ({ email, password }) => {
+        const { signIn } = await import('aws-amplify/auth');
+        await signIn({ username: email, password });
+      },
+      { email: TEST_USER.email, password: TEST_USER.password },
+    );
 
     // Wait for successful login and redirect to home page (/)
-    // The URL can be / or /home or /dashboard
     await expect(page).toHaveURL(/\/(home|dashboard)?$/, { timeout: 20000 });
 
     await use(page);
