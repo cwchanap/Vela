@@ -296,7 +296,7 @@ class AuthService {
     try {
       const attributes = await fetchUserAttributes();
       email = email || attributes.email || null;
-      username = attributes.preferred_username || null;
+      username = attributes.preferred_username || attributes.name || null;
     } catch {
       // OAuth redirects should populate attributes, but preserve legacy loginId behavior if not.
     }

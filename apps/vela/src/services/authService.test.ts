@@ -484,6 +484,42 @@ describe('AuthService', () => {
       });
     });
 
+    it('should fall back to name attribute when preferred_username is missing for Google users', async () => {
+      const mockUser = {
+        userId: 'google-user-456',
+      } as any;
+      const mockSession = { tokens: { accessToken: 'token' as any } } as any;
+
+      vi.mocked(getCurrentUser).mockResolvedValue(mockUser);
+      vi.mocked(fetchAuthSession).mockResolvedValue(mockSession);
+      // Google maps display name to "name", not "preferred_username"
+      vi.mocked(fetchUserAttributes).mockResolvedValue({
+        email: 'google@example.com',
+        name: 'Google Display Name',
+      } as any);
+
+      const createProfileSpy = vi
+        .spyOn(authService as any, 'createUserProfile')
+        .mockResolvedValue(undefined);
+      const callback = vi.fn();
+      let capturedListener: ((_data: any) => void) | null = null;
+
+      vi.mocked(Hub.listen).mockImplementation((_channel: any, listener: any) => {
+        capturedListener = listener;
+        return vi.fn() as any;
+      });
+
+      authService.onAuthStateChange(callback);
+      capturedListener!({ payload: { event: 'signedIn' } });
+
+      await vi.waitFor(() => expect(callback).toHaveBeenCalled());
+
+      expect(createProfileSpy).toHaveBeenCalledWith('google-user-456', {
+        email: 'google@example.com',
+        username: 'Google Display Name',
+      });
+    });
+
     it('should log error when getCurrentUser throws during signedIn Hub event', async () => {
       const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
       const err = new Error('get user failed');
