@@ -13,7 +13,7 @@ import { httpJsonAuth } from 'src/utils/httpClient';
 // Configure Amplify with Cognito
 const configureAmplify = () => {
   const { userPoolId, userPoolClientId, region, oauth } = config.cognito;
-  if (!userPoolId || !userPoolClientId || !region) {
+  if (!userPoolId || !userPoolClientId || !region || !oauth.domain) {
     console.warn('⚠️ Missing Cognito configuration. Authentication will be disabled.');
     return false;
   }
