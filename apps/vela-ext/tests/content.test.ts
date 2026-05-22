@@ -42,7 +42,7 @@ describe('content script config', () => {
         'http://localhost:9000/auth/*',
         'http://127.0.0.1:9000/auth/*',
         'https://*.amazoncognito.com/*',
-        'https://*.google.com/*',
+        'https://accounts.google.com/*',
       ]),
     );
     expect(contentScript.excludeMatches).not.toContain('http://localhost:9000/*');

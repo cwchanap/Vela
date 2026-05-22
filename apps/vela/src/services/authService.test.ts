@@ -646,6 +646,57 @@ describe('AuthService', () => {
     });
   });
 
+  describe('with Cognito pool configured but missing OAuth domain', () => {
+    // When userPoolId, userPoolClientId, and region are present but oauth.domain
+    // is empty, configureAmplify must still return false so that the app does not
+    // render a Google sign-in button that fails at click time.
+    let noOAuthAuthService: typeof authService;
+
+    beforeAll(async () => {
+      vi.resetModules();
+      vi.doMock('../config', () => ({
+        config: {
+          cognito: {
+            userPoolId: 'present-pool-id',
+            userPoolClientId: 'present-client-id',
+            region: 'us-east-1',
+            oauth: {
+              domain: '',
+              redirectSignIn: ['http://localhost:9000/auth/callback'],
+              redirectSignOut: ['http://localhost:9000/auth/login'],
+              responseType: 'code',
+              providers: ['Google'],
+            },
+          },
+          api: { url: '/api/' },
+          app: { isDev: false },
+        },
+      }));
+      const mod = await import('./authService');
+      noOAuthAuthService = mod.authService;
+    });
+
+    afterAll(() => {
+      vi.resetModules();
+    });
+
+    it('signInWithGoogle rejects because auth is disabled', async () => {
+      await expect(noOAuthAuthService.signInWithGoogle()).rejects.toThrow(
+        'Authentication is currently disabled',
+      );
+    });
+
+    it('getCurrentUser returns null because auth is disabled', async () => {
+      const result = await noOAuthAuthService.getCurrentUser();
+      expect(result).toBeNull();
+    });
+
+    it('getCurrentSession returns null because auth is disabled', async () => {
+      const result = await noOAuthAuthService.getCurrentSession();
+      expect(result).toBeNull();
+    });
+  });
+
   describe('private profile creation helpers', () => {
     it('marks profile as ensured when createUserProfile returns true (success or duplicate)', async () => {
       const createProfileSpy = vi
