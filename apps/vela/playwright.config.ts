@@ -17,6 +17,13 @@ export function buildE2EWebServerEnv(
 const e2eWebServerEnv = buildE2EWebServerEnv();
 
 /**
+ * Whether Playwright can reuse an already-running server.
+ * Disabled when a test client override is required, because the reused
+ * server process won't have the overridden env vars applied.
+ */
+const shouldReuseExistingServer = !process.env.CI && !process.env.VITE_COGNITO_TEST_CLIENT_ID;
+
+/**
  * @see https://playwright.dev/docs/test-configuration
  */
 export default defineConfig({
@@ -64,7 +71,7 @@ export default defineConfig({
       command: 'bun run dev',
       url: 'http://localhost:9000',
       env: e2eWebServerEnv,
-      reuseExistingServer: !process.env.CI,
+      reuseExistingServer: shouldReuseExistingServer,
       timeout: 120 * 1000,
     },
     {
@@ -73,7 +80,7 @@ export default defineConfig({
       cwd: '../vela-api',
       url: 'http://localhost:9005',
       env: e2eWebServerEnv,
-      reuseExistingServer: !process.env.CI,
+      reuseExistingServer: shouldReuseExistingServer,
       timeout: 60 * 1000,
     },
   ],

@@ -23,7 +23,7 @@ export const TEST_USER = {
 const COGNITO_CONFIG = {
   userPoolId: requireTestEnv('VITE_COGNITO_USER_POOL_ID'),
   // Must match the client injected into the Playwright app/API web servers.
-  // The production web client intentionally does not allow ADMIN_NO_SRP_AUTH.
+  // The production web client intentionally does not allow ADMIN_USER_PASSWORD_AUTH.
   clientId: requireTestEnv('VITE_COGNITO_TEST_CLIENT_ID'),
   region: requireTestEnv('VITE_AWS_REGION'),
 };
@@ -32,9 +32,9 @@ const COGNITO_CONFIG = {
 const AUTH_KEY_PREFIX = 'CognitoIdentityServiceProvider';
 
 /**
- * Obtain valid Cognito tokens using AdminInitiateAuth (admin-level API
- * bypasses the app client's disabled password/SRP auth flows) and seed
- * them into the browser's localStorage so Amplify recognises the session.
+ * Obtain valid Cognito tokens using AdminInitiateAuth with the
+ * ADMIN_USER_PASSWORD_AUTH flow (enabled on the dedicated test client)
+ * and seed them into the browser's localStorage so Amplify recognises the session.
  */
 async function seedAuthSession(page: Page, email: string, password: string): Promise<void> {
   // 1. Get tokens via AWS SDK from the Node.js test runner context
@@ -46,7 +46,7 @@ async function seedAuthSession(page: Page, email: string, password: string): Pro
     new AdminInitiateAuthCommand({
       UserPoolId: COGNITO_CONFIG.userPoolId,
       ClientId: COGNITO_CONFIG.clientId,
-      AuthFlow: 'ADMIN_NO_SRP_AUTH',
+      AuthFlow: 'ADMIN_USER_PASSWORD_AUTH',
       AuthParameters: {
         USERNAME: email,
         PASSWORD: password,
@@ -107,8 +107,8 @@ export const test = base.extend<{
 }>({
   authenticatedPage: async ({ page }, use) => {
     // Seed a valid Cognito session via AdminInitiateAuth + localStorage injection.
-    // This bypasses the Google-only OAuth UI while still authenticating against
-    // the real Cognito user pool (admin API ignores client-level auth-flow restrictions).
+    // Uses ADMIN_USER_PASSWORD_AUTH which is enabled on the dedicated test client,
+    // bypassing the Google-only OAuth UI while authenticating against the real user pool.
     await seedAuthSession(page, TEST_USER.email, TEST_USER.password);
 
     // Reload so Amplify picks up the seeded tokens and the app enters authenticated state
