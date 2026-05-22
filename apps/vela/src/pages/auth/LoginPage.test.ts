@@ -169,5 +169,27 @@ describe('LoginPage', () => {
       expect(consumeRedirectSpy).toHaveBeenCalledWith('/');
       expect(routerPushSpy).toHaveBeenCalledWith('/progress');
     });
+
+    it('redirects when session arrives after mount (asynchronous OAuth callback)', async () => {
+      const authStore = useAuthStore();
+      const initializeSpy = vi.spyOn(authStore, 'initialize').mockResolvedValue(undefined);
+      const routerPushSpy = vi.spyOn(router, 'push');
+
+      wrapper = mountComponent();
+      await flushPromises();
+
+      // Session wasn't present during mount
+      expect(initializeSpy).toHaveBeenCalled();
+      expect(routerPushSpy).not.toHaveBeenCalled();
+
+      // Simulate OAuth callback completing after mount
+      authStore.setSession({
+        user: { id: 'user-1', email: 'test@example.com' },
+        provider: 'cognito',
+      });
+      await flushPromises();
+
+      expect(routerPushSpy).toHaveBeenCalledWith('/');
+    });
   });
 });

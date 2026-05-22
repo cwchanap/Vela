@@ -204,13 +204,17 @@ class AuthService {
     profileData: Partial<ProfileInsert>,
   ): Promise<boolean> {
     try {
+      const body: Record<string, unknown> = { user_id: userId };
+      if (profileData.email !== undefined && profileData.email !== null) {
+        body.email = profileData.email;
+      }
+      if (profileData.username !== undefined && profileData.username !== null) {
+        body.username = profileData.username;
+      }
+
       await httpJsonAuth<{ success: boolean }>(`${config.api.url}profiles/create`, {
         method: 'POST',
-        body: JSON.stringify({
-          user_id: userId,
-          email: profileData.email,
-          username: profileData.username,
-        }),
+        body: JSON.stringify(body),
       });
       return true;
     } catch (error) {
