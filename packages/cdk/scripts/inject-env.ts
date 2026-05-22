@@ -85,7 +85,7 @@ function main(): void {
   }
 
   const repoRoot = path.resolve(process.cwd(), '..', '..');
-  const envFilePath = path.join(repoRoot, 'apps', 'vela', '.env.prod');
+  const envFilePath = path.join(repoRoot, 'apps', 'vela', '.env.production');
   const envDir = path.dirname(envFilePath);
   fs.mkdirSync(envDir, { recursive: true });
 

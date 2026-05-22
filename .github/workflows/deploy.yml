@@ -109,14 +109,14 @@ jobs:
             fi
           fi
 
-      - name: Inject Vite env (.env.prod) from CDK outputs
+      - name: Inject Vite env (.env.production) from CDK outputs
         run: bun scripts/inject-env.ts
         working-directory: packages/cdk
 
-      - name: Verify .env.prod was generated
+      - name: Verify .env.production was generated
         run: |
-          if [ ! -f apps/vela/.env.prod ]; then
-            echo "::error::.env.prod was not generated — CDK stack outputs unavailable. Deploy infrastructure stacks first, then re-run."
+          if [ ! -f apps/vela/.env.production ]; then
+            echo "::error::.env.production was not generated — CDK stack outputs unavailable. Deploy infrastructure stacks first, then re-run."
             exit 1
           fi
 
