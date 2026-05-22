@@ -42,6 +42,7 @@
         "vuedraggable": "^4.1.0",
       },
       "devDependencies": {
+        "@aws-sdk/client-cognito-identity-provider": "^3.666.0",
         "@playwright/test": "^1.55.0",
         "@quasar/app-vite": "^2.1.0",
         "@quasar/quasar-app-extension-testing": "^2.2.0",
