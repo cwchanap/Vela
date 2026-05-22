@@ -16,6 +16,29 @@ export interface AuthStackProps extends StackProps {}
 
 const DEFAULT_COGNITO_DOMAIN_PREFIX = 'vela-cwchanap-auth';
 
+const DEFAULT_CALLBACK_URLS = [
+  'http://localhost:9000/auth/callback',
+  'http://127.0.0.1:9000/auth/callback',
+  'https://vela.cwchanap.dev/auth/callback',
+];
+
+const DEFAULT_LOGOUT_URLS = [
+  'http://localhost:9000/auth/login',
+  'http://127.0.0.1:9000/auth/login',
+  'https://vela.cwchanap.dev/auth/login',
+];
+
+function parseCommaList(value: string | undefined, defaults: string[]): string[] {
+  if (!value || value.trim().length === 0) {
+    return defaults;
+  }
+  const entries = value
+    .split(',')
+    .map((entry) => entry.trim())
+    .filter((entry) => entry.length > 0);
+  return entries.length > 0 ? entries : defaults;
+}
+
 export class AuthStack extends Stack {
   public readonly userPool: UserPool;
   public readonly userPoolClient: UserPoolClient;
@@ -115,6 +138,9 @@ export class AuthStack extends Stack {
       },
     });
 
+    const callbackUrls = parseCommaList(process.env.COGNITO_CALLBACK_URLS, DEFAULT_CALLBACK_URLS);
+    const logoutUrls = parseCommaList(process.env.COGNITO_LOGOUT_URLS, DEFAULT_LOGOUT_URLS);
+
     const userPoolClient = new UserPoolClient(this, 'VelaUserPoolClient', {
       userPool,
       userPoolClientName: 'vela-web-client',
@@ -132,16 +158,8 @@ export class AuthStack extends Stack {
           implicitCodeGrant: false,
         },
         scopes: [OAuthScope.OPENID, OAuthScope.EMAIL, OAuthScope.PROFILE],
-        callbackUrls: [
-          'http://localhost:9000/auth/callback',
-          'http://127.0.0.1:9000/auth/callback',
-          'https://vela.cwchanap.dev/auth/callback',
-        ],
-        logoutUrls: [
-          'http://localhost:9000/auth/login',
-          'http://127.0.0.1:9000/auth/login',
-          'https://vela.cwchanap.dev/auth/login',
-        ],
+        callbackUrls,
+        logoutUrls,
       },
     });
     userPoolClient.node.addDependency(googleProvider);
