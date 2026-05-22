@@ -219,6 +219,40 @@ describe('AuthService', () => {
 
       expect(result).toBeNull();
     });
+
+    it('omits null username and email from profile creation POST body', async () => {
+      const mockUser = {
+        userId: 'user-123',
+        signInDetails: { loginId: 'test@example.com' },
+      } as any;
+      const mockSession = {
+        tokens: {
+          accessToken: 'valid-token' as any,
+          idToken: { payload: {}, toString: () => 'id-token' } as any,
+        },
+      } as any;
+
+      vi.mocked(fetchAuthSession).mockResolvedValue(mockSession);
+      vi.mocked(getCurrentUser).mockResolvedValue(mockUser);
+      mockFetch.mockResolvedValue({
+        ok: true,
+        json: vi.fn().mockResolvedValue({ success: true }),
+      });
+
+      await authService.getCurrentSession();
+
+      const createCall = mockFetch.mock.calls.find(
+        (call) =>
+          typeof call[0] === 'string' &&
+          call[0].includes('profiles/create') &&
+          call[1]?.method === 'POST',
+      );
+      expect(createCall).toBeDefined();
+      const body = JSON.parse(createCall![1].body);
+      expect(body.user_id).toBe('user-123');
+      expect(body.email).toBe('test@example.com');
+      expect(body).not.toHaveProperty('username');
+    });
   });
 
   describe('getCurrentUser', () => {
