@@ -496,7 +496,7 @@ describe('AuthService', () => {
 
       const createProfileSpy = vi
         .spyOn(authService as any, 'createUserProfile')
-        .mockResolvedValue(undefined);
+        .mockResolvedValue(true);
       const callback = vi.fn();
       let capturedListener: ((_data: any) => void) | null = null;
 
@@ -540,7 +540,7 @@ describe('AuthService', () => {
 
       const createProfileSpy = vi
         .spyOn(authService as any, 'createUserProfile')
-        .mockResolvedValue(undefined);
+        .mockResolvedValue(true);
       const callback = vi.fn();
       let capturedListener: ((_data: any) => void) | null = null;
 
@@ -647,12 +647,10 @@ describe('AuthService', () => {
   });
 
   describe('private profile creation helpers', () => {
-    it('logs and swallows create-profile races in ensureProfileForCurrentUser', async () => {
-      const consoleLogSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
-      const raceError = new Error('Profile already exists');
+    it('marks profile as ensured when createUserProfile returns true (success or duplicate)', async () => {
       const createProfileSpy = vi
         .spyOn(authService as any, 'createUserProfile')
-        .mockRejectedValueOnce(raceError);
+        .mockResolvedValue(true);
 
       await (authService as any).ensureProfileForCurrentUser(
         'user-123',
@@ -664,16 +662,44 @@ describe('AuthService', () => {
         email: 'test@example.com',
         username: 'tester',
       });
-      expect(consoleLogSpy).toHaveBeenCalledWith(
-        'Profile creation completed (may already exist):',
-        raceError,
+
+      // Guard should be set — second call skips createUserProfile
+      createProfileSpy.mockClear();
+      await (authService as any).ensureProfileForCurrentUser(
+        'user-123',
+        'test@example.com',
+        'tester',
       );
+      expect(createProfileSpy).not.toHaveBeenCalled();
+    });
+
+    it('does NOT set the guard when createUserProfile returns false (transient failure)', async () => {
+      const createProfileSpy = vi
+        .spyOn(authService as any, 'createUserProfile')
+        .mockResolvedValue(false);
+
+      await (authService as any).ensureProfileForCurrentUser(
+        'user-123',
+        'test@example.com',
+        'tester',
+      );
+
+      expect(createProfileSpy).toHaveBeenCalledTimes(1);
+
+      // Guard should NOT be set — next call retries createUserProfile
+      createProfileSpy.mockResolvedValue(true);
+      await (authService as any).ensureProfileForCurrentUser(
+        'user-123',
+        'test@example.com',
+        'tester',
+      );
+      expect(createProfileSpy).toHaveBeenCalledTimes(2);
     });
 
     it('skips createUserProfile when profileEnsuredForUserId matches the user', async () => {
       const createProfileSpy = vi
         .spyOn(authService as any, 'createUserProfile')
-        .mockResolvedValue(undefined);
+        .mockResolvedValue(true);
 
       // First call — should hit createUserProfile
       await (authService as any).ensureProfileForCurrentUser('user-abc', 'a@b.com', null);
@@ -687,7 +713,7 @@ describe('AuthService', () => {
     it('re-runs createUserProfile for a different user after reset', async () => {
       const createProfileSpy = vi
         .spyOn(authService as any, 'createUserProfile')
-        .mockResolvedValue(undefined);
+        .mockResolvedValue(true);
 
       await (authService as any).ensureProfileForCurrentUser('user-first', 'first@test.com', null);
       expect(createProfileSpy).toHaveBeenCalledTimes(1);

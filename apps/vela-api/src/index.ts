@@ -67,8 +67,12 @@ if (process.env.NODE_ENV === 'development') {
     for (const line of envLines) {
       const [key, ...valueParts] = line.split('=');
       if (key && valueParts.length > 0) {
-        const value = valueParts.join('=').trim();
-        process.env[key.trim()] = value;
+        const trimmedKey = key.trim();
+        // Preserve values already set in the environment (e.g. by Playwright's
+        // webServer env) so that test overrides are not clobbered by .env.
+        if (!(trimmedKey in process.env)) {
+          process.env[trimmedKey] = valueParts.join('=').trim();
+        }
       }
     }
     console.log(`✅ Loaded .env file from: ${envPath}`);
