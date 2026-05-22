@@ -129,6 +129,8 @@ describe('AuthStack', () => {
     expect(testClient!.Properties.ExplicitAuthFlows).toContain('ALLOW_ADMIN_USER_PASSWORD_AUTH');
     expect(testClient!.Properties.ExplicitAuthFlows).toContain('ALLOW_REFRESH_TOKEN_AUTH');
     expect(testClient!.Properties.SupportedIdentityProviders).toEqual(['COGNITO']);
+    // OAuth is disabled — this client should never be used with Hosted UI flows
+    expect(testClient!.Properties.AllowedOAuthFlowsUserPoolClient).toBe(false);
   });
 
   test('test client is distinct from the production web client', () => {

@@ -195,12 +195,14 @@ class AuthService {
   }
 
   /**
-   * Create user profile via API
+   * Create user profile via API.
+   * Returns true when the request succeeded (or profile already existed),
+   * false when the creation attempt failed and should be retried later.
    */
   private async createUserProfile(
     userId: string,
     profileData: Partial<ProfileInsert>,
-  ): Promise<void> {
+  ): Promise<boolean> {
     try {
       await httpJsonAuth<{ success: boolean }>(`${config.api.url}profiles/create`, {
         method: 'POST',
@@ -210,8 +212,16 @@ class AuthService {
           username: profileData.username,
         }),
       });
+      return true;
     } catch (error) {
+      // Profile already exists — backend returns a conflict/duplicate error.
+      // This is not a failure; the profile is present, so we can mark it as ensured.
+      const msg = error instanceof Error ? error.message : String(error);
+      if (/already exist|conflict|duplicate|409/i.test(msg)) {
+        return true;
+      }
       console.error('Error creating user profile:', error);
+      return false;
     }
   }
 
@@ -340,18 +350,18 @@ class AuthService {
       return;
     }
 
-    try {
-      // Always attempt to create the profile with username first
-      // The backend will handle duplicates gracefully
-      await this.createUserProfile(userId, { email: email || null, username: username || null });
+    // Attempt to create the profile with username first.
+    // The backend handles duplicates gracefully.
+    const created = await this.createUserProfile(userId, {
+      email: email || null,
+      username: username || null,
+    });
+
+    if (created) {
       profileEnsuredForUserId = userId;
-    } catch (error) {
-      // If create fails (e.g., profile already exists), that's fine
-      // The profile was created either by us or by a concurrent request
-      // Still mark as ensured to avoid retrying on every call
-      profileEnsuredForUserId = userId;
-      console.log('Profile creation completed (may already exist):', error);
     }
+    // If creation failed, leave the guard unset so the next
+    // ensureProfileForCurrentUser call retries automatically.
   }
 }
 
