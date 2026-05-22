@@ -183,4 +183,41 @@ describe('AuthStack', () => {
       Name: 'vela/google-oauth-client-secret',
     });
   });
+
+  test('uses custom callback and logout URLs from env vars', () => {
+    process.env.COGNITO_CALLBACK_URLS =
+      'https://staging.example.com/auth/callback,http://localhost:9000/auth/callback';
+    process.env.COGNITO_LOGOUT_URLS =
+      'https://staging.example.com/auth/login,http://localhost:9000/auth/login';
+
+    const template = synthesizeTemplate();
+
+    template.hasResourceProperties('AWS::Cognito::UserPoolClient', {
+      CallbackURLs: [
+        'https://staging.example.com/auth/callback',
+        'http://localhost:9000/auth/callback',
+      ],
+      LogoutURLs: ['https://staging.example.com/auth/login', 'http://localhost:9000/auth/login'],
+    });
+  });
+
+  test('falls back to default callback and logout URLs when env vars are empty', () => {
+    process.env.COGNITO_CALLBACK_URLS = '';
+    process.env.COGNITO_LOGOUT_URLS = '   ';
+
+    const template = synthesizeTemplate();
+
+    template.hasResourceProperties('AWS::Cognito::UserPoolClient', {
+      CallbackURLs: Match.arrayWith([
+        'http://localhost:9000/auth/callback',
+        'http://127.0.0.1:9000/auth/callback',
+        'https://vela.cwchanap.dev/auth/callback',
+      ]),
+      LogoutURLs: Match.arrayWith([
+        'http://localhost:9000/auth/login',
+        'http://127.0.0.1:9000/auth/login',
+        'https://vela.cwchanap.dev/auth/login',
+      ]),
+    });
+  });
 });
