@@ -146,7 +146,7 @@ export class AuthStack extends Stack {
     });
     userPoolClient.node.addDependency(googleProvider);
 
-    // Separate client for e2e tests: enables ADMIN_NO_SRP_AUTH so Playwright
+    // Separate client for e2e tests: enables ADMIN_USER_PASSWORD_AUTH so Playwright
     // fixtures can obtain tokens via AdminInitiateAuth without going through
     // the Google Hosted UI. Only deployed alongside the production stack —
     // the client secret is not needed; IAM permissions on the test runner
