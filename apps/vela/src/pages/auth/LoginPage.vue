@@ -69,14 +69,15 @@ const getInitialRedirect = () => {
   return isAuthCallback ? authStore.consumePendingAuthRedirect(routeRedirect) : routeRedirect;
 };
 
-// Watch for session changes after mount — the OAuth code exchange can finish
-// asynchronously via the Amplify listener, so we need to redirect once the
-// session becomes available even if it wasn't present during onMounted.
-const unwatchSession = watch(
-  () => authStore.session,
-  (newSession) => {
-    if (newSession) {
-      unwatchSession();
+// Watch for authentication readiness after mount — the OAuth code exchange can
+// finish asynchronously via the Amplify listener, and loadUserProfile() runs
+// after setSession(). Protected routes check isAuthenticated (user + session),
+// so we must wait for the profile to load before redirecting to avoid a bounce.
+const unwatchAuth = watch(
+  () => authStore.isAuthenticated,
+  (authenticated) => {
+    if (authenticated) {
+      unwatchAuth();
       void router.push(redirectTo.value);
     }
   },
@@ -97,8 +98,10 @@ onMounted(async () => {
   // Initialize auth store
   await authStore.initialize();
 
-  // Check if user has a valid session (redirect immediately even if profile hasn't loaded)
-  if (authStore.session) {
+  // Check if user is fully authenticated (session + profile loaded).
+  // Redirecting on session alone can bounce protected routes because the
+  // router guard requires isAuthenticated, which needs user to be set.
+  if (authStore.isAuthenticated) {
     void router.push(redirectTo.value);
     return;
   }

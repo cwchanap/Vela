@@ -116,12 +116,23 @@ describe('LoginPage', () => {
       expect(wrapper.vm.redirectTo).toBe('/progress');
     });
 
-    it('redirects immediately on mount when a session already exists', async () => {
+    it('redirects immediately on mount when fully authenticated', async () => {
       const authStore = useAuthStore();
       const initializeSpy = vi.spyOn(authStore, 'initialize').mockResolvedValue(undefined);
       authStore.setSession({
         user: { id: 'user-1', email: 'test@example.com' },
         provider: 'cognito',
+      });
+      authStore.setUser({
+        id: 'user-1',
+        email: 'test@example.com',
+        current_level: 1,
+        total_experience: 0,
+        learning_streak: 0,
+        native_language: 'en',
+        preferences: {},
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
       });
       const routerPushSpy = vi.spyOn(router, 'push');
 
@@ -132,13 +143,24 @@ describe('LoginPage', () => {
       expect(routerPushSpy).toHaveBeenCalledWith('/');
     });
 
-    it('redirects an existing session to the query redirect on mount', async () => {
+    it('redirects an existing authenticated user to the query redirect on mount', async () => {
       await router.push('/auth/login?redirect=/progress');
       const authStore = useAuthStore();
       const initializeSpy = vi.spyOn(authStore, 'initialize').mockResolvedValue(undefined);
       authStore.setSession({
         user: { id: 'user-1', email: 'test@example.com' },
         provider: 'cognito',
+      });
+      authStore.setUser({
+        id: 'user-1',
+        email: 'test@example.com',
+        current_level: 1,
+        total_experience: 0,
+        learning_streak: 0,
+        native_language: 'en',
+        preferences: {},
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
       });
       const routerPushSpy = vi.spyOn(router, 'push');
 
@@ -149,7 +171,7 @@ describe('LoginPage', () => {
       expect(routerPushSpy).toHaveBeenCalledWith('/progress');
     });
 
-    it('uses the pending Hosted UI redirect on callback when a session exists', async () => {
+    it('uses the pending Hosted UI redirect on callback when authenticated', async () => {
       await router.push('/auth/callback');
       const authStore = useAuthStore();
       const initializeSpy = vi.spyOn(authStore, 'initialize').mockResolvedValue(undefined);
@@ -159,6 +181,17 @@ describe('LoginPage', () => {
       authStore.setSession({
         user: { id: 'user-1', email: 'test@example.com' },
         provider: 'cognito',
+      });
+      authStore.setUser({
+        id: 'user-1',
+        email: 'test@example.com',
+        current_level: 1,
+        total_experience: 0,
+        learning_streak: 0,
+        native_language: 'en',
+        preferences: {},
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
       });
       const routerPushSpy = vi.spyOn(router, 'push');
 
@@ -170,7 +203,7 @@ describe('LoginPage', () => {
       expect(routerPushSpy).toHaveBeenCalledWith('/progress');
     });
 
-    it('redirects when session arrives after mount (asynchronous OAuth callback)', async () => {
+    it('redirects when authentication completes after mount (asynchronous OAuth callback)', async () => {
       const authStore = useAuthStore();
       const initializeSpy = vi.spyOn(authStore, 'initialize').mockResolvedValue(undefined);
       const routerPushSpy = vi.spyOn(router, 'push');
@@ -178,17 +211,34 @@ describe('LoginPage', () => {
       wrapper = mountComponent();
       await flushPromises();
 
-      // Session wasn't present during mount
+      // Not authenticated during mount
       expect(initializeSpy).toHaveBeenCalled();
       expect(routerPushSpy).not.toHaveBeenCalled();
 
-      // Simulate OAuth callback completing after mount
+      // Simulate OAuth callback completing after mount: session first, then user
       authStore.setSession({
         user: { id: 'user-1', email: 'test@example.com' },
         provider: 'cognito',
       });
       await flushPromises();
 
+      // Still no redirect because user isn't set yet
+      expect(routerPushSpy).not.toHaveBeenCalled();
+
+      authStore.setUser({
+        id: 'user-1',
+        email: 'test@example.com',
+        current_level: 1,
+        total_experience: 0,
+        learning_streak: 0,
+        native_language: 'en',
+        preferences: {},
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      });
+      await flushPromises();
+
+      // Now isAuthenticated is true, redirect happens
       expect(routerPushSpy).toHaveBeenCalledWith('/');
     });
   });
