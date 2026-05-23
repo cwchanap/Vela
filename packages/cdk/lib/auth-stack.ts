@@ -137,14 +137,8 @@ export class AuthStack extends Stack {
       },
     });
 
-    const defaultCallbackUrls = [
-      ...PRODUCTION_CALLBACK_URLS,
-      ...(allowLocalOAuthPlaceholders ? LOCAL_CALLBACK_URLS : []),
-    ];
-    const defaultLogoutUrls = [
-      ...PRODUCTION_LOGOUT_URLS,
-      ...(allowLocalOAuthPlaceholders ? LOCAL_LOGOUT_URLS : []),
-    ];
+    const defaultCallbackUrls = [...PRODUCTION_CALLBACK_URLS, ...LOCAL_CALLBACK_URLS];
+    const defaultLogoutUrls = [...PRODUCTION_LOGOUT_URLS, ...LOCAL_LOGOUT_URLS];
 
     const callbackUrls = parseCommaList(process.env.COGNITO_CALLBACK_URLS, defaultCallbackUrls);
     const logoutUrls = parseCommaList(process.env.COGNITO_LOGOUT_URLS, defaultLogoutUrls);
