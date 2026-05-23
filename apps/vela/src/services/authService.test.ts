@@ -159,7 +159,7 @@ describe('AuthService', () => {
 
       const ensureProfileSpy = vi
         .spyOn(authService as any, 'ensureProfileForCurrentUser')
-        .mockResolvedValue(undefined);
+        .mockResolvedValue(true);
 
       const result = await authService.getCurrentSession();
 
@@ -189,7 +189,7 @@ describe('AuthService', () => {
 
       const ensureProfileSpy = vi
         .spyOn(authService as any, 'ensureProfileForCurrentUser')
-        .mockResolvedValue(undefined);
+        .mockResolvedValue(true);
 
       const result = await authService.getCurrentSession();
 
@@ -201,6 +201,28 @@ describe('AuthService', () => {
         'oauth-user-123',
         'test@example.com',
         'oauthuser',
+      );
+    });
+
+    it('should return session and log warning when profile creation fails', async () => {
+      const mockUser = {
+        userId: 'user-123',
+        signInDetails: { loginId: 'test@example.com' },
+      } as any;
+      const mockSession = { tokens: { accessToken: 'valid-token' as any } } as any;
+
+      vi.mocked(fetchAuthSession).mockResolvedValue(mockSession);
+      vi.mocked(getCurrentUser).mockResolvedValue(mockUser);
+
+      vi.spyOn(authService as any, 'ensureProfileForCurrentUser').mockResolvedValue(false);
+      const consoleWarnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+      const result = await authService.getCurrentSession();
+
+      expect(result).not.toBeNull();
+      expect(result?.user?.id).toBe('user-123');
+      expect(consoleWarnSpy).toHaveBeenCalledWith(
+        '⚠️ Profile creation failed — the user session is valid but the profile may not exist.',
       );
     });
 
@@ -594,7 +616,7 @@ describe('AuthService', () => {
       });
     });
 
-    it('should log error when getCurrentUser throws during signedIn Hub event', async () => {
+    it('should invoke callback with SIGNED_IN_ERROR when getCurrentUser throws during signedIn Hub event', async () => {
       const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
       const err = new Error('get user failed');
       vi.mocked(getCurrentUser).mockRejectedValue(err);
@@ -613,7 +635,53 @@ describe('AuthService', () => {
       await vi.waitFor(() => expect(consoleSpy).toHaveBeenCalled());
 
       expect(consoleSpy).toHaveBeenCalledWith('Error handling sign in:', err);
-      expect(callback).not.toHaveBeenCalled();
+      expect(callback).toHaveBeenCalledWith('SIGNED_IN_ERROR', null);
+    });
+
+    it('should invoke callback with OAUTH_FAILURE on signInWithRedirect_failure event', async () => {
+      const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      const callback = vi.fn();
+      let capturedListener: ((_data: any) => void) | null = null;
+
+      vi.mocked(Hub.listen).mockImplementation((_channel: any, listener: any) => {
+        capturedListener = listener;
+        return vi.fn() as any;
+      });
+
+      authService.onAuthStateChange(callback);
+      capturedListener!({
+        payload: { event: 'signInWithRedirect_failure', data: { error: 'invalid_grant' } },
+      });
+
+      await vi.waitFor(() => expect(consoleSpy).toHaveBeenCalled());
+
+      expect(callback).toHaveBeenCalledWith('OAUTH_FAILURE', null);
+      expect(consoleSpy).toHaveBeenCalledWith('❌ OAuth redirect failure in onAuthStateChange:', {
+        error: 'invalid_grant',
+      });
+    });
+
+    it('should invoke callback with TOKEN_REFRESH_FAILURE on tokenRefresh_failure event', async () => {
+      const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      const callback = vi.fn();
+      let capturedListener: ((_data: any) => void) | null = null;
+
+      vi.mocked(Hub.listen).mockImplementation((_channel: any, listener: any) => {
+        capturedListener = listener;
+        return vi.fn() as any;
+      });
+
+      authService.onAuthStateChange(callback);
+      capturedListener!({
+        payload: { event: 'tokenRefresh_failure', data: { error: 'expired' } },
+      });
+
+      await vi.waitFor(() => expect(consoleSpy).toHaveBeenCalled());
+
+      expect(callback).toHaveBeenCalledWith('TOKEN_REFRESH_FAILURE', null);
+      expect(consoleSpy).toHaveBeenCalledWith('❌ Token refresh failure in onAuthStateChange:', {
+        error: 'expired',
+      });
     });
   });
 
@@ -634,6 +702,22 @@ describe('AuthService', () => {
       const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
       topLevelHubListener?.({ payload: { event: 'tokenRefresh' } });
       expect(consoleSpy).toHaveBeenCalledWith('✅ Cognito token refreshed successfully');
+    });
+
+    it('should log error on signInWithRedirect_failure event', () => {
+      const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      const failureData = { error: 'invalid_grant' };
+      topLevelHubListener?.({
+        payload: { event: 'signInWithRedirect_failure', data: failureData },
+      });
+      expect(consoleSpy).toHaveBeenCalledWith('❌ OAuth sign-in redirect failed:', failureData);
+    });
+
+    it('should log error on tokenRefresh_failure event', () => {
+      const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      const failureData = { error: 'refresh token expired' };
+      topLevelHubListener?.({ payload: { event: 'tokenRefresh_failure', data: failureData } });
+      expect(consoleSpy).toHaveBeenCalledWith('❌ Token refresh failed:', failureData);
     });
   });
 

@@ -14,7 +14,8 @@ export default defineContentScript({
 
         try {
           sendResponse(readCognitoSessionFromStorage(window.localStorage));
-        } catch {
+        } catch (error) {
+          console.warn('Failed to read Cognito session from storage:', error);
           sendResponse(null);
         }
       },

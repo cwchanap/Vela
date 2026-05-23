@@ -2,8 +2,12 @@ import { boot } from 'quasar/wrappers';
 import { configureDicPath } from '@vela/common/tokenizer';
 import { useThemeStore } from 'src/stores/theme';
 import { useAuthStore } from 'src/stores/auth';
+import { validateConfig } from 'src/config';
 
 export default boot(async ({ store }) => {
+  // Fail fast on missing Cognito env vars in production
+  validateConfig();
+
   // Set kuromoji dictionary path (served from public/kuromoji-dict/)
   configureDicPath('/kuromoji-dict');
 

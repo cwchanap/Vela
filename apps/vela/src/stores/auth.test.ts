@@ -326,6 +326,55 @@ describe('useAuthStore', () => {
       });
       expect(store.session).toBeNull();
     });
+
+    it('onAuthStateChange callback with OAUTH_FAILURE sets error', async () => {
+      const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      let capturedCallback: ((_event: string, _session: unknown) => void) | null = null;
+      mockAuthService.getCurrentSession.mockResolvedValueOnce(null);
+      mockAuthService.onAuthStateChange.mockImplementation(
+        (cb: (_event: string, _session: unknown) => void) => {
+          capturedCallback = cb;
+        },
+      );
+      const { useAuthStore } = await import('./auth');
+      const store = useAuthStore();
+      await store.initialize();
+
+      capturedCallback!('OAUTH_FAILURE', null);
+
+      await vi.waitFor(() => {
+        expect(store.error).toBe('Sign-in failed. Please try again.');
+      });
+      expect(consoleSpy).toHaveBeenCalledWith('OAuth sign-in failed');
+      expect(store.user).toBeNull();
+      expect(store.session).toBeNull();
+    });
+
+    it('onAuthStateChange callback with TOKEN_REFRESH_FAILURE logs error without changing state', async () => {
+      const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      let capturedCallback: ((_event: string, _session: unknown) => void) | null = null;
+      mockAuthService.getCurrentSession.mockResolvedValueOnce(null);
+      mockAuthService.onAuthStateChange.mockImplementation(
+        (cb: (_event: string, _session: unknown) => void) => {
+          capturedCallback = cb;
+        },
+      );
+      const { useAuthStore } = await import('./auth');
+      const store = useAuthStore();
+      await store.initialize();
+      store.setUser(makeUser());
+      store.setSession(mockSession);
+
+      capturedCallback!('TOKEN_REFRESH_FAILURE', null);
+
+      await vi.waitFor(() => {
+        expect(consoleSpy).toHaveBeenCalledWith('Token refresh failed');
+      });
+      // State should remain unchanged
+      expect(store.user).not.toBeNull();
+      expect(store.session).not.toBeNull();
+      expect(store.error).toBeNull();
+    });
   });
 
   describe('loadUserProfile', () => {

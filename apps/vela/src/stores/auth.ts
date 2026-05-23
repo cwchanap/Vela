@@ -136,12 +136,20 @@ export const useAuthStore = defineStore('auth', () => {
         await loadUserProfile(currentSession.user.id);
       }
 
-      // Listen for auth state changes - bypass email confirmation checks
+      // Listen for auth state changes
       authService.onAuthStateChange((event, session) => {
         void (async () => {
-          console.log('Auth state changed:', event, session);
+          if (event === 'OAUTH_FAILURE') {
+            console.error('OAuth sign-in failed');
+            setError('Sign-in failed. Please try again.');
+            return;
+          }
 
-          // Allow login regardless of email confirmation status
+          if (event === 'TOKEN_REFRESH_FAILURE') {
+            console.error('Token refresh failed');
+            return;
+          }
+
           if (session?.user) {
             setSession(session);
             await loadUserProfile(session.user.id);
