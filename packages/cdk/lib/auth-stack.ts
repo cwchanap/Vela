@@ -16,17 +16,16 @@ export interface AuthStackProps extends StackProps {}
 
 const DEFAULT_COGNITO_DOMAIN_PREFIX = 'vela-cwchanap-auth';
 
-const DEFAULT_CALLBACK_URLS = [
+const PRODUCTION_CALLBACK_URLS = ['https://vela.cwchanap.dev/auth/callback'];
+
+const PRODUCTION_LOGOUT_URLS = ['https://vela.cwchanap.dev/auth/login'];
+
+const LOCAL_CALLBACK_URLS = [
   'http://localhost:9000/auth/callback',
   'http://127.0.0.1:9000/auth/callback',
-  'https://vela.cwchanap.dev/auth/callback',
 ];
 
-const DEFAULT_LOGOUT_URLS = [
-  'http://localhost:9000/auth/login',
-  'http://127.0.0.1:9000/auth/login',
-  'https://vela.cwchanap.dev/auth/login',
-];
+const LOCAL_LOGOUT_URLS = ['http://localhost:9000/auth/login', 'http://127.0.0.1:9000/auth/login'];
 
 function parseCommaList(value: string | undefined, defaults: string[]): string[] {
   if (!value || value.trim().length === 0) {
@@ -138,8 +137,17 @@ export class AuthStack extends Stack {
       },
     });
 
-    const callbackUrls = parseCommaList(process.env.COGNITO_CALLBACK_URLS, DEFAULT_CALLBACK_URLS);
-    const logoutUrls = parseCommaList(process.env.COGNITO_LOGOUT_URLS, DEFAULT_LOGOUT_URLS);
+    const defaultCallbackUrls = [
+      ...PRODUCTION_CALLBACK_URLS,
+      ...(allowLocalOAuthPlaceholders ? LOCAL_CALLBACK_URLS : []),
+    ];
+    const defaultLogoutUrls = [
+      ...PRODUCTION_LOGOUT_URLS,
+      ...(allowLocalOAuthPlaceholders ? LOCAL_LOGOUT_URLS : []),
+    ];
+
+    const callbackUrls = parseCommaList(process.env.COGNITO_CALLBACK_URLS, defaultCallbackUrls);
+    const logoutUrls = parseCommaList(process.env.COGNITO_LOGOUT_URLS, defaultLogoutUrls);
 
     const userPoolClient = new UserPoolClient(this, 'VelaUserPoolClient', {
       userPool,

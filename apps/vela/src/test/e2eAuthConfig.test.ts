@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { buildE2EWebServerEnv } from '../../playwright.config';
+import { buildE2EWebServerEnv, shouldReuseServer } from '../../playwright.config';
 
 describe('Playwright e2e Cognito client config', () => {
   it('runs the app and API with the dedicated e2e Cognito client', () => {
@@ -51,23 +51,18 @@ describe('Playwright server reuse logic', () => {
   it('allows reuse locally when no test client override is set', () => {
     delete process.env.CI;
     delete process.env.VITE_COGNITO_TEST_CLIENT_ID;
-    // Re-import to pick up env changes — since the module caches on load,
-    // we verify the formula directly.
-    const shouldReuse = !process.env.CI && !process.env.VITE_COGNITO_TEST_CLIENT_ID;
-    expect(shouldReuse).toBe(true);
+    expect(shouldReuseServer(process.env as Record<string, string | undefined>)).toBe(true);
   });
 
   it('disables reuse when test client override is required', () => {
     delete process.env.CI;
     process.env.VITE_COGNITO_TEST_CLIENT_ID = 'test-client-id';
-    const shouldReuse = !process.env.CI && !process.env.VITE_COGNITO_TEST_CLIENT_ID;
-    expect(shouldReuse).toBe(false);
+    expect(shouldReuseServer(process.env as Record<string, string | undefined>)).toBe(false);
   });
 
   it('disables reuse on CI regardless of test client', () => {
     process.env.CI = 'true';
     delete process.env.VITE_COGNITO_TEST_CLIENT_ID;
-    const shouldReuse = !process.env.CI && !process.env.VITE_COGNITO_TEST_CLIENT_ID;
-    expect(shouldReuse).toBe(false);
+    expect(shouldReuseServer(process.env as Record<string, string | undefined>)).toBe(false);
   });
 });
