@@ -54,7 +54,10 @@ const cognitoEnabled = configureAmplify();
 // Reset to null on sign-out so a different user can trigger a fresh check.
 let profileEnsuredForUserId: string | null = null;
 
-// Listen to auth events
+// Listen to auth events — both success and failure.
+// Failure events (signInWithRedirect_failure, tokenRefresh_failure) fire when
+// the OAuth code exchange, token refresh, or hosted-UI redirect goes wrong.
+// Without these listeners the user is stranded on /auth/callback with no feedback.
 if (cognitoEnabled) {
   Hub.listen('auth', (data) => {
     const { event } = data.payload;
@@ -65,6 +68,10 @@ if (cognitoEnabled) {
       console.log('✅ User signed out from Cognito');
     } else if (event === 'tokenRefresh') {
       console.log('✅ Cognito token refreshed successfully');
+    } else if (event === 'signInWithRedirect_failure') {
+      console.error('❌ OAuth sign-in redirect failed:', data.payload.data);
+    } else if (event === 'tokenRefresh_failure') {
+      console.error('❌ Token refresh failed:', data.payload.data);
     }
   });
 }
@@ -145,9 +152,16 @@ class AuthService {
       const session = await fetchAuthSession();
       if (session.tokens?.accessToken) {
         const user = await this.hydrateCurrentUser();
-        // Ensure profile exists with correct email/username before any GET
-        // auto-creates it with null values (e.g., first-time OAuth callback).
-        await this.ensureProfileForCurrentUser(user.id, user.email, user.username);
+        const profileEnsured = await this.ensureProfileForCurrentUser(
+          user.id,
+          user.email,
+          user.username,
+        );
+        if (!profileEnsured) {
+          console.warn(
+            '⚠️ Profile creation failed — the user session is valid but the profile may not exist.',
+          );
+        }
         return {
           user: { id: user.id, email: user.email },
           provider: 'cognito',
@@ -288,8 +302,14 @@ class AuthService {
           const session = await fetchAuthSession();
 
           if (session.tokens?.accessToken) {
-            // Ensure profile exists when user signs in
-            await this.ensureProfileForCurrentUser(user.id, user.email, user.username);
+            const profileEnsured = await this.ensureProfileForCurrentUser(
+              user.id,
+              user.email,
+              user.username,
+            );
+            if (!profileEnsured) {
+              console.warn('⚠️ Profile creation failed during sign-in — profile may not exist.');
+            }
 
             callback('SIGNED_IN', {
               user: { id: user.id, email: user.email },
@@ -298,9 +318,16 @@ class AuthService {
           }
         } catch (error) {
           console.error('Error handling sign in:', error);
+          callback('SIGNED_IN_ERROR', null);
         }
       } else if (event === 'signedOut') {
         callback('SIGNED_OUT', null);
+      } else if (event === 'signInWithRedirect_failure') {
+        console.error('❌ OAuth redirect failure in onAuthStateChange:', data.payload.data);
+        callback('OAUTH_FAILURE', null);
+      } else if (event === 'tokenRefresh_failure') {
+        console.error('❌ Token refresh failure in onAuthStateChange:', data.payload.data);
+        callback('TOKEN_REFRESH_FAILURE', null);
       }
     });
 
@@ -342,20 +369,19 @@ class AuthService {
   }
 
   /**
-   * Ensure a user profile exists; create it if missing
-   * Uses upsert pattern to avoid race condition where GET auto-creates without username
+   * Ensure a user profile exists; create it if missing.
+   * Uses upsert pattern to avoid race condition where GET auto-creates without username.
+   * Returns true if the profile exists (created or already present), false on failure.
    */
   private async ensureProfileForCurrentUser(
     userId: string,
     email?: string | null,
     username?: string | null,
-  ): Promise<void> {
+  ): Promise<boolean> {
     if (profileEnsuredForUserId === userId) {
-      return;
+      return true;
     }
 
-    // Attempt to create the profile with username first.
-    // The backend handles duplicates gracefully.
     const created = await this.createUserProfile(userId, {
       email: email || null,
       username: username || null,
@@ -363,9 +389,9 @@ class AuthService {
 
     if (created) {
       profileEnsuredForUserId = userId;
+      return true;
     }
-    // If creation failed, leave the guard unset so the next
-    // ensureProfileForCurrentUser call retries automatically.
+    return false;
   }
 }
 

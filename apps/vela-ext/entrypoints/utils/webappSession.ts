@@ -126,7 +126,8 @@ export async function importWebappSession(): Promise<boolean> {
         const newTokens = await refreshToken(session.tokens.refreshToken);
         await saveAuthTokens(newTokens, session.email ?? undefined);
         return true;
-      } catch {
+      } catch (refreshError) {
+        console.warn('Token refresh failed for tab, skipping:', refreshError);
         continue;
       }
     }
