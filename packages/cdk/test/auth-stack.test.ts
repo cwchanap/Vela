@@ -79,14 +79,14 @@ describe('AuthStack', () => {
       AllowedOAuthScopes: Match.arrayWith(['openid', 'email', 'profile']),
       ExplicitAuthFlows: ['ALLOW_REFRESH_TOKEN_AUTH'],
       CallbackURLs: Match.arrayWith([
+        'https://vela.cwchanap.dev/auth/callback',
         'http://localhost:9000/auth/callback',
         'http://127.0.0.1:9000/auth/callback',
-        'https://vela.cwchanap.dev/auth/callback',
       ]),
       LogoutURLs: Match.arrayWith([
+        'https://vela.cwchanap.dev/auth/login',
         'http://localhost:9000/auth/login',
         'http://127.0.0.1:9000/auth/login',
-        'https://vela.cwchanap.dev/auth/login',
       ]),
     });
   });
@@ -209,14 +209,35 @@ describe('AuthStack', () => {
 
     template.hasResourceProperties('AWS::Cognito::UserPoolClient', {
       CallbackURLs: Match.arrayWith([
+        'https://vela.cwchanap.dev/auth/callback',
         'http://localhost:9000/auth/callback',
         'http://127.0.0.1:9000/auth/callback',
-        'https://vela.cwchanap.dev/auth/callback',
       ]),
       LogoutURLs: Match.arrayWith([
+        'https://vela.cwchanap.dev/auth/login',
         'http://localhost:9000/auth/login',
         'http://127.0.0.1:9000/auth/login',
+      ]),
+    });
+  });
+
+  test('includes localhost OAuth URLs in deployed (non-placeholder) mode', () => {
+    delete process.env.ALLOW_LOCAL_OAUTH_PLACEHOLDERS;
+    process.env.GOOGLE_OAUTH_CLIENT_ID = 'deployed-client-id.apps.googleusercontent.com';
+
+    const template = synthesizeTemplate();
+
+    template.hasResourceProperties('AWS::Cognito::UserPoolClient', {
+      ClientName: 'vela-web-client',
+      CallbackURLs: Match.arrayWith([
+        'https://vela.cwchanap.dev/auth/callback',
+        'http://localhost:9000/auth/callback',
+        'http://127.0.0.1:9000/auth/callback',
+      ]),
+      LogoutURLs: Match.arrayWith([
         'https://vela.cwchanap.dev/auth/login',
+        'http://localhost:9000/auth/login',
+        'http://127.0.0.1:9000/auth/login',
       ]),
     });
   });
