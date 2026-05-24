@@ -73,10 +73,13 @@ const getInitialRedirect = () => {
 // finish asynchronously via the Amplify listener, and loadUserProfile() runs
 // after setSession(). Protected routes check isAuthenticated (user + session),
 // so we must wait for the profile to load before redirecting to avoid a bounce.
+let navigated = false;
+
 const unwatchAuth = watch(
   () => authStore.isAuthenticated,
   (authenticated) => {
-    if (authenticated) {
+    if (authenticated && !navigated) {
+      navigated = true;
       unwatchAuth();
       void router.push(redirectTo.value);
     }
@@ -101,7 +104,9 @@ onMounted(async () => {
   // Check if user is fully authenticated (session + profile loaded).
   // Redirecting on session alone can bounce protected routes because the
   // router guard requires isAuthenticated, which needs user to be set.
-  if (authStore.isAuthenticated) {
+  if (authStore.isAuthenticated && !navigated) {
+    navigated = true;
+    unwatchAuth();
     void router.push(redirectTo.value);
     return;
   }
