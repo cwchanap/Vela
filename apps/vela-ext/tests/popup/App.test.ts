@@ -170,4 +170,18 @@ describe('popup App', () => {
     expect(mockImportWebappSession).toHaveBeenCalledOnce();
     expect(wrapper.find('[data-testid="login-page"]').exists()).toBe(true);
   });
+
+  it('announces loading state to screen readers', async () => {
+    // Keep loading true by never resolving isAuthenticated
+    mockIsAuthenticated.mockReturnValue(new Promise(() => {}));
+
+    const wrapper = mount(App);
+    // Don't flushPromises — we want loading to stay true
+
+    const loadingEl = wrapper.find('.vela-loading');
+    expect(loadingEl.exists()).toBe(true);
+    expect(loadingEl.attributes('role')).toBe('status');
+    expect(loadingEl.attributes('aria-label')).toBe('Loading Vela');
+    expect(wrapper.find('.sr-only').text()).toBe('Loading…');
+  });
 });

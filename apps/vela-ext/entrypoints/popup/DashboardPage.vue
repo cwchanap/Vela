@@ -12,8 +12,8 @@
           <span class="brand-sub">Dictionary</span>
         </div>
       </div>
-      <div v-if="userEmail" class="header-actions">
-        <div class="user-pill" :title="userEmail">
+      <div class="header-actions">
+        <div v-if="userEmail" class="user-pill" :title="userEmail">
           <span class="user-dot"></span>
           <span class="user-email">{{ userEmail }}</span>
         </div>
