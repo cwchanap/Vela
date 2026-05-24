@@ -181,78 +181,6 @@ describe('DashboardPage', () => {
 
       expect(wrapper.find('.pending-badge').text()).toContain('3');
     });
-
-    it('should load theme preference from storage on mount', async () => {
-      storageState.theme_preference = 'dark';
-
-      wrapper = mount(DashboardPage);
-      await flushPromises();
-
-      const container = wrapper.find('.dashboard-container');
-      expect(container.classes()).toContain('dark');
-    });
-
-    it('should default to light theme if no preference is saved', async () => {
-      wrapper = mount(DashboardPage);
-      await flushPromises();
-
-      const container = wrapper.find('.dashboard-container');
-      expect(container.classes()).not.toContain('dark');
-    });
-  });
-
-  describe('Theme Toggle', () => {
-    it('should toggle theme when theme button is clicked', async () => {
-      wrapper = mount(DashboardPage);
-      await flushPromises();
-
-      // Find the button by title attribute instead of array index
-      const themeButton = wrapper.find('[title="Switch to Dark Mode"]');
-      expect(themeButton.exists()).toBe(true);
-
-      // Trigger the click event
-      await themeButton.trigger('click');
-      await flushPromises();
-
-      // Verify the dark class is applied
-      const container = wrapper.find('.dashboard-container');
-      const classes = container.classes();
-      expect(classes).toContain('dark');
-    });
-
-    it('should persist theme preference to storage when changed', async () => {
-      wrapper = mount(DashboardPage);
-      await flushPromises();
-
-      const themeButton = wrapper.find('[title="Switch to Dark Mode"]');
-      await themeButton.trigger('click');
-      await flushPromises();
-
-      expect(browser.storage.local.set).toHaveBeenCalledWith({
-        theme_preference: 'dark',
-      });
-    });
-
-    it('should display correct emoji for light mode', async () => {
-      wrapper = mount(DashboardPage);
-      await flushPromises();
-
-      const themeButton = wrapper.find('[title="Switch to Dark Mode"]');
-      expect(themeButton.text()).toBe('🌙');
-    });
-
-    it('should display correct emoji for dark mode', async () => {
-      wrapper = mount(DashboardPage);
-      await flushPromises();
-
-      const themeButton = wrapper.find('[title="Switch to Dark Mode"]');
-      await themeButton.trigger('click');
-      await flushPromises();
-
-      // After clicking, the title changes to "Switch to Light Mode"
-      const updatedButton = wrapper.find('[title="Switch to Light Mode"]');
-      expect(updatedButton.text()).toBe('☀️');
-    });
   });
 
   describe('Session Actions', () => {
@@ -327,20 +255,20 @@ describe('DashboardPage', () => {
       expect(instructionsList.element.style.display).toBe('none');
     });
 
-    it('should display correct collapse icon based on expanded state', async () => {
+    it('should rotate the chevron icon based on expanded state', async () => {
       wrapper = mount(DashboardPage);
       await flushPromises();
 
       const instructionsHeader = wrapper.find('.instructions-header');
-      const collapseIcon = wrapper.find('.collapse-icon');
+      const chevron = wrapper.find('.instructions-chevron');
 
-      // Initially collapsed
-      expect(collapseIcon.text()).toBe('▶');
+      // Initially collapsed — no "open" class
+      expect(chevron.classes()).not.toContain('open');
 
       // After expanding
       await instructionsHeader.trigger('click');
       await wrapper.vm.$nextTick();
-      expect(collapseIcon.text()).toBe('▼');
+      expect(chevron.classes()).toContain('open');
     });
 
     it('should have ARIA disclosure attributes on the instructions accordion', async () => {
@@ -373,8 +301,8 @@ describe('DashboardPage', () => {
       wrapper = mount(DashboardPage);
       await flushPromises();
 
-      // Check that the refresh button shows "Loading..."
-      const refreshButton = wrapper.find('.refresh-button');
+      // Check that the refresh button shows "Loading"
+      const refreshButton = wrapper.find('.refresh-btn');
       expect(refreshButton.text()).toContain('Loading');
 
       // Resolve the promise
@@ -386,7 +314,7 @@ describe('DashboardPage', () => {
       wrapper = mount(DashboardPage);
       await flushPromises();
 
-      const entries = wrapper.findAll('.entry-item');
+      const entries = wrapper.findAll('.entry');
       expect(entries.length).toBe(5); // Only first 5 entries
     });
 
@@ -394,11 +322,11 @@ describe('DashboardPage', () => {
       wrapper = mount(DashboardPage);
       await flushPromises();
 
-      const entries = wrapper.findAll('.entry-item');
+      const entries = wrapper.findAll('.entry');
       expect(entries.length).toBe(5);
 
       // Verify the 6th entry is not displayed
-      const allEntryTexts = entries.map((e) => e.find('.entry-text').text());
+      const allEntryTexts = entries.map((e) => e.find('.entry-sentence').text());
       expect(allEntryTexts).not.toContain('いただきます'); // 6th entry
     });
 
@@ -409,15 +337,15 @@ describe('DashboardPage', () => {
       await flushPromises();
 
       expect(wrapper.find('.empty-state').exists()).toBe(true);
-      expect(wrapper.text()).toContain('No dictionary entries yet');
+      expect(wrapper.text()).toContain('No entries yet');
     });
 
     it('should display entry text correctly', async () => {
       wrapper = mount(DashboardPage);
       await flushPromises();
 
-      const entries = wrapper.findAll('.entry-item');
-      const entryTexts = entries.map((entry) => entry.find('.entry-text').text());
+      const entries = wrapper.findAll('.entry');
+      const entryTexts = entries.map((entry) => entry.find('.entry-sentence').text());
       expect(entryTexts).toContain('こんにちは');
     });
 
@@ -425,10 +353,10 @@ describe('DashboardPage', () => {
       wrapper = mount(DashboardPage);
       await flushPromises();
 
-      const entries = wrapper.findAll('.entry-item');
+      const entries = wrapper.findAll('.entry');
       // Find entry with 'こんにちは' which has a source URL in mockEntries
       const entryWithSource = entries.find(
-        (entry) => entry.find('.entry-text').text() === 'こんにちは',
+        (entry) => entry.find('.entry-sentence').text() === 'こんにちは',
       );
 
       if (!entryWithSource) {
@@ -444,10 +372,10 @@ describe('DashboardPage', () => {
       wrapper = mount(DashboardPage);
       await flushPromises();
 
-      const entries = wrapper.findAll('.entry-item');
+      const entries = wrapper.findAll('.entry');
       // Find entry with 'さようなら' which has no source URL in mockEntries
       const entryWithoutSource = entries.find(
-        (entry) => entry.find('.entry-text').text() === 'さようなら',
+        (entry) => entry.find('.entry-sentence').text() === 'さようなら',
       );
 
       if (!entryWithoutSource) {
@@ -462,7 +390,7 @@ describe('DashboardPage', () => {
       wrapper = mount(DashboardPage);
       await flushPromises();
 
-      const entries = wrapper.findAll('.entry-item');
+      const entries = wrapper.findAll('.entry');
       expect(entries.length).toBeGreaterThan(0);
 
       // Check that all entries have date elements
@@ -474,22 +402,22 @@ describe('DashboardPage', () => {
       });
     });
 
-    it('should display "View All" button when entries exist', async () => {
+    it('should display "Open in Web App" button when entries exist', async () => {
       wrapper = mount(DashboardPage);
       await flushPromises();
 
-      const viewAllButton = wrapper.find('.view-all-button');
+      const viewAllButton = wrapper.find('.view-all-btn');
       expect(viewAllButton.exists()).toBe(true);
       expect(viewAllButton.text()).toContain('Open in Web App');
     });
 
-    it('should not display "View All" button when no entries exist', async () => {
+    it('should not display "Open in Web App" button when no entries exist', async () => {
       mockGetMyDictionaries.mockResolvedValue([]);
 
       wrapper = mount(DashboardPage);
       await flushPromises();
 
-      const viewAllButton = wrapper.find('.view-all-button');
+      const viewAllButton = wrapper.find('.view-all-btn');
       expect(viewAllButton.exists()).toBe(false);
     });
   });
@@ -501,7 +429,7 @@ describe('DashboardPage', () => {
 
       mockGetMyDictionaries.mockClear();
 
-      const refreshButton = wrapper.find('.refresh-button');
+      const refreshButton = wrapper.find('.refresh-btn');
       await refreshButton.trigger('click');
 
       expect(mockGetMyDictionaries).toHaveBeenCalled();
@@ -514,7 +442,7 @@ describe('DashboardPage', () => {
       await flushPromises();
       expect(wrapper.find('.pending-badge').text()).toContain('2');
 
-      const refreshButton = wrapper.find('.refresh-button');
+      const refreshButton = wrapper.find('.refresh-btn');
       await refreshButton.trigger('click');
       await flushPromises();
 
@@ -553,7 +481,7 @@ describe('DashboardPage', () => {
       wrapper = mount(DashboardPage);
       await flushPromises();
 
-      const refreshButton = wrapper.find('.refresh-button');
+      const refreshButton = wrapper.find('.refresh-btn');
       // The :disabled selector checks if the disabled attribute exists
       expect(refreshButton.attributes()).toHaveProperty('disabled');
 
@@ -564,13 +492,13 @@ describe('DashboardPage', () => {
   });
 
   describe('Error Handling', () => {
-    it('should display error message when loading entries fails', async () => {
+    it('should display error banner when loading entries fails', async () => {
       mockGetMyDictionaries.mockRejectedValue(new Error('Network error'));
 
       wrapper = mount(DashboardPage);
       await flushPromises();
 
-      expect(wrapper.find('.error-message').exists()).toBe(true);
+      expect(wrapper.find('.error-banner').exists()).toBe(true);
       expect(wrapper.text()).toContain('Network error');
     });
 
@@ -610,7 +538,7 @@ describe('DashboardPage', () => {
         wrapper = mount(DashboardPage);
         await flushPromises();
 
-        expect(wrapper.find('.error-message').exists()).toBe(true);
+        expect(wrapper.find('.error-banner').exists()).toBe(true);
 
         // Fast-forward time by 2 seconds to trigger the expired-session transition
         await vi.advanceTimersByTimeAsync(2000);
@@ -629,7 +557,7 @@ describe('DashboardPage', () => {
       wrapper = mount(DashboardPage);
       await flushPromises();
 
-      expect(wrapper.find('.error-message').exists()).toBe(true);
+      expect(wrapper.find('.error-banner').exists()).toBe(true);
     });
   });
 
@@ -638,7 +566,7 @@ describe('DashboardPage', () => {
       wrapper = mount(DashboardPage);
       await flushPromises();
 
-      const viewAllButton = wrapper.find('.view-all-button');
+      const viewAllButton = wrapper.find('.view-all-btn');
       await viewAllButton.trigger('click');
 
       expect(browser.tabs.create).toHaveBeenCalled();

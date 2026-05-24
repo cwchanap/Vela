@@ -12,9 +12,34 @@
           <span class="brand-sub">Dictionary</span>
         </div>
       </div>
-      <div v-if="userEmail" class="user-pill" :title="userEmail">
-        <span class="user-dot"></span>
-        <span class="user-email">{{ userEmail }}</span>
+      <div v-if="userEmail" class="header-actions">
+        <div class="user-pill" :title="userEmail">
+          <span class="user-dot"></span>
+          <span class="user-email">{{ userEmail }}</span>
+        </div>
+        <button
+          type="button"
+          class="sign-out-btn"
+          title="Sign Out"
+          aria-label="Sign Out"
+          @click="handleSignOut"
+        >
+          <svg
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            xmlns="http://www.w3.org/2000/svg"
+          >
+            <path
+              d="M9 21H5C3.9 21 3 20.1 3 19V5C3 3.9 3.9 3 5 3H9M16 17L21 12M21 12L16 7M21 12H9"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            />
+          </svg>
+        </button>
       </div>
     </header>
 
@@ -161,7 +186,13 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, computed } from 'vue';
 import { getMyDictionaries } from '../utils/api';
-import { getValidIdToken, refreshIdToken, getUserEmail } from '../utils/storage';
+import {
+  getValidIdToken,
+  refreshIdToken,
+  getUserEmail,
+  clearAuthData,
+  setExplicitSignout,
+} from '../utils/storage';
 import { getPendingQueueCount } from '../utils/pendingQueue';
 
 const emit = defineEmits<{
@@ -266,6 +297,16 @@ function openWebapp() {
   const isDev = import.meta.env.MODE === 'development';
   const baseUrl = isDev ? 'http://localhost:9000' : 'https://vela.cwchanap.dev';
   browser.tabs.create({ url: `${baseUrl}/my-dictionaries` });
+}
+
+async function handleSignOut() {
+  try {
+    await clearAuthData();
+  } catch (err) {
+    console.error('[Vela] Failed to clear auth data on sign out:', err);
+  }
+  await setExplicitSignout();
+  emit('sessionExpired');
 }
 
 const recentEntries = computed(() => {
@@ -395,6 +436,35 @@ const recentEntries = computed(() => {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.sign-out-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  border: 1px solid var(--border-subtle);
+  color: var(--text-tertiary);
+  cursor: pointer;
+  transition:
+    color 0.2s ease,
+    border-color 0.2s ease,
+    background 0.2s ease;
+}
+
+.sign-out-btn:hover {
+  color: var(--color-error);
+  border-color: rgba(255, 84, 112, 0.4);
+  background: rgba(255, 84, 112, 0.08);
 }
 
 /* Body */
