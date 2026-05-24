@@ -1,5 +1,5 @@
 <template>
-  <q-page class="auth-page">
+  <q-page class="login-page">
     <!-- Ambient indigo / sakura / jade blobs -->
     <div class="ambient-layer" aria-hidden="true">
       <div class="ambient-blob blob-primary"></div>
@@ -120,7 +120,7 @@ onMounted(async () => {
 /* ============================================
    Vela Auth — wa-modern ink + indigo bloom
    ============================================ */
-.auth-page {
+.login-page {
   min-height: 100vh;
   display: flex;
   align-items: center;
@@ -133,7 +133,7 @@ onMounted(async () => {
     radial-gradient(circle at 88% 82%, rgba(232, 68, 122, 0.16), transparent 55%), var(--bg-page);
 }
 
-body.body--dark .auth-page {
+body.body--dark .login-page {
   background:
     radial-gradient(circle at 12% 18%, rgba(123, 97, 255, 0.28), transparent 55%),
     radial-gradient(circle at 88% 82%, rgba(255, 107, 163, 0.18), transparent 55%), var(--bg-page);
