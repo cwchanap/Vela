@@ -23,6 +23,8 @@
         <button
           type="button"
           class="instructions-header"
+          :aria-expanded="instructionsExpanded"
+          aria-controls="instructions-panel"
           @click="instructionsExpanded = !instructionsExpanded"
         >
           <span class="instructions-kanji" aria-hidden="true">選</span>
@@ -45,7 +47,13 @@
             </svg>
           </span>
         </button>
-        <ol v-show="instructionsExpanded" class="instructions-list">
+        <ol
+          id="instructions-panel"
+          v-show="instructionsExpanded"
+          class="instructions-list"
+          role="region"
+          aria-label="Instructions"
+        >
           <li><span class="step-num">1</span>Select any text on a webpage</li>
           <li><span class="step-num">2</span>Right-click to open the context menu</li>
           <li><span class="step-num">3</span>Click <em>"Add vocab to Vela"</em></li>
