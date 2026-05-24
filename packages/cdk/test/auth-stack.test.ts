@@ -112,9 +112,16 @@ describe('AuthStack', () => {
   test('uses only the expected OAuth scopes', () => {
     const template = synthesizeTemplate();
     const clients = template.findResources('AWS::Cognito::UserPoolClient');
-    const client = Object.values(clients)[0];
+    const client = Object.values(clients).find(
+      (c) => c.Properties.ClientName === 'vela-web-client',
+    );
 
-    expect(client.Properties.AllowedOAuthScopes.toSorted()).toEqual(['email', 'openid', 'profile']);
+    expect(client).toBeDefined();
+    expect(client!.Properties.AllowedOAuthScopes.toSorted()).toEqual([
+      'email',
+      'openid',
+      'profile',
+    ]);
   });
 
   test('creates a separate test client with admin auth flow enabled', () => {
