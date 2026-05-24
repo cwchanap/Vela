@@ -1,44 +1,58 @@
 <template>
-  <q-page class="modern-auth-page animated-bg">
-    <!-- Floating Decorative Elements -->
-    <div class="floating-shapes">
-      <div class="shape shape-1"></div>
-      <div class="shape shape-2"></div>
-      <div class="shape shape-3"></div>
+  <q-page class="auth-page">
+    <!-- Ambient indigo / sakura / jade blobs -->
+    <div class="ambient-layer" aria-hidden="true">
+      <div class="ambient-blob blob-primary"></div>
+      <div class="ambient-blob blob-sakura"></div>
+      <div class="ambient-blob blob-jade"></div>
     </div>
 
+    <!-- Decorative kanji watermark -->
+    <div class="kanji-deco kanji-watermark" aria-hidden="true">学</div>
+
+    <!-- Hairline grid background -->
+    <div class="grid-overlay" aria-hidden="true"></div>
+
     <div class="auth-container">
-      <div class="auth-content">
-        <!-- App Branding -->
-        <div class="brand-section">
-          <div class="brand-icon">
-            <q-icon name="school" size="3.5rem" color="white" />
-          </div>
-          <h1 class="brand-title">日本語学習</h1>
-          <p class="brand-tagline">Master Japanese with Interactive Learning</p>
-        </div>
+      <!-- Brand: eyebrow + stacked Japanese wordmark + tagline -->
+      <header class="brand anim-enter-1">
+        <span class="brand-eyebrow">
+          <span class="brand-dot"></span>
+          Vela &middot; ヴェラ
+        </span>
+        <h1 class="brand-title">日本語学習</h1>
+        <p class="brand-tagline">Master Japanese with Interactive Learning</p>
+      </header>
 
-        <!-- Authentication Card -->
-        <div class="auth-card">
-          <AuthForm :mode="authMode" :redirect-to="redirectTo" @error="handleAuthError" />
-        </div>
+      <!-- Glass-card sign-in -->
+      <section class="auth-card anim-enter-2">
+        <div class="auth-card-glow" aria-hidden="true"></div>
+        <AuthForm :mode="authMode" :redirect-to="redirectTo" @error="handleAuthError" />
+      </section>
 
-        <!-- Features Preview -->
-        <div class="features-section">
-          <div class="feature-pill">
-            <q-icon name="quiz" size="1.25rem" />
-            <span>Vocabulary Games</span>
-          </div>
-          <div class="feature-pill">
-            <q-icon name="psychology" size="1.25rem" />
-            <span>AI-Powered Tutor</span>
-          </div>
-          <div class="feature-pill">
-            <q-icon name="trending_up" size="1.25rem" />
-            <span>Track Progress</span>
-          </div>
-        </div>
-      </div>
+      <!-- Feature pills -->
+      <ul class="feature-rail anim-enter-3">
+        <li class="feature-pill pill-vocab">
+          <span class="pill-icon">
+            <q-icon name="quiz" size="1.1rem" />
+          </span>
+          <span class="pill-label">Vocabulary Games</span>
+        </li>
+        <li class="feature-pill pill-chat">
+          <span class="pill-icon">
+            <q-icon name="psychology" size="1.1rem" />
+          </span>
+          <span class="pill-label">AI-Powered Tutor</span>
+        </li>
+        <li class="feature-pill pill-streak">
+          <span class="pill-icon">
+            <q-icon name="trending_up" size="1.1rem" />
+          </span>
+          <span class="pill-label">Track Progress</span>
+        </li>
+      </ul>
+
+      <p class="auth-footnote anim-enter-4">Continue with Google &middot; No password required</p>
     </div>
   </q-page>
 </template>
@@ -50,17 +64,14 @@ import { useQuasar } from 'quasar';
 import { useAuthStore } from '../../stores/auth';
 import AuthForm from '../../components/auth/AuthForm.vue';
 
-// Composables
 const route = useRoute();
 const router = useRouter();
 const $q = useQuasar();
 const authStore = useAuthStore();
 
-// State
 const authMode = ref<'signin' | 'signup'>('signin');
 const redirectTo = ref('/');
 
-// Methods
 const getRouteRedirect = () => authStore.getSafeAuthRedirect(route.query.redirect);
 
 const getInitialRedirect = () => {
@@ -69,10 +80,6 @@ const getInitialRedirect = () => {
   return isAuthCallback ? authStore.consumePendingAuthRedirect(routeRedirect) : routeRedirect;
 };
 
-// Watch for authentication readiness after mount — the OAuth code exchange can
-// finish asynchronously via the Amplify listener, and loadUserProfile() runs
-// after setSession(). Protected routes check isAuthenticated (user + session),
-// so we must wait for the profile to load before redirecting to avoid a bounce.
 let navigated = false;
 
 const unwatchAuth = watch(
@@ -98,12 +105,8 @@ const handleAuthError = (message: string) => {
 onMounted(async () => {
   redirectTo.value = getInitialRedirect();
 
-  // Initialize auth store
   await authStore.initialize();
 
-  // Check if user is fully authenticated (session + profile loaded).
-  // Redirecting on session alone can bounce protected routes because the
-  // router guard requires isAuthenticated, which needs user to be set.
   if (authStore.isAuthenticated && !navigated) {
     navigated = true;
     unwatchAuth();
@@ -113,238 +116,279 @@ onMounted(async () => {
 });
 </script>
 
-<style scoped>
-/* Modern Authentication Page */
-.modern-auth-page {
+<style scoped lang="scss">
+/* ============================================
+   Vela Auth — wa-modern ink + indigo bloom
+   ============================================ */
+.auth-page {
   min-height: 100vh;
   display: flex;
   align-items: center;
   justify-content: center;
   position: relative;
   overflow: hidden;
-  padding: 2rem 1rem;
+  padding: clamp(1.5rem, 4vw, 3rem) 1rem;
+  background:
+    radial-gradient(circle at 12% 18%, rgba(91, 74, 247, 0.18), transparent 55%),
+    radial-gradient(circle at 88% 82%, rgba(232, 68, 122, 0.16), transparent 55%), var(--bg-page);
 }
 
-/* Floating Background Shapes */
-.floating-shapes {
+body.body--dark .auth-page {
+  background:
+    radial-gradient(circle at 12% 18%, rgba(123, 97, 255, 0.28), transparent 55%),
+    radial-gradient(circle at 88% 82%, rgba(255, 107, 163, 0.18), transparent 55%), var(--bg-page);
+}
+
+/* Hairline graph grid */
+.grid-overlay {
   position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
+  inset: 0;
   z-index: 0;
   pointer-events: none;
-  overflow: hidden;
+  background-image:
+    linear-gradient(rgba(91, 74, 247, 0.05) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(91, 74, 247, 0.05) 1px, transparent 1px);
+  background-size: 56px 56px;
+  mask-image: radial-gradient(circle at center, black 30%, transparent 75%);
+  -webkit-mask-image: radial-gradient(circle at center, black 30%, transparent 75%);
 }
 
-.shape {
-  position: absolute;
-  border-radius: 50%;
-  filter: blur(80px);
-  opacity: 0.3;
-  animation: float 20s ease-in-out infinite;
+body.body--dark .grid-overlay {
+  background-image:
+    linear-gradient(rgba(123, 97, 255, 0.08) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(123, 97, 255, 0.08) 1px, transparent 1px);
 }
 
-.shape-1 {
-  width: 400px;
-  height: 400px;
-  background: radial-gradient(circle, rgba(255, 107, 107, 0.4), rgba(255, 170, 65, 0.2));
-  top: -100px;
-  left: -100px;
-  animation-delay: 0s;
-}
-
-.shape-2 {
-  width: 350px;
-  height: 350px;
-  background: radial-gradient(circle, rgba(94, 114, 228, 0.4), rgba(130, 88, 255, 0.2));
-  bottom: -100px;
-  right: -100px;
-  animation-delay: 5s;
-}
-
-.shape-3 {
-  width: 300px;
-  height: 300px;
-  background: radial-gradient(circle, rgba(52, 211, 153, 0.3), rgba(33, 206, 153, 0.2));
+/* Watermark kanji */
+.kanji-watermark {
+  font-size: clamp(22rem, 55vw, 42rem);
   top: 50%;
   left: 50%;
-  transform: translate(-50%, -50%);
-  animation-delay: 10s;
+  transform: translate(-50%, -52%);
+  z-index: 0;
+  opacity: 0.045;
+  letter-spacing: -0.05em;
 }
 
-@keyframes float {
-  0%,
-  100% {
-    transform: translate(0, 0) scale(1);
-  }
-  33% {
-    transform: translate(30px, -30px) scale(1.1);
-  }
-  66% {
-    transform: translate(-20px, 20px) scale(0.9);
-  }
+body.body--dark .kanji-watermark {
+  opacity: 0.07;
 }
 
-/* Main Container */
+/* Container */
 .auth-container {
   position: relative;
-  z-index: 1;
+  z-index: 2;
   width: 100%;
-  max-width: 420px;
-  animation: fadeInUp 0.6s ease-out;
-}
-
-@keyframes fadeInUp {
-  from {
-    opacity: 0;
-    transform: translateY(20px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-.auth-content {
+  max-width: 460px;
   display: flex;
   flex-direction: column;
-  gap: 2rem;
+  gap: clamp(1.5rem, 3vw, 2.25rem);
 }
 
-/* Brand Section */
-.brand-section {
+/* Brand */
+.brand {
   text-align: center;
-  color: white;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
 }
 
-.brand-icon {
-  margin-bottom: 1rem;
-  animation: pulse 2s ease-in-out infinite;
+.brand-eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.6rem;
+  font-family: Syne, sans-serif;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.32em;
+  text-transform: uppercase;
+  color: var(--color-primary);
+  padding: 0.45rem 0.95rem;
+  border-radius: 999px;
+  border: 1px solid var(--glass-border);
+  background: var(--glass-bg-subtle);
+  backdrop-filter: blur(8px);
 }
 
-@keyframes pulse {
-  0%,
-  100% {
-    transform: scale(1);
-    opacity: 1;
-  }
-  50% {
-    transform: scale(1.05);
-    opacity: 0.9;
-  }
+.brand-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--color-primary);
+  box-shadow: 0 0 0 4px rgba(91, 74, 247, 0.15);
+  animation: glow-pulse 2.4s ease-in-out infinite;
 }
 
 .brand-title {
-  font-size: 2.75rem;
+  font-family: 'Noto Serif JP', serif;
   font-weight: 700;
-  margin: 0 0 0.5rem 0;
-  color: white;
-  text-shadow: 0 2px 20px rgba(0, 0, 0, 0.3);
-  letter-spacing: 2px;
+  font-size: clamp(2.8rem, 7vw, 4rem);
+  letter-spacing: 0.02em;
+  margin: 0.3rem 0 0.15rem;
+  line-height: 1;
+  background: linear-gradient(135deg, var(--color-primary) 0%, var(--color-sakura) 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
 }
 
 .brand-tagline {
-  font-size: 1rem;
+  font-family: Figtree, sans-serif;
+  font-size: 0.95rem;
   font-weight: 400;
+  letter-spacing: 0.01em;
+  color: var(--text-secondary);
   margin: 0;
-  color: rgba(255, 255, 255, 0.9);
-  text-shadow: 0 1px 10px rgba(0, 0, 0, 0.2);
+  max-width: 28ch;
 }
 
-/* Authentication Card */
+/* Card */
 .auth-card {
-  background: rgba(255, 255, 255, 0.95);
-  backdrop-filter: blur(10px);
-  border-radius: 20px;
-  padding: 2.5rem;
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
-  border: 1px solid rgba(255, 255, 255, 0.5);
-  transition: all 0.3s ease;
+  position: relative;
+  background: var(--glass-bg);
+  backdrop-filter: var(--glass-backdrop);
+  -webkit-backdrop-filter: var(--glass-backdrop);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--border-radius-xl);
+  padding: clamp(1.75rem, 4vw, 2.25rem) clamp(1.5rem, 4vw, 2.25rem) clamp(1.5rem, 3vw, 2rem);
+  box-shadow: var(--shadow-medium);
+  overflow: hidden;
 }
 
-.auth-card:hover {
-  box-shadow: 0 25px 70px rgba(0, 0, 0, 0.4);
-  transform: translateY(-2px);
+/* Subtle indigo halo behind card */
+.auth-card-glow {
+  position: absolute;
+  inset: -1px;
+  border-radius: inherit;
+  padding: 1px;
+  background: linear-gradient(
+    135deg,
+    rgba(91, 74, 247, 0.4),
+    transparent 35%,
+    transparent 65%,
+    rgba(232, 68, 122, 0.3)
+  );
+  -webkit-mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  mask-composite: exclude;
+  pointer-events: none;
 }
 
-/* Features Section */
-.features-section {
+/* Feature rail */
+.feature-rail {
+  list-style: none;
   display: flex;
   flex-wrap: wrap;
-  gap: 0.75rem;
   justify-content: center;
+  gap: 0.5rem;
+  padding: 0;
+  margin: 0;
 }
 
 .feature-pill {
-  display: flex;
+  display: inline-flex;
   align-items: center;
   gap: 0.5rem;
-  padding: 0.75rem 1.25rem;
-  background: rgba(255, 255, 255, 0.15);
-  backdrop-filter: blur(10px);
-  border-radius: 50px;
-  border: 1px solid rgba(255, 255, 255, 0.3);
-  color: white;
-  font-size: 0.875rem;
-  font-weight: 500;
+  padding: 0.55rem 0.95rem;
+  border-radius: 999px;
+  background: var(--glass-bg-subtle);
+  border: 1px solid var(--glass-border);
+  backdrop-filter: blur(8px);
+  font-family: Syne, sans-serif;
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-primary);
   cursor: default;
-  text-shadow: 0 1px 5px rgba(0, 0, 0, 0.2);
+  transition:
+    transform 0.25s ease,
+    border-color 0.25s ease,
+    color 0.25s ease;
 }
 
-.feature-pill .q-icon {
-  opacity: 0.95;
+.feature-pill:hover {
+  transform: translateY(-2px);
 }
 
-/* Responsive Design */
+.pill-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  font-size: 0.7rem;
+}
+
+.pill-vocab .pill-icon {
+  background: rgba(91, 74, 247, 0.12);
+  color: var(--color-primary);
+}
+.pill-vocab:hover {
+  border-color: rgba(91, 74, 247, 0.3);
+}
+
+.pill-chat .pill-icon {
+  background: rgba(29, 184, 122, 0.12);
+  color: var(--color-success);
+}
+.pill-chat:hover {
+  border-color: rgba(29, 184, 122, 0.3);
+}
+
+.pill-streak .pill-icon {
+  background: rgba(232, 68, 122, 0.12);
+  color: var(--color-sakura);
+}
+.pill-streak:hover {
+  border-color: rgba(232, 68, 122, 0.3);
+}
+
+.pill-label {
+  line-height: 1;
+}
+
+/* Footnote */
+.auth-footnote {
+  text-align: center;
+  margin: 0;
+  font-family: Figtree, sans-serif;
+  font-size: 0.78rem;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  color: var(--text-secondary);
+  opacity: 0.85;
+}
+
+/* Responsive */
 @media (max-width: 600px) {
-  .modern-auth-page {
-    padding: 1.5rem 1rem;
-  }
-
   .auth-container {
     max-width: 100%;
+    gap: 1.25rem;
   }
-
-  .brand-title {
-    font-size: 2.25rem;
+  .brand-eyebrow {
+    font-size: 0.65rem;
+    letter-spacing: 0.28em;
   }
-
-  .brand-tagline {
-    font-size: 0.9rem;
-  }
-
-  .auth-card {
-    padding: 2rem 1.5rem;
-    border-radius: 16px;
-  }
-
   .feature-pill {
-    font-size: 0.8rem;
-    padding: 0.625rem 1rem;
-  }
-
-  .feature-pill .q-icon {
-    font-size: 1.1rem;
+    font-size: 0.7rem;
+    padding: 0.45rem 0.75rem;
   }
 }
 
 @media (max-width: 400px) {
-  .brand-title {
-    font-size: 2rem;
-  }
-
   .auth-card {
-    padding: 1.75rem 1.25rem;
+    border-radius: var(--border-radius-lg);
   }
-
-  .features-section {
-    gap: 0.5rem;
-  }
-
-  .feature-pill {
-    font-size: 0.75rem;
-    padding: 0.5rem 0.875rem;
+  .feature-rail {
+    gap: 0.4rem;
   }
 }
 </style>

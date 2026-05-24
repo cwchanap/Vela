@@ -1,104 +1,156 @@
 <template>
-  <div class="dashboard-container" :class="{ dark: isDarkMode }">
-    <div class="dashboard-card">
-      <div class="dashboard-header">
-        <div class="header-top">
-          <h2>Vela Dictionary</h2>
-          <div class="header-actions">
-            <button @click="handleSignOut" class="icon-button" title="Sign Out">🚪</button>
-            <button
-              @click="toggleTheme"
-              class="icon-button"
-              :title="isDarkMode ? 'Switch to Light Mode' : 'Switch to Dark Mode'"
-            >
-              {{ isDarkMode ? '☀️' : '🌙' }}
-            </button>
-          </div>
-        </div>
-        <p>Logged in as: {{ userEmail }}</p>
-      </div>
-
-      <div class="dashboard-content">
-        <div class="instructions">
-          <div class="instructions-header" @click="instructionsExpanded = !instructionsExpanded">
-            <h3>How to save entries</h3>
-            <button class="collapse-icon" type="button">
-              {{ instructionsExpanded ? '▼' : '▶' }}
-            </button>
-          </div>
-          <ol v-show="instructionsExpanded">
-            <li>Select any text on a webpage</li>
-            <li>Right-click to open the context menu</li>
-            <li>Click "Add vocab to Vela"</li>
-          </ol>
-        </div>
-
-        <div class="my-dictionaries">
-          <div class="section-header">
-            <h3>
-              Your Dictionary Entries<span
-                v-if="pendingCount > 0"
-                class="pending-badge"
-                :title="`${pendingCount} sentence(s) waiting to sync`"
-              >
-                {{ pendingCount }}
-              </span>
-            </h3>
-            <button @click="loadEntries" :disabled="loading" class="refresh-button">
-              {{ loading ? 'Loading...' : 'Refresh' }}
-            </button>
-          </div>
-
-          <div v-if="error" class="error-message">
-            {{ error }}
-          </div>
-
-          <button @click="openWebapp" class="view-all-button" v-if="entries.length > 0">
-            Open in Web App →
-          </button>
-
-          <div v-if="entries.length === 0 && !loading" class="empty-state">
-            No dictionary entries yet. Start by selecting text on any webpage!
-          </div>
-
-          <div v-else class="entries-list">
-            <div v-for="item in recentEntries" :key="item.sentence_id" class="entry-item">
-              <div class="entry-header">
-                <div class="entry-text">{{ item.sentence }}</div>
-                <a
-                  v-if="item.source_url"
-                  :href="item.source_url"
-                  target="_blank"
-                  class="source-link"
-                  title="Open source"
-                >
-                  🔗
-                </a>
-              </div>
-              <div v-if="item.source_url" class="entry-meta">
-                Source: <a :href="item.source_url" target="_blank">{{ item.source_url }}</a>
-              </div>
-              <div class="entry-date">
-                {{ formatDate(item.created_at) }}
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
+  <div class="vela-popup dashboard">
+    <div class="ambient" aria-hidden="true">
+      <div class="blob blob-a"></div>
     </div>
+
+    <header class="dash-header">
+      <div class="brand-cluster">
+        <span class="brand-mark" aria-hidden="true">辞</span>
+        <div class="brand-text">
+          <span class="brand-name">Vela</span>
+          <span class="brand-sub">Dictionary</span>
+        </div>
+      </div>
+      <div v-if="userEmail" class="user-pill" :title="userEmail">
+        <span class="user-dot"></span>
+        <span class="user-email">{{ userEmail }}</span>
+      </div>
+    </header>
+
+    <main class="dash-body">
+      <section class="instructions" :class="{ expanded: instructionsExpanded }">
+        <button
+          type="button"
+          class="instructions-header"
+          @click="instructionsExpanded = !instructionsExpanded"
+        >
+          <span class="instructions-kanji" aria-hidden="true">選</span>
+          <span class="instructions-title">How to save entries</span>
+          <span class="instructions-chevron" :class="{ open: instructionsExpanded }">
+            <svg
+              width="12"
+              height="12"
+              viewBox="0 0 12 12"
+              fill="none"
+              xmlns="http://www.w3.org/2000/svg"
+            >
+              <path
+                d="M3 4.5L6 7.5L9 4.5"
+                stroke="currentColor"
+                stroke-width="1.6"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              />
+            </svg>
+          </span>
+        </button>
+        <ol v-show="instructionsExpanded" class="instructions-list">
+          <li><span class="step-num">1</span>Select any text on a webpage</li>
+          <li><span class="step-num">2</span>Right-click to open the context menu</li>
+          <li><span class="step-num">3</span>Click <em>"Add vocab to Vela"</em></li>
+        </ol>
+      </section>
+
+      <section class="entries-section">
+        <div class="section-head">
+          <div class="section-title">
+            <h2>Your Dictionary</h2>
+            <span
+              v-if="pendingCount > 0"
+              class="pending-badge"
+              :title="`${pendingCount} sentence(s) waiting to sync`"
+            >
+              {{ pendingCount }} pending
+            </span>
+          </div>
+          <button @click="loadEntries" :disabled="loading" class="refresh-btn" type="button">
+            <span class="refresh-icon" :class="{ spinning: loading }">
+              <svg
+                width="13"
+                height="13"
+                viewBox="0 0 24 24"
+                fill="none"
+                xmlns="http://www.w3.org/2000/svg"
+              >
+                <path
+                  d="M21 12a9 9 0 11-3.51-7.12M21 4v5h-5"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                />
+              </svg>
+            </span>
+            <span>{{ loading ? 'Loading' : 'Refresh' }}</span>
+          </button>
+        </div>
+
+        <div v-if="error" class="error-banner">
+          <span class="error-dot"></span>
+          {{ error }}
+        </div>
+
+        <button v-if="entries.length > 0" @click="openWebapp" class="view-all-btn" type="button">
+          <span>Open in Web App</span>
+          <span class="btn-arrow">↗</span>
+        </button>
+
+        <div v-if="entries.length === 0 && !loading" class="empty-state">
+          <span class="empty-kanji" aria-hidden="true">空</span>
+          <p class="empty-title">No entries yet</p>
+          <p class="empty-copy">
+            Select text on any webpage and right-click to start your dictionary.
+          </p>
+        </div>
+
+        <div v-else class="entries-list">
+          <article v-for="item in recentEntries" :key="item.sentence_id" class="entry">
+            <div class="entry-head">
+              <p class="entry-sentence">{{ item.sentence }}</p>
+              <a
+                v-if="item.source_url"
+                :href="item.source_url"
+                target="_blank"
+                class="source-link"
+                title="Open source"
+                aria-label="Open source page"
+              >
+                <svg
+                  width="13"
+                  height="13"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  xmlns="http://www.w3.org/2000/svg"
+                >
+                  <path
+                    d="M10 14L21 3M21 3H15M21 3V9M21 13V19C21 20.1 20.1 21 19 21H5C3.9 21 3 20.1 3 19V5C3 3.9 3.9 3 5 3H11"
+                    stroke="currentColor"
+                    stroke-width="2"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                  />
+                </svg>
+              </a>
+            </div>
+            <div v-if="item.source_url" class="entry-source">
+              <span class="source-label">Source</span>
+              <a :href="item.source_url" target="_blank">{{ item.source_url }}</a>
+            </div>
+            <div class="entry-meta">
+              <span class="entry-date">{{ formatDate(item.created_at) }}</span>
+            </div>
+          </article>
+        </div>
+      </section>
+    </main>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, watch, computed } from 'vue';
+import { ref, onMounted, onUnmounted, computed } from 'vue';
 import { getMyDictionaries } from '../utils/api';
-import {
-  getValidIdToken,
-  refreshIdToken,
-  getUserEmail,
-  clearAuthData,
-  setExplicitSignout,
-} from '../utils/storage';
+import { getValidIdToken, refreshIdToken, getUserEmail } from '../utils/storage';
 import { getPendingQueueCount } from '../utils/pendingQueue';
 
 const emit = defineEmits<{
@@ -109,7 +161,6 @@ const userEmail = ref('');
 const entries = ref<any[]>([]);
 const loading = ref(false);
 const error = ref('');
-const isDarkMode = ref(false);
 const instructionsExpanded = ref(false);
 const pendingCount = ref(0);
 
@@ -137,21 +188,12 @@ onMounted(async () => {
     userEmail.value = email;
   }
 
-  // Load theme preference
-  const savedTheme = await browser.storage.local.get('theme_preference');
-  isDarkMode.value = savedTheme.theme_preference === 'dark';
-
   browser.runtime.onMessage.addListener(handleRuntimeMessage);
   await loadEntries();
 });
 
 onUnmounted(() => {
   browser.runtime.onMessage.removeListener(handleRuntimeMessage);
-});
-
-// Watch for theme changes and persist to storage
-watch(isDarkMode, async (newValue) => {
-  await browser.storage.local.set({ theme_preference: newValue ? 'dark' : 'light' });
 });
 
 async function loadEntries() {
@@ -165,14 +207,12 @@ async function loadEntries() {
       const data = await getMyDictionaries(idToken);
       entries.value = data;
     } catch (apiError: any) {
-      // If unauthorized, try to refresh token and retry once
       if (
         apiError.message?.includes('Unauthorized') ||
         apiError.message?.includes('expired token')
       ) {
         idToken = await refreshIdToken();
 
-        // Validate the refreshed token before proceeding
         if (!idToken) {
           throw new Error('Session expired. Please log in again.');
         }
@@ -197,20 +237,6 @@ async function loadEntries() {
   }
 }
 
-function toggleTheme() {
-  isDarkMode.value = !isDarkMode.value;
-}
-
-async function handleSignOut() {
-  try {
-    await clearAuthData();
-  } catch (error: unknown) {
-    console.error('[Vela] Failed to clear auth data on sign out:', error);
-  }
-  await setExplicitSignout();
-  emit('sessionExpired');
-}
-
 function isAuthenticationError(error: Error): boolean {
   return [
     'Session expired',
@@ -222,344 +248,565 @@ function isAuthenticationError(error: Error): boolean {
 
 function formatDate(timestamp: number): string {
   const date = new Date(timestamp);
-  return date.toLocaleDateString() + ' ' + date.toLocaleTimeString();
+  return date.toLocaleDateString() + ' · ' + date.toLocaleTimeString();
 }
 
 function openWebapp() {
-  // Use localhost in dev mode, production URL in production
   const isDev = import.meta.env.MODE === 'development';
   const baseUrl = isDev ? 'http://localhost:9000' : 'https://vela.cwchanap.dev';
   browser.tabs.create({ url: `${baseUrl}/my-dictionaries` });
 }
 
-// Computed property to show only first 5 entries
 const recentEntries = computed(() => {
   return entries.value.slice(0, 5);
 });
 </script>
 
 <style scoped>
-/* CSS Variables for theming */
-.dashboard-container {
-  --bg-primary: #ffffff;
-  --bg-secondary: #f8f9fa;
-  --bg-hover: #f5f5f5;
-  --text-primary: #1a1a1a;
-  --text-secondary: #333;
-  --text-tertiary: #666;
-  --text-muted: #888;
-  --border-color: #ddd;
-  --border-hover: #ccc;
-  --accent-color: #4a90e2;
-  --accent-hover: #357abd;
-  --error-bg: #fee;
-  --error-border: #fcc;
-  --error-text: #c33;
-}
-
-.dashboard-container.dark {
-  --bg-primary: #1e1e1e;
-  --bg-secondary: #2a2a2a;
-  --bg-hover: #353535;
-  --text-primary: #e4e4e4;
-  --text-secondary: #d0d0d0;
-  --text-tertiary: #a0a0a0;
-  --text-muted: #808080;
-  --border-color: #404040;
-  --border-hover: #505050;
-  --accent-color: #5ba3f5;
-  --accent-hover: #4a90e2;
-  --error-bg: #3d1a1a;
-  --error-border: #5c2828;
-  --error-text: #ff6b6b;
-}
-
-.dashboard-container {
+.vela-popup.dashboard {
+  position: relative;
   width: 400px;
   height: 100%;
-  font-family:
-    -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-  overflow: hidden;
   display: flex;
   flex-direction: column;
-  background-color: var(--bg-primary);
-}
-
-.dashboard-card {
-  background-color: var(--bg-primary);
-  flex: 1;
-  display: flex;
-  flex-direction: column;
+  background:
+    radial-gradient(circle at 90% -5%, rgba(123, 97, 255, 0.16), transparent 50%), var(--bg-page);
   overflow: hidden;
 }
 
-.dashboard-header {
-  padding: 20px;
-  border-bottom: 1px solid var(--border-color);
+/* Ambient */
+.ambient {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  overflow: hidden;
+  z-index: 0;
 }
 
-.header-top {
+.blob {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(70px);
+  opacity: 0.22;
+  will-change: transform;
+}
+
+.blob-a {
+  width: 240px;
+  height: 240px;
+  background: var(--color-primary);
+  top: -90px;
+  right: -90px;
+  animation: vela-blob-drift 14s ease-in-out infinite;
+}
+
+/* Header */
+.dash-header {
+  position: relative;
+  z-index: 1;
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 8px;
+  gap: 10px;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border-subtle);
+  background: linear-gradient(180deg, rgba(28, 26, 50, 0.4), transparent);
 }
 
-.dashboard-header h2 {
-  margin: 0;
-  font-size: 24px;
-  font-weight: 600;
-  color: var(--text-primary);
-}
-
-.header-actions {
+.brand-cluster {
   display: flex;
-  gap: 8px;
-}
-
-.icon-button {
-  padding: 6px 12px;
-  background-color: var(--bg-secondary);
-  color: var(--text-primary);
-  border: 1px solid var(--border-color);
-  border-radius: 6px;
-  font-size: 18px;
-  cursor: pointer;
-  transition: all 0.2s;
-  line-height: 1;
-}
-
-.icon-button:hover {
-  background-color: var(--bg-hover);
-  border-color: var(--border-hover);
-}
-
-.dashboard-header p {
-  margin: 0 0 12px;
-  font-size: 14px;
-  color: var(--text-tertiary);
-}
-
-.dashboard-content {
-  display: flex;
-  flex-direction: column;
-  gap: 20px;
-  padding: 20px;
-  overflow-y: auto;
-  flex: 1;
-}
-
-.instructions {
-  padding: 12px 16px;
-  background-color: var(--bg-secondary);
-  border-radius: 6px;
-  border: 1px solid var(--border-color);
-}
-
-.instructions-header {
-  display: flex;
-  justify-content: space-between;
   align-items: center;
-  cursor: pointer;
-  user-select: none;
+  gap: 10px;
 }
 
-.instructions-header:hover {
-  opacity: 0.8;
-}
-
-.instructions h3 {
-  margin: 0;
-  font-size: 16px;
-  font-weight: 600;
-  color: var(--text-primary);
-}
-
-.collapse-icon {
-  background: none;
-  border: none;
-  color: var(--text-secondary);
-  font-size: 14px;
-  cursor: pointer;
-  padding: 0;
-  width: 20px;
-  height: 20px;
-  display: flex;
+.brand-mark {
+  display: inline-flex;
   align-items: center;
   justify-content: center;
-  pointer-events: none;
-}
-
-.instructions ol {
-  margin: 12px 0 0;
-  padding-left: 20px;
-}
-
-.instructions li {
-  margin: 6px 0;
-  font-size: 14px;
-  color: var(--text-secondary);
-}
-
-.my-dictionaries {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.section-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-
-.section-header h3 {
-  margin: 0;
-  font-size: 18px;
-  font-weight: 600;
-  color: var(--text-primary);
-}
-
-.refresh-button {
-  padding: 6px 12px;
-  background-color: var(--accent-color);
+  width: 36px;
+  height: 36px;
+  border-radius: var(--radius-md);
+  background: linear-gradient(135deg, var(--color-primary) 0%, var(--color-sakura) 130%);
   color: white;
-  border: none;
-  border-radius: 6px;
-  font-size: 13px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: background-color 0.2s;
+  font-family: var(--font-jp);
+  font-weight: 700;
+  font-size: 1.1rem;
+  box-shadow: 0 4px 14px rgba(123, 97, 255, 0.4);
 }
 
-.refresh-button:hover:not(:disabled) {
-  background-color: var(--accent-hover);
-}
-
-.refresh-button:disabled {
-  background-color: var(--border-color);
-  cursor: not-allowed;
-  opacity: 0.6;
-}
-
-.error-message {
-  padding: 12px;
-  background-color: var(--error-bg);
-  border: 1px solid var(--error-border);
-  border-radius: 6px;
-  color: var(--error-text);
-  font-size: 14px;
-}
-
-.empty-state {
-  padding: 32px 24px;
-  text-align: center;
-  color: var(--text-muted);
-  font-size: 14px;
-}
-
-.entries-list {
+.brand-text {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  line-height: 1.05;
 }
 
-.entry-item {
-  padding: 12px;
-  border: 1px solid var(--border-color);
-  border-radius: 8px;
-  background: var(--bg-secondary);
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.entry-item:hover {
-  border-color: var(--accent-color);
-  background-color: var(--bg-hover);
-}
-
-.entry-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  gap: 8px;
-  margin-bottom: 8px;
-}
-
-.entry-text {
-  font-size: 14px;
-  line-height: 1.5;
+.brand-name {
+  font-family: var(--font-display);
+  font-size: 1.05rem;
+  font-weight: 700;
   color: var(--text-primary);
-  word-break: break-word;
-  flex: 1;
+  letter-spacing: -0.01em;
 }
 
-.source-link {
-  font-size: 16px;
-  text-decoration: none;
-  opacity: 0.6;
-  transition: opacity 0.2s;
+.brand-sub {
+  font-family: var(--font-display);
+  font-size: 0.6rem;
+  font-weight: 600;
+  letter-spacing: 0.24em;
+  text-transform: uppercase;
+  color: var(--color-primary-soft);
+}
+
+.user-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px 5px 8px;
+  border-radius: 999px;
+  background: var(--glass-bg-subtle);
+  border: 1px solid var(--glass-border);
+  font-size: 0.7rem;
+  font-weight: 500;
+  color: var(--text-secondary);
+  max-width: 180px;
+}
+
+.user-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--color-success);
+  box-shadow: 0 0 0 3px rgba(0, 204, 136, 0.18);
   flex-shrink: 0;
 }
 
-.source-link:hover {
-  opacity: 1;
+.user-email {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-.entry-meta {
-  font-size: 12px;
-  color: var(--text-secondary);
-  word-break: break-all;
+/* Body */
+.dash-body {
+  position: relative;
+  z-index: 1;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 16px 18px 18px;
+  overflow-y: auto;
 }
 
-.entry-meta a {
-  color: var(--accent-color);
-  text-decoration: none;
-  transition: opacity 0.2s;
+/* Instructions */
+.instructions {
+  background: var(--glass-bg-subtle);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  transition: background 0.25s ease;
 }
 
-.entry-meta a:hover {
-  opacity: 0.8;
-  text-decoration: underline;
+.instructions.expanded {
+  background: var(--glass-bg);
 }
 
-.entry-date {
-  font-size: 12px;
-  color: var(--text-secondary);
-}
-
-.view-all-button {
+.instructions-header {
   width: 100%;
-  padding: 12px;
-  margin-bottom: 12px;
-  background-color: var(--accent-color);
-  color: white;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 11px 14px;
+  background: transparent;
   border: none;
-  border-radius: 6px;
-  font-size: 14px;
-  font-weight: 500;
+  color: var(--text-primary);
+  text-align: left;
   cursor: pointer;
-  transition: background-color 0.2s;
 }
 
-.view-all-button:hover {
-  background-color: var(--accent-hover);
+.instructions-kanji {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  background: rgba(123, 97, 255, 0.15);
+  color: var(--color-primary-soft);
+  font-family: var(--font-jp);
+  font-weight: 700;
+  font-size: 0.85rem;
+}
+
+.instructions-title {
+  flex: 1;
+  font-family: var(--font-display);
+  font-size: 0.82rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--text-primary);
+}
+
+.instructions-chevron {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-tertiary);
+  transition:
+    transform 0.25s ease,
+    color 0.2s ease;
+}
+
+.instructions-chevron.open {
+  transform: rotate(180deg);
+  color: var(--color-primary-soft);
+}
+
+.instructions-list {
+  list-style: none;
+  margin: 0;
+  padding: 0 14px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  animation: vela-fade-up 0.25s ease-out both;
+}
+
+.instructions-list li {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+  line-height: 1.4;
+}
+
+.instructions-list em {
+  font-style: normal;
+  color: var(--color-primary-soft);
+  font-weight: 600;
+}
+
+.step-num {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: rgba(123, 97, 255, 0.18);
+  color: var(--color-primary-soft);
+  font-family: var(--font-display);
+  font-size: 0.65rem;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+/* Section head */
+.entries-section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.section-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+}
+
+.section-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.section-title h2 {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 0.95rem;
+  font-weight: 700;
+  letter-spacing: -0.005em;
+  color: var(--text-primary);
 }
 
 .pending-badge {
   display: inline-flex;
   align-items: center;
-  justify-content: center;
-  background-color: #e55;
-  color: #fff;
-  border-radius: 10px;
-  padding: 0 7px;
-  font-size: 11px;
+  gap: 4px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: linear-gradient(135deg, rgba(255, 107, 163, 0.18), rgba(123, 97, 255, 0.18));
+  border: 1px solid rgba(255, 107, 163, 0.3);
+  color: var(--color-sakura);
+  font-family: var(--font-display);
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.refresh-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  font-family: var(--font-display);
+  font-size: 0.72rem;
   font-weight: 600;
-  min-width: 18px;
-  height: 18px;
-  margin-left: 6px;
-  vertical-align: middle;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.refresh-btn:hover:not(:disabled) {
+  border-color: var(--border-strong);
+  color: var(--color-primary-soft);
+  background: var(--bg-elevated);
+}
+
+.refresh-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.refresh-icon {
+  display: inline-flex;
+  align-items: center;
+  color: var(--color-primary-soft);
+}
+
+.refresh-icon.spinning {
+  animation: spin 0.9s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Error banner */
+.error-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  background: rgba(255, 84, 112, 0.1);
+  border: 1px solid rgba(255, 84, 112, 0.3);
+  border-radius: var(--radius-md);
+  color: var(--color-error);
+  font-size: 0.8rem;
+  line-height: 1.4;
+}
+
+.error-dot {
+  flex-shrink: 0;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--color-error);
+  box-shadow: 0 0 0 3px rgba(255, 84, 112, 0.15);
+}
+
+/* View-all */
+.view-all-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 11px 14px;
+  background: linear-gradient(
+    135deg,
+    var(--color-primary) 0%,
+    #9b7bff 50%,
+    var(--color-sakura) 130%
+  );
+  color: white;
+  border: none;
+  border-radius: var(--radius-md);
+  font-family: var(--font-display);
+  font-size: 0.85rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  box-shadow:
+    var(--shadow-button),
+    inset 0 1px 0 rgba(255, 255, 255, 0.14);
+  transition:
+    transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1),
+    box-shadow 0.25s ease;
+}
+
+.view-all-btn:hover {
+  transform: translateY(-2px);
+  box-shadow:
+    0 10px 28px rgba(123, 97, 255, 0.5),
+    inset 0 1px 0 rgba(255, 255, 255, 0.18);
+}
+
+.btn-arrow {
+  font-size: 1rem;
+  transition: transform 0.2s ease;
+}
+
+.view-all-btn:hover .btn-arrow {
+  transform: translate(2px, -2px);
+}
+
+/* Empty state */
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  padding: 28px 16px 20px;
+  border: 1px dashed var(--glass-border);
+  border-radius: var(--radius-md);
+  background: var(--glass-bg-subtle);
+}
+
+.empty-kanji {
+  font-family: var(--font-jp);
+  font-weight: 300;
+  font-size: 3.2rem;
+  line-height: 1;
+  color: var(--color-primary);
+  opacity: 0.35;
+  margin-bottom: 6px;
+}
+
+.empty-title {
+  margin: 4px 0 4px;
+  font-family: var(--font-display);
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.empty-copy {
+  margin: 0;
+  font-size: 0.78rem;
+  color: var(--text-tertiary);
+  max-width: 28ch;
+  line-height: 1.45;
+}
+
+/* Entries list */
+.entries-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.entry {
+  position: relative;
+  padding: 11px 12px;
+  background: var(--glass-bg-subtle);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-md);
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  transition:
+    border-color 0.2s ease,
+    background 0.2s ease,
+    transform 0.2s ease;
+}
+
+.entry:hover {
+  border-color: var(--border-strong);
+  background: var(--glass-bg);
+  transform: translateY(-1px);
+}
+
+.entry-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.entry-sentence {
+  margin: 0;
+  flex: 1;
+  font-family: var(--font-jp);
+  font-weight: 500;
+  font-size: 0.92rem;
+  line-height: 1.5;
+  color: var(--text-primary);
+  word-break: break-word;
+}
+
+.source-link {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 7px;
+  background: rgba(255, 107, 163, 0.1);
+  color: var(--color-sakura);
+  transition:
+    background 0.2s ease,
+    color 0.2s ease,
+    transform 0.2s ease;
+}
+
+.source-link:hover {
+  background: rgba(255, 107, 163, 0.2);
+  color: var(--color-sakura);
+  transform: translate(1px, -1px);
+}
+
+.entry-source {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  font-size: 0.7rem;
+  color: var(--text-tertiary);
+  word-break: break-all;
+  line-height: 1.35;
+}
+
+.source-label {
+  flex-shrink: 0;
+  font-family: var(--font-display);
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--color-primary-soft);
+}
+
+.entry-source a {
+  color: var(--text-secondary);
+  text-decoration: none;
+  transition: color 0.2s ease;
+}
+
+.entry-source a:hover {
+  color: var(--color-primary-soft);
+  text-decoration: underline;
+}
+
+.entry-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.entry-date {
+  font-size: 0.68rem;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
 }
 </style>
