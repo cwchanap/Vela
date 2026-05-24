@@ -112,6 +112,7 @@
                 v-if="item.source_url"
                 :href="item.source_url"
                 target="_blank"
+                rel="noopener noreferrer"
                 class="source-link"
                 title="Open source"
                 aria-label="Open source page"
@@ -135,7 +136,9 @@
             </div>
             <div v-if="item.source_url" class="entry-source">
               <span class="source-label">Source</span>
-              <a :href="item.source_url" target="_blank">{{ item.source_url }}</a>
+              <a :href="item.source_url" target="_blank" rel="noopener noreferrer">{{
+                item.source_url
+              }}</a>
             </div>
             <div class="entry-meta">
               <span class="entry-date">{{ formatDate(item.created_at) }}</span>
