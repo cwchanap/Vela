@@ -342,6 +342,24 @@ describe('DashboardPage', () => {
       await wrapper.vm.$nextTick();
       expect(collapseIcon.text()).toBe('▼');
     });
+
+    it('should have ARIA disclosure attributes on the instructions accordion', async () => {
+      wrapper = mount(DashboardPage);
+      await flushPromises();
+
+      const button = wrapper.find('.instructions-header');
+      expect(button.attributes('aria-expanded')).toBe('false');
+      expect(button.attributes('aria-controls')).toBe('instructions-panel');
+
+      const panel = wrapper.find('#instructions-panel');
+      expect(panel.exists()).toBe(true);
+      expect(panel.attributes('role')).toBe('region');
+
+      // Click to expand
+      await button.trigger('click');
+      await wrapper.vm.$nextTick();
+      expect(button.attributes('aria-expanded')).toBe('true');
+    });
   });
 
   describe('Dictionary Entries Display', () => {
