@@ -199,6 +199,26 @@ describe('DashboardPage', () => {
       expect(wrapper.emitted('sessionExpired')).toBeTruthy();
     });
 
+    it('renders sign-out button even when no email is stored', async () => {
+      mockGetUserEmail.mockResolvedValue(null);
+
+      wrapper = mount(DashboardPage);
+      await flushPromises();
+
+      expect(wrapper.find('[title="Sign Out"]').exists()).toBe(true);
+      expect(wrapper.find('.user-pill').exists()).toBe(false);
+    });
+
+    it('renders user-pill only when email is available', async () => {
+      mockGetUserEmail.mockResolvedValue('user@example.com');
+
+      wrapper = mount(DashboardPage);
+      await flushPromises();
+
+      expect(wrapper.find('.user-pill').exists()).toBe(true);
+      expect(wrapper.find('.user-pill').text()).toContain('user@example.com');
+    });
+
     it('emits sessionExpired even if clearAuthData fails on sign-out', async () => {
       const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
       mockClearAuthData.mockRejectedValue(new Error('Storage corrupted'));

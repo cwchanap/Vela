@@ -47,11 +47,12 @@ async function handleSessionExpired() {
 </script>
 
 <template>
-  <div v-if="loading" class="vela-loading">
+  <div v-if="loading" class="vela-loading" role="status" aria-label="Loading Vela">
     <div class="loading-blob" aria-hidden="true"></div>
     <div class="loading-stack">
       <span class="loading-mark" aria-hidden="true">辞</span>
       <span class="loading-label">Vela</span>
+      <span class="sr-only">Loading…</span>
       <span class="loading-bar" aria-hidden="true">
         <span class="loading-bar-fill"></span>
       </span>
@@ -151,5 +152,17 @@ async function handleSessionExpired() {
   100% {
     transform: translateX(350%);
   }
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }
 </style>
