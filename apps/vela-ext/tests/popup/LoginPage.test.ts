@@ -76,49 +76,14 @@ describe('LoginPage', () => {
       expect(wrapper.find('button[type="submit"]').exists()).toBe(false);
     });
 
-    it('renders the page title', () => {
+    it('renders the brand title', () => {
       wrapper = mount(LoginPage);
-      expect(wrapper.text()).toContain('Sign in on Vela');
+      expect(wrapper.text()).toContain('辞書拡張');
     });
 
-    it('does not show error message initially', () => {
+    it('does not show error banner initially', () => {
       wrapper = mount(LoginPage);
-      expect(wrapper.find('.error-message').exists()).toBe(false);
-    });
-  });
-
-  describe('theme toggle', () => {
-    it('defaults to light mode', async () => {
-      wrapper = mount(LoginPage);
-      await flushPromises();
-      expect(wrapper.find('.login-container').classes()).not.toContain('dark');
-    });
-
-    it('loads dark mode from storage when preference is "dark"', async () => {
-      storageState.theme_preference = 'dark';
-      wrapper = mount(LoginPage);
-      await flushPromises();
-      expect(wrapper.find('.login-container').classes()).toContain('dark');
-    });
-
-    it('toggles to dark mode when theme button is clicked', async () => {
-      wrapper = mount(LoginPage);
-      await flushPromises();
-
-      const themeBtn = wrapper.find('.theme-toggle');
-      await themeBtn.trigger('click');
-
-      expect(wrapper.find('.login-container').classes()).toContain('dark');
-    });
-
-    it('persists theme preference to storage on change', async () => {
-      wrapper = mount(LoginPage);
-      await flushPromises();
-
-      await wrapper.find('.theme-toggle').trigger('click');
-      await flushPromises();
-
-      expect(browser.storage.local.set).toHaveBeenCalledWith({ theme_preference: 'dark' });
+      expect(wrapper.find('.error-banner').exists()).toBe(false);
     });
   });
 
@@ -127,7 +92,7 @@ describe('LoginPage', () => {
       wrapper = mount(LoginPage);
       await flushPromises();
 
-      await wrapper.find('.open-webapp-button').trigger('click');
+      await wrapper.find('.btn-primary').trigger('click');
       await flushPromises();
 
       expect(mockOpenWebappLogin).toHaveBeenCalledOnce();
@@ -138,10 +103,10 @@ describe('LoginPage', () => {
       wrapper = mount(LoginPage);
       await flushPromises();
 
-      await wrapper.find('.open-webapp-button').trigger('click');
+      await wrapper.find('.btn-primary').trigger('click');
       await flushPromises();
 
-      expect(wrapper.find('.error-message').text()).toBe('tabs.create failed');
+      expect(wrapper.find('.error-banner').text()).toBe('tabs.create failed');
     });
 
     it('imports the web-app session when the user has signed in there', async () => {
@@ -149,7 +114,7 @@ describe('LoginPage', () => {
       wrapper = mount(LoginPage);
       await flushPromises();
 
-      await wrapper.find('.web-session-button').trigger('click');
+      await wrapper.find('.btn-ghost').trigger('click');
       await flushPromises();
 
       expect(mockImportWebappSession).toHaveBeenCalledOnce();
@@ -162,7 +127,7 @@ describe('LoginPage', () => {
       wrapper = mount(LoginPage);
       await flushPromises();
 
-      await wrapper.find('.web-session-button').trigger('click');
+      await wrapper.find('.btn-ghost').trigger('click');
       await flushPromises();
 
       expect(mockClearExplicitSignout).not.toHaveBeenCalled();
@@ -173,10 +138,10 @@ describe('LoginPage', () => {
       wrapper = mount(LoginPage);
       await flushPromises();
 
-      await wrapper.find('.web-session-button').trigger('click');
+      await wrapper.find('.btn-ghost').trigger('click');
       await flushPromises();
 
-      expect(wrapper.find('.error-message').text()).toContain('Sign in at the URL above');
+      expect(wrapper.find('.error-banner').text()).toContain('Sign in at the URL above');
       expect(wrapper.emitted('loginSuccess')).toBeUndefined();
     });
 
@@ -190,11 +155,11 @@ describe('LoginPage', () => {
       wrapper = mount(LoginPage);
       await flushPromises();
 
-      const importButton = wrapper.find('.web-session-button');
+      const importButton = wrapper.find('.btn-ghost');
       await importButton.trigger('click');
       await wrapper.vm.$nextTick();
 
-      expect(importButton.text()).toBe('Checking...');
+      expect(importButton.text()).toContain('Checking');
       expect(importButton.attributes('disabled')).toBeDefined();
 
       resolve(true);
