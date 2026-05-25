@@ -730,4 +730,89 @@ describe('Chat History Route', () => {
       expect(json.error).toContain('DynamoDB connection error');
     });
   });
+
+  describe('DELETE /thread - additional coverage', () => {
+    test('should handle race condition when messages deleted between get and delete', async () => {
+      mockSend
+        // getMessages returns items (route proceeds to deleteThread)
+        .mockResolvedValueOnce({
+          Items: [
+            {
+              ThreadId: 'thread-123',
+              Timestamp: 1693440000000,
+              UserId: 'user-123',
+              message: 'hello',
+              is_user: true,
+            },
+          ],
+        })
+        // deleteThread query returns empty (race condition)
+        .mockResolvedValueOnce({ Items: [], LastEvaluatedKey: undefined });
+
+      const app = createTestApp({
+        AWS_ACCESS_KEY_ID: 'test-key',
+        AWS_SECRET_ACCESS_KEY: 'test-secret',
+      });
+
+      const req = new Request('http://localhost/thread?thread_id=thread-123', {
+        method: 'DELETE',
+      });
+      const res = await app.request(req);
+      const json = await res.json();
+
+      expect(res.status).toBe(200);
+      expect(json.ok).toBe(true);
+    });
+
+    test('should return 500 when batch delete retries are exhausted', async () => {
+      const setTimeoutSpy = vi.spyOn(globalThis, 'setTimeout').mockImplementation(((
+        fn: () => void,
+      ) => {
+        fn();
+        return 0 as unknown as ReturnType<typeof setTimeout>;
+      }) as typeof setTimeout);
+
+      try {
+        const message = {
+          ThreadId: 'thread-123',
+          Timestamp: 1693440000000,
+          UserId: 'user-123',
+          message: 'hello',
+          is_user: true,
+        };
+
+        const unprocessedResponse = {
+          UnprocessedItems: {
+            'vela-chat-history': [
+              { DeleteRequest: { Key: { ThreadId: 'thread-123', Timestamp: 1693440000000 } } },
+            ],
+          },
+        };
+
+        mockSend
+          // getMessages call
+          .mockResolvedValueOnce({ Items: [message] })
+          // deleteThread pagination query
+          .mockResolvedValueOnce({ Items: [message], LastEvaluatedKey: undefined })
+          // 5 batch write retries, all returning unprocessed
+          .mockResolvedValue(unprocessedResponse);
+
+        const app = createTestApp({
+          AWS_ACCESS_KEY_ID: 'test-key',
+          AWS_SECRET_ACCESS_KEY: 'test-secret',
+        });
+
+        const req = new Request('http://localhost/thread?thread_id=thread-123', {
+          method: 'DELETE',
+        });
+        const res = await app.request(req);
+        const json = await res.json();
+
+        expect(res.status).toBe(500);
+        expect(json.error).toContain('Failed to delete all messages');
+      } finally {
+        setTimeoutSpy.mockRestore();
+      }
+    });
+  });
 });

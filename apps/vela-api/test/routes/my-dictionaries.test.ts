@@ -14,22 +14,24 @@ vi.mock('../../src/dynamodb', () => ({
   myDictionaries: mockMyDictionaries,
 }));
 
+const mockAuthConfig = {
+  userId: 'test-user-id',
+  userEmail: 'test@example.com',
+};
+
 vi.mock('../../src/middleware/auth', () => ({
   requireAuth: async (_c: any, next: any) => {
-    _c.set('userId', 'test-user-id');
-    _c.set('userEmail', 'test@example.com');
+    _c.set('userId', mockAuthConfig.userId);
+    _c.set('userEmail', mockAuthConfig.userEmail);
     await next();
   },
   AuthContext: {},
 }));
 
+const mockIsAllowedOrigin = vi.fn();
+
 vi.mock('../../src/middleware/cors', () => ({
-  isAllowedOrigin: vi.fn(() => ({
-    isAllowed: true,
-    hasConfiguredOrigins: false,
-    allowedOrigin: null,
-    isWebOrigin: false,
-  })),
+  isAllowedOrigin: mockIsAllowedOrigin,
 }));
 
 // Import AFTER mocks are declared
@@ -63,6 +65,14 @@ describe('My Dictionaries Route', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    mockAuthConfig.userId = 'test-user-id';
+    mockAuthConfig.userEmail = 'test@example.com';
+    mockIsAllowedOrigin.mockReturnValue({
+      isAllowed: true,
+      hasConfiguredOrigins: false,
+      allowedOrigin: null,
+      isWebOrigin: false,
+    });
     mockFetch = vi.fn();
     globalThis.fetch = mockFetch as any;
   });
@@ -573,6 +583,127 @@ describe('My Dictionaries Route', () => {
         }
       }
       expect(fullText).toContain('error');
+    });
+
+    test('google provider: SSE stream processes remaining buffer on flush', async () => {
+      const encoder = new TextEncoder();
+      const validChunk = JSON.stringify({ candidates: [{ content: { parts: [{ text: '日' }] } }] });
+      const sseData = `data: ${validChunk}\ndata: {invalid-json`;
+      const stream = new ReadableStream({
+        start(controller) {
+          controller.enqueue(encoder.encode(sseData));
+          controller.close();
+        },
+      });
+      mockFetch.mockResolvedValueOnce({ ok: true, body: stream });
+
+      const app = createTestApp();
+      const res = await app.request('/analyze', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sentence: '日本語', provider: 'google', apiKey: 'test-key' }),
+      });
+
+      expect(res.status).toBe(200);
+      const reader = res.body?.getReader();
+      const decoder = new TextDecoder();
+      let sseText = '';
+      if (reader) {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          sseText += typeof value === 'string' ? value : decoder.decode(value);
+        }
+      }
+      const events = sseText
+        .split('\n')
+        .filter((l) => l.startsWith('data: '))
+        .map((l) => JSON.parse(l.slice(6)));
+      const chunkEvents = events.filter((e) => e.type === 'chunk');
+      expect(chunkEvents.length).toBe(1);
+      expect(chunkEvents[0].text).toBe('日');
+      expect(events.some((e) => e.type === 'done')).toBe(true);
+    });
+
+    test('google provider: SSE stream handles upstream read error', async () => {
+      const errorStream = new ReadableStream({
+        start(controller) {
+          controller.error(new Error('Connection lost'));
+        },
+      });
+      mockFetch.mockResolvedValueOnce({ ok: true, body: errorStream });
+
+      const app = createTestApp();
+      const res = await app.request('/analyze', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sentence: '日本語', provider: 'google', apiKey: 'test-key' }),
+      });
+
+      expect(res.status).toBe(200);
+      expect(res.headers.get('content-type')).toContain('text/event-stream');
+      const reader = res.body?.getReader();
+      const decoder = new TextDecoder();
+      let fullText = '';
+      if (reader) {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          fullText += typeof value === 'string' ? value : decoder.decode(value);
+        }
+      }
+      expect(fullText).toContain('error');
+    });
+
+    test('returns 403 when origin is not allowed with configured origins', async () => {
+      mockIsAllowedOrigin.mockReturnValueOnce({
+        isAllowed: false,
+        hasConfiguredOrigins: true,
+        allowedOrigin: null,
+        isWebOrigin: false,
+      });
+
+      const app = createTestApp();
+      const res = await app.request('/analyze', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Origin: 'http://evil.com' },
+        body: JSON.stringify({ sentence: '日本語', provider: 'google', apiKey: 'test-key' }),
+      });
+
+      expect(res.status).toBe(403);
+      const body = (await res.json()) as { error: string };
+      expect(body.error).toContain('Origin not allowed');
+    });
+
+    test('returns 500 when analyze request body is invalid JSON', async () => {
+      const app = createTestApp();
+      const res = await app.request('/analyze', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: 'not-valid-json',
+      });
+
+      expect(res.status).toBe(500);
+      const body = (await res.json()) as { error: string };
+      expect(body.error).toBe('Failed to analyze sentence');
+    });
+  });
+
+  describe('POST / - unauthorized edge case', () => {
+    test('returns 401 when user has no userId or email', async () => {
+      mockAuthConfig.userId = '';
+      mockAuthConfig.userEmail = '';
+
+      const app = createTestApp();
+      const res = await app.request('/', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sentence: '日本語' }),
+      });
+
+      expect(res.status).toBe(401);
+      const body = (await res.json()) as { error: string };
+      expect(body.error).toBe('Unauthorized');
     });
   });
 });

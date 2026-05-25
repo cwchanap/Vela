@@ -85,6 +85,18 @@ describe('processWithConcurrency', () => {
     );
     expect(results).toEqual(delays);
   });
+
+  test('stores error in results when processFn rejects', async () => {
+    const items = ['a', 'b', 'c'];
+    const failingFn = (item: string) =>
+      item === 'b' ? Promise.reject(new Error(`fail ${item}`)) : Promise.resolve(item);
+
+    const results = await processWithConcurrency(items, failingFn, 2);
+    expect(results[0]).toBe('a');
+    expect(results[1]).toBeInstanceOf(Error);
+    expect((results[1] as Error).message).toBe('fail b');
+    expect(results[2]).toBe('c');
+  });
 });
 
 describe('SRS Routes', () => {
@@ -184,6 +196,32 @@ describe('SRS Routes', () => {
       expect(res.status).toBe(500);
       const data = await res.json();
       expect(data.error).toBe('Failed to fetch due items');
+    });
+
+    test('provides estimate total when JLPT filter does not exhaust due items', async () => {
+      const dueItems = Array.from({ length: 60 }, (_, i) =>
+        makeProgress({ vocabulary_id: `vocab-${i + 1}` }),
+      );
+      mockUserVocabularyProgress.getDueItems.mockResolvedValue(dueItems);
+
+      const vocabMap: Record<string, unknown> = {};
+      for (let i = 1; i <= 60; i++) {
+        vocabMap[`vocab-${i}`] = {
+          id: `vocab-${i}`,
+          word: `word${i}`,
+          jlpt_level: i <= 10 ? 5 : 3,
+        };
+      }
+      mockVocabulary.getByIds.mockResolvedValue(vocabMap);
+
+      const app = createTestApp();
+      const res = await app.request('/api/srs/due?jlpt=5&limit=5');
+
+      expect(res.status).toBe(200);
+      const data = await res.json();
+      expect(data.items.length).toBeLessThanOrEqual(5);
+      expect(data.items.every((item: any) => item.vocabulary?.jlpt_level === 5)).toBe(true);
+      expect(data.total).toBeGreaterThanOrEqual(data.items.length);
     });
   });
 
@@ -424,6 +462,67 @@ describe('SRS Routes', () => {
       expect(res.status).toBe(500);
       const data = await res.json();
       expect(data.error).toBe('Failed to record review');
+    });
+
+    test('recovers progress via retry when first updateAfterReview returns undefined', async () => {
+      const existingProgress = makeProgress();
+      const recoveredProgress = makeProgress({ interval: 1, repetitions: 1, last_quality: 4 });
+
+      mockVocabulary.getById.mockResolvedValue({ id: 'vocab-1' });
+      mockUserVocabularyProgress.get.mockResolvedValue(existingProgress);
+      mockUserVocabularyProgress.updateAfterReview
+        .mockResolvedValueOnce(undefined)
+        .mockResolvedValueOnce(recoveredProgress);
+
+      const app = createTestApp();
+      const res = await app.request('/api/srs/review', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ vocabulary_id: 'vocab-1', quality: 4 }),
+      });
+
+      expect(res.status).toBe(200);
+      const data = await res.json();
+      expect(data.progress.interval).toBe(1);
+      expect(mockUserVocabularyProgress.updateAfterReview).toHaveBeenCalledTimes(2);
+    });
+
+    test('returns 409 when recovery retry also returns undefined', async () => {
+      const existingProgress = makeProgress();
+
+      mockVocabulary.getById.mockResolvedValue({ id: 'vocab-1' });
+      mockUserVocabularyProgress.get.mockResolvedValue(existingProgress);
+      mockUserVocabularyProgress.updateAfterReview.mockResolvedValue(undefined);
+
+      const app = createTestApp();
+      const res = await app.request('/api/srs/review', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ vocabulary_id: 'vocab-1', quality: 4 }),
+      });
+
+      expect(res.status).toBe(409);
+      const data = await res.json();
+      expect(data.error).toContain('race condition');
+    });
+
+    test('returns 409 when ConditionalCheckFailedException is thrown', async () => {
+      const condError = new Error('Conditional check failed');
+      (condError as any).name = 'ConditionalCheckFailedException';
+
+      mockVocabulary.getById.mockResolvedValue({ id: 'vocab-1' });
+      mockUserVocabularyProgress.get.mockRejectedValue(condError);
+
+      const app = createTestApp();
+      const res = await app.request('/api/srs/review', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ vocabulary_id: 'vocab-1', quality: 4 }),
+      });
+
+      expect(res.status).toBe(409);
+      const data = await res.json();
+      expect(data.error).toContain('item does not exist');
     });
   });
 
@@ -700,6 +799,30 @@ describe('SRS Routes', () => {
       expect(res.status).toBe(500);
       const data = await res.json();
       expect(data.error).toBe('Failed to record batch reviews');
+    });
+
+    test('reports failure when updateAfterReview returns undefined for a vocabulary', async () => {
+      mockVocabulary.getByIds.mockResolvedValue({
+        'vocab-1': { id: 'vocab-1', word: '猫' },
+      });
+      mockUserVocabularyProgress.get.mockResolvedValue(makeProgress());
+      mockUserVocabularyProgress.updateAfterReview.mockResolvedValue(undefined);
+
+      const app = createTestApp();
+      const res = await app.request('/api/srs/batch-review', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          reviews: [{ vocabulary_id: 'vocab-1', quality: 4 }],
+        }),
+      });
+
+      expect(res.status).toBe(200);
+      const data = await res.json();
+      expect(data.success).toBe(true);
+      expect(data.failed).toBe(1);
+      expect(data.results[0].success).toBe(false);
+      expect(data.results[0].error).toContain('Failed to update progress');
     });
   });
 });
