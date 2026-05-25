@@ -192,4 +192,71 @@ describe('getMyDictionaries', () => {
       'Failed to fetch dictionary entries (HTTP 500)',
     );
   });
+
+  it('throws fallback error when response body is not JSON', async () => {
+    mockFetch.mockResolvedValue({
+      ok: false,
+      status: 500,
+      headers: {
+        get: vi.fn((name: string) => (name.toLowerCase() === 'content-type' ? 'text/plain' : null)),
+      },
+      json: vi.fn(),
+    });
+
+    await expect(getMyDictionaries('token')).rejects.toThrow(
+      'Failed to fetch dictionary entries (HTTP 500)',
+    );
+  });
+
+  it('throws fallback error when json() rejects in getJsonBody', async () => {
+    mockFetch.mockResolvedValue({
+      ok: true,
+      headers: {
+        get: vi.fn(() => 'application/json'),
+      },
+      json: vi.fn().mockRejectedValue(new SyntaxError('Unexpected token')),
+    });
+
+    await expect(getMyDictionaries('token')).rejects.toThrow(
+      'Failed to fetch dictionary entries: invalid response from server',
+    );
+  });
+
+  it('throws fallback error with status when error field is empty string', async () => {
+    mockFetch.mockResolvedValue(mockJsonResponse({ error: '' }, 500));
+
+    await expect(getMyDictionaries('token')).rejects.toThrow(
+      'Failed to fetch dictionary entries (HTTP 500)',
+    );
+  });
+
+  it('extracts error message from response message field when error field is missing', async () => {
+    mockFetch.mockResolvedValue(mockJsonResponse({ message: 'Custom error from server' }, 400));
+
+    await expect(getMyDictionaries('token')).rejects.toThrow('Custom error from server');
+  });
+
+  it('falls back to status message when both error and message fields are empty', async () => {
+    mockFetch.mockResolvedValue(mockJsonResponse({ error: '', message: '' }, 422));
+
+    await expect(getMyDictionaries('token')).rejects.toThrow(
+      'Failed to fetch dictionary entries (HTTP 422)',
+    );
+  });
+
+  it('falls back to status message when json() throws during error extraction', async () => {
+    const response = {
+      ok: false,
+      status: 502,
+      headers: {
+        get: vi.fn(() => 'application/json'),
+      },
+      json: vi.fn().mockRejectedValue(new SyntaxError('Invalid JSON')),
+    };
+    mockFetch.mockResolvedValue(response);
+
+    await expect(getMyDictionaries('token')).rejects.toThrow(
+      'Failed to fetch dictionary entries (HTTP 502)',
+    );
+  });
 });

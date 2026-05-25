@@ -184,4 +184,22 @@ describe('popup App', () => {
     expect(loadingEl.attributes('aria-label')).toBe('Loading Vela');
     expect(wrapper.find('.sr-only').text()).toBe('Loading…');
   });
+
+  it('sends LOGIN_SUCCESS and shows dashboard when LoginPage emits loginSuccess', async () => {
+    mockIsAuthenticated.mockResolvedValue(false);
+    mockImportWebappSession.mockResolvedValue(false);
+
+    const wrapper = mount(App);
+    await flushPromises();
+
+    expect(wrapper.find('[data-testid="login-page"]').exists()).toBe(true);
+
+    wrapper.findComponent({ name: 'LoginPage' }).vm.$emit('loginSuccess');
+    await flushPromises();
+
+    expect(wrapper.find('[data-testid="dashboard-page"]').exists()).toBe(true);
+    expect((globalThis as any).browser.runtime.sendMessage).toHaveBeenCalledWith({
+      type: 'LOGIN_SUCCESS',
+    });
+  });
 });

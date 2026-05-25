@@ -580,6 +580,69 @@ describe('flushQueue', () => {
     expect(global.fetch).toHaveBeenCalledOnce();
     expect(mockIdbStore.delete).toHaveBeenCalledWith(1);
   });
+
+  it('refreshes token and retries on 401, then deletes on success', async () => {
+    idbState.getAllResult = [
+      { id: 10, sentence: 'テスト', retries: 0, timestamp: Date.now(), idempotencyKey: 'key-r1' },
+    ];
+    vi.mocked(getValidIdToken).mockResolvedValue('expired-token');
+    vi.mocked(refreshIdToken).mockResolvedValue('refreshed-token');
+    vi.mocked(global.fetch as unknown as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce(new Response(null, { status: 401 }))
+      .mockResolvedValueOnce(new Response(null, { status: 200 }));
+
+    await flushQueue();
+
+    expect(refreshIdToken).toHaveBeenCalledOnce();
+    expect(global.fetch).toHaveBeenCalledTimes(2);
+    expect(mockIdbStore.delete).toHaveBeenCalledWith(10);
+  });
+
+  it('refreshes token and retries on 401, then increments retry on second failure', async () => {
+    idbState.getAllResult = [
+      { id: 11, sentence: 'テスト', retries: 0, timestamp: Date.now(), idempotencyKey: 'key-r2' },
+    ];
+    vi.mocked(getValidIdToken).mockResolvedValue('expired-token');
+    vi.mocked(refreshIdToken).mockResolvedValue('refreshed-token');
+    vi.mocked(global.fetch as unknown as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce(new Response(null, { status: 401 }))
+      .mockResolvedValueOnce(new Response(null, { status: 500 }));
+
+    await flushQueue();
+
+    expect(refreshIdToken).toHaveBeenCalledOnce();
+    expect(mockIdbStore.put).toHaveBeenCalled();
+    expect(mockIdbStore.delete).not.toHaveBeenCalled();
+  });
+
+  it('returns early when getValidIdToken throws in flushQueue', async () => {
+    idbState.getAllResult = [
+      { id: 12, sentence: 'テスト', retries: 0, timestamp: Date.now(), idempotencyKey: 'key-r3' },
+    ];
+    vi.mocked(getValidIdToken).mockRejectedValue(new Error('No token'));
+
+    await flushQueue();
+
+    expect(global.fetch).not.toHaveBeenCalled();
+    expect(mockIdbStore.delete).not.toHaveBeenCalled();
+    expect(mockIdbStore.put).not.toHaveBeenCalled();
+  });
+
+  it('returns early when refreshIdToken throws on 401 in flushQueue', async () => {
+    idbState.getAllResult = [
+      { id: 13, sentence: 'テスト', retries: 0, timestamp: Date.now(), idempotencyKey: 'key-r4' },
+    ];
+    vi.mocked(getValidIdToken).mockResolvedValue('expired-token');
+    vi.mocked(refreshIdToken).mockRejectedValue(new Error('Refresh failed'));
+    vi.mocked(global.fetch as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(
+      new Response(null, { status: 401 }),
+    );
+
+    await flushQueue();
+
+    expect(refreshIdToken).toHaveBeenCalledOnce();
+    expect(mockIdbStore.delete).not.toHaveBeenCalled();
+  });
 });
 
 describe('SAVE_SENTENCES message handler', () => {
@@ -770,5 +833,198 @@ describe('LOGIN_SUCCESS message handler', () => {
     expect(result).toBeUndefined();
     await new Promise((r) => setTimeout(r, 10));
     expect(global.fetch).not.toHaveBeenCalled();
+  });
+});
+
+describe('context menu onClicked handler', () => {
+  function getOnClickedListener(): (_info: any, _tab: any) => Promise<void> {
+    const calls = vi.mocked(browser.contextMenus.onClicked.addListener).mock.calls;
+    if (calls.length === 0) throw new Error('No onClicked listener registered');
+    return calls[0][0] as (_info: any, _tab: any) => Promise<void>;
+  }
+
+  beforeEach(() => {
+    mockNotificationsCreate.mockClear();
+    vi.mocked(getValidIdToken).mockReset();
+    vi.mocked(refreshIdToken).mockReset();
+    vi.mocked(getUserEmail).mockReset().mockResolvedValue('user@test.com');
+    global.fetch = vi.fn() as unknown as typeof fetch;
+  });
+
+  it('shows "Entry Saved" notification on successful save', async () => {
+    vi.mocked(getValidIdToken).mockResolvedValue('valid-token');
+    vi.mocked(global.fetch as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(
+      new Response(null, { status: 200 }),
+    );
+
+    const listener = getOnClickedListener();
+    await listener(
+      { menuItemId: 'add-vocab-to-vela', selectionText: '日本語を勉強します。' },
+      { id: 1, url: 'https://example.com', title: 'Example' },
+    );
+
+    expect(mockNotificationsCreate).toHaveBeenCalledWith(
+      expect.objectContaining({ title: 'Vela - Entry Saved' }),
+    );
+  });
+
+  it('shows "Entry Queued" notification when save is queued', async () => {
+    vi.mocked(getValidIdToken).mockRejectedValue(new Error('No token'));
+
+    const listener = getOnClickedListener();
+    await listener(
+      { menuItemId: 'add-vocab-to-vela', selectionText: '日本語を勉強します。' },
+      { id: 1, url: 'https://example.com', title: 'Example' },
+    );
+
+    expect(mockNotificationsCreate).toHaveBeenCalledWith(
+      expect.objectContaining({ title: 'Vela - Entry Queued' }),
+    );
+  });
+
+  it('shows "Save Failed" notification when save is dropped', async () => {
+    vi.mocked(getValidIdToken).mockRejectedValue(new Error('No token'));
+    vi.mocked(getUserEmail).mockResolvedValue(null);
+
+    const listener = getOnClickedListener();
+    await listener(
+      { menuItemId: 'add-vocab-to-vela', selectionText: '日本語を勉強します。' },
+      { id: 1, url: 'https://example.com', title: 'Example' },
+    );
+
+    expect(mockNotificationsCreate).toHaveBeenCalledWith(
+      expect.objectContaining({ title: 'Vela - Save Failed' }),
+    );
+  });
+
+  it('truncates long sentences in notification messages', async () => {
+    const longText = 'あ'.repeat(60);
+    vi.mocked(getValidIdToken).mockResolvedValue('valid-token');
+    vi.mocked(global.fetch as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(
+      new Response(null, { status: 200 }),
+    );
+
+    const listener = getOnClickedListener();
+    await listener(
+      { menuItemId: 'add-vocab-to-vela', selectionText: longText },
+      { id: 1, url: 'https://example.com', title: 'Example' },
+    );
+
+    expect(mockNotificationsCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: expect.stringContaining('...'),
+      }),
+    );
+  });
+
+  it('does nothing when selection is empty after trimming', async () => {
+    const listener = getOnClickedListener();
+    await listener(
+      { menuItemId: 'add-vocab-to-vela', selectionText: '   ' },
+      { id: 1, url: 'https://example.com', title: 'Example' },
+    );
+
+    expect(mockNotificationsCreate).not.toHaveBeenCalled();
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+});
+
+describe('startup and focus listeners', () => {
+  beforeEach(() => {
+    idbState.getAllResult = [];
+    mockIdbStore.getAll.mockReset();
+    mockIdbStore.getAll.mockImplementation(function () {
+      const result = idbState.getAllResult;
+      const req = {
+        result,
+        get onsuccess() {
+          return null;
+        },
+        set onsuccess(cb: any) {
+          cb();
+        },
+        get onerror() {
+          return null;
+        },
+        set onerror(_: any) {},
+      };
+      return req;
+    });
+    mockIdbStore.delete.mockReset();
+    mockIdbStore.delete.mockImplementation(function () {
+      const req = {
+        result: undefined,
+        get onsuccess() {
+          return null;
+        },
+        set onsuccess(cb: any) {
+          cb();
+        },
+        get onerror() {
+          return null;
+        },
+        set onerror(_: any) {},
+      };
+      return req;
+    });
+    mockIdbStore.put.mockReset();
+    mockIdbStore.put.mockImplementation(function () {
+      const req = {
+        result: undefined,
+        get onsuccess() {
+          return null;
+        },
+        set onsuccess(cb: any) {
+          cb();
+        },
+        get onerror() {
+          return null;
+        },
+        set onerror(_: any) {},
+      };
+      return req;
+    });
+    vi.mocked(getValidIdToken).mockReset();
+    vi.mocked(getUserEmail).mockReset().mockResolvedValue('user@test.com');
+    global.fetch = vi.fn() as unknown as typeof fetch;
+  });
+
+  it('registers onStartup listener that calls flushQueue', () => {
+    const calls = vi.mocked(browser.runtime.onStartup.addListener).mock.calls;
+    expect(calls.length).toBeGreaterThan(0);
+    expect(typeof calls[0][0]).toBe('function');
+  });
+
+  it('onStartup listener invokes flushQueue', async () => {
+    idbState.getAllResult = [];
+    const calls = vi.mocked(browser.runtime.onStartup.addListener).mock.calls;
+    const onStartup = calls[0][0] as () => void;
+    onStartup();
+    await new Promise((r) => setTimeout(r, 10));
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+
+  it('onFocusChanged listener invokes flushQueue when windowId is not WINDOW_ID_NONE', async () => {
+    idbState.getAllResult = [];
+    const calls = vi.mocked(browser.windows.onFocusChanged.addListener).mock.calls;
+    const onFocusChanged = calls[0][0] as (_windowId: number) => void;
+    onFocusChanged(1);
+    await new Promise((r) => setTimeout(r, 10));
+  });
+
+  it('onFocusChanged listener skips flushQueue when windowId is WINDOW_ID_NONE', async () => {
+    const calls = vi.mocked(browser.windows.onFocusChanged.addListener).mock.calls;
+    const onFocusChanged = calls[0][0] as (_windowId: number) => void;
+    onFocusChanged(-1);
+    await new Promise((r) => setTimeout(r, 10));
+  });
+
+  it('online event listener invokes flushQueue', async () => {
+    idbState.getAllResult = [];
+    const onlineListeners = (self as any).__onlineListeners as Array<() => void>;
+    if (onlineListeners && onlineListeners.length > 0) {
+      onlineListeners[0]();
+      await new Promise((r) => setTimeout(r, 10));
+    }
   });
 });
