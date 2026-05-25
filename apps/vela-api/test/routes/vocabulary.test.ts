@@ -293,4 +293,29 @@ describe('POST /from-word', () => {
 
     consoleErrorSpy.mockRestore();
   });
+
+  test('logs sanitized non-Error when vocabulary.create throws a string', async () => {
+    mockVocabulary.create.mockRejectedValue('raw string error');
+    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    const app = createTestApp();
+    const res = await app.request('/from-word', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-request-id': 'req-non-error',
+      },
+      body: JSON.stringify(validBody),
+    });
+
+    expect(res.status).toBe(500);
+    expect(consoleErrorSpy).toHaveBeenCalledWith(
+      '[Vela] /vocabulary/from-word failed',
+      expect.objectContaining({
+        err: { code: 'UnknownError', message: 'raw string error' },
+      }),
+    );
+
+    consoleErrorSpy.mockRestore();
+  });
 });

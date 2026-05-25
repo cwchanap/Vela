@@ -255,4 +255,54 @@ describe('Auth Route', () => {
       );
     });
   });
+
+  describe('POST /signout - error handling', () => {
+    test('returns 500 on unexpected error during signout', async () => {
+      const app = new Hono<{ Bindings: Env }>();
+      app.use('*', async (c, next) => {
+        c.env = new Proxy({} as Env, {
+          get(_target, prop) {
+            if (prop === 'VITE_COGNITO_USER_POOL_ID') throw new Error('Env error');
+            return undefined;
+          },
+        });
+        await next();
+      });
+      app.route('/', authApp);
+
+      const res = await app.request('/signout', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: 'Bearer some-token',
+        },
+        body: JSON.stringify({}),
+      });
+      expect(res.status).toBe(500);
+      const body = (await res.json()) as { error: string };
+      expect(body.error).toBe('Sign out failed');
+    });
+  });
+
+  describe('GET /session - error handling', () => {
+    test('returns 500 when context access fails', async () => {
+      const app = new Hono<{ Bindings: Env }>();
+      app.use('*', async (c, next) => {
+        c.env = (c.env || {}) as Env;
+        Object.assign(c.env, { VITE_COGNITO_USER_POOL_ID: 'us-east-1_test123' });
+        const origGet = c.get;
+        c.get = function (key: string) {
+          if (key === 'userId') throw new Error('Context error');
+          return origGet.call(this, key);
+        } as any;
+        await next();
+      });
+      app.route('/', authApp);
+
+      const res = await app.request('/session');
+      expect(res.status).toBe(500);
+      const body = (await res.json()) as { authenticated: boolean; message: string };
+      expect(body.authenticated).toBe(false);
+    });
+  });
 });
