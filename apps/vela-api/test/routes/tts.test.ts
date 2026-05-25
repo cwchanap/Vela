@@ -37,10 +37,15 @@ vi.mock('../../src/tts/factory', () => ({
   createTTSProvider: vi.fn().mockReturnValue(mockTTSProvider),
 }));
 
+const mockAuthConfig = {
+  userId: 'test-user-id',
+  userEmail: 'test@example.com',
+};
+
 vi.mock('../../src/middleware/auth', () => ({
   requireAuth: async (_c: any, next: any) => {
-    _c.set('userId', 'test-user-id');
-    _c.set('userEmail', 'test@example.com');
+    _c.set('userId', mockAuthConfig.userId);
+    _c.set('userEmail', mockAuthConfig.userEmail);
     await next();
   },
   AuthContext: {},
@@ -69,6 +74,8 @@ function createTestApp(env: Env = TEST_ENV) {
 describe('TTS Route', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockAuthConfig.userId = 'test-user-id';
+    mockAuthConfig.userEmail = 'test@example.com';
   });
 
   describe('GET /settings - Get TTS settings', () => {
@@ -552,6 +559,130 @@ describe('TTS Route', () => {
       const res = await app.request('/audio/vocab-1');
 
       expect(res.status).toBe(500);
+    });
+
+    test('returns 500 when presigned URL generation fails after upload', async () => {
+      mockTtsSettingsDB.get.mockResolvedValueOnce({
+        user_id: 'test-user-id',
+        provider: 'elevenlabs',
+        api_key: 'test-api-key',
+        voice_id: null,
+        model: null,
+      });
+      const notFoundError = new Error('Not found');
+      (notFoundError as any).name = 'NotFound';
+      mockS3Client.send.mockRejectedValueOnce(notFoundError);
+      mockTTSProvider.generate.mockResolvedValueOnce({
+        audioBuffer: Buffer.from('audio-data'),
+        contentType: 'audio/mpeg',
+      });
+      mockS3Client.send.mockResolvedValueOnce({});
+      mockGetSignedUrl.mockRejectedValueOnce(new Error('Signing service unavailable'));
+
+      const app = createTestApp();
+      const res = await app.request('/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ vocabularyId: 'vocab-1', text: '日本語' }),
+      });
+
+      expect(res.status).toBe(500);
+      const body = (await res.json()) as { error: string };
+      expect(body.error).toContain('could not be accessed');
+    });
+
+    test('returns 500 when settings lookup fails during generate', async () => {
+      mockTtsSettingsDB.get.mockRejectedValueOnce(new Error('Settings DB error'));
+
+      const app = createTestApp();
+      const res = await app.request('/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ vocabularyId: 'vocab-1', text: '日本語' }),
+      });
+
+      expect(res.status).toBe(500);
+      const body = (await res.json()) as { error: string };
+      expect(body.error).toBe('Failed to generate TTS audio');
+    });
+
+    test('returns 401 when userId is missing on generate', async () => {
+      mockAuthConfig.userId = '';
+
+      const app = createTestApp();
+      const res = await app.request('/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ vocabularyId: 'vocab-1', text: '日本語' }),
+      });
+
+      expect(res.status).toBe(401);
+      const body = (await res.json()) as { error: string };
+      expect(body.error).toContain('Unauthorized');
+    });
+
+    test('returns 401 when userId is missing on get audio', async () => {
+      mockAuthConfig.userId = '';
+
+      const app = createTestApp();
+      const res = await app.request('/audio/vocab-1');
+
+      expect(res.status).toBe(401);
+    });
+
+    test('returns 500 when TTS audio bucket not configured on get audio', async () => {
+      mockTtsSettingsDB.get.mockResolvedValueOnce({
+        user_id: 'test-user-id',
+        provider: 'elevenlabs',
+        api_key: 'test-api-key',
+        voice_id: null,
+        model: null,
+      });
+
+      const app = createTestApp({ AWS_REGION: 'us-east-1' });
+      const res = await app.request('/audio/vocab-1');
+
+      expect(res.status).toBe(500);
+    });
+
+    test('returns 400 when invalid provider in get audio settings', async () => {
+      mockTtsSettingsDB.get.mockResolvedValueOnce({
+        user_id: 'test-user-id',
+        provider: 'invalid-provider',
+        api_key: 'test-api-key',
+        voice_id: null,
+        model: null,
+      });
+
+      const app = createTestApp();
+      const res = await app.request('/audio/vocab-1');
+
+      expect(res.status).toBe(400);
+    });
+
+    test('returns 500 when settings lookup fails on get audio', async () => {
+      mockTtsSettingsDB.get.mockRejectedValueOnce(new Error('Settings DB error'));
+
+      const app = createTestApp();
+      const res = await app.request('/audio/vocab-1');
+
+      expect(res.status).toBe(500);
+    });
+
+    test('returns 401 when userId is missing on save settings', async () => {
+      mockAuthConfig.userId = '';
+
+      const app = createTestApp();
+      const res = await app.request('/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          provider: 'elevenlabs',
+          apiKey: 'test-api-key',
+        }),
+      });
+
+      expect(res.status).toBe(401);
     });
   });
 });
