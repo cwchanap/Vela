@@ -1,7 +1,5 @@
 # Test Coverage 95% Implementation Plan
 
-> **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
-
 **Goal:** Reach 95% line coverage across all packages (80% for CDK) by configuring coverage exclusions for type/enum/constant files and writing targeted tests for uncovered business logic.
 
 **Architecture:** Each package keeps its existing test framework and patterns. Coverage is configured via vitest.config.ts (Vitest packages) and bunfig.toml (Bun packages). New tests follow co-located or `test/` directory conventions already established in each package.
