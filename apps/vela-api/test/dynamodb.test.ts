@@ -1558,14 +1558,17 @@ describe('DynamoDB Operations', () => {
 
       mockSend.mockResolvedValue(unprocessedResponse);
 
-      const result = await vocabulary.getByIds(['v-missing']);
+      try {
+        const result = await vocabulary.getByIds(['v-missing']);
 
-      expect(mockSend).toHaveBeenCalledTimes(3);
-      expect(result).toEqual({});
-      expect(warnSpy).toHaveBeenCalledWith(
-        expect.stringContaining('Failed to process 1 vocabulary items after 3 attempts'),
-      );
-      warnSpy.mockRestore();
+        expect(mockSend).toHaveBeenCalledTimes(3);
+        expect(result).toEqual({});
+        expect(warnSpy).toHaveBeenCalledWith(
+          expect.stringContaining('Failed to process 1 vocabulary items after 3 attempts'),
+        );
+      } finally {
+        warnSpy.mockRestore();
+      }
     });
   });
 
@@ -1626,10 +1629,13 @@ describe('DynamoDB Operations', () => {
           LastEvaluatedKey: undefined,
         });
 
-      await vocabulary.getByJlptLevel([3], 10);
+      try {
+        await vocabulary.getByJlptLevel([3], 10);
 
-      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('Approaching hard cap'));
-      warnSpy.mockRestore();
+        expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('Approaching hard cap'));
+      } finally {
+        warnSpy.mockRestore();
+      }
     });
   });
 
@@ -1679,7 +1685,7 @@ describe('DynamoDB Operations', () => {
           correct_answers: 10,
           experience_gained: 200,
         }),
-      ).rejects.toThrow('DynamoDB operation failed');
+      ).rejects.toThrow('DynamoDB operation failed: ProvisionedThroughputExceededException');
     });
 
     test('userVocabularyProgress.updateAfterReview should throw generic DynamoDB error for non-conditional failures', async () => {

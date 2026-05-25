@@ -98,7 +98,7 @@ describe('readCognitoSessionFromStorage', () => {
     expect(readCognitoSessionFromStorage(storage)).toBeNull();
   });
 
-  it('returns null when id token payload cannot be decoded', () => {
+  it('returns session with email from username fallback when id token payload cannot be decoded', () => {
     const storage = makeStorage({
       'CognitoIdentityServiceProvider.client-id.LastAuthUser': 'user@example.com',
       'CognitoIdentityServiceProvider.client-id.user@example.com.accessToken': 'access-token',
@@ -119,7 +119,7 @@ describe('readCognitoSessionFromStorage', () => {
     expect(readCognitoSessionFromStorage(storage)).toBeNull();
   });
 
-  it('returns null when id token has malformed base64 payload', () => {
+  it('returns session with null email when id token has malformed base64 and username has no @', () => {
     const storage = makeStorage({
       'CognitoIdentityServiceProvider.client-id.LastAuthUser': 'non-email-user',
       'CognitoIdentityServiceProvider.client-id.non-email-user.accessToken': 'access-token',
