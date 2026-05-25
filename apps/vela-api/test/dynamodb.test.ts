@@ -1522,4 +1522,217 @@ describe('DynamoDB Operations', () => {
       expect(result).toHaveLength(2);
     });
   });
+
+  describe('vocabulary.getByIds retry on UnprocessedKeys', () => {
+    test('should retry when UnprocessedKeys returned on first attempt', async () => {
+      const item1 = { id: 'v1', word: '猫' };
+      const item2 = { id: 'v2', word: '犬' };
+
+      mockSend
+        .mockResolvedValueOnce({
+          Responses: { 'vela-vocabulary': [item1] },
+          UnprocessedKeys: {
+            'vela-vocabulary': { Keys: [{ id: 'v2' }] },
+          },
+        })
+        .mockResolvedValueOnce({
+          Responses: { 'vela-vocabulary': [item2] },
+          UnprocessedKeys: {},
+        });
+
+      const result = await vocabulary.getByIds(['v1', 'v2']);
+
+      expect(mockSend).toHaveBeenCalledTimes(2);
+      expect(result['v1']).toEqual(item1);
+      expect(result['v2']).toEqual(item2);
+    });
+
+    test('should warn and stop after MAX_RETRY_ATTEMPTS exhausted', async () => {
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const unprocessedResponse = {
+        Responses: { 'vela-vocabulary': [] },
+        UnprocessedKeys: {
+          'vela-vocabulary': { Keys: [{ id: 'v-missing' }] },
+        },
+      };
+
+      mockSend.mockResolvedValue(unprocessedResponse);
+
+      const result = await vocabulary.getByIds(['v-missing']);
+
+      expect(mockSend).toHaveBeenCalledTimes(3);
+      expect(result).toEqual({});
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining('Failed to process 1 vocabulary items after 3 attempts'),
+      );
+      warnSpy.mockRestore();
+    });
+  });
+
+  describe('userVocabularyProgress.getStats with empty data', () => {
+    test('should return zeroed stats when user has no progress items', async () => {
+      mockSend.mockResolvedValueOnce({ Items: [], LastEvaluatedKey: undefined });
+
+      const result = await userVocabularyProgress.getStats(mockUserId);
+
+      expect(result).toEqual({
+        total_items: 0,
+        due_today: 0,
+        mastery_breakdown: { new: 0, learning: 0, reviewing: 0, mastered: 0 },
+        average_ease_factor: 0,
+        total_reviews: 0,
+        accuracy_rate: 0,
+      });
+    });
+
+    test('should classify learning items (1 <= interval < 21)', async () => {
+      const mockItems = [
+        {
+          user_id: mockUserId,
+          vocabulary_id: 'v1',
+          next_review_date: '2099-01-01T00:00:00Z',
+          ease_factor: 2.5,
+          interval: 10,
+          repetitions: 2,
+          first_learned_at: '2024-01-01',
+          total_reviews: 5,
+          correct_count: 3,
+        },
+      ];
+      mockSend.mockResolvedValueOnce({ Items: mockItems, LastEvaluatedKey: undefined });
+
+      const result = await userVocabularyProgress.getStats(mockUserId);
+
+      expect(result.mastery_breakdown.learning).toBe(1);
+      expect(result.mastery_breakdown.new).toBe(0);
+      expect(result.mastery_breakdown.reviewing).toBe(0);
+      expect(result.mastery_breakdown.mastered).toBe(0);
+    });
+  });
+
+  describe('scanByJlptLevel warning threshold', () => {
+    test('should log warning when scannedCount crosses 800 threshold', async () => {
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+      mockSend
+        .mockResolvedValueOnce({
+          Items: [],
+          ScannedCount: 850,
+          LastEvaluatedKey: { id: 'lek' },
+        })
+        .mockResolvedValueOnce({
+          Items: [],
+          ScannedCount: 150,
+          LastEvaluatedKey: undefined,
+        });
+
+      await vocabulary.getByJlptLevel([3], 10);
+
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('Approaching hard cap'));
+      warnSpy.mockRestore();
+    });
+  });
+
+  describe('handleDynamoError with non-conditional errors', () => {
+    test('vocabulary.getById should throw generic DynamoDB error for non-conditional failures', async () => {
+      mockSend.mockRejectedValueOnce(new Error('Network error'));
+
+      await expect(vocabulary.getById('v1')).rejects.toThrow(
+        'DynamoDB operation failed: Network error',
+      );
+    });
+
+    test('vocabulary.getAll should throw generic DynamoDB error', async () => {
+      mockSend.mockRejectedValueOnce(new Error('ServiceUnavailable'));
+
+      await expect(vocabulary.getAll()).rejects.toThrow(
+        'DynamoDB operation failed: ServiceUnavailable',
+      );
+    });
+
+    test('sentences.getById should throw generic DynamoDB error', async () => {
+      mockSend.mockRejectedValueOnce(new Error('ThrottlingException'));
+
+      await expect(sentences.getById('s1')).rejects.toThrow(
+        'DynamoDB operation failed: ThrottlingException',
+      );
+    });
+
+    test('dailyProgress.getByUserAndDate should throw generic DynamoDB error', async () => {
+      mockSend.mockRejectedValueOnce(new Error('InternalFailure'));
+
+      await expect(dailyProgress.getByUserAndDate(mockUserId, '2024-01-01')).rejects.toThrow(
+        'DynamoDB operation failed: InternalFailure',
+      );
+    });
+
+    test('gameSessions.create should throw generic DynamoDB error', async () => {
+      mockSend.mockRejectedValueOnce(new Error('ProvisionedThroughputExceededException'));
+
+      await expect(
+        gameSessions.create({
+          user_id: mockUserId,
+          game_type: 'quiz',
+          score: 100,
+          duration_seconds: 60,
+          questions_answered: 10,
+          correct_answers: 10,
+          experience_gained: 200,
+        }),
+      ).rejects.toThrow('DynamoDB operation failed');
+    });
+
+    test('userVocabularyProgress.updateAfterReview should throw generic DynamoDB error for non-conditional failures', async () => {
+      mockSend.mockRejectedValueOnce(new Error('TransactionConflict'));
+
+      await expect(
+        userVocabularyProgress.updateAfterReview(mockUserId, 'v1', {
+          next_review_date: '2024-01-14T00:00:00Z',
+          ease_factor: 2.6,
+          interval: 7,
+          repetitions: 2,
+          last_quality: 4,
+        }),
+      ).rejects.toThrow('DynamoDB operation failed: TransactionConflict');
+    });
+
+    test('vocabulary.create should throw generic DynamoDB error for non-conditional failures', async () => {
+      mockSend
+        .mockResolvedValueOnce({ Items: [], LastEvaluatedKey: undefined })
+        .mockRejectedValueOnce(new Error('ResourceNotFoundException'));
+
+      await expect(
+        vocabulary.create({
+          japanese_word: '猫',
+          english_translation: 'cat',
+          created_at: '2026-01-01T00:00:00Z',
+        }),
+      ).rejects.toThrow('DynamoDB operation failed: ResourceNotFoundException');
+    });
+  });
+
+  describe('vocabulary.getByIds large batch chunking', () => {
+    test('should chunk requests when ids exceed batch size of 100', async () => {
+      const ids = Array.from({ length: 150 }, (_, i) => `v${i}`);
+
+      mockSend
+        .mockResolvedValueOnce({
+          Responses: {
+            'vela-vocabulary': ids.slice(0, 100).map((id) => ({ id, word: `word-${id}` })),
+          },
+          UnprocessedKeys: {},
+        })
+        .mockResolvedValueOnce({
+          Responses: {
+            'vela-vocabulary': ids.slice(100).map((id) => ({ id, word: `word-${id}` })),
+          },
+          UnprocessedKeys: {},
+        });
+
+      const result = await vocabulary.getByIds(ids);
+
+      expect(mockSend).toHaveBeenCalledTimes(2);
+      expect(Object.keys(result)).toHaveLength(150);
+    });
+  });
 });
