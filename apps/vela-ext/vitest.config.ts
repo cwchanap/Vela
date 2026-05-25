@@ -17,7 +17,16 @@ export default defineConfig({
       reporter: ['text', 'json', 'html'],
       all: true,
       include: ['{components,entrypoints}/**/*.{ts,vue}'],
-      exclude: ['{components,tests}/**/*.test.ts', '{components,tests}/**/*.spec.ts'],
+      exclude: [
+        '{components,tests}/**/*.test.ts',
+        '{components,tests}/**/*.spec.ts',
+        'entrypoints/**/*.d.ts',
+        'entrypoints/popup/main.ts',
+        'components/HelloWorld.vue',
+      ],
+      thresholds: {
+        lines: 95,
+      },
     },
   },
   resolve: {

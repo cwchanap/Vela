@@ -29,7 +29,15 @@ export default defineConfig({
         'src/**/*.spec.ts',
         'e2e/**',
         'node_modules/**',
+        'src/**/*.d.ts',
+        'src/types/**',
+        'src/**/types.ts',
+        'src/**/models.ts',
+        'src/**/constants.ts',
       ],
+      thresholds: {
+        lines: 95,
+      },
     },
   },
   resolve: {
