@@ -185,4 +185,92 @@ describe('Profiles Route', () => {
     });
     expect(res.status).toBe(403);
   });
+
+  test('GET / normalizes out-of-range preference values to fallback', async () => {
+    mockProfilesDb.get.mockResolvedValueOnce({
+      user_id: 'test-user',
+      email: null,
+      username: null,
+      preferences: {
+        dailyGoal: 9999,
+        dailyLessonGoal: 0,
+        lessonDurationMinutes: 200,
+        todayStudyTime: -5,
+      },
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    });
+    const app = createTestApp();
+    const res = await app.request('/?user_id=test-user');
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { profile: { preferences: Record<string, number> } };
+    expect(body.profile.preferences.dailyGoal).toBe(30);
+    expect(body.profile.preferences.dailyLessonGoal).toBe(5);
+    expect(body.profile.preferences.lessonDurationMinutes).toBe(6);
+    expect(body.profile.preferences.todayStudyTime).toBe(0);
+  });
+
+  test('GET / returns 500 when stored preferences fail validation', async () => {
+    mockProfilesDb.get.mockResolvedValueOnce({
+      user_id: 'test-user',
+      email: null,
+      username: null,
+      preferences: { difficulty: 123 },
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    });
+    const app = createTestApp();
+    const res = await app.request('/?user_id=test-user');
+    expect(res.status).toBe(500);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toContain('Invalid preferences');
+  });
+
+  test('PUT /update normalizes and persists valid preferences', async () => {
+    mockProfilesDb.update.mockResolvedValueOnce({
+      user_id: 'test-user',
+      preferences: { dailyGoal: 30 },
+      updated_at: new Date().toISOString(),
+    });
+    const app = createTestApp();
+    const res = await app.request('/update', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ user_id: 'test-user', preferences: { dailyGoal: 30 } }),
+    });
+    expect(res.status).toBe(200);
+    expect(mockProfilesDb.update).toHaveBeenCalledWith(
+      'test-user',
+      expect.objectContaining({
+        preferences: expect.objectContaining({ dailyGoal: 30 }),
+      }),
+    );
+  });
+
+  test('PUT /update returns 500 on DynamoDB update error', async () => {
+    mockProfilesDb.update.mockRejectedValueOnce(new Error('DDB update failed'));
+    const app = createTestApp();
+    const res = await app.request('/update', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ user_id: 'test-user', username: 'new-name' }),
+    });
+    expect(res.status).toBe(500);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toBe('DDB update failed');
+  });
+
+  test('POST /create returns 500 on DynamoDB create error', async () => {
+    mockProfilesDb.get.mockResolvedValueOnce(null);
+    mockProfilesDb.create.mockRejectedValueOnce(new Error('DDB create failed'));
+    const app = createTestApp();
+    const res = await app.request('/create', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ user_id: 'test-user' }),
+    });
+    expect(res.status).toBe(500);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toBe('DDB create failed');
+  });
 });
