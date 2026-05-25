@@ -1,0 +1,10 @@
+[test]
+coverage = true
+coverageSkipTestFiles = true
+coverageThreshold = 0
+coverageReporter = ["text", "lcov"]
+coveragePathIgnorePatterns = [
+  "**/*.test.ts",
+  "**/*.spec.ts",
+  "lib/naming.ts",
+]
