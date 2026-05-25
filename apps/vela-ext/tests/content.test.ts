@@ -330,4 +330,96 @@ describe('content script message listener', () => {
 
     expect(shadowRoot.textContent).toContain('Saved 1 sentence');
   });
+
+  it('updates save button text when checkboxes are toggled', async () => {
+    document.body.innerHTML = '<p>日本語を勉強しています。</p><p>東京は大きな都市です。</p>';
+    (globalThis as any).browser.runtime.sendMessage.mockResolvedValue({ saved: 2, total: 2 });
+
+    contentScript.main();
+    const listener = getRegisteredMessageListener();
+    listener({ type: 'SCAN_PAGE' }, undefined, noopSendResponse);
+
+    const host = document.getElementById('vela-ext-overlay-host');
+    const shadowRoot = host?.shadowRoot;
+    const saveBtn = shadowRoot?.querySelector('.vela-btn-save') as HTMLButtonElement | null;
+    const checkboxes = shadowRoot?.querySelectorAll<HTMLInputElement>('input[type="checkbox"]');
+    if (!saveBtn || !shadowRoot || !checkboxes) {
+      throw new Error('Expected save overlay to be rendered');
+    }
+
+    expect(saveBtn.textContent).toContain('2');
+
+    checkboxes[0].checked = false;
+    checkboxes[0].dispatchEvent(new Event('change'));
+
+    expect(saveBtn.textContent).toContain('1');
+    expect(saveBtn.disabled).toBe(false);
+
+    checkboxes[1].checked = false;
+    checkboxes[1].dispatchEvent(new Event('change'));
+
+    expect(saveBtn.textContent).toContain('0');
+    expect(saveBtn.disabled).toBe(true);
+  });
+
+  it('removes existing overlay before creating a new one on SCAN_PAGE', () => {
+    document.body.innerHTML = '<p>日本語を勉強しています。</p>';
+    (globalThis as any).browser.runtime.sendMessage.mockResolvedValue({ saved: 1, total: 1 });
+
+    contentScript.main();
+    const listener = getRegisteredMessageListener();
+
+    listener({ type: 'SCAN_PAGE' }, undefined, noopSendResponse);
+    expect(document.getElementById('vela-ext-overlay-host')).not.toBeNull();
+
+    listener({ type: 'SCAN_PAGE' }, undefined, noopSendResponse);
+    const hosts = document.querySelectorAll('#vela-ext-overlay-host');
+    expect(hosts.length).toBe(1);
+  });
+
+  it('falls back to selected count when SAVE_SENTENCES returns non-standard result', async () => {
+    document.body.innerHTML = '<p>日本語を勉強しています。</p>';
+    (globalThis as any).browser.runtime.sendMessage.mockResolvedValue('unexpected');
+
+    contentScript.main();
+    const listener = getRegisteredMessageListener();
+    listener({ type: 'SCAN_PAGE' }, undefined, noopSendResponse);
+
+    const host = document.getElementById('vela-ext-overlay-host');
+    const shadowRoot = host?.shadowRoot;
+    const saveBtn = shadowRoot?.querySelector('.vela-btn-save') as HTMLButtonElement | null;
+    if (!saveBtn || !shadowRoot) {
+      throw new Error('Expected save overlay to be rendered');
+    }
+
+    saveBtn.click();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(shadowRoot.textContent).toContain('Saved 1 sentence');
+  });
+
+  it('shows dropped count when some sentences are dropped', async () => {
+    document.body.innerHTML = '<p>日本語を勉強しています。</p><p>東京は大きな都市です。</p>';
+    (globalThis as any).browser.runtime.sendMessage.mockResolvedValue({
+      saved: 1,
+      total: 2,
+      dropped: 1,
+    });
+
+    contentScript.main();
+    const listener = getRegisteredMessageListener();
+    listener({ type: 'SCAN_PAGE' }, undefined, noopSendResponse);
+
+    const host = document.getElementById('vela-ext-overlay-host');
+    const shadowRoot = host?.shadowRoot;
+    const saveBtn = shadowRoot?.querySelector('.vela-btn-save') as HTMLButtonElement | null;
+    if (!saveBtn || !shadowRoot) {
+      throw new Error('Expected save overlay to be rendered');
+    }
+
+    saveBtn.click();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(shadowRoot.textContent).toContain('could not be saved');
+  });
 });

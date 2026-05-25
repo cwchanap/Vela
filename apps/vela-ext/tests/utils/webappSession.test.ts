@@ -85,6 +85,53 @@ describe('readCognitoSessionFromStorage', () => {
 
     expect(readCognitoSessionFromStorage(storage)).toBeNull();
   });
+
+  it('returns null when username is not found in storage', () => {
+    const idToken = jwtWithPayload({ email: 'user@example.com' });
+    const storage = makeStorage({
+      'CognitoIdentityServiceProvider.client-id.LastAuthUser': '',
+      'CognitoIdentityServiceProvider.client-id..accessToken': 'access-token',
+      'CognitoIdentityServiceProvider.client-id..refreshToken': 'refresh-token',
+      'CognitoIdentityServiceProvider.client-id..idToken': idToken,
+    });
+
+    expect(readCognitoSessionFromStorage(storage)).toBeNull();
+  });
+
+  it('returns null when id token payload cannot be decoded', () => {
+    const storage = makeStorage({
+      'CognitoIdentityServiceProvider.client-id.LastAuthUser': 'user@example.com',
+      'CognitoIdentityServiceProvider.client-id.user@example.com.accessToken': 'access-token',
+      'CognitoIdentityServiceProvider.client-id.user@example.com.refreshToken': 'refresh-token',
+      'CognitoIdentityServiceProvider.client-id.user@example.com.idToken': 'not-a-jwt',
+    });
+
+    const result = readCognitoSessionFromStorage(storage);
+    expect(result).not.toBeNull();
+    expect(result!.email).toBe('user@example.com');
+  });
+
+  it('skips keys that do not end with LastAuthUser', () => {
+    const storage = makeStorage({
+      SomeOtherKey: 'value',
+    });
+
+    expect(readCognitoSessionFromStorage(storage)).toBeNull();
+  });
+
+  it('returns null when id token has malformed base64 payload', () => {
+    const storage = makeStorage({
+      'CognitoIdentityServiceProvider.client-id.LastAuthUser': 'non-email-user',
+      'CognitoIdentityServiceProvider.client-id.non-email-user.accessToken': 'access-token',
+      'CognitoIdentityServiceProvider.client-id.non-email-user.refreshToken': 'refresh-token',
+      'CognitoIdentityServiceProvider.client-id.non-email-user.idToken':
+        'header.!!!invalid-base64!!!.signature',
+    });
+
+    const result = readCognitoSessionFromStorage(storage);
+    expect(result).not.toBeNull();
+    expect(result!.email).toBeNull();
+  });
 });
 
 describe('getWebappLoginUrl', () => {
@@ -190,5 +237,24 @@ describe('importWebappSession', () => {
     mockSaveAuthTokens.mockRejectedValue(new Error('Storage full'));
 
     await expect(importWebappSession()).rejects.toThrow('Storage full');
+  });
+});
+
+describe('openWebappLogin', () => {
+  beforeEach(() => {
+    (globalThis as any).browser = {
+      tabs: {
+        create: vi.fn().mockResolvedValue({ id: 1 }),
+      },
+    };
+  });
+
+  it('opens a new tab with the webapp login URL', async () => {
+    const { openWebappLogin } = await import('../../entrypoints/utils/webappSession');
+    await openWebappLogin();
+
+    expect(browser.tabs.create).toHaveBeenCalledWith({
+      url: 'https://vela.cwchanap.dev/auth/login',
+    });
   });
 });
