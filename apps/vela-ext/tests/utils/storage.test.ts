@@ -9,6 +9,9 @@ import {
   setExplicitSignout,
   isExplicitSignout,
   clearExplicitSignout,
+  isAuthenticated,
+  getValidIdToken,
+  refreshIdToken,
 } from '../../entrypoints/utils/storage';
 import type { AuthTokens } from '../../entrypoints/utils/api';
 
@@ -126,6 +129,102 @@ describe('storage utils', () => {
       idToken: 'refresh-token-id',
     });
     expect(mockRefreshToken).toHaveBeenCalledWith('refresh-token');
+  });
+
+  it('getValidAccessToken throws Not authenticated when no tokens stored', async () => {
+    await expect(getValidAccessToken()).rejects.toThrow('Not authenticated');
+  });
+
+  describe('refreshAccessToken', () => {
+    it('throws No refresh token available when empty refreshToken', async () => {
+      await saveAuthTokens({ ...tokens, refreshToken: '' });
+
+      await expect(refreshAccessToken()).rejects.toThrow('No refresh token available');
+    });
+
+    it('clears auth data when API errors', async () => {
+      mockRefreshToken.mockRejectedValueOnce(new Error('API error'));
+      await saveAuthTokens(tokens);
+
+      await expect(refreshAccessToken()).rejects.toThrow('Session expired. Please log in again.');
+      await expect(getAuthTokens()).resolves.toBeNull();
+    });
+  });
+
+  describe('isAuthenticated', () => {
+    it('returns true when tokens with accessToken exist', async () => {
+      await saveAuthTokens(tokens);
+
+      await expect(isAuthenticated()).resolves.toBe(true);
+    });
+
+    it('returns false when no tokens stored', async () => {
+      await expect(isAuthenticated()).resolves.toBe(false);
+    });
+
+    it('returns false when accessToken is empty', async () => {
+      await saveAuthTokens({ ...tokens, accessToken: '' });
+
+      await expect(isAuthenticated()).resolves.toBe(false);
+    });
+  });
+
+  describe('getValidIdToken', () => {
+    it('returns id token when available', async () => {
+      await saveAuthTokens(tokens);
+
+      await expect(getValidIdToken()).resolves.toBe('id-token');
+    });
+
+    it('throws Not authenticated when no tokens', async () => {
+      await expect(getValidIdToken()).rejects.toThrow('Not authenticated');
+    });
+
+    it('throws No ID token available when idToken is empty', async () => {
+      await saveAuthTokens({ ...tokens, idToken: '' });
+
+      await expect(getValidIdToken()).rejects.toThrow('No ID token available');
+    });
+  });
+
+  describe('refreshIdToken', () => {
+    it('refreshes and returns new id token', async () => {
+      await saveAuthTokens(tokens);
+
+      const idToken = await refreshIdToken();
+
+      expect(idToken).toBe('refresh-token-id');
+      await expect(getAuthTokens()).resolves.toStrictEqual({
+        accessToken: 'refresh-token-access',
+        refreshToken: 'refresh-token-refresh',
+        idToken: 'refresh-token-id',
+      });
+    });
+
+    it('throws No refresh token available', async () => {
+      await saveAuthTokens({ ...tokens, refreshToken: '' });
+
+      await expect(refreshIdToken()).rejects.toThrow('No refresh token available');
+    });
+
+    it('clears auth data when refresh API fails', async () => {
+      mockRefreshToken.mockRejectedValueOnce(new Error('Network error'));
+      await saveAuthTokens(tokens);
+
+      await expect(refreshIdToken()).rejects.toThrow('Session expired. Please log in again.');
+      await expect(getAuthTokens()).resolves.toBeNull();
+    });
+
+    it('throws Missing ID token after refresh when refreshed tokens have empty idToken', async () => {
+      mockRefreshToken.mockResolvedValueOnce({
+        accessToken: 'new-access',
+        refreshToken: 'new-refresh',
+        idToken: '',
+      });
+      await saveAuthTokens(tokens);
+
+      await expect(refreshIdToken()).rejects.toThrow('Missing ID token after refresh');
+    });
   });
 
   describe('explicit signout flag', () => {
