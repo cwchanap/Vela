@@ -88,13 +88,18 @@ describe('processWithConcurrency', () => {
 
   test('stores error in results when processFn rejects', async () => {
     const items = ['a', 'b', 'c'];
-    const failingFn = (item: string) =>
-      item === 'b' ? Promise.reject(new Error(`fail ${item}`)) : Promise.resolve(item);
+    const failingFn = async (item: string): Promise<string | Error> => {
+      if (item === 'b') {
+        throw new Error(`fail ${item}`);
+      }
 
-    const results = await processWithConcurrency(items, failingFn, 2);
+      return item;
+    };
+
+    const results = await processWithConcurrency<string, string | Error>(items, failingFn, 2);
     expect(results[0]).toBe('a');
     expect(results[1]).toBeInstanceOf(Error);
-    expect((results[1] as Error).message).toBe('fail b');
+    expect(results[1] instanceof Error ? results[1].message : '').toBe('fail b');
     expect(results[2]).toBe('c');
   });
 });
