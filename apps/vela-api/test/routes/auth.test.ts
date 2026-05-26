@@ -290,11 +290,11 @@ describe('Auth Route', () => {
       app.use('*', async (c, next) => {
         c.env = (c.env || {}) as Env;
         Object.assign(c.env, { VITE_COGNITO_USER_POOL_ID: 'us-east-1_test123' });
-        const origGet = c.get;
-        c.get = function (key: string) {
+        const origGet = c.get.bind(c);
+        c.get = ((key: string) => {
           if (key === 'userId') throw new Error('Context error');
-          return origGet.call(this, key);
-        } as any;
+          return origGet(key);
+        }) as typeof c.get;
         await next();
       });
       app.route('/', authApp);
