@@ -623,6 +623,46 @@ describe('isAllowedOrigin utility', () => {
 });
 
 describe('corsMiddleware - extension origins', () => {
+  test('should allow local development extension origins when extension IDs are not configured', async () => {
+    const originalNodeEnv = process.env.NODE_ENV;
+    const originalExtIds = process.env.CORS_ALLOWED_EXTENSION_IDS;
+
+    try {
+      process.env.NODE_ENV = 'development';
+      delete process.env.CORS_ALLOWED_EXTENSION_IDS;
+
+      const app = createTestApp({
+        CORS_ALLOWED_ORIGINS: 'http://localhost:9000,http://127.0.0.1:9000',
+      });
+      const req = new Request('http://localhost/test', {
+        method: 'POST',
+        headers: {
+          Origin: 'chrome-extension://wxt-dev-extension-id',
+        },
+      });
+      const res = await app.request(req);
+      const json = await res.json();
+
+      expect(res.status).toBe(200);
+      expect(json.message).toBe('POST success');
+      expect(res.headers.get('Access-Control-Allow-Origin')).toBe(
+        'chrome-extension://wxt-dev-extension-id',
+      );
+      expect(res.headers.get('Access-Control-Allow-Credentials')).toBeNull();
+    } finally {
+      if (originalNodeEnv !== undefined) {
+        process.env.NODE_ENV = originalNodeEnv;
+      } else {
+        delete process.env.NODE_ENV;
+      }
+      if (originalExtIds !== undefined) {
+        process.env.CORS_ALLOWED_EXTENSION_IDS = originalExtIds;
+      } else {
+        delete process.env.CORS_ALLOWED_EXTENSION_IDS;
+      }
+    }
+  });
+
   test('should allow request from allowed Chrome extension origin', async () => {
     const app = createTestApp({
       CORS_ALLOWED_EXTENSION_IDS: 'valid-ext-id',

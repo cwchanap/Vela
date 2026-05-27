@@ -37,6 +37,12 @@ export class ApiStack extends Stack {
       .split(',')
       .map((o: string) => o.trim())
       .filter((o: string) => o.length > 0);
+    const corsAllowedExtensionIds = process.env.CORS_ALLOWED_EXTENSION_IDS || '';
+    const allowedExtensionOriginsList = corsAllowedExtensionIds
+      .split(',')
+      .map((id: string) => id.trim())
+      .filter((id: string) => id.length > 0)
+      .flatMap((id: string) => [`chrome-extension://${id}`, `moz-extension://${id}`]);
 
     // Fall back to defaults if parsing results in an empty array
     if (allowedOriginsList.length === 0) {
@@ -74,6 +80,7 @@ export class ApiStack extends Stack {
         COGNITO_CLIENT_ID: auth.userPoolClient.userPoolClientId,
         DDB_REGION: Stack.of(this).region,
         CORS_ALLOWED_ORIGINS: corsAllowedOrigins,
+        ...(corsAllowedExtensionIds ? { CORS_ALLOWED_EXTENSION_IDS: corsAllowedExtensionIds } : {}),
       },
     });
 
@@ -125,7 +132,7 @@ export class ApiStack extends Stack {
       restApiName: 'Vela API',
       description: 'API for Vela Japanese Learning App',
       defaultCorsPreflightOptions: {
-        allowOrigins: allowedOriginsList,
+        allowOrigins: [...allowedOriginsList, ...allowedExtensionOriginsList],
         allowMethods: Cors.ALL_METHODS,
         allowHeaders: [
           'Content-Type',

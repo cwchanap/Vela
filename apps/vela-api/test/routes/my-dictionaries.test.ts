@@ -28,12 +28,6 @@ vi.mock('../../src/middleware/auth', () => ({
   AuthContext: {},
 }));
 
-const mockIsAllowedOrigin = vi.fn();
-
-vi.mock('../../src/middleware/cors', () => ({
-  isAllowedOrigin: mockIsAllowedOrigin,
-}));
-
 // Import AFTER mocks are declared
 const { default: myDictionariesRouter } = await import('../../src/routes/my-dictionaries');
 
@@ -67,12 +61,6 @@ describe('My Dictionaries Route', () => {
     vi.clearAllMocks();
     mockAuthConfig.userId = 'test-user-id';
     mockAuthConfig.userEmail = 'test@example.com';
-    mockIsAllowedOrigin.mockReturnValue({
-      isAllowed: true,
-      hasConfiguredOrigins: false,
-      allowedOrigin: null,
-      isWebOrigin: false,
-    });
     mockFetch = vi.fn();
     globalThis.fetch = mockFetch as any;
   });
@@ -656,14 +644,9 @@ describe('My Dictionaries Route', () => {
     });
 
     test('returns 403 when origin is not allowed with configured origins', async () => {
-      mockIsAllowedOrigin.mockReturnValueOnce({
-        isAllowed: false,
-        hasConfiguredOrigins: true,
-        allowedOrigin: null,
-        isWebOrigin: false,
+      const app = createTestApp({
+        CORS_ALLOWED_ORIGINS: 'http://localhost:9000',
       });
-
-      const app = createTestApp();
       const res = await app.request('/analyze', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Origin: 'http://evil.com' },

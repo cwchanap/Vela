@@ -1,6 +1,10 @@
 import type { Context, Next } from 'hono';
 import type { Env } from '../types';
 
+function isBrowserExtensionOrigin(origin: string | undefined): origin is string {
+  return /^(chrome|moz)-extension:\/\/[^/]+$/.test(origin ?? '');
+}
+
 /**
  * Utility function to check if an origin is allowed based on CORS configuration.
  *
@@ -53,15 +57,20 @@ export function isAllowedOrigin(
 
   // Check if origin is a whitelisted extension origin
   const isWhitelistedExtensionOrigin = allowedExtensionOrigins.has(origin);
+  const isLocalDevExtensionOrigin =
+    process.env.NODE_ENV === 'development' &&
+    allowedExtensionIds.length === 0 &&
+    isBrowserExtensionOrigin(origin);
 
   // Check if origin is in the allowed web origins list
   const isAllowedWebOrigin = allowedOrigins.includes(origin);
+  const isAllowed = isAllowedWebOrigin || isWhitelistedExtensionOrigin || isLocalDevExtensionOrigin;
 
   return {
-    isAllowed: isAllowedWebOrigin || isWhitelistedExtensionOrigin,
+    isAllowed,
     isWebOrigin: isAllowedWebOrigin,
     hasConfiguredOrigins,
-    allowedOrigin: isAllowedWebOrigin || isWhitelistedExtensionOrigin ? origin : undefined,
+    allowedOrigin: isAllowed ? origin : undefined,
   };
 }
 
@@ -78,37 +87,9 @@ export function isAllowedOrigin(
  */
 export const corsMiddleware = async (c: Context<{ Bindings: Env }>, next: Next) => {
   const origin = c.req.header('Origin');
+  const originCheck = isAllowedOrigin(origin, c.env);
 
-  // Parse allowed origins from environment variable (comma-separated)
-  // Fall back to process.env if c.env is not available (e.g., in production before env injection)
-  const corsConfig = c.env?.CORS_ALLOWED_ORIGINS || process.env.CORS_ALLOWED_ORIGINS;
-  const allowedOrigins = corsConfig?.split(',').map((o) => o.trim()) || [];
-
-  // Parse allowed extension IDs from environment variable (comma-separated)
-  // These should be the extension IDs without the chrome-extension:// prefix
-  const extensionIdsConfig =
-    c.env?.CORS_ALLOWED_EXTENSION_IDS || process.env.CORS_ALLOWED_EXTENSION_IDS;
-  const allowedExtensionIds = extensionIdsConfig?.split(',').map((id: string) => id.trim()) || [];
-
-  // Build full extension origin URIs from the allowed extension IDs
-  const allowedExtensionOrigins = new Set<string>();
-  for (const extId of allowedExtensionIds) {
-    if (extId) {
-      allowedExtensionOrigins.add(`chrome-extension://${extId}`);
-      allowedExtensionOrigins.add(`moz-extension://${extId}`);
-    }
-  }
-
-  // Check if origin is a whitelisted extension origin
-  const isWhitelistedExtensionOrigin =
-    typeof origin === 'string' && allowedExtensionOrigins.has(origin);
-
-  // Check if origin is in the allowed origins list (web origins)
-  const isAllowedWebOrigin = !!origin && allowedOrigins.includes(origin);
-
-  const isAllowedOrigin = isAllowedWebOrigin || isWhitelistedExtensionOrigin;
-
-  if (origin && !isAllowedOrigin) {
+  if (origin && !originCheck.isAllowed) {
     // Origin not allowed - return 403 for non-OPTIONS requests
     if (c.req.method !== 'OPTIONS') {
       return c.json({ error: 'CORS policy violation: Origin not allowed' }, 403);
@@ -119,12 +100,12 @@ export const corsMiddleware = async (c: Context<{ Bindings: Env }>, next: Next) 
     return new Response(null, { status: 204 });
   }
 
-  if (isAllowedOrigin && origin) {
+  if (originCheck.isAllowed && origin) {
     // Set specific origin instead of wildcard for security
     c.header('Access-Control-Allow-Origin', origin);
     // Only allow credentials for explicitly whitelisted web origins, not for extensions
     // This prevents credential leakage to unauthorized extensions
-    if (isAllowedWebOrigin) {
+    if (originCheck.isWebOrigin) {
       c.header('Access-Control-Allow-Credentials', 'true');
     }
   }

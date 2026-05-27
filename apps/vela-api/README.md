@@ -7,7 +7,7 @@ A Hono-based API for the Vela Japanese Learning App, migrated from the original 
 - **LLM Chat API**: Supports Google Gemini and OpenRouter providers
 - **Chat History API**: Save and retrieve chat conversations using DynamoDB
 - **AWS Lambda**: Designed to run as AWS Lambda functions
-- **CORS Support**: Built-in CORS handling for web applications
+- **CORS Support**: Built-in CORS handling for web applications and approved browser extensions
 
 ## Endpoints
 
@@ -112,6 +112,15 @@ If server-side API keys are configured, they will be used for all requests. User
 - `DDB_ENDPOINT`: DynamoDB endpoint (default: https://dynamodb.us-east-1.amazonaws.com)
 - `DDB_REGION`: AWS region (default: us-east-1)
 - `DDB_TABLE`: DynamoDB table name (default: vela)
+
+### CORS Configuration
+
+- `CORS_ALLOWED_ORIGINS`: Comma-separated web origins allowed to call the API
+- `CORS_ALLOWED_EXTENSION_IDS`: Comma-separated browser extension IDs, without the
+  `chrome-extension://` or `moz-extension://` prefix
+
+Local development allows generated browser-extension origins when no extension IDs are configured.
+Production deploys must set `CORS_ALLOWED_EXTENSION_IDS` for the published extension.
 
 ## Development
 
