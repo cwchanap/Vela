@@ -54,6 +54,10 @@
     "cdk:diff": {
       "dependsOn": ["^build"]
     },
-    "cdk:destroy": {}
+    "cdk:destroy": {},
+    "lint:fix": {
+      "dependsOn": ["^lint"]
+    },
+    "clean": {}
   }
 }
