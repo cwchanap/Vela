@@ -107,6 +107,27 @@
         "wxt": "^0.20.6",
       },
     },
+    "apps/vela-mobile": {
+      "name": "@vela/mobile",
+      "version": "0.0.1",
+      "dependencies": {
+        "@quasar/extras": "^1.16.4",
+        "quasar": "^2.16.0",
+        "vue": "^3.4.18",
+        "vue-router": "^4.3.0",
+      },
+      "devDependencies": {
+        "@quasar/app-vite": "^2.1.0",
+        "@quasar/vite-plugin": "^1.8.0",
+        "@types/node": "^20.5.9",
+        "@vitejs/plugin-vue": "^6.0.1",
+        "@vue/test-utils": "^2.4.6",
+        "jsdom": "^26.1.0",
+        "typescript": "~5.6.3",
+        "vitest": "^3.2.4",
+        "vue-tsc": "^2.0.29",
+      },
+    },
     "packages/cdk": {
       "name": "@vela/cdk",
       "version": "0.0.1",
@@ -762,6 +783,8 @@
     "@vela/cdk": ["@vela/cdk@workspace:packages/cdk"],
 
     "@vela/common": ["@vela/common@workspace:packages/common"],
+
+    "@vela/mobile": ["@vela/mobile@workspace:apps/vela-mobile"],
 
     "@vitejs/plugin-vue": ["@vitejs/plugin-vue@6.0.3", "", { "dependencies": { "@rolldown/pluginutils": "1.0.0-beta.53" }, "peerDependencies": { "vite": "^5.0.0 || ^6.0.0 || ^7.0.0 || ^8.0.0-0", "vue": "^3.2.25" } }, "sha512-TlGPkLFLVOY3T7fZrwdvKpjprR3s4fxRln0ORDo1VQ7HHyxJwTlrjKU3kpVWTlaAjIEuCTokmjkZnr8Tpc925w=="],
 
