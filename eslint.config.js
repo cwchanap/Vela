@@ -126,6 +126,71 @@ export default [
     },
   },
 
+  // Vue files in vela-mobile package
+  {
+    files: ['apps/vela-mobile/**/*.vue'],
+    languageOptions: {
+      parser: parserVue,
+      parserOptions: {
+        parser: parserTs,
+        ecmaVersion: 'latest',
+        sourceType: 'module',
+      },
+      globals: {
+        ...globals.browser,
+        ...globals.node,
+        process: 'readonly',
+        Capacitor: 'readonly',
+        chrome: 'readonly',
+        browser: 'readonly',
+      },
+    },
+    plugins: {
+      vue: pluginVue,
+      '@typescript-eslint': pluginTs,
+    },
+    rules: {
+      ...pluginVue.configs['flat/essential'].rules,
+      '@typescript-eslint/no-unused-vars': [
+        'error',
+        { argsIgnorePattern: '^_', varsIgnorePattern: '^_' },
+      ],
+      'no-unused-vars': ['error', { argsIgnorePattern: '^_', varsIgnorePattern: '^_' }],
+      'prefer-promise-reject-errors': 'off',
+      'no-debugger': isProduction ? 'error' : 'off',
+    },
+  },
+
+  // TypeScript files in vela-mobile package
+  {
+    files: ['apps/vela-mobile/**/*.ts'],
+    languageOptions: {
+      parser: parserTs,
+      ecmaVersion: 'latest',
+      sourceType: 'module',
+      globals: {
+        ...globals.browser,
+        ...globals.node,
+        process: 'readonly',
+        Capacitor: 'readonly',
+        chrome: 'readonly',
+        browser: 'readonly',
+      },
+    },
+    plugins: {
+      '@typescript-eslint': pluginTs,
+    },
+    rules: {
+      '@typescript-eslint/no-unused-vars': [
+        'error',
+        { argsIgnorePattern: '^_', varsIgnorePattern: '^_' },
+      ],
+      'no-unused-vars': ['error', { argsIgnorePattern: '^_', varsIgnorePattern: '^_' }],
+      'prefer-promise-reject-errors': 'off',
+      'no-debugger': isProduction ? 'error' : 'off',
+    },
+  },
+
   // JavaScript files in Vue app
   {
     files: ['apps/vela/**/*.js'],
