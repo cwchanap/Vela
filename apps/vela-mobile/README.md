@@ -95,7 +95,7 @@ bun run lint         # ESLint
 
 ## Project Structure
 
-```
+```text
 src/                  # Vue application source
   config/             # Environment config
   boot/               # Quasar boot files
