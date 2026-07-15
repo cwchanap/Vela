@@ -21,8 +21,12 @@ bun --version         # Must be >= 1.3.1
 ## Setup
 
 ```bash
-# From repo root
+# From repo root — installs web app workspace deps
 bun install
+
+# Capacitor native deps live in a separate package (src-capacitor/)
+# and are NOT covered by the workspace install. Required for iOS dev/build:
+cd apps/vela-mobile/src-capacitor && bun install
 ```
 
 ## Development
@@ -70,10 +74,13 @@ cd apps/vela-mobile
 bun run build:ios
 ```
 
-This runs `xcodebuild` CLI. To build from the Xcode IDE instead:
+This syncs web assets and opens the project in **Xcode**. Press the Run button (or `Cmd+B`) to build.
+
+To drive `xcodebuild` headlessly from the CLI instead of the IDE, use Capacitor's CLI directly:
 
 ```bash
-bun run build:ios -- --ide
+cd apps/vela-mobile/src-capacitor
+bunx cap build ios
 ```
 
 ## Physical Device

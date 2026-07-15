@@ -15,6 +15,7 @@
     "lint:fix": "eslint \"./src/**/*.{ts,js,vue}\" --fix",
     "format": "prettier --write \"**/*.{js,ts,vue,scss,html,md,json}\" --ignore-path ../../.gitignore",
     "test:unit": "vitest run",
+    "test": "bun run test:unit",
     "typecheck": "vue-tsc --noEmit",
     "postinstall": "quasar prepare",
     "clean": "rm -rf dist .quasar"
