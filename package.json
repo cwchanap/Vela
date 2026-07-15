@@ -23,6 +23,7 @@
     "format": "turbo format",
     "test:unit": "turbo test:unit",
     "test": "turbo test:unit",
+    "typecheck": "turbo typecheck",
     "test:e2e": "turbo test:e2e",
     "clean": "turbo clean",
     "cdk:synth": "turbo cdk:synth",

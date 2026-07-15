@@ -24,8 +24,8 @@ export default defineConfig(() => {
       publicPath: '/',
 
       env: {
-        VITE_APP_NAME: process.env.VITE_APP_NAME,
-        VITE_APP_VERSION: process.env.VITE_APP_VERSION,
+        VITE_APP_NAME: process.env.VITE_APP_NAME || 'Vela',
+        VITE_APP_VERSION: process.env.VITE_APP_VERSION || '0.0.1',
       },
     },
 
