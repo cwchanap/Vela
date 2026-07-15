@@ -359,7 +359,7 @@ body.body--dark .q-page-container {
 
 Create `apps/vela-mobile/.env.example`:
 
-```
+```env
 # App Configuration
 VITE_APP_NAME=Vela
 VITE_APP_VERSION=0.0.1
