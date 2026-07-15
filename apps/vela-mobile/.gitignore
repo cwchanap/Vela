@@ -9,7 +9,7 @@ src-capacitor/ios/App/output/
 src-capacitor/ios/App/App.xcodeproj/xcuserdata/
 src-capacitor/ios/App/App.xcworkspace/xcuserdata/
 src-capacitor/ios/DerivedData/
-src-capacitor/ios/App exported/
+src-capacitor/ios/App/exported/
 
 # Quasar
 .quasar
