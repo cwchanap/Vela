@@ -1,5 +1,7 @@
 import { boot } from 'quasar/wrappers';
 
 export default boot(() => {
-  console.log('Vela Mobile boot initialized');
+  if (import.meta.env.DEV) {
+    console.log('Vela Mobile boot initialized');
+  }
 });
