@@ -4,11 +4,11 @@ iOS-first Vela Japanese learning app, built with Quasar + Capacitor.
 
 ## Prerequisites
 
-| Requirement | Version                       | Install                            |
-| ----------- | ----------------------------- | ---------------------------------- | ----- |
-| Xcode       | 16+ (Capacitor 7 requirement) | Mac App Store                      |
-| CocoaPods   | latest                        | `brew install cocoapods`           |
-| Bun         | >= 1.3.1                      | `curl -fsSL https://bun.sh/install | bash` |
+| Requirement | Version                       | Install                                     |
+| ----------- | ----------------------------- | ------------------------------------------- |
+| Xcode       | 16+ (Capacitor 7 requirement) | Mac App Store                               |
+| CocoaPods   | latest                        | `brew install cocoapods`                    |
+| Bun         | >= 1.3.1                      | `curl -fsSL https://bun.sh/install \| bash` |
 
 Verify:
 
