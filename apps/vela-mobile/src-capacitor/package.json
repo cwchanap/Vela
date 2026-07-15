@@ -1,0 +1,13 @@
+{
+  "name": "@vela/mobile",
+  "version": "0.0.1",
+  "description": "Vela Mobile - iOS Japanese Learning App",
+  "author": "cwchanap <cwchanap@connect.ust.hk>",
+  "private": true,
+  "dependencies": {
+    "@capacitor/app": "^7.0.0",
+    "@capacitor/cli": "^7.0.0",
+    "@capacitor/core": "^7.0.0",
+    "@capacitor/ios": "^7"
+  }
+}
