@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 import { mount } from '@vue/test-utils';
 import { Quasar, QLayout, QPageContainer } from 'quasar';
 import { defineComponent } from 'vue';
@@ -15,6 +15,11 @@ const Host = defineComponent({
 const mountPage = () => mount(Host, { global: { plugins: [Quasar] } });
 
 describe('HomePage', () => {
+  afterEach(() => {
+    vi.doUnmock('src/config');
+    vi.resetModules();
+  });
+
   it('renders the app name', () => {
     const wrapper = mountPage();
     expect(wrapper.text()).toContain('Vela');
@@ -52,7 +57,5 @@ describe('HomePage', () => {
     const wrapper = mount(ProdHost, { global: { plugins: [Quasar] } });
     expect(wrapper.text()).toContain('Production');
     expect(wrapper.text()).not.toContain('Development');
-    vi.doUnmock('src/config');
-    vi.resetModules();
   });
 });

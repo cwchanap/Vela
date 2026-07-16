@@ -1,14 +1,14 @@
 import { describe, it, expect } from 'vitest';
 import { mount } from '@vue/test-utils';
 import { Quasar, QLayout, QPageContainer } from 'quasar';
-import { defineComponent } from 'vue';
+import { defineComponent, type Component } from 'vue';
 import LearnPage from './LearnPage.vue';
 import ReviewPage from './ReviewPage.vue';
 import WordsPage from './WordsPage.vue';
 import MorePage from './MorePage.vue';
 
 // q-page must be a deep child of q-layout; wrap so Quasar renders under jsdom.
-const mountPage = (Page: any) => {
+const mountPage = (Page: Component) => {
   const Host = defineComponent({
     components: { QLayout, QPageContainer, Page },
     template:
