@@ -10,7 +10,7 @@ export default defineConfig(() => {
 
     build: {
       target: {
-        browser: ['es2022', 'safari16'],
+        browser: ['es2022', 'safari14'],
         node: 'node20',
       },
 
