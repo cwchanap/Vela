@@ -18,6 +18,28 @@ export default defineConfig({
     setupFiles: ['src/test/setup.ts'],
     include: ['src/**/*.{test,spec}.{ts,tsx}'],
     exclude: ['node_modules/**'],
+    coverage: {
+      provider: 'v8',
+      reporter: ['text', 'json', 'html'],
+      all: true,
+      include: ['src/**/*.{ts,vue}'],
+      exclude: [
+        'src/**/*.test.ts',
+        'src/**/*.test.tsx',
+        'src/**/*.spec.ts',
+        'node_modules/**',
+        'src/**/*.d.ts',
+        'src/**/types.ts',
+        'src/**/models.ts',
+        'src/**/constants.ts',
+        'src/test/**',
+      ],
+      // Scaffold coverage is below the monorepo 95% target (apps/vela).
+      // Floor tracks current scaffold coverage; raise toward 95% as features land.
+      thresholds: {
+        lines: 50,
+      },
+    },
   },
   resolve: {
     alias: {
