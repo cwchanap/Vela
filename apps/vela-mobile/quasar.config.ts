@@ -31,6 +31,9 @@ export default defineConfig(() => {
 
     devServer: {
       open: false,
+      // Distinct from apps/vela (9000) so `turbo dev --parallel` doesn't race
+      // for the same listener. API runs on 9005.
+      port: 9100,
     },
 
     framework: {
