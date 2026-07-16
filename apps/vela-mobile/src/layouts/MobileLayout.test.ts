@@ -30,8 +30,8 @@ const mountLayout = async (initialPath = '/') => {
 const tabByLabel = (wrapper: VueWrapper, label: string) =>
   wrapper.findAll('.q-tab').find((t) => t.text().includes(label));
 
-const isActive = (el: VueWrapper | ReturnType<VueWrapper['find']>) =>
-  el.classes().includes('q-router-link--active');
+const isActive = (el: VueWrapper | ReturnType<VueWrapper['find']> | undefined) =>
+  el ? el.classes().includes('q-router-link--active') : false;
 
 describe('MobileLayout', () => {
   afterEach(() => {
@@ -83,7 +83,7 @@ describe('MobileLayout', () => {
     };
     for (const path of ['/learn', '/words', '/more']) {
       const wrapper = await mountLayout(path);
-      const active = tabByLabel(wrapper, labels[path]);
+      const active = tabByLabel(wrapper, labels[path]!);
       const home = tabByLabel(wrapper, 'Home');
       expect(isActive(active)).toBe(true);
       expect(isActive(home)).toBe(false);
