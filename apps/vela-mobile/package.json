@@ -16,7 +16,7 @@
     "format": "prettier --write \"**/*.{js,ts,vue,scss,html,md,json}\" --ignore-path ../../.gitignore",
     "test:unit": "vitest run",
     "test": "bun run test:unit",
-    "typecheck": "vue-tsc --noEmit",
+    "typecheck": "quasar prepare && vue-tsc --noEmit",
     "postinstall": "quasar prepare && bun install --cwd src-capacitor --frozen-lockfile",
     "clean": "rm -rf dist .quasar"
   },
