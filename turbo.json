@@ -5,7 +5,18 @@
     "build": {
       "dependsOn": ["^build"],
       "outputs": ["dist/**", ".next/**", ".output/**", "!.next/cache/**"],
-      "env": ["VITE_APP_NAME", "VITE_APP_VERSION"],
+      "env": [
+        "VITE_APP_NAME",
+        "VITE_APP_VERSION",
+        "VITE_DEV_MODE",
+        "VITE_API_URL",
+        "VITE_AWS_REGION",
+        "VITE_COGNITO_USER_POOL_ID",
+        "VITE_COGNITO_USER_POOL_CLIENT_ID",
+        "VITE_COGNITO_OAUTH_DOMAIN",
+        "VITE_COGNITO_REDIRECT_SIGN_IN",
+        "VITE_COGNITO_REDIRECT_SIGN_OUT"
+      ],
       "inputs": [
         "$TURBO_DEFAULT$",
         ".env",
