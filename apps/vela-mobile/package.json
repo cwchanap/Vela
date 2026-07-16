@@ -17,7 +17,7 @@
     "test:unit": "vitest run",
     "test": "bun run test:unit",
     "typecheck": "vue-tsc --noEmit",
-    "postinstall": "quasar prepare && bun install --cwd src-capacitor",
+    "postinstall": "quasar prepare && bun install --cwd src-capacitor --frozen-lockfile",
     "clean": "rm -rf dist .quasar"
   },
   "dependencies": {
