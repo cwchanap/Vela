@@ -6,7 +6,13 @@
       "dependsOn": ["^build"],
       "outputs": ["dist/**", ".next/**", ".output/**", "!.next/cache/**"],
       "env": ["VITE_APP_NAME", "VITE_APP_VERSION"],
-      "inputs": ["$TURBO_DEFAULT$", ".env", ".env.local"]
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        ".env",
+        ".env.local",
+        ".env.production",
+        ".env.production.local"
+      ]
     },
     "zip": {
       "dependsOn": ["^build"],
