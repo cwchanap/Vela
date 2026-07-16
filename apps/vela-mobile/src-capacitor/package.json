@@ -1,5 +1,5 @@
 {
-  "name": "@vela/mobile",
+  "name": "@vela/mobile-capacitor",
   "version": "0.0.1",
   "description": "Vela Mobile - iOS Japanese Learning App",
   "author": "cwchanap <cwchanap@connect.ust.hk>",

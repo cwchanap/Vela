@@ -21,6 +21,7 @@ export default [
       '**/cdk-out-synth/**',
       '**/.turbo/**',
       '**/coverage/**',
+      '**/src-capacitor/**',
     ],
   },
 

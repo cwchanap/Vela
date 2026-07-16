@@ -5,8 +5,15 @@
     </q-page-container>
 
     <q-footer class="mobile-nav">
-      <q-tabs dense no-caps align="justify" class="bg-white text-primary nav-tabs" :breakpoint="0">
-        <q-route-tab to="/" icon="home" label="Home" />
+      <q-tabs
+        dense
+        no-caps
+        align="justify"
+        class="nav-tabs"
+        :class="$q.dark.isActive ? 'bg-grey-9 text-primary' : 'bg-white text-primary'"
+        :breakpoint="0"
+      >
+        <q-route-tab to="/" icon="home" label="Home" exact />
         <q-route-tab to="/review" icon="repeat" label="Review" />
         <q-route-tab to="/learn" icon="school" label="Learn" />
         <q-route-tab to="/words" icon="menu_book" label="Words" />

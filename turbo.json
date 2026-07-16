@@ -56,7 +56,7 @@
     },
     "cdk:destroy": {},
     "lint:fix": {
-      "dependsOn": ["^lint"],
+      "dependsOn": ["^lint:fix"],
       "cache": false
     },
     "typecheck": {
