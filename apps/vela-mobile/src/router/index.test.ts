@@ -25,9 +25,6 @@ describe('router/index', () => {
 
   afterEach(() => {
     vi.unstubAllEnvs();
-    delete process.env.SERVER;
-    delete process.env.VUE_ROUTER_MODE;
-    delete process.env.VUE_ROUTER_BASE;
   });
 
   it('exports a router factory function', () => {
@@ -41,7 +38,7 @@ describe('router/index', () => {
   });
 
   it('uses createMemoryHistory when SERVER is set', () => {
-    process.env.SERVER = 'true';
+    vi.stubEnv('SERVER', 'true');
     const router = (createRouter as () => any)();
     expect(router).toBeDefined();
     expect(createMemoryHistory).toHaveBeenCalledTimes(1);
@@ -50,7 +47,7 @@ describe('router/index', () => {
   });
 
   it('uses createWebHistory when VUE_ROUTER_MODE is "history" (no SERVER)', () => {
-    process.env.VUE_ROUTER_MODE = 'history';
+    vi.stubEnv('VUE_ROUTER_MODE', 'history');
     const router = (createRouter as () => any)();
     expect(router).toBeDefined();
     expect(createWebHistory).toHaveBeenCalledTimes(1);
@@ -67,16 +64,16 @@ describe('router/index', () => {
   });
 
   it('prefers SERVER over VUE_ROUTER_MODE', () => {
-    process.env.SERVER = 'true';
-    process.env.VUE_ROUTER_MODE = 'history';
+    vi.stubEnv('SERVER', 'true');
+    vi.stubEnv('VUE_ROUTER_MODE', 'history');
     (createRouter as () => any)();
     expect(createMemoryHistory).toHaveBeenCalledTimes(1);
     expect(createWebHistory).not.toHaveBeenCalled();
   });
 
   it('forwards VUE_ROUTER_BASE to the chosen history factory', () => {
-    process.env.VUE_ROUTER_MODE = 'history';
-    process.env.VUE_ROUTER_BASE = '/app/';
+    vi.stubEnv('VUE_ROUTER_MODE', 'history');
+    vi.stubEnv('VUE_ROUTER_BASE', '/app/');
     (createRouter as () => any)();
     expect(createWebHistory).toHaveBeenCalledWith('/app/');
   });
