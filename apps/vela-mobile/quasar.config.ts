@@ -6,7 +6,7 @@ export default defineConfig(() => {
 
     css: ['app.scss'],
 
-    extras: ['material-icons'],
+    extras: ['material-icons', 'roboto-font'],
 
     build: {
       target: {

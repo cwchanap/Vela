@@ -34,10 +34,10 @@ export default defineConfig({
         'src/**/constants.ts',
         'src/test/**',
       ],
-      // Scaffold coverage is below the monorepo 95% target (apps/vela).
-      // Floor tracks current scaffold coverage; raise toward 95% as features land.
+      // Aligned with the monorepo 95% line-coverage target (apps/vela).
+      // Funcs% is unreliable for Vue SFCs under v8, so only lines are gated.
       thresholds: {
-        lines: 50,
+        lines: 95,
       },
     },
   },
