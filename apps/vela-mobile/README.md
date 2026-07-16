@@ -82,6 +82,14 @@ bun run build:ios
 This runs `quasar build -m capacitor -T ios`: builds the web assets, syncs Capacitor, then
 invokes `xcodebuild` headlessly (via Quasar's Capacitor builder).
 
+> **Signing prerequisite:** `build:ios` produces a signed `iphoneos` release build and
+> requires a configured development team. The Xcode target uses automatic signing
+> (`CODE_SIGN_STYLE = Automatic`) with no `DEVELOPMENT_TEAM` committed, so a headless
+> build fails with `Signing for "App" requires a development team` until one is set.
+> To configure it, open Xcode (`bunx cap open ios`), select your team under
+> **Signing & Capabilities**, then re-run `bun run build:ios` — or use the Xcode-based
+> flow described under [Physical Device](#physical-device) instead.
+
 To open **Xcode** instead of a terminal-only build:
 
 ```bash
