@@ -5,3 +5,7 @@ export function defineConfig<T>(fn: T) {
 export function defineRouter<T>(fn: T) {
   return fn;
 }
+
+export function defineBoot<T>(fn: T) {
+  return fn;
+}
