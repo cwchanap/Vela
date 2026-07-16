@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from 'vitest';
-import { mount, type VueWrapper } from '@vue/test-utils';
+import { mount, type VueWrapper, type DOMWrapper } from '@vue/test-utils';
 import { Quasar, Dark } from 'quasar';
 import { createRouter, createMemoryHistory } from 'vue-router';
 import { nextTick } from 'vue';
@@ -27,11 +27,13 @@ const mountLayout = async (initialPath = '/') => {
   return wrapper;
 };
 
-const tabByLabel = (wrapper: VueWrapper, label: string) =>
-  wrapper.findAll('.q-tab').find((t) => t.text().includes(label));
+const tabByLabel = (wrapper: VueWrapper, label: string): DOMWrapper<Element> => {
+  const tab = wrapper.findAll('.q-tab').find((t) => t.text().includes(label));
+  if (!tab) throw new Error(`Tab with label "${label}" not found`);
+  return tab;
+};
 
-const isActive = (el: VueWrapper | ReturnType<VueWrapper['find']> | undefined) =>
-  el ? el.classes().includes('q-router-link--active') : false;
+const isActive = (el: DOMWrapper<Element>) => el.classes().includes('q-router-link--active');
 
 describe('MobileLayout', () => {
   afterEach(() => {
@@ -82,8 +84,10 @@ describe('MobileLayout', () => {
       '/more': 'More',
     };
     for (const path of ['/learn', '/words', '/more']) {
+      const label = labels[path];
+      if (!label) throw new Error(`No label mapped for path ${path}`);
       const wrapper = await mountLayout(path);
-      const active = tabByLabel(wrapper, labels[path]!);
+      const active = tabByLabel(wrapper, label);
       const home = tabByLabel(wrapper, 'Home');
       expect(isActive(active)).toBe(true);
       expect(isActive(home)).toBe(false);
