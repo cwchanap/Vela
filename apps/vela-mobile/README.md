@@ -21,11 +21,16 @@ bun --version         # Must be >= 1.3.1
 ## Setup
 
 ```bash
-# From repo root — installs web app workspace deps
+# From repo root — installs workspace deps, then apps/vela-mobile postinstall
+# runs `bun install --cwd src-capacitor` for Capacitor native packages.
 bun install
+```
 
-# Capacitor native deps live in a separate package (src-capacitor/)
-# and are NOT covered by the workspace install. Required for iOS dev/build:
+Capacitor packages (`@capacitor/*`) live in `src-capacitor/package.json` (Quasar layout).
+The Podfile resolves them from `src-capacitor/node_modules/`, not the monorepo root.
+If you skip install at the monorepo root, install them manually:
+
+```bash
 cd apps/vela-mobile/src-capacitor && bun install
 ```
 
@@ -74,13 +79,16 @@ cd apps/vela-mobile
 bun run build:ios
 ```
 
-This syncs web assets and opens the project in **Xcode**. Press the Run button (or `Cmd+B`) to build.
+This runs `quasar build -m capacitor -T ios`: builds the web assets, syncs Capacitor, then
+invokes `xcodebuild` headlessly (via Quasar's Capacitor builder).
 
-To drive `xcodebuild` headlessly from the CLI instead of the IDE, use Capacitor's CLI directly:
+To open **Xcode** instead of a terminal-only build:
 
 ```bash
-cd apps/vela-mobile/src-capacitor
-bunx cap build ios
+cd apps/vela-mobile
+bunx quasar build -m capacitor -T ios --ide
+# or
+cd apps/vela-mobile/src-capacitor && bunx cap open ios
 ```
 
 ## Physical Device
@@ -95,10 +103,13 @@ bunx cap build ios
 
 ```bash
 cd apps/vela-mobile
-bun run test:unit    # Unit tests (Vitest)
-bun run typecheck    # Type checking (vue-tsc)
-bun run lint         # ESLint
+bun run test:unit                # Unit tests (Vitest)
+bun run test:unit -- --coverage  # Unit tests with coverage
+bun run typecheck                # Type checking (vue-tsc)
+bun run lint                     # ESLint
 ```
+
+From monorepo root, `bun run typecheck` / `bun run clean` only run in packages that define those scripts (mobile defines both; most sibling apps do not yet).
 
 ## Project Structure
 

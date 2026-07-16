@@ -9,6 +9,7 @@ This is a **Turborepo monorepo** containing:
 - `apps/vela` - Main Vela Japanese learning app (Quasar/Vue.js)
 - `apps/vela-api` - API backend (Hono framework, runs on port 9005)
 - `apps/vela-ext` - Browser extension for saving Japanese sentences (WXT/Vue.js)
+- `apps/vela-mobile` - iOS-first mobile app (Quasar + Capacitor)
 - `packages/cdk` - AWS CDK infrastructure (5 stacks: Auth, Database, Storage, Api, StaticWeb)
 - `packages/common` - Shared TanStack Query config and query key factories
 
@@ -23,8 +24,13 @@ bun run test         # Run all unit tests
 bun run lint         # Lint all packages
 bun run lint:fix     # Lint and fix
 bun run format       # Format all packages
-bun run clean        # Clean build artifacts
+bun run typecheck    # Typecheck packages that define a typecheck script (currently @vela/mobile only)
+bun run clean        # Clean packages that define a clean script (@vela/mobile, @vela/common)
+bun run dev:mobile   # Start mobile web dev server
+bun run build:mobile # Build mobile web assets
 ```
+
+Turbo skips workspaces that lack the requested script. Sibling apps use `compile` (api/ext) or rely on build-time typechecking instead of a root-level `typecheck` script.
 
 ### Vela App (from apps/vela/)
 

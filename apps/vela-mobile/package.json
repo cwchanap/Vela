@@ -17,7 +17,7 @@
     "test:unit": "vitest run",
     "test": "bun run test:unit",
     "typecheck": "vue-tsc --noEmit",
-    "postinstall": "quasar prepare",
+    "postinstall": "quasar prepare && bun install --cwd src-capacitor",
     "clean": "rm -rf dist .quasar"
   },
   "dependencies": {
@@ -31,6 +31,7 @@
     "@quasar/vite-plugin": "^1.8.0",
     "@types/node": "^20.5.9",
     "@vitejs/plugin-vue": "^6.0.1",
+    "@vitest/coverage-v8": "^3.2.4",
     "@vue/test-utils": "^2.4.6",
     "jsdom": "^26.1.0",
     "typescript": "~5.6.3",
