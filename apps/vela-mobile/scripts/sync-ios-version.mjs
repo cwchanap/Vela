@@ -14,7 +14,7 @@ const pbxprojPath = resolve(
 );
 
 const { version } = JSON.parse(readFileSync(pkgPath, 'utf8'));
-if (!version || !/^\d+\.\d+\.\d+/.test(version)) {
+if (!version || !/^\d+\.\d+\.\d+$/.test(version)) {
   throw new Error(
     `package.json "version" is missing or not semver-like: "${version}"`,
   );
