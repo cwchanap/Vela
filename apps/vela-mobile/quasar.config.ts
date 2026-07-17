@@ -2,10 +2,11 @@ import { defineConfig } from '#q-app/wrappers';
 import { createRequire } from 'node:module';
 
 const require = createRequire(import.meta.url);
-// package.json.version is the single source of truth for both the iOS
-// MARKETING_VERSION (synced by scripts/sync-ios-version.mjs) and the Home
-// page version (exposed as VITE_APP_VERSION below). Override at build time
-// by setting VITE_APP_VERSION in the environment.
+// The version shown on the Home page (VITE_APP_VERSION below) and the iOS
+// MARKETING_VERSION (synced by scripts/sync-ios-version.mjs) are resolved
+// from the same source: VITE_APP_VERSION env override first, then
+// package.json "version" as fallback. sync-ios-version.mjs mirrors this
+// resolution so the UI and native bundle never drift.
 const pkg = require('./package.json') as { version: string };
 
 export default defineConfig(() => {
