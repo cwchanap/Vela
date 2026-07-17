@@ -34,6 +34,18 @@ If you skip install at the monorepo root, install them manually:
 cd apps/vela-mobile/src-capacitor && bun install
 ```
 
+> **Frozen lockfile:** The `postinstall` script runs
+> `bun install --cwd src-capacitor --frozen-lockfile`, so a root `bun install` fails if
+> `src-capacitor/bun.lock` is out of sync with `src-capacitor/package.json`. After editing
+> `src-capacitor/package.json`, regenerate its lockfile first:
+>
+> ```bash
+> cd apps/vela-mobile/src-capacitor && bun install
+> ```
+>
+> Then commit the updated `src-capacitor/bun.lock` before running `bun install` at the
+> monorepo root.
+
 ## Development
 
 ### Browser (fast UI iteration)

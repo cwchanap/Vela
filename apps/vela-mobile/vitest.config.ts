@@ -48,7 +48,6 @@ export default defineConfig({
       pages: resolve(__dirname, './src/pages'),
       boot: resolve(__dirname, './src/boot'),
       '#q-app/wrappers': resolve(__dirname, './src/test/mocks/q-app-wrappers.ts'),
-      'quasar/wrappers': resolve(__dirname, './src/test/mocks/quasar-wrappers.ts'),
     },
   },
 });
