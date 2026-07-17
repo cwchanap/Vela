@@ -28,8 +28,11 @@
 <style scoped lang="scss">
 /* Quasar applies env(safe-area-inset-bottom) to the footer q-tabs on native
  * iOS via body.q-ios-padding (QLayout.sass). On web iOS that class is absent,
- * so we only add the inset there to avoid doubling it on native. */
-body:not(.q-ios-padding) .mobile-nav {
+ * so we only add the inset there to avoid doubling it on native. The padding
+ * goes on .nav-tabs (not the footer) so the tab background — bg-white in light
+ * mode, bg-grey-9 in dark mode — fills the home-indicator strip; the footer's
+ * own default background is primary, which would otherwise show through. */
+body:not(.q-ios-padding) .nav-tabs {
   padding-bottom: env(safe-area-inset-bottom, 0px);
 }
 </style>

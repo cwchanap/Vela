@@ -128,16 +128,20 @@ Pods, or copy generated config. On a fresh checkout those are all absent
 (see `.gitignore`), so the workspace cannot build until you build and sync
 first.
 
-1. Build web assets and sync Capacitor:
+1. Build web assets, sync Capacitor, and open Xcode:
+
    ```bash
    cd apps/vela-mobile
-   bun run build              # fills src-capacitor/www/
-   cd src-capacitor
-   bunx cap sync ios          # copies www/ into iOS project + pod install
-   bunx cap open ios          # open Xcode
+   bunx quasar build -m capacitor -T ios --ide
    ```
-   (Equivalent one-liner: `bunx quasar build -m capacitor -T ios --ide`
-   builds, syncs, and opens Xcode in one step.)
+
+   This fills `src-capacitor/www/`, syncs it into the iOS project, runs
+   `pod install`, and opens Xcode. The `--ide` flag skips the headless
+   `xcodebuild` step, which would fail without a configured signing team.
+
+   > `bun run build` is the web-only SPA build (`dist/spa`) and does **not**
+   > fill `src-capacitor/www/` — do not use it before `cap sync`.
+
 2. Select your development team under Signing & Capabilities
 3. Connect your iPhone
 4. Select the device in Xcode's device dropdown

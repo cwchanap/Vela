@@ -3,6 +3,7 @@ import { mount } from '@vue/test-utils';
 import { Quasar, QLayout, QPageContainer } from 'quasar';
 import { defineComponent } from 'vue';
 import HomePage from './HomePage.vue';
+import { config } from 'src/config';
 
 // q-page must be a deep child of q-layout; wrap HomePage so Quasar renders its
 // content under jsdom instead of silently emitting nothing.
@@ -22,12 +23,12 @@ describe('HomePage', () => {
 
   it('renders the app name', () => {
     const wrapper = mountPage();
-    expect(wrapper.text()).toContain('Vela');
+    expect(wrapper.text()).toContain(config.app.name);
   });
 
   it('renders the app version', () => {
     const wrapper = mountPage();
-    expect(wrapper.text()).toContain('0.0.1');
+    expect(wrapper.text()).toContain(config.app.version);
   });
 
   it('renders the M1 scaffold label', () => {
