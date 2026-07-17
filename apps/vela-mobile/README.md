@@ -123,7 +123,21 @@ cd apps/vela-mobile/src-capacitor && bunx cap open ios
 
 ## Physical Device
 
-1. Open Xcode: `cd apps/vela-mobile/src-capacitor && bunx cap open ios`
+`cap open ios` only launches Xcode — it does not build web assets, install
+Pods, or copy generated config. On a fresh checkout those are all absent
+(see `.gitignore`), so the workspace cannot build until you build and sync
+first.
+
+1. Build web assets and sync Capacitor:
+   ```bash
+   cd apps/vela-mobile
+   bun run build              # fills src-capacitor/www/
+   cd src-capacitor
+   bunx cap sync ios          # copies www/ into iOS project + pod install
+   bunx cap open ios          # open Xcode
+   ```
+   (Equivalent one-liner: `bunx quasar build -m capacitor -T ios --ide`
+   builds, syncs, and opens Xcode in one step.)
 2. Select your development team under Signing & Capabilities
 3. Connect your iPhone
 4. Select the device in Xcode's device dropdown
