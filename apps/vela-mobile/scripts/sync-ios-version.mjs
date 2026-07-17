@@ -1,6 +1,8 @@
 // Syncs the iOS native marketing version (MARKETING_VERSION in project.pbxproj)
-// from package.json so iOS metadata and the Home page report the same version.
-// Run via `bun run sync:ios-version` (wired into build:ios).
+// so iOS metadata and the Home page report the same version. The version is
+// resolved the same way as quasar.config.ts: VITE_APP_VERSION env override
+// first, then package.json "version" as fallback. Run via `bun run
+// sync:ios-version` (wired into every Capacitor build/dev path).
 
 import { readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -13,10 +15,14 @@ const pbxprojPath = resolve(
   'src-capacitor/ios/App/App.xcodeproj/project.pbxproj',
 );
 
-const { version } = JSON.parse(readFileSync(pkgPath, 'utf8'));
+const pkgVersion = JSON.parse(readFileSync(pkgPath, 'utf8')).version;
+// Mirror quasar.config.ts: env override wins, package.json is the fallback.
+const version = process.env.VITE_APP_VERSION || pkgVersion;
 if (!version || !/^\d+\.\d+\.\d+$/.test(version)) {
   throw new Error(
-    `package.json "version" is missing or not semver-like: "${version}"`,
+    `Resolved version is missing or not semver-like: "${version}"` +
+      ` (VITE_APP_VERSION=${process.env.VITE_APP_VERSION ?? '<unset>'}` +
+      `, package.json.version=${pkgVersion ?? '<unset>'})`,
   );
 }
 

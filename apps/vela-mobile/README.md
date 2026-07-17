@@ -116,10 +116,13 @@ To open **Xcode** instead of a terminal-only build:
 
 ```bash
 cd apps/vela-mobile
-bunx quasar build -m capacitor -T ios --ide
+bun run build:ios:ide   # syncs version, builds web assets, syncs Capacitor, opens Xcode
 # or
 cd apps/vela-mobile/src-capacitor && bunx cap open ios
 ```
+
+`build:ios:ide` runs `sync:ios-version` first so `MARKETING_VERSION` stays
+aligned with the Home page version before Xcode archives the bundle.
 
 ## Physical Device
 
@@ -132,12 +135,13 @@ first.
 
    ```bash
    cd apps/vela-mobile
-   bunx quasar build -m capacitor -T ios --ide
+   bun run build:ios:ide
    ```
 
-   This fills `src-capacitor/www/`, syncs it into the iOS project, runs
-   `pod install`, and opens Xcode. The `--ide` flag skips the headless
-   `xcodebuild` step, which would fail without a configured signing team.
+   This syncs the iOS version, fills `src-capacitor/www/`, syncs it into the
+   iOS project, runs `pod install`, and opens Xcode. The `--ide` flag skips
+   the headless `xcodebuild` step, which would fail without a configured
+   signing team.
 
    > `bun run build` is the web-only SPA build (`dist/spa`) and does **not**
    > fill `src-capacitor/www/` — do not use it before `cap sync`.
