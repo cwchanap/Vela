@@ -79,7 +79,8 @@
       "cache": false
     },
     "typecheck": {
-      "dependsOn": ["^build"]
+      "dependsOn": ["^build"],
+      "outputs": [".quasar/**"]
     },
     "clean": {
       "cache": false
