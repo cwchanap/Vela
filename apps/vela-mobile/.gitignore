@@ -6,6 +6,8 @@ src-capacitor/node_modules/
 src-capacitor/ios/App/Pods/
 src-capacitor/ios/App/build/
 src-capacitor/ios/App/output/
+src-capacitor/ios/App/App/public/
+src-capacitor/ios/App/App/capacitor.config.json
 src-capacitor/ios/App/App.xcodeproj/xcuserdata/
 src-capacitor/ios/App/App.xcworkspace/xcuserdata/
 src-capacitor/ios/DerivedData/
@@ -14,6 +16,9 @@ src-capacitor/ios/App/exported/
 # Quasar
 .quasar
 dist/
+
+# Test coverage
+coverage/
 
 # Env
 .env

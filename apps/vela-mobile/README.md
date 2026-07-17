@@ -68,12 +68,22 @@ This starts the Vite dev server, syncs Capacitor, and opens **Xcode**. Press the
 
 ### Manual Capacitor commands
 
-From `apps/vela-mobile/src-capacitor/`:
+`cap sync` copies the built web assets from `src-capacitor/www/` (the configured
+`webDir`) into the iOS project and runs `pod install`. That directory is
+gitignored and only populated by a Quasar Capacitor build, so build **before**
+syncing. `cap open ios` only launches Xcode — it does not sync or install Pods.
 
 ```bash
-bunx cap sync ios    # Sync web assets + native plugins
+cd apps/vela-mobile
+bun run build:ios    # quasar build -m capacitor -T ios → fills src-capacitor/www/
+cd src-capacitor
+bunx cap sync ios    # Copy www/ into iOS project + pod install
 bunx cap open ios    # Open Xcode
 ```
+
+If you only changed native config (no web changes), `bunx cap sync ios` alone is
+enough — but it still requires a prior build to have populated `www/` at least
+once on this checkout.
 
 ## Build
 
