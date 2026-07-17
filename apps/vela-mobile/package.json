@@ -36,6 +36,8 @@
     "@vitejs/plugin-vue": "^6.0.1",
     "@vitest/coverage-v8": "^3.2.4",
     "@vue/test-utils": "^2.4.6",
+    "dotenv": "16.6.1",
+    "dotenv-expand": "11.0.7",
     "jsdom": "^26.1.0",
     "typescript": "~5.6.3",
     "vitest": "^3.2.4",

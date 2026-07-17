@@ -85,15 +85,25 @@ function parseArg(argv, name) {
  */
 function resolveFileEnvVersion(root, mode) {
   const files = ['.env', '.env.local', `.env.${mode}`, `.env.${mode}.local`];
+  // Merge all files in precedence order BEFORE expanding. dotenv-expand v11
+  // writes every parsed key back into its `processEnv`, so expanding each file
+  // in turn against the real `process.env` would let an earlier file's value
+  // leak into `process.env` and suppress a later (higher-precedence) file's
+  // value (the `inProcessEnv` branch keeps the existing env value when it
+  // differs from the file). Merging first means expansion sees only the final
+  // winning file value per key. Expand against a clone of `process.env` so
+  // `$VAR` references still resolve against the shell environment, but the
+  // writeback mutates the clone instead of the real `process.env` (which the
+  // caller relies on for the shell-override check at the call site).
   let merged = {};
   for (const file of files) {
     const filePath = resolve(root, file);
     if (!existsSync(filePath)) continue;
-    const parsed = dotEnvParse(readFileSync(filePath, 'utf8'));
-    // dotenv-expand resolves `$VAR` references against the running env plus the
-    // accumulated file values, mirroring Vite's loadEnv behavior.
-    const { parsed: expanded } = dotEnvExpand({ parsed });
-    merged = { ...merged, ...expanded };
+    merged = { ...merged, ...dotEnvParse(readFileSync(filePath, 'utf8')) };
   }
-  return merged.VITE_APP_VERSION;
+  const { parsed: expanded } = dotEnvExpand({
+    parsed: merged,
+    processEnv: { ...process.env },
+  });
+  return expanded.VITE_APP_VERSION;
 }
