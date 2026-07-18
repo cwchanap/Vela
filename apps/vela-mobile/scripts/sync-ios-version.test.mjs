@@ -85,6 +85,30 @@ describe('sync-ios-version resolveVersion', () => {
     expect(version).toBe('1.1.1');
   });
 
+  it('empty processEnv VITE_APP_VERSION does NOT drift from Home page (no divergence)', () => {
+    // A reviewer flagged a P2 claiming that when VITE_APP_VERSION="" in
+    // process.env while .env.production has a value, the script's `||` chain
+    // would select the file value for iOS while the Home page falls back to
+    // pkgVersion. That is NOT what happens: resolveFileEnvVersion expands
+    // against `{ ...processEnv }`, and dotenv-expand v11 keeps the processEnv
+    // value (even empty) for keys present in processEnv — mirroring Vite's
+    // loadEnv precedence. So fileEnvVersion is also '' and the `||` chain
+    // falls through to pkgVersion, matching src/config/index.ts. This test
+    // locks that behavior so a future `??` "fix" cannot reintroduce the
+    // imagined divergence by letting an empty process value reach the file
+    // value while the Home page still shows pkgVersion.
+    writePkg('1.2.3');
+    writeEnv('.env.production', 'VITE_APP_VERSION=2.2.2\n');
+    const { version, processEnvVersion, fileEnvVersion } = resolveVersion({
+      root: dir,
+      mode: 'production',
+      processEnv: { VITE_APP_VERSION: '' },
+    });
+    expect(processEnvVersion).toBe('');
+    expect(fileEnvVersion).toBe('');
+    expect(version).toBe('1.2.3');
+  });
+
   it('.env.[mode] overrides .env (later files win)', () => {
     writePkg('0.0.1');
     writeEnv('.env', 'VITE_APP_VERSION=1.1.1\n');
