@@ -1,13 +1,13 @@
 {
   "lockfileVersion": 1,
-  "configVersion": 0,
+  "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "@vela/mobile",
+      "name": "@vela/mobile-capacitor",
       "dependencies": {
         "@capacitor/app": "^7.0.0",
         "@capacitor/core": "^7.0.0",
-        "@capacitor/ios": "^7",
+        "@capacitor/ios": "^7.0.0",
       },
       "devDependencies": {
         "@capacitor/cli": "^7.0.0",

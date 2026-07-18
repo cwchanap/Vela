@@ -15,7 +15,7 @@
     "sync:ios-version": "bun run scripts/sync-ios-version.mjs",
     "lint": "eslint \"./src/**/*.{ts,js,vue}\"",
     "lint:fix": "eslint \"./src/**/*.{ts,js,vue}\" --fix",
-    "format": "prettier --write \"**/*.{js,ts,vue,scss,html,md,json}\" --ignore-path .gitignore",
+    "format": "prettier --write \"**/*.{js,ts,vue,scss,html,md,json}\" --ignore-path .gitignore --ignore-path .prettierignore",
     "test:unit": "vitest run",
     "test:coverage": "vitest run --coverage",
     "test": "bun run test:unit",
