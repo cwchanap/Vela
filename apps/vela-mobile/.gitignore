@@ -20,6 +20,9 @@ dist/
 # Test coverage
 coverage/
 
-# Env
+# Env (mode-specific files are consumed by scripts/sync-ios-version.mjs)
 .env
-.env.local*
+.env.local
+.env.*.local
+.env.production
+.env.development

@@ -2,13 +2,22 @@
 // so iOS metadata and the Home page report the same version. The Home page
 // reads `import.meta.env.VITE_APP_VERSION`, which Vite populates from the .env
 // files it loads for the active mode (`.env`, `.env.local`, `.env.[mode]`,
-// `.env.[mode].local`), with an already-set `process.env` value winning over
-// all files. This script mirrors that resolution — Vite env files first, shell
-// `VITE_APP_VERSION` override on top, then package.json "version" as the final
-// fallback — so the UI and native bundle never drift when the version is set
-// via a mode-specific file such as `.env.production`. Run via
+// `.env.[mode].local`). This script resolves the version from those same files
+// in Vite's precedence order, then falls back to package.json "version" — so
+// the UI and native bundle never drift when the version is set via a
+// mode-specific file such as `.env.production`. Run via
 // `bun run sync:ios-version` (wired into every Capacitor build/dev path).
 // Pass `--mode=development` for dev runs so the same file set as Vite is loaded.
+//
+// NOTE: We deliberately do NOT consult `process.env.VITE_APP_VERSION` as a
+// shell override. Bun auto-loads `.env` into `process.env` before this script
+// runs, and since the script executes in a separate process before `quasar
+// build` sets `NODE_ENV`, Bun only loads the base `.env` (not the mode-specific
+// `.env.production`). That makes a Bun-loaded base value indistinguishable
+// from a genuine shell export, so `process.env` would silently override the
+// higher-precedence mode file — the exact drift this script exists to prevent.
+// Resolving purely from files + package.json is deterministic and matches the
+// file-based resolution Vite uses for `import.meta.env`.
 
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -30,16 +39,16 @@ const argvMode = parseArg(process.argv.slice(2), 'mode');
 const mode = argvMode || 'production';
 
 const pkgVersion = JSON.parse(readFileSync(pkgPath, 'utf8')).version;
-// Mirror Vite's loadEnv: load `.env`, `.env.local`, `.env.[mode]`,
-// `.env.[mode].local` in order (later files override earlier), then let an
-// already-set `process.env.VITE_APP_VERSION` win over all files, with
-// package.json as the final fallback.
+// Resolve `VITE_APP_VERSION` from the same .env files Vite loads for the active
+// mode, in Vite's precedence order (later files override earlier), with
+// package.json "version" as the final fallback. We intentionally do NOT layer
+// `process.env.VITE_APP_VERSION` on top — see the header comment for why.
 const fileEnvVersion = resolveFileEnvVersion(root, mode);
-const version = process.env.VITE_APP_VERSION || fileEnvVersion || pkgVersion;
+const version = fileEnvVersion || pkgVersion;
 if (!version || !/^\d+\.\d+\.\d+$/.test(version)) {
   throw new Error(
     `Resolved version is missing or not semver-like: "${version}"` +
-      ` (VITE_APP_VERSION=${process.env.VITE_APP_VERSION ?? '<unset>'}` +
+      ` (fileEnvVersion=${fileEnvVersion ?? '<unset>'}` +
       `, package.json.version=${pkgVersion ?? '<unset>'})`,
   );
 }
@@ -80,8 +89,14 @@ function parseArg(argv, name) {
 /**
  * Resolves `VITE_APP_VERSION` from the same .env files Vite loads for the given
  * mode, in Vite's precedence order (later files override earlier). Returns
- * `undefined` if no file defines it. Does NOT consult `process.env` — the caller
- * applies the shell override on top, matching Vite's "existing env wins" rule.
+ * `undefined` if no file defines it. Does NOT let `process.env` override file
+ * values — Bun auto-loads `.env` into `process.env` before this script runs,
+ * and since the script executes without `NODE_ENV` set to the mode, that value
+ * is the base `.env` value, not the mode-specific one. Stripping merged keys
+ * from the `processEnv` clone passed to dotenv-expand prevents its
+ * `inProcessEnv` branch from overriding the merged file value, while still
+ * allowing `$VAR` references to resolve against the shell environment for keys
+ * not defined in the env files.
  */
 function resolveFileEnvVersion(root, mode) {
   const files = ['.env', '.env.local', `.env.${mode}`, `.env.${mode}.local`];
@@ -91,19 +106,22 @@ function resolveFileEnvVersion(root, mode) {
   // leak into `process.env` and suppress a later (higher-precedence) file's
   // value (the `inProcessEnv` branch keeps the existing env value when it
   // differs from the file). Merging first means expansion sees only the final
-  // winning file value per key. Expand against a clone of `process.env` so
-  // `$VAR` references still resolve against the shell environment, but the
-  // writeback mutates the clone instead of the real `process.env` (which the
-  // caller relies on for the shell-override check at the call site).
+  // winning file value per key.
   let merged = {};
   for (const file of files) {
     const filePath = resolve(root, file);
     if (!existsSync(filePath)) continue;
     merged = { ...merged, ...dotEnvParse(readFileSync(filePath, 'utf8')) };
   }
+  // Strip merged keys from the processEnv clone so dotenv-expand's
+  // `inProcessEnv` branch does NOT let Bun-auto-loaded `.env` values override
+  // our merged file resolution. `$VAR` references for keys NOT in the env
+  // files still resolve against the shell environment.
+  const processEnv = { ...process.env };
+  for (const key of Object.keys(merged)) delete processEnv[key];
   const { parsed: expanded } = dotEnvExpand({
     parsed: merged,
-    processEnv: { ...process.env },
+    processEnv,
   });
   return expanded.VITE_APP_VERSION;
 }
