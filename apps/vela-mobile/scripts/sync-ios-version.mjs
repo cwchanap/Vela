@@ -41,7 +41,13 @@ if (isMain) {
   const mode = argvMode || 'production';
 
   const { version, processEnvVersion, fileEnvVersion, pkgVersion } = resolveVersion({ root, mode });
-  if (!version || !/^\d+\.\d+\.\d+$/.test(version)) {
+  // iOS MARKETING_VERSION (CFBundleShortVersionString) only accepts
+  // `major.minor.patch` — Apple rejects prerelease/build metadata. Strip
+  // semver prerelease (`-x.y.z`) and build metadata (`+x.y.z`) before
+  // validation so inputs like `1.0.0-beta.1` are accepted and written as
+  // `1.0.0`.
+  const marketingVersion = stripSemverMetadata(version);
+  if (!marketingVersion || !/^\d+\.\d+\.\d+$/.test(marketingVersion)) {
     throw new Error(
       `Resolved version is missing or not semver-like: "${version}"` +
         ` (processEnvVersion=${processEnvVersion ?? '<unset>'}` +
@@ -58,15 +64,15 @@ if (isMain) {
     throw new Error(`No MARKETING_VERSION entries found in ${pbxprojPath}`);
   }
 
-  const updated = original.replace(pattern, `MARKETING_VERSION = ${version};`);
+  const updated = original.replace(pattern, `MARKETING_VERSION = ${marketingVersion};`);
   if (updated === original) {
-    console.info(`iOS MARKETING_VERSION already at ${version}; no change.`);
+    console.info(`iOS MARKETING_VERSION already at ${marketingVersion}; no change.`);
     process.exit(0);
   }
 
   writeFileSync(pbxprojPath, updated);
   console.info(
-    `Synced iOS MARKETING_VERSION -> ${version} (${matches.length} entr${
+    `Synced iOS MARKETING_VERSION -> ${marketingVersion} (${matches.length} entr${
       matches.length === 1 ? 'y' : 'ies'
     } in project.pbxproj).`,
   );
@@ -82,6 +88,25 @@ function parseArg(argv, name) {
   const prefix = `${flag}=`;
   const hit = argv.find((a) => a.startsWith(prefix));
   return hit ? hit.slice(prefix.length) : undefined;
+}
+
+/**
+ * Strips semver prerelease (`-x.y.z…`) and build metadata (`+x.y.z…`) from a
+ * version string, returning the `major.minor.patch` prefix. iOS
+ * `MARKETING_VERSION` (CFBundleShortVersionString) only accepts three numeric
+ * dot segments — Apple rejects prerelease/build suffixes — so any resolved
+ * version carrying them must be reduced before being written to the pbxproj.
+ * Returns the input unchanged if it has no metadata or is not semver-like;
+ * the caller is responsible for validating the result.
+ */
+export function stripSemverMetadata(version) {
+  if (typeof version !== 'string') return version;
+  // Strip build metadata (`+…`) first, then prerelease (`-…`), preserving
+  // everything before the first `-` or `+`.
+  const buildIdx = version.indexOf('+');
+  let withoutBuild = buildIdx === -1 ? version : version.slice(0, buildIdx);
+  const preIdx = withoutBuild.indexOf('-');
+  return preIdx === -1 ? withoutBuild : withoutBuild.slice(0, preIdx);
 }
 
 /**

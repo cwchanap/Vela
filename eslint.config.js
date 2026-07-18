@@ -6,8 +6,6 @@ import parserTs from '@typescript-eslint/parser';
 import parserVue from 'vue-eslint-parser';
 import prettierSkipFormatting from '@vue/eslint-config-prettier/skip-formatting';
 
-const isProduction = 'off'; // Simplified: always disable debugger restrictions in ESLint config
-
 export default [
   {
     /**
@@ -46,7 +44,7 @@ export default [
     rules: {
       '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_' }],
       'prefer-promise-reject-errors': 'off',
-      'no-debugger': isProduction ? 'error' : 'off',
+      'no-debugger': 'error',
     },
   },
 
@@ -87,7 +85,7 @@ export default [
       ],
       'no-unused-vars': ['error', { argsIgnorePattern: '^_', varsIgnorePattern: '^_' }],
       'prefer-promise-reject-errors': 'off',
-      'no-debugger': isProduction ? 'error' : 'off',
+      'no-debugger': 'error',
     },
   },
 
@@ -123,7 +121,7 @@ export default [
       ],
       'no-unused-vars': ['error', { argsIgnorePattern: '^_', varsIgnorePattern: '^_' }],
       'prefer-promise-reject-errors': 'off',
-      'no-debugger': isProduction ? 'error' : 'off',
+      'no-debugger': 'error',
     },
   },
 
@@ -158,7 +156,7 @@ export default [
       ],
       'no-unused-vars': 'off',
       'prefer-promise-reject-errors': 'off',
-      'no-debugger': isProduction ? 'error' : 'off',
+      'no-debugger': 'error',
     },
   },
 
@@ -188,7 +186,7 @@ export default [
       ],
       'no-unused-vars': 'off',
       'prefer-promise-reject-errors': 'off',
-      'no-debugger': isProduction ? 'error' : 'off',
+      'no-debugger': 'error',
     },
   },
 
@@ -211,7 +209,7 @@ export default [
     },
     rules: {
       'prefer-promise-reject-errors': 'off',
-      'no-debugger': isProduction ? 'error' : 'off',
+      'no-debugger': 'error',
     },
   },
 
@@ -243,7 +241,7 @@ export default [
     rules: {
       '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_' }],
       'prefer-promise-reject-errors': 'off',
-      'no-debugger': isProduction ? 'error' : 'off',
+      'no-debugger': 'error',
     },
   },
 
@@ -265,7 +263,7 @@ export default [
     rules: {
       '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_' }],
       'prefer-promise-reject-errors': 'off',
-      'no-debugger': isProduction ? 'error' : 'off',
+      'no-debugger': 'error',
     },
   },
 
@@ -282,7 +280,7 @@ export default [
     },
     rules: {
       'prefer-promise-reject-errors': 'off',
-      'no-debugger': isProduction ? 'error' : 'off',
+      'no-debugger': 'error',
     },
   },
 
@@ -299,7 +297,7 @@ export default [
     },
     rules: {
       'prefer-promise-reject-errors': 'off',
-      'no-debugger': isProduction ? 'error' : 'off',
+      'no-debugger': 'error',
     },
   },
 
@@ -333,7 +331,7 @@ export default [
       ],
       'no-unused-vars': ['error', { argsIgnorePattern: '^_', varsIgnorePattern: '^_' }],
       'prefer-promise-reject-errors': 'off',
-      'no-debugger': isProduction ? 'error' : 'off',
+      'no-debugger': 'error',
     },
   },
 
@@ -364,7 +362,7 @@ export default [
       ],
       'no-unused-vars': ['error', { argsIgnorePattern: '^_', varsIgnorePattern: '^_' }],
       'prefer-promise-reject-errors': 'off',
-      'no-debugger': isProduction ? 'error' : 'off',
+      'no-debugger': 'error',
     },
   },
 

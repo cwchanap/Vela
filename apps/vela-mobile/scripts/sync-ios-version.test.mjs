@@ -19,7 +19,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { resolveVersion, resolveFileEnvVersion } from './sync-ios-version.mjs';
+import { resolveVersion, resolveFileEnvVersion, stripSemverMetadata } from './sync-ios-version.mjs';
 
 describe('sync-ios-version resolveVersion', () => {
   let dir;
@@ -147,5 +147,28 @@ describe('sync-ios-version resolveVersion', () => {
     });
     expect(fileEnvVersion).toBe('one');
     expect(version).toBe('one');
+  });
+});
+
+describe('sync-ios-version stripSemverMetadata', () => {
+  it('strips prerelease tags (e.g. 1.0.0-beta.1 -> 1.0.0)', () => {
+    expect(stripSemverMetadata('1.0.0-beta.1')).toBe('1.0.0');
+  });
+
+  it('strips build metadata (e.g. 1.0.0+001 -> 1.0.0)', () => {
+    expect(stripSemverMetadata('1.0.0+001')).toBe('1.0.0');
+  });
+
+  it('strips both prerelease and build metadata', () => {
+    expect(stripSemverMetadata('1.0.0-beta.1+001')).toBe('1.0.0');
+  });
+
+  it('leaves plain major.minor.patch unchanged', () => {
+    expect(stripSemverMetadata('1.2.3')).toBe('1.2.3');
+  });
+
+  it('returns input unchanged when it is not semver-like (caller validates)', () => {
+    expect(stripSemverMetadata('v1.2.3')).toBe('v1.2.3');
+    expect(stripSemverMetadata('')).toBe('');
   });
 });

@@ -174,6 +174,7 @@ src/                  # Vue application source
   pages/              # Route page components
   css/                # Global styles
   test/               # Test setup and mocks
+scripts/              # Build/dev helper scripts (sync-ios-version.mjs)
 src-capacitor/        # Capacitor native project
   capacitor.config.json
   ios/                # Xcode project (committed)
