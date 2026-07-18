@@ -286,6 +286,23 @@ export default [
     },
   },
 
+  // JavaScript files in vela-mobile package
+  {
+    files: ['apps/vela-mobile/**/*.{js,mjs}'],
+    languageOptions: {
+      ecmaVersion: 'latest',
+      sourceType: 'module',
+      globals: {
+        ...globals.node,
+        process: 'readonly',
+      },
+    },
+    rules: {
+      'prefer-promise-reject-errors': 'off',
+      'no-debugger': isProduction ? 'error' : 'off',
+    },
+  },
+
   // Vue files in vela-ext package
   {
     files: ['apps/vela-ext/**/*.vue'],
