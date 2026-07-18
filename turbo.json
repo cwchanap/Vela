@@ -22,7 +22,17 @@
         ".env",
         ".env.local",
         ".env.production",
-        ".env.production.local"
+        ".env.production.local",
+        ".env.prod",
+        ".env.local.prod",
+        ".env.spa",
+        ".env.local.spa",
+        ".env.prod.spa",
+        ".env.local.prod.spa",
+        ".env.capacitor",
+        ".env.local.capacitor",
+        ".env.prod.capacitor",
+        ".env.local.prod.capacitor"
       ]
     },
     "zip": {
