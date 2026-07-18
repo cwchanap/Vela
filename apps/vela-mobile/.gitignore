@@ -20,9 +20,11 @@ dist/
 # Test coverage
 coverage/
 
-# Env (mode-specific files are consumed by scripts/sync-ios-version.mjs)
+# Env files (consumed by scripts/sync-ios-version.mjs and Quasar app-vite).
+# Quasar app-vite loads .env, .env.local, .env.[dev|prod], .env.[capacitor],
+# .env.[dev|prod].[capacitor] and their .local.* variants — see
+# node_modules/@quasar/app-vite/lib/utils/env.js. Ignore every variant so
+# local config and secrets can't be accidentally committed; keep .env.example.
 .env
-.env.local
-.env.*.local
-.env.production
-.env.development
+.env.*
+!.env.example
