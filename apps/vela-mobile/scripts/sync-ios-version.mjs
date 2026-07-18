@@ -104,36 +104,39 @@ export function resolveVersion({ root, mode, processEnv = process.env }) {
  * Resolves `VITE_APP_VERSION` from the .env files Vite loads for the given
  * mode, in Vite's precedence order (later files override earlier). Returns
  * `undefined` if no file defines it. This is the file-resolution fallback used
- * when `processEnv.VITE_APP_VERSION` is not set. Stripping merged keys from
- * the `processEnv` clone passed to dotenv-expand prevents its `inProcessEnv`
- * branch from overriding the merged file value with a Bun-auto-loaded `.env`
- * value, while still allowing `$VAR` references to resolve against the shell
- * environment for keys not defined in the env files.
+ * when `processEnv.VITE_APP_VERSION` is not set. Mirrors Vite's `loadEnv`:
+ * files are merged into one `parsed` object, then `dotenv-expand` runs once
+ * against a CLONE of `processEnv` (not the real `process.env`, so
+ * dotenv-expand v11's write-back of parsed keys cannot leak file values into
+ * the live environment). Existing `processEnv` values win for `$VAR`
+ * references — e.g. when Bun auto-loads `.env` setting `BASE=one` and
+ * `.env.production` redefines `BASE=two`, `VITE_APP_VERSION=$BASE` resolves to
+ * `one` (the `processEnv` value Vite uses), not `two` (the merged file value).
  */
 export function resolveFileEnvVersion(root, mode, processEnv = process.env) {
   const files = ['.env', '.env.local', `.env.${mode}`, `.env.${mode}.local`];
-  // Merge all files in precedence order BEFORE expanding. dotenv-expand v11
-  // writes every parsed key back into its `processEnv`, so expanding each file
-  // in turn against the real `process.env` would let an earlier file's value
-  // leak into `process.env` and suppress a later (higher-precedence) file's
-  // value (the `inProcessEnv` branch keeps the existing env value when it
-  // differs from the file). Merging first means expansion sees only the final
-  // winning file value per key.
+  // Merge all files in precedence order BEFORE expanding, the same way Vite's
+  // `loadEnv` builds one `parsed` object from every env file and then calls
+  // `dotenv-expand` once. Merging first means expansion sees the final winning
+  // file value per key.
   let merged = {};
   for (const file of files) {
     const filePath = resolve(root, file);
     if (!existsSync(filePath)) continue;
     merged = { ...merged, ...dotEnvParse(readFileSync(filePath, 'utf8')) };
   }
-  // Strip merged keys from the processEnv clone so dotenv-expand's
-  // `inProcessEnv` branch does NOT let Bun-auto-loaded `.env` values override
-  // our merged file resolution. `$VAR` references for keys NOT in the env
-  // files still resolve against the shell environment.
-  const envClone = { ...processEnv };
-  for (const key of Object.keys(merged)) delete envClone[key];
+  // Do NOT strip merged keys from the clone. Vite expands against
+  // `{ ...process.env }` directly, so existing processEnv values (e.g.
+  // Bun-auto-loaded `.env`) win for `$VAR` references AND for keys whose
+  // processEnv value differs from the file (dotenv-expand's `inProcessEnv`
+  // branch keeps the processEnv value without interpolating). Stripping
+  // merged keys would make `$BASE` resolve to the merged file value instead of
+  // the processEnv value Vite uses, drifting the iOS version from the Home
+  // page. Passing a clone (not the real `process.env`) prevents
+  // dotenv-expand's parsed-key write-back from mutating the live environment.
   const { parsed: expanded } = dotEnvExpand({
     parsed: merged,
-    processEnv: envClone,
+    processEnv: { ...processEnv },
   });
   return expanded.VITE_APP_VERSION;
 }

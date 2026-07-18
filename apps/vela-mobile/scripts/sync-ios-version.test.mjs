@@ -128,4 +128,24 @@ describe('sync-ios-version resolveVersion', () => {
     writeEnv('.env.capacitor', 'VITE_APP_VERSION=9.9.9\n');
     expect(resolveFileEnvVersion(dir, 'production', {})).toBeUndefined();
   });
+
+  it('$VAR references resolve against processEnv, not the merged file value (Vite loadEnv precedence)', () => {
+    // Regression for a reviewer-flagged P2: .env defines BASE=one,
+    // .env.production redefines BASE=two, and VITE_APP_VERSION=$BASE. Vite's
+    // loadEnv expands $BASE against process.env (Bun auto-loads .env so
+    // process.env.BASE=one), so the Home page resolves VITE_APP_VERSION=one.
+    // The script must match or the iOS MARKETING_VERSION drifts to 'two' (the
+    // merged file value). VITE_APP_VERSION is intentionally NOT in processEnv
+    // so the file-resolution path (and $BASE expansion) is exercised.
+    writePkg('0.0.1');
+    writeEnv('.env', 'BASE=one\n');
+    writeEnv('.env.production', 'BASE=two\nVITE_APP_VERSION=$BASE\n');
+    const { version, fileEnvVersion } = resolveVersion({
+      root: dir,
+      mode: 'production',
+      processEnv: { BASE: 'one' },
+    });
+    expect(fileEnvVersion).toBe('one');
+    expect(version).toBe('one');
+  });
 });
