@@ -18,7 +18,7 @@ describe('AuthStack', () => {
     process.env = originalEnv;
   });
 
-  function synthesizeTemplate(): Template {
+  function synthesizeStack() {
     const app = new App();
     const stack = new AuthStack(app, 'TestAuthStack', {
       env: {
@@ -26,8 +26,11 @@ describe('AuthStack', () => {
         region: 'us-east-1',
       },
     });
+    return { stack, template: Template.fromStack(stack) };
+  }
 
-    return Template.fromStack(stack);
+  function synthesizeTemplate(): Template {
+    return synthesizeStack().template;
   }
 
   test('configures Google as the hosted UI identity provider', () => {
@@ -73,6 +76,7 @@ describe('AuthStack', () => {
     const template = synthesizeTemplate();
 
     template.hasResourceProperties('AWS::Cognito::UserPoolClient', {
+      ClientName: 'vela-web-client',
       SupportedIdentityProviders: ['Google'],
       AllowedOAuthFlows: ['code'],
       AllowedOAuthFlowsUserPoolClient: true,
@@ -129,7 +133,7 @@ describe('AuthStack', () => {
     const clients = template.findResources('AWS::Cognito::UserPoolClient');
 
     const allClients = Object.values(clients);
-    expect(allClients.length).toBe(2);
+    expect(allClients.length).toBe(3);
 
     const testClient = allClients.find((c) => c.Properties.ClientName === 'vela-test-client');
     expect(testClient).toBeDefined();
@@ -145,7 +149,7 @@ describe('AuthStack', () => {
     const clients = template.findResources('AWS::Cognito::UserPoolClient');
 
     const allClients = Object.values(clients);
-    expect(allClients.length).toBe(2);
+    expect(allClients.length).toBe(3);
 
     const webClient = allClients.find((c) => c.Properties.ClientName === 'vela-web-client');
     const testClient = allClients.find((c) => c.Properties.ClientName === 'vela-test-client');
@@ -200,6 +204,7 @@ describe('AuthStack', () => {
     const template = synthesizeTemplate();
 
     template.hasResourceProperties('AWS::Cognito::UserPoolClient', {
+      ClientName: 'vela-web-client',
       CallbackURLs: [
         'https://staging.example.com/auth/callback',
         'http://localhost:9000/auth/callback',
@@ -215,6 +220,7 @@ describe('AuthStack', () => {
     const template = synthesizeTemplate();
 
     template.hasResourceProperties('AWS::Cognito::UserPoolClient', {
+      ClientName: 'vela-web-client',
       CallbackURLs: Match.arrayWith([
         'https://vela.cwchanap.dev/auth/callback',
         'http://localhost:9000/auth/callback',
@@ -247,5 +253,145 @@ describe('AuthStack', () => {
         'http://127.0.0.1:9000/auth/login',
       ]),
     });
+  });
+
+  test('mobile client uses the iOS custom-scheme callback and logout URIs', () => {
+    const template = synthesizeTemplate();
+
+    template.hasResourceProperties('AWS::Cognito::UserPoolClient', {
+      ClientName: 'vela-mobile-client',
+      CallbackURLs: ['dev.cwchanap.vela.oauth://oauth/callback'],
+      LogoutURLs: ['dev.cwchanap.vela.oauth://oauth/logout'],
+    });
+  });
+
+  test('creates a dedicated public mobile client with PKCE-compatible OAuth', () => {
+    const template = synthesizeTemplate();
+    const clients = template.findResources('AWS::Cognito::UserPoolClient');
+    const mobile = Object.values(clients).find(
+      (c) => c.Properties.ClientName === 'vela-mobile-client',
+    );
+
+    expect(mobile).toBeDefined();
+    expect(mobile!.Properties.GenerateSecret).toBeFalsy();
+    expect(mobile!.Properties.AllowedOAuthFlows).toEqual(['code']);
+    expect(mobile!.Properties.AllowedOAuthFlowsUserPoolClient).toBe(true);
+    expect(mobile!.Properties.SupportedIdentityProviders).toEqual(['Google']);
+    expect(mobile!.Properties.AllowedOAuthScopes.toSorted()).toEqual([
+      'email',
+      'openid',
+      'profile',
+    ]);
+    expect(mobile!.Properties.ExplicitAuthFlows).toEqual(['ALLOW_REFRESH_TOKEN_AUTH']);
+  });
+
+  test('mobile callback/logout URIs are overridable via env vars (same-scheme only)', () => {
+    process.env.COGNITO_MOBILE_CALLBACK_URLS =
+      'dev.cwchanap.vela.oauth://oauth/staging-callback,dev.cwchanap.vela.oauth://oauth/callback';
+    process.env.COGNITO_MOBILE_LOGOUT_URLS = 'dev.cwchanap.vela.oauth://oauth/staging-logout';
+
+    const template = synthesizeTemplate();
+    const clients = template.findResources('AWS::Cognito::UserPoolClient');
+    const byName = (name: string) =>
+      Object.values(clients).find((c) => c.Properties.ClientName === name);
+
+    const mobile = byName('vela-mobile-client');
+    expect(mobile!.Properties.CallbackURLs).toEqual([
+      'dev.cwchanap.vela.oauth://oauth/staging-callback',
+      'dev.cwchanap.vela.oauth://oauth/callback',
+    ]);
+    expect(mobile!.Properties.LogoutURLs).toEqual([
+      'dev.cwchanap.vela.oauth://oauth/staging-logout',
+    ]);
+
+    const web = byName('vela-web-client');
+    expect(web!.Properties.CallbackURLs).toEqual(
+      expect.arrayContaining([
+        'https://vela.cwchanap.dev/auth/callback',
+        'http://localhost:9000/auth/callback',
+      ]),
+    );
+    expect(web!.Properties.LogoutURLs).toEqual(
+      expect.arrayContaining([
+        'https://vela.cwchanap.dev/auth/login',
+        'http://localhost:9000/auth/login',
+      ]),
+    );
+  });
+
+  test('mobile callback/logout URIs fall back to defaults when env vars are empty', () => {
+    process.env.COGNITO_MOBILE_CALLBACK_URLS = '';
+    process.env.COGNITO_MOBILE_LOGOUT_URLS = '   ';
+
+    const template = synthesizeTemplate();
+
+    template.hasResourceProperties('AWS::Cognito::UserPoolClient', {
+      ClientName: 'vela-mobile-client',
+      CallbackURLs: ['dev.cwchanap.vela.oauth://oauth/callback'],
+      LogoutURLs: ['dev.cwchanap.vela.oauth://oauth/logout'],
+    });
+  });
+
+  test('rejects mobile callback/logout URIs that do not use the registered scheme', () => {
+    process.env.COGNITO_MOBILE_CALLBACK_URLS = 'dev.cwchanap.vela.dev://oauth/callback';
+
+    expect(() => synthesizeTemplate()).toThrow(
+      /COGNITO_MOBILE_CALLBACK_URLS must use the dev\.cwchanap\.vela\.oauth:\/\/ scheme/,
+    );
+
+    process.env.COGNITO_MOBILE_CALLBACK_URLS = '';
+    process.env.COGNITO_MOBILE_LOGOUT_URLS = 'dev.cwchanap.vela.dev://oauth/logout';
+
+    expect(() => synthesizeTemplate()).toThrow(
+      /COGNITO_MOBILE_LOGOUT_URLS must use the dev\.cwchanap\.vela\.oauth:\/\/ scheme/,
+    );
+  });
+
+  test('mobile client is distinct from web and test clients', () => {
+    const template = synthesizeTemplate();
+    const clients = Object.values(template.findResources('AWS::Cognito::UserPoolClient'));
+
+    const byName = (name: string) => clients.find((c) => c.Properties.ClientName === name);
+
+    expect(byName('vela-web-client')).toBeDefined();
+    expect(byName('vela-test-client')).toBeDefined();
+    expect(byName('vela-mobile-client')).toBeDefined();
+
+    const names = clients.map((c) => c.Properties.ClientName);
+    expect(new Set(names).size).toBe(3);
+  });
+
+  test('web client contract is unchanged by the mobile client addition', () => {
+    const template = synthesizeTemplate();
+    const clients = template.findResources('AWS::Cognito::UserPoolClient');
+    const web = Object.values(clients).find((c) => c.Properties.ClientName === 'vela-web-client');
+
+    expect(web!.Properties.SupportedIdentityProviders).toEqual(['Google']);
+    expect(web!.Properties.AllowedOAuthFlows).toEqual(['code']);
+    expect(web!.Properties.AllowedOAuthFlowsUserPoolClient).toBe(true);
+    expect(web!.Properties.AllowedOAuthScopes.toSorted()).toEqual(['email', 'openid', 'profile']);
+    expect(web!.Properties.ExplicitAuthFlows).toEqual(['ALLOW_REFRESH_TOKEN_AUTH']);
+    expect(web!.Properties.GenerateSecret).toBeFalsy();
+    expect(web!.Properties.CallbackURLs).toEqual(
+      expect.arrayContaining([
+        'https://vela.cwchanap.dev/auth/callback',
+        'http://localhost:9000/auth/callback',
+        'http://127.0.0.1:9000/auth/callback',
+      ]),
+    );
+    expect(web!.Properties.LogoutURLs).toEqual(
+      expect.arrayContaining([
+        'https://vela.cwchanap.dev/auth/login',
+        'http://localhost:9000/auth/login',
+        'http://127.0.0.1:9000/auth/login',
+      ]),
+    );
+  });
+
+  test('exposes the mobile client as a public field on AuthStack', () => {
+    const { stack } = synthesizeStack();
+
+    expect(stack.mobileUserPoolClient).toBeDefined();
+    expect(stack.mobileUserPoolClient.userPoolClientId).toBeDefined();
   });
 });
