@@ -27,6 +27,27 @@ const LOCAL_CALLBACK_URLS = [
 
 const LOCAL_LOGOUT_URLS = ['http://localhost:9000/auth/login', 'http://127.0.0.1:9000/auth/login'];
 
+const MOBILE_OAUTH_SCHEME = 'dev.cwchanap.vela.oauth';
+const DEFAULT_MOBILE_CALLBACK_URLS = [`${MOBILE_OAUTH_SCHEME}://oauth/callback`];
+const DEFAULT_MOBILE_LOGOUT_URLS = [`${MOBILE_OAUTH_SCHEME}://oauth/logout`];
+
+/**
+ * Reject mobile callback/logout URIs that do not use the registered iOS scheme.
+ * `parseCommaList` is permissive on its own; without this guard a typo like
+ * `dev.cwchanap.vela.dev://...` would synthesise + deploy successfully and
+ * then fail silently on-device because iOS would have no handler registered.
+ */
+function assertMobileScheme(label: string, uris: string[]): void {
+  const prefix = `${MOBILE_OAUTH_SCHEME}://`;
+  for (const uri of uris) {
+    if (!uri.startsWith(prefix)) {
+      throw new Error(
+        `${label} must use the ${MOBILE_OAUTH_SCHEME}:// scheme (Info.plist only registers that scheme). Got: ${uri}`,
+      );
+    }
+  }
+}
+
 function parseCommaList(value: string | undefined, defaults: string[]): string[] {
   if (!value || value.trim().length === 0) {
     return defaults;
@@ -42,6 +63,7 @@ export class AuthStack extends Stack {
   public readonly userPool: UserPool;
   public readonly userPoolClient: UserPoolClient;
   public readonly testUserPoolClient: UserPoolClient;
+  public readonly mobileUserPoolClient: UserPoolClient;
   public readonly userPoolDomain: UserPoolDomain;
   public readonly oauthDomain: string;
 
@@ -166,6 +188,41 @@ export class AuthStack extends Stack {
     });
     userPoolClient.node.addDependency(googleProvider);
 
+    const mobileCallbackUrls = parseCommaList(
+      process.env.COGNITO_MOBILE_CALLBACK_URLS,
+      DEFAULT_MOBILE_CALLBACK_URLS,
+    );
+    const mobileLogoutUrls = parseCommaList(
+      process.env.COGNITO_MOBILE_LOGOUT_URLS,
+      DEFAULT_MOBILE_LOGOUT_URLS,
+    );
+    assertMobileScheme('COGNITO_MOBILE_CALLBACK_URLS', mobileCallbackUrls);
+    assertMobileScheme('COGNITO_MOBILE_LOGOUT_URLS', mobileLogoutUrls);
+
+    const mobileUserPoolClient = new UserPoolClient(this, 'VelaMobileUserPoolClient', {
+      userPool,
+      userPoolClientName: 'vela-mobile-client',
+      generateSecret: false,
+      authFlows: {
+        adminUserPassword: false,
+        custom: false,
+        userPassword: false,
+        userSrp: false,
+      },
+      preventUserExistenceErrors: true,
+      supportedIdentityProviders: [UserPoolClientIdentityProvider.GOOGLE],
+      oAuth: {
+        flows: {
+          authorizationCodeGrant: true,
+          implicitCodeGrant: false,
+        },
+        scopes: [OAuthScope.OPENID, OAuthScope.EMAIL, OAuthScope.PROFILE],
+        callbackUrls: mobileCallbackUrls,
+        logoutUrls: mobileLogoutUrls,
+      },
+    });
+    mobileUserPoolClient.node.addDependency(googleProvider);
+
     // Separate client for e2e tests: enables ADMIN_USER_PASSWORD_AUTH so Playwright
     // fixtures can obtain tokens via AdminInitiateAuth without going through
     // the Google Hosted UI. Only deployed alongside the production stack —
@@ -189,6 +246,7 @@ export class AuthStack extends Stack {
     this.userPoolClient = userPoolClient;
     this.userPoolDomain = userPoolDomain;
     this.testUserPoolClient = testPoolClient;
+    this.mobileUserPoolClient = mobileUserPoolClient;
     this.oauthDomain = `${domainPrefix}.auth.${Stack.of(this).region}.amazoncognito.com`;
   }
 }
