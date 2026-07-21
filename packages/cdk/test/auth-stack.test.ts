@@ -347,6 +347,21 @@ describe('AuthStack', () => {
     );
   });
 
+  test('rejects mobile URIs with the right scheme but an empty path', () => {
+    process.env.COGNITO_MOBILE_CALLBACK_URLS = 'dev.cwchanap.vela.oauth://';
+
+    expect(() => synthesizeTemplate()).toThrow(
+      /COGNITO_MOBILE_CALLBACK_URLS must use the dev\.cwchanap\.vela\.oauth:\/\/ scheme with a non-empty path/,
+    );
+
+    process.env.COGNITO_MOBILE_CALLBACK_URLS = '';
+    process.env.COGNITO_MOBILE_LOGOUT_URLS = 'dev.cwchanap.vela.oauth://';
+
+    expect(() => synthesizeTemplate()).toThrow(
+      /COGNITO_MOBILE_LOGOUT_URLS must use the dev\.cwchanap\.vela\.oauth:\/\/ scheme with a non-empty path/,
+    );
+  });
+
   test('mobile client is distinct from web and test clients', () => {
     const template = synthesizeTemplate();
     const clients = Object.values(template.findResources('AWS::Cognito::UserPoolClient'));
@@ -361,7 +376,7 @@ describe('AuthStack', () => {
     expect(new Set(names).size).toBe(3);
   });
 
-  test('web client contract is unchanged by the mobile client addition', () => {
+  test('web client OAuth contract is unchanged by the mobile client addition', () => {
     const template = synthesizeTemplate();
     const clients = template.findResources('AWS::Cognito::UserPoolClient');
     const web = Object.values(clients).find((c) => c.Properties.ClientName === 'vela-web-client');
@@ -396,9 +411,10 @@ describe('AuthStack', () => {
   });
 
   // Pins the intentional enableTokenRevocation: true hardening applied to
-  // every client. It is a runtime no-op until RevokeToken is called, but
-  // pinning the synthesized template prevents a future refactor from silently
-  // dropping it. See auth-stack.ts for the rationale.
+  // every client. It adds origin_jti/origin_iat claims to access tokens and
+  // enables the RevokeToken endpoint; pinning the synthesized template
+  // prevents a future refactor from silently dropping it. See auth-stack.ts
+  // for the rationale.
   test('pins enableTokenRevocation=true on all three clients', () => {
     const template = synthesizeTemplate();
     const clients = Object.values(template.findResources('AWS::Cognito::UserPoolClient'));

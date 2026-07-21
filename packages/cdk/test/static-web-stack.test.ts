@@ -1,6 +1,9 @@
 import { App } from 'aws-cdk-lib';
 import { Template } from 'aws-cdk-lib/assertions';
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { AuthStack } from '../lib/auth-stack';
 import { DatabaseStack } from '../lib/database-stack';
 import { StorageStack } from '../lib/storage-stack';
@@ -9,6 +12,7 @@ import { StaticWebStack } from '../lib/static-web-stack';
 
 describe('StaticWebStack', () => {
   const originalEnv = { ...process.env };
+  let spaDistDir: string | undefined;
 
   beforeEach(() => {
     process.env = { ...originalEnv };
@@ -18,10 +22,22 @@ describe('StaticWebStack', () => {
     process.env.GOOGLE_OAUTH_CLIENT_SECRET_NAME = 'vela/test-google-oauth-client-secret';
     delete process.env.CLOUDFRONT_CERT_ARN;
     delete process.env.ACM_CERT_ARN;
+
+    // Source.asset stats the directory at construct time. Point CDK_SPA_DIST_PATH
+    // at a temp dir with a dummy index.html so tests don't require a built SPA
+    // (`bun run build` in apps/vela). Without this, a fresh checkout fails
+    // synth with "Cannot find asset at .../apps/vela/dist/spa".
+    spaDistDir = mkdtempSync(join(tmpdir(), 'vela-cdk-spa-'));
+    writeFileSync(join(spaDistDir, 'index.html'), '<!doctype html><title>test</title>');
+    process.env.CDK_SPA_DIST_PATH = spaDistDir;
   });
 
   afterEach(() => {
     process.env = originalEnv;
+    if (spaDistDir) {
+      rmSync(spaDistDir, { recursive: true, force: true });
+      spaDistDir = undefined;
+    }
   });
 
   function synthesize() {

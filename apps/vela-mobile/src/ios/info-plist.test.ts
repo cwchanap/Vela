@@ -8,6 +8,17 @@ import { describe, expect, test } from 'vitest';
 const plistPath = resolve(__dirname, '../../src-capacitor/ios/App/App/Info.plist');
 const plistContent = readFileSync(plistPath, 'utf8');
 
+// Binary plists start with `bplist00`. Xcode occasionally converts Info.plist
+// to binary format (e.g. after a merge conflict resolution or an Xcode
+// version upgrade). The regex-based extractors below return null/empty on
+// binary plists, which would surface as misleading "Capacitor sync wiped
+// CFBundleURLTypes" failures. Fail fast with a clear message instead.
+if (plistContent.startsWith('bplist')) {
+  throw new Error(
+    `${plistPath} is a binary plist. Convert it back to XML: plutil -convert xml1 "${plistPath}". The Info.plist test assumes XML text.`,
+  );
+}
+
 function extractSchemes(xml: string): string[] {
   const schemes: string[] = [];
   const blockMatch = xml.match(/<key>CFBundleURLSchemes<\/key>\s*<array>([\s\S]*?)<\/array>/);
