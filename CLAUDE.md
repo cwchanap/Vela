@@ -136,6 +136,35 @@ Vela uses **Google-only OAuth** via Cognito Hosted UI. There is no password-base
 - **E2E tests**: Use the seeded-token fixture (`e2e/fixtures/auth.ts`) which calls `AdminInitiateAuth` via the AWS SDK to bypass Google's UI. This requires AWS credentials (`aws sso login` or env-injected) and the `VITE_COGNITO_TEST_CLIENT_ID` env var (see `.env.example`).
 - **Extension**: Imports tokens from the web app's localStorage via a content script restricted to Vela origins.
 
+### Mobile client (iOS)
+
+Vela Mobile authenticates against the same Cognito user pool as the web app, through a dedicated **public** app client (`vela-mobile-client`). The mobile OAuth flow uses authorization-code grant + PKCE; no client secret is bundled in the app binary.
+
+The iOS callback uses a custom URL scheme registered in `apps/vela-mobile/src-capacitor/ios/App/App/Info.plist`:
+
+| URI                                        | Purpose                                              |
+| ------------------------------------------ | ---------------------------------------------------- |
+| `dev.cwchanap.vela.oauth://oauth/callback` | Receives the authorization code after Google sign-in |
+| `dev.cwchanap.vela.oauth://oauth/logout`   | Receives the redirect after Cognito sign-out         |
+
+The scheme is rooted at `cwchanap.dev` (a project-controlled domain) rather than the bundle id, because `vela.app` is not a controlled namespace and custom URL schemes are an unowned namespace on iOS.
+
+`AppDelegate.application(_:open:options:)` already forwards opens to Capacitor's `ApplicationDelegateProxy`. This is only relevant if the M2 client-side flow uses `@capacitor/browser` + `@capacitor/app` — if M2 uses `ASWebAuthenticationSession` instead, the callback arrives through the session's completion handler and `AppDelegate` is bypassed entirely.
+
+CDK env vars (defaults shown):
+
+    COGNITO_MOBILE_CALLBACK_URLS=dev.cwchanap.vela.oauth://oauth/callback
+    COGNITO_MOBILE_LOGOUT_URLS=dev.cwchanap.vela.oauth://oauth/logout
+
+Both accept comma-separated lists for dev/QA overrides. **Override URIs must use the `dev.cwchanap.vela.oauth://` scheme** — CDK validates this at synth time and throws otherwise, because iOS only registers that one scheme. Vary the path, not the scheme. The mobile client ID is published as the `CognitoMobileUserPoolClientId` CloudFormation output.
+
+The following M2 work is required before the mobile OAuth flow can complete end-to-end (out of scope for HPA-203):
+
+1. Widen the API JWT verifier to accept both web and mobile client audiences (`aws-jwt-verify` `clientId: [webId, mobileId]`).
+2. Wire the mobile client ID into the Capacitor build.
+3. If API calls go through WKWebView, add `capacitor://localhost` to the API CORS allow-list.
+4. Implement PKCE + `state` + `nonce` in the client-side OAuth flow.
+
 ## Testing
 
 - **E2E tests** require `TEST_EMAIL`, `TEST_PASSWORD`, and `VITE_COGNITO_TEST_CLIENT_ID` env vars (see `.env.example`). Also requires AWS credentials for `AdminInitiateAuth`.
