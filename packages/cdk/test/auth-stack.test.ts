@@ -394,4 +394,19 @@ describe('AuthStack', () => {
     expect(stack.mobileUserPoolClient).toBeDefined();
     expect(stack.mobileUserPoolClient.userPoolClientId).toBeDefined();
   });
+
+  // Pins the intentional enableTokenRevocation: true hardening applied to
+  // every client. It is a runtime no-op until RevokeToken is called, but
+  // pinning the synthesized template prevents a future refactor from silently
+  // dropping it. See auth-stack.ts for the rationale.
+  test('pins enableTokenRevocation=true on all three clients', () => {
+    const template = synthesizeTemplate();
+    const clients = Object.values(template.findResources('AWS::Cognito::UserPoolClient'));
+
+    expect(clients.length).toBe(3);
+    for (const client of clients) {
+      expect(client.Properties.ClientName).toMatch(/^vela-(web|mobile|test)-client$/);
+      expect(client.Properties.EnableTokenRevocation).toBe(true);
+    }
+  });
 });

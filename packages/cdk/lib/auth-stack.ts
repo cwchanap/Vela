@@ -182,6 +182,10 @@ export class AuthStack extends Stack {
         userSrp: false,
       },
       preventUserExistenceErrors: true,
+      // enableTokenRevocation is a runtime no-op until RevokeToken is called,
+      // but is applied to every client as defense-in-depth: it costs nothing
+      // at rest and means a future revoke flow works uniformly without a
+      // per-client CDK change. Pinned by the `pins enableTokenRevocation` test.
       enableTokenRevocation: true,
       supportedIdentityProviders: [UserPoolClientIdentityProvider.GOOGLE],
       oAuth: {
