@@ -77,6 +77,13 @@ bun cdk:deploy   # Deploy to AWS
 bun lambda:build # Build Lambda bundle via esbuild
 ```
 
+`CDK_SPA_DIST_PATH` env var overrides the SPA dist path that `StaticWebStack`
+deploys. `Source.asset` stats the directory at synth time, so a fresh checkout
+without a built SPA (`bun run build` in `apps/vela`) fails before any test
+runs. The CDK unit tests set `CDK_SPA_DIST_PATH` to a temp directory to break
+that dependency; set it explicitly when running `cdk:synth` against a non-default
+build output.
+
 ## Architecture
 
 ### Key cross-package pattern

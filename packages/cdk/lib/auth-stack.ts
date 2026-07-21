@@ -45,10 +45,13 @@ const DEFAULT_MOBILE_LOGOUT_URLS = [`${MOBILE_OAUTH_SCHEME}://oauth/logout`];
  * config drift between CDK and Info.plist. Fail strict, fix the config.
  */
 function assertMobileScheme(label: string, uris: string[]): void {
-  // Scheme prefix plus a non-empty path. Rejecting `scheme://` (empty path)
-  // catches fat-fingered config like `COGNITO_MOBILE_CALLBACK_URLS=dev.cwchanap.vela.oauth://`
-  // which would synthesise + deploy but resolve to a no-op callback on-device.
-  const re = new RegExp(`^${MOBILE_OAUTH_SCHEME.replace(/\./g, '\\.')}://.+`);
+  // Scheme prefix plus a non-empty, non-whitespace path. Rejecting `scheme://`
+  // (empty path) catches fat-fingered config like
+  // `COGNITO_MOBILE_CALLBACK_URLS=dev.cwchanap.vela.oauth://` which would
+  // synthesise + deploy but resolve to a no-op callback on-device. `\S+`
+  // (not `.+`) also rejects whitespace-only paths that would slip past a
+  // naive empty-path check.
+  const re = new RegExp(`^${MOBILE_OAUTH_SCHEME.replace(/\./g, '\\.')}://\\S+`);
   for (const uri of uris) {
     if (!re.test(uri)) {
       throw new Error(
