@@ -194,6 +194,11 @@ function handler(event) {
       description: 'Cognito User Pool Client ID for e2e tests (admin auth flow enabled)',
     });
 
+    new CfnOutput(this, 'CognitoMobileUserPoolClientId', {
+      value: auth.mobileUserPoolClient.userPoolClientId,
+      description: 'Cognito User Pool Client ID for the iOS mobile app (public, PKCE)',
+    });
+
     new CfnOutput(this, 'CognitoRegion', {
       value: Stack.of(this).region,
       description: 'AWS Region for Cognito',
