@@ -22,11 +22,12 @@ if (plistContent.startsWith('bplist')) {
 function extractSchemes(xml: string): string[] {
   const schemes: string[] = [];
   const blockMatch = xml.match(/<key>CFBundleURLSchemes<\/key>\s*<array>([\s\S]*?)<\/array>/);
-  if (!blockMatch) return schemes;
+  if (!blockMatch || blockMatch[1] === undefined) return schemes;
+  const blockBody = blockMatch[1];
   const stringRegex = /<string>([^<]+)<\/string>/g;
   let match: RegExpExecArray | null;
-  while ((match = stringRegex.exec(blockMatch[1])) !== null) {
-    schemes.push(match[1]);
+  while ((match = stringRegex.exec(blockBody)) !== null) {
+    if (match[1] !== undefined) schemes.push(match[1]);
   }
   return schemes;
 }
@@ -94,7 +95,7 @@ function extractUrlTypeEntry(xml: string): string | null {
 function extractKeyValue(xml: string, key: string): string | null {
   const re = new RegExp(`<key>${key}</key>\\s*<string>([^<]+)</string>`);
   const m = xml.match(re);
-  return m ? m[1] : null;
+  return m && m[1] !== undefined ? m[1] : null;
 }
 
 describe('iOS Info.plist', () => {

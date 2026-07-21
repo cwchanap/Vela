@@ -362,6 +362,16 @@ describe('AuthStack', () => {
     );
   });
 
+  test('rejects mobile URIs with a whitespace-only path', () => {
+    // `.+` would accept `scheme:// ` (space-only path); `\S+` rejects it.
+    // Cognito would store the URI but iOS would dispatch to a no-op handler.
+    process.env.COGNITO_MOBILE_CALLBACK_URLS = 'dev.cwchanap.vela.oauth:// ';
+
+    expect(() => synthesizeTemplate()).toThrow(
+      /COGNITO_MOBILE_CALLBACK_URLS must use the dev\.cwchanap\.vela\.oauth:\/\/ scheme with a non-empty path/,
+    );
+  });
+
   test('mobile client is distinct from web and test clients', () => {
     const template = synthesizeTemplate();
     const clients = Object.values(template.findResources('AWS::Cognito::UserPoolClient'));
