@@ -147,7 +147,7 @@ The iOS callback uses a custom URL scheme registered in `apps/vela-mobile/src-ca
 | `dev.cwchanap.vela.oauth://oauth/callback` | Receives the authorization code after Google sign-in |
 | `dev.cwchanap.vela.oauth://oauth/logout`   | Receives the redirect after Cognito sign-out         |
 
-The scheme is rooted at `cwchanap.dev` (a project-controlled domain) rather than the bundle id, because `vela.app` is not a controlled namespace and custom URL schemes are an unowned namespace on iOS.
+The scheme is the reverse-DNS of the project-controlled `vela.cwchanap.dev` domain with an `.oauth` suffix (i.e. `dev.cwchanap.vela.oauth`), rather than the bundle id, because `vela.app` is not a controlled namespace and custom URL schemes are an unowned namespace on iOS.
 
 `AppDelegate.application(_:open:options:)` already forwards opens to Capacitor's `ApplicationDelegateProxy`. This is only relevant if the M2 client-side flow uses `@capacitor/browser` + `@capacitor/app` — if M2 uses `ASWebAuthenticationSession` instead, the callback arrives through the session's completion handler and `AppDelegate` is bypassed entirely.
 

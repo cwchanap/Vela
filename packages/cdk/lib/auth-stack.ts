@@ -36,6 +36,13 @@ const DEFAULT_MOBILE_LOGOUT_URLS = [`${MOBILE_OAUTH_SCHEME}://oauth/logout`];
  * `parseCommaList` is permissive on its own; without this guard a typo like
  * `dev.cwchanap.vela.dev://...` would synthesise + deploy successfully and
  * then fail silently on-device because iOS would have no handler registered.
+ *
+ * The check is intentionally case-sensitive: the scheme registered in Info.plist
+ * is `dev.cwchanap.vela.oauth` (all lowercase) and the override URIs in
+ * COGNITO_MOBILE_*_URLS are project-controlled values, not free user input.
+ * iOS itself lowercases custom URL schemes before dispatch, so a mixed-case
+ * override would still work on-device — but accepting it here would mask a
+ * config drift between CDK and Info.plist. Fail strict, fix the config.
  */
 function assertMobileScheme(label: string, uris: string[]): void {
   const prefix = `${MOBILE_OAUTH_SCHEME}://`;
@@ -175,6 +182,7 @@ export class AuthStack extends Stack {
         userSrp: false,
       },
       preventUserExistenceErrors: true,
+      enableTokenRevocation: true,
       supportedIdentityProviders: [UserPoolClientIdentityProvider.GOOGLE],
       oAuth: {
         flows: {
@@ -210,6 +218,7 @@ export class AuthStack extends Stack {
         userSrp: false,
       },
       preventUserExistenceErrors: true,
+      enableTokenRevocation: true,
       supportedIdentityProviders: [UserPoolClientIdentityProvider.GOOGLE],
       oAuth: {
         flows: {
@@ -238,6 +247,7 @@ export class AuthStack extends Stack {
         userSrp: false,
       },
       preventUserExistenceErrors: true,
+      enableTokenRevocation: true,
       supportedIdentityProviders: [UserPoolClientIdentityProvider.COGNITO],
       disableOAuth: true,
     });
