@@ -378,7 +378,7 @@ git commit -m "feat(cdk): add vela-mobile-client for iOS OAuth (HPA-203)
 **Interfaces:**
 
 - Consumes: `auth.mobileUserPoolClient.userPoolClientId` from Task 1.
-- Produces: a CloudFormation output named `CognitoMobileUserPoolClientId` whose `Value` resolves to the mobile client's logical resource (Fn::GetAtt or Ref), not the web or test client.
+- Produces: a CloudFormation output named `CognitoMobileUserPoolClientId` whose `Value` is an `Fn::ImportValue` of the AuthStack export backed by the mobile client, not the web or test client.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -430,11 +430,15 @@ describe('StaticWebStack', () => {
       storage,
       api,
     });
-    return { stack: staticWeb, template: Template.fromStack(staticWeb) };
+    return {
+      stack: staticWeb,
+      template: Template.fromStack(staticWeb),
+      authTemplate: Template.fromStack(auth),
+    };
   }
 
   test('exposes CognitoMobileUserPoolClientId wired to the mobile client resource', () => {
-    const { template } = synthesize();
+    const { template, authTemplate } = synthesize();
 
     // The output exists.
     const outputs = (template.toJSON().Outputs ?? {}) as Record<
@@ -443,21 +447,22 @@ describe('StaticWebStack', () => {
     >;
     expect(outputs.CognitoMobileUserPoolClientId).toBeDefined();
 
-    // The Value must reference the *mobile* client, not the web or test client.
-    // CDK renders userPoolClientId as { "Fn::GetAtt": ["<logicalId>", "ClientId"] }
-    // in the synthesised template.
+    // AuthStack and StaticWebStack are separate stacks, so CDK renders the
+    // cross-stack reference as an Fn::ImportValue rather than Fn::GetAtt.
     const value = outputs.CognitoMobileUserPoolClientId.Value as Record<string, unknown>;
-    expect(value).toHaveProperty('Fn::GetAtt');
-    const getAtt = value['Fn::GetAtt'] as unknown[];
-    expect(getAtt[0]).toContain('VelaMobileUserPoolClient');
-    expect(String(getAtt[0])).not.toContain('VelaTestUserPoolClient');
-    // The web client's logical id is just 'VelaUserPoolClient' — guard against
-    // a substring false-positive by checking exact-id membership via findResources.
-    const clients = template.findResources('AWS::Cognito::UserPoolClient');
+    expect(value).toHaveProperty('Fn::ImportValue');
+    const importValue = value['Fn::ImportValue'] as string;
+    expect(importValue).toContain('VelaMobileUserPoolClient');
+    expect(importValue).not.toContain('VelaTestUserPoolClient');
+
+    // Confirm the imported export name embeds the logical id of the one
+    // AuthStack client whose ClientName is vela-mobile-client.
+    const clients = authTemplate.findResources('AWS::Cognito::UserPoolClient');
     const mobileLogicalIds = Object.keys(clients).filter(
       (id) => clients[id].Properties?.ClientName === 'vela-mobile-client',
     );
-    expect(mobileLogicalIds).toContain(getAtt[0]);
+    expect(mobileLogicalIds).toHaveLength(1);
+    expect(importValue).toContain(mobileLogicalIds[0]);
   });
 });
 ```
@@ -486,7 +491,7 @@ Expected: the new test PASSES.
 - [ ] **Step 5: Verify CDK synth succeeds and emits the new output**
 
 Run: `cdk:synth` from `packages/cdk/`
-Expected: synthesis completes. The synthesised template's `Outputs` block contains a `CognitoMobileUserPoolClientId` entry whose `Value` is a `Fn::GetAtt` referencing `VelaMobileUserPoolClient`.
+Expected: synthesis completes. The `StaticWebStack` template's `Outputs` block contains a `CognitoMobileUserPoolClientId` entry whose `Value` is an `Fn::ImportValue` of the AuthStack export for `VelaMobileUserPoolClient`.
 
 - [ ] **Step 6: Commit**
 
@@ -614,7 +619,7 @@ it (src-capacitor/ is not in the include list)."
 
 In `CLAUDE.md`, locate the `## Authentication` section. Append a new `### Mobile client (iOS)` subsection at the end of that section (before the next top-level `##` heading):
 
-```md
+````md
 ### Mobile client (iOS)
 
 Vela Mobile authenticates against the same Cognito user pool as the web app, through a dedicated **public** app client (`vela-mobile-client`). The mobile OAuth flow uses authorization-code grant + PKCE; no client secret is bundled in the app binary.
@@ -632,8 +637,10 @@ The scheme is rooted at `cwchanap.dev` (a project-controlled domain) rather than
 
 CDK env vars (defaults shown):
 
-    COGNITO_MOBILE_CALLBACK_URLS=dev.cwchanap.vela.oauth://oauth/callback
-    COGNITO_MOBILE_LOGOUT_URLS=dev.cwchanap.vela.oauth://oauth/logout
+```dotenv
+COGNITO_MOBILE_CALLBACK_URLS=dev.cwchanap.vela.oauth://oauth/callback
+COGNITO_MOBILE_LOGOUT_URLS=dev.cwchanap.vela.oauth://oauth/logout
+```
 
 Both accept comma-separated lists for dev/QA overrides. **Override URIs must use the `dev.cwchanap.vela.oauth://` scheme** — CDK validates this at synth time and throws otherwise, because iOS only registers that one scheme. Vary the path, not the scheme. The mobile client ID is published as the `CognitoMobileUserPoolClientId` CloudFormation output.
 
@@ -643,13 +650,13 @@ The following M2 work is required before the mobile OAuth flow can complete end-
 2. Wire the mobile client ID into the Capacitor build.
 3. If API calls go through WKWebView, add `capacitor://localhost` to the API CORS allow-list.
 4. Implement PKCE + `state` + `nonce` in the client-side OAuth flow.
-```
+````
 
 - [ ] **Step 2: Add the CDK deploy-time block to `.env.example`**
 
 In the root `.env.example`, locate the existing `CORS_ALLOWED_EXTENSION_IDS` line (line 29). Immediately after it, insert:
 
-```
+```dotenv
 
 # CDK deploy-time only (not read by the Quasar apps; do not mirror into apps/*/.env.example)
 # Override URIs MUST use the dev.cwchanap.vela.oauth:// scheme — CDK throws at synth time otherwise.
@@ -687,8 +694,8 @@ After all four tasks are complete:
 
 - [ ] **Final check 1:** Run the full CDK test suite: `bun test` from `packages/cdk/`. All tests pass (existing 12 + new mobile-client tests + new StaticWebStack test).
 - [ ] **Final check 2:** Run the mobile test suite: `bun test` from `apps/vela-mobile/`. The new Info.plist test passes alongside all existing tests.
-- [ ] **Final check 3:** Run `cdk:synth` from `packages/cdk/`. Confirm the synthesised template contains:
-  - Three `AWS::Cognito::UserPoolClient` resources named `vela-web-client`, `vela-test-client`, `vela-mobile-client`.
-  - A `CognitoMobileUserPoolClientId` output whose `Value` is a `Fn::GetAtt` on `VelaMobileUserPoolClient`.
+- [ ] **Final check 3:** Run `cdk:synth` from `packages/cdk/`. Confirm the synthesised templates contain:
+  - Three `AWS::Cognito::UserPoolClient` resources named `vela-web-client`, `vela-test-client`, `vela-mobile-client` in `AuthStack`.
+  - A `CognitoMobileUserPoolClientId` output in `StaticWebStack` whose `Value` is an `Fn::ImportValue` of the AuthStack export for `VelaMobileUserPoolClient`.
 - [ ] **Final check 4:** Confirm `AGENTS.md` still symlinks to `CLAUDE.md` and shows the new "Mobile client (iOS)" subsection.
 - [ ] **Final check 5:** Confirm the bundle id is unchanged (`com.vela.app`) — only the OAuth scheme is `dev.cwchanap.vela.oauth`. Check `capacitor.config.json` was not modified.
