@@ -51,7 +51,7 @@ function assertMobileScheme(label: string, uris: string[]): void {
   // synthesise + deploy but resolve to a no-op callback on-device. `\S+`
   // (not `.+`) also rejects whitespace-only paths that would slip past a
   // naive empty-path check.
-  const re = new RegExp(`^${MOBILE_OAUTH_SCHEME.replace(/\./g, '\\.')}://\\S+`);
+  const re = new RegExp(`^${MOBILE_OAUTH_SCHEME.replace(/\./g, '\\.')}://\\S+$`);
   for (const uri of uris) {
     if (!re.test(uri)) {
       throw new Error(
@@ -222,6 +222,9 @@ export class AuthStack extends Stack {
       userPool,
       userPoolClientName: 'vela-mobile-client',
       generateSecret: false,
+      // All explicit authFlows disabled, but ALLOW_REFRESH_TOKEN_AUTH is on
+      // by default in Cognito and remains enabled — refresh-token rotation
+      // is the intended long-lived-session path for the mobile client.
       authFlows: {
         adminUserPassword: false,
         custom: false,
