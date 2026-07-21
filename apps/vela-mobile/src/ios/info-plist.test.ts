@@ -20,9 +20,50 @@ function extractSchemes(xml: string): string[] {
   return schemes;
 }
 
+// Extract the first <dict> inside CFBundleURLTypes so we can assert on the
+// sibling keys (CFBundleURLName, CFBundleTypeRole) that Capacitor syncs have
+// been observed to drop while leaving CFBundleURLSchemes intact.
+//
+// The CFBundleURLTypes <array> contains a nested <array> (CFBundleURLSchemes),
+// so a non-greedy match on the outer array would stop at the inner </array>.
+// Anchor on `</array>\s*</dict>\s*</plist>` — the root plist dict close — to
+// uniquely identify the outer CFBundleURLTypes array.
+function extractUrlTypeEntry(xml: string): string | null {
+  const blockMatch = xml.match(
+    /<key>CFBundleURLTypes<\/key>\s*<array>([\s\S]*?)<\/array>\s*<\/dict>\s*<\/plist>/,
+  );
+  if (!blockMatch) return null;
+  const dictMatch = blockMatch[1].match(/<dict>([\s\S]*?)<\/dict>/);
+  return dictMatch ? dictMatch[1] : null;
+}
+
+function extractKeyValue(xml: string, key: string): string | null {
+  const re = new RegExp(`<key>${key}</key>\\s*<string>([^<]+)</string>`);
+  const m = xml.match(re);
+  return m ? m[1] : null;
+}
+
 describe('iOS Info.plist', () => {
   test('registers the dev.cwchanap.vela.oauth custom URL scheme', () => {
     const schemes = extractSchemes(plistContent);
     expect(schemes).toContain('dev.cwchanap.vela.oauth');
+  });
+
+  test('CFBundleURLTypes entry declares CFBundleURLName and CFBundleTypeRole', () => {
+    const entry = extractUrlTypeEntry(plistContent);
+    expect(
+      entry,
+      'CFBundleURLTypes dict entry missing — Capacitor sync may have wiped it',
+    ).not.toBeNull();
+    if (!entry) return;
+
+    const urlName = extractKeyValue(entry, 'CFBundleURLName');
+    const typeRole = extractKeyValue(entry, 'CFBundleTypeRole');
+
+    expect(urlName, 'CFBundleURLName missing inside CFBundleURLTypes dict').not.toBeNull();
+    expect(typeRole, 'CFBundleTypeRole missing inside CFBundleURLTypes dict').not.toBeNull();
+    // Editor is the correct role for an app that handles OAuth callbacks it
+    // initiates; Viewer would still work but Editor is the documented convention.
+    expect(typeRole).toBe('Editor');
   });
 });
