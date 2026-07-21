@@ -25,16 +25,59 @@ function extractSchemes(xml: string): string[] {
 // been observed to drop while leaving CFBundleURLSchemes intact.
 //
 // The CFBundleURLTypes <array> contains a nested <array> (CFBundleURLSchemes),
-// so a non-greedy match on the outer array would stop at the inner </array>.
-// Anchor on `</array>\s*</dict>\s*</plist>` — the root plist dict close — to
-// uniquely identify the outer CFBundleURLTypes array.
+// so a non-greedy regex on the outer array would stop at the inner </array>.
+// Tracking <array>/</array> depth from the CFBundleURLTypes key is robust to
+// any sibling keys appended after it (NSAppTransportSecurity, etc.) — a
+// previous regex anchored on `</dict>\s*</plist>` and would silently return
+// null (false alarm) the moment CFBundleURLTypes was no longer the last key.
 function extractUrlTypeEntry(xml: string): string | null {
-  const blockMatch = xml.match(
-    /<key>CFBundleURLTypes<\/key>\s*<array>([\s\S]*?)<\/array>\s*<\/dict>\s*<\/plist>/,
-  );
-  if (!blockMatch) return null;
-  const dictMatch = blockMatch[1].match(/<dict>([\s\S]*?)<\/dict>/);
-  return dictMatch ? dictMatch[1] : null;
+  const keyIdx = xml.indexOf('<key>CFBundleURLTypes</key>');
+  if (keyIdx === -1) return null;
+  const afterKey = xml.slice(keyIdx);
+  const arrayOpen = afterKey.match(/\s*<array>/);
+  if (!arrayOpen) return null;
+  const start = keyIdx + afterKey.indexOf('<array>') + '<array>'.length;
+
+  // Walk <array>/</array> tags to find the matching close of the outer array.
+  let depth = 1;
+  let i = start;
+  const tag = /<\/?array>/g;
+  tag.lastIndex = start;
+  let match: RegExpExecArray | null;
+  while ((match = tag.exec(xml)) !== null) {
+    depth += match[0] === '<array>' ? 1 : -1;
+    if (depth === 0) {
+      i = match.index;
+      break;
+    }
+  }
+  if (depth !== 0) return null;
+  const outerArrayBody = xml.slice(start, i);
+
+  // Extract the first top-level <dict>...</dict> inside the outer array,
+  // tracking <dict>/</dict> depth so nested dicts don't trip the match.
+  const dictOpenIdx = outerArrayBody.indexOf('<dict>');
+  if (dictOpenIdx === -1) return null;
+  let d = 0;
+  let dictStart = -1;
+  let dictEnd = -1;
+  const dt = /<\/?dict>/g;
+  dt.lastIndex = dictOpenIdx;
+  let dm: RegExpExecArray | null;
+  while ((dm = dt.exec(outerArrayBody)) !== null) {
+    if (dm[0] === '<dict>') {
+      if (d === 0) dictStart = dm.index + '<dict>'.length;
+      d += 1;
+    } else {
+      d -= 1;
+      if (d === 0) {
+        dictEnd = dm.index;
+        break;
+      }
+    }
+  }
+  if (dictStart === -1 || dictEnd === -1) return null;
+  return outerArrayBody.slice(dictStart, dictEnd);
 }
 
 function extractKeyValue(xml: string, key: string): string | null {
