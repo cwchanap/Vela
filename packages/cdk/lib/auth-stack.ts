@@ -45,11 +45,14 @@ const DEFAULT_MOBILE_LOGOUT_URLS = [`${MOBILE_OAUTH_SCHEME}://oauth/logout`];
  * config drift between CDK and Info.plist. Fail strict, fix the config.
  */
 function assertMobileScheme(label: string, uris: string[]): void {
-  const prefix = `${MOBILE_OAUTH_SCHEME}://`;
+  // Scheme prefix plus a non-empty path. Rejecting `scheme://` (empty path)
+  // catches fat-fingered config like `COGNITO_MOBILE_CALLBACK_URLS=dev.cwchanap.vela.oauth://`
+  // which would synthesise + deploy but resolve to a no-op callback on-device.
+  const re = new RegExp(`^${MOBILE_OAUTH_SCHEME.replace(/\./g, '\\.')}://.+`);
   for (const uri of uris) {
-    if (!uri.startsWith(prefix)) {
+    if (!re.test(uri)) {
       throw new Error(
-        `${label} must use the ${MOBILE_OAUTH_SCHEME}:// scheme (Info.plist only registers that scheme). Got: ${uri}`,
+        `${label} must use the ${MOBILE_OAUTH_SCHEME}:// scheme with a non-empty path (Info.plist only registers that scheme). Got: ${uri}`,
       );
     }
   }
@@ -182,9 +185,10 @@ export class AuthStack extends Stack {
         userSrp: false,
       },
       preventUserExistenceErrors: true,
-      // enableTokenRevocation is a runtime no-op until RevokeToken is called,
-      // but is applied to every client as defense-in-depth: it costs nothing
-      // at rest and means a future revoke flow works uniformly without a
+      // enableTokenRevocation adds origin_jti/origin_iat claims to issued
+      // access tokens (a token-shape change, not a runtime no-op) and enables
+      // the RevokeToken endpoint for this client. Applied to every client as
+      // defense-in-depth: a future revoke flow then works uniformly without a
       // per-client CDK change. Pinned by the `pins enableTokenRevocation` test.
       enableTokenRevocation: true,
       supportedIdentityProviders: [UserPoolClientIdentityProvider.GOOGLE],

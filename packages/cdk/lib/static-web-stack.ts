@@ -117,8 +117,15 @@ function handler(event) {
       allowedMethods: AllowedMethods.ALLOW_ALL,
     });
 
+    // Allow the SPA dist path to be overridden for test synth. `Source.asset`
+    // stats the directory at construct time, so a fresh checkout without a
+    // built SPA (`bun run build` in apps/vela) fails before any test runs.
+    // Tests set CDK_SPA_DIST_PATH to a temp directory to break that dependency.
+    const spaDistPath =
+      process.env.CDK_SPA_DIST_PATH || path.join(__dirname, '../../../apps/vela/dist/spa');
+
     new BucketDeployment(this, 'VelaWebsiteDeployment', {
-      sources: [Source.asset(path.join(__dirname, '../../../apps/vela/dist/spa'))],
+      sources: [Source.asset(spaDistPath)],
       destinationBucket: websiteBucket,
       distribution,
       distributionPaths: ['/*'],
