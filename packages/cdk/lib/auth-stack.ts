@@ -45,28 +45,41 @@ const DEFAULT_MOBILE_LOGOUT_URLS = [`${MOBILE_OAUTH_SCHEME}://oauth/logout`];
  * config drift between CDK and Info.plist. Fail strict, fix the config.
  */
 function assertMobileScheme(label: string, uris: string[]): void {
-  // Scheme prefix plus a non-empty, non-whitespace path. Rejecting `scheme://`
-  // (empty path) catches fat-fingered config like
-  // `COGNITO_MOBILE_CALLBACK_URLS=dev.cwchanap.vela.oauth://` which would
-  // synthesise + deploy but resolve to a no-op callback on-device. `\S+`
-  // (not `.+`) also rejects whitespace-only paths that would slip past a
-  // naive empty-path check.
+  // Two checks: a case-sensitive scheme prefix check, then a WHATWG URL
+  // parse for structural validation.
   //
-  // The first character after `://` must be a real path character (not `?`
-  // or `#`): a query-only (`scheme://?foo`) or fragment-only (`scheme://#bar`)
-  // URI has no path and would likewise dispatch to a no-op handler on-device.
-  // `[^\s?#]+` for the leading path segment enforces that, while the trailing
-  // `\S*` still permits a legitimate `?query` / `#fragment` after a real
-  // path. Fragments are then rejected by the explicit `#` check below —
-  // Cognito's CreateUserPoolClient docs require that a redirect URI "Not
-  // include a fragment component", so a URI like `scheme://oauth/callback#frag`
-  // would synth + deploy-fail at the AWS::Cognito::UserPoolClient resource.
-  // Reject it at synth time with a fragment-specific error message instead
-  // of the generic "missing path" message.
+  // The scheme check is intentionally case-sensitive: the scheme registered
+  // in Info.plist is `dev.cwchanap.vela.oauth` (all lowercase) and the
+  // override URIs in COGNITO_MOBILE_*_URLS are project-controlled values,
+  // not free user input. iOS itself lowercases custom URL schemes before
+  // dispatch, so a mixed-case override would still work on-device — but
+  // accepting it here would mask a config drift between CDK and Info.plist.
+  // Fail strict, fix the config. `new URL()` lowercases the scheme, so it
+  // cannot enforce this on its own; the `startsWith` check must come first.
+  //
+  // Structural validation uses `new URL()` rather than a regex because a
+  // regex like `[^\s?#]+` cannot distinguish authority from path in a
+  // custom scheme. `dev.cwchanap.vela.oauth://oauth` (authority-only,
+  // empty pathname) would pass such a regex — `oauth` matches the path
+  // character class — but WHATWG assigns `oauth` to `host` and leaves
+  // `pathname` empty. That authority-only case is exactly the kind of
+  // fat-fingered config (missing `/callback` or `/logout`) this validator
+  // exists to catch: Cognito would store it but iOS would dispatch to a
+  // no-op handler on-device. A path following an authority must begin with
+  // `/`, so `scheme://oauth` and `scheme://oauth/` are both rejected.
+  //
+  // The first character after the authority must begin a real path
+  // component (not `?` or `#`): a query-only (`scheme://?foo`) or
+  // fragment-only (`scheme://#bar`) URI has an empty `pathname` and would
+  // likewise dispatch to a no-op handler on-device. Fragments on a URI
+  // that *does* have a path are then rejected by the explicit `hash`
+  // check — Cognito's CreateUserPoolClient docs require that a redirect
+  // URI "Not include a fragment component", so a URI like
+  // `scheme://oauth/callback#frag` would synth + deploy-fail at the
+  // AWS::Cognito::UserPoolClient resource. Reject it at synth time with a
+  // fragment-specific error message instead of the generic "missing path"
+  // message.
   const schemePrefix = `${MOBILE_OAUTH_SCHEME}://`;
-  const mobileUriPattern = new RegExp(
-    `^${MOBILE_OAUTH_SCHEME.replace(/\./g, '\\.')}://[^\\s?#]+\\S*$`,
-  );
   for (const uri of uris) {
     if (!uri.startsWith(schemePrefix)) {
       // Wrong scheme entirely (e.g. `https://...`, `dev.cwchanap.vela.dev://...`).
@@ -76,15 +89,28 @@ function assertMobileScheme(label: string, uris: string[]): void {
         `${label} must use the ${MOBILE_OAUTH_SCHEME}:// scheme (Info.plist only registers that scheme). Got: ${uri}`,
       );
     }
-    if (!mobileUriPattern.test(uri)) {
-      // Right scheme but missing/invalid path: `scheme://`, `scheme:// `,
-      // `scheme://?query`, `scheme://#fragment`. Cognito would store these but
+    let parsed: URL;
+    try {
+      parsed = new URL(uri);
+    } catch {
+      // `startsWith(schemePrefix)` already guaranteed the scheme prefix is
+      // present, so a parse failure here means the rest of the URI is
+      // malformed. Surface it as a path error — the scheme is fine.
+      throw new Error(
+        `${label} must include a non-empty, non-whitespace path after ${MOBILE_OAUTH_SCHEME}:// (query-only and fragment-only URIs have no path and dispatch to a no-op handler on-device). Got: ${uri}`,
+      );
+    }
+    if (parsed.pathname === '' || parsed.pathname === '/') {
+      // Right scheme but missing path: `scheme://`, `scheme:// `,
+      // `scheme://?query`, `scheme://#fragment`, `scheme://oauth`
+      // (authority-only — `oauth` is the host, pathname is empty),
+      // `scheme://oauth/` (root path). Cognito would store these but
       // iOS would dispatch to a no-op handler.
       throw new Error(
         `${label} must include a non-empty, non-whitespace path after ${MOBILE_OAUTH_SCHEME}:// (query-only and fragment-only URIs have no path and dispatch to a no-op handler on-device). Got: ${uri}`,
       );
     }
-    if (uri.includes('#')) {
+    if (parsed.hash !== '') {
       // Path is well-formed but a `#fragment` is present. Cognito rejects
       // redirect URIs containing a fragment component at deploy time
       // (CreateUserPoolClient / UpdateUserPoolClient validation), so synth
@@ -223,11 +249,23 @@ export class AuthStack extends Stack {
         userSrp: false,
       },
       preventUserExistenceErrors: true,
-      // enableTokenRevocation adds origin_jti/origin_iat claims to issued
-      // access tokens (a token-shape change, not a runtime no-op) and enables
-      // the RevokeToken endpoint for this client. Applied to every client as
+      // enableTokenRevocation adds origin_jti/jti claims to issued access and
+      // ID tokens (a token-shape change, not a runtime no-op) and enables the
+      // RevokeToken endpoint for this client. Applied to every client as
       // defense-in-depth: a future revoke flow then works uniformly without a
       // per-client CDK change. Pinned by the `pins enableTokenRevocation` test.
+      //
+      // Security scope: RevokeToken invalidates the refresh token and prevents
+      // issuance of *new* access/ID tokens, but it does NOT immediately
+      // invalidate already-issued bearer tokens. The Vela API verifies ID
+      // tokens locally with aws-jwt-verify's CognitoJwtVerifier, which only
+      // checks token cryptography and standard claims — it does not perform a
+      // revocation lookup against Cognito. AWS confirms that revoked tokens
+      // remain valid when evaluated by such a JWT library until their natural
+      // `exp`. Immediate logout / bearer-token invalidation would require a
+      // server-side session or token-version denylist in the API; that is
+      // out of scope for this hardening pass, which only ensures the
+      // RevokeToken endpoint and token-shape prerequisites are in place.
       enableTokenRevocation: true,
       supportedIdentityProviders: [UserPoolClientIdentityProvider.GOOGLE],
       oAuth: {

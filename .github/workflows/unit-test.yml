@@ -9,7 +9,6 @@ on:
 
 env:
   BUN_VERSION: '1.3.1'
-  CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
 
 # Top-level permissions restrict the auto-generated GITHUB_TOKEN to read-only
 # across every job in this workflow. Per-job `permissions:` overrides and
@@ -55,6 +54,12 @@ jobs:
       - name: Upload coverage to Codecov (web)
         if: hashFiles('apps/vela/coverage/coverage-final.json') != ''
         uses: codecov/codecov-action@v4
+        env:
+          # Scoped to this step only — defining CODECOV_TOKEN at workflow scope
+          # exposed it to `bun install` and test execution in every job, letting
+          # dependency lifecycle scripts and test code read a secret they don't
+          # need.
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
         with:
           token: ${{ env.CODECOV_TOKEN }}
           files: ./apps/vela/coverage/coverage-final.json
@@ -96,6 +101,8 @@ jobs:
       - name: Upload coverage to Codecov (api)
         if: hashFiles('apps/vela-api/coverage/lcov.info') != ''
         uses: codecov/codecov-action@v4
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
         with:
           token: ${{ env.CODECOV_TOKEN }}
           files: ./apps/vela-api/coverage/lcov.info
@@ -143,6 +150,8 @@ jobs:
       - name: Upload coverage to Codecov (ext)
         if: hashFiles('apps/vela-ext/coverage/coverage-final.json') != ''
         uses: codecov/codecov-action@v4
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
         with:
           token: ${{ env.CODECOV_TOKEN }}
           files: ./apps/vela-ext/coverage/coverage-final.json
@@ -185,6 +194,8 @@ jobs:
       - name: Upload coverage to Codecov (mobile)
         if: hashFiles('apps/vela-mobile/coverage/coverage-final.json') != ''
         uses: codecov/codecov-action@v4
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
         with:
           token: ${{ env.CODECOV_TOKEN }}
           files: ./apps/vela-mobile/coverage/coverage-final.json
