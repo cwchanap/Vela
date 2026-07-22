@@ -103,4 +103,39 @@ describe('StaticWebStack', () => {
     expect(mobileLogicalIds).toHaveLength(1);
     expect(importValue).toContain(mobileLogicalIds[0]);
   });
+
+  // Belt-and-suspenders: the pre-existing CognitoUserPoolClientId output must
+  // still be wired to the *web* client after the mobile client addition. The
+  // web client's resource contract (scopes, flows, redirect URIs) is pinned in
+  // auth-stack.test.ts; this test pins the StaticWebStack output pass-through
+  // so a future edit that accidentally swaps the output's source client is
+  // caught here, not by a downstream consumer getting the wrong client ID.
+  test('exposes CognitoUserPoolClientId wired to the web client resource', () => {
+    const { template, authTemplate } = synthesize();
+
+    const outputs = (template.toJSON().Outputs ?? {}) as Record<
+      string,
+      { Value: unknown; Description?: string }
+    >;
+    expect(outputs.CognitoUserPoolClientId).toBeDefined();
+    expect(outputs.CognitoUserPoolClientId.Description).toBe('Cognito User Pool Client ID');
+
+    const value = outputs.CognitoUserPoolClientId.Value as Record<string, unknown>;
+    expect(value).toHaveProperty('Fn::ImportValue');
+    const importValue = value['Fn::ImportValue'] as string;
+    // The web client's logical id is 'VelaUserPoolClient' (no prefix). Guard
+    // against a substring false-positive (e.g. 'VelaMobileUserPoolClient'
+    // contains 'VelaUserPoolClient' as a substring) by looking up the actual
+    // web-client logical id via findResources and asserting exact membership.
+    expect(importValue).toContain('VelaUserPoolClient');
+    expect(importValue).not.toContain('VelaMobileUserPoolClient');
+    expect(importValue).not.toContain('VelaTestUserPoolClient');
+
+    const clients = authTemplate.findResources('AWS::Cognito::UserPoolClient');
+    const webLogicalIds = Object.keys(clients).filter(
+      (id) => clients[id].Properties?.ClientName === 'vela-web-client',
+    );
+    expect(webLogicalIds).toHaveLength(1);
+    expect(importValue).toContain(webLogicalIds[0]);
+  });
 });

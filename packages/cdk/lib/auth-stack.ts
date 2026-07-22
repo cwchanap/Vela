@@ -57,13 +57,25 @@ function assertMobileScheme(label: string, uris: string[]): void {
   // URI has no path and would likewise dispatch to a no-op handler on-device.
   // `[^\s?#]+` for the leading path segment enforces that, while the trailing
   // `\S*` still permits a legitimate `?query` / `#fragment` after a real path.
+  const schemePrefix = `${MOBILE_OAUTH_SCHEME}://`;
   const mobileUriPattern = new RegExp(
     `^${MOBILE_OAUTH_SCHEME.replace(/\./g, '\\.')}://[^\\s?#]+\\S*$`,
   );
   for (const uri of uris) {
-    if (!mobileUriPattern.test(uri)) {
+    if (!uri.startsWith(schemePrefix)) {
+      // Wrong scheme entirely (e.g. `https://...`, `dev.cwchanap.vela.dev://...`).
+      // iOS only registers `dev.cwchanap.vela.oauth`, so any other scheme would
+      // dispatch to a no-op handler (or another app) on-device.
       throw new Error(
-        `${label} must use the ${MOBILE_OAUTH_SCHEME}:// scheme with a non-empty path (Info.plist only registers that scheme). Got: ${uri}`,
+        `${label} must use the ${MOBILE_OAUTH_SCHEME}:// scheme (Info.plist only registers that scheme). Got: ${uri}`,
+      );
+    }
+    if (!mobileUriPattern.test(uri)) {
+      // Right scheme but missing/invalid path: `scheme://`, `scheme:// `,
+      // `scheme://?query`, `scheme://#fragment`. Cognito would store these but
+      // iOS would dispatch to a no-op handler.
+      throw new Error(
+        `${label} must include a non-empty, non-whitespace path after ${MOBILE_OAUTH_SCHEME}:// (query-only and fragment-only URIs have no path and dispatch to a no-op handler on-device). Got: ${uri}`,
       );
     }
   }

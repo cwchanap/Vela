@@ -335,30 +335,32 @@ describe('AuthStack', () => {
   test('rejects mobile callback/logout URIs that do not use the registered scheme', () => {
     process.env.COGNITO_MOBILE_CALLBACK_URLS = 'dev.cwchanap.vela.dev://oauth/callback';
 
+    // Wrong-scheme branch: message names the scheme, not the path.
     expect(() => synthesizeTemplate()).toThrow(
-      /COGNITO_MOBILE_CALLBACK_URLS must use the dev\.cwchanap\.vela\.oauth:\/\/ scheme/,
+      /COGNITO_MOBILE_CALLBACK_URLS must use the dev\.cwchanap\.vela\.oauth:\/\/ scheme \(Info\.plist only registers that scheme\)\. Got: dev\.cwchanap\.vela\.dev:\/\/oauth\/callback/,
     );
 
     process.env.COGNITO_MOBILE_CALLBACK_URLS = '';
     process.env.COGNITO_MOBILE_LOGOUT_URLS = 'dev.cwchanap.vela.dev://oauth/logout';
 
     expect(() => synthesizeTemplate()).toThrow(
-      /COGNITO_MOBILE_LOGOUT_URLS must use the dev\.cwchanap\.vela\.oauth:\/\/ scheme/,
+      /COGNITO_MOBILE_LOGOUT_URLS must use the dev\.cwchanap\.vela\.oauth:\/\/ scheme \(Info\.plist only registers that scheme\)\. Got: dev\.cwchanap\.vela\.dev:\/\/oauth\/logout/,
     );
   });
 
   test('rejects mobile URIs with the right scheme but an empty path', () => {
     process.env.COGNITO_MOBILE_CALLBACK_URLS = 'dev.cwchanap.vela.oauth://';
 
+    // Right-scheme / bad-path branch: message names the path, not the scheme.
     expect(() => synthesizeTemplate()).toThrow(
-      /COGNITO_MOBILE_CALLBACK_URLS must use the dev\.cwchanap\.vela\.oauth:\/\/ scheme with a non-empty path/,
+      /COGNITO_MOBILE_CALLBACK_URLS must include a non-empty, non-whitespace path after dev\.cwchanap\.vela\.oauth:\/\/ \(query-only and fragment-only URIs have no path and dispatch to a no-op handler on-device\)\. Got: dev\.cwchanap\.vela\.oauth:\/\/$/,
     );
 
     process.env.COGNITO_MOBILE_CALLBACK_URLS = '';
     process.env.COGNITO_MOBILE_LOGOUT_URLS = 'dev.cwchanap.vela.oauth://';
 
     expect(() => synthesizeTemplate()).toThrow(
-      /COGNITO_MOBILE_LOGOUT_URLS must use the dev\.cwchanap\.vela\.oauth:\/\/ scheme with a non-empty path/,
+      /COGNITO_MOBILE_LOGOUT_URLS must include a non-empty, non-whitespace path after dev\.cwchanap\.vela\.oauth:\/\/ \(query-only and fragment-only URIs have no path and dispatch to a no-op handler on-device\)\. Got: dev\.cwchanap\.vela\.oauth:\/\/$/,
     );
   });
 
@@ -368,7 +370,7 @@ describe('AuthStack', () => {
     process.env.COGNITO_MOBILE_CALLBACK_URLS = 'dev.cwchanap.vela.oauth:// ';
 
     expect(() => synthesizeTemplate()).toThrow(
-      /COGNITO_MOBILE_CALLBACK_URLS must use the dev\.cwchanap\.vela\.oauth:\/\/ scheme with a non-empty path/,
+      /COGNITO_MOBILE_CALLBACK_URLS must include a non-empty, non-whitespace path after dev\.cwchanap\.vela\.oauth:\/\//,
     );
   });
 
@@ -379,14 +381,14 @@ describe('AuthStack', () => {
     process.env.COGNITO_MOBILE_CALLBACK_URLS = 'dev.cwchanap.vela.oauth://?code=abc';
 
     expect(() => synthesizeTemplate()).toThrow(
-      /COGNITO_MOBILE_CALLBACK_URLS must use the dev\.cwchanap\.vela\.oauth:\/\/ scheme with a non-empty path/,
+      /COGNITO_MOBILE_CALLBACK_URLS must include a non-empty, non-whitespace path after dev\.cwchanap\.vela\.oauth:\/\//,
     );
 
     process.env.COGNITO_MOBILE_CALLBACK_URLS = '';
     process.env.COGNITO_MOBILE_LOGOUT_URLS = 'dev.cwchanap.vela.oauth://#fragment';
 
     expect(() => synthesizeTemplate()).toThrow(
-      /COGNITO_MOBILE_LOGOUT_URLS must use the dev\.cwchanap\.vela\.oauth:\/\/ scheme with a non-empty path/,
+      /COGNITO_MOBILE_LOGOUT_URLS must include a non-empty, non-whitespace path after dev\.cwchanap\.vela\.oauth:\/\//,
     );
   });
 
