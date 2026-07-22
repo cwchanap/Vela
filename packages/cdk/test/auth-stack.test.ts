@@ -374,6 +374,45 @@ describe('AuthStack', () => {
     );
   });
 
+  test('rejects mobile URIs with an authority-only path (no pathname)', () => {
+    // `dev.cwchanap.vela.oauth://oauth` has `oauth` as the host and an empty
+    // pathname per WHATWG URL parsing. A regex like `[^\s?#]+` would accept it
+    // (treating `oauth` as the path), but iOS would dispatch to a no-op
+    // handler because the path that distinguishes callback vs logout is
+    // missing. `new URL()` correctly assigns `oauth` to `host` and leaves
+    // `pathname` empty, which the validator rejects.
+    process.env.COGNITO_MOBILE_CALLBACK_URLS = 'dev.cwchanap.vela.oauth://oauth';
+
+    expect(() => synthesizeTemplate()).toThrow(
+      /COGNITO_MOBILE_CALLBACK_URLS must include a non-empty, non-whitespace path after dev\.cwchanap\.vela\.oauth:\/\/ \(query-only and fragment-only URIs have no path and dispatch to a no-op handler on-device\)\. Got: dev\.cwchanap\.vela\.oauth:\/\/oauth$/,
+    );
+
+    process.env.COGNITO_MOBILE_CALLBACK_URLS = '';
+    process.env.COGNITO_MOBILE_LOGOUT_URLS = 'dev.cwchanap.vela.oauth://oauth';
+
+    expect(() => synthesizeTemplate()).toThrow(
+      /COGNITO_MOBILE_LOGOUT_URLS must include a non-empty, non-whitespace path after dev\.cwchanap\.vela\.oauth:\/\/ \(query-only and fragment-only URIs have no path and dispatch to a no-op handler on-device\)\. Got: dev\.cwchanap\.vela\.oauth:\/\/oauth$/,
+    );
+  });
+
+  test('rejects mobile URIs with a root-only path (slash after authority)', () => {
+    // `dev.cwchanap.vela.oauth://oauth/` has pathname `/` — the authority is
+    // present but the path is just the root slash, which does not distinguish
+    // callback from logout. iOS would dispatch to a no-op handler.
+    process.env.COGNITO_MOBILE_CALLBACK_URLS = 'dev.cwchanap.vela.oauth://oauth/';
+
+    expect(() => synthesizeTemplate()).toThrow(
+      /COGNITO_MOBILE_CALLBACK_URLS must include a non-empty, non-whitespace path after dev\.cwchanap\.vela\.oauth:\/\/.*Got: dev\.cwchanap\.vela\.oauth:\/\/oauth\/$/,
+    );
+
+    process.env.COGNITO_MOBILE_CALLBACK_URLS = '';
+    process.env.COGNITO_MOBILE_LOGOUT_URLS = 'dev.cwchanap.vela.oauth://oauth/';
+
+    expect(() => synthesizeTemplate()).toThrow(
+      /COGNITO_MOBILE_LOGOUT_URLS must include a non-empty, non-whitespace path after dev\.cwchanap\.vela\.oauth:\/\/.*Got: dev\.cwchanap\.vela\.oauth:\/\/oauth\/$/,
+    );
+  });
+
   test('rejects mobile URIs with a query-only or fragment-only suffix', () => {
     // A URI like `scheme://?foo` or `scheme://#bar` has no path component;
     // `\S+` alone would accept it because `?` and `#` are non-whitespace.
@@ -460,10 +499,12 @@ describe('AuthStack', () => {
   });
 
   // Pins the intentional enableTokenRevocation: true hardening applied to
-  // every client. It adds origin_jti/origin_iat claims to access tokens and
+  // every client. It adds origin_jti/jti claims to access and ID tokens and
   // enables the RevokeToken endpoint; pinning the synthesized template
   // prevents a future refactor from silently dropping it. See auth-stack.ts
-  // for the rationale.
+  // for the rationale and the security-scope caveat (revocation does not
+  // immediately invalidate already-issued bearer tokens verified locally by
+  // the Vela API).
   test('pins enableTokenRevocation=true on all three clients', () => {
     const template = synthesizeTemplate();
     const clients = Object.values(template.findResources('AWS::Cognito::UserPoolClient'));
