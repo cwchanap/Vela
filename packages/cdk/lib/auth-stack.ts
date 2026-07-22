@@ -45,8 +45,9 @@ const DEFAULT_MOBILE_LOGOUT_URLS = [`${MOBILE_OAUTH_SCHEME}://oauth/logout`];
  * config drift between CDK and Info.plist. Fail strict, fix the config.
  */
 function assertMobileScheme(label: string, uris: string[]): void {
-  // Two checks: a case-sensitive scheme prefix check, then a WHATWG URL
-  // parse for structural validation.
+  // Four checks, in order: case-sensitive scheme prefix, raw-string fragment
+  // (`#`), raw-string whitespace, then a WHATWG URL parse for structural
+  // validation (non-empty path).
   //
   // The scheme check is intentionally case-sensitive: the scheme registered
   // in Info.plist is `dev.cwchanap.vela.oauth` (all lowercase) and the
@@ -56,6 +57,14 @@ function assertMobileScheme(label: string, uris: string[]): void {
   // accepting it here would mask a config drift between CDK and Info.plist.
   // Fail strict, fix the config. `new URL()` lowercases the scheme, so it
   // cannot enforce this on its own; the `startsWith` check must come first.
+  //
+  // The raw-string fragment and whitespace checks come BEFORE `new URL()`
+  // because the WHATWG parser normalises away exactly the characters
+  // Cognito rejects: a trailing `#` (empty fragment) yields
+  // `parsed.hash === ''`, and internal whitespace is percent-encoded
+  // (spaces) or silently stripped (tabs/newlines). Validating the parsed
+  // representation would let these through; the raw string is what Cognito
+  // receives, so it is what must be checked.
   //
   // Structural validation uses `new URL()` rather than a regex because a
   // regex like `[^\s?#]+` cannot distinguish authority from path in a
@@ -69,16 +78,10 @@ function assertMobileScheme(label: string, uris: string[]): void {
   // `/`, so `scheme://oauth` and `scheme://oauth/` are both rejected.
   //
   // The first character after the authority must begin a real path
-  // component (not `?` or `#`): a query-only (`scheme://?foo`) or
-  // fragment-only (`scheme://#bar`) URI has an empty `pathname` and would
-  // likewise dispatch to a no-op handler on-device. Fragments on a URI
-  // that *does* have a path are then rejected by the explicit `hash`
-  // check — Cognito's CreateUserPoolClient docs require that a redirect
-  // URI "Not include a fragment component", so a URI like
-  // `scheme://oauth/callback#frag` would synth + deploy-fail at the
-  // AWS::Cognito::UserPoolClient resource. Reject it at synth time with a
-  // fragment-specific error message instead of the generic "missing path"
-  // message.
+  // component (not `?`): a query-only (`scheme://?foo`) URI has an empty
+  // `pathname` and would likewise dispatch to a no-op handler on-device.
+  // Fragment-only URIs (`scheme://#bar`) are already rejected by the
+  // raw-string `#` check above before parsing.
   const schemePrefix = `${MOBILE_OAUTH_SCHEME}://`;
   for (const uri of uris) {
     if (!uri.startsWith(schemePrefix)) {
@@ -87,6 +90,38 @@ function assertMobileScheme(label: string, uris: string[]): void {
       // dispatch to a no-op handler (or another app) on-device.
       throw new Error(
         `${label} must use the ${MOBILE_OAUTH_SCHEME}:// scheme (Info.plist only registers that scheme). Got: ${uri}`,
+      );
+    }
+    // Raw-string checks BEFORE `new URL()` parsing. The WHATWG URL parser
+    // normalises away exactly the characters Cognito rejects, so validating
+    // the parsed representation would let invalid raw strings through:
+    //
+    //   - Trailing `#` (empty fragment): `parsed.hash === ''` but the raw
+    //     string still contains `#`. Cognito rejects any redirect URI
+    //     containing a fragment component, including a bare trailing `#`.
+    //   - Internal whitespace: `new URL()` percent-encodes spaces and
+    //     silently strips tabs/newlines, so `parsed.pathname` looks valid
+    //     while the raw string passed to Cognito contains whitespace that
+    //     Cognito's redirect URI pattern excludes.
+    //
+    // Checking the raw string catches both cases the parser masks.
+    if (uri.includes('#')) {
+      // Cognito's CreateUserPoolClient / UpdateUserPoolClient docs require
+      // that a redirect URI "Not include a fragment component". A bare
+      // trailing `#` (empty fragment) is still a fragment component —
+      // `new URL('...#').hash` is `''`, so the parsed-hash check below
+      // would miss it. Reject any `#` in the raw string.
+      throw new Error(
+        `${label} must not contain a fragment (Cognito rejects redirect URIs with a \`#\` component). Got: ${uri}`,
+      );
+    }
+    if (/\s/u.test(uri)) {
+      // Cognito's redirect URI pattern excludes whitespace. `new URL()`
+      // percent-encodes spaces and strips tabs/newlines, so the parsed
+      // representation would look valid while the raw string passed to
+      // Cognito contains whitespace that deploy-time validation rejects.
+      throw new Error(
+        `${label} must not contain whitespace (Cognito rejects redirect URIs containing whitespace characters). Got: ${uri}`,
       );
     }
     let parsed: URL;
@@ -108,15 +143,6 @@ function assertMobileScheme(label: string, uris: string[]): void {
       // iOS would dispatch to a no-op handler.
       throw new Error(
         `${label} must include a non-empty, non-whitespace path after ${MOBILE_OAUTH_SCHEME}:// (query-only and fragment-only URIs have no path and dispatch to a no-op handler on-device). Got: ${uri}`,
-      );
-    }
-    if (parsed.hash !== '') {
-      // Path is well-formed but a `#fragment` is present. Cognito rejects
-      // redirect URIs containing a fragment component at deploy time
-      // (CreateUserPoolClient / UpdateUserPoolClient validation), so synth
-      // would succeed and deploy would fail. Fail fast at synth instead.
-      throw new Error(
-        `${label} must not contain a fragment (Cognito rejects redirect URIs with a \`#\` component). Got: ${uri}`,
       );
     }
   }
@@ -296,7 +322,7 @@ export class AuthStack extends Stack {
       userPoolClientName: 'vela-mobile-client',
       generateSecret: false,
       // All explicit authFlows disabled, but ALLOW_REFRESH_TOKEN_AUTH is on
-      // by default in Cognito and remains enabled — refresh-token rotation
+      // by default in Cognito and remains enabled — refresh-token renewal
       // is the intended long-lived-session path for the mobile client.
       authFlows: {
         adminUserPassword: false,

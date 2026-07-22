@@ -365,12 +365,16 @@ describe('AuthStack', () => {
   });
 
   test('rejects mobile URIs with a whitespace-only path', () => {
-    // `.+` would accept `scheme:// ` (space-only path); `\S+` rejects it.
-    // Cognito would store the URI but iOS would dispatch to a no-op handler.
+    // `parseCommaList` trims each entry before `assertMobileScheme` sees
+    // it, so `dev.cwchanap.vela.oauth:// ` arrives as
+    // `dev.cwchanap.vela.oauth://` — the trailing space is already gone.
+    // The path-empty check then rejects it. (Internal whitespace within
+    // a path is NOT trimmed by `parseCommaList` and is caught by the
+    // raw-string whitespace check — see the internal-whitespace test.)
     process.env.COGNITO_MOBILE_CALLBACK_URLS = 'dev.cwchanap.vela.oauth:// ';
 
     expect(() => synthesizeTemplate()).toThrow(
-      /COGNITO_MOBILE_CALLBACK_URLS must include a non-empty, non-whitespace path after dev\.cwchanap\.vela\.oauth:\/\//,
+      /COGNITO_MOBILE_CALLBACK_URLS must include a non-empty, non-whitespace path after dev\.cwchanap\.vela\.oauth:\/\/ \(query-only and fragment-only URIs have no path and dispatch to a no-op handler on-device\)\. Got: dev\.cwchanap\.vela\.oauth:\/\/$/,
     );
   });
 
@@ -414,20 +418,23 @@ describe('AuthStack', () => {
   });
 
   test('rejects mobile URIs with a query-only or fragment-only suffix', () => {
-    // A URI like `scheme://?foo` or `scheme://#bar` has no path component;
-    // `\S+` alone would accept it because `?` and `#` are non-whitespace.
-    // iOS would have no handler registered for the empty path → no-op callback.
+    // A URI like `scheme://?foo` has no path component; `\S+` alone would
+    // accept it because `?` is non-whitespace. iOS would have no handler
+    // registered for the empty path → no-op callback.
     process.env.COGNITO_MOBILE_CALLBACK_URLS = 'dev.cwchanap.vela.oauth://?code=abc';
 
     expect(() => synthesizeTemplate()).toThrow(
       /COGNITO_MOBILE_CALLBACK_URLS must include a non-empty, non-whitespace path after dev\.cwchanap\.vela\.oauth:\/\//,
     );
 
+    // `scheme://#bar` is rejected by the raw-string `#` check (before
+    // parsing) with a fragment-specific error — Cognito rejects any
+    // redirect URI containing a fragment component, regardless of path.
     process.env.COGNITO_MOBILE_CALLBACK_URLS = '';
     process.env.COGNITO_MOBILE_LOGOUT_URLS = 'dev.cwchanap.vela.oauth://#fragment';
 
     expect(() => synthesizeTemplate()).toThrow(
-      /COGNITO_MOBILE_LOGOUT_URLS must include a non-empty, non-whitespace path after dev\.cwchanap\.vela\.oauth:\/\//,
+      /COGNITO_MOBILE_LOGOUT_URLS must not contain a fragment \(Cognito rejects redirect URIs with a `#` component\)\. Got: dev\.cwchanap\.vela\.oauth:\/\/#fragment/,
     );
   });
 
@@ -448,6 +455,62 @@ describe('AuthStack', () => {
     expect(() => synthesizeTemplate()).toThrow(
       /COGNITO_MOBILE_LOGOUT_URLS must not contain a fragment \(Cognito rejects redirect URIs with a `#` component\)\. Got: dev\.cwchanap\.vela\.oauth:\/\/oauth\/logout#fragment/,
     );
+  });
+
+  test('rejects mobile URIs with a bare trailing `#` (empty fragment)', () => {
+    // Regression: `new URL('...#').hash === ''`, so the old `parsed.hash`
+    // check did not reject a trailing `#`. But the raw string still
+    // contains `#`, and Cognito rejects any redirect URI with a fragment
+    // component — including a bare trailing `#` with empty fragment.
+    // The raw-string `uri.includes('#')` check catches this before parsing.
+    process.env.COGNITO_MOBILE_CALLBACK_URLS = 'dev.cwchanap.vela.oauth://oauth/callback#';
+
+    expect(() => synthesizeTemplate()).toThrow(
+      /COGNITO_MOBILE_CALLBACK_URLS must not contain a fragment \(Cognito rejects redirect URIs with a `#` component\)\. Got: dev\.cwchanap\.vela\.oauth:\/\/oauth\/callback#$/,
+    );
+
+    process.env.COGNITO_MOBILE_CALLBACK_URLS = '';
+    process.env.COGNITO_MOBILE_LOGOUT_URLS = 'dev.cwchanap.vela.oauth://oauth/logout#';
+
+    expect(() => synthesizeTemplate()).toThrow(
+      /COGNITO_MOBILE_LOGOUT_URLS must not contain a fragment \(Cognito rejects redirect URIs with a `#` component\)\. Got: dev\.cwchanap\.vela\.oauth:\/\/oauth\/logout#$/,
+    );
+  });
+
+  test('rejects mobile URIs with internal whitespace in an otherwise valid path', () => {
+    // Regression: `new URL()` percent-encodes spaces and silently strips
+    // tabs/newlines, so `parsed.pathname` looks valid while the raw string
+    // passed to Cognito contains whitespace that Cognito's redirect URI
+    // pattern excludes. The raw-string `/\s/u` check catches these before
+    // parsing.
+    const cases = [
+      'dev.cwchanap.vela.oauth://oauth/callback trailing',
+      'dev.cwchanap.vela.oauth://oauth/callback\tsuffix',
+      'dev.cwchanap.vela.oauth://oauth/callback\nsuffix',
+    ];
+
+    for (const uri of cases) {
+      process.env.COGNITO_MOBILE_CALLBACK_URLS = uri;
+      expect(() => synthesizeTemplate()).toThrow(
+        /COGNITO_MOBILE_CALLBACK_URLS must not contain whitespace \(Cognito rejects redirect URIs containing whitespace characters\)\. Got: dev\.cwchanap\.vela\.oauth:\/\/oauth\/callback[\s\S]*$/,
+      );
+      process.env.COGNITO_MOBILE_CALLBACK_URLS = '';
+    }
+
+    // Logout URLs: same bypass, same fix.
+    const logoutCases = [
+      'dev.cwchanap.vela.oauth://oauth/logout trailing',
+      'dev.cwchanap.vela.oauth://oauth/logout\tsuffix',
+      'dev.cwchanap.vela.oauth://oauth/logout\nsuffix',
+    ];
+
+    for (const uri of logoutCases) {
+      process.env.COGNITO_MOBILE_LOGOUT_URLS = uri;
+      expect(() => synthesizeTemplate()).toThrow(
+        /COGNITO_MOBILE_LOGOUT_URLS must not contain whitespace \(Cognito rejects redirect URIs containing whitespace characters\)\. Got: dev\.cwchanap\.vela\.oauth:\/\/oauth\/logout[\s\S]*$/,
+      );
+      process.env.COGNITO_MOBILE_LOGOUT_URLS = '';
+    }
   });
 
   test('mobile client is distinct from web and test clients', () => {
