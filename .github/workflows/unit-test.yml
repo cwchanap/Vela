@@ -199,6 +199,16 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
+      - name: Build Lambda bundle
+        # ApiStack constructs Code.fromAsset(.../packages/cdk/dist/lambda), and
+        # Source.asset stats the directory at construct time. Both api-stack and
+        # static-web-stack tests instantiate ApiStack, so dist/lambda must exist
+        # before tests run or synth throws ValidationError before assertions.
+        shell: bash
+        run: |
+          cd packages/cdk
+          bun run lambda:build
+
       - name: Run CDK unit tests
         shell: bash
         # CDK_SPA_DIST_PATH is set by the StaticWebStack tests themselves via
