@@ -49,6 +49,7 @@ jobs:
           else
             echo "Coverage file NOT found"
             find apps/vela -name "*.json" -path "*/coverage/*"
+            exit 1
           fi
 
       - name: Upload coverage to Codecov (web)
@@ -96,6 +97,7 @@ jobs:
           else
             echo "Coverage file NOT found"
             find apps/vela-api -name "*.info" -o -name "coverage" -type d
+            exit 1
           fi
 
       - name: Upload coverage to Codecov (api)
@@ -145,6 +147,7 @@ jobs:
           else
             echo "Coverage file NOT found"
             find apps/vela-ext -name "*.json" -path "*/coverage/*"
+            exit 1
           fi
 
       - name: Upload coverage to Codecov (ext)
@@ -173,6 +176,13 @@ jobs:
 
       - name: Install dependencies
         run: bun install --frozen-lockfile
+
+      - name: Lint Info.plist XML well-formedness
+        # plutil -lint is macOS-only; ubuntu-latest has xmllint instead, which
+        # performs the same well-formedness check for XML plists. Catches
+        # broken XML before the Bun-based plist parser tests run.
+        shell: bash
+        run: xmllint --noout apps/vela-mobile/src-capacitor/ios/App/App/Info.plist
 
       - name: Run mobile unit tests with coverage
         shell: bash
