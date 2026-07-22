@@ -12,12 +12,10 @@ const plistContent = readFileSync(plistPath, 'utf8');
 // to binary format (e.g. after a merge conflict resolution or an Xcode
 // version upgrade). The regex-based extractors below return null/empty on
 // binary plists, which would surface as misleading "Capacitor sync wiped
-// CFBundleURLTypes" failures. Fail fast with a clear message instead.
-if (plistContent.startsWith('bplist')) {
-  throw new Error(
-    `${plistPath} is a binary plist. Convert it back to XML: plutil -convert xml1 "${plistPath}". The Info.plist test assumes XML text.`,
-  );
-}
+// CFBundleURLTypes" failures. Wrapped in a test() so a binary plist surfaces
+// as a named per-test failure with a clear remediation message, instead of a
+// module-load error that obscures which test file failed.
+const isBinaryPlist = plistContent.startsWith('bplist');
 
 function extractSchemes(xml: string): string[] {
   const schemes: string[] = [];
@@ -102,6 +100,16 @@ function extractKeyValue(xml: string, key: string): string | null {
 }
 
 describe('iOS Info.plist', () => {
+  test('Info.plist is XML, not binary', () => {
+    // Fail fast with a clear remediation message before the regex-based
+    // assertions below would produce misleading "Capacitor sync wiped
+    // CFBundleURLTypes" failures on a binary plist.
+    expect(
+      !isBinaryPlist,
+      `${plistPath} is a binary plist. Convert it back to XML: plutil -convert xml1 "${plistPath}". The Info.plist test assumes XML text.`,
+    ).toBe(true);
+  });
+
   test('registers the dev.cwchanap.vela.oauth custom URL scheme', () => {
     const schemes = extractSchemes(plistContent);
     expect(schemes).toContain('dev.cwchanap.vela.oauth');
