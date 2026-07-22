@@ -73,20 +73,20 @@ function extractUrlTypeEntry(xml: string): string | null {
   // tracking <dict>/</dict> depth so nested dicts don't trip the match.
   const dictOpenIdx = outerArrayBody.indexOf('<dict>');
   if (dictOpenIdx === -1) return null;
-  let d = 0;
+  let dictDepth = 0;
   let dictStart = -1;
   let dictEnd = -1;
-  const dt = /<\/?dict>/g;
-  dt.lastIndex = dictOpenIdx;
-  let dm: RegExpExecArray | null;
-  while ((dm = dt.exec(outerArrayBody)) !== null) {
-    if (dm[0] === '<dict>') {
-      if (d === 0) dictStart = dm.index + '<dict>'.length;
-      d += 1;
+  const dictTagRegex = /<\/?dict>/g;
+  dictTagRegex.lastIndex = dictOpenIdx;
+  let dictMatch: RegExpExecArray | null;
+  while ((dictMatch = dictTagRegex.exec(outerArrayBody)) !== null) {
+    if (dictMatch[0] === '<dict>') {
+      if (dictDepth === 0) dictStart = dictMatch.index + '<dict>'.length;
+      dictDepth += 1;
     } else {
-      d -= 1;
-      if (d === 0) {
-        dictEnd = dm.index;
+      dictDepth -= 1;
+      if (dictDepth === 0) {
+        dictEnd = dictMatch.index;
         break;
       }
     }
