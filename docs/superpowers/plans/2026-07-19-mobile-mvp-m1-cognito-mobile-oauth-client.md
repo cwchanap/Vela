@@ -237,17 +237,40 @@ const DEFAULT_MOBILE_CALLBACK_URLS = [`${MOBILE_OAUTH_SCHEME}://oauth/callback`]
 const DEFAULT_MOBILE_LOGOUT_URLS = [`${MOBILE_OAUTH_SCHEME}://oauth/logout`];
 
 /**
- * Reject mobile callback/logout URIs that do not use the registered iOS scheme.
- * `parseCommaList` is permissive on its own; without this guard a typo like
- * `dev.cwchanap.vela.dev://...` would synthesise + deploy successfully and
- * then fail silently on-device because iOS would have no handler registered.
+ * Reject mobile callback/logout URIs that do not use the registered iOS scheme
+ * or that use the right scheme with an empty/invalid path. `parseCommaList` is
+ * permissive on its own; without this guard a typo like
+ * `dev.cwchanap.vela.dev://...` (wrong scheme) or
+ * `dev.cwchanap.vela.oauth://` (empty path) would synthesise + deploy
+ * successfully and then fail silently on-device because iOS would have no
+ * handler registered for the dispatch.
+ *
+ * Two distinct error branches so the failure message names the actual defect:
+ *   1. Wrong scheme  → `${label} must use the ...:// scheme (...)`
+ *   2. Right scheme, bad path (empty / whitespace-only / query-only /
+ *      fragment-only) → `${label} must include a non-empty, non-whitespace
+ *      path after ...:// (...)`
+ *
+ * The path check uses `^\.\.\.://[^\s?#]+\S*$` rather than a naive
+ * `startsWith(prefix)` so it also rejects `scheme://` (no path), `scheme:// `
+ * (whitespace-only path), `scheme://?query` (query-only, no path), and
+ * `scheme://#fragment` (fragment-only, no path) — all of which Cognito would
+ * accept but iOS would dispatch to a no-op handler.
  */
 function assertMobileScheme(label: string, uris: string[]): void {
-  const prefix = `${MOBILE_OAUTH_SCHEME}://`;
+  const schemePrefix = `${MOBILE_OAUTH_SCHEME}://`;
+  const mobileUriPattern = new RegExp(
+    `^${MOBILE_OAUTH_SCHEME.replace(/\./g, '\\.')}://[^\\s?#]+\\S*$`,
+  );
   for (const uri of uris) {
-    if (!uri.startsWith(prefix)) {
+    if (!uri.startsWith(schemePrefix)) {
       throw new Error(
         `${label} must use the ${MOBILE_OAUTH_SCHEME}:// scheme (Info.plist only registers that scheme). Got: ${uri}`,
+      );
+    }
+    if (!mobileUriPattern.test(uri)) {
+      throw new Error(
+        `${label} must include a non-empty, non-whitespace path after ${MOBILE_OAUTH_SCHEME}:// (query-only and fragment-only URIs have no path and dispatch to a no-op handler on-device). Got: ${uri}`,
       );
     }
   }
