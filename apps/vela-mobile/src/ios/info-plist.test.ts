@@ -47,8 +47,11 @@ function extractUrlTypeEntry(xml: string): string | null {
   if (keyIdx === -1) return null;
   const afterKey = xml.slice(keyIdx);
   const arrayOpen = afterKey.match(/\s*<array>/);
-  if (!arrayOpen) return null;
-  const start = keyIdx + afterKey.indexOf('<array>') + '<array>'.length;
+  if (!arrayOpen || arrayOpen.index === undefined) return null;
+  // arrayOpen.index points at the start of the leading whitespace; arrayOpen[0]
+  // is the full match including that whitespace, so its length lands us right
+  // after the opening <array> tag.
+  const start = keyIdx + arrayOpen.index + arrayOpen[0].length;
 
   // Walk <array>/</array> tags to find the matching close of the outer array.
   let depth = 1;

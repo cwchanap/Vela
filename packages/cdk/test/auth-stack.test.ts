@@ -386,7 +386,7 @@ describe('AuthStack', () => {
     expect(new Set(names).size).toBe(3);
   });
 
-  test('web client OAuth contract is unchanged by the mobile client addition', () => {
+  test('web client OAuth flow, scopes, and redirect URIs are preserved after the mobile client addition', () => {
     const template = synthesizeTemplate();
     const clients = template.findResources('AWS::Cognito::UserPoolClient');
     const web = Object.values(clients).find((c) => c.Properties.ClientName === 'vela-web-client');
