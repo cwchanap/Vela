@@ -203,7 +203,7 @@ function handler(event) {
 
     new CfnOutput(this, 'CognitoMobileUserPoolClientId', {
       value: auth.mobileUserPoolClient.userPoolClientId,
-      description: 'Cognito User Pool Client ID for the iOS mobile app (public, PKCE)',
+      description: 'Cognito User Pool Client ID for the iOS mobile app (public, no client secret)',
     });
 
     new CfnOutput(this, 'CognitoRegion', {

@@ -75,11 +75,12 @@ describe('StaticWebStack', () => {
       { Value: unknown; Description?: string }
     >;
     expect(outputs.CognitoMobileUserPoolClientId).toBeDefined();
-    // Pin the description so a future edit (e.g. dropping "public, PKCE" or
-    // swapping it for the web client's description) is caught. The description
-    // documents the security-relevant "public client, no secret" property.
+    // Pin the description so a future edit (e.g. dropping "public, no client
+    // secret" or swapping it for the web client's description) is caught. The
+    // description documents the security-relevant "public client, no secret"
+    // property. PKCE is not yet implemented (M2 work); do not advertise it here.
     expect(outputs.CognitoMobileUserPoolClientId.Description).toBe(
-      'Cognito User Pool Client ID for the iOS mobile app (public, PKCE)',
+      'Cognito User Pool Client ID for the iOS mobile app (public, no client secret)',
     );
 
     // The Value must reference the *mobile* client, not the web or test client.
