@@ -178,11 +178,15 @@ jobs:
         run: bun install --frozen-lockfile
 
       - name: Lint Info.plist XML well-formedness
-        # plutil -lint is macOS-only; ubuntu-latest has xmllint instead, which
-        # performs the same well-formedness check for XML plists. Catches
-        # broken XML before the Bun-based plist parser tests run.
+        # Use Python's standard-library XML parser so this check works on the
+        # stock ubuntu-latest image without installing xmllint/libxml2-utils.
         shell: bash
-        run: xmllint --noout apps/vela-mobile/src-capacitor/ios/App/App/Info.plist
+        run: |
+          python3 - <<'PY'
+          import xml.etree.ElementTree as ET
+
+          ET.parse('apps/vela-mobile/src-capacitor/ios/App/App/Info.plist')
+          PY
 
       - name: Run mobile unit tests with coverage
         shell: bash
