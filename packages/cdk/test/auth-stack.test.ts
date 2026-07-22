@@ -372,6 +372,24 @@ describe('AuthStack', () => {
     );
   });
 
+  test('rejects mobile URIs with a query-only or fragment-only suffix', () => {
+    // A URI like `scheme://?foo` or `scheme://#bar` has no path component;
+    // `\S+` alone would accept it because `?` and `#` are non-whitespace.
+    // iOS would have no handler registered for the empty path → no-op callback.
+    process.env.COGNITO_MOBILE_CALLBACK_URLS = 'dev.cwchanap.vela.oauth://?code=abc';
+
+    expect(() => synthesizeTemplate()).toThrow(
+      /COGNITO_MOBILE_CALLBACK_URLS must use the dev\.cwchanap\.vela\.oauth:\/\/ scheme with a non-empty path/,
+    );
+
+    process.env.COGNITO_MOBILE_CALLBACK_URLS = '';
+    process.env.COGNITO_MOBILE_LOGOUT_URLS = 'dev.cwchanap.vela.oauth://#fragment';
+
+    expect(() => synthesizeTemplate()).toThrow(
+      /COGNITO_MOBILE_LOGOUT_URLS must use the dev\.cwchanap\.vela\.oauth:\/\/ scheme with a non-empty path/,
+    );
+  });
+
   test('mobile client is distinct from web and test clients', () => {
     const template = synthesizeTemplate();
     const clients = Object.values(template.findResources('AWS::Cognito::UserPoolClient'));

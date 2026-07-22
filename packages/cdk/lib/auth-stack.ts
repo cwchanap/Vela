@@ -51,9 +51,17 @@ function assertMobileScheme(label: string, uris: string[]): void {
   // synthesise + deploy but resolve to a no-op callback on-device. `\S+`
   // (not `.+`) also rejects whitespace-only paths that would slip past a
   // naive empty-path check.
-  const re = new RegExp(`^${MOBILE_OAUTH_SCHEME.replace(/\./g, '\\.')}://\\S+$`);
+  //
+  // The first character after `://` must be a real path character (not `?`
+  // or `#`): a query-only (`scheme://?foo`) or fragment-only (`scheme://#bar`)
+  // URI has no path and would likewise dispatch to a no-op handler on-device.
+  // `[^\s?#]+` for the leading path segment enforces that, while the trailing
+  // `\S*` still permits a legitimate `?query` / `#fragment` after a real path.
+  const mobileUriPattern = new RegExp(
+    `^${MOBILE_OAUTH_SCHEME.replace(/\./g, '\\.')}://[^\\s?#]+\\S*$`,
+  );
   for (const uri of uris) {
-    if (!re.test(uri)) {
+    if (!mobileUriPattern.test(uri)) {
       throw new Error(
         `${label} must use the ${MOBILE_OAUTH_SCHEME}:// scheme with a non-empty path (Info.plist only registers that scheme). Got: ${uri}`,
       );
