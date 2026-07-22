@@ -245,30 +245,53 @@ const DEFAULT_MOBILE_LOGOUT_URLS = [`${MOBILE_OAUTH_SCHEME}://oauth/logout`];
  * successfully and then fail silently on-device because iOS would have no
  * handler registered for the dispatch.
  *
- * Two distinct error branches so the failure message names the actual defect:
- *   1. Wrong scheme  → `${label} must use the ...:// scheme (...)`
- *   2. Right scheme, bad path (empty / whitespace-only / query-only /
- *      fragment-only) → `${label} must include a non-empty, non-whitespace
- *      path after ...:// (...)`
+ * Four checks, in order: case-sensitive scheme prefix, raw-string fragment
+ * (`#`), raw-string whitespace, then a WHATWG URL parse for structural
+ * validation (non-empty path).
  *
- * The path check uses `^\.\.\.://[^\s?#]+\S*$` rather than a naive
- * `startsWith(prefix)` so it also rejects `scheme://` (no path), `scheme:// `
- * (whitespace-only path), `scheme://?query` (query-only, no path), and
- * `scheme://#fragment` (fragment-only, no path) — all of which Cognito would
- * accept but iOS would dispatch to a no-op handler.
+ * The raw-string fragment and whitespace checks come BEFORE `new URL()`
+ * because the WHATWG parser normalises away exactly the characters Cognito
+ * rejects: a trailing `#` (empty fragment) yields `parsed.hash === ''`, and
+ * internal whitespace is percent-encoded (spaces) or silently stripped
+ * (tabs/newlines). Validating the parsed representation would let these
+ * through; the raw string is what Cognito receives, so it is what must be
+ * checked.
+ *
+ * Structural validation uses `new URL()` rather than a regex because a
+ * regex like `[^\s?#]+` cannot distinguish authority from path in a custom
+ * scheme. `dev.cwchanap.vela.oauth://oauth` (authority-only, empty
+ * pathname) would pass such a regex — `oauth` matches the path character
+ * class — but WHATWG assigns `oauth` to `host` and leaves `pathname` empty.
+ * That authority-only case is exactly the kind of fat-fingered config
+ * (missing `/callback` or `/logout`) this validator exists to catch.
  */
 function assertMobileScheme(label: string, uris: string[]): void {
   const schemePrefix = `${MOBILE_OAUTH_SCHEME}://`;
-  const mobileUriPattern = new RegExp(
-    `^${MOBILE_OAUTH_SCHEME.replace(/\./g, '\\.')}://[^\\s?#]+\\S*$`,
-  );
   for (const uri of uris) {
     if (!uri.startsWith(schemePrefix)) {
       throw new Error(
         `${label} must use the ${MOBILE_OAUTH_SCHEME}:// scheme (Info.plist only registers that scheme). Got: ${uri}`,
       );
     }
-    if (!mobileUriPattern.test(uri)) {
+    if (uri.includes('#')) {
+      throw new Error(
+        `${label} must not contain a fragment (Cognito rejects redirect URIs with a \`#\` component). Got: ${uri}`,
+      );
+    }
+    if (/\s/u.test(uri)) {
+      throw new Error(
+        `${label} must not contain whitespace (Cognito rejects redirect URIs containing whitespace characters). Got: ${uri}`,
+      );
+    }
+    let parsed: URL;
+    try {
+      parsed = new URL(uri);
+    } catch {
+      throw new Error(
+        `${label} must include a non-empty, non-whitespace path after ${MOBILE_OAUTH_SCHEME}:// (query-only and fragment-only URIs have no path and dispatch to a no-op handler on-device). Got: ${uri}`,
+      );
+    }
+    if (parsed.pathname === '' || parsed.pathname === '/') {
       throw new Error(
         `${label} must include a non-empty, non-whitespace path after ${MOBILE_OAUTH_SCHEME}:// (query-only and fragment-only URIs have no path and dispatch to a no-op handler on-device). Got: ${uri}`,
       );
