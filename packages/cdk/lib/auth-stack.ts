@@ -56,7 +56,13 @@ function assertMobileScheme(label: string, uris: string[]): void {
   // or `#`): a query-only (`scheme://?foo`) or fragment-only (`scheme://#bar`)
   // URI has no path and would likewise dispatch to a no-op handler on-device.
   // `[^\s?#]+` for the leading path segment enforces that, while the trailing
-  // `\S*` still permits a legitimate `?query` / `#fragment` after a real path.
+  // `\S*` still permits a legitimate `?query` / `#fragment` after a real
+  // path. Fragments are then rejected by the explicit `#` check below —
+  // Cognito's CreateUserPoolClient docs require that a redirect URI "Not
+  // include a fragment component", so a URI like `scheme://oauth/callback#frag`
+  // would synth + deploy-fail at the AWS::Cognito::UserPoolClient resource.
+  // Reject it at synth time with a fragment-specific error message instead
+  // of the generic "missing path" message.
   const schemePrefix = `${MOBILE_OAUTH_SCHEME}://`;
   const mobileUriPattern = new RegExp(
     `^${MOBILE_OAUTH_SCHEME.replace(/\./g, '\\.')}://[^\\s?#]+\\S*$`,
@@ -76,6 +82,15 @@ function assertMobileScheme(label: string, uris: string[]): void {
       // iOS would dispatch to a no-op handler.
       throw new Error(
         `${label} must include a non-empty, non-whitespace path after ${MOBILE_OAUTH_SCHEME}:// (query-only and fragment-only URIs have no path and dispatch to a no-op handler on-device). Got: ${uri}`,
+      );
+    }
+    if (uri.includes('#')) {
+      // Path is well-formed but a `#fragment` is present. Cognito rejects
+      // redirect URIs containing a fragment component at deploy time
+      // (CreateUserPoolClient / UpdateUserPoolClient validation), so synth
+      // would succeed and deploy would fail. Fail fast at synth instead.
+      throw new Error(
+        `${label} must not contain a fragment (Cognito rejects redirect URIs with a \`#\` component). Got: ${uri}`,
       );
     }
   }
