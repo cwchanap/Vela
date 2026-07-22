@@ -392,6 +392,25 @@ describe('AuthStack', () => {
     );
   });
 
+  test('rejects mobile URIs that contain a fragment after a real path', () => {
+    // Cognito rejects callback/logout URLs containing a fragment component
+    // (see CreateUserPoolClient docs: "Not include a fragment component").
+    // Without this guard, synth succeeds and deploy fails at the
+    // AWS::Cognito::UserPoolClient resource.
+    process.env.COGNITO_MOBILE_CALLBACK_URLS = 'dev.cwchanap.vela.oauth://oauth/callback#fragment';
+
+    expect(() => synthesizeTemplate()).toThrow(
+      /COGNITO_MOBILE_CALLBACK_URLS must not contain a fragment \(Cognito rejects redirect URIs with a `#` component\)\. Got: dev\.cwchanap\.vela\.oauth:\/\/oauth\/callback#fragment/,
+    );
+
+    process.env.COGNITO_MOBILE_CALLBACK_URLS = '';
+    process.env.COGNITO_MOBILE_LOGOUT_URLS = 'dev.cwchanap.vela.oauth://oauth/logout#fragment';
+
+    expect(() => synthesizeTemplate()).toThrow(
+      /COGNITO_MOBILE_LOGOUT_URLS must not contain a fragment \(Cognito rejects redirect URIs with a `#` component\)\. Got: dev\.cwchanap\.vela\.oauth:\/\/oauth\/logout#fragment/,
+    );
+  });
+
   test('mobile client is distinct from web and test clients', () => {
     const template = synthesizeTemplate();
     const clients = Object.values(template.findResources('AWS::Cognito::UserPoolClient'));
