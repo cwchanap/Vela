@@ -35,7 +35,9 @@ const DEFAULT_MOBILE_LOGOUT_URLS = [`${MOBILE_OAUTH_SCHEME}://oauth/logout`];
  * Reject mobile callback/logout URIs that do not use the registered iOS scheme.
  * `parseCommaList` is permissive on its own; without this guard a typo like
  * `dev.cwchanap.vela.dev://...` would synthesise + deploy successfully and
- * then fail silently on-device because iOS would have no handler registered.
+ * then fail silently on-device because iOS would not dispatch the URL to this
+ * app — the scheme is not registered in Info.plist, so iOS sends it to a
+ * different app (or no app at all), and the OAuth callback is lost.
  *
  * The check is intentionally case-sensitive: the scheme registered in Info.plist
  * is `dev.cwchanap.vela.oauth` (all lowercase) and the override URIs in
@@ -73,21 +75,24 @@ function assertMobileScheme(label: string, uris: string[]): void {
   // character class — but WHATWG assigns `oauth` to `host` and leaves
   // `pathname` empty. That authority-only case is exactly the kind of
   // fat-fingered config (missing `/callback` or `/logout`) this validator
-  // exists to catch: Cognito would store it but iOS would dispatch to a
-  // no-op handler on-device. A path following an authority must begin with
-  // `/`, so `scheme://oauth` and `scheme://oauth/` are both rejected.
+  // exists to catch: Cognito would store it, and iOS would deliver the
+  // URL to the app, but the app's router would have no matching route —
+  // the callback is silently dropped. A path following an authority must
+  // begin with `/`, so `scheme://oauth` and `scheme://oauth/` are both
+  // rejected.
   //
   // The first character after the authority must begin a real path
   // component (not `?`): a query-only (`scheme://?foo`) URI has an empty
-  // `pathname` and would likewise dispatch to a no-op handler on-device.
-  // Fragment-only URIs (`scheme://#bar`) are already rejected by the
-  // raw-string `#` check above before parsing.
+  // `pathname` and would likewise leave the app's router with no matching
+  // route. Fragment-only URIs (`scheme://#bar`) are already rejected by
+  // the raw-string `#` check above before parsing.
   const schemePrefix = `${MOBILE_OAUTH_SCHEME}://`;
   for (const uri of uris) {
     if (!uri.startsWith(schemePrefix)) {
       // Wrong scheme entirely (e.g. `https://...`, `dev.cwchanap.vela.dev://...`).
       // iOS only registers `dev.cwchanap.vela.oauth`, so any other scheme would
-      // dispatch to a no-op handler (or another app) on-device.
+      // dispatch to a different app (or no app at all) — this app would never
+      // receive the callback.
       throw new Error(
         `${label} must use the ${MOBILE_OAUTH_SCHEME}:// scheme (Info.plist only registers that scheme). Got: ${uri}`,
       );
@@ -132,17 +137,18 @@ function assertMobileScheme(label: string, uris: string[]): void {
       // present, so a parse failure here means the rest of the URI is
       // malformed. Surface it as a path error — the scheme is fine.
       throw new Error(
-        `${label} must include a non-empty, non-whitespace path after ${MOBILE_OAUTH_SCHEME}:// (query-only and fragment-only URIs have no path and dispatch to a no-op handler on-device). Got: ${uri}`,
+        `${label} must include a non-empty, non-whitespace path after ${MOBILE_OAUTH_SCHEME}:// (query-only and fragment-only URIs have no path; the app's router would have no matching route). Got: ${uri}`,
       );
     }
     if (parsed.pathname === '' || parsed.pathname === '/') {
       // Right scheme but missing path: `scheme://`, `scheme:// `,
       // `scheme://?query`, `scheme://#fragment`, `scheme://oauth`
       // (authority-only — `oauth` is the host, pathname is empty),
-      // `scheme://oauth/` (root path). Cognito would store these but
-      // iOS would dispatch to a no-op handler.
+      // `scheme://oauth/` (root path). Cognito would store these; iOS
+      // would deliver the URL to the app, but the app's router would
+      // have no matching route — the callback is silently dropped.
       throw new Error(
-        `${label} must include a non-empty, non-whitespace path after ${MOBILE_OAUTH_SCHEME}:// (query-only and fragment-only URIs have no path and dispatch to a no-op handler on-device). Got: ${uri}`,
+        `${label} must include a non-empty, non-whitespace path after ${MOBILE_OAUTH_SCHEME}:// (query-only and fragment-only URIs have no path; the app's router would have no matching route). Got: ${uri}`,
       );
     }
   }

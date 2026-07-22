@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Provision a third Cognito app client (`vela-mobile-client`) configured for public PKCE OAuth, register an iOS custom URL scheme to receive the callback, and expose the new client ID through CloudFormation outputs — without changing the existing web or test client contracts.
+**Goal:** Provision a third Cognito app client (`vela-mobile-client`) configured as a public authorization-code client (PKCE-compatible — the PKCE flow itself is implemented client-side in M2), register an iOS custom URL scheme to receive the callback, and expose the new client ID through CloudFormation outputs — without changing the existing web or test client contracts.
 
 **Architecture:** Inline a third `UserPoolClient` in `packages/cdk/lib/auth-stack.ts` next to the existing web and test clients, with synth-time scheme validation that throws if the mobile callback/logout URIs do not use the registered iOS scheme (`dev.cwchanap.vela.oauth`). Surface the new client ID via a `CognitoMobileUserPoolClientId` output on `StaticWebStack`. Register the scheme in `apps/vela-mobile/src-capacitor/ios/App/App/Info.plist` via `CFBundleURLTypes` (no Swift changes — `AppDelegate` already forwards to `ApplicationDelegateProxy.shared`). Document the result in `CLAUDE.md` and `.env.example`.
 
@@ -242,8 +242,10 @@ const DEFAULT_MOBILE_LOGOUT_URLS = [`${MOBILE_OAUTH_SCHEME}://oauth/logout`];
  * permissive on its own; without this guard a typo like
  * `dev.cwchanap.vela.dev://...` (wrong scheme) or
  * `dev.cwchanap.vela.oauth://` (empty path) would synthesise + deploy
- * successfully and then fail silently on-device because iOS would have no
- * handler registered for the dispatch.
+ * successfully and then fail silently on-device: a wrong scheme means iOS
+ * would not dispatch the URL to this app at all, and an empty path means
+ * iOS would deliver the URL but the app's router would have no matching
+ * route.
  *
  * Four checks, in order: case-sensitive scheme prefix, raw-string fragment
  * (`#`), raw-string whitespace, then a WHATWG URL parse for structural
@@ -288,12 +290,12 @@ function assertMobileScheme(label: string, uris: string[]): void {
       parsed = new URL(uri);
     } catch {
       throw new Error(
-        `${label} must include a non-empty, non-whitespace path after ${MOBILE_OAUTH_SCHEME}:// (query-only and fragment-only URIs have no path and dispatch to a no-op handler on-device). Got: ${uri}`,
+        `${label} must include a non-empty, non-whitespace path after ${MOBILE_OAUTH_SCHEME}:// (query-only and fragment-only URIs have no path; the app's router would have no matching route). Got: ${uri}`,
       );
     }
     if (parsed.pathname === '' || parsed.pathname === '/') {
       throw new Error(
-        `${label} must include a non-empty, non-whitespace path after ${MOBILE_OAUTH_SCHEME}:// (query-only and fragment-only URIs have no path and dispatch to a no-op handler on-device). Got: ${uri}`,
+        `${label} must include a non-empty, non-whitespace path after ${MOBILE_OAUTH_SCHEME}:// (query-only and fragment-only URIs have no path; the app's router would have no matching route). Got: ${uri}`,
       );
     }
   }
@@ -525,7 +527,7 @@ In `packages/cdk/lib/static-web-stack.ts`, immediately after the existing `Cogni
 ```ts
 new CfnOutput(this, 'CognitoMobileUserPoolClientId', {
   value: auth.mobileUserPoolClient.userPoolClientId,
-  description: 'Cognito User Pool Client ID for the iOS mobile app (public, PKCE)',
+  description: 'Cognito User Pool Client ID for the iOS mobile app (public, no client secret)',
 });
 ```
 
@@ -668,7 +670,7 @@ In `CLAUDE.md`, locate the `## Authentication` section. Append a new `### Mobile
 ````md
 ### Mobile client (iOS)
 
-Vela Mobile authenticates against the same Cognito user pool as the web app, through a dedicated **public** app client (`vela-mobile-client`). The mobile OAuth flow uses authorization-code grant + PKCE; no client secret is bundled in the app binary.
+Vela Mobile authenticates against the same Cognito user pool as the web app, through a dedicated **public** app client (`vela-mobile-client`). The client is configured for authorization-code grant with no client secret bundled in the app binary. PKCE, `state`, and `nonce` validation are implemented client-side in M2 (see below) before mobile sign-in is enabled; the M1 client is PKCE-_compatible_ (public, auth-code grant) but does not yet perform the PKCE flow.
 
 The iOS callback uses a custom URL scheme registered in `apps/vela-mobile/src-capacitor/ios/App/App/Info.plist`:
 

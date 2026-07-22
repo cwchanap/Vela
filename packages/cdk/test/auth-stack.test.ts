@@ -1,6 +1,8 @@
 import { App } from 'aws-cdk-lib';
 import { Match, Template } from 'aws-cdk-lib/assertions';
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { AuthStack } from '../lib/auth-stack';
 
 describe('AuthStack', () => {
@@ -353,14 +355,14 @@ describe('AuthStack', () => {
 
     // Right-scheme / bad-path branch: message names the path, not the scheme.
     expect(() => synthesizeTemplate()).toThrow(
-      /COGNITO_MOBILE_CALLBACK_URLS must include a non-empty, non-whitespace path after dev\.cwchanap\.vela\.oauth:\/\/ \(query-only and fragment-only URIs have no path and dispatch to a no-op handler on-device\)\. Got: dev\.cwchanap\.vela\.oauth:\/\/$/,
+      /COGNITO_MOBILE_CALLBACK_URLS must include a non-empty, non-whitespace path after dev\.cwchanap\.vela\.oauth:\/\/ \(query-only and fragment-only URIs have no path; the app's router would have no matching route\)\. Got: dev\.cwchanap\.vela\.oauth:\/\/$/,
     );
 
     process.env.COGNITO_MOBILE_CALLBACK_URLS = '';
     process.env.COGNITO_MOBILE_LOGOUT_URLS = 'dev.cwchanap.vela.oauth://';
 
     expect(() => synthesizeTemplate()).toThrow(
-      /COGNITO_MOBILE_LOGOUT_URLS must include a non-empty, non-whitespace path after dev\.cwchanap\.vela\.oauth:\/\/ \(query-only and fragment-only URIs have no path and dispatch to a no-op handler on-device\)\. Got: dev\.cwchanap\.vela\.oauth:\/\/$/,
+      /COGNITO_MOBILE_LOGOUT_URLS must include a non-empty, non-whitespace path after dev\.cwchanap\.vela\.oauth:\/\/ \(query-only and fragment-only URIs have no path; the app's router would have no matching route\)\. Got: dev\.cwchanap\.vela\.oauth:\/\/$/,
     );
   });
 
@@ -374,35 +376,35 @@ describe('AuthStack', () => {
     process.env.COGNITO_MOBILE_CALLBACK_URLS = 'dev.cwchanap.vela.oauth:// ';
 
     expect(() => synthesizeTemplate()).toThrow(
-      /COGNITO_MOBILE_CALLBACK_URLS must include a non-empty, non-whitespace path after dev\.cwchanap\.vela\.oauth:\/\/ \(query-only and fragment-only URIs have no path and dispatch to a no-op handler on-device\)\. Got: dev\.cwchanap\.vela\.oauth:\/\/$/,
+      /COGNITO_MOBILE_CALLBACK_URLS must include a non-empty, non-whitespace path after dev\.cwchanap\.vela\.oauth:\/\/ \(query-only and fragment-only URIs have no path; the app's router would have no matching route\)\. Got: dev\.cwchanap\.vela\.oauth:\/\/$/,
     );
   });
 
   test('rejects mobile URIs with an authority-only path (no pathname)', () => {
     // `dev.cwchanap.vela.oauth://oauth` has `oauth` as the host and an empty
     // pathname per WHATWG URL parsing. A regex like `[^\s?#]+` would accept it
-    // (treating `oauth` as the path), but iOS would dispatch to a no-op
-    // handler because the path that distinguishes callback vs logout is
-    // missing. `new URL()` correctly assigns `oauth` to `host` and leaves
+    // (treating `oauth` as the path), but the app's router would have no
+    // matching route because the path that distinguishes callback vs logout
+    // is missing. `new URL()` correctly assigns `oauth` to `host` and leaves
     // `pathname` empty, which the validator rejects.
     process.env.COGNITO_MOBILE_CALLBACK_URLS = 'dev.cwchanap.vela.oauth://oauth';
 
     expect(() => synthesizeTemplate()).toThrow(
-      /COGNITO_MOBILE_CALLBACK_URLS must include a non-empty, non-whitespace path after dev\.cwchanap\.vela\.oauth:\/\/ \(query-only and fragment-only URIs have no path and dispatch to a no-op handler on-device\)\. Got: dev\.cwchanap\.vela\.oauth:\/\/oauth$/,
+      /COGNITO_MOBILE_CALLBACK_URLS must include a non-empty, non-whitespace path after dev\.cwchanap\.vela\.oauth:\/\/ \(query-only and fragment-only URIs have no path; the app's router would have no matching route\)\. Got: dev\.cwchanap\.vela\.oauth:\/\/oauth$/,
     );
 
     process.env.COGNITO_MOBILE_CALLBACK_URLS = '';
     process.env.COGNITO_MOBILE_LOGOUT_URLS = 'dev.cwchanap.vela.oauth://oauth';
 
     expect(() => synthesizeTemplate()).toThrow(
-      /COGNITO_MOBILE_LOGOUT_URLS must include a non-empty, non-whitespace path after dev\.cwchanap\.vela\.oauth:\/\/ \(query-only and fragment-only URIs have no path and dispatch to a no-op handler on-device\)\. Got: dev\.cwchanap\.vela\.oauth:\/\/oauth$/,
+      /COGNITO_MOBILE_LOGOUT_URLS must include a non-empty, non-whitespace path after dev\.cwchanap\.vela\.oauth:\/\/ \(query-only and fragment-only URIs have no path; the app's router would have no matching route\)\. Got: dev\.cwchanap\.vela\.oauth:\/\/oauth$/,
     );
   });
 
   test('rejects mobile URIs with a root-only path (slash after authority)', () => {
     // `dev.cwchanap.vela.oauth://oauth/` has pathname `/` — the authority is
     // present but the path is just the root slash, which does not distinguish
-    // callback from logout. iOS would dispatch to a no-op handler.
+    // callback from logout. The app's router would have no matching route.
     process.env.COGNITO_MOBILE_CALLBACK_URLS = 'dev.cwchanap.vela.oauth://oauth/';
 
     expect(() => synthesizeTemplate()).toThrow(
@@ -419,8 +421,8 @@ describe('AuthStack', () => {
 
   test('rejects mobile URIs with a query-only or fragment-only suffix', () => {
     // A URI like `scheme://?foo` has no path component; `\S+` alone would
-    // accept it because `?` is non-whitespace. iOS would have no handler
-    // registered for the empty path → no-op callback.
+    // accept it because `?` is non-whitespace. The app's router would have
+    // no matching route for the empty path → callback silently dropped.
     process.env.COGNITO_MOBILE_CALLBACK_URLS = 'dev.cwchanap.vela.oauth://?code=abc';
 
     expect(() => synthesizeTemplate()).toThrow(
@@ -577,5 +579,63 @@ describe('AuthStack', () => {
       expect(client.Properties.ClientName).toMatch(/^vela-(web|mobile|test)-client$/);
       expect(client.Properties.EnableTokenRevocation).toBe(true);
     }
+  });
+
+  // Cross-layer contract test: the iOS custom URL scheme registered in
+  // Info.plist must match the scheme used in the CDK mobile client's
+  // callback/logout URIs. The scheme is hardcoded independently in CDK
+  // source (MOBILE_OAUTH_SCHEME) and in Info.plist (CFBundleURLSchemes).
+  // Without this test, a change to one without the other would leave all
+  // existing tests green while OAuth callbacks fail on-device: iOS would
+  // not dispatch the CDK-configured callback URL to the app (or vice
+  // versa, the app would register a scheme Cognito never sends).
+  //
+  // This test reads the Info.plist directly (cross-package file read, no
+  // runtime dependency) and compares the scheme against the mobile
+  // client's synthesized CallbackURLs. The mobile info-plist.test.ts
+  // suite independently asserts the plist structure; this test only
+  // bridges the two packages' scheme constants.
+  test('CDK mobile callback scheme matches the iOS Info.plist CFBundleURLSchemes entry', () => {
+    // Extract the scheme from the synthesized CDK template.
+    const template = synthesizeTemplate();
+    const clients = template.findResources('AWS::Cognito::UserPoolClient');
+    const mobile = Object.values(clients).find(
+      (c) => c.Properties.ClientName === 'vela-mobile-client',
+    );
+    expect(mobile).toBeDefined();
+    const cdkCallbackUrl = mobile!.Properties.CallbackURLs[0] as string;
+    const cdkScheme = cdkCallbackUrl.split('://')[0];
+
+    // Extract the scheme from Info.plist. The plist is XML text; a regex
+    // on the CFBundleURLSchemes array is sufficient (the mobile test suite
+    // already validates the plist structure more thoroughly).
+    const plistPath = resolve(
+      __dirname,
+      '../../../apps/vela-mobile/src-capacitor/ios/App/App/Info.plist',
+    );
+    const plistContent = readFileSync(plistPath, 'utf8');
+
+    // Guard against binary plists — would produce a misleading failure.
+    expect(
+      !plistContent.startsWith('bplist'),
+      `${plistPath} is a binary plist. Convert it: plutil -convert xml1 "${plistPath}".`,
+    ).toBe(true);
+
+    const schemesBlock = plistContent.match(
+      /<key>CFBundleURLSchemes<\/key>\s*<array>([\s\S]*?)<\/array>/,
+    );
+    expect(schemesBlock, 'CFBundleURLSchemes entry not found in Info.plist').not.toBeNull();
+    const plistSchemes: string[] = [];
+    const stringRegex = /<string>([^<]+)<\/string>/g;
+    let match: RegExpExecArray | null;
+    while ((match = stringRegex.exec(schemesBlock![1])) !== null) {
+      if (match[1] !== undefined) plistSchemes.push(match[1]);
+    }
+    expect(plistSchemes, 'Info.plist CFBundleURLSchemes array is empty').not.toHaveLength(0);
+
+    // The CDK scheme must be registered in Info.plist. If this fails, either
+    // update Info.plist's CFBundleURLSchemes or the CDK MOBILE_OAUTH_SCHEME
+    // constant — they must stay in sync.
+    expect(plistSchemes).toContain(cdkScheme);
   });
 });

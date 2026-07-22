@@ -145,7 +145,7 @@ Vela uses **Google-only OAuth** via Cognito Hosted UI. There is no password-base
 
 ### Mobile client (iOS)
 
-Vela Mobile authenticates against the same Cognito user pool as the web app, through a dedicated **public** app client (`vela-mobile-client`). The mobile OAuth flow uses authorization-code grant + PKCE; no client secret is bundled in the app binary.
+Vela Mobile authenticates against the same Cognito user pool as the web app, through a dedicated **public** app client (`vela-mobile-client`). The client is configured for authorization-code grant with no client secret bundled in the app binary. PKCE, `state`, and `nonce` validation are implemented client-side in M2 (see below) before mobile sign-in is enabled; the M1 client is PKCE-_compatible_ (public, auth-code grant) but does not yet perform the PKCE flow.
 
 The iOS callback uses a custom URL scheme registered in `apps/vela-mobile/src-capacitor/ios/App/App/Info.plist`:
 
