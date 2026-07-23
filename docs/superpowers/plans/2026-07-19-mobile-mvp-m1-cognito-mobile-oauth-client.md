@@ -14,10 +14,10 @@
 
 - Custom OAuth scheme is **`dev.cwchanap.vela.oauth`** (reverse-DNS of the controlled `vela.cwchanap.dev` domain; do NOT use `com.vela.app` — that's the bundle id, separate namespace).
 - Bundle id stays `com.vela.app`; only the OAuth scheme changes.
-- Callback URI: `dev.cwchanap.vela.oauth://oauth/callback`. Logout URI: `dev.cwchanap.vela.oauth://oauth/logout`.
+- Callback URI: `dev.cwchanap.vela.oauth:/oauth/callback`. Logout URI: `dev.cwchanap.vela.oauth:/oauth/logout`.
 - The mobile client MUST be public: `generateSecret: false` (explicit, not implicit default).
 - Web and test client behaviour must remain unchanged. Existing tests that count clients or use unpinned `hasResourceProperties` must be updated to pin `ClientName: 'vela-web-client'` where they were implicitly asserting the web client's contract.
-- Mobile callback/logout URI overrides via `COGNITO_MOBILE_CALLBACK_URLS` / `COGNITO_MOBILE_LOGOUT_URLS` MUST be validated to use the registered scheme; a typo like `dev.cwchanap.vela.dev://...` must throw at synth time, not deploy silently.
+- Mobile callback/logout URI overrides via `COGNITO_MOBILE_CALLBACK_URLS` / `COGNITO_MOBILE_LOGOUT_URLS` MUST be validated to use the registered scheme; a typo like `dev.cwchanap.vela.dev:/...` must throw at synth time, not deploy silently.
 - Documentation target is **`CLAUDE.md`** at the repo root (`AGENTS.md` is a symlink to it).
 - M2 prerequisites (API JWT verifier widening, mobile client ID injection, Capacitor OAuth integration, `state`/`nonce`) are **out of scope** — the spec documents them, this plan does not implement them.
 
@@ -53,7 +53,7 @@
 **Interfaces:**
 
 - Produces: `AuthStack.mobileUserPoolClient: UserPoolClient` (new public readonly field). Consumed by `StaticWebStack` in Task 3.
-- Produces: synth-time `Error` from `assertMobileScheme()` when `COGNITO_MOBILE_CALLBACK_URLS` / `COGNITO_MOBILE_LOGOUT_URLS` contains a URI that does not start with `dev.cwchanap.vela.oauth://`.
+- Produces: synth-time `Error` from `assertMobileRedirect()` when `COGNITO_MOBILE_CALLBACK_URLS` / `COGNITO_MOBILE_LOGOUT_URLS` contains a URI that does not start with `dev.cwchanap.vela.oauth:/`.
 
 - [ ] **Step 1: Refactor the test helper to expose the stack instance**
 
@@ -91,8 +91,8 @@ test('mobile client uses the iOS custom-scheme callback and logout URIs', () => 
 
   template.hasResourceProperties('AWS::Cognito::UserPoolClient', {
     ClientName: 'vela-mobile-client',
-    CallbackURLs: ['dev.cwchanap.vela.oauth://oauth/callback'],
-    LogoutURLs: ['dev.cwchanap.vela.oauth://oauth/logout'],
+    CallbackURLs: ['dev.cwchanap.vela.oauth:/oauth/callback'],
+    LogoutURLs: ['dev.cwchanap.vela.oauth:/oauth/logout'],
   });
 });
 
@@ -115,8 +115,8 @@ test('creates a dedicated public mobile client with PKCE-compatible OAuth', () =
 
 test('mobile callback/logout URIs are overridable via env vars (same-scheme only)', () => {
   process.env.COGNITO_MOBILE_CALLBACK_URLS =
-    'dev.cwchanap.vela.oauth://oauth/staging-callback,dev.cwchanap.vela.oauth://oauth/callback';
-  process.env.COGNITO_MOBILE_LOGOUT_URLS = 'dev.cwchanap.vela.oauth://oauth/staging-logout';
+    'dev.cwchanap.vela.oauth:/oauth/staging-callback,dev.cwchanap.vela.oauth:/oauth/callback';
+  process.env.COGNITO_MOBILE_LOGOUT_URLS = 'dev.cwchanap.vela.oauth:/oauth/staging-logout';
 
   const template = synthesizeTemplate();
   const clients = template.findResources('AWS::Cognito::UserPoolClient');
@@ -125,10 +125,10 @@ test('mobile callback/logout URIs are overridable via env vars (same-scheme only
 
   const mobile = byName('vela-mobile-client');
   expect(mobile!.Properties.CallbackURLs).toEqual([
-    'dev.cwchanap.vela.oauth://oauth/staging-callback',
-    'dev.cwchanap.vela.oauth://oauth/callback',
+    'dev.cwchanap.vela.oauth:/oauth/staging-callback',
+    'dev.cwchanap.vela.oauth:/oauth/callback',
   ]);
-  expect(mobile!.Properties.LogoutURLs).toEqual(['dev.cwchanap.vela.oauth://oauth/staging-logout']);
+  expect(mobile!.Properties.LogoutURLs).toEqual(['dev.cwchanap.vela.oauth:/oauth/staging-logout']);
 
   const web = byName('vela-web-client');
   expect(web!.Properties.CallbackURLs).toEqual(
@@ -153,23 +153,23 @@ test('mobile callback/logout URIs fall back to defaults when env vars are empty'
 
   template.hasResourceProperties('AWS::Cognito::UserPoolClient', {
     ClientName: 'vela-mobile-client',
-    CallbackURLs: ['dev.cwchanap.vela.oauth://oauth/callback'],
-    LogoutURLs: ['dev.cwchanap.vela.oauth://oauth/logout'],
+    CallbackURLs: ['dev.cwchanap.vela.oauth:/oauth/callback'],
+    LogoutURLs: ['dev.cwchanap.vela.oauth:/oauth/logout'],
   });
 });
 
 test('rejects mobile callback/logout URIs that do not use the registered scheme', () => {
-  process.env.COGNITO_MOBILE_CALLBACK_URLS = 'dev.cwchanap.vela.dev://oauth/callback';
+  process.env.COGNITO_MOBILE_CALLBACK_URLS = 'dev.cwchanap.vela.dev:/oauth/callback';
 
   expect(() => synthesizeTemplate()).toThrow(
-    /COGNITO_MOBILE_CALLBACK_URLS must use the dev\.cwchanap\.vela\.oauth:\/\/ scheme/,
+    /COGNITO_MOBILE_CALLBACK_URLS must use the dev\.cwchanap\.vela\.oauth:\/ scheme/,
   );
 
   process.env.COGNITO_MOBILE_CALLBACK_URLS = '';
-  process.env.COGNITO_MOBILE_LOGOUT_URLS = 'dev.cwchanap.vela.dev://oauth/logout';
+  process.env.COGNITO_MOBILE_LOGOUT_URLS = 'dev.cwchanap.vela.dev:/oauth/logout';
 
   expect(() => synthesizeTemplate()).toThrow(
-    /COGNITO_MOBILE_LOGOUT_URLS must use the dev\.cwchanap\.vela\.oauth:\/\/ scheme/,
+    /COGNITO_MOBILE_LOGOUT_URLS must use the dev\.cwchanap\.vela\.oauth:\/ scheme/,
   );
 });
 
@@ -233,23 +233,23 @@ In `packages/cdk/lib/auth-stack.ts`, immediately after the existing `LOCAL_LOGOU
 
 ```ts
 const MOBILE_OAUTH_SCHEME = 'dev.cwchanap.vela.oauth';
-const DEFAULT_MOBILE_CALLBACK_URLS = [`${MOBILE_OAUTH_SCHEME}://oauth/callback`];
-const DEFAULT_MOBILE_LOGOUT_URLS = [`${MOBILE_OAUTH_SCHEME}://oauth/logout`];
+const DEFAULT_MOBILE_CALLBACK_URLS = [`${MOBILE_OAUTH_SCHEME}:/oauth/callback`];
+const DEFAULT_MOBILE_LOGOUT_URLS = [`${MOBILE_OAUTH_SCHEME}:/oauth/logout`];
+
+const MOBILE_CALLBACK_PATHS = ['/oauth/callback', '/oauth/staging-callback'];
+const MOBILE_LOGOUT_PATHS = ['/oauth/logout', '/oauth/staging-logout'];
 
 /**
- * Reject mobile callback/logout URIs that do not use the registered iOS scheme
- * or that use the right scheme with an empty/invalid path. `parseCommaList` is
- * permissive on its own; without this guard a typo like
- * `dev.cwchanap.vela.dev://...` (wrong scheme) or
- * `dev.cwchanap.vela.oauth://` (empty path) would synthesise + deploy
- * successfully and then fail silently on-device: a wrong scheme means iOS
- * would not dispatch the URL to this app at all, and an empty path means
- * iOS would deliver the URL but the app's router would have no matching
- * route.
+ * Reject mobile callback/logout URIs that do not use the registered iOS
+ * scheme, the RFC 8252 §7.1 private-use URI form, or an allowed route path.
+ * `parseCommaList` is permissive on its own; without this guard a typo like
+ * `dev.cwchanap.vela.dev:/...` (wrong scheme) or
+ * `dev.cwchanap.vela.oauth:/oauth/typo` (path not in allowlist) would
+ * synthesise + deploy successfully and then fail silently on-device.
  *
- * Four checks, in order: case-sensitive scheme prefix, raw-string fragment
+ * Checks, in order: case-sensitive scheme prefix, raw-string fragment
  * (`#`), raw-string whitespace, then a WHATWG URL parse for structural
- * validation (non-empty path).
+ * validation (no authority + path in allowlist).
  *
  * The raw-string fragment and whitespace checks come BEFORE `new URL()`
  * because the WHATWG parser normalises away exactly the characters Cognito
@@ -259,20 +259,17 @@ const DEFAULT_MOBILE_LOGOUT_URLS = [`${MOBILE_OAUTH_SCHEME}://oauth/logout`];
  * through; the raw string is what Cognito receives, so it is what must be
  * checked.
  *
- * Structural validation uses `new URL()` rather than a regex because a
- * regex like `[^\s?#]+` cannot distinguish authority from path in a custom
- * scheme. `dev.cwchanap.vela.oauth://oauth` (authority-only, empty
- * pathname) would pass such a regex — `oauth` matches the path character
- * class — but WHATWG assigns `oauth` to `host` and leaves `pathname` empty.
- * That authority-only case is exactly the kind of fat-fingered config
- * (missing `/callback` or `/logout`) this validator exists to catch.
+ * URI form: RFC 8252 §7.1 requires the single-slash form (`scheme:/path`)
+ * for private-use URI schemes because there is no naming authority. The
+ * `scheme://host/path` (authority) form is rejected — `parsed.host !== ''`
+ * catches it after parsing.
  */
-function assertMobileScheme(label: string, uris: string[]): void {
-  const schemePrefix = `${MOBILE_OAUTH_SCHEME}://`;
+function assertMobileRedirect(label: string, uris: string[], allowedPaths: string[]): void {
+  const schemePrefix = `${MOBILE_OAUTH_SCHEME}:/`;
   for (const uri of uris) {
     if (!uri.startsWith(schemePrefix)) {
       throw new Error(
-        `${label} must use the ${MOBILE_OAUTH_SCHEME}:// scheme (Info.plist only registers that scheme). Got: ${uri}`,
+        `${label} must use the ${MOBILE_OAUTH_SCHEME}:/ scheme (Info.plist only registers that scheme). Got: ${uri}`,
       );
     }
     if (uri.includes('#')) {
@@ -290,12 +287,17 @@ function assertMobileScheme(label: string, uris: string[]): void {
       parsed = new URL(uri);
     } catch {
       throw new Error(
-        `${label} must include a non-empty, non-whitespace path after ${MOBILE_OAUTH_SCHEME}:// (query-only and fragment-only URIs have no path; the app's router would have no matching route). Got: ${uri}`,
+        `${label} must include a valid path after ${MOBILE_OAUTH_SCHEME}:/ (the app's router has no matching route for other paths). Got: ${uri}`,
       );
     }
-    if (parsed.pathname === '' || parsed.pathname === '/') {
+    if (parsed.host !== '') {
       throw new Error(
-        `${label} must include a non-empty, non-whitespace path after ${MOBILE_OAUTH_SCHEME}:// (query-only and fragment-only URIs have no path; the app's router would have no matching route). Got: ${uri}`,
+        `${label} must use the ${MOBILE_OAUTH_SCHEME}:/ form (no authority component), not ${MOBILE_OAUTH_SCHEME}://. RFC 8252 §7.1 requires a single slash for private-use URI schemes. Got: ${uri}`,
+      );
+    }
+    if (!allowedPaths.includes(parsed.pathname)) {
+      throw new Error(
+        `${label} path must be one of [${allowedPaths.join(', ')}] (the app's router has no matching route for other paths). Got: ${uri}`,
       );
     }
   }
@@ -323,8 +325,8 @@ const mobileLogoutUrls = parseCommaList(
   process.env.COGNITO_MOBILE_LOGOUT_URLS,
   DEFAULT_MOBILE_LOGOUT_URLS,
 );
-assertMobileScheme('COGNITO_MOBILE_CALLBACK_URLS', mobileCallbackUrls);
-assertMobileScheme('COGNITO_MOBILE_LOGOUT_URLS', mobileLogoutUrls);
+assertMobileRedirect('COGNITO_MOBILE_CALLBACK_URLS', mobileCallbackUrls, MOBILE_CALLBACK_PATHS);
+assertMobileRedirect('COGNITO_MOBILE_LOGOUT_URLS', mobileLogoutUrls, MOBILE_LOGOUT_PATHS);
 
 const mobileUserPoolClient = new UserPoolClient(this, 'VelaMobileUserPoolClient', {
   userPool,
@@ -408,7 +410,7 @@ git commit -m "feat(cdk): add vela-mobile-client for iOS OAuth (HPA-203)
   no client secret (generateSecret: false explicit).
 - Add synth-time scheme validation: throws if COGNITO_MOBILE_CALLBACK_URLS
   or COGNITO_MOBILE_LOGOUT_URLS contains a URI that does not use the
-  registered dev.cwchanap.vela.oauth:// scheme.
+  registered dev.cwchanap.vela.oauth:/ scheme.
 - Pin three existing nameless hasResourceProperties tests to
   ClientName: 'vela-web-client' to avoid multi-match ambiguity.
 - Update two literal-count assertions (2 -> 3 clients)."
@@ -563,7 +565,7 @@ reference VelaMobileUserPoolClient, not the web or test client."
 
 **Interfaces:**
 
-- Produces: an iOS custom URL scheme declaration. iOS will hand URLs of the form `dev.cwchanap.vela.oauth://…` to the app via `AppDelegate.application(_:open:options:)` (already wired to `ApplicationDelegateProxy.shared`). No Swift changes.
+- Produces: an iOS custom URL scheme declaration. iOS will hand URLs of the form `dev.cwchanap.vela.oauth:/…` to the app via `AppDelegate.application(_:open:options:)` (already wired to `ApplicationDelegateProxy.shared`). No Swift changes.
 
 - [ ] **Step 1: Write the failing plist scheme-registration test**
 
@@ -642,7 +644,7 @@ git add apps/vela-mobile/src-capacitor/ios/App/App/Info.plist apps/vela-mobile/s
 git commit -m "feat(mobile): register dev.cwchanap.vela.oauth URL scheme (HPA-203)
 
 Adds CFBundleURLTypes to Info.plist so iOS hands OAuth callback URLs of
-the form dev.cwchanap.vela.oauth://... to the Vela app. AppDelegate
+the form dev.cwchanap.vela.oauth:/... to the Vela app. AppDelegate
 already forwards opens through ApplicationDelegateProxy.shared, so no
 Swift changes are needed. The scheme is rooted at cwchanap.dev (a
 project-controlled domain) rather than the bundle id (com.vela.app)
@@ -674,10 +676,10 @@ Vela Mobile authenticates against the same Cognito user pool as the web app, thr
 
 The iOS callback uses a custom URL scheme registered in `apps/vela-mobile/src-capacitor/ios/App/App/Info.plist`:
 
-| URI                                        | Purpose                                              |
-| ------------------------------------------ | ---------------------------------------------------- |
-| `dev.cwchanap.vela.oauth://oauth/callback` | Receives the authorization code after Google sign-in |
-| `dev.cwchanap.vela.oauth://oauth/logout`   | Receives the redirect after Cognito sign-out         |
+| URI                                       | Purpose                                              |
+| ----------------------------------------- | ---------------------------------------------------- |
+| `dev.cwchanap.vela.oauth:/oauth/callback` | Receives the authorization code after Google sign-in |
+| `dev.cwchanap.vela.oauth:/oauth/logout`   | Receives the redirect after Cognito sign-out         |
 
 The scheme is rooted at `cwchanap.dev` (a project-controlled domain) rather than the bundle id, because `vela.app` is not a controlled namespace and custom URL schemes are an unowned namespace on iOS.
 
@@ -686,11 +688,11 @@ The scheme is rooted at `cwchanap.dev` (a project-controlled domain) rather than
 CDK env vars (defaults shown):
 
 ```dotenv
-COGNITO_MOBILE_CALLBACK_URLS=dev.cwchanap.vela.oauth://oauth/callback
-COGNITO_MOBILE_LOGOUT_URLS=dev.cwchanap.vela.oauth://oauth/logout
+COGNITO_MOBILE_CALLBACK_URLS=dev.cwchanap.vela.oauth:/oauth/callback
+COGNITO_MOBILE_LOGOUT_URLS=dev.cwchanap.vela.oauth:/oauth/logout
 ```
 
-Both accept comma-separated lists for dev/QA overrides. **Override URIs must use the `dev.cwchanap.vela.oauth://` scheme** — CDK validates this at synth time and throws otherwise, because iOS only registers that one scheme. Vary the path, not the scheme. The mobile client ID is published as the `CognitoMobileUserPoolClientId` CloudFormation output.
+Both accept comma-separated lists for dev/QA overrides. **Override URIs must use the `dev.cwchanap.vela.oauth:/` scheme** (RFC 8252 §7.1 private-use form, single slash) and an allowed path — CDK validates both at synth time and throws otherwise, because iOS only registers that one scheme and the app's router only handles known paths. Vary the path within the allowlist, not the scheme or URI form. The mobile client ID is published as the `CognitoMobileUserPoolClientId` CloudFormation output.
 
 The following M2 work is required before the mobile OAuth flow can complete end-to-end (out of scope for HPA-203):
 
@@ -707,9 +709,9 @@ In the root `.env.example`, locate the existing `CORS_ALLOWED_EXTENSION_IDS` lin
 ```dotenv
 
 # CDK deploy-time only (not read by the Quasar apps; do not mirror into apps/*/.env.example)
-# Override URIs MUST use the dev.cwchanap.vela.oauth:// scheme — CDK throws at synth time otherwise.
-COGNITO_MOBILE_CALLBACK_URLS=dev.cwchanap.vela.oauth://oauth/callback
-COGNITO_MOBILE_LOGOUT_URLS=dev.cwchanap.vela.oauth://oauth/logout
+# Override URIs MUST use the dev.cwchanap.vela.oauth:/ scheme (RFC 8252 §7.1 private-use form) — CDK throws at synth time otherwise.
+COGNITO_MOBILE_CALLBACK_URLS=dev.cwchanap.vela.oauth:/oauth/callback
+COGNITO_MOBILE_LOGOUT_URLS=dev.cwchanap.vela.oauth:/oauth/logout
 ```
 
 (The leading blank line preserves visual separation from the CORS block above.)

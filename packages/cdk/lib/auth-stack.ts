@@ -28,28 +28,44 @@ const LOCAL_CALLBACK_URLS = [
 const LOCAL_LOGOUT_URLS = ['http://localhost:9000/auth/login', 'http://127.0.0.1:9000/auth/login'];
 
 const MOBILE_OAUTH_SCHEME = 'dev.cwchanap.vela.oauth';
-const DEFAULT_MOBILE_CALLBACK_URLS = [`${MOBILE_OAUTH_SCHEME}://oauth/callback`];
-const DEFAULT_MOBILE_LOGOUT_URLS = [`${MOBILE_OAUTH_SCHEME}://oauth/logout`];
+const DEFAULT_MOBILE_CALLBACK_URLS = [`${MOBILE_OAUTH_SCHEME}:/oauth/callback`];
+const DEFAULT_MOBILE_LOGOUT_URLS = [`${MOBILE_OAUTH_SCHEME}:/oauth/logout`];
+
+// Allowed paths for mobile callback/logout URIs. Adding a new path (e.g. a
+// new staging environment) is a deliberate code change, not an env-var
+// change — the env var only controls which of these paths are active.
+const MOBILE_CALLBACK_PATHS = ['/oauth/callback', '/oauth/staging-callback'];
+const MOBILE_LOGOUT_PATHS = ['/oauth/logout', '/oauth/staging-logout'];
 
 /**
- * Reject mobile callback/logout URIs that do not use the registered iOS scheme.
+ * Reject mobile callback/logout URIs that do not use the registered iOS
+ * scheme, the RFC 8252 §7.1 private-use URI form, or an allowed route path.
+ *
  * `parseCommaList` is permissive on its own; without this guard a typo like
- * `dev.cwchanap.vela.dev://...` would synthesise + deploy successfully and
+ * `dev.cwchanap.vela.dev:/...` would synthesise + deploy successfully and
  * then fail silently on-device because iOS would not dispatch the URL to this
  * app — the scheme is not registered in Info.plist, so iOS sends it to a
  * different app (or no app at all), and the OAuth callback is lost.
  *
- * The check is intentionally case-sensitive: the scheme registered in Info.plist
- * is `dev.cwchanap.vela.oauth` (all lowercase) and the override URIs in
- * COGNITO_MOBILE_*_URLS are project-controlled values, not free user input.
- * iOS itself lowercases custom URL schemes before dispatch, so a mixed-case
- * override would still work on-device — but accepting it here would mask a
- * config drift between CDK and Info.plist. Fail strict, fix the config.
+ * The scheme check is intentionally case-sensitive: the scheme registered in
+ * Info.plist is `dev.cwchanap.vela.oauth` (all lowercase) and the override
+ * URIs in COGNITO_MOBILE_*_URLS are project-controlled values, not free user
+ * input. iOS itself lowercases custom URL schemes before dispatch, so a
+ * mixed-case override would still work on-device — but accepting it here
+ * would mask a config drift between CDK and Info.plist. Fail strict, fix
+ * the config.
+ *
+ * URI form: RFC 8252 §7.1 requires the single-slash form
+ * (`scheme:/path`) for private-use URI schemes because there is no naming
+ * authority. The `scheme://host/path` (authority) form is rejected — it
+ * introduces a spurious `host` component and would mask config drift from
+ * the BCP. `new URL()` distinguishes the two: `scheme:/path` has
+ * `host === ''`; `scheme://host/path` sets `host`.
  */
-function assertMobileScheme(label: string, uris: string[]): void {
-  // Four checks, in order: case-sensitive scheme prefix, raw-string fragment
+function assertMobileRedirect(label: string, uris: string[], allowedPaths: string[]): void {
+  // Checks, in order: case-sensitive scheme prefix, raw-string fragment
   // (`#`), raw-string whitespace, then a WHATWG URL parse for structural
-  // validation (non-empty path).
+  // validation (no authority + path in allowlist).
   //
   // The scheme check is intentionally case-sensitive: the scheme registered
   // in Info.plist is `dev.cwchanap.vela.oauth` (all lowercase) and the
@@ -67,34 +83,15 @@ function assertMobileScheme(label: string, uris: string[]): void {
   // (spaces) or silently stripped (tabs/newlines). Validating the parsed
   // representation would let these through; the raw string is what Cognito
   // receives, so it is what must be checked.
-  //
-  // Structural validation uses `new URL()` rather than a regex because a
-  // regex like `[^\s?#]+` cannot distinguish authority from path in a
-  // custom scheme. `dev.cwchanap.vela.oauth://oauth` (authority-only,
-  // empty pathname) would pass such a regex — `oauth` matches the path
-  // character class — but WHATWG assigns `oauth` to `host` and leaves
-  // `pathname` empty. That authority-only case is exactly the kind of
-  // fat-fingered config (missing `/callback` or `/logout`) this validator
-  // exists to catch: Cognito would store it, and iOS would deliver the
-  // URL to the app, but the app's router would have no matching route —
-  // the callback is silently dropped. A path following an authority must
-  // begin with `/`, so `scheme://oauth` and `scheme://oauth/` are both
-  // rejected.
-  //
-  // The first character after the authority must begin a real path
-  // component (not `?`): a query-only (`scheme://?foo`) URI has an empty
-  // `pathname` and would likewise leave the app's router with no matching
-  // route. Fragment-only URIs (`scheme://#bar`) are already rejected by
-  // the raw-string `#` check above before parsing.
-  const schemePrefix = `${MOBILE_OAUTH_SCHEME}://`;
+  const schemePrefix = `${MOBILE_OAUTH_SCHEME}:/`;
   for (const uri of uris) {
     if (!uri.startsWith(schemePrefix)) {
-      // Wrong scheme entirely (e.g. `https://...`, `dev.cwchanap.vela.dev://...`).
+      // Wrong scheme entirely (e.g. `https://...`, `dev.cwchanap.vela.dev:/...`).
       // iOS only registers `dev.cwchanap.vela.oauth`, so any other scheme would
       // dispatch to a different app (or no app at all) — this app would never
       // receive the callback.
       throw new Error(
-        `${label} must use the ${MOBILE_OAUTH_SCHEME}:// scheme (Info.plist only registers that scheme). Got: ${uri}`,
+        `${label} must use the ${MOBILE_OAUTH_SCHEME}:/ scheme (Info.plist only registers that scheme). Got: ${uri}`,
       );
     }
     // Raw-string checks BEFORE `new URL()` parsing. The WHATWG URL parser
@@ -137,18 +134,25 @@ function assertMobileScheme(label: string, uris: string[]): void {
       // present, so a parse failure here means the rest of the URI is
       // malformed. Surface it as a path error — the scheme is fine.
       throw new Error(
-        `${label} must include a non-empty, non-whitespace path after ${MOBILE_OAUTH_SCHEME}:// (query-only and fragment-only URIs have no path; the app's router would have no matching route). Got: ${uri}`,
+        `${label} must include a valid path after ${MOBILE_OAUTH_SCHEME}:/ (the app's router has no matching route for other paths). Got: ${uri}`,
       );
     }
-    if (parsed.pathname === '' || parsed.pathname === '/') {
-      // Right scheme but missing path: `scheme://`, `scheme:// `,
-      // `scheme://?query`, `scheme://#fragment`, `scheme://oauth`
-      // (authority-only — `oauth` is the host, pathname is empty),
-      // `scheme://oauth/` (root path). Cognito would store these; iOS
-      // would deliver the URL to the app, but the app's router would
-      // have no matching route — the callback is silently dropped.
+    // Reject the authority form (`scheme://host/path`). RFC 8252 §7.1
+    // requires the single-slash form (`scheme:/path`) for private-use URI
+    // schemes because there is no naming authority. `startsWith` alone
+    // cannot distinguish `:/` from `://` (the latter contains the former);
+    // `parsed.host !== ''` catches the authority form after parsing.
+    if (parsed.host !== '') {
       throw new Error(
-        `${label} must include a non-empty, non-whitespace path after ${MOBILE_OAUTH_SCHEME}:// (query-only and fragment-only URIs have no path; the app's router would have no matching route). Got: ${uri}`,
+        `${label} must use the ${MOBILE_OAUTH_SCHEME}:/ form (no authority component), not ${MOBILE_OAUTH_SCHEME}://. RFC 8252 §7.1 requires a single slash for private-use URI schemes. Got: ${uri}`,
+      );
+    }
+    // Validate the path against an explicit allowlist. The app's router
+    // only handles known callback/logout routes; a typo like `/oauth/typo`
+    // would deploy silently and the callback would be dropped on-device.
+    if (!allowedPaths.includes(parsed.pathname)) {
+      throw new Error(
+        `${label} path must be one of [${allowedPaths.join(', ')}] (the app's router has no matching route for other paths). Got: ${uri}`,
       );
     }
   }
@@ -320,8 +324,8 @@ export class AuthStack extends Stack {
       process.env.COGNITO_MOBILE_LOGOUT_URLS,
       DEFAULT_MOBILE_LOGOUT_URLS,
     );
-    assertMobileScheme('COGNITO_MOBILE_CALLBACK_URLS', mobileCallbackUrls);
-    assertMobileScheme('COGNITO_MOBILE_LOGOUT_URLS', mobileLogoutUrls);
+    assertMobileRedirect('COGNITO_MOBILE_CALLBACK_URLS', mobileCallbackUrls, MOBILE_CALLBACK_PATHS);
+    assertMobileRedirect('COGNITO_MOBILE_LOGOUT_URLS', mobileLogoutUrls, MOBILE_LOGOUT_PATHS);
 
     const mobileUserPoolClient = new UserPoolClient(this, 'VelaMobileUserPoolClient', {
       userPool,
