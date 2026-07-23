@@ -149,23 +149,23 @@ Vela Mobile authenticates against the same Cognito user pool as the web app, thr
 
 The iOS callback uses a custom URL scheme registered in `apps/vela-mobile/src-capacitor/ios/App/App/Info.plist`:
 
-| URI                                        | Purpose                                              |
-| ------------------------------------------ | ---------------------------------------------------- |
-| `dev.cwchanap.vela.oauth://oauth/callback` | Receives the authorization code after Google sign-in |
-| `dev.cwchanap.vela.oauth://oauth/logout`   | Receives the redirect after Cognito sign-out         |
+| URI                                       | Purpose                                              |
+| ----------------------------------------- | ---------------------------------------------------- |
+| `dev.cwchanap.vela.oauth:/oauth/callback` | Receives the authorization code after Google sign-in |
+| `dev.cwchanap.vela.oauth:/oauth/logout`   | Receives the redirect after Cognito sign-out         |
 
-The scheme is the reverse-DNS of the project-controlled `vela.cwchanap.dev` domain with an `.oauth` suffix (i.e. `dev.cwchanap.vela.oauth`), rather than the bundle id, because `vela.app` is not a controlled namespace and custom URL schemes are an unowned namespace on iOS.
+The scheme is the reverse-DNS of the project-controlled `vela.cwchanap.dev` domain with an `.oauth` suffix (i.e. `dev.cwchanap.vela.oauth`), rather than the bundle id, because `vela.app` is not a controlled namespace and custom URL schemes are an unowned namespace on iOS. The URIs use the RFC 8252 §7.1 private-use URI form (single slash, no authority component) — `scheme:/path`, not `scheme://host/path` — because there is no naming authority for custom URL schemes.
 
 `AppDelegate.application(_:open:options:)` already forwards opens to Capacitor's `ApplicationDelegateProxy`. This is only relevant if the M2 client-side flow uses `@capacitor/browser` + `@capacitor/app` — if M2 uses `ASWebAuthenticationSession` instead, the callback arrives through the session's completion handler and `AppDelegate` is bypassed entirely.
 
 CDK env vars (defaults shown):
 
 ```dotenv
-COGNITO_MOBILE_CALLBACK_URLS=dev.cwchanap.vela.oauth://oauth/callback
-COGNITO_MOBILE_LOGOUT_URLS=dev.cwchanap.vela.oauth://oauth/logout
+COGNITO_MOBILE_CALLBACK_URLS=dev.cwchanap.vela.oauth:/oauth/callback
+COGNITO_MOBILE_LOGOUT_URLS=dev.cwchanap.vela.oauth:/oauth/logout
 ```
 
-Both accept comma-separated lists for dev/QA overrides. **Override URIs must use the `dev.cwchanap.vela.oauth://` scheme** — CDK validates this at synth time and throws otherwise, because iOS only registers that one scheme. Vary the path, not the scheme. The mobile client ID is published as the `CognitoMobileUserPoolClientId` CloudFormation output.
+Both accept comma-separated lists for dev/QA overrides. **Override URIs must use the `dev.cwchanap.vela.oauth:/` scheme** (RFC 8252 §7.1 private-use form, single slash) and an allowed path (`/oauth/callback` or `/oauth/staging-callback` for callbacks; `/oauth/logout` or `/oauth/staging-logout` for logouts) — CDK validates both at synth time and throws otherwise, because iOS only registers that one scheme and the app's router only handles known paths. Vary the path within the allowlist, not the scheme or URI form. The mobile client ID is published as the `CognitoMobileUserPoolClientId` CloudFormation output.
 
 The following M2 work is required before the mobile OAuth flow can complete end-to-end (out of scope for HPA-203):
 
