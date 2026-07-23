@@ -155,6 +155,33 @@ function assertMobileRedirect(label: string, uris: string[], allowedPaths: strin
         `${label} path must be one of [${allowedPaths.join(', ')}] (the app's router has no matching route for other paths). Got: ${uri}`,
       );
     }
+    // Reject query strings. RFC 6749 §3.1.2 requires that a query
+    // component on the registered redirect URI be retained when the
+    // authorization server appends OAuth response parameters. Cognito
+    // appends `code`, `state`, etc. at redirect time, so a static query
+    // like `?code=abc` would produce an ambiguous callback with
+    // duplicate parameter values (e.g. `?code=abc&code=<actual>`),
+    // and different URL parsers select different values. There is no
+    // current need for static query parameters on mobile redirect URIs.
+    if (parsed.search !== '') {
+      throw new Error(
+        `${label} must not include a query string (Cognito appends OAuth response parameters to the redirect URI at redirect time; a static query would collide with them and produce ambiguous duplicate parameters). Got: ${uri}`,
+      );
+    }
+    // Require the raw URI to exactly match the normalized form
+    // `scheme:<allowedPath>`. WHATWG URL parsing normalizes dot segments,
+    // so a raw value like `dev.cwchanap.vela.oauth:/oauth/temporary/../callback`
+    // parses to pathname `/oauth/callback` and would pass the allowlist
+    // above — but the raw string registered with Cognito is not the
+    // allowlisted URI. The env vars are deployment-controlled, so this is
+    // low-risk, but rejecting it preserves the exact-match guarantee the
+    // allowlist is meant to provide.
+    const expected = `${MOBILE_OAUTH_SCHEME}:${parsed.pathname}`;
+    if (uri !== expected) {
+      throw new Error(
+        `${label} must exactly match an allowed mobile redirect URI (dot-segment normalization and other parser transforms are rejected; the raw string registered with Cognito must be the allowlisted URI). Got: ${uri}`,
+      );
+    }
   }
 }
 
