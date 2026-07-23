@@ -455,20 +455,58 @@ describe('AuthStack', () => {
     );
   });
 
-  test('accepts mobile URIs with a query string on an allowed path', () => {
-    // A query string is valid — Cognito appends `?code=...` to the callback
-    // URI. The allowlist check uses `parsed.pathname`, which excludes the
-    // query, so `/oauth/callback?code=abc` matches `/oauth/callback`.
+  test('rejects mobile URIs with a query string on an allowed path', () => {
+    // RFC 6749 §3.1.2 requires that a query component on the registered
+    // redirect URI be retained when the authorization server appends
+    // response parameters. Cognito appends `code`, `state`, etc. at
+    // redirect time, so a static query like `?code=abc` would produce an
+    // ambiguous callback with duplicate parameter values
+    // (e.g. `?code=abc&code=<actual>`). Reject any query string — there
+    // is no current need for static query parameters on mobile redirect
+    // URIs.
     process.env.COGNITO_MOBILE_CALLBACK_URLS = 'dev.cwchanap.vela.oauth:/oauth/callback?code=abc';
 
-    const template = synthesizeTemplate();
-    const clients = template.findResources('AWS::Cognito::UserPoolClient');
-    const mobile = Object.values(clients).find(
-      (c) => c.Properties.ClientName === 'vela-mobile-client',
+    expect(() => synthesizeTemplate()).toThrow(
+      /COGNITO_MOBILE_CALLBACK_URLS must not include a query string \(Cognito appends OAuth response parameters to the redirect URI at redirect time; a static query would collide with them and produce ambiguous duplicate parameters\)\. Got: dev\.cwchanap\.vela\.oauth:\/oauth\/callback\?code=abc/,
     );
-    expect(mobile!.Properties.CallbackURLs).toEqual([
-      'dev.cwchanap.vela.oauth:/oauth/callback?code=abc',
-    ]);
+
+    // A non-reserved query parameter is also rejected — the simpler
+    // "no query" rule is safer than maintaining a reserved-parameter
+    // blocklist, and no current override needs static query params.
+    process.env.COGNITO_MOBILE_CALLBACK_URLS =
+      'dev.cwchanap.vela.oauth:/oauth/callback?environment=staging';
+
+    expect(() => synthesizeTemplate()).toThrow(
+      /COGNITO_MOBILE_CALLBACK_URLS must not include a query string/,
+    );
+
+    process.env.COGNITO_MOBILE_CALLBACK_URLS = '';
+    process.env.COGNITO_MOBILE_LOGOUT_URLS = 'dev.cwchanap.vela.oauth:/oauth/logout?foo=bar';
+
+    expect(() => synthesizeTemplate()).toThrow(
+      /COGNITO_MOBILE_LOGOUT_URLS must not include a query string/,
+    );
+  });
+
+  test('rejects mobile URIs that rely on dot-segment normalization', () => {
+    // WHATWG URL parsing normalizes dot segments, so
+    // `dev.cwchanap.vela.oauth:/oauth/temporary/../callback` parses to
+    // pathname `/oauth/callback` and would pass the path allowlist. But
+    // the raw string registered with Cognito is not the allowlisted URI.
+    // Require the raw URI to exactly match `scheme:<allowedPath>`.
+    process.env.COGNITO_MOBILE_CALLBACK_URLS =
+      'dev.cwchanap.vela.oauth:/oauth/temporary/../callback';
+
+    expect(() => synthesizeTemplate()).toThrow(
+      /COGNITO_MOBILE_CALLBACK_URLS must exactly match an allowed mobile redirect URI \(dot-segment normalization and other parser transforms are rejected; the raw string registered with Cognito must be the allowlisted URI\)\. Got: dev\.cwchanap\.vela\.oauth:\/oauth\/temporary\/\.\.\/callback/,
+    );
+
+    process.env.COGNITO_MOBILE_CALLBACK_URLS = '';
+    process.env.COGNITO_MOBILE_LOGOUT_URLS = 'dev.cwchanap.vela.oauth:/oauth/temporary/../logout';
+
+    expect(() => synthesizeTemplate()).toThrow(
+      /COGNITO_MOBILE_LOGOUT_URLS must exactly match an allowed mobile redirect URI/,
+    );
   });
 
   test('rejects mobile URIs with a fragment-only suffix', () => {
