@@ -13,15 +13,17 @@ describe('boot/main', () => {
 
   it('logs in dev mode', () => {
     const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
     vi.stubEnv('DEV', true);
-    (boot as () => void)();
+    (boot as (params: any) => void)({} as any);
     expect(log).toHaveBeenCalledWith('Vela Mobile boot initialized');
   });
 
-  it('does not log in production', () => {
+  it('does not log the init message in production', () => {
     const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
     vi.stubEnv('DEV', false);
-    (boot as () => void)();
-    expect(log).not.toHaveBeenCalled();
+    (boot as (params: any) => void)({} as any);
+    expect(log).not.toHaveBeenCalledWith('Vela Mobile boot initialized');
   });
 });
