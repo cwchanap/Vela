@@ -99,6 +99,34 @@ function main(): void {
     const message = error instanceof Error ? error.message : String(error);
     throw new Error(`Failed to write environment variables to ${envFilePath}: ${message}`);
   }
+
+  // Generate apps/vela-mobile/.env.production with the mobile API URL
+  const mobileApiUrl = 'https://vela.cwchanap.dev/api/';
+
+  // Validate the mobile API URL is absolute
+  try {
+    const parsed = new URL(mobileApiUrl);
+    if ((parsed.protocol !== 'http:' && parsed.protocol !== 'https:') || !parsed.hostname) {
+      throw new Error('invalid');
+    }
+  } catch {
+    throw new Error(`Mobile API URL must be a valid absolute http(s) URL, got: ${mobileApiUrl}`);
+  }
+
+  const mobileEnvFilePath = path.join(repoRoot, 'apps', 'vela-mobile', '.env.production');
+  const mobileEnvDir = path.dirname(mobileEnvFilePath);
+  fs.mkdirSync(mobileEnvDir, { recursive: true });
+
+  const mobileLines = [`VITE_MOBILE_API_URL=${mobileApiUrl}`];
+  const mobileContent = `${mobileLines.join('\n')}\n`;
+
+  try {
+    fs.writeFileSync(mobileEnvFilePath, mobileContent, 'utf8');
+    console.log(`Wrote environment variables to ${mobileEnvFilePath}`);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`Failed to write environment variables to ${mobileEnvFilePath}: ${message}`);
+  }
 }
 
 main();

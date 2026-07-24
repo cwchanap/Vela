@@ -93,4 +93,21 @@ describe('inject-env', () => {
     expect(envFile).toContain('VITE_COGNITO_OAUTH_DOMAIN=custom.auth.us-east-1.amazoncognito.com');
     expect(envFile).not.toContain('different-prefix');
   });
+
+  test('generates apps/vela-mobile/.env.production with absolute VITE_MOBILE_API_URL', () => {
+    writeOutputs([
+      { OutputKey: 'CognitoUserPoolId', OutputValue: 'us-east-1_testPool' },
+      { OutputKey: 'CognitoUserPoolClientId', OutputValue: 'test-client-id' },
+      { OutputKey: 'CognitoRegion', OutputValue: 'us-east-1' },
+    ]);
+
+    const result = runInjectEnv();
+
+    expect(result.status).toBe(0);
+    const mobileEnvPath = path.join(tempRoot, 'apps', 'vela-mobile', '.env.production');
+    expect(fs.existsSync(mobileEnvPath)).toBe(true);
+    const mobileEnv = fs.readFileSync(mobileEnvPath, 'utf8');
+    expect(mobileEnv).toContain('VITE_MOBILE_API_URL=https://vela.cwchanap.dev/api/');
+    expect(mobileEnv).not.toContain('VITE_MOBILE_API_URL=/api/');
+  });
 });
