@@ -723,3 +723,58 @@ describe('corsMiddleware - extension origins', () => {
     expect(json.error).toContain('CORS policy violation');
   });
 });
+
+describe('Capacitor mobile origins', () => {
+  test('should return isAllowed=true, isWebOrigin=true for capacitor://localhost', () => {
+    const env: Env = {
+      CORS_ALLOWED_ORIGINS: 'https://vela.cwchanap.dev,capacitor://localhost',
+    };
+    const result = isAllowedOrigin('capacitor://localhost', env);
+
+    expect(result.isAllowed).toBe(true);
+    expect(result.isWebOrigin).toBe(true);
+    expect(result.allowedOrigin).toBe('capacitor://localhost');
+  });
+
+  test('should reject capacitor://localhost when not in allowlist', () => {
+    const env: Env = {
+      CORS_ALLOWED_ORIGINS: 'https://vela.cwchanap.dev',
+    };
+    const result = isAllowedOrigin('capacitor://localhost', env);
+
+    expect(result.isAllowed).toBe(false);
+    expect(result.isWebOrigin).toBe(false);
+  });
+
+  test('should allow GET from capacitor://localhost with credentials', async () => {
+    const app = createTestApp({
+      CORS_ALLOWED_ORIGINS: 'capacitor://localhost',
+    });
+    const req = new Request('http://localhost/test', {
+      method: 'GET',
+      headers: { Origin: 'capacitor://localhost' },
+    });
+    const res = await app.request(req);
+    const json = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(json.message).toBe('GET success');
+    expect(res.headers.get('Access-Control-Allow-Origin')).toBe('capacitor://localhost');
+    expect(res.headers.get('Access-Control-Allow-Credentials')).toBe('true');
+  });
+
+  test('should reject GET from capacitor://localhost when not in allowlist', async () => {
+    const app = createTestApp({
+      CORS_ALLOWED_ORIGINS: 'http://localhost:9000',
+    });
+    const req = new Request('http://localhost/test', {
+      method: 'GET',
+      headers: { Origin: 'capacitor://localhost' },
+    });
+    const res = await app.request(req);
+    const json = await res.json();
+
+    expect(res.status).toBe(403);
+    expect(json.error).toContain('CORS policy violation');
+  });
+});
