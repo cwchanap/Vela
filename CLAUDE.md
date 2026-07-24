@@ -171,7 +171,7 @@ The following M2 work is required before the mobile OAuth flow can complete end-
 
 1. Widen the API JWT verifier to accept both web and mobile client audiences (`aws-jwt-verify` `clientId: [webId, mobileId]`).
 2. Wire the mobile client ID into the Capacitor build.
-3. If API calls go through WKWebView, add `capacitor://localhost` to the API CORS allow-list.
+3. ~~If API calls go through WKWebView, add `capacitor://localhost` to the API CORS allow-list.~~ **Done in M1 (HPA-204).** The CORS allowlist is not a security boundary for native clients — `capacitor://localhost` is shared across all Capacitor apps and the middleware passes requests with no `Origin` header. JWT verification (item #1 above) is the actual auth boundary.
 4. Implement PKCE + `state` + `nonce` in the client-side OAuth flow.
 5. Route the authorization request with `identity_provider=Google` (the web app's established pattern via `signInWithRedirect({ provider: 'Google' })`) so the Cognito `/oauth2/authorize` endpoint redirects straight to Google and never renders the Cognito login selection page. Neither the web nor the mobile app pool client has a `CfnManagedLoginBranding` or `CfnUserPoolUICustomizationAttachment` resource — the Cognito Hosted UI / managed-login page is intentionally unused. If M2 instead opens the interactive Cognito page (e.g. without the `identity_provider` parameter), add a branding resource for the mobile client first, or add an authorization-endpoint smoke test that proves the direct-provider redirect.
 
