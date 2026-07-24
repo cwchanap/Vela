@@ -68,4 +68,43 @@ describe('ApiStack', () => {
       }),
     });
   });
+
+  test('includes capacitor://localhost in default CORS_ALLOWED_ORIGINS', () => {
+    const template = synthesizeTemplate();
+
+    template.hasResourceProperties('AWS::Lambda::Function', {
+      Environment: {
+        Variables: Match.objectLike({
+          CORS_ALLOWED_ORIGINS: Match.stringLikeRegexp('capacitor://localhost'),
+        }),
+      },
+    });
+
+    template.hasResourceProperties('AWS::ApiGateway::Method', {
+      HttpMethod: 'OPTIONS',
+      Integration: Match.objectLike({
+        IntegrationResponses: Match.arrayWith([
+          Match.objectLike({
+            ResponseTemplates: Match.objectLike({
+              'application/json': Match.stringLikeRegexp('capacitor://localhost'),
+            }),
+          }),
+        ]),
+      }),
+    });
+  });
+
+  test('passes capacitor://localhost through when CORS_ALLOWED_ORIGINS is overridden', () => {
+    process.env.CORS_ALLOWED_ORIGINS = 'https://staging.example.com,capacitor://localhost';
+
+    const template = synthesizeTemplate();
+
+    template.hasResourceProperties('AWS::Lambda::Function', {
+      Environment: {
+        Variables: Match.objectLike({
+          CORS_ALLOWED_ORIGINS: 'https://staging.example.com,capacitor://localhost',
+        }),
+      },
+    });
+  });
 });
