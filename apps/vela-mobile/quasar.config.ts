@@ -1,14 +1,6 @@
 import { defineConfig } from '#q-app/wrappers';
-
-// The Home page version (import.meta.env.VITE_APP_VERSION, populated by Vite's
-// loadEnv) and the iOS MARKETING_VERSION (synced by
-// scripts/sync-ios-version.mjs) are resolved from the same source:
-// VITE_APP_VERSION env override first, then package.json "version" as
-// fallback (see src/config/index.ts). sync-ios-version.mjs mirrors this
-// resolution so the UI and native bundle never drift. No build.env override is
-// needed here — Vite's loadEnv populates import.meta.env directly from .env
-// files, and a build.env entry would only create a process.env.* define that
-// import.meta.env never reads.
+import { resolve } from 'node:path';
+import { existsSync, readFileSync } from 'node:fs';
 
 export default defineConfig(() => {
   return {
@@ -32,12 +24,53 @@ export default defineConfig(() => {
       vueRouterMode: 'history',
 
       publicPath: '/',
+
+      extendViteConf(viteConf) {
+        viteConf.plugins = viteConf.plugins || [];
+        viteConf.plugins.push({
+          name: 'validate-mobile-api-url',
+          config(_, { mode }) {
+            if (mode !== 'production') return;
+
+            const envPath = resolve(__dirname, '.env.production');
+            if (!existsSync(envPath)) {
+              throw new Error(
+                'apps/vela-mobile/.env.production not found. ' +
+                  'Run packages/cdk/scripts/inject-env.ts after cdk:deploy, ' +
+                  'or create it manually with VITE_MOBILE_API_URL.',
+              );
+            }
+
+            const content = readFileSync(envPath, 'utf8');
+            const match = content.match(/^VITE_MOBILE_API_URL=(.+)$/m);
+            const url = match?.[1]?.trim();
+
+            if (!url) {
+              throw new Error(
+                'VITE_MOBILE_API_URL is missing from apps/vela-mobile/.env.production.',
+              );
+            }
+
+            try {
+              const parsed = new URL(url);
+              if (
+                (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') ||
+                !parsed.hostname
+              ) {
+                throw new Error('invalid');
+              }
+            } catch {
+              throw new Error(
+                `VITE_MOBILE_API_URL must be a valid absolute http(s) URL with a hostname, got: ${url}`,
+              );
+            }
+          },
+        });
+      },
     },
 
     devServer: {
       open: false,
-      // Distinct from apps/vela (9000) so `turbo dev --parallel` doesn't race
-      // for the same listener. API runs on 9005.
       port: 9100,
     },
 
