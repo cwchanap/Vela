@@ -46,7 +46,9 @@ function buildEnv(): Env {
     OPENROUTER_API_KEY: process.env.OPENROUTER_API_KEY,
     CORS_ALLOWED_ORIGINS:
       process.env.CORS_ALLOWED_ORIGINS ||
-      (isDev ? 'http://localhost:9000,http://127.0.0.1:9000' : undefined),
+      (isDev
+        ? 'http://localhost:9000,http://127.0.0.1:9000,http://localhost:9100,http://127.0.0.1:9100,capacitor://localhost'
+        : undefined),
     CORS_ALLOWED_EXTENSION_IDS: process.env.CORS_ALLOWED_EXTENSION_IDS,
     AURORA_DB_CLUSTER_ARN: process.env.AURORA_DB_CLUSTER_ARN,
     AURORA_DB_ENDPOINT: process.env.AURORA_DB_ENDPOINT,
