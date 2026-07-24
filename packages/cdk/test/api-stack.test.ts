@@ -94,6 +94,23 @@ describe('ApiStack', () => {
     });
   });
 
+  test('enables Access-Control-Allow-Credentials in CORS preflight', () => {
+    const template = synthesizeTemplate();
+
+    template.hasResourceProperties('AWS::ApiGateway::Method', {
+      HttpMethod: 'OPTIONS',
+      Integration: Match.objectLike({
+        IntegrationResponses: Match.arrayWith([
+          Match.objectLike({
+            ResponseParameters: Match.objectLike({
+              'method.response.header.Access-Control-Allow-Credentials': "'true'",
+            }),
+          }),
+        ]),
+      }),
+    });
+  });
+
   test('passes capacitor://localhost through when CORS_ALLOWED_ORIGINS is overridden', () => {
     process.env.CORS_ALLOWED_ORIGINS = 'https://staging.example.com,capacitor://localhost';
 
