@@ -68,12 +68,36 @@ describe('validateMobileApiUrl', () => {
     expect(() => validateMobileApiUrl('https://vela.cwchanap.dev/api/')).not.toThrow();
   });
 
-  it('passes for a valid http URL (local dev / simulator)', () => {
+  it('passes for a valid http URL when requireHttps is not set (local dev / simulator)', () => {
+    // The default contract allows http: so dev-mode callers (local/simulator
+    // builds) can target http://localhost or LAN IPs without opting out of
+    // validation. The production build plugin sets requireHttps=true.
     expect(() => validateMobileApiUrl('http://localhost:9005/api/')).not.toThrow();
   });
 
   it('passes for an https URL with a trailing path but no trailing slash', () => {
     expect(() => validateMobileApiUrl('https://staging.vela.example/api')).not.toThrow();
+  });
+
+  it('rejects http: when requireHttps is true (production contract)', () => {
+    // Mirrors src/config/index.ts validateConfig() rejecting http: when PROD
+    // is true. The build-time and runtime contracts must agree, otherwise a
+    // misconfigured release passes the build guard and crashes at app boot.
+    expect(() => validateMobileApiUrl('http://example.com/api/', { requireHttps: true })).toThrow(
+      /must be https: in production/,
+    );
+  });
+
+  it('includes the offending value in the requireHttps message', () => {
+    expect(() => validateMobileApiUrl('http://example.com/api/', { requireHttps: true })).toThrow(
+      'got: http://example.com/api/',
+    );
+  });
+
+  it('passes for an https URL when requireHttps is true', () => {
+    expect(() =>
+      validateMobileApiUrl('https://vela.cwchanap.dev/api/', { requireHttps: true }),
+    ).not.toThrow();
   });
 });
 
@@ -141,6 +165,17 @@ describe('validateMobileApiUrlPlugin', () => {
     process.env.VITE_MOBILE_API_URL = '/api/';
     expect(() => invokeConfigHook('production')).toThrow(
       /must be a valid absolute http\(s\) URL with a hostname/,
+    );
+  });
+
+  it('rejects an http: VITE_MOBILE_API_URL in production (requireHttps contract)', () => {
+    // The plugin only runs in production mode, so it must require HTTPS to
+    // match the runtime validateConfig() contract. Otherwise a misconfigured
+    // release passes the build guard and crashes at app boot.
+    delete process.env.MOBILE_SKIP_ENV_VALIDATION;
+    process.env.VITE_MOBILE_API_URL = 'http://example.com/api/';
+    expect(() => invokeConfigHook('production')).toThrow(
+      /must be https: in production/,
     );
   });
 });
