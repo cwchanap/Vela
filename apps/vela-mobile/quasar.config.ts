@@ -1,5 +1,29 @@
 import { defineConfig } from '#q-app/wrappers';
-import { loadEnv } from 'vite';
+import { existsSync, readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+import { parse } from 'dotenv';
+import { expand } from 'dotenv-expand';
+
+function loadMobileApiUrl(mode: string): string | undefined {
+  const parsed: Record<string, string> = {};
+  const envFiles = ['.env', '.env.local', `.env.${mode}`, `.env.${mode}.local`];
+
+  for (const envFile of envFiles) {
+    const envPath = resolve(__dirname, envFile);
+    if (existsSync(envPath)) {
+      Object.assign(parsed, parse(readFileSync(envPath)));
+    }
+  }
+
+  const processEnv = Object.fromEntries(
+    Object.entries(process.env).filter((entry): entry is [string, string] => entry[1] !== undefined),
+  );
+  const expanded = expand({ parsed, processEnv }).parsed ?? {};
+
+  // Match Vite's precedence: an existing, non-empty process.env value wins
+  // over .env, .env.local, .env.[mode], and .env.[mode].local.
+  return process.env.VITE_MOBILE_API_URL || expanded.VITE_MOBILE_API_URL;
+}
 
 export default defineConfig(() => {
   return {
@@ -37,15 +61,11 @@ export default defineConfig(() => {
             // launch. Set MOBILE_SKIP_ENV_VALIDATION=true to bypass.
             if (process.env.MOBILE_SKIP_ENV_VALIDATION === 'true') return;
 
-            // Validate the same merged env Vite injects at build time. Vite's
-            // loadEnv merges .env, .env.local, .env.[mode], and .env.[mode].local
-            // in precedence order (later files win), then gives existing
-            // process.env values final priority — so a relative override in
-            // .env.production.local would otherwise pass this check while
-            // validateConfig() crashes the native app at boot. loadEnv expands
-            // against a process.env clone and does not mutate the live env.
-            const env = loadEnv(mode, __dirname, 'VITE_');
-            const url = env.VITE_MOBILE_API_URL;
+            // Quasar executes this config during postinstall, so importing Vite
+            // directly would require an otherwise redundant direct dependency.
+            // Use the package's declared dotenv dependencies to reproduce the
+            // same env-file and process.env precedence Vite applies at build time.
+            const url = loadMobileApiUrl(mode);
 
             if (!url) {
               throw new Error(
@@ -59,10 +79,10 @@ export default defineConfig(() => {
             }
 
             try {
-              const parsed = new URL(url);
+              const parsedUrl = new URL(url);
               if (
-                (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') ||
-                !parsed.hostname
+                (parsedUrl.protocol !== 'http:' && parsedUrl.protocol !== 'https:') ||
+                !parsedUrl.hostname
               ) {
                 throw new Error('invalid');
               }
