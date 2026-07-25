@@ -2,20 +2,17 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, test } from 'vitest';
 
-// Parse the plist as XML without adding a runtime dependency.
-// The Info.plist is small and stable; a regex on the raw text is enough
-// to catch "a Capacitor sync wiped the CFBundleURLTypes entry".
-const plistPath = resolve(__dirname, '../../src-capacitor/ios/App/App/Info.plist');
-const plistContent = readFileSync(plistPath, 'utf8');
+// Parse the plists as XML without adding a runtime dependency.
+// The files are small and stable; regexes on the raw text are enough to catch
+// Capacitor/Xcode changes that remove required entries or widen ATS policy.
+const releasePlistPath = resolve(__dirname, '../../src-capacitor/ios/App/App/Info.plist');
+const releasePlistContent = readFileSync(releasePlistPath, 'utf8');
+const debugPlistPath = resolve(__dirname, '../../src-capacitor/ios/App/App/Info-Debug.plist');
+const debugPlistContent = readFileSync(debugPlistPath, 'utf8');
 
-// Binary plists start with `bplist00`. Xcode occasionally converts Info.plist
-// to binary format (e.g. after a merge conflict resolution or an Xcode
-// version upgrade). The regex-based extractors below return null/empty on
-// binary plists, which would surface as misleading "Capacitor sync wiped
-// CFBundleURLTypes" failures. Wrapped in a test() so a binary plist surfaces
-// as a named per-test failure with a clear remediation message, instead of a
-// module-load error that obscures which test file failed.
-const isBinaryPlist = plistContent.startsWith('bplist');
+function isBinaryPlist(content: string): boolean {
+  return content.startsWith('bplist');
+}
 
 function extractSchemes(xml: string): string[] {
   const schemes: string[] = [];
@@ -37,21 +34,15 @@ function extractSchemes(xml: string): string[] {
 // The CFBundleURLTypes <array> contains a nested <array> (CFBundleURLSchemes),
 // so a non-greedy regex on the outer array would stop at the inner </array>.
 // Tracking <array>/</array> depth from the CFBundleURLTypes key is robust to
-// any sibling keys appended after it (NSAppTransportSecurity, etc.) — a
-// previous regex anchored on `</dict>\s*</plist>` and would silently return
-// null (false alarm) the moment CFBundleURLTypes was no longer the last key.
+// any sibling keys appended after it.
 function extractUrlTypeEntry(xml: string): string | null {
   const keyIdx = xml.indexOf('<key>CFBundleURLTypes</key>');
   if (keyIdx === -1) return null;
   const afterKey = xml.slice(keyIdx);
   const arrayOpen = afterKey.match(/\s*<array>/);
   if (!arrayOpen || arrayOpen.index === undefined) return null;
-  // arrayOpen.index points at the start of the leading whitespace; arrayOpen[0]
-  // is the full match including that whitespace, so its length lands us right
-  // after the opening <array> tag.
   const start = keyIdx + arrayOpen.index + arrayOpen[0].length;
 
-  // Walk <array>/</array> tags to find the matching close of the outer array.
   let depth = 1;
   let i = start;
   const tag = /<\/?array>/g;
@@ -67,8 +58,6 @@ function extractUrlTypeEntry(xml: string): string | null {
   if (depth !== 0) return null;
   const outerArrayBody = xml.slice(start, i);
 
-  // Extract the first top-level <dict>...</dict> inside the outer array,
-  // tracking <dict>/</dict> depth so nested dicts don't trip the match.
   const dictOpenIdx = outerArrayBody.indexOf('<dict>');
   if (dictOpenIdx === -1) return null;
   let dictDepth = 0;
@@ -95,28 +84,40 @@ function extractUrlTypeEntry(xml: string): string | null {
 
 function extractKeyValue(xml: string, key: string): string | null {
   const re = new RegExp(`<key>${key}</key>\\s*<string>([^<]+)</string>`);
-  const m = xml.match(re);
-  return m && m[1] !== undefined ? m[1] : null;
+  const match = xml.match(re);
+  return match && match[1] !== undefined ? match[1] : null;
+}
+
+function allowsLocalNetworking(xml: string): boolean {
+  return /<key>NSAllowsLocalNetworking<\/key>\s*<true\/>/.test(xml);
+}
+
+function allowsArbitraryLoads(xml: string): boolean {
+  return /<key>NSAllowsArbitraryLoads<\/key>\s*<true\/>/.test(xml);
 }
 
 describe('iOS Info.plist', () => {
-  test('Info.plist is XML, not binary', () => {
-    // Fail fast with a clear remediation message before the regex-based
-    // assertions below would produce misleading "Capacitor sync wiped
-    // CFBundleURLTypes" failures on a binary plist.
+  test('Release Info.plist is XML, not binary', () => {
     expect(
-      !isBinaryPlist,
-      `${plistPath} is a binary plist. Convert it back to XML: plutil -convert xml1 "${plistPath}". The Info.plist test assumes XML text.`,
+      !isBinaryPlist(releasePlistContent),
+      `${releasePlistPath} is a binary plist. Convert it back to XML: plutil -convert xml1 "${releasePlistPath}". The Info.plist test assumes XML text.`,
+    ).toBe(true);
+  });
+
+  test('Debug Info-Debug.plist is XML, not binary', () => {
+    expect(
+      !isBinaryPlist(debugPlistContent),
+      `${debugPlistPath} is a binary plist. Convert it back to XML: plutil -convert xml1 "${debugPlistPath}". The Info.plist test assumes XML text.`,
     ).toBe(true);
   });
 
   test('registers the dev.cwchanap.vela.oauth custom URL scheme', () => {
-    const schemes = extractSchemes(plistContent);
+    const schemes = extractSchemes(releasePlistContent);
     expect(schemes).toContain('dev.cwchanap.vela.oauth');
   });
 
   test('CFBundleURLTypes entry declares CFBundleURLName and CFBundleTypeRole', () => {
-    const entry = extractUrlTypeEntry(plistContent);
+    const entry = extractUrlTypeEntry(releasePlistContent);
     expect(
       entry,
       'CFBundleURLTypes dict entry missing — Capacitor sync may have wiped it',
@@ -128,37 +129,28 @@ describe('iOS Info.plist', () => {
 
     expect(urlName, 'CFBundleURLName missing inside CFBundleURLTypes dict').not.toBeNull();
     expect(typeRole, 'CFBundleTypeRole missing inside CFBundleURLTypes dict').not.toBeNull();
-    // Editor is the correct role for an app that handles OAuth callbacks it
-    // initiates; Viewer would still work but Editor is the documented convention.
     expect(typeRole).toBe('Editor');
   });
 
-  // Physical-device development points the Capacitor app at the dev Mac's LAN
-  // IP over plain HTTP (see apps/vela-mobile/.env.example). ATS blocks HTTP by
-  // default, so Info.plist must carry a narrowly scoped exception.
-  // NSAllowsLocalNetworking permits HTTP to local network resources (private
-  // IP addresses, .local, .localdomain) without opening up arbitrary HTTP to
-  // the internet — broader exceptions (NSAllowsArbitraryLoads) would require
-  // App Store justification and are intentionally absent.
-  test('declares a narrowly scoped NSAppTransportSecurity exception for local networking', () => {
-    const hasKey = /<key>NSAppTransportSecurity<\/key>\s*<dict>/.test(plistContent);
+  test('Debug plist allows local networking without arbitrary HTTP loads', () => {
     expect(
-      hasKey,
-      'NSAppTransportSecurity missing — physical-device HTTP dev to a LAN IP is blocked by ATS',
+      allowsLocalNetworking(debugPlistContent),
+      'Debug Info-Debug.plist must set NSAllowsLocalNetworking=true for LAN HTTP development',
     ).toBe(true);
-
-    const allowsLocalNetworking = /<key>NSAllowsLocalNetworking<\/key>\s*<true\/>/.test(
-      plistContent,
-    );
     expect(
-      allowsLocalNetworking,
-      'NSAppTransportSecurity must set NSAllowsLocalNetworking=true for LAN HTTP dev',
-    ).toBe(true);
+      allowsArbitraryLoads(debugPlistContent),
+      'NSAllowsArbitraryLoads=true is too broad — use NSAllowsLocalNetworking for Debug builds',
+    ).toBe(false);
+  });
 
-    const allowsArbitraryLoads = /<key>NSAllowsArbitraryLoads<\/key>\s*<true\/>/.test(plistContent);
+  test('Release plist does not include an ATS exception', () => {
     expect(
-      allowsArbitraryLoads,
-      'NSAllowsArbitraryLoads=true is too broad — use NSAllowsLocalNetworking for dev-only LAN HTTP',
+      allowsLocalNetworking(releasePlistContent),
+      'Release Info.plist must not allow local HTTP networking',
+    ).toBe(false);
+    expect(
+      allowsArbitraryLoads(releasePlistContent),
+      'Release Info.plist must not allow arbitrary HTTP loads',
     ).toBe(false);
   });
 });
