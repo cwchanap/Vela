@@ -16,9 +16,20 @@ export interface AuthStackProps extends StackProps {}
 
 const DEFAULT_COGNITO_DOMAIN_PREFIX = 'vela-cwchanap-auth';
 
-const PRODUCTION_CALLBACK_URLS = ['https://vela.cwchanap.dev/auth/callback'];
+// Default production callback/logout URLs. The domain is resolved inside the
+// constructor from VELA_DOMAIN_NAME (same env var StaticWebStack reads) so a
+// non-production deployment registers matching Cognito redirect URIs instead
+// of the production domain. Reading at construct time (not module load) lets
+// tests set VELA_DOMAIN_NAME in beforeEach and have it take effect.
+const DEFAULT_WEBSITE_DOMAIN = 'vela.cwchanap.dev';
 
-const PRODUCTION_LOGOUT_URLS = ['https://vela.cwchanap.dev/auth/login'];
+function productionCallbackUrls(websiteDomain: string): string[] {
+  return [`https://${websiteDomain}/auth/callback`];
+}
+
+function productionLogoutUrls(websiteDomain: string): string[] {
+  return [`https://${websiteDomain}/auth/login`];
+}
 
 const LOCAL_CALLBACK_URLS = [
   'http://localhost:9000/auth/callback',
@@ -296,8 +307,9 @@ export class AuthStack extends Stack {
       },
     });
 
-    const defaultCallbackUrls = [...PRODUCTION_CALLBACK_URLS, ...LOCAL_CALLBACK_URLS];
-    const defaultLogoutUrls = [...PRODUCTION_LOGOUT_URLS, ...LOCAL_LOGOUT_URLS];
+    const websiteDomain = process.env.VELA_DOMAIN_NAME || DEFAULT_WEBSITE_DOMAIN;
+    const defaultCallbackUrls = [...productionCallbackUrls(websiteDomain), ...LOCAL_CALLBACK_URLS];
+    const defaultLogoutUrls = [...productionLogoutUrls(websiteDomain), ...LOCAL_LOGOUT_URLS];
 
     const callbackUrls = parseCommaList(process.env.COGNITO_CALLBACK_URLS, defaultCallbackUrls);
     const logoutUrls = parseCommaList(process.env.COGNITO_LOGOUT_URLS, defaultLogoutUrls);

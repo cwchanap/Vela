@@ -21,7 +21,10 @@ export class StorageStack extends Stack {
       frontendOrigins.push('http://localhost:9000');
     }
 
-    const domainName = 'vela.cwchanap.dev';
+    // Same env var as StaticWebStack/AuthStack/ApiStack so a non-production
+    // deployment's S3 CORS policy matches its custom domain. Defaults to the
+    // production domain for backward compatibility.
+    const domainName = process.env.VELA_DOMAIN_NAME || 'vela.cwchanap.dev';
 
     if (frontendOrigins.length === 0) {
       frontendOrigins.push(`https://${domainName}`);

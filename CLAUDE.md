@@ -34,7 +34,7 @@ Turbo skips workspaces that lack the requested script. Sibling apps use `compile
 
 ### Mobile build env injection (ordering requirement)
 
-`apps/vela-mobile/.env.production` is gitignored and must be generated before a production mobile build. It is written by `packages/cdk/scripts/inject-env.ts`, which derives the web app's env from `cdk-outputs.json` and writes a hardcoded absolute `VITE_MOBILE_API_URL` for the Capacitor app (the web app's relative `/api/` path is unusable in a native WebView).
+`apps/vela-mobile/.env.production` is gitignored and must be generated before a production mobile build. It is written by `packages/cdk/scripts/inject-env.ts`, which derives the web app's env from `cdk-outputs.json` and writes an absolute `VITE_MOBILE_API_URL` for the Capacitor app (the web app's relative `/api/` path is unusable in a native WebView). The mobile URL and the web app's Cognito redirect URLs are derived from the `WebsiteOrigin` / `MobileApiURL` CloudFormation outputs (emitted by `StaticWebStack`), so a non-production deployment (different `VELA_DOMAIN_NAME`) routes mobile traffic to its own backend instead of production. `VELA_DOMAIN_NAME` also drives the CloudFront custom domain, CORS defaults (`ApiStack` / `StorageStack`), and Cognito redirect URIs (`AuthStack`).
 
 **Required ordering for any production mobile build (local or CI):**
 
@@ -42,7 +42,7 @@ Turbo skips workspaces that lack the requested script. Sibling apps use `compile
 2. `bun scripts/inject-env.ts` (from `packages/cdk/`) → writes `apps/vela-mobile/.env.production`.
 3. `bun run build:mobile` (or `bun run build` filtered to `@vela/mobile`).
 
-The `validate-mobile-api-url` Vite plugin in `apps/vela-mobile/quasar.config.ts` enforces this at build time: in production mode it throws if `.env.production` is missing or `VITE_MOBILE_API_URL` is absent/invalid. The check is **on by default**. CI pipelines that run `inject-env.ts` (or otherwise guarantee `.env.production`) before the build may set `MOBILE_SKIP_ENV_VALIDATION=true` to bypass it; the previous blanket `CI === 'true'` skip was removed because it silently disabled the only build-time guard, leaving a launch-time `validateConfig` throw as the sole (late) failure mode. If `.env.production` is missing, the app crashes at boot via `src/config/index.ts` `validateConfig`.
+The `validate-mobile-api-url` Vite plugin (extracted to `apps/vela-mobile/build/validate-mobile-api-url.ts`, registered from `quasar.config.ts`) enforces this at build time: in production mode it throws if `.env.production` is missing or `VITE_MOBILE_API_URL` is absent/invalid. The check is **on by default**. CI pipelines that run `inject-env.ts` (or otherwise guarantee `.env.production`) before the build may set `MOBILE_SKIP_ENV_VALIDATION=true` to bypass it; the previous blanket `CI === 'true'` skip was removed because it silently disabled the only build-time guard, leaving a launch-time `validateConfig` throw as the sole (late) failure mode. The PR CI workflow (`build-lint.yml`) sets `VITE_MOBILE_API_URL=https://example.invalid/api/` instead of bypassing, so the normal validation path executes on every PR. If `.env.production` is missing, the app crashes at boot via `src/config/index.ts` `validateConfig`.
 
 ### Vela App (from apps/vela/)
 

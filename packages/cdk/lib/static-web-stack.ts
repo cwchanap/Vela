@@ -40,7 +40,10 @@ export class StaticWebStack extends Stack {
     super(scope, id, props);
 
     const { auth, database, api } = props;
-    const domainName = 'vela.cwchanap.dev';
+    // Configurable via env var so the same CDK app can target a non-production
+    // domain (staging, temp env, alternate account). Defaults to the
+    // production custom domain for backward compatibility.
+    const domainName = process.env.VELA_DOMAIN_NAME || 'vela.cwchanap.dev';
 
     const certificateArn = process.env.CLOUDFRONT_CERT_ARN || process.env.ACM_CERT_ARN;
 
@@ -139,6 +142,29 @@ function handler(event) {
     new CfnOutput(this, 'ApiURL', {
       value: api.api.url,
       description: 'API Gateway URL',
+    });
+
+    // The origin users actually visit: the custom domain when configured, the
+    // CloudFront distribution domain otherwise. inject-env.ts derives the web
+    // app's Cognito redirect URLs from this so they match the URIs registered
+    // in AuthStack (which reads the same VELA_DOMAIN_NAME env var).
+    const websiteOrigin = domainName
+      ? `https://${domainName}`
+      : `https://${distribution.distributionDomainName}`;
+
+    new CfnOutput(this, 'WebsiteOrigin', {
+      value: websiteOrigin,
+      description: 'Website origin (custom domain when configured, CloudFront domain otherwise)',
+    });
+
+    // Native builds cannot use the web app's relative '/api/' path (no web
+    // origin in a Capacitor WebView), so inject-env.ts reads this absolute URL
+    // when generating apps/vela-mobile/.env.production. Derived from the same
+    // origin as the web app's redirect URLs so mobile and web share a backend.
+    new CfnOutput(this, 'MobileApiURL', {
+      value: `${websiteOrigin}/api/`,
+      description:
+        'Absolute API URL for the Capacitor mobile app (web app uses relative /api/ behind CloudFront)',
     });
 
     new CfnOutput(this, 'DynamoDBChatHistoryTableName', {
