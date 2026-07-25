@@ -51,7 +51,15 @@ export default defineConfig(() => {
             const match = content.match(/^VITE_MOBILE_API_URL=(.+)$/m);
             // Strip surrounding quotes so a hand-authored quoted value
             // (e.g. VITE_MOBILE_API_URL="https://...") parses correctly.
-            const url = match?.[1]?.trim().replace(/^["']|["']$/g, '');
+            const fileUrl = match?.[1]?.trim().replace(/^["']|["']$/g, '');
+
+            // Vite gives process.env vars prefixed with VITE_ precedence over
+            // .env files, so a release environment that exports an invalid
+            // VITE_MOBILE_API_URL would override a valid file value. Validate
+            // the effective value that Vite will actually inject, not just the
+            // file contents — otherwise the build succeeds and the native app
+            // crashes at boot via validateConfig().
+            const url = process.env.VITE_MOBILE_API_URL ?? fileUrl;
 
             if (!url) {
               throw new Error(

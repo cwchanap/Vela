@@ -29,6 +29,13 @@ jobs:
         run: bun run lint
 
       - name: Build frontend
+        # This workflow is a lint+build smoke test from a clean checkout, not
+        # a deployment: there is no cdk-outputs.json to feed inject-env.ts, so
+        # apps/vela-mobile/.env.production (gitignored) is absent. Bypass the
+        # build-time mobile env guard rather than synthesizing CDK here. The
+        # guard still fires for real release builds that run inject-env.ts.
+        env:
+          MOBILE_SKIP_ENV_VALIDATION: 'true'
         run: bun run build
 
       - name: Build Lambda function
