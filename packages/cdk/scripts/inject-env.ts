@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { DEFAULT_WEBSITE_DOMAIN } from '../lib/constants';
 
 type OutputEntry = {
   OutputKey?: string;
@@ -40,14 +41,14 @@ function loadOutputs(outputsPath: string): OutputMap | null {
 // Must match the DEFAULT_COGNITO_DOMAIN_PREFIX in AuthStack
 const DEFAULT_COGNITO_DOMAIN_PREFIX = 'vela-cwchanap-auth';
 
-// Must match DEFAULT_WEBSITE_DOMAIN in AuthStack. Used as the fallback for the
+// DEFAULT_WEBSITE_DOMAIN is imported from ../lib/constants so this script and
+// the CDK stacks share a single source of truth. Used as the fallback for the
 // website origin when WebsiteOrigin is absent (older stack deployed before
 // this output existed) AND VELA_DOMAIN_NAME is unset. AuthStack registers
 // Cognito callback/logout URLs from `VELA_DOMAIN_NAME || DEFAULT_WEBSITE_DOMAIN`,
 // so the SPA's redirect URLs must be derived from the same expression — NOT
 // from CloudFrontDomain, which Cognito does not have registered and would
 // break OAuth on the first deployment of the multi-env refactor.
-const DEFAULT_WEBSITE_DOMAIN = 'vela.cwchanap.dev';
 
 function main(): void {
   // cdk-outputs.json is written in the @vela/cdk package root

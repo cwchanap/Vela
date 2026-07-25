@@ -8,6 +8,7 @@ import { AuthStack } from './auth-stack';
 import { DatabaseStack } from './database-stack';
 import { StorageStack } from './storage-stack';
 import { getTtsAudioBucketName } from './naming';
+import { DEFAULT_WEBSITE_DOMAIN } from './constants';
 
 declare const __dirname: string;
 declare const process: any;
@@ -33,7 +34,7 @@ export class ApiStack extends Stack {
     // VELA_DOMAIN_NAME (same env var StaticWebStack/AuthStack read) keeps the
     // production origin in sync with the deployed custom domain for
     // non-production deployments. Defaults to the production domain.
-    const websiteDomain = process.env.VELA_DOMAIN_NAME || 'vela.cwchanap.dev';
+    const websiteDomain = process.env.VELA_DOMAIN_NAME || DEFAULT_WEBSITE_DOMAIN;
     const defaultAllowedOrigins = `https://${websiteDomain},http://localhost:9000,http://127.0.0.1:9000,http://localhost:9100,http://127.0.0.1:9100,capacitor://localhost`;
     const corsAllowedOrigins = process.env.CORS_ALLOWED_ORIGINS || defaultAllowedOrigins;
     let allowedOriginsList = corsAllowedOrigins
