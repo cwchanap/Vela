@@ -1,11 +1,10 @@
 // @vitest-environment node
 //
-// The plugin imports `vite` (for `loadEnv` and the `Plugin` type), which pulls
-// in esbuild. esbuild requires a working `TextEncoder` whose output is a true
-// `Uint8Array` instance; jsdom's TextEncoder breaks that invariant, so the
-// import fails under the default jsdom environment. Node's built-in
-// TextEncoder is correct, and these tests need no DOM globals, so use the
-// node environment instead.
+// The plugin's config hook invokes loadMobileApiUrl, which reads .env files
+// from disk via node:fs and reads process.env directly. The tests also
+// reassign process.env wholesale in afterEach to isolate env state between
+// cases. No DOM globals are needed, so the node environment is the natural
+// fit for these filesystem-and-env-driven tests.
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   validateMobileApiUrl,

@@ -2,6 +2,7 @@ import { Stack, StackProps, RemovalPolicy } from 'aws-cdk-lib';
 import { Bucket, BlockPublicAccess, HttpMethods } from 'aws-cdk-lib/aws-s3';
 import { Construct } from 'constructs';
 import { getTtsAudioBucketName } from './naming';
+import { DEFAULT_WEBSITE_DOMAIN } from './constants';
 
 declare const process: any;
 
@@ -24,7 +25,7 @@ export class StorageStack extends Stack {
     // Same env var as StaticWebStack/AuthStack/ApiStack so a non-production
     // deployment's S3 CORS policy matches its custom domain. Defaults to the
     // production domain for backward compatibility.
-    const domainName = process.env.VELA_DOMAIN_NAME || 'vela.cwchanap.dev';
+    const domainName = process.env.VELA_DOMAIN_NAME || DEFAULT_WEBSITE_DOMAIN;
 
     if (frontendOrigins.length === 0) {
       frontendOrigins.push(`https://${domainName}`);

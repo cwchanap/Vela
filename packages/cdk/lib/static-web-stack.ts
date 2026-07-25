@@ -24,6 +24,7 @@ import { DatabaseStack } from './database-stack';
 import { StorageStack } from './storage-stack';
 import { ApiStack } from './api-stack';
 import { getTtsAudioBucketName } from './naming';
+import { DEFAULT_WEBSITE_DOMAIN } from './constants';
 
 declare const __dirname: string;
 declare const process: any;
@@ -43,7 +44,7 @@ export class StaticWebStack extends Stack {
     // Configurable via env var so the same CDK app can target a non-production
     // domain (staging, temp env, alternate account). Defaults to the
     // production custom domain for backward compatibility.
-    const domainName = process.env.VELA_DOMAIN_NAME || 'vela.cwchanap.dev';
+    const domainName = process.env.VELA_DOMAIN_NAME || DEFAULT_WEBSITE_DOMAIN;
 
     const certificateArn = process.env.CLOUDFRONT_CERT_ARN || process.env.ACM_CERT_ARN;
 

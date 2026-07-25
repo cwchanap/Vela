@@ -11,6 +11,7 @@ import {
 } from 'aws-cdk-lib/aws-cognito';
 import * as secretsmanager from 'aws-cdk-lib/aws-secretsmanager';
 import { Construct } from 'constructs';
+import { DEFAULT_WEBSITE_DOMAIN } from './constants';
 
 export interface AuthStackProps extends StackProps {}
 
@@ -21,7 +22,6 @@ const DEFAULT_COGNITO_DOMAIN_PREFIX = 'vela-cwchanap-auth';
 // non-production deployment registers matching Cognito redirect URIs instead
 // of the production domain. Reading at construct time (not module load) lets
 // tests set VELA_DOMAIN_NAME in beforeEach and have it take effect.
-const DEFAULT_WEBSITE_DOMAIN = 'vela.cwchanap.dev';
 
 function productionCallbackUrls(websiteDomain: string): string[] {
   return [`https://${websiteDomain}/auth/callback`];
