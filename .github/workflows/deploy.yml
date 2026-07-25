@@ -49,6 +49,17 @@ jobs:
     environment: production
     env:
       GOOGLE_OAUTH_CLIENT_ID: ${{ vars.GOOGLE_OAUTH_CLIENT_ID }}
+      # Single source of truth for the website domain. Both inject-env.ts
+      # (fallback when WebsiteOrigin CFN output is absent) and the CDK stacks
+      # (AuthStack callback/logout URLs, ApiStack/StorageStack CORS, custom
+      # CloudFront domain) read VELA_DOMAIN_NAME. Setting it here propagates
+      # to every step via job-level env inheritance, so the SPA's Cognito
+      # redirect URLs and Cognito's registered callbacks always agree — even
+      # on the first deployment of a non-production stack whose prior deploy
+      # lacks the WebsiteOrigin output. Leave unset for the production default
+      # (vela.cwchanap.dev); both inject-env.ts and the CDK stacks fall back
+      # to that same constant when VELA_DOMAIN_NAME is empty.
+      VELA_DOMAIN_NAME: ${{ vars.VELA_DOMAIN_NAME }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4

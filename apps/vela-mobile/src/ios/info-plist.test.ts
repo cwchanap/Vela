@@ -132,4 +132,33 @@ describe('iOS Info.plist', () => {
     // initiates; Viewer would still work but Editor is the documented convention.
     expect(typeRole).toBe('Editor');
   });
+
+  // Physical-device development points the Capacitor app at the dev Mac's LAN
+  // IP over plain HTTP (see apps/vela-mobile/.env.example). ATS blocks HTTP by
+  // default, so Info.plist must carry a narrowly scoped exception.
+  // NSAllowsLocalNetworking permits HTTP to local network resources (private
+  // IP addresses, .local, .localdomain) without opening up arbitrary HTTP to
+  // the internet — broader exceptions (NSAllowsArbitraryLoads) would require
+  // App Store justification and are intentionally absent.
+  test('declares a narrowly scoped NSAppTransportSecurity exception for local networking', () => {
+    const hasKey = /<key>NSAppTransportSecurity<\/key>\s*<dict>/.test(plistContent);
+    expect(
+      hasKey,
+      'NSAppTransportSecurity missing — physical-device HTTP dev to a LAN IP is blocked by ATS',
+    ).toBe(true);
+
+    const allowsLocalNetworking = /<key>NSAllowsLocalNetworking<\/key>\s*<true\/>/.test(
+      plistContent,
+    );
+    expect(
+      allowsLocalNetworking,
+      'NSAppTransportSecurity must set NSAllowsLocalNetworking=true for LAN HTTP dev',
+    ).toBe(true);
+
+    const allowsArbitraryLoads = /<key>NSAllowsArbitraryLoads<\/key>\s*<true\/>/.test(plistContent);
+    expect(
+      allowsArbitraryLoads,
+      'NSAllowsArbitraryLoads=true is too broad — use NSAllowsLocalNetworking for dev-only LAN HTTP',
+    ).toBe(false);
+  });
 });

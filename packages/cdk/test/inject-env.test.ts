@@ -37,7 +37,7 @@ describe('inject-env', () => {
   // Minimal outputs that satisfy all required fields. Tests add/override as
   // needed. WebsiteOrigin + MobileApiURL are emitted by StaticWebStack after
   // the multi-env refactor; included here so the default fixture exercises the
-  // output-driven path rather than the CloudFrontDomain fallback.
+  // output-driven path rather than the DEFAULT_WEBSITE_DOMAIN fallback.
   const BASE_OUTPUTS = [
     { OutputKey: 'CognitoUserPoolId', OutputValue: 'us-east-1_testPool' },
     { OutputKey: 'CognitoUserPoolClientId', OutputValue: 'test-client-id' },
@@ -140,7 +140,14 @@ describe('inject-env', () => {
     expect(mobileEnv).not.toContain('vela.cwchanap.dev');
   });
 
-  test('falls back to CloudFrontDomain output when WebsiteOrigin is absent (older stack)', () => {
+  // Older stacks deployed before the WebsiteOrigin output existed have only
+  // CloudFrontDomain. The fallback must NOT use CloudFrontDomain — AuthStack
+  // registers Cognito callbacks for VELA_DOMAIN_NAME (default vela.cwchanap.dev),
+  // not the CloudFront domain, so a CloudFront-derived callback URL would be
+  // rejected by Cognito on the first deployment of the multi-env refactor.
+  // Instead the fallback derives from VELA_DOMAIN_NAME (same env var AuthStack
+  // reads) and finally DEFAULT_WEBSITE_DOMAIN, matching AuthStack's expression.
+  test('falls back to DEFAULT_WEBSITE_DOMAIN (not CloudFrontDomain) when WebsiteOrigin is absent', () => {
     writeOutputs([
       { OutputKey: 'CognitoUserPoolId', OutputValue: 'us-east-1_testPool' },
       { OutputKey: 'CognitoUserPoolClientId', OutputValue: 'test-client-id' },
@@ -148,31 +155,61 @@ describe('inject-env', () => {
       { OutputKey: 'CloudFrontDomain', OutputValue: 'd1234567890abc.cloudfront.net' },
     ]);
 
-    const result = runInjectEnv();
+    const result = runInjectEnv({ VELA_DOMAIN_NAME: undefined });
 
     expect(result.status).toBe(0);
     const webEnv = fs.readFileSync(path.join(tempRoot, 'apps', 'vela', '.env.production'), 'utf8');
     expect(webEnv).toContain(
-      'VITE_COGNITO_REDIRECT_SIGN_IN=https://d1234567890abc.cloudfront.net/auth/callback',
+      'VITE_COGNITO_REDIRECT_SIGN_IN=https://vela.cwchanap.dev/auth/callback',
     );
+    expect(webEnv).not.toContain('cloudfront.net');
     const mobileEnv = fs.readFileSync(
       path.join(tempRoot, 'apps', 'vela-mobile', '.env.production'),
       'utf8',
     );
-    expect(mobileEnv).toContain('VITE_MOBILE_API_URL=https://d1234567890abc.cloudfront.net/api/');
+    expect(mobileEnv).toContain('VITE_MOBILE_API_URL=https://vela.cwchanap.dev/api/');
+    expect(mobileEnv).not.toContain('cloudfront.net');
   });
 
-  test('throws when neither WebsiteOrigin nor CloudFrontDomain is present', () => {
+  test('falls back to VELA_DOMAIN_NAME when WebsiteOrigin is absent and VELA_DOMAIN_NAME is set', () => {
     writeOutputs([
       { OutputKey: 'CognitoUserPoolId', OutputValue: 'us-east-1_testPool' },
       { OutputKey: 'CognitoUserPoolClientId', OutputValue: 'test-client-id' },
       { OutputKey: 'CognitoRegion', OutputValue: 'us-east-1' },
+      { OutputKey: 'CloudFrontDomain', OutputValue: 'd1234567890abc.cloudfront.net' },
     ]);
 
-    const result = runInjectEnv();
+    const result = runInjectEnv({ VELA_DOMAIN_NAME: 'staging.vela.example' });
 
-    expect(result.status).not.toBe(0);
-    expect(result.stderr).toContain('Missing WebsiteOrigin');
+    expect(result.status).toBe(0);
+    const webEnv = fs.readFileSync(path.join(tempRoot, 'apps', 'vela', '.env.production'), 'utf8');
+    expect(webEnv).toContain(
+      'VITE_COGNITO_REDIRECT_SIGN_IN=https://staging.vela.example/auth/callback',
+    );
+    expect(webEnv).not.toContain('cloudfront.net');
+  });
+
+  // GitHub Actions evaluates an unset `vars.VELA_DOMAIN_NAME` to an empty
+  // string, not undefined. Both inject-env.ts and the CDK stacks must treat
+  // empty string as "unset" and fall through to DEFAULT_WEBSITE_DOMAIN, so
+  // the production default stays consistent when the workflow-level env var
+  // is left unconfigured.
+  test('treats empty-string VELA_DOMAIN_NAME as unset (GitHub Actions unset-var semantics)', () => {
+    writeOutputs([
+      { OutputKey: 'CognitoUserPoolId', OutputValue: 'us-east-1_testPool' },
+      { OutputKey: 'CognitoUserPoolClientId', OutputValue: 'test-client-id' },
+      { OutputKey: 'CognitoRegion', OutputValue: 'us-east-1' },
+      { OutputKey: 'CloudFrontDomain', OutputValue: 'd1234567890abc.cloudfront.net' },
+    ]);
+
+    const result = runInjectEnv({ VELA_DOMAIN_NAME: '' });
+
+    expect(result.status).toBe(0);
+    const webEnv = fs.readFileSync(path.join(tempRoot, 'apps', 'vela', '.env.production'), 'utf8');
+    expect(webEnv).toContain(
+      'VITE_COGNITO_REDIRECT_SIGN_IN=https://vela.cwchanap.dev/auth/callback',
+    );
+    expect(webEnv).not.toContain('cloudfront.net');
   });
 
   test('VITE_MOBILE_API_URL env var overrides the CFN output', () => {

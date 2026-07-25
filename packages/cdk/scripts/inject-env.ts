@@ -40,6 +40,15 @@ function loadOutputs(outputsPath: string): OutputMap | null {
 // Must match the DEFAULT_COGNITO_DOMAIN_PREFIX in AuthStack
 const DEFAULT_COGNITO_DOMAIN_PREFIX = 'vela-cwchanap-auth';
 
+// Must match DEFAULT_WEBSITE_DOMAIN in AuthStack. Used as the fallback for the
+// website origin when WebsiteOrigin is absent (older stack deployed before
+// this output existed) AND VELA_DOMAIN_NAME is unset. AuthStack registers
+// Cognito callback/logout URLs from `VELA_DOMAIN_NAME || DEFAULT_WEBSITE_DOMAIN`,
+// so the SPA's redirect URLs must be derived from the same expression — NOT
+// from CloudFrontDomain, which Cognito does not have registered and would
+// break OAuth on the first deployment of the multi-env refactor.
+const DEFAULT_WEBSITE_DOMAIN = 'vela.cwchanap.dev';
+
 function main(): void {
   // cdk-outputs.json is written in the @vela/cdk package root
   const outputsPath = path.resolve(process.cwd(), 'cdk-outputs.json');
@@ -60,19 +69,19 @@ function main(): void {
 
   // Derive the website origin from CFN outputs so a non-production deployment
   // (different VELA_DOMAIN_NAME) generates redirect URLs that match the URIs
-  // AuthStack registered in Cognito. Fall back to the CloudFrontDomain output
-  // (always emitted) when WebsiteOrigin is absent (older stack without the
-  // new output). Env var overrides remain as escape hatches.
+  // AuthStack registered in Cognito. When WebsiteOrigin is absent (older stack
+  // deployed before this output existed), fall back to VELA_DOMAIN_NAME (the
+  // same env var AuthStack reads) and finally to DEFAULT_WEBSITE_DOMAIN — the
+  // same expression AuthStack uses to register Cognito callback/logout URLs.
+  // CloudFrontDomain is intentionally NOT used as a fallback: AuthStack
+  // registers the custom domain, not the CloudFront domain, so a CloudFront-
+  // derived callback URL would be rejected by Cognito on the first deployment
+  // of the multi-env refactor. Env var overrides remain as escape hatches.
   const websiteOrigin =
     outputs.WebsiteOrigin ||
-    (outputs.CloudFrontDomain ? `https://${outputs.CloudFrontDomain}` : undefined);
-  if (!websiteOrigin) {
-    throw new Error(
-      'Missing WebsiteOrigin in CloudFormation outputs (and CloudFrontDomain fallback absent). ' +
-        'Re-deploy the CDK stack to emit WebsiteOrigin, or set VITE_COGNITO_REDIRECT_SIGN_IN / ' +
-        'VITE_COGNITO_REDIRECT_SIGN_OUT / VITE_MOBILE_API_URL env vars to override.',
-    );
-  }
+    (process.env.VELA_DOMAIN_NAME
+      ? `https://${process.env.VELA_DOMAIN_NAME}`
+      : `https://${DEFAULT_WEBSITE_DOMAIN}`);
 
   // Mobile API URL: derived from the same website origin as the web app's
   // redirect URLs (MobileApiURL CFN output). Falls back to `${websiteOrigin}/api/`
