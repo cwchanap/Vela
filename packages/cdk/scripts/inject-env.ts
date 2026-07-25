@@ -103,16 +103,9 @@ function main(): void {
   // Native builds cannot use the relative '/api/' path the web app relies on
   // (CloudFront-served SPA), so apps/vela-mobile/.env.production is generated
   // with an absolute API endpoint that the Capacitor app calls directly.
+  // Multi-env derivation from a CFN output is a tracked follow-up; for now the
+  // value is a constant consistent with the redirect URLs above.
   const mobileApiUrl = 'https://vela.cwchanap.dev/api/';
-
-  try {
-    const parsed = new URL(mobileApiUrl);
-    if ((parsed.protocol !== 'http:' && parsed.protocol !== 'https:') || !parsed.hostname) {
-      throw new Error('invalid');
-    }
-  } catch {
-    throw new Error(`Mobile API URL must be a valid absolute http(s) URL, got: ${mobileApiUrl}`);
-  }
 
   const mobileEnvFilePath = path.join(repoRoot, 'apps', 'vela-mobile', '.env.production');
   const mobileEnvDir = path.dirname(mobileEnvFilePath);

@@ -32,6 +32,18 @@ bun run build:mobile # Build mobile web assets
 
 Turbo skips workspaces that lack the requested script. Sibling apps use `compile` (api/ext) or rely on build-time typechecking instead of a root-level `typecheck` script.
 
+### Mobile build env injection (ordering requirement)
+
+`apps/vela-mobile/.env.production` is gitignored and must be generated before a production mobile build. It is written by `packages/cdk/scripts/inject-env.ts`, which derives the web app's env from `cdk-outputs.json` and writes a hardcoded absolute `VITE_MOBILE_API_URL` for the Capacitor app (the web app's relative `/api/` path is unusable in a native WebView).
+
+**Required ordering for any production mobile build (local or CI):**
+
+1. `cdk:deploy` (or `cdk synth` + export outputs) so `cdk-outputs.json` exists in `packages/cdk/`.
+2. `bun scripts/inject-env.ts` (from `packages/cdk/`) → writes `apps/vela-mobile/.env.production`.
+3. `bun run build:mobile` (or `bun run build` filtered to `@vela/mobile`).
+
+The `validate-mobile-api-url` Vite plugin in `apps/vela-mobile/quasar.config.ts` enforces this at build time: in production mode it throws if `.env.production` is missing or `VITE_MOBILE_API_URL` is absent/invalid. The check is **on by default**. CI pipelines that run `inject-env.ts` (or otherwise guarantee `.env.production`) before the build may set `MOBILE_SKIP_ENV_VALIDATION=true` to bypass it; the previous blanket `CI === 'true'` skip was removed because it silently disabled the only build-time guard, leaving a launch-time `validateConfig` throw as the sole (late) failure mode. If `.env.production` is missing, the app crashes at boot via `src/config/index.ts` `validateConfig`.
+
 ### Vela App (from apps/vela/)
 
 ```bash

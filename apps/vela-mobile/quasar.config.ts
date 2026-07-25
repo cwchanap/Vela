@@ -31,9 +31,12 @@ export default defineConfig(() => {
           name: 'validate-mobile-api-url',
           config(_, { mode }) {
             if (mode !== 'production') return;
-            // CI builds run on clean checkouts where .env.production is
-            // gitignored; the guard is enforced for local/native builds.
-            if (process.env.CI === 'true') return;
+            // Opt-in skip for CI pipelines that run inject-env.ts (or an
+            // equivalent) before the build and therefore already guarantee
+            // .env.production exists. Default: enforce, so a clean checkout
+            // without .env.production fails at build time rather than at app
+            // launch. Set MOBILE_SKIP_ENV_VALIDATION=true to bypass.
+            if (process.env.MOBILE_SKIP_ENV_VALIDATION === 'true') return;
 
             const envPath = resolve(__dirname, '.env.production');
             if (!existsSync(envPath)) {
@@ -46,7 +49,9 @@ export default defineConfig(() => {
 
             const content = readFileSync(envPath, 'utf8');
             const match = content.match(/^VITE_MOBILE_API_URL=(.+)$/m);
-            const url = match?.[1]?.trim();
+            // Strip surrounding quotes so a hand-authored quoted value
+            // (e.g. VITE_MOBILE_API_URL="https://...") parses correctly.
+            const url = match?.[1]?.trim().replace(/^["']|["']$/g, '');
 
             if (!url) {
               throw new Error(
