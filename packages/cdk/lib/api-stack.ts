@@ -31,7 +31,7 @@ export class ApiStack extends Stack {
 
     // Parse CORS allowed origins from environment or use defaults
     const defaultAllowedOrigins =
-      'https://vela.cwchanap.dev,http://localhost:9000,http://127.0.0.1:9000,capacitor://localhost';
+      'https://vela.cwchanap.dev,http://localhost:9000,http://127.0.0.1:9000,http://localhost:9100,http://127.0.0.1:9100,capacitor://localhost';
     const corsAllowedOrigins = process.env.CORS_ALLOWED_ORIGINS || defaultAllowedOrigins;
     let allowedOriginsList = corsAllowedOrigins
       .split(',')

@@ -100,10 +100,11 @@ function main(): void {
     throw new Error(`Failed to write environment variables to ${envFilePath}: ${message}`);
   }
 
-  // Generate apps/vela-mobile/.env.production with the mobile API URL
+  // Native builds cannot use the relative '/api/' path the web app relies on
+  // (CloudFront-served SPA), so apps/vela-mobile/.env.production is generated
+  // with an absolute API endpoint that the Capacitor app calls directly.
   const mobileApiUrl = 'https://vela.cwchanap.dev/api/';
 
-  // Validate the mobile API URL is absolute
   try {
     const parsed = new URL(mobileApiUrl);
     if ((parsed.protocol !== 'http:' && parsed.protocol !== 'https:') || !parsed.hostname) {

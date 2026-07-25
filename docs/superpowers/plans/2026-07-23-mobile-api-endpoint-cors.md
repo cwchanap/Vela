@@ -276,7 +276,7 @@ describe('boot/main', () => {
     const log = vi.spyOn(console, 'log').mockImplementation(() => {});
     vi.spyOn(console, 'warn').mockImplementation(() => {});
     vi.stubEnv('DEV', true);
-    (boot as () => void)({} as any);
+    (boot as (params: any) => void)({} as any);
     expect(log).toHaveBeenCalledWith('Vela Mobile boot initialized');
   });
 
@@ -284,7 +284,7 @@ describe('boot/main', () => {
     const log = vi.spyOn(console, 'log').mockImplementation(() => {});
     vi.spyOn(console, 'warn').mockImplementation(() => {});
     vi.stubEnv('DEV', false);
-    (boot as () => void)({} as any);
+    (boot as (params: any) => void)({} as any);
     expect(log).not.toHaveBeenCalledWith('Vela Mobile boot initialized');
   });
 });
@@ -952,13 +952,13 @@ In `AGENTS.md` (symlink → `CLAUDE.md`), find the M2 work item #3 under the Mob
 
 Old:
 
-```
+```text
 3. If API calls go through WKWebView, add `capacitor://localhost` to the API CORS allow-list.
 ```
 
 New:
 
-```
+```text
 3. ~~If API calls go through WKWebView, add `capacitor://localhost` to the API CORS allow-list.~~ **Done in M1 (HPA-204).** The CORS allowlist is not a security boundary for native clients — `capacitor://localhost` is shared across all Capacitor apps and the middleware passes requests with no `Origin` header. JWT verification (item #1 above) is the actual auth boundary.
 ```
 
