@@ -176,6 +176,26 @@ describe('iOS Info.plist', () => {
         'NSAllowsArbitraryLoads=true is too broad — use NSAllowsLocalNetworking for dev-only LAN HTTP',
       ).toBe(false);
     });
+
+    // ATS (NSAllowsLocalNetworking) and iOS Local Network Privacy are
+    // separate mechanisms. The Debug build connects directly to the dev Mac's
+    // LAN IP for both the API (http://<lan-ip>:9005/api/) and Capacitor
+    // live-reload (http://<lan-ip>:9100) — both are local-network operations
+    // under iOS 14+, which requires NSLocalNetworkUsageDescription to supply
+    // the user-facing explanation shown in the Local Network permission prompt.
+    // Without it the prompt still appears (or the connection is blocked until
+    // granted) but with a generic message, and App Store Connect flags the
+    // missing key. NSAllowsLocalNetworking only relaxes the HTTPS requirement;
+    // it does not grant Local Network privacy permission.
+    test('declares NSLocalNetworkUsageDescription for direct LAN host access', () => {
+      const hasKey = /<key>NSLocalNetworkUsageDescription<\/key>\s*<string>[^<]+<\/string>/.test(
+        debugContent,
+      );
+      expect(
+        hasKey,
+        'NSLocalNetworkUsageDescription missing from Info-Debug.plist — physical-device dev connects directly to the Mac LAN IP, which is a local-network operation under iOS 14+ and requires a user-facing explanation string separate from the ATS exception.',
+      ).toBe(true);
+    });
   });
 
   // The Release plist must NOT carry an ATS exception. The runtime
@@ -205,6 +225,19 @@ describe('iOS Info.plist', () => {
       expect(hasKey, 'NSAllowsArbitraryLoads=true is too broad for any build configuration.').toBe(
         false,
       );
+    });
+
+    // Release builds target https://vela.cwchanap.dev/api/ (production), not a
+    // LAN host, so they perform no local-network operations and must not
+    // carry the Debug-only NSLocalNetworkUsageDescription. A leaked key would
+    // signal the Debug/Release plist split has been undone, and would surface
+    // an unnecessary permission prompt in App Store builds.
+    test('does not declare NSLocalNetworkUsageDescription', () => {
+      const hasKey = /<key>NSLocalNetworkUsageDescription<\/key>/.test(releaseContent);
+      expect(
+        hasKey,
+        'NSLocalNetworkUsageDescription present in Release Info.plist — this Debug-only key must not leak into Release. Release builds target the production HTTPS API and perform no local-network operations.',
+      ).toBe(false);
     });
   });
 });
