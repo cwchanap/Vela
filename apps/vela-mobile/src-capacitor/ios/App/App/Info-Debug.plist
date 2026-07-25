@@ -63,5 +63,7 @@
 		<key>NSAllowsLocalNetworking</key>
 		<true/>
 	</dict>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>Vela connects to the development Mac for local API testing and live reload.</string>
 </dict>
 </plist>
