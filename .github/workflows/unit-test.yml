@@ -180,12 +180,22 @@ jobs:
       - name: Lint Info.plist XML well-formedness
         # Use Python's standard-library XML parser so this check works on the
         # stock ubuntu-latest image without installing xmllint/libxml2-utils.
+        # Parse both plists: the Xcode project wires Debug → Info-Debug.plist
+        # and Release → Info.plist, so a syntax error in either breaks the
+        # build. The unit-test suite asserts the Debug/Release ATS split; this
+        # step only checks XML well-formedness.
         shell: bash
         run: |
           python3 - <<'PY'
           import xml.etree.ElementTree as ET
 
-          ET.parse('apps/vela-mobile/src-capacitor/ios/App/App/Info.plist')
+          plists = [
+              'apps/vela-mobile/src-capacitor/ios/App/App/Info.plist',
+              'apps/vela-mobile/src-capacitor/ios/App/App/Info-Debug.plist',
+          ]
+          for path in plists:
+              ET.parse(path)
+              print(f'OK: {path}')
           PY
 
       - name: Run mobile unit tests with coverage

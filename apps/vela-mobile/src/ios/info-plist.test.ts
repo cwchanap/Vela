@@ -2,16 +2,28 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, test } from 'vitest';
 
-// Parse the plists as XML without adding a runtime dependency.
-// The files are small and stable; regexes on the raw text are enough to catch
-// Capacitor/Xcode changes that remove required entries or widen ATS policy.
-const releasePlistPath = resolve(__dirname, '../../src-capacitor/ios/App/App/Info.plist');
-const releasePlistContent = readFileSync(releasePlistPath, 'utf8');
-const debugPlistPath = resolve(__dirname, '../../src-capacitor/ios/App/App/Info-Debug.plist');
-const debugPlistContent = readFileSync(debugPlistPath, 'utf8');
+// The Xcode project wires the build configurations to separate plists:
+//   Debug   → Info-Debug.plist (carries the NSAppTransportSecurity exception
+//                              for LAN HTTP dev on physical devices)
+//   Release → Info.plist       (no ATS exception — Release must not allow HTTP)
+// Both files must be exercised: a Capacitor sync could wipe entries in either.
+// See apps/vela-mobile/src-capacitor/ios/App/App.xcodeproj/project.pbxproj
+// (INFOPLIST_FILE = App/Info-Debug.plist for Debug, App/Info.plist for Release).
+const plistDir = resolve(__dirname, '../../src-capacitor/ios/App/App');
+const releasePlistPath = resolve(plistDir, 'Info.plist');
+const debugPlistPath = resolve(plistDir, 'Info-Debug.plist');
+const releaseContent = readFileSync(releasePlistPath, 'utf8');
+const debugContent = readFileSync(debugPlistPath, 'utf8');
 
-function isBinaryPlist(content: string): boolean {
-  return content.startsWith('bplist');
+// Binary plists start with `bplist00`. Xcode occasionally converts Info.plist
+// to binary format (e.g. after a merge conflict resolution or an Xcode
+// version upgrade). The regex-based extractors below return null/empty on
+// binary plists, which would surface as misleading "Capacitor sync wiped
+// CFBundleURLTypes" failures. Wrapped in a test() so a binary plist surfaces
+// as a named per-test failure with a clear remediation message, instead of a
+// module-load error that obscures which test file failed.
+function isBinaryPlist(xml: string): boolean {
+  return xml.startsWith('bplist');
 }
 
 function extractSchemes(xml: string): string[] {
@@ -28,7 +40,7 @@ function extractSchemes(xml: string): string[] {
 }
 
 // Extract the first <dict> inside CFBundleURLTypes so we can assert on the
-// sibling keys (CFBundleURLName, CFBundleTypeRole) that Capacitor syncs have
+// sibling keys (CFBundleURLName, CFBundleURLTypeRole) that Capacitor syncs have
 // been observed to drop while leaving CFBundleURLSchemes intact.
 //
 // The CFBundleURLTypes <array> contains a nested <array> (CFBundleURLSchemes),
@@ -88,69 +100,111 @@ function extractKeyValue(xml: string, key: string): string | null {
   return match && match[1] !== undefined ? match[1] : null;
 }
 
-function allowsLocalNetworking(xml: string): boolean {
-  return /<key>NSAllowsLocalNetworking<\/key>\s*<true\/>/.test(xml);
-}
+// Both plists carry the same CFBundleURLTypes entry (the OAuth scheme is
+// required in both Debug and Release). Run the shared assertions against each
+// file so a Capacitor sync wiping the entry in either build surfaces as a
+// named failure.
+function describeSharedPlistAssertions(label: string, path: string, content: string): void {
+  describe(`${label} (shared)`, () => {
+    test('is XML, not binary', () => {
+      // Fail fast with a clear remediation message before the regex-based
+      // assertions below would produce misleading "Capacitor sync wiped
+      // CFBundleURLTypes" failures on a binary plist.
+      expect(
+        !isBinaryPlist(content),
+        `${path} is a binary plist. Convert it back to XML: plutil -convert xml1 "${path}". The Info.plist test assumes XML text.`,
+      ).toBe(true);
+    });
 
-function allowsArbitraryLoads(xml: string): boolean {
-  return /<key>NSAllowsArbitraryLoads<\/key>\s*<true\/>/.test(xml);
+    test('registers the dev.cwchanap.vela.oauth custom URL scheme', () => {
+      const schemes = extractSchemes(content);
+      expect(schemes).toContain('dev.cwchanap.vela.oauth');
+    });
+
+    test('CFBundleURLTypes entry declares CFBundleURLName and CFBundleTypeRole', () => {
+      const entry = extractUrlTypeEntry(content);
+      expect(
+        entry,
+        'CFBundleURLTypes dict entry missing — Capacitor sync may have wiped it',
+      ).not.toBeNull();
+      if (!entry) return;
+
+      const urlName = extractKeyValue(entry, 'CFBundleURLName');
+      const typeRole = extractKeyValue(entry, 'CFBundleTypeRole');
+
+      expect(urlName, 'CFBundleURLName missing inside CFBundleURLTypes dict').not.toBeNull();
+      expect(typeRole, 'CFBundleTypeRole missing inside CFBundleURLTypes dict').not.toBeNull();
+      // Editor is the correct role for an app that handles OAuth callbacks it
+      // initiates; Viewer would still work but Editor is the documented convention.
+      expect(typeRole).toBe('Editor');
+    });
+  });
 }
 
 describe('iOS Info.plist', () => {
-  test('Release Info.plist is XML, not binary', () => {
-    expect(
-      !isBinaryPlist(releasePlistContent),
-      `${releasePlistPath} is a binary plist. Convert it back to XML: plutil -convert xml1 "${releasePlistPath}". The Info.plist test assumes XML text.`,
-    ).toBe(true);
+  describeSharedPlistAssertions('Info.plist (Release)', releasePlistPath, releaseContent);
+  describeSharedPlistAssertions('Info-Debug.plist (Debug)', debugPlistPath, debugContent);
+
+  // Physical-device development points the Capacitor app at the dev Mac's LAN
+  // IP over plain HTTP (see apps/vela-mobile/.env.example). ATS blocks HTTP by
+  // default, so the Debug plist must carry a narrowly scoped exception.
+  // NSAllowsLocalNetworking permits HTTP to local network resources (private
+  // IP addresses, .local, .localdomain) without opening up arbitrary HTTP to
+  // the internet — broader exceptions (NSAllowsArbitraryLoads) would require
+  // App Store justification and are intentionally absent.
+  describe('Info-Debug.plist ATS exception (Debug-only)', () => {
+    test('declares a narrowly scoped NSAppTransportSecurity exception for local networking', () => {
+      const hasKey = /<key>NSAppTransportSecurity<\/key>\s*<dict>/.test(debugContent);
+      expect(
+        hasKey,
+        'NSAppTransportSecurity missing from Info-Debug.plist — physical-device HTTP dev to a LAN IP is blocked by ATS',
+      ).toBe(true);
+
+      const allowsLocalNetworking = /<key>NSAllowsLocalNetworking<\/key>\s*<true\/>/.test(
+        debugContent,
+      );
+      expect(
+        allowsLocalNetworking,
+        'Info-Debug.plist NSAppTransportSecurity must set NSAllowsLocalNetworking=true for LAN HTTP dev',
+      ).toBe(true);
+
+      const allowsArbitraryLoads = /<key>NSAllowsArbitraryLoads<\/key>\s*<true\/>/.test(
+        debugContent,
+      );
+      expect(
+        allowsArbitraryLoads,
+        'NSAllowsArbitraryLoads=true is too broad — use NSAllowsLocalNetworking for dev-only LAN HTTP',
+      ).toBe(false);
+    });
   });
 
-  test('Debug Info-Debug.plist is XML, not binary', () => {
-    expect(
-      !isBinaryPlist(debugPlistContent),
-      `${debugPlistPath} is a binary plist. Convert it back to XML: plutil -convert xml1 "${debugPlistPath}". The Info.plist test assumes XML text.`,
-    ).toBe(true);
-  });
+  // The Release plist must NOT carry an ATS exception. The runtime
+  // validateConfig() rejects http: in production, so a Release build should
+  // never need one; a leaked NSAppTransportSecurity entry in Release would
+  // signal that the build configuration split (project.pbxproj
+  // INFOPLIST_FILE) has been undone or that an exception was added by mistake.
+  describe('Info.plist ATS absence (Release)', () => {
+    test('does not declare NSAppTransportSecurity', () => {
+      const hasKey = /<key>NSAppTransportSecurity<\/key>/.test(releaseContent);
+      expect(
+        hasKey,
+        'NSAppTransportSecurity present in Release Info.plist — Release builds must not carry an ATS exception. The Debug-only exception lives in Info-Debug.plist.',
+      ).toBe(false);
+    });
 
-  test('registers the dev.cwchanap.vela.oauth custom URL scheme', () => {
-    const schemes = extractSchemes(releasePlistContent);
-    expect(schemes).toContain('dev.cwchanap.vela.oauth');
-  });
+    test('does not declare NSAllowsLocalNetworking', () => {
+      const hasKey = /<key>NSAllowsLocalNetworking<\/key>/.test(releaseContent);
+      expect(
+        hasKey,
+        'NSAllowsLocalNetworking present in Release Info.plist — this Debug-only exception must not leak into Release.',
+      ).toBe(false);
+    });
 
-  test('CFBundleURLTypes entry declares CFBundleURLName and CFBundleTypeRole', () => {
-    const entry = extractUrlTypeEntry(releasePlistContent);
-    expect(
-      entry,
-      'CFBundleURLTypes dict entry missing — Capacitor sync may have wiped it',
-    ).not.toBeNull();
-    if (!entry) return;
-
-    const urlName = extractKeyValue(entry, 'CFBundleURLName');
-    const typeRole = extractKeyValue(entry, 'CFBundleTypeRole');
-
-    expect(urlName, 'CFBundleURLName missing inside CFBundleURLTypes dict').not.toBeNull();
-    expect(typeRole, 'CFBundleTypeRole missing inside CFBundleURLTypes dict').not.toBeNull();
-    expect(typeRole).toBe('Editor');
-  });
-
-  test('Debug plist allows local networking without arbitrary HTTP loads', () => {
-    expect(
-      allowsLocalNetworking(debugPlistContent),
-      'Debug Info-Debug.plist must set NSAllowsLocalNetworking=true for LAN HTTP development',
-    ).toBe(true);
-    expect(
-      allowsArbitraryLoads(debugPlistContent),
-      'NSAllowsArbitraryLoads=true is too broad — use NSAllowsLocalNetworking for Debug builds',
-    ).toBe(false);
-  });
-
-  test('Release plist does not include an ATS exception', () => {
-    expect(
-      allowsLocalNetworking(releasePlistContent),
-      'Release Info.plist must not allow local HTTP networking',
-    ).toBe(false);
-    expect(
-      allowsArbitraryLoads(releasePlistContent),
-      'Release Info.plist must not allow arbitrary HTTP loads',
-    ).toBe(false);
+    test('does not declare NSAllowsArbitraryLoads', () => {
+      const hasKey = /<key>NSAllowsArbitraryLoads<\/key>\s*<true\/>/.test(releaseContent);
+      expect(hasKey, 'NSAllowsArbitraryLoads=true is too broad for any build configuration.').toBe(
+        false,
+      );
+    });
   });
 });

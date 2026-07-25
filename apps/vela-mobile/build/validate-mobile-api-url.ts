@@ -45,9 +45,22 @@ function loadMobileApiUrl(mode: string, rootDir: string): string | undefined {
  * missing/malformed `.env.production` before the app ships rather than at
  * first launch in a native WebView.
  *
+ * The build-time and runtime contracts must agree in production. The runtime
+ * `validateConfig` rejects `http:` when `PROD` is true (ATS enforcement
+ * depends on this — a Release build must not load over HTTP). This function
+ * therefore takes a `requireHttps` flag that the production-only Vite plugin
+ * sets to `true`; dev-mode callers leave it unset so local/simulator HTTP
+ * URLs continue to pass.
+ *
  * @param url The merged `VITE_MOBILE_API_URL` value Vite would inject.
+ * @param options.requireHttps When true, reject `http:` URLs. Set by the
+ *   production build plugin so a misconfigured HTTP release fails at build
+ *   time instead of producing a distributable that crashes at boot.
  */
-export function validateMobileApiUrl(url: string | undefined): void {
+export function validateMobileApiUrl(
+  url: string | undefined,
+  options: { requireHttps?: boolean } = {},
+): void {
   if (!url || (typeof url === 'string' && url.trim() === '')) {
     throw new Error(
       'VITE_MOBILE_API_URL is missing. Vite loads .env, .env.local, ' +
@@ -67,7 +80,17 @@ export function validateMobileApiUrl(url: string | undefined): void {
     ) {
       throw new Error('invalid');
     }
-  } catch {
+    if (options.requireHttps && parsed.protocol === 'http:') {
+      throw new Error(
+        `VITE_MOBILE_API_URL must be https: in production, got: ${url}`,
+      );
+    }
+  } catch (err) {
+    // Re-throw the explicit HTTPS-requirement message verbatim; only wrap
+    // the generic URL-parse/shape failures.
+    if (err instanceof Error && err.message.startsWith('VITE_MOBILE_API_URL must be https:')) {
+      throw err;
+    }
     throw new Error(
       `VITE_MOBILE_API_URL must be a valid absolute http(s) URL with a hostname, got: ${url}`,
     );
@@ -100,7 +123,10 @@ export function validateMobileApiUrlPlugin(rootDir: string): VitePluginLike {
       if (mode !== 'production') return;
       if (process.env.MOBILE_SKIP_ENV_VALIDATION === 'true') return;
 
-      validateMobileApiUrl(loadMobileApiUrl(mode, rootDir));
+      // The plugin only runs in production mode, so require HTTPS to match
+      // the runtime validateConfig() contract. A misconfigured HTTP release
+      // must fail here, not at app boot in a native WebView.
+      validateMobileApiUrl(loadMobileApiUrl(mode, rootDir), { requireHttps: true });
     },
   };
 }
