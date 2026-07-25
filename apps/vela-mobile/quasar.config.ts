@@ -31,6 +31,9 @@ export default defineConfig(() => {
           name: 'validate-mobile-api-url',
           config(_, { mode }) {
             if (mode !== 'production') return;
+            // CI builds run on clean checkouts where .env.production is
+            // gitignored; the guard is enforced for local/native builds.
+            if (process.env.CI === 'true') return;
 
             const envPath = resolve(__dirname, '.env.production');
             if (!existsSync(envPath)) {
