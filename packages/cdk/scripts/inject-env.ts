@@ -58,14 +58,36 @@ function main(): void {
   const cognitoOAuthDomain =
     outputs.CognitoOAuthDomain || `${cognitoDomainPrefix}.auth.${awsRegion}.amazoncognito.com`;
 
+  // Derive the website origin from CFN outputs so a non-production deployment
+  // (different VELA_DOMAIN_NAME) generates redirect URLs that match the URIs
+  // AuthStack registered in Cognito. Fall back to the CloudFrontDomain output
+  // (always emitted) when WebsiteOrigin is absent (older stack without the
+  // new output). Env var overrides remain as escape hatches.
+  const websiteOrigin =
+    outputs.WebsiteOrigin ||
+    (outputs.CloudFrontDomain ? `https://${outputs.CloudFrontDomain}` : undefined);
+  if (!websiteOrigin) {
+    throw new Error(
+      'Missing WebsiteOrigin in CloudFormation outputs (and CloudFrontDomain fallback absent). ' +
+        'Re-deploy the CDK stack to emit WebsiteOrigin, or set VITE_COGNITO_REDIRECT_SIGN_IN / ' +
+        'VITE_COGNITO_REDIRECT_SIGN_OUT / VITE_MOBILE_API_URL env vars to override.',
+    );
+  }
+
+  // Mobile API URL: derived from the same website origin as the web app's
+  // redirect URLs (MobileApiURL CFN output). Falls back to `${websiteOrigin}/api/`
+  // when the output is absent (older stack). Env var override as escape hatch.
+  const mobileApiUrl =
+    process.env.VITE_MOBILE_API_URL || outputs.MobileApiURL || `${websiteOrigin}/api/`;
+
   const envVars = {
     VITE_COGNITO_USER_POOL_ID: outputs.CognitoUserPoolId,
     VITE_COGNITO_USER_POOL_CLIENT_ID: outputs.CognitoUserPoolClientId,
     VITE_COGNITO_OAUTH_DOMAIN: cognitoOAuthDomain,
     VITE_COGNITO_REDIRECT_SIGN_IN:
-      process.env.VITE_COGNITO_REDIRECT_SIGN_IN || 'https://vela.cwchanap.dev/auth/callback',
+      process.env.VITE_COGNITO_REDIRECT_SIGN_IN || `${websiteOrigin}/auth/callback`,
     VITE_COGNITO_REDIRECT_SIGN_OUT:
-      process.env.VITE_COGNITO_REDIRECT_SIGN_OUT || 'https://vela.cwchanap.dev/auth/login',
+      process.env.VITE_COGNITO_REDIRECT_SIGN_OUT || `${websiteOrigin}/auth/login`,
     VITE_AWS_REGION: awsRegion,
     VITE_API_URL: '/api/',
   } as const;
@@ -103,10 +125,9 @@ function main(): void {
   // Native builds cannot use the relative '/api/' path the web app relies on
   // (CloudFront-served SPA), so apps/vela-mobile/.env.production is generated
   // with an absolute API endpoint that the Capacitor app calls directly.
-  // Multi-env derivation from a CFN output is a tracked follow-up; for now the
-  // value is a constant consistent with the redirect URLs above.
-  const mobileApiUrl = 'https://vela.cwchanap.dev/api/';
-
+  // mobileApiUrl is derived from the MobileApiURL CFN output (or WebsiteOrigin)
+  // above, so a non-production deployment routes mobile traffic to its own
+  // backend instead of production.
   const mobileEnvFilePath = path.join(repoRoot, 'apps', 'vela-mobile', '.env.production');
   const mobileEnvDir = path.dirname(mobileEnvFilePath);
   fs.mkdirSync(mobileEnvDir, { recursive: true });

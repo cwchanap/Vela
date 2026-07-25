@@ -115,6 +115,26 @@ describe('AuthStack', () => {
     });
   });
 
+  // VELA_DOMAIN_NAME drives the production callback/logout URLs so a
+  // non-production deployment registers URIs that match the redirect URLs
+  // inject-env.ts derives from the WebsiteOrigin output. Without this, Cognito
+  // would reject the redirect at runtime because the registered URI
+  // (vela.cwchanap.dev) would not match the deployed origin.
+  test('production callback/logout URLs follow VELA_DOMAIN_NAME', () => {
+    process.env.VELA_DOMAIN_NAME = 'staging.vela.example';
+    try {
+      const template = synthesizeTemplate();
+
+      template.hasResourceProperties('AWS::Cognito::UserPoolClient', {
+        ClientName: 'vela-web-client',
+        CallbackURLs: Match.arrayWith(['https://staging.vela.example/auth/callback']),
+        LogoutURLs: Match.arrayWith(['https://staging.vela.example/auth/login']),
+      });
+    } finally {
+      delete process.env.VELA_DOMAIN_NAME;
+    }
+  });
+
   test('uses only the expected OAuth scopes', () => {
     const template = synthesizeTemplate();
     const clients = template.findResources('AWS::Cognito::UserPoolClient');

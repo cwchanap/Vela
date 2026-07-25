@@ -29,9 +29,12 @@ export class ApiStack extends Stack {
 
     const ttsAudioBucketName = getTtsAudioBucketName(this);
 
-    // Parse CORS allowed origins from environment or use defaults
-    const defaultAllowedOrigins =
-      'https://vela.cwchanap.dev,http://localhost:9000,http://127.0.0.1:9000,http://localhost:9100,http://127.0.0.1:9100,capacitor://localhost';
+    // Parse CORS allowed origins from environment or use defaults.
+    // VELA_DOMAIN_NAME (same env var StaticWebStack/AuthStack read) keeps the
+    // production origin in sync with the deployed custom domain for
+    // non-production deployments. Defaults to the production domain.
+    const websiteDomain = process.env.VELA_DOMAIN_NAME || 'vela.cwchanap.dev';
+    const defaultAllowedOrigins = `https://${websiteDomain},http://localhost:9000,http://127.0.0.1:9000,http://localhost:9100,http://127.0.0.1:9100,capacitor://localhost`;
     const corsAllowedOrigins = process.env.CORS_ALLOWED_ORIGINS || defaultAllowedOrigins;
     let allowedOriginsList = corsAllowedOrigins
       .split(',')

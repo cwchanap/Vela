@@ -139,4 +139,47 @@ describe('StaticWebStack', () => {
     expect(webLogicalIds).toHaveLength(1);
     expect(importValue).toContain(webLogicalIds[0]);
   });
+
+  // inject-env.ts reads WebsiteOrigin to derive the web app's Cognito redirect
+  // URLs and MobileApiURL to derive the Capacitor app's absolute API endpoint.
+  // Pinning both outputs (and their descriptions) catches a future edit that
+  // drops or renames them, which would silently break inject-env.ts.
+  test('emits WebsiteOrigin and MobileApiURL outputs derived from the configured domain', () => {
+    const { template } = synthesize();
+
+    const outputs = (template.toJSON().Outputs ?? {}) as Record<
+      string,
+      { Value: unknown; Description?: string }
+    >;
+
+    expect(outputs.WebsiteOrigin).toBeDefined();
+    expect(outputs.WebsiteOrigin.Description).toBe(
+      'Website origin (custom domain when configured, CloudFront domain otherwise)',
+    );
+    // Default domain is vela.cwchanap.dev (VELA_DOMAIN_NAME unset in beforeEach).
+    expect(outputs.WebsiteOrigin.Value).toBe('https://vela.cwchanap.dev');
+
+    expect(outputs.MobileApiURL).toBeDefined();
+    expect(outputs.MobileApiURL.Description).toBe(
+      'Absolute API URL for the Capacitor mobile app (web app uses relative /api/ behind CloudFront)',
+    );
+    expect(outputs.MobileApiURL.Value).toBe('https://vela.cwchanap.dev/api/');
+  });
+
+  // VELA_DOMAIN_NAME drives the custom domain, CORS defaults, Cognito redirect
+  // URIs, and the inject-env.ts derivation. Pinning the output values for a
+  // non-default domain catches a regression that routes a staging/temp
+  // deployment's mobile traffic to production.
+  test('WebsiteOrigin and MobileApiURL follow VELA_DOMAIN_NAME for non-production deployments', () => {
+    process.env.VELA_DOMAIN_NAME = 'staging.vela.example';
+    try {
+      const { template } = synthesize();
+
+      const outputs = (template.toJSON().Outputs ?? {}) as Record<string, { Value: unknown }>;
+      expect(outputs.WebsiteOrigin.Value).toBe('https://staging.vela.example');
+      expect(outputs.MobileApiURL.Value).toBe('https://staging.vela.example/api/');
+    } finally {
+      delete process.env.VELA_DOMAIN_NAME;
+    }
+  });
 });

@@ -31,11 +31,16 @@ jobs:
       - name: Build frontend
         # This workflow is a lint+build smoke test from a clean checkout, not
         # a deployment: there is no cdk-outputs.json to feed inject-env.ts, so
-        # apps/vela-mobile/.env.production (gitignored) is absent. Bypass the
-        # build-time mobile env guard rather than synthesizing CDK here. The
-        # guard still fires for real release builds that run inject-env.ts.
+        # apps/vela-mobile/.env.production (gitignored) is absent. Rather than
+        # bypassing the build-time mobile env guard (MOBILE_SKIP_ENV_VALIDATION),
+        # set a harmless placeholder that passes the guard's format check
+        # (valid absolute https URL with a hostname) while being unreachable.
+        # This exercises the normal validation path so a regression in env-file
+        # loading or plugin registration fails PR CI instead of slipping through
+        # to the release build. The guard still fires for real release builds
+        # that run inject-env.ts (which writes a reachable URL).
         env:
-          MOBILE_SKIP_ENV_VALIDATION: 'true'
+          VITE_MOBILE_API_URL: 'https://example.invalid/api/'
         run: bun run build
 
       - name: Build Lambda function
