@@ -69,13 +69,29 @@ describe('ApiStack', () => {
     });
   });
 
-  test('includes capacitor://localhost in default CORS_ALLOWED_ORIGINS', () => {
+  test('includes capacitor://localhost and mobile dev origins in default CORS_ALLOWED_ORIGINS', () => {
     const template = synthesizeTemplate();
 
     template.hasResourceProperties('AWS::Lambda::Function', {
       Environment: {
         Variables: Match.objectLike({
           CORS_ALLOWED_ORIGINS: Match.stringLikeRegexp('capacitor://localhost'),
+        }),
+      },
+    });
+
+    template.hasResourceProperties('AWS::Lambda::Function', {
+      Environment: {
+        Variables: Match.objectLike({
+          CORS_ALLOWED_ORIGINS: Match.stringLikeRegexp('http://localhost:9100'),
+        }),
+      },
+    });
+
+    template.hasResourceProperties('AWS::Lambda::Function', {
+      Environment: {
+        Variables: Match.objectLike({
+          CORS_ALLOWED_ORIGINS: Match.stringLikeRegexp('http://127.0.0.1:9100'),
         }),
       },
     });
@@ -87,6 +103,32 @@ describe('ApiStack', () => {
           Match.objectLike({
             ResponseTemplates: Match.objectLike({
               'application/json': Match.stringLikeRegexp('capacitor://localhost'),
+            }),
+          }),
+        ]),
+      }),
+    });
+
+    template.hasResourceProperties('AWS::ApiGateway::Method', {
+      HttpMethod: 'OPTIONS',
+      Integration: Match.objectLike({
+        IntegrationResponses: Match.arrayWith([
+          Match.objectLike({
+            ResponseTemplates: Match.objectLike({
+              'application/json': Match.stringLikeRegexp('http://localhost:9100'),
+            }),
+          }),
+        ]),
+      }),
+    });
+
+    template.hasResourceProperties('AWS::ApiGateway::Method', {
+      HttpMethod: 'OPTIONS',
+      Integration: Match.objectLike({
+        IntegrationResponses: Match.arrayWith([
+          Match.objectLike({
+            ResponseTemplates: Match.objectLike({
+              'application/json': Match.stringLikeRegexp('http://127.0.0.1:9100'),
             }),
           }),
         ]),

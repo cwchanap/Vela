@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test';
 
-const API_BASE_URL = process.env.VITE_API_URL || 'http://localhost:3001';
+const API_BASE_URL = process.env.VITE_API_URL || 'http://localhost:9005';
 
 test.describe('Vela API E2E Tests', () => {
   test.beforeAll(async () => {
