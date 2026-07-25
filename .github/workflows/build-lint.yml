@@ -23,7 +23,22 @@ jobs:
           bun-version: ${{ env.BUN_VERSION }}
 
       - name: Install dependencies
-        run: bun install --frozen-lockfile
+        id: install
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          bun install --frozen-lockfile 2>&1 | tee bun-install.log
+
+      - name: Upload Bun install diagnostics
+        if: steps.install.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: bun-install-log
+          path: bun-install.log
+
+      - name: Fail when dependency installation fails
+        if: steps.install.outcome == 'failure'
+        run: exit 1
 
       - name: Run linter
         run: bun run lint
