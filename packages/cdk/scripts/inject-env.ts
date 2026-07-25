@@ -67,27 +67,39 @@ function main(): void {
   const cognitoOAuthDomain =
     outputs.CognitoOAuthDomain || `${cognitoDomainPrefix}.auth.${awsRegion}.amazoncognito.com`;
 
-  // Derive the website origin from CFN outputs so a non-production deployment
-  // (different VELA_DOMAIN_NAME) generates redirect URLs that match the URIs
-  // AuthStack registered in Cognito. When WebsiteOrigin is absent (older stack
-  // deployed before this output existed), fall back to VELA_DOMAIN_NAME (the
-  // same env var AuthStack reads) and finally to DEFAULT_WEBSITE_DOMAIN — the
-  // same expression AuthStack uses to register Cognito callback/logout URLs.
+  // An explicitly configured VELA_DOMAIN_NAME describes the stack this run is
+  // about to deploy — it must take precedence over WebsiteOrigin/MobileApiURL,
+  // which are outputs from the *currently* deployed stack. The deploy workflow
+  // exports outputs, injects env, builds the SPA/mobile bundle, and only then
+  // runs `cdk deploy`. Giving outputs precedence over VELA_DOMAIN_NAME would
+  // build the frontend against the old domain while AuthStack registers
+  // Cognito callbacks for the new one — the deployed bundle and Cognito would
+  // disagree. Empty string is treated as unset (GitHub Actions unset-var
+  // semantics), so configuredOrigin is undefined and we fall through to
+  // outputs, then DEFAULT_WEBSITE_DOMAIN — matching AuthStack's expression
+  // (`VELA_DOMAIN_NAME || DEFAULT_WEBSITE_DOMAIN`) when nothing is configured.
   // CloudFrontDomain is intentionally NOT used as a fallback: AuthStack
   // registers the custom domain, not the CloudFront domain, so a CloudFront-
   // derived callback URL would be rejected by Cognito on the first deployment
-  // of the multi-env refactor. Env var overrides remain as escape hatches.
+  // of the multi-env refactor.
+  const configuredOrigin = process.env.VELA_DOMAIN_NAME
+    ? `https://${process.env.VELA_DOMAIN_NAME}`
+    : undefined;
+
   const websiteOrigin =
-    outputs.WebsiteOrigin ||
-    (process.env.VELA_DOMAIN_NAME
-      ? `https://${process.env.VELA_DOMAIN_NAME}`
-      : `https://${DEFAULT_WEBSITE_DOMAIN}`);
+    configuredOrigin || outputs.WebsiteOrigin || `https://${DEFAULT_WEBSITE_DOMAIN}`;
 
   // Mobile API URL: derived from the same website origin as the web app's
-  // redirect URLs (MobileApiURL CFN output). Falls back to `${websiteOrigin}/api/`
-  // when the output is absent (older stack). Env var override as escape hatch.
+  // redirect URLs (MobileApiURL CFN output). An explicit VELA_DOMAIN_NAME
+  // overrides the stale output for the same reason as websiteOrigin above.
+  // VITE_MOBILE_API_URL remains the top-priority escape hatch. Falls back to
+  // `${websiteOrigin}/api/` when both configuredOrigin and MobileApiURL are
+  // absent (older stack).
   const mobileApiUrl =
-    process.env.VITE_MOBILE_API_URL || outputs.MobileApiURL || `${websiteOrigin}/api/`;
+    process.env.VITE_MOBILE_API_URL ||
+    (configuredOrigin ? `${configuredOrigin}/api/` : undefined) ||
+    outputs.MobileApiURL ||
+    `${websiteOrigin}/api/`;
 
   const envVars = {
     VITE_COGNITO_USER_POOL_ID: outputs.CognitoUserPoolId,

@@ -60,5 +60,15 @@ export const validateConfig = (env?: ConfigEnv): boolean => {
     return true;
   }
 
+  // Reject plain http: in production. ATS enforcement depends on this — even
+  // if an ATS exception leaked into a Release build (or an operator configures
+  // an HTTP endpoint), the app must crash at boot rather than silently load
+  // over HTTP. Dev builds may target http://localhost or LAN IPs.
+  if (isProd && typeof apiUrl === 'string' && new URL(apiUrl).protocol === 'http:') {
+    const msg = `VITE_MOBILE_API_URL must be https: in production, got: ${apiUrl}`;
+    console.error(msg);
+    throw new Error(msg);
+  }
+
   return true;
 };

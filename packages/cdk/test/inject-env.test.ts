@@ -212,6 +212,42 @@ describe('inject-env', () => {
     expect(webEnv).not.toContain('cloudfront.net');
   });
 
+  // Regression: the deploy workflow exports outputs from the *currently*
+  // deployed stack, injects env, builds the SPA/mobile bundle, and only then
+  // runs `cdk deploy`. When VELA_DOMAIN_NAME is changed (e.g. production →
+  // staging), the stale outputs still contain the old domain. VELA_DOMAIN_NAME
+  // must take precedence over those outputs so the bundle is built against the
+  // domain AuthStack is about to register in Cognito — otherwise the deployed
+  // SPA/mobile bundle and Cognito disagree on callback/logout URLs.
+  test('VELA_DOMAIN_NAME overrides stale WebsiteOrigin/MobileApiURL outputs', () => {
+    writeOutputs([
+      { OutputKey: 'CognitoUserPoolId', OutputValue: 'us-east-1_testPool' },
+      { OutputKey: 'CognitoUserPoolClientId', OutputValue: 'test-client-id' },
+      { OutputKey: 'CognitoRegion', OutputValue: 'us-east-1' },
+      // Stale outputs from the currently-deployed production stack.
+      { OutputKey: 'WebsiteOrigin', OutputValue: 'https://vela.cwchanap.dev' },
+      { OutputKey: 'MobileApiURL', OutputValue: 'https://vela.cwchanap.dev/api/' },
+    ]);
+
+    const result = runInjectEnv({ VELA_DOMAIN_NAME: 'staging.vela.example' });
+
+    expect(result.status).toBe(0);
+    const webEnv = fs.readFileSync(path.join(tempRoot, 'apps', 'vela', '.env.production'), 'utf8');
+    expect(webEnv).toContain(
+      'VITE_COGNITO_REDIRECT_SIGN_IN=https://staging.vela.example/auth/callback',
+    );
+    expect(webEnv).toContain(
+      'VITE_COGNITO_REDIRECT_SIGN_OUT=https://staging.vela.example/auth/login',
+    );
+    expect(webEnv).not.toContain('vela.cwchanap.dev');
+    const mobileEnv = fs.readFileSync(
+      path.join(tempRoot, 'apps', 'vela-mobile', '.env.production'),
+      'utf8',
+    );
+    expect(mobileEnv).toContain('VITE_MOBILE_API_URL=https://staging.vela.example/api/');
+    expect(mobileEnv).not.toContain('vela.cwchanap.dev');
+  });
+
   test('VITE_MOBILE_API_URL env var overrides the CFN output', () => {
     writeOutputs(BASE_OUTPUTS);
 
