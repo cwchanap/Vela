@@ -1,21 +1,42 @@
-import { describe, it, expect } from 'vitest';
+import { beforeEach, describe, it, expect, vi } from 'vitest';
 import { mount } from '@vue/test-utils';
 import { Quasar, QLayout, QPageContainer } from 'quasar';
 import { defineComponent, type Component } from 'vue';
+import { createMemoryHistory, createRouter } from 'vue-router';
 import LearnPage from './LearnPage.vue';
 import ReviewPage from './ReviewPage.vue';
 import WordsPage from './WordsPage.vue';
 import MorePage from './MorePage.vue';
 
+const configState = vi.hoisted(() => ({ isDev: true }));
+
+vi.mock('src/config', () => ({
+  config: {
+    app: {
+      get isDev() {
+        return configState.isDev;
+      },
+    },
+  },
+}));
+
 // q-page must be a deep child of q-layout; wrap so Quasar renders under jsdom.
 const mountPage = (Page: Component) => {
+  const router = createRouter({
+    history: createMemoryHistory(),
+    routes: [{ path: '/', component: { template: '<div />' } }],
+  });
   const Host = defineComponent({
     components: { QLayout, QPageContainer, Page },
     template:
       '<q-layout view="hHh Lpr fFf"><q-page-container><page/></q-page-container></q-layout>',
   });
-  return mount(Host, { global: { plugins: [Quasar] } });
+  return mount(Host, { global: { plugins: [Quasar, router] } });
 };
+
+beforeEach(() => {
+  configState.isDev = true;
+});
 
 describe.each([
   ['LearnPage', LearnPage, 'Learn'],
@@ -31,5 +52,18 @@ describe.each([
   it('renders the Coming soon placeholder', () => {
     const wrapper = mountPage(Page);
     expect(wrapper.text()).toContain('Coming soon');
+  });
+});
+
+describe('MorePage diagnostics entry', () => {
+  it('shows the iOS interaction diagnostics entry in development', () => {
+    const wrapper = mountPage(MorePage);
+    expect(wrapper.find('[data-testid="ios-interaction-entry"]').exists()).toBe(true);
+  });
+
+  it('hides the iOS interaction diagnostics entry outside development', () => {
+    configState.isDev = false;
+    const wrapper = mountPage(MorePage);
+    expect(wrapper.find('[data-testid="ios-interaction-entry"]').exists()).toBe(false);
   });
 });
