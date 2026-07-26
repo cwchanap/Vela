@@ -4,8 +4,12 @@ import {
   createRouter,
   createWebHashHistory,
   createWebHistory,
+  type RouterScrollBehavior,
 } from 'vue-router';
 import routes from './routes';
+
+export const mobileScrollBehavior: RouterScrollBehavior = (_to, _from, savedPosition) =>
+  savedPosition ?? { left: 0, top: 0 };
 
 export default defineRouter(() => {
   const createHistory = process.env.SERVER
@@ -15,7 +19,7 @@ export default defineRouter(() => {
       : createWebHashHistory;
 
   const Router = createRouter({
-    scrollBehavior: () => ({ left: 0, top: 0 }),
+    scrollBehavior: mobileScrollBehavior,
     routes,
     history: createHistory(process.env.VUE_ROUTER_BASE),
   });

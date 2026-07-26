@@ -14,7 +14,9 @@ vi.mock('vue-router', async () => {
 
 // Import after mock is registered so the module under test picks up spies.
 const { createMemoryHistory, createWebHistory, createWebHashHistory } = await import('vue-router');
-const createRouter = (await import('./index')).default;
+const routerModule = await import('./index');
+const createRouter = routerModule.default;
+const { mobileScrollBehavior } = routerModule;
 
 describe('router/index', () => {
   beforeEach(() => {
@@ -35,6 +37,11 @@ describe('router/index', () => {
     const router = (createRouter as () => any)();
     expect(router).toBeDefined();
     expect(router.options.routes.length).toBeGreaterThan(0);
+  });
+
+  it('installs the exported mobile scroll behavior', () => {
+    const router = (createRouter as () => any)();
+    expect(router.options.scrollBehavior).toBe(mobileScrollBehavior);
   });
 
   it('uses createMemoryHistory when SERVER is set', () => {
