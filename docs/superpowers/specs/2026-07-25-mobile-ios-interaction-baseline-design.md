@@ -36,10 +36,11 @@ The pre-design baseline is clean: 12 Vitest files and 104 tests pass at commit
 | General app links | Not introduced by this issue | The existing custom scheme remains OAuth-only; universal links or another scheme require separate product and security decisions |
 | Deep-link behavior | Define and test route-entry policy without registering new external links | Establishes semantics now without expanding the public URL surface |
 | Swipe-back | Enable only WKWebView's native back/forward gesture | Avoids a competing JavaScript or third-party gesture system |
-| Bottom-tab history | Route every tab switch through the app-owned navigation helper and retain chronological history | A tab switch is a real navigation in M1; native swipe returns to the exact previously visible route rather than pretending `replace` can clear older WKWebView entries |
+| Bottom-tab history | Route every tab switch through the app-owned navigation helper and retain chronological history for M1 | A tab switch is a real navigation in this spike, so native swipe returns to the exact previously visible route. This deliberately favors observable history over bounded tab history and must be revisited in M2 after physical repeated-switch testing |
 | History scroll position | Restore Vue Router's saved position on back/forward; scroll new pushes to the top | Keeps native swipe transitions visually coherent while preserving predictable forward navigation |
-| Keyboard resize | Capacitor Keyboard `native` resize | Resizes the whole WebView and keeps Quasar viewport calculations aligned with the visible iOS viewport |
+| Keyboard resize | Explicitly pin Capacitor Keyboard `native` resize | `native` is already Capacitor iOS's default; the explicit configuration and contract test prevent a future default or configuration drift |
 | Bottom navigation with keyboard | Hidden while the native keyboard is visible | Preserves compact-height space for the focused field and primary action |
+| Safe-area ownership | Decide `ios.contentInset` through a simulator preflight before building the full harness | The existing `.always` setting has never been exercised with both headerless and header-enabled routes; the design must not guess whether native scroll insets and CSS `env()` values combine or double |
 | Production impact | Reusable shell, keyboard, and native navigation behavior ship; diagnostic pages do not | Later mobile pages need the baseline behavior, but users do not need the probe UI |
 
 ## Scope
@@ -52,6 +53,9 @@ The pre-design baseline is clean: 12 Vitest files and 104 tests pass at commit
 - Add a Japanese-capable input probe with explicit composition handling.
 - Make the input and primary action recoverably visible when the iOS keyboard appears.
 - Add explicit Capacitor Keyboard configuration and lifecycle handling.
+- Run a safe-area preflight that compares `ios.contentInset: "always"` and
+  `"never"` with headerless content, a fixed header, and the existing fixed
+  footer before committing to an inset owner.
 - Extend safe-area handling to top, bottom, left, and right insets.
 - Keep portrait and landscape usable.
 - Enable WKWebView native back/forward gestures through a Capacitor view-controller subclass.
@@ -95,16 +99,24 @@ the compile-time branch.
 
 More renders the diagnostic entry only in development. A production build has
 neither a visible entry nor resolvable diagnostic routes. The main diagnostic
-page contains `data-testid="ios-interaction-diagnostics"`. The exact canonical
-scan token is `ios-interaction-diagnostics`.
+page binds its `data-testid` to a shared
+`IOS_INTERACTION_DIAGNOSTICS_MARKER` constant whose exact value is
+`ios-interaction-diagnostics`. The page test is the positive control that the
+development UI uses that constant; scanner tests prove the same constant is
+detected in nested emitted JavaScript and ignored in non-JavaScript assets.
 
 The checked-in `scripts/verify-production-diagnostics.mjs` script scans
 `src-capacitor/www/**/*.js` after a production Capacitor asset build and fails
 if that token is present. The package command
 `verify:production-diagnostics` first runs
 `quasar build -m capacitor -T ios --skip-pkg`, which exercises the shipped
-Capacitor/hash-router compile surface without requiring an Xcode package or
-signing step, and then runs the scanner. The ordinary SPA `dist` output is not
+Capacitor/hash-router compile surface, and then runs the scanner. Quasar still
+runs its default `cap sync ios` preparation before honoring `--skip-pkg`; that
+preparation invokes CocoaPods. The real artifact scan is therefore a local
+macOS pre-merge gate (or a future macOS-CI gate), not an
+`ubuntu-latest` command. The CI-safe controls are the development/production
+route-construction tests, the page/marker positive control, and the scanner's
+synthetic positive/negative tests. The ordinary SPA `dist` output is not
 accepted as production-exclusion evidence for the iOS app.
 
 ### File boundaries
@@ -115,6 +127,11 @@ The implementation should keep these responsibilities isolated:
   keyboard-driven footer visibility, and bottom navigation. Every
   `QRouteTab` uses Quasar's custom-navigation callback to cancel its default
   push and delegate to `mobile-navigation.ts`.
+- `safe-area-policy.ts`: records the simulator-selected native content-inset
+  mode and whether headerless top ownership belongs to the native scroll view
+  or app CSS.
+- `ios-interaction-contract.ts`: owns the single canonical diagnostics marker
+  imported by the development page and the external artifact scanner.
 - `MobilePageHeader.vue`: renders a route title and at least 44-by-44-point back control.
 - `JapaneseInputProbe.vue`: owns text input, IME composition state, exact committed/submitted values, and explicit focus dismissal.
 - `useKeyboardViewport.ts`: adapts the typed Capacitor Keyboard listener API to
@@ -146,12 +163,15 @@ must preserve the exact text delivered by the browser and avoid
 transformations while composition is active.
 
 The installed Quasar `QInput` owns its native composition handlers and
-suppresses `update:model-value` while its internal composing flag is set. The
-probe therefore does not rely on `@compositionstart` or
-`@compositionend` being forwarded by the component. After mount it reads the
-public `QInput.nativeEl` reference and registers native
-`compositionstart`, `input`, `compositionend`, and `keydown` listeners. Every
-listener is removed on unmount.
+suppresses `update:model-value` while its internal composing flag is set.
+Quasar's flag is heuristic: it is set during `compositionupdate` only after
+the event data matches its CJK patterns, rather than immediately on
+`compositionstart`. The probe therefore treats Quasar's suppression as a
+helpful implementation detail, not its correctness boundary. It does not rely
+on `@compositionstart` or `@compositionend` being forwarded by the component.
+After mount it reads the public `QInput.nativeEl` reference and registers
+native `compositionstart`, `input`, `compositionend`, and `keydown` listeners.
+Every listener is removed on unmount.
 
 The bound QInput model and the displayed draft are separate values. The model
 continues to receive Quasar's ordinary `update:model-value` events; native
@@ -193,8 +213,8 @@ Add `@capacitor/keyboard` to `src-capacitor/package.json` at the same Capacitor
 `src-capacitor/bun.lock`, and run:
 
 ```bash
-cd apps/vela-mobile/src-capacitor
-bunx cap sync ios
+# workdir: apps/vela-mobile/src-capacitor
+rtk bunx cap sync ios
 ```
 
 The dependency remains only in `src-capacitor/package.json`, following
@@ -223,9 +243,11 @@ mocked independently. After adding Keyboard, update
 contains its generated path aliases, and then run `bun run typecheck`.
 
 Capacitor documents native resize as resizing the whole native WebView,
-including viewport-relative units. It is compatible with the existing
-`ios.contentInset: "always"` setting: the former changes the WebView frame while
-the latter controls scroll-view inset adjustment.
+including viewport-relative units. `native` is already the Capacitor iOS
+default; the explicit value pins that behavior. Its interaction with
+`ios.contentInset` is not assumed. The safe-area preflight below decides
+whether the existing `"always"` setting remains or `"never"` gives the single,
+measurable inset ownership required by this issue.
 
 The keyboard adapter imports the typed `Keyboard` API:
 
@@ -265,17 +287,54 @@ back to standard focus scrolling and leaves native-only status unavailable.
 
 Quasar already applies `env(safe-area-inset-top)` to the first toolbar in a
 standard `QHeader` and `env(safe-area-inset-bottom)` to the final tabs in a
-standard `QFooter` when `body.q-ios-padding` is present. The mobile shell commits
-to this ownership model:
+standard `QFooter` when `body.q-ios-padding` is present. Those rules do not add
+left or right padding. Four of the five root tab routes are headerless, and the
+current shell has never rendered a `QHeader`, so neither the headerless top
+inset nor the interaction between Quasar CSS and the existing
+`ios.contentInset: "always"` has been established.
 
-- Use those standard Quasar header/footer structures on native iOS.
-- Do not add custom top or bottom padding to native `QHeader`, `QFooter`, or
-  page content.
-- Apply manual top/bottom fallback CSS only below
+Safe-area ownership is therefore an implementation preflight, not a settled
+fact. Before the full diagnostic harness is built, compare
+`ios.contentInset: "always"` and `"never"` on a notched or Dynamic Island
+simulator using:
+
+- the current headerless tab content;
+- a temporary standard `QHeader`/`QToolbar` probe;
+- the existing standard `QFooter`/`QTabs`;
+- the exact candidate CSS for page, toolbar, and footer-tab horizontal insets
+  plus CSS headerless-top ownership when testing `"never"`;
+- portrait, landscape-left, and landscape-right;
+- recorded computed values for all four `env(safe-area-inset-*)` variables;
+- screenshots and element bounds for the first page control, header back
+  control, and first/last footer tabs.
+
+Choose the policy using these rules:
+
+1. Headerless content has exactly one top inset.
+2. Header content and footer content have exactly one top/bottom inset.
+3. Header, footer, and page controls remain outside both landscape sensor
+   regions.
+4. No native scroll inset and CSS inset are visibly doubled.
+5. If both modes satisfy the observations, preserve `"always"` to minimize
+   native-configuration churn. If neither does, HPA-209 remains blocked and
+   the ownership model must be redesigned before the harness proceeds.
+
+The selected mode is written to `capacitor.config.json`, an app-owned
+`safe-area-policy.ts` contract, and the checked-in evidence. Subsequent layout
+work follows the selected policy:
+
+- With `"always"`, the preflight must have proven that the native scroll view
+  owns the headerless top inset without a CSS duplicate.
+- With `"never"`, the app-owned layout applies a CSS top inset to the
+  headerless `QPageContainer`; Quasar continues to apply the fixed header and
+  footer top/bottom CSS insets.
+- In either mode, page content, `QToolbar`, and the footer
+  `.q-tabs__content` receive explicit left/right `env()` padding. Horizontal
+  padding does not overlap Quasar's top/bottom rules.
+- The existing web-iOS bottom fallback remains scoped below
   `body:not(.q-ios-padding)`.
-- Page content owns left and right safe-area padding only, in both orientations.
-- Ensure header, footer, and page backgrounds fill their inset regions.
-- Avoid fixed margins on Quasar layout primitives.
+- Header, footer, and page backgrounds fill their inset regions.
+- Fixed margins are not added to Quasar layout primitives.
 
 ### Orientation
 
@@ -310,9 +369,11 @@ scrollBehavior(_to, _from, savedPosition) {
 
 New pushes and replacements start at the top. Browser, header, and native
 back/forward traversal restore Vue Router's `savedPosition`. Physical swipe
-validation must confirm that the destination remains visible throughout the
-interactive animation: no blank or white intermediate frame, stale page,
-unexpected jump, or trapped final state is accepted.
+validation is functional rather than aesthetic. A WebKit-provided snapshot,
+cross-fade, or temporarily stale transition image is acceptable while the
+gesture is active if the correct live destination and saved position appear
+when it completes. A blank or white intermediate frame, wrong final route,
+unexpected app exit, or trapped state is not accepted.
 
 ### Ordinary in-app navigation
 
@@ -329,15 +390,29 @@ This makes repeated taps explicitly idempotent even though Vue Router also
 reports duplicated navigation. The app does not depend on Vue Router's internal
 `back` field or on `window.history.length`.
 
-`QRouteTab` remains responsible for route-aware active styling, but its
-custom-navigation click callback cancels the default navigation and calls the
-helper. M1 deliberately uses one chronological WKWebView history rather than
+`QRouteTab` remains responsible for route-aware active styling. Quasar emits
+its `click` event with `(event, go)`, then calls `go()` unless
+`event.defaultPrevented` is already true. The app handler must call
+`event.preventDefault()` synchronously and deliberately not call `go()`;
+instead it calls the app-owned helper. Skipping `go()` also skips Quasar's
+immediate `$tabs.updateModel()`/`avoidRouteWatcher` path, so active styling
+depends on QTabs' route watcher and is covered by an explicit
+`q-tab--active` test after helper-driven navigation.
+
+M1 deliberately uses one chronological WKWebView history rather than
 independent per-tab stacks. If the user opens More, Diagnostics, and Detail,
 then taps Home, a native back swipe from Home returns to Detail because Detail
 was the previously visible route. That behavior is intentional, carries a
 defined `mobileDepth`, and is verified physically. Merely adding `replace` or
 resetting the numeric depth would not remove older entries from WKWebView
 history and is therefore not used as a false stack-reset mechanism.
+
+This is not declared a permanent product policy. M1 chooses chronological
+history because it makes every WKWebView entry observable during the spike.
+The physical matrix includes twenty alternating tab switches followed by
+repeated swipe-back traversal. M2 must revisit whether a bounded or
+tab-specific policy better matches product expectations after that evidence is
+available.
 
 ### Route-entry behavior
 
@@ -489,6 +564,11 @@ Physical validation is authoritative. If native swipe:
 
 HPA-209 remains blocked until the native-history integration is corrected or the product requirement is revisited. The implementation must not hide a failure behind a custom swipe imitation.
 
+Exact native animation fidelity is not an acceptance criterion. The live
+HPA-209 requirement is predictable back behavior without closing or trapping
+the app; a native snapshot or cross-fade is acceptable under the functional
+completion rule above.
+
 ## Diagnostic journey
 
 The main page contains:
@@ -560,6 +640,13 @@ The diagnostic does not send input or device information to a backend.
   `savedPosition`.
 - Header title, back control, and fallback follow the typed route metadata.
 - Safe-area content classes and minimum target classes are present.
+- `IosInteractionDiagnosticsPage` tests cover every control, readout,
+  lifecycle/navigation outcome, cold-entry staging, marker binding, and IME
+  probe integration.
+- `IosInteractionDetailPage` tests cover route identity and repeated
+  current-route navigation.
+- The full mobile suite passes the configured 95% line threshold with
+  `bun run test:coverage`; diagnostic pages are covered rather than excluded.
 
 ### Navigation tests
 
@@ -567,6 +654,9 @@ The diagnostic does not send input or device information to a backend.
 - Unique internal navigation increments `mobileDepth`.
 - Every bottom-tab switch delegates to the navigation helper, pushes once, and
   increments `mobileDepth`.
+- After helper-driven tab navigation, QTabs' route watcher applies
+  `q-tab--active` to the destination tab even though the handler canceled
+  Quasar's `go()` callback.
 - Repeated current-route navigation is a no-op and leaves `mobileDepth`
   unchanged, including Detail to the same Detail route.
 - After Detail to Home through a tab, simulated back traversal returns to
@@ -588,9 +678,14 @@ The diagnostic does not send input or device information to a backend.
 - Unknown entry targets do not navigate.
 - Development route construction includes the diagnostic journey.
 - Production route construction excludes the diagnostic journey.
-- The production-exclusion command builds Capacitor iOS assets with
-  `--skip-pkg`, scans `src-capacitor/www/**/*.js` for the exact token
-  `ios-interaction-diagnostics`, and fails if it is present.
+- The shared diagnostics marker is present on the development page.
+- Scanner tests use the repository's existing
+  `scripts/**/*.{test,spec}.{mts,mjs}` Vitest convention and prove a nested
+  JavaScript positive match, a clean negative result, and non-JavaScript
+  exclusion.
+- On macOS, the production-exclusion command builds Capacitor iOS assets with
+  `--skip-pkg`, scans `src-capacitor/www/**/*.js` for the shared token, and
+  fails if it is present.
 
 ### Native contract tests
 
@@ -612,20 +707,29 @@ Repository tests read the committed native/configuration files and assert:
 At implementation completion, run:
 
 ```bash
-cd apps/vela-mobile
-bun run test:unit
-bun run lint
-bun run typecheck
-bun run build
-bun run verify:production-diagnostics
+# workdir: apps/vela-mobile
+rtk bun run test:unit
+rtk bun run test:coverage
+rtk bun run lint
+rtk bun run typecheck
+rtk env VITE_MOBILE_API_URL=https://example.invalid/api/ bun run build
 ```
 
-`verify:production-diagnostics` runs the production Capacitor asset build and
-scans the resulting `src-capacitor/www` JavaScript. It requires the same valid
-production mobile API environment as other production mobile builds. Then run
-`cd src-capacitor && bunx cap sync ios` before the Capacitor simulator/device
-workflow. The exact build command and any signing constraints must be recorded
-with the evidence.
+On macOS, also run:
+
+```bash
+# workdir: apps/vela-mobile
+rtk env VITE_MOBILE_API_URL=https://example.invalid/api/ bun run verify:production-diagnostics
+# workdir: apps/vela-mobile/src-capacitor
+rtk bunx cap sync ios
+```
+
+`verify:production-diagnostics` runs the production Capacitor asset build,
+including Quasar's `cap sync ios` preparation, and scans the resulting
+`src-capacitor/www` JavaScript. It requires CocoaPods and the same valid
+production mobile API environment as other production mobile builds. The
+exact command, host platform, build configuration, and any signing constraints
+are recorded with the evidence.
 
 ## Manual device matrix
 
@@ -633,10 +737,12 @@ The checked-in evidence document records exact models and versions used at valid
 
 | Environment | Required coverage |
 | --- | --- |
+| Notched or Dynamic Island iPhone Simulator safe-area preflight | Compare `contentInset` modes with headerless content, an injected standard header, fixed footer, computed four-edge `env()` values, and both landscape directions before full harness work |
 | Small-screen iPhone Simulator, portrait | Keyboard-open layout, scrolling, focus/action visibility, footer hide/restore without double padding, tap targets, route controls |
 | Small-screen iPhone Simulator, landscape | Keyboard-open compact-height stress case; focused field and primary action remain reachable without dismissing the keyboard |
 | Dynamic Island iPhone Simulator | Top/bottom/side safe areas, rotation while the keyboard is open, keyboard resize, nested back history |
-| Physical iPhone | Japanese IME composition, candidate commitment, exact submission, keyboard visibility/dismissal, selection, background/resume, header back, tab-switch history, native edge swipe, and swipe-animation visual continuity |
+| Physical iPhone, Debug development build | Japanese IME composition, candidate commitment, exact submission, keyboard visibility/dismissal, selection, background/resume, header back, repeated tab-switch history, native edge swipe, and functionally correct swipe completion |
+| Simulator or physical iPhone, Release smoke build | Core Home/More shell launch, rotation, safe-area control bounds, and footer behavior with diagnostics absent; diagnostic-specific Release evidence remains indirect through the artifact scan |
 
 Each row records:
 
@@ -645,6 +751,9 @@ Each row records:
 - Xcode version.
 - Japanese keyboard layout used.
 - Git commit/build identifier.
+- Build configuration (`Debug development`, `Release smoke`, or production
+  Capacitor asset scan).
+- Whether the app used the LAN development server or packaged WebView assets.
 - Orientation.
 - Pass/fail result for each scenario.
 - Reproduction notes and linked follow-up issue for failures.
@@ -684,8 +793,8 @@ Each row records:
    restored.
 8. From Detail, tap the Home bottom tab.
 9. Use native swipe-back and confirm the exact Detail page and its original
-   depth return, with visible page content throughout the interactive
-   transition rather than a blank or white frame.
+   depth return. Record whether WebKit uses a live view, snapshot, or
+   cross-fade; those are acceptable, but a blank or white frame is not.
 10. Use native swipe-forward and confirm Home is restored.
 11. Repeat navigation to the current route and confirm its depth does not
     change.
@@ -695,10 +804,16 @@ Each row records:
     relaunch it, and confirm the target is consumed once.
 15. Confirm native swipe-back is a no-op from that fresh detail entry while
     header back uses its fallback.
-16. Confirm that the app remains on one predictable route with no duplicated
+16. Alternate Home and Review twenty times, then traverse backward repeatedly
+    and record whether chronological tab history remains usable or feels
+    product-hostile.
+17. Confirm that the app remains on one predictable route with no duplicated
     pages, blank content, exit, or trap.
 
-Physical-iPhone evidence is a release gate for this issue.
+The diagnostic matrix necessarily uses a Debug development build because the
+routes are development-only. Physical-iPhone Debug evidence is a release gate
+for this issue. It is not represented as production-build evidence; Release
+confidence comes from the marker scan plus the separate core-shell smoke row.
 
 ## Reusable guidance produced by HPA-209
 
@@ -707,8 +822,10 @@ The mobile README and device evidence will record these conventions:
 - Do not submit or normalize Japanese input during IME composition.
 - Use Capacitor native keyboard resize and scroll the focused form block after resize settles.
 - Hide bottom navigation while the native keyboard is visible.
-- Use standard Quasar header/footer structures so native safe-area padding is applied once.
-- Apply left/right safe-area padding to page content for landscape.
+- Choose native-scroll versus CSS headerless-top ownership from measured
+  simulator evidence; do not assume `contentInset` compatibility.
+- Use standard Quasar header/footer structures for top/bottom CSS ownership and
+  add explicit left/right safe-area padding to page, toolbar, and tab content.
 - Keep interactive targets at least 44 by 44 points.
 - Route ordinary links and bottom tabs through one unique-push helper; M1 uses
   chronological history rather than independent tab stacks.
@@ -717,7 +834,10 @@ The mobile README and device evidence will record these conventions:
 - Register resume observation at the app boundary; resume preserves route
   state unless a new entry event is consumed.
 - Header back always has a route fallback.
-- Native swipe and visible back controls share one WKWebView/Vue Router history.
+- For ordinary pushed navigation, native swipe and visible back controls
+  traverse the same WKWebView/Vue Router history. After a validated
+  replace-on-entry at depth zero, header fallback may intentionally differ
+  from any older native session entry.
 - Treat physical-device IME and swipe results as authoritative.
 
 ## Acceptance criteria mapping
@@ -726,7 +846,7 @@ The mobile README and device evidence will record these conventions:
 | --- | --- |
 | Japanese IME composition and submission do not corrupt or prematurely commit text | Explicit composition state machine, exact value readouts, automated event tests, and required physical scenario |
 | Focused inputs remain visible with the keyboard | Native WebView resize, focused-block scrolling, hidden footer, portrait/landscape matrix |
-| Content and navigation respect safe areas | Standard Quasar header/footer handling, web fallback, side-inset content padding, simulator matrix |
+| Content and navigation respect safe areas | Preflight-selected native/CSS ownership, standard Quasar top/bottom handling, explicit page/header/footer side padding, and simulator matrix |
 | Back controls and swipe-back produce predictable history | Unique navigation policy for ordinary links and tabs, saved-position restoration, back fallbacks, app-owned bridge controller, storyboard module contract, and physical route sequence |
 | Portrait works and landscape is handled intentionally | Both orientations remain functional; landscape is a required compact-height test |
 | Findings produce reusable guidance | Isolated components/policies, README conventions, and checked-in device evidence |
