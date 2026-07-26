@@ -1,10 +1,14 @@
 import { defineConfig } from '#q-app/wrappers';
 import { resolve } from 'node:path';
+import { getMobileBootFiles } from './src/boot/boot-files';
 import { validateMobileApiUrlPlugin } from './build/validate-mobile-api-url';
 
-export default defineConfig(() => {
+export default defineConfig((ctx) => {
   return {
-    boot: ['main'],
+    boot: getMobileBootFiles({
+      isCapacitor: ctx.modeName === 'capacitor',
+      isDevelopment: ctx.dev,
+    }),
 
     css: ['app.scss'],
 
