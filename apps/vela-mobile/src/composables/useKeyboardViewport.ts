@@ -77,6 +77,8 @@ export function useKeyboardViewport(options: KeyboardViewportOptions = {}) {
       if (!mounted || !nativeReady) return;
       isKeyboardVisible.value = true;
     },
+    // iOS fires keyboardWillShow before keyboardDidShow; scrollFocusedBlockAfterLayout
+    // guards on isKeyboardVisible, so this ordering is required for the scroll to run.
     keyboardDidShow: () => {
       if (!mounted || !nativeReady) return;
       void scrollFocusedBlockAfterLayout();

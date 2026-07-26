@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import {
-  buildMobileChildRoutes,
-  developmentDiagnosticRoutes,
   IOS_DIAGNOSTIC_DETAIL_PATH,
   IOS_DIAGNOSTIC_ROOT_PATH,
-} from './diagnostic-routes';
+  IOS_INTERACTION_DIAGNOSTICS_LABEL,
+} from 'src/diagnostics/ios-interaction-contract';
+import { buildMobileChildRoutes, developmentDiagnosticRoutes } from './diagnostic-routes';
 
 describe('diagnostic route construction', () => {
   it('adds the two diagnostic routes in development', () => {
@@ -19,7 +19,7 @@ describe('diagnostic route construction', () => {
 
   it('declares exact header metadata and fallbacks', () => {
     expect(developmentDiagnosticRoutes[0]?.meta?.mobileHeader).toEqual({
-      title: 'iOS Interaction Diagnostics',
+      title: IOS_INTERACTION_DIAGNOSTICS_LABEL,
       fallback: '/more',
     });
     expect(developmentDiagnosticRoutes[1]?.meta?.mobileHeader).toEqual({

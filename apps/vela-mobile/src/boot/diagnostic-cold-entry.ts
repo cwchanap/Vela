@@ -1,6 +1,9 @@
 import { defineBoot } from '#q-app/wrappers';
 import type { Router } from 'vue-router';
-import { IOS_DIAGNOSTIC_DETAIL_PATH, IOS_DIAGNOSTIC_ROOT_PATH } from 'src/router/diagnostic-routes';
+import {
+  IOS_DIAGNOSTIC_DETAIL_PATH,
+  IOS_DIAGNOSTIC_ROOT_PATH,
+} from 'src/diagnostics/ios-interaction-contract';
 import { replaceColdMobileRoute, type MobileNavigationResult } from 'src/router/mobile-navigation';
 
 export const DIAGNOSTIC_COLD_ENTRY_KEY = 'vela:dev:ios-interaction-cold-entry';

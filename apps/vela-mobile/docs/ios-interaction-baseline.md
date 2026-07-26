@@ -198,19 +198,19 @@ with all five observed values exactly `日本語`.
 ## Automated verification
 
 The automated web and Capacitor asset commands below were run against
-`d261de358a54d8ffd41a02e0107c84e5e3d90c2d`; the final post-sync simulator
+`94da5e455a12c47fbb7dd7ff02dfff2267548e73`; the final post-sync simulator
 compilation used the documentation commit identified in its own bullet:
 
-- `bun run test:unit`: 27 files, 187 tests passed. The intentional
+- `bun run test:unit`: 27 files, 191 tests passed. The intentional
   guard-failure test still emits its expected Vue Router warning.
-- `bun run test:coverage`: 27 files, 187 tests passed; line coverage was
-  `97.53%`, above the configured 95% threshold. The same expected warning was
+- `bun run test:coverage`: 27 files, 191 tests passed; line coverage was
+  `97.45%`, above the configured 95% threshold. The same expected warning was
   emitted.
 - `bun run lint`, `bun run typecheck`, and the SPA production build with
   `VITE_MOBILE_API_URL=https://example.invalid/api/`: passed.
-- `verify:production-diagnostics`: passed after a real macOS Capacitor build
-  and `cap sync ios`; no diagnostic marker was found under
-  `src-capacitor/www`.
+- `verify:production-diagnostics`: re-run at HEAD after the leak-fix commits
+  (`9cdb99b`, `94da5e4`) with a real macOS Capacitor build and `cap sync ios`;
+  no diagnostic marker was found under `src-capacitor/www`.
 - Final `bunx cap sync ios`: passed and found `@capacitor/app@7.1.2` and
   `@capacitor/keyboard@7.0.6`.
 - Post-final-sync simulator compilation: passed against

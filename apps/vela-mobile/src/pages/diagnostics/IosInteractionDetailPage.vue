@@ -33,7 +33,10 @@
 <script setup lang="ts">
 import { ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
-import { IOS_DIAGNOSTIC_DETAIL_PATH, IOS_DIAGNOSTIC_ROOT_PATH } from 'src/router/diagnostic-routes';
+import {
+  IOS_DIAGNOSTIC_DETAIL_PATH,
+  IOS_DIAGNOSTIC_ROOT_PATH,
+} from 'src/diagnostics/ios-interaction-contract';
 import {
   enterMobileRoute,
   pushMobileRoute,
