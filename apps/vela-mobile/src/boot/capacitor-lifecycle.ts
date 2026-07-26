@@ -8,15 +8,26 @@ export type ResumeAppAdapter = {
 };
 
 let registered = false;
+let registration: Promise<void> | null = null;
 
 export async function registerCapacitorLifecycle(adapter: ResumeAppAdapter = App): Promise<void> {
   if (registered) return;
-  await adapter.addListener('resume', () => recordAppResume());
-  registered = true;
+  if (registration !== null) return registration;
+  registration = adapter
+    .addListener('resume', () => recordAppResume())
+    .then(() => {
+      registered = true;
+    })
+    .catch((error: unknown) => {
+      registration = null;
+      throw error;
+    });
+  return registration;
 }
 
 export function resetCapacitorLifecycleForTests(): void {
   registered = false;
+  registration = null;
 }
 
 export default defineBoot(async () => {
