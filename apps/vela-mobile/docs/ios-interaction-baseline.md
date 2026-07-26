@@ -212,6 +212,13 @@ All commands were run against
   `src-capacitor/www`.
 - Final `bunx cap sync ios`: passed and found `@capacitor/app@7.1.2` and
   `@capacitor/keyboard@7.0.6`.
+- Post-final-sync simulator compilation: passed against
+  `95611efb619bbcb8d3a81a46ff8ce0b75a620f03`. XcodeBuildMCP first showed
+  defaults, then confirmed the `App.xcworkspace`, `App` scheme, iPhone 17 Pro
+  (iOS 26.5), and Debug configuration before `build_sim`. The build completed
+  in 2.0 seconds with the existing CocoaPods `[CP] Embed Pods Frameworks`
+  always-run warning. Its log is
+  `~/Library/Developer/XcodeBuildMCP/workspaces/vela-595d49e6efe6/logs/build_sim_2026-07-26T11-01-13-673Z_pid80927_8de9c869.log`.
 - Debug simulator builds passed on iPhone 17e and iPhone 17 Pro. The Release
   simulator build passed with eight dependency/build-phase warnings; it was
   not pristine warning-free output.
