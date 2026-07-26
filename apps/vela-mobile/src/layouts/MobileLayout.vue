@@ -1,10 +1,18 @@
 <template>
   <q-layout view="hHh lpR fFf">
-    <q-page-container>
+    <MobilePageHeader />
+
+    <q-page-container
+      :class="{
+        'mobile-page-container--headerless': !hasMobileHeader,
+        'mobile-page-container--css-safe-top':
+          !hasMobileHeader && safeAreaPolicy.headerlessTopOwner === 'css',
+      }"
+    >
       <router-view />
     </q-page-container>
 
-    <q-footer class="mobile-nav">
+    <q-footer v-if="!isKeyboardVisible" class="mobile-nav">
       <q-tabs
         dense
         no-caps
@@ -13,17 +21,58 @@
         :class="$q.dark.isActive ? 'bg-grey-9 text-primary' : 'bg-white text-primary'"
         :breakpoint="0"
       >
-        <q-route-tab to="/" icon="home" label="Home" exact />
-        <q-route-tab to="/review" icon="repeat" label="Review" />
-        <q-route-tab to="/learn" icon="school" label="Learn" />
-        <q-route-tab to="/words" icon="menu_book" label="Words" />
-        <q-route-tab to="/more" icon="more_horiz" label="More" />
+        <q-route-tab to="/" icon="home" label="Home" exact @click="onTabClick($event, '/')" />
+        <q-route-tab
+          to="/review"
+          icon="repeat"
+          label="Review"
+          @click="onTabClick($event, '/review')"
+        />
+        <q-route-tab
+          to="/learn"
+          icon="school"
+          label="Learn"
+          @click="onTabClick($event, '/learn')"
+        />
+        <q-route-tab
+          to="/words"
+          icon="menu_book"
+          label="Words"
+          @click="onTabClick($event, '/words')"
+        />
+        <q-route-tab
+          to="/more"
+          icon="more_horiz"
+          label="More"
+          @click="onTabClick($event, '/more')"
+        />
       </q-tabs>
     </q-footer>
   </q-layout>
 </template>
 
-<script setup lang="ts"></script>
+<script setup lang="ts">
+import { computed } from 'vue';
+import { useRoute, useRouter, type RouteLocationRaw } from 'vue-router';
+import MobilePageHeader from '../components/mobile/MobilePageHeader.vue';
+import { useKeyboardViewport } from '../composables/useKeyboardViewport';
+import { safeAreaPolicy } from '../ios/safe-area-policy';
+import { pushMobileRoute } from '../router/mobile-navigation';
+
+const route = useRoute();
+const router = useRouter();
+const hasMobileHeader = computed(() => Boolean(route.meta.mobileHeader));
+const { isKeyboardVisible } = useKeyboardViewport({
+  getFocusedBlock: () => document.querySelector<HTMLElement>('[data-keyboard-scroll-block]'),
+});
+
+function onTabClick(event: Event, target: RouteLocationRaw): void {
+  event.preventDefault();
+  void pushMobileRoute(router, target).catch((error: unknown) => {
+    console.error('Mobile tab navigation failed', error);
+  });
+}
+</script>
 
 <style scoped lang="scss">
 /* Quasar applies env(safe-area-inset-bottom) to the footer q-tabs on native

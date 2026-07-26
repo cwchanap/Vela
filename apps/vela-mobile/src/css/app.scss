@@ -11,3 +11,29 @@ body {
 body.body--dark .q-page-container {
   background-color: #080714;
 }
+
+.mobile-touch-target,
+.mobile-back-target {
+  min-width: 44px;
+  min-height: 44px;
+}
+
+.mobile-safe-x {
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+}
+
+.mobile-header .q-toolbar {
+  padding-left: max(12px, env(safe-area-inset-left, 0px));
+  padding-right: max(12px, env(safe-area-inset-right, 0px));
+}
+
+.mobile-nav .q-tabs__content {
+  padding-left: env(safe-area-inset-left, 0px);
+  padding-right: env(safe-area-inset-right, 0px);
+}
+
+body:not(.q-ios-padding) .mobile-page-container--headerless,
+.mobile-page-container--css-safe-top {
+  padding-top: env(safe-area-inset-top, 0px) !important;
+}
