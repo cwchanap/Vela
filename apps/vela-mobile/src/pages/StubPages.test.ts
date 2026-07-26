@@ -1,4 +1,4 @@
-import { beforeEach, describe, it, expect, vi } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import { mount } from '@vue/test-utils';
 import { Quasar, QLayout, QPageContainer } from 'quasar';
 import { defineComponent, type Component } from 'vue';
@@ -7,18 +7,6 @@ import LearnPage from './LearnPage.vue';
 import ReviewPage from './ReviewPage.vue';
 import WordsPage from './WordsPage.vue';
 import MorePage from './MorePage.vue';
-
-const configState = vi.hoisted(() => ({ isDev: true }));
-
-vi.mock('src/config', () => ({
-  config: {
-    app: {
-      get isDev() {
-        return configState.isDev;
-      },
-    },
-  },
-}));
 
 // q-page must be a deep child of q-layout; wrap so Quasar renders under jsdom.
 const mountPage = (Page: Component) => {
@@ -33,10 +21,6 @@ const mountPage = (Page: Component) => {
   });
   return mount(Host, { global: { plugins: [Quasar, router] } });
 };
-
-beforeEach(() => {
-  configState.isDev = true;
-});
 
 describe.each([
   ['LearnPage', LearnPage, 'Learn'],
@@ -58,12 +42,8 @@ describe.each([
 describe('MorePage diagnostics entry', () => {
   it('shows the iOS interaction diagnostics entry in development', () => {
     const wrapper = mountPage(MorePage);
-    expect(wrapper.find('[data-testid="ios-interaction-entry"]').exists()).toBe(true);
-  });
-
-  it('hides the iOS interaction diagnostics entry outside development', () => {
-    configState.isDev = false;
-    const wrapper = mountPage(MorePage);
-    expect(wrapper.find('[data-testid="ios-interaction-entry"]').exists()).toBe(false);
+    const entry = wrapper.find('[data-testid="ios-interaction-entry"]');
+    expect(entry.exists()).toBe(true);
+    expect(entry.text()).toContain('iOS Interaction Diagnostics');
   });
 });

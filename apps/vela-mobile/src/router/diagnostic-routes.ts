@@ -1,7 +1,11 @@
 import type { RouteRecordRaw } from 'vue-router';
+import {
+  IOS_DIAGNOSTIC_DETAIL_PATH,
+  IOS_DIAGNOSTIC_ROOT_PATH,
+  IOS_INTERACTION_DIAGNOSTICS_LABEL,
+} from 'src/diagnostics/ios-interaction-contract';
 
-export const IOS_DIAGNOSTIC_ROOT_PATH = '/diagnostics/ios-interactions';
-export const IOS_DIAGNOSTIC_DETAIL_PATH = '/diagnostics/ios-interactions/detail';
+export { IOS_DIAGNOSTIC_DETAIL_PATH, IOS_DIAGNOSTIC_ROOT_PATH };
 
 const coreRoutes: RouteRecordRaw[] = [
   { path: '', name: 'home', component: () => import('pages/HomePage.vue') },
@@ -19,7 +23,7 @@ export const developmentDiagnosticRoutes: RouteRecordRaw[] = import.meta.env.DEV
         component: () => import('pages/diagnostics/IosInteractionDiagnosticsPage.vue'),
         meta: {
           mobileHeader: {
-            title: 'iOS Interaction Diagnostics',
+            title: IOS_INTERACTION_DIAGNOSTICS_LABEL,
             fallback: '/more',
           },
         },
