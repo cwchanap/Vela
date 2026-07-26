@@ -36,6 +36,8 @@ The pre-design baseline is clean: 12 Vitest files and 104 tests pass at commit
 | General app links | Not introduced by this issue | The existing custom scheme remains OAuth-only; universal links or another scheme require separate product and security decisions |
 | Deep-link behavior | Define and test route-entry policy without registering new external links | Establishes semantics now without expanding the public URL surface |
 | Swipe-back | Enable only WKWebView's native back/forward gesture | Avoids a competing JavaScript or third-party gesture system |
+| Bottom-tab history | Route every tab switch through the app-owned navigation helper and retain chronological history | A tab switch is a real navigation in M1; native swipe returns to the exact previously visible route rather than pretending `replace` can clear older WKWebView entries |
+| History scroll position | Restore Vue Router's saved position on back/forward; scroll new pushes to the top | Keeps native swipe transitions visually coherent while preserving predictable forward navigation |
 | Keyboard resize | Capacitor Keyboard `native` resize | Resizes the whole WebView and keeps Quasar viewport calculations aligned with the visible iOS viewport |
 | Bottom navigation with keyboard | Hidden while the native keyboard is visible | Preserves compact-height space for the focused field and primary action |
 | Production impact | Reusable shell, keyboard, and native navigation behavior ship; diagnostic pages do not | Later mobile pages need the baseline behavior, but users do not need the probe UI |
@@ -93,32 +95,68 @@ the compile-time branch.
 
 More renders the diagnostic entry only in development. A production build has
 neither a visible entry nor resolvable diagnostic routes. The main diagnostic
-page contains the unique marker `ios-interaction-diagnostics`; a checked-in
-verification script scans the emitted production JavaScript and fails if that
-marker is present.
+page contains `data-testid="ios-interaction-diagnostics"`. The exact canonical
+scan token is `ios-interaction-diagnostics`.
+
+The checked-in `scripts/verify-production-diagnostics.mjs` script scans
+`src-capacitor/www/**/*.js` after a production Capacitor asset build and fails
+if that token is present. The package command
+`verify:production-diagnostics` first runs
+`quasar build -m capacitor -T ios --skip-pkg`, which exercises the shipped
+Capacitor/hash-router compile surface without requiring an Xcode package or
+signing step, and then runs the scanner. The ordinary SPA `dist` output is not
+accepted as production-exclusion evidence for the iOS app.
 
 ### File boundaries
 
 The implementation should keep these responsibilities isolated:
 
-- `MobileLayout.vue`: coordinates the optional header, router view, keyboard-driven footer visibility, and bottom navigation.
+- `MobileLayout.vue`: coordinates the optional header, router view,
+  keyboard-driven footer visibility, and bottom navigation. Every
+  `QRouteTab` uses Quasar's custom-navigation callback to cancel its default
+  push and delegate to `mobile-navigation.ts`.
 - `MobilePageHeader.vue`: renders a route title and at least 44-by-44-point back control.
 - `JapaneseInputProbe.vue`: owns text input, IME composition state, exact committed/submitted values, and explicit focus dismissal.
 - `useKeyboardViewport.ts`: adapts the typed Capacitor Keyboard listener API to
   reactive keyboard visibility and focused-block scrolling. It skips native
   listener registration in browser mode and removes every returned listener
   handle.
-- `mobile-navigation.ts`: owns unique push, replace-on-entry, back-or-fallback, and resume-preservation rules.
+- `mobile-navigation.ts`: owns unique push for ordinary links and tab switches,
+  replace-on-entry, back-or-fallback, and resume-preservation rules.
+- `mobile-route-meta.d.ts`: augments Vue Router's `RouteMeta` with the exact
+  optional mobile-header contract.
+- `mobile-lifecycle.ts`: exposes app-level lifecycle observations without
+  mutating the route.
+- `boot/capacitor-lifecycle.ts`: is included only in Capacitor mode, registers
+  the typed Capacitor App resume listener once, and forwards observations to
+  `mobile-lifecycle.ts`.
 - `IosInteractionDiagnosticsPage.vue`: assembles selectable text, scroll stress content, input probe, lifecycle/navigation readouts, and navigation controls.
 - `IosInteractionDetailPage.vue`: provides a real nested destination for header-back and native swipe validation.
 - `VelaBridgeViewController.swift`: enables the native WKWebView back/forward gesture in `capacitorDidLoad()`.
+- `scripts/verify-production-diagnostics.mjs`: scans the production Capacitor
+  JavaScript artifact for the canonical diagnostics marker.
 - A checked-in manual validation document: records the simulator and physical-device matrix and the reusable rules established by the results.
 
 Names may be adjusted to existing repository naming conventions during planning, but the responsibility boundaries must remain intact.
 
 ## Japanese input contract
 
-The probe uses a Quasar text input backed by the native HTML input element. It must preserve the exact text delivered by the browser and avoid transformations while composition is active.
+The probe uses a Quasar `QInput` backed by its native HTML input element. It
+must preserve the exact text delivered by the browser and avoid
+transformations while composition is active.
+
+The installed Quasar `QInput` owns its native composition handlers and
+suppresses `update:model-value` while its internal composing flag is set. The
+probe therefore does not rely on `@compositionstart` or
+`@compositionend` being forwarded by the component. After mount it reads the
+public `QInput.nativeEl` reference and registers native
+`compositionstart`, `input`, `compositionend`, and `keydown` listeners. Every
+listener is removed on unmount.
+
+The bound QInput model and the displayed draft are separate values. The model
+continues to receive Quasar's ordinary `update:model-value` events; native
+`input` events update the diagnostic draft without writing that in-progress
+value back through the model and risking disruption of the active IME session.
 
 ### State
 
@@ -132,14 +170,18 @@ It also displays whether composition is active. These values make premature comm
 
 ### Event rules
 
-1. `compositionstart` marks composition active.
-2. Every input event updates the draft, including input events delivered while
+1. Native `compositionstart` marks composition active.
+2. Every native `input` event reads `event.currentTarget.value` and updates the
+   draft, including input events delivered while
    composition is active. An implementation must not guard out composing input
    events because WebKit may deliver the final committed value before
    `compositionend`.
-3. Enter does nothing while either the tracked flag or `KeyboardEvent.isComposing` is true.
-4. `compositionend` marks composition inactive and records the exact committed value.
-5. A later Enter press or explicit Submit tap records the exact submitted value.
+3. Enter is handled on native `keydown`, not `keyup`, and does nothing while
+   either the tracked flag or `KeyboardEvent.isComposing` is true.
+4. Native `compositionend` marks composition inactive and records the exact
+   value read from the native element.
+5. A later Enter `keydown` or explicit Submit tap records the exact submitted
+   value.
 6. Submission does not clear the field automatically; the tester must be able to compare all three values.
 
 The reusable guidance is: never validate, normalize, or submit Japanese answer text until composition has ended.
@@ -169,6 +211,16 @@ duplicate the dependency. Configure:
   }
 }
 ```
+
+Quasar's Capacitor-mode Vite aliases and generated TypeScript paths do not
+automatically configure the standalone Vitest runner. `vitest.config.ts` must
+explicitly resolve `@capacitor/app` and `@capacitor/keyboard` to their packages
+under `src-capacitor/node_modules`. Tests mock the typed plugin surface:
+`Keyboard.addListener(...)` resolves to a `PluginListenerHandle` whose
+`remove()` call can be asserted, and App lifecycle listener registration is
+mocked independently. After adding Keyboard, update
+`src-capacitor/bun.lock`, run `quasar prepare` so `.quasar/tsconfig.json`
+contains its generated path aliases, and then run `bun run typecheck`.
 
 Capacitor documents native resize as resizing the whole native WebView,
 including viewport-relative units. It is compatible with the existing
@@ -246,11 +298,28 @@ Portrait is the primary presentation. Landscape must remain fully operable even 
 
 ## Navigation and lifecycle policy
 
+### Scroll restoration and swipe continuity
+
+The router preserves history-entry scroll positions:
+
+```ts
+scrollBehavior(_to, _from, savedPosition) {
+  return savedPosition ?? { left: 0, top: 0 };
+}
+```
+
+New pushes and replacements start at the top. Browser, header, and native
+back/forward traversal restore Vue Router's `savedPosition`. Physical swipe
+validation must confirm that the destination remains visible throughout the
+interactive animation: no blank or white intermediate frame, stale page,
+unexpected jump, or trapped final state is accepted.
+
 ### Ordinary in-app navigation
 
 Before pushing, resolve the target and compare its `fullPath` with the current
-route. Mobile-owned header routes also write an app-owned `mobileDepth` number
-to the Vue Router history state:
+route. Every mobile-owned route transition, including all five bottom tabs,
+uses `mobile-navigation.ts` and writes an app-owned `mobileDepth` number to the
+Vue Router history state:
 
 - Different target: `router.push` with `mobileDepth` incremented from the
   current entry, treating a missing or invalid depth as zero.
@@ -259,6 +328,16 @@ to the Vue Router history state:
 This makes repeated taps explicitly idempotent even though Vue Router also
 reports duplicated navigation. The app does not depend on Vue Router's internal
 `back` field or on `window.history.length`.
+
+`QRouteTab` remains responsible for route-aware active styling, but its
+custom-navigation click callback cancels the default navigation and calls the
+helper. M1 deliberately uses one chronological WKWebView history rather than
+independent per-tab stacks. If the user opens More, Diagnostics, and Detail,
+then taps Home, a native back swipe from Home returns to Detail because Detail
+was the previously visible route. That behavior is intentional, carries a
+defined `mobileDepth`, and is verified physically. Merely adding `replace` or
+resetting the numeric depth would not remove older entries from WKWebView
+history and is therefore not used as a false stack-reset mechanism.
 
 ### Route-entry behavior
 
@@ -275,9 +354,20 @@ HPA-209 does not register a new external URL. The existing custom scheme remains
 For physical cold-entry validation, development builds expose a **Stage cold
 entry** action. It writes one validated diagnostic target to a dedicated
 local-storage key and instructs the tester to terminate and relaunch the app.
-Development boot consumes and deletes that key before applying the target
-through `router.replace`. The key and its consumer are both excluded from
-production builds. Invalid values are deleted and ignored.
+Development boot performs these steps in order:
+
+1. Read the staged raw value and immediately delete the key.
+2. Resolve and validate the value against the exact allowlist of the two
+   diagnostic paths.
+3. Ignore an absent, invalid, or disallowed value.
+4. Directly `await router.replace(...)` with `mobileDepth: 0`.
+
+Quasar executes boot functions before it installs Vue Router into the app, so
+the consumer must not await `router.isReady()`; that promise represents the
+initial navigation triggered by router installation. The pre-install
+`router.replace` establishes the intended initial route before the app mounts.
+The key and its consumer are both excluded from production builds. Invalid
+values are deleted and ignored.
 
 ### App resume
 
@@ -290,7 +380,34 @@ navigation also cannot replay on resume. Re-delivery while already at the same
 `fullPath` is a no-op; a later, newly delivered event after the user has
 navigated elsewhere is handled as a new entry.
 
-The diagnostic records resume events and can simulate repeated entry so route stability is visible and unit-testable.
+`boot/capacitor-lifecycle.ts` is conditionally included only for Capacitor
+builds and registers the typed `App.addListener('resume', ...)` listener once
+for the app lifetime. Its callback records the event through
+`mobile-lifecycle.ts` and does not navigate. The browser diagnostic can invoke
+the same lifecycle observation boundary for simulation without importing or
+calling the native plugin. The diagnostic displays recorded resume events and
+can simulate repeated entry so route stability is visible and unit-testable.
+
+### Header route metadata
+
+The optional header uses one typed route-meta contract:
+
+```ts
+import type { RouteLocationRaw } from 'vue-router';
+
+declare module 'vue-router' {
+  interface RouteMeta {
+    mobileHeader?: {
+      title: string;
+      fallback: RouteLocationRaw;
+    };
+  }
+}
+```
+
+`MobileLayout`, `MobilePageHeader`, and the back helper read this same object.
+The diagnostic root declares a fallback to More; the detail route declares a
+fallback to the diagnostic root. Root tab routes omit `mobileHeader`.
 
 ### Back behavior
 
@@ -330,7 +447,20 @@ final class VelaBridgeViewController: CAPBridgeViewController {
 }
 ```
 
-The storyboard root scene changes from Capacitor's base controller to the app-owned subclass. The Swift file must be included in the application target.
+Xcode resolves the current application target's `PRODUCT_MODULE_NAME` to
+`App`. The storyboard root scene changes from Capacitor's base controller to:
+
+```xml
+<viewController
+  id="BYZ-38-t0r"
+  customClass="VelaBridgeViewController"
+  customModule="App"
+  customModuleProvider="target"
+  sceneMemberID="viewController"
+/>
+```
+
+The Swift file must be included in the application target.
 
 The gesture operates on the same WKWebView session history used by Vue Router hash mode. No JavaScript edge-pan recognizer, community plugin, or parallel native navigation stack is added.
 
@@ -407,32 +537,50 @@ The diagnostic does not send input or device information to a backend.
 
 - Composition start updates composing state.
 - Input during composition updates draft only.
-- Enter during composition does not submit.
+- Native QInput listeners are attached through `nativeEl` and removed on
+  unmount.
+- The in-progress draft is not written back through the QInput model.
+- Enter `keydown` during composition does not submit when either composition
+  guard is active.
 - Composition end records the exact committed value.
-- Enter after composition submits the exact value.
+- Enter `keydown` after composition submits the exact value.
 - Submit button submits the exact value.
 - Done and safe background taps dismiss focus.
 - Interactive background taps are not intercepted.
 - Keyboard show hides the footer and scrolls the form block after layout settles.
-- Keyboard hide restores the footer.
+- Keyboard hide restores the footer without duplicated bottom-safe-area
+  padding or an unreachable Submit action.
 - Keyboard listener handles are removed on unmount.
+- Vitest resolves and mocks both `@capacitor/app` and
+  `@capacitor/keyboard` from `src-capacitor/node_modules`.
 - Browser fallback does not require a native plugin.
 - `keyboardDidShow`, rather than a timer, initiates settled-viewport scrolling.
 - Quasar layout elements recalculate after simulated viewport resize.
-- Header title and back control follow route metadata.
+- New navigation scrolls to the top while popstate navigation returns
+  `savedPosition`.
+- Header title, back control, and fallback follow the typed route metadata.
 - Safe-area content classes and minimum target classes are present.
 
 ### Navigation tests
 
 - Unique internal navigation pushes once.
 - Unique internal navigation increments `mobileDepth`.
-- Repeated current-route navigation is a no-op.
+- Every bottom-tab switch delegates to the navigation helper, pushes once, and
+  increments `mobileDepth`.
+- Repeated current-route navigation is a no-op and leaves `mobileDepth`
+  unchanged, including Detail to the same Detail route.
+- After Detail to Home through a tab, simulated back traversal returns to
+  Detail with its original `mobileDepth`.
 - Route entry replaces rather than pushes and resets `mobileDepth` to zero.
 - Repeated route entry is a no-op.
 - Resume preserves the current route.
+- Capacitor resume registration records one lifecycle event and performs no
+  navigation.
 - Resume does not replay an already consumed route-entry event.
 - A staged development cold-entry target is deleted before it is applied and
   cannot replay after success or failure.
+- The staged cold-entry consumer replaces the route during Quasar boot without
+  awaiting `router.isReady()`.
 - Invalid staged cold-entry values are deleted without navigation.
 - Back uses existing history only when `mobileDepth` is positive.
 - Back without history replaces with the fallback.
@@ -440,8 +588,9 @@ The diagnostic does not send input or device information to a backend.
 - Unknown entry targets do not navigate.
 - Development route construction includes the diagnostic journey.
 - Production route construction excludes the diagnostic journey.
-- The production-exclusion script scans emitted JavaScript for
-  `ios-interaction-diagnostics` and fails if it is present.
+- The production-exclusion command builds Capacitor iOS assets with
+  `--skip-pkg`, scans `src-capacitor/www/**/*.js` for the exact token
+  `ios-interaction-diagnostics`, and fails if it is present.
 
 ### Native contract tests
 
@@ -451,7 +600,9 @@ Repository tests read the committed native/configuration files and assert:
 - Keyboard resize mode is `native`.
 - `VelaBridgeViewController` subclasses `CAPBridgeViewController`.
 - `capacitorDidLoad()` enables `allowsBackForwardNavigationGestures`.
-- The storyboard root controller uses the app-owned class.
+- The storyboard root controller uses
+  `customClass="VelaBridgeViewController"`, `customModule="App"`, and
+  `customModuleProvider="target"`.
 - `VelaBridgeViewController.swift` has a `PBXFileReference`, a `PBXBuildFile`,
   and membership in the application target's Sources build phase in
   `project.pbxproj`.
@@ -469,9 +620,12 @@ bun run build
 bun run verify:production-diagnostics
 ```
 
-Then run `cd src-capacitor && bunx cap sync ios` before the Capacitor
-simulator/device workflow. The exact build command and any signing constraints
-must be recorded with the evidence.
+`verify:production-diagnostics` runs the production Capacitor asset build and
+scans the resulting `src-capacitor/www` JavaScript. It requires the same valid
+production mobile API environment as other production mobile builds. Then run
+`cd src-capacitor && bunx cap sync ios` before the Capacitor simulator/device
+workflow. The exact build command and any signing constraints must be recorded
+with the evidence.
 
 ## Manual device matrix
 
@@ -479,10 +633,10 @@ The checked-in evidence document records exact models and versions used at valid
 
 | Environment | Required coverage |
 | --- | --- |
-| Small-screen iPhone Simulator, portrait | Keyboard-open layout, scrolling, focus/action visibility, tap targets, route controls |
+| Small-screen iPhone Simulator, portrait | Keyboard-open layout, scrolling, focus/action visibility, footer hide/restore without double padding, tap targets, route controls |
 | Small-screen iPhone Simulator, landscape | Keyboard-open compact-height stress case; focused field and primary action remain reachable without dismissing the keyboard |
-| Dynamic Island iPhone Simulator | Top/bottom/side safe areas, rotation, keyboard resize, nested back history |
-| Physical iPhone | Japanese IME composition, candidate commitment, exact submission, keyboard visibility/dismissal, selection, background/resume, header back, native edge swipe |
+| Dynamic Island iPhone Simulator | Top/bottom/side safe areas, rotation while the keyboard is open, keyboard resize, nested back history |
+| Physical iPhone | Japanese IME composition, candidate commitment, exact submission, keyboard visibility/dismissal, selection, background/resume, header back, tab-switch history, native edge swipe, and swipe-animation visual continuity |
 
 Each row records:
 
@@ -506,6 +660,18 @@ Each row records:
 7. Press Return again or tap Submit.
 8. Confirm draft, committed, and submitted values remain exactly `日本語`.
 
+### Required keyboard and orientation scenario
+
+1. In portrait, focus the Japanese input and keep the keyboard open.
+2. Confirm the complete input-and-Submit block remains reachable and the
+   bottom tabs are hidden.
+3. Rotate directly to landscape without dismissing the keyboard.
+4. Confirm the focused block is scrolled back into view after the resized
+   viewport settles and Submit remains reachable.
+5. Dismiss the keyboard and confirm the footer returns once with one bottom
+   safe-area inset and no stale gap or double padding.
+6. Rotate back to portrait and confirm the layout remains operable.
+
 ### Required navigation scenario
 
 1. Open More.
@@ -516,14 +682,20 @@ Each row records:
 6. Use the native left-edge swipe.
 7. After a back traversal, use native swipe-forward and confirm detail is
    restored.
-8. Repeat navigation to the current route.
-9. Background and resume the app.
-10. Simulate route entry to detail twice.
-11. Stage the detail route as the next cold-entry target, terminate the app,
+8. From Detail, tap the Home bottom tab.
+9. Use native swipe-back and confirm the exact Detail page and its original
+   depth return, with visible page content throughout the interactive
+   transition rather than a blank or white frame.
+10. Use native swipe-forward and confirm Home is restored.
+11. Repeat navigation to the current route and confirm its depth does not
+    change.
+12. Background and resume the app.
+13. Simulate route entry to detail twice.
+14. Stage the detail route as the next cold-entry target, terminate the app,
     relaunch it, and confirm the target is consumed once.
-12. Confirm native swipe-back is a no-op from that fresh detail entry while
+15. Confirm native swipe-back is a no-op from that fresh detail entry while
     header back uses its fallback.
-13. Confirm that the app remains on one predictable route with no duplicated
+16. Confirm that the app remains on one predictable route with no duplicated
     pages, blank content, exit, or trap.
 
 Physical-iPhone evidence is a release gate for this issue.
@@ -538,8 +710,12 @@ The mobile README and device evidence will record these conventions:
 - Use standard Quasar header/footer structures so native safe-area padding is applied once.
 - Apply left/right safe-area padding to page content for landscape.
 - Keep interactive targets at least 44 by 44 points.
-- Use unique push for in-app navigation and replace for validated external entry.
-- Resume preserves route state unless a new entry event is consumed.
+- Route ordinary links and bottom tabs through one unique-push helper; M1 uses
+  chronological history rather than independent tab stacks.
+- Use replace for validated external entry.
+- Restore saved scroll positions for back/forward navigation.
+- Register resume observation at the app boundary; resume preserves route
+  state unless a new entry event is consumed.
 - Header back always has a route fallback.
 - Native swipe and visible back controls share one WKWebView/Vue Router history.
 - Treat physical-device IME and swipe results as authoritative.
@@ -551,7 +727,7 @@ The mobile README and device evidence will record these conventions:
 | Japanese IME composition and submission do not corrupt or prematurely commit text | Explicit composition state machine, exact value readouts, automated event tests, and required physical scenario |
 | Focused inputs remain visible with the keyboard | Native WebView resize, focused-block scrolling, hidden footer, portrait/landscape matrix |
 | Content and navigation respect safe areas | Standard Quasar header/footer handling, web fallback, side-inset content padding, simulator matrix |
-| Back controls and swipe-back produce predictable history | Unique navigation policy, back fallbacks, app-owned bridge controller, physical route sequence |
+| Back controls and swipe-back produce predictable history | Unique navigation policy for ordinary links and tabs, saved-position restoration, back fallbacks, app-owned bridge controller, storyboard module contract, and physical route sequence |
 | Portrait works and landscape is handled intentionally | Both orientations remain functional; landscape is a required compact-height test |
 | Findings produce reusable guidance | Isolated components/policies, README conventions, and checked-in device evidence |
 
@@ -559,6 +735,10 @@ The mobile README and device evidence will record these conventions:
 
 - [Capacitor 7 Keyboard API](https://capacitorjs.com/docs/v7/apis/keyboard)
 - [Capacitor 7 App API](https://capacitorjs.com/docs/v7/apis/app)
+- [Quasar Capacitor build commands](https://quasar.dev/quasar-cli-vite/developing-capacitor-apps/build-commands/)
+- [Quasar boot files](https://quasar.dev/quasar-cli-vite/boot-files/)
 - [Quasar Layout](https://quasar.dev/layout/layout/)
+- [Quasar tabs and custom route navigation](https://quasar.dev/vue-components/tabs/)
+- [Vue Router scroll behavior](https://router.vuejs.org/guide/advanced/scroll-behavior)
 - [Vue Router navigation failures](https://router.vuejs.org/guide/advanced/navigation-failures.html)
 - [WKWebView `allowsBackForwardNavigationGestures`](https://developer.apple.com/documentation/webkit/wkwebview/allowsbackforwardnavigationgestures)
