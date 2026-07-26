@@ -1,4 +1,9 @@
 import { describe, it, expect } from 'vitest';
+import {
+  buildMobileChildRoutes,
+  IOS_DIAGNOSTIC_DETAIL_PATH,
+  IOS_DIAGNOSTIC_ROOT_PATH,
+} from './diagnostic-routes';
 import routes from './routes';
 
 // Route components are lazy: `() => import('pages/HomePage.vue')`. Asserting
@@ -26,9 +31,13 @@ describe('routes', () => {
     expect(await loadDefault(root?.component)).toBeDefined();
   });
 
-  it('has 5 child routes under the root layout', () => {
+  it('has five core routes plus two development routes under the root layout', () => {
     const root = routes.find((r) => r.path === '/');
-    expect(root?.children).toHaveLength(5);
+    expect(root?.children).toHaveLength(7);
+  });
+
+  it('constructs production routes with only the five core children', () => {
+    expect(buildMobileChildRoutes([])).toHaveLength(5);
   });
 
   it('includes all expected child paths with resolvable components', async () => {
@@ -39,6 +48,8 @@ describe('routes', () => {
     expect(paths).toContain('learn');
     expect(paths).toContain('words');
     expect(paths).toContain('more');
+    expect(paths).toContain(IOS_DIAGNOSTIC_ROOT_PATH.slice(1));
+    expect(paths).toContain(IOS_DIAGNOSTIC_DETAIL_PATH.slice(1));
     // Await every child component so a deleted page fails here, not at runtime.
     await Promise.all(
       (root?.children ?? []).map(async (c) => {
