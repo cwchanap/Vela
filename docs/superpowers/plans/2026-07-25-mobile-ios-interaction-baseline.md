@@ -4,7 +4,7 @@
 
 **Goal:** Build and physically verify the HPA-209 diagnostic journey and reusable iOS shell contracts for Japanese IME input, keyboard resizing, safe areas, lifecycle, and native WKWebView history.
 
-**Architecture:** Keep the diagnostic UI development-only while shipping the reusable keyboard, layout, lifecycle, and navigation policies. Vue Router owns one chronological hash-history stack with app-owned `mobileDepth`; Capacitor supplies typed Keyboard and App events; an app-owned `CAPBridgeViewController` enables native back/forward gestures. Automated tests cover browser-observable and committed-native contracts, while simulator and physical-iPhone evidence remain the authority for IME and interactive swipe behavior.
+**Architecture:** Begin with a simulator safe-area preflight that selects native-scroll or CSS headerless-top ownership before the full harness is built. Keep the diagnostic UI development-only while shipping the selected safe-area policy plus reusable keyboard, layout, lifecycle, and navigation policies. Vue Router owns one chronological hash-history stack with app-owned `mobileDepth`; Capacitor supplies typed Keyboard and App events; an app-owned `CAPBridgeViewController` enables native back/forward gestures. Automated tests cover browser-observable and committed-native contracts, while simulator and physical-iPhone evidence remain the authority for safe areas, IME, and interactive swipe behavior.
 
 **Tech Stack:** Vue 3, Quasar 2, Vue Router 4, Capacitor 7, TypeScript 5.6, Vitest 3, Swift 5, Xcode 16+
 
@@ -12,18 +12,29 @@
 
 - Work from an isolated worktree created with `superpowers:using-git-worktrees` before changing product code.
 - Keep `@capacitor/keyboard` on Capacitor major 7 and install it only under `apps/vela-mobile/src-capacitor`.
-- Preserve `ios.contentInset: "always"` and configure Keyboard resize as `"native"`.
+- Complete Task 0 before the full harness. Preserve `ios.contentInset: "always"`
+  only if it wins the recorded single-inset preflight; otherwise select
+  `"never"` and app-owned CSS headerless-top ownership.
+- Explicitly pin Keyboard resize as `"native"` even though it is already the
+  Capacitor iOS default.
 - Keep the diagnostic entry, routes, pages, cold-entry key, and marker out of production bundles.
 - Use the exact production-exclusion token `ios-interaction-diagnostics`.
-- Verify production exclusion against `apps/vela-mobile/src-capacitor/www/**/*.js`, not the SPA `dist` directory.
+- Verify production exclusion against
+  `apps/vela-mobile/src-capacitor/www/**/*.js`, not the SPA `dist` directory;
+  the real build-and-scan command is a local macOS pre-merge gate because
+  Quasar runs `cap sync ios` before honoring `--skip-pkg`.
 - Route ordinary links and all five bottom tabs through one unique-push helper with app-owned `mobileDepth`.
-- M1 uses chronological browser history; it does not emulate independent native tab stacks.
+- M1 uses chronological browser history; it does not emulate independent
+  native tab stacks. Treat this as a revisitable M1 spike policy, not a
+  permanent product commitment.
 - Use `router.replace` with `mobileDepth: 0` only for validated route-entry events and header fallbacks.
 - Never use `window.history.length` or Vue Router's internal `back` state as an app-history predicate.
 - Never await `router.isReady()` from the development cold-entry boot file.
 - Handle submission on native `keydown` and block it while either tracked composition state or `KeyboardEvent.isComposing` is true.
 - Do not write in-progress native IME input back through the QInput model.
-- Use standard Quasar `QHeader` and `QFooter` safe-area ownership; custom page CSS owns only left/right insets on native iOS.
+- Use the Task 0 policy for headerless top ownership. Quasar owns fixed
+  header/footer top/bottom CSS insets, while page, toolbar, and footer-tab
+  content own left/right insets.
 - Do not add a JavaScript swipe recognizer, third-party gesture plugin, native navigation controller, universal link, or new custom scheme.
 - Resume observation never navigates unless a separately validated route-entry event is consumed.
 - HPA-209 cannot be marked complete without physical-iPhone IME and native-swipe evidence.
@@ -35,6 +46,14 @@
 
 ### Create
 
+- `apps/vela-mobile/src/ios/safe-area-policy.ts` — simulator-selected native
+  content-inset and headerless-top ownership.
+- `apps/vela-mobile/src/ios/safe-area-policy.test.ts` — policy/config
+  consistency contract.
+- `apps/vela-mobile/src/diagnostics/ios-interaction-contract.ts` — single
+  canonical production-exclusion marker.
+- `apps/vela-mobile/docs/evidence/hpa-209/` — twelve safe-area preflight
+  screenshots using the exact mode/state/orientation naming below.
 - `apps/vela-mobile/src/ios/capacitor-plugins.test.ts` — dependency, config, and Vitest-resolution contracts.
 - `apps/vela-mobile/src/router/mobile-navigation.ts` — unique push, validated replace, depth reading, and back/fallback.
 - `apps/vela-mobile/src/router/mobile-navigation.test.ts` — history-state behavior.
@@ -63,7 +82,8 @@
 - `apps/vela-mobile/scripts/verify-production-diagnostics.test.mjs` — scanner positive and negative cases.
 - `apps/vela-mobile/src-capacitor/ios/App/App/VelaBridgeViewController.swift` — native WKWebView gesture enablement.
 - `apps/vela-mobile/src/ios/native-interaction-contract.test.ts` — Swift, storyboard, and pbxproj contracts.
-- `apps/vela-mobile/docs/ios-interaction-baseline.md` — checked-in simulator/device evidence.
+- `apps/vela-mobile/docs/ios-interaction-baseline.md` — checked-in safe-area,
+  simulator, Debug-device, Release-smoke, and artifact-scan evidence.
 
 ### Modify
 
@@ -86,6 +106,303 @@
 - `apps/vela-mobile/src-capacitor/ios/App/App/Base.lproj/Main.storyboard`
 - `apps/vela-mobile/src-capacitor/ios/App/App.xcodeproj/project.pbxproj`
 - `apps/vela-mobile/README.md`
+
+---
+
+### Task 0: Select safe-area ownership on an iOS simulator
+
+**Files:**
+
+- Create: `apps/vela-mobile/src/ios/safe-area-policy.ts`
+- Create: `apps/vela-mobile/src/ios/safe-area-policy.test.ts`
+- Create: `apps/vela-mobile/docs/ios-interaction-baseline.md`
+- Modify: `apps/vela-mobile/src-capacitor/capacitor.config.json`
+
+**Interfaces:**
+
+- Produces:
+  - `SafeAreaPolicy`
+  - `safeAreaPolicy.contentInset: 'always' | 'never'`
+  - `safeAreaPolicy.headerlessTopOwner: 'native-scroll-view' | 'css'`
+- Blocks every later task until one mode has recorded single-inset evidence.
+
+- [ ] **Step 1: Write the failing policy/config consistency test**
+
+```ts
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+import { describe, expect, it } from 'vitest';
+import { safeAreaPolicy } from './safe-area-policy';
+
+const capacitorConfig = JSON.parse(
+  readFileSync(resolve(__dirname, '../../src-capacitor/capacitor.config.json'), 'utf8'),
+) as { ios?: { contentInset?: string } };
+
+describe('safeAreaPolicy', () => {
+  it('matches the native content-inset configuration', () => {
+    expect(capacitorConfig.ios?.contentInset).toBe(safeAreaPolicy.contentInset);
+  });
+
+  it('uses the only valid headerless-top owner for the selected mode', () => {
+    expect(safeAreaPolicy).toEqual(
+      capacitorConfig.ios?.contentInset === 'always'
+        ? {
+            contentInset: 'always',
+            headerlessTopOwner: 'native-scroll-view',
+          }
+        : {
+            contentInset: 'never',
+            headerlessTopOwner: 'css',
+          },
+    );
+  });
+});
+```
+
+- [ ] **Step 2: Run the policy test and verify the missing module fails**
+
+```bash
+# workdir: apps/vela-mobile
+rtk bunx vitest run src/ios/safe-area-policy.test.ts
+```
+
+Expected: FAIL because `safe-area-policy.ts` does not exist.
+
+- [ ] **Step 3: Measure the existing `"always"` mode before adding the full harness**
+
+Start the current development shell on a notched or Dynamic Island simulator:
+
+```bash
+# workdir: apps/vela-mobile
+rtk bun run dev:ios
+```
+
+Use Safari Web Inspector on the running WebView. Paste these exact inspector
+helpers:
+
+```js
+function safeAreaRect(selector) {
+  const element = document.querySelector(selector);
+  if (!(element instanceof HTMLElement)) return null;
+  const rect = element.getBoundingClientRect();
+  return {
+    top: rect.top,
+    right: rect.right,
+    bottom: rect.bottom,
+    left: rect.left,
+    width: rect.width,
+    height: rect.height,
+  };
+}
+
+function readSafeAreaPreflight() {
+  const probe = document.createElement('div');
+  probe.style.cssText = [
+    'position:fixed',
+    'visibility:hidden',
+    'padding-top:env(safe-area-inset-top, 0px)',
+    'padding-right:env(safe-area-inset-right, 0px)',
+    'padding-bottom:env(safe-area-inset-bottom, 0px)',
+    'padding-left:env(safe-area-inset-left, 0px)',
+  ].join(';');
+  document.body.append(probe);
+  const style = getComputedStyle(probe);
+  const result = {
+    bodyClasses: document.body.className,
+    insets: {
+      top: style.paddingTop,
+      right: style.paddingRight,
+      bottom: style.paddingBottom,
+      left: style.paddingLeft,
+    },
+    page: safeAreaRect('.q-page'),
+    pageFirstControl: safeAreaRect('.q-page :is(button, a, [role="button"], input, textarea)'),
+    headerToolbar: safeAreaRect('#safe-area-preflight-header > .q-toolbar'),
+    headerBack: safeAreaRect('#safe-area-preflight-header button'),
+    footerTabs: safeAreaRect('.q-footer .q-tabs__content'),
+    footerFirstTab: safeAreaRect('.q-footer .q-tab:first-child'),
+    footerLastTab: safeAreaRect('.q-footer .q-tab:last-child'),
+  };
+  probe.remove();
+  return result;
+}
+
+function installSafeAreaStyleProbe(headerlessTopOwner) {
+  if (!['native-scroll-view', 'css'].includes(headerlessTopOwner)) {
+    throw new Error(`Unknown headerless-top owner: ${headerlessTopOwner}`);
+  }
+
+  document.querySelector('#safe-area-preflight-style')?.remove();
+  const pageContainer = document.querySelector('.q-page-container');
+  if (!(pageContainer instanceof HTMLElement)) {
+    throw new Error('Missing .q-page-container');
+  }
+  pageContainer.classList.toggle('safe-area-preflight--css-top', headerlessTopOwner === 'css');
+
+  const style = document.createElement('style');
+  style.id = 'safe-area-preflight-style';
+  style.textContent = `
+    .q-page {
+      padding-left: max(16px, env(safe-area-inset-left, 0px)) !important;
+      padding-right: max(16px, env(safe-area-inset-right, 0px)) !important;
+    }
+    #safe-area-preflight-header > .q-toolbar {
+      padding-left: max(12px, env(safe-area-inset-left, 0px));
+      padding-right: max(12px, env(safe-area-inset-right, 0px));
+    }
+    .q-footer .q-tabs__content {
+      padding-left: env(safe-area-inset-left, 0px);
+      padding-right: env(safe-area-inset-right, 0px);
+    }
+    .safe-area-preflight--css-top {
+      padding-top: env(safe-area-inset-top, 0px) !important;
+    }
+  `;
+  document.head.append(style);
+}
+
+function installSafeAreaHeaderProbe() {
+  document.querySelector('#safe-area-preflight-header')?.remove();
+  const layout = document.querySelector('.q-layout');
+  if (!(layout instanceof HTMLElement)) {
+    throw new Error('Missing .q-layout');
+  }
+  const header = document.createElement('header');
+  header.id = 'safe-area-preflight-header';
+  header.className = 'q-header q-layout__section--marginal fixed-top bg-primary text-white';
+  header.innerHTML = [
+    '<div class="q-toolbar row no-wrap items-center">',
+    '<button style="min-width:44px;min-height:44px">Back probe</button>',
+    '<div class="q-toolbar__title ellipsis">Safe-area preflight</div>',
+    '</div>',
+  ].join('');
+  layout.prepend(header);
+}
+```
+
+Then install the exact candidate horizontal rules with native-scroll
+headerless-top ownership, capture the headerless result, install the header
+probe, and capture the header result:
+
+```js
+installSafeAreaStyleProbe('native-scroll-view');
+readSafeAreaPreflight();
+installSafeAreaHeaderProbe();
+readSafeAreaPreflight();
+```
+
+Capture `readSafeAreaPreflight()` output and a screenshot in portrait,
+landscape-left, and landscape-right. Record whether the headerless page,
+injected toolbar, footer tabs, and their first/last controls have exactly one
+inset and remain outside the sensor housing. Save screenshots under
+`docs/evidence/hpa-209/` as
+`safe-area-always-{headerless,header}-{portrait,landscape-left,landscape-right}.png`.
+Stop the first development process after all `"always"` evidence is saved.
+
+- [ ] **Step 4: Repeat the same measurements with `"never"`**
+
+Set only the native inset value in `capacitor.config.json`:
+
+```json
+"ios": {
+  "contentInset": "never"
+}
+```
+
+Synchronize and restart the simulator build:
+
+```bash
+# workdir: apps/vela-mobile/src-capacitor
+rtk bunx cap sync ios
+# workdir: apps/vela-mobile
+rtk bun run dev:ios
+```
+
+Run the same inspector snippet, orientations, screenshots, and measurements.
+For this run, replace the first call with
+`installSafeAreaStyleProbe('css')` so the candidate app-owned headerless top
+inset is present. The horizontal rules remain identical between modes.
+Save the six screenshots as
+`safe-area-never-{headerless,header}-{portrait,landscape-left,landscape-right}.png`.
+Do not reuse values from the `"always"` run.
+
+- [ ] **Step 5: Apply the deterministic ownership decision**
+
+Choose `"always"` only when all of these observations are true:
+
+- the native scroll view gives headerless content exactly one top inset;
+- Quasar's fixed toolbar and footer each have exactly one top/bottom inset;
+- all four CSS `env()` values are usable in the relevant orientations;
+- the candidate page, toolbar, and footer-tab horizontal rules keep the
+  measured first/last controls outside either landscape sensor region;
+- no top or bottom inset is visibly doubled.
+
+Choose `"never"` when it meets those same control-bound requirements with CSS
+owning the headerless top inset. If both pass, choose `"always"` to preserve
+the existing native configuration. If neither passes, stop execution and
+report HPA-209 blocked; do not build the full harness against an unknown
+ownership model.
+
+- [ ] **Step 6: Commit the selected policy as one of two exact variants**
+
+If `"always"` wins, keep it in `capacitor.config.json` and create:
+
+```ts
+export type SafeAreaPolicy = {
+  contentInset: 'always' | 'never';
+  headerlessTopOwner: 'native-scroll-view' | 'css';
+};
+
+export const safeAreaPolicy: SafeAreaPolicy = {
+  contentInset: 'always',
+  headerlessTopOwner: 'native-scroll-view',
+};
+```
+
+If `"never"` wins, keep it in `capacitor.config.json` and create:
+
+```ts
+export type SafeAreaPolicy = {
+  contentInset: 'always' | 'never';
+  headerlessTopOwner: 'native-scroll-view' | 'css';
+};
+
+export const safeAreaPolicy: SafeAreaPolicy = {
+  contentInset: 'never',
+  headerlessTopOwner: 'css',
+};
+```
+
+Create `docs/ios-interaction-baseline.md` with:
+
+- the selected mode and ownership;
+- both modes' exact computed inset values and element bounds;
+- simulator model, iOS, Xcode, orientation, commit, and build configuration;
+- screenshots' repository-relative paths;
+- an explicit pass/fail result for each decision rule;
+- reproduction details for any failure.
+
+- [ ] **Step 7: Run the policy test and typecheck**
+
+```bash
+# workdir: apps/vela-mobile
+rtk bunx vitest run src/ios/safe-area-policy.test.ts
+rtk bun run typecheck
+```
+
+Expected: PASS with the policy literal matching `capacitor.config.json`.
+
+- [ ] **Step 8: Commit**
+
+```bash
+# workdir: repository root
+rtk git add apps/vela-mobile/src/ios/safe-area-policy.ts \
+  apps/vela-mobile/src/ios/safe-area-policy.test.ts \
+  apps/vela-mobile/src-capacitor/capacitor.config.json \
+  apps/vela-mobile/docs/ios-interaction-baseline.md \
+  apps/vela-mobile/docs/evidence/hpa-209
+rtk git commit -m "test(mobile): record safe-area ownership"
+```
 
 ---
 
@@ -157,23 +474,19 @@ Run:
 rtk bun add @capacitor/keyboard@^7.0.0
 ```
 
-Set `capacitor.config.json` to:
+Leave the Task 0 `ios.contentInset` value unchanged and add this exact
+top-level plugin block to `capacitor.config.json`:
 
 ```json
-{
-  "appId": "com.vela.app",
-  "appName": "Vela",
-  "webDir": "www",
-  "ios": {
-    "contentInset": "always"
-  },
-  "plugins": {
-    "Keyboard": {
-      "resize": "native"
-    }
+"plugins": {
+  "Keyboard": {
+    "resize": "native"
   }
 }
 ```
+
+The explicit value pins Capacitor iOS's existing default; it is not expected
+to change behavior.
 
 - [ ] **Step 4: Add explicit Vitest aliases**
 
@@ -957,7 +1270,7 @@ rtk git commit -m "feat(mobile): own resume and cold entry lifecycle"
 - [ ] **Step 1: Write failing native-event component tests**
 
 ```ts
-import { flushPromises, mount } from '@vue/test-utils';
+import { mount } from '@vue/test-utils';
 import { Quasar } from 'quasar';
 import { describe, expect, it } from 'vitest';
 import JapaneseInputProbe from './JapaneseInputProbe.vue';
@@ -1023,6 +1336,11 @@ rtk bunx vitest run src/components/mobile/JapaneseInputProbe.test.ts
 Expected: FAIL because the component does not exist.
 
 - [ ] **Step 3: Implement native listener ownership and exact submission**
+
+Do not use Quasar's internal `qComposing` flag as the probe's source of truth.
+The installed Quasar version sets it during `compositionupdate` only after CJK
+pattern detection, so it can lag native `compositionstart`. The tracked native
+flag and `KeyboardEvent.isComposing` remain the submission guards.
 
 Use this state and event contract in the component:
 
@@ -1144,11 +1462,12 @@ rtk git commit -m "feat(mobile): add Japanese IME probe"
   - `useKeyboardViewport(options?): { isKeyboardVisible; nativeStatus; lastError }`
   - `MobilePageHeader` reading `route.meta.mobileHeader`
   - bottom tabs using `pushMobileRoute`
+  - layout classes driven by `safeAreaPolicy.headerlessTopOwner`
 
 - [ ] **Step 1: Write failing keyboard adapter tests**
 
 ```ts
-import { mount } from '@vue/test-utils';
+import { flushPromises, mount } from '@vue/test-utils';
 import { defineComponent, nextTick } from 'vue';
 import { describe, expect, it, vi } from 'vitest';
 import {
@@ -1324,7 +1643,8 @@ While the keyboard is visible, a window `resize` event repeats the settled scrol
 
 - [ ] **Step 4: Write failing header and shell integration tests**
 
-Extend `MobileLayout.test.ts` with a table-driven test covering every tab:
+Import `safeAreaPolicy` from `src/ios/safe-area-policy`, then extend
+`MobileLayout.test.ts` with a table-driven test covering every tab:
 
 ```ts
 it.each([
@@ -1336,15 +1656,16 @@ it.each([
 ])('delegates %s -> %s to chronological mobile navigation', async (start, label, target) => {
   const wrapper = await mountLayout(start);
   await tabByLabel(wrapper, label).trigger('click');
-  await nextTick();
+  await flushPromises();
   expect(wrapper.vm.$router.currentRoute.value.fullPath).toBe(target);
   expect(wrapper.vm.$router.options.history.state.mobileDepth).toBe(1);
+  expect(tabByLabel(wrapper, label).classes()).toContain('q-tab--active');
 });
 
 it('does not duplicate navigation to the active tab', async () => {
   const wrapper = await mountLayout('/more');
   await tabByLabel(wrapper, 'More').trigger('click');
-  await nextTick();
+  await flushPromises();
   expect(wrapper.vm.$router.currentRoute.value.fullPath).toBe('/more');
   expect(wrapper.vm.$router.options.history.state.mobileDepth).toBe(0);
 });
@@ -1357,7 +1678,27 @@ it('removes the footer while the keyboard is visible and restores it once', asyn
   await nextTick();
   expect(wrapper.findAllComponents({ name: 'QFooter' })).toHaveLength(1);
 });
+
+it('applies only the selected headerless-top owner', async () => {
+  const wrapper = await mountLayout('/');
+  const container = wrapper.getComponent({ name: 'QPageContainer' });
+  expect(container.classes()).toContain('mobile-page-container--headerless');
+  expect(container.classes().includes('mobile-page-container--css-safe-top')).toBe(
+    String(safeAreaPolicy.headerlessTopOwner) === 'css',
+  );
+});
+
+it('pins horizontal safe areas for fixed header and footer content', () => {
+  const appScss = readFileSync(resolve(__dirname, '../css/app.scss'), 'utf8');
+  expect(appScss).toContain('.mobile-header .q-toolbar');
+  expect(appScss).toContain('.mobile-nav .q-tabs__content');
+  expect(appScss).toContain('env(safe-area-inset-left, 0px)');
+  expect(appScss).toContain('env(safe-area-inset-right, 0px)');
+});
 ```
+
+Add `flushPromises` from `@vue/test-utils`, `readFileSync` from `node:fs`, and
+`resolve` from `node:path` to the test imports.
 
 Create `MobilePageHeader.test.ts` cases for:
 
@@ -1398,11 +1739,18 @@ await backOrFallback(router, header.value.fallback);
 In `MobileLayout.vue`:
 
 - render `MobilePageHeader` before `QPageContainer`;
+- import `safeAreaPolicy` and compute `hasMobileHeader` from
+  `route.meta.mobileHeader`;
+- always add `mobile-page-container--headerless` when metadata is absent;
+- add `mobile-page-container--css-safe-top` only when metadata is absent and
+  `safeAreaPolicy.headerlessTopOwner === 'css'`;
 - call `useKeyboardViewport` with a `getFocusedBlock` query for `[data-keyboard-scroll-block]`;
 - render `QFooter` with `v-if="!isKeyboardVisible"`;
 - keep each `QRouteTab`'s `to` prop for active matching;
 - attach `@click="onTabClick($event, '/target')"` to every tab;
-- call `event.preventDefault()` and then `pushMobileRoute(router, target)`.
+- call `event.preventDefault()` synchronously, deliberately do not invoke
+  Quasar's emitted `go()` callback, and then call
+  `pushMobileRoute(router, target)`.
 
 Use this handler:
 
@@ -1427,9 +1775,28 @@ Add:
   padding-left: max(16px, env(safe-area-inset-left, 0px));
   padding-right: max(16px, env(safe-area-inset-right, 0px));
 }
+
+.mobile-header .q-toolbar {
+  padding-left: max(12px, env(safe-area-inset-left, 0px));
+  padding-right: max(12px, env(safe-area-inset-right, 0px));
+}
+
+.mobile-nav .q-tabs__content {
+  padding-left: env(safe-area-inset-left, 0px);
+  padding-right: env(safe-area-inset-right, 0px);
+}
+
+body:not(.q-ios-padding) .mobile-page-container--headerless,
+.mobile-page-container--css-safe-top {
+  padding-top: env(safe-area-inset-top, 0px) !important;
+}
 ```
 
-Retain the existing `body:not(.q-ios-padding) .nav-tabs` bottom fallback and do not add native top/bottom padding to `QHeader`, `QFooter`, or `QPage`.
+Retain the existing `body:not(.q-ios-padding) .nav-tabs` bottom fallback. Do
+not add custom top/bottom padding to native `QHeader` or `QFooter`; the only
+app-owned native top rule is the policy-selected headerless
+`QPageContainer`. Horizontal toolbar/tab padding is required in both inset
+modes.
 
 - [ ] **Step 8: Run component/composable tests and typecheck**
 
@@ -1464,6 +1831,7 @@ rtk git commit -m "feat(mobile): integrate keyboard-safe navigation shell"
 
 **Files:**
 
+- Create: `apps/vela-mobile/src/diagnostics/ios-interaction-contract.ts`
 - Modify: `apps/vela-mobile/src/pages/diagnostics/IosInteractionDiagnosticsPage.vue`
 - Create: `apps/vela-mobile/src/pages/diagnostics/IosInteractionDiagnosticsPage.test.ts`
 - Modify: `apps/vela-mobile/src/pages/diagnostics/IosInteractionDetailPage.vue`
@@ -1474,15 +1842,20 @@ rtk git commit -m "feat(mobile): integrate keyboard-safe navigation shell"
 **Interfaces:**
 
 - Consumes: JapaneseInputProbe, mobile lifecycle state, mobile navigation, cold-entry staging, typed route metadata.
-- Produces: the two-route physical-validation journey and the only application-bundle source literal `data-testid="ios-interaction-diagnostics"`.
+- Produces:
+  - `IOS_INTERACTION_DIAGNOSTICS_MARKER`
+  - the two-route physical-validation journey
+  - the only application-bundle source literal
+    `ios-interaction-diagnostics`
 
 - [ ] **Step 1: Write failing diagnostic-page tests**
 
 ```ts
-import { mount } from '@vue/test-utils';
+import { flushPromises, mount } from '@vue/test-utils';
 import { Quasar } from 'quasar';
 import { createMemoryHistory, createRouter } from 'vue-router';
 import { describe, expect, it } from 'vitest';
+import { IOS_INTERACTION_DIAGNOSTICS_MARKER } from 'src/diagnostics/ios-interaction-contract';
 import IosInteractionDiagnosticsPage from './IosInteractionDiagnosticsPage.vue';
 
 async function mountPage() {
@@ -1509,7 +1882,9 @@ async function mountPage() {
 describe('IosInteractionDiagnosticsPage', () => {
   it('renders the canonical production-exclusion marker', async () => {
     const wrapper = await mountPage();
-    expect(wrapper.find('[data-testid="ios-interaction-diagnostics"]').exists()).toBe(true);
+    expect(wrapper.find(`[data-testid="${IOS_INTERACTION_DIAGNOSTICS_MARKER}"]`).exists()).toBe(
+      true,
+    );
   });
 
   it('renders selectable Japanese samples and the IME probe', async () => {
@@ -1522,23 +1897,27 @@ describe('IosInteractionDiagnosticsPage', () => {
   it('pushes detail once and ignores repeated current-route navigation', async () => {
     const wrapper = await mountPage();
     await wrapper.get('[data-testid="navigate-detail"]').trigger('click');
+    await flushPromises();
     expect(wrapper.vm.$router.currentRoute.value.fullPath).toBe(
       '/diagnostics/ios-interactions/detail',
     );
     const depth = wrapper.vm.$router.options.history.state.mobileDepth;
     await wrapper.get('[data-testid="navigate-detail"]').trigger('click');
+    await flushPromises();
     expect(wrapper.vm.$router.options.history.state.mobileDepth).toBe(depth);
   });
 
   it('applies repeated route entry once and resume preserves it', async () => {
     const wrapper = await mountPage();
     await wrapper.get('[data-testid="simulate-entry"]').trigger('click');
+    await flushPromises();
     expect(wrapper.vm.$router.currentRoute.value.fullPath).toBe(
       '/diagnostics/ios-interactions/detail',
     );
     expect(wrapper.vm.$router.options.history.state.mobileDepth).toBe(0);
     await wrapper.get('[data-testid="simulate-entry-again"]').trigger('click');
     await wrapper.get('[data-testid="simulate-resume"]').trigger('click');
+    await flushPromises();
     expect(wrapper.vm.$router.currentRoute.value.fullPath).toBe(
       '/diagnostics/ios-interactions/detail',
     );
@@ -1552,6 +1931,46 @@ describe('IosInteractionDiagnosticsPage', () => {
     expect(window.localStorage.getItem('vela:dev:ios-interaction-cold-entry')).toBe(
       '/diagnostics/ios-interactions/detail',
     );
+  });
+});
+```
+
+Create `IosInteractionDetailPage.test.ts` with:
+
+```ts
+import { flushPromises, mount } from '@vue/test-utils';
+import { Quasar } from 'quasar';
+import { createMemoryHistory, createRouter } from 'vue-router';
+import { describe, expect, it } from 'vitest';
+import IosInteractionDetailPage from './IosInteractionDetailPage.vue';
+
+describe('IosInteractionDetailPage', () => {
+  it('keeps its route identity and ignores repeated current navigation', async () => {
+    const router = createRouter({
+      history: createMemoryHistory(),
+      routes: [
+        {
+          path: '/diagnostics/ios-interactions/detail',
+          component: IosInteractionDetailPage,
+        },
+      ],
+    });
+    await router.replace({
+      path: '/diagnostics/ios-interactions/detail',
+      state: { mobileDepth: 2 },
+    });
+    await router.isReady();
+    const wrapper = mount(IosInteractionDetailPage, {
+      global: { plugins: [Quasar, router] },
+    });
+
+    expect(wrapper.get('[data-testid="detail-route-identity"]').text()).toContain(
+      'nested iOS interaction route',
+    );
+    await wrapper.get('[data-testid="repeat-detail-navigation"]').trigger('click');
+    await flushPromises();
+    expect(router.currentRoute.value.fullPath).toBe('/diagnostics/ios-interactions/detail');
+    expect(router.options.history.state.mobileDepth).toBe(2);
   });
 });
 ```
@@ -1574,13 +1993,20 @@ Expected: FAIL because the marker, controls, and More entry are absent.
 
 - [ ] **Step 3: Build the diagnostic page structure**
 
-The root element must be:
+Create the marker contract:
+
+```ts
+export const IOS_INTERACTION_DIAGNOSTICS_MARKER = 'ios-interaction-diagnostics';
+```
+
+Import that constant into `IosInteractionDiagnosticsPage.vue`. The root
+element must be:
 
 ```vue
 <q-page
   padding
   class="mobile-safe-x ios-interaction-page"
-  data-testid="ios-interaction-diagnostics"
+  :data-testid="IOS_INTERACTION_DIAGNOSTICS_MARKER"
   @pointerdown.self="dismissFocusedControl"
 >
 ```
@@ -1653,15 +2079,17 @@ rtk bunx vitest run src/pages/diagnostics \
   src/pages/StubPages.test.ts \
   src/router \
   src/layouts/MobileLayout.test.ts
+rtk bun run test:coverage
 ```
 
-Expected: PASS.
+Expected: PASS, including the configured 95% mobile line-coverage threshold.
 
 - [ ] **Step 7: Commit**
 
 ```bash
 # workdir: repository root
 rtk git add apps/vela-mobile/src/pages/diagnostics \
+  apps/vela-mobile/src/diagnostics/ios-interaction-contract.ts \
   apps/vela-mobile/src/pages/MorePage.vue \
   apps/vela-mobile/src/pages/StubPages.test.ts
 rtk git commit -m "feat(mobile): add iOS interaction diagnostics"
@@ -1679,6 +2107,7 @@ rtk git commit -m "feat(mobile): add iOS interaction diagnostics"
 
 **Interfaces:**
 
+- Consumes: `IOS_INTERACTION_DIAGNOSTICS_MARKER`
 - Produces:
   - `findDiagnosticMarker(root, marker): Promise<string[]>`
   - `build:ios:assets`
@@ -1692,13 +2121,14 @@ import { mkdtemp, mkdir, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { IOS_INTERACTION_DIAGNOSTICS_MARKER } from '../src/diagnostics/ios-interaction-contract.ts';
 import { findDiagnosticMarker } from './verify-production-diagnostics.mjs';
 
 describe('verify-production-diagnostics', () => {
   it('returns no files when emitted JavaScript excludes the marker', async () => {
     const root = await mkdtemp(join(tmpdir(), 'vela-prod-scan-'));
     await writeFile(join(root, 'app.js'), 'console.log(\"production\")');
-    expect(await findDiagnosticMarker(root, 'ios-interaction-diagnostics')).toEqual([]);
+    expect(await findDiagnosticMarker(root, IOS_INTERACTION_DIAGNOSTICS_MARKER)).toEqual([]);
   });
 
   it('finds the marker in nested emitted JavaScript', async () => {
@@ -1706,17 +2136,17 @@ describe('verify-production-diagnostics', () => {
     await mkdir(join(root, 'assets'));
     await writeFile(
       join(root, 'assets', 'diagnostic.js'),
-      'const marker=\"ios-interaction-diagnostics\"',
+      `const marker=${JSON.stringify(IOS_INTERACTION_DIAGNOSTICS_MARKER)}`,
     );
-    expect(await findDiagnosticMarker(root, 'ios-interaction-diagnostics')).toEqual([
+    expect(await findDiagnosticMarker(root, IOS_INTERACTION_DIAGNOSTICS_MARKER)).toEqual([
       join(root, 'assets', 'diagnostic.js'),
     ]);
   });
 
   it('ignores non-JavaScript assets', async () => {
     const root = await mkdtemp(join(tmpdir(), 'vela-prod-scan-'));
-    await writeFile(join(root, 'notes.txt'), 'ios-interaction-diagnostics');
-    expect(await findDiagnosticMarker(root, 'ios-interaction-diagnostics')).toEqual([]);
+    await writeFile(join(root, 'notes.txt'), IOS_INTERACTION_DIAGNOSTICS_MARKER);
+    expect(await findDiagnosticMarker(root, IOS_INTERACTION_DIAGNOSTICS_MARKER)).toEqual([]);
   });
 });
 ```
@@ -1749,12 +2179,12 @@ Use:
 
 ```js
 import { fileURLToPath } from 'node:url';
+import { IOS_INTERACTION_DIAGNOSTICS_MARKER } from '../src/diagnostics/ios-interaction-contract.ts';
 
-export const DIAGNOSTIC_MARKER = 'ios-interaction-diagnostics';
 const defaultRoot = fileURLToPath(new URL('../src-capacitor/www/', import.meta.url));
 
 if (import.meta.main) {
-  const matches = await findDiagnosticMarker(defaultRoot, DIAGNOSTIC_MARKER);
+  const matches = await findDiagnosticMarker(defaultRoot, IOS_INTERACTION_DIAGNOSTICS_MARKER);
   if (matches.length > 0) {
     console.error(`Production diagnostics marker found:\n${matches.join('\n')}`);
     process.exit(1);
@@ -1785,7 +2215,9 @@ Expected: PASS.
 
 - [ ] **Step 6: Build the real production Capacitor asset and scan it**
 
-Run:
+This is a local macOS pre-merge gate, not an `ubuntu-latest` CI command.
+Quasar runs `cap sync ios` and CocoaPods before honoring `--skip-pkg`. On
+macOS, run:
 
 ```bash
 # workdir: apps/vela-mobile
@@ -1940,7 +2372,7 @@ rtk git commit -m "feat(mobile): enable native WebView swipe history"
 
 **Files:**
 
-- Create: `apps/vela-mobile/docs/ios-interaction-baseline.md`
+- Modify: `apps/vela-mobile/docs/ios-interaction-baseline.md`
 - Modify: `apps/vela-mobile/README.md`
 
 **Interfaces:**
@@ -1948,26 +2380,27 @@ rtk git commit -m "feat(mobile): enable native WebView swipe history"
 - Consumes: all implementation tasks and the exact physical scenarios from the design.
 - Produces: durable simulator/device evidence and reusable shell guidance.
 
-- [ ] **Step 1: Add the checked-in evidence document**
+- [ ] **Step 1: Extend the checked-in evidence document**
 
-Start the document with:
+Preserve Task 0's safe-area measurements and selected policy. Add these exact
+result rules and matrix columns:
 
 ```markdown
-# iOS Interaction Baseline Evidence
-
-**Linear issue:** HPA-209
-
 ## Result policy
 
 - Record a row only after running that environment.
 - Put the exact tested commit SHA in every environment row.
+- Record whether the row used Debug development, Release smoke, or production
+  Capacitor assets.
+- Record whether the WebView loaded from the LAN development server or
+  packaged assets.
 - A failure includes reproduction steps and a linked follow-up issue.
 - Physical Japanese IME and WKWebView swipe results are release-blocking.
 
 ## Environment matrix
 
-| Environment | Commit | Model | OS  | Xcode | Japanese keyboard | Orientation | Result |
-| ----------- | ------ | ----- | --- | ----- | ----------------- | ----------- | ------ |
+| Environment | Commit | Build configuration | Asset source | Model | OS  | Xcode | Japanese keyboard | Orientation | Result |
+| ----------- | ------ | ------------------- | ------------ | ----- | --- | ----- | ----------------- | ----------- | ------ |
 
 ## Japanese IME evidence
 
@@ -1981,17 +2414,20 @@ block visibility, Submit reachability, footer restoration, and inset ownership.
 ## Navigation evidence
 
 Record visible back, native swipe-back, swipe-forward, Detail-to-Home tab
-history, cold entry, resume, duplicate navigation, visual continuity, and
-exit/trap behavior.
+history, cold entry, resume, duplicate navigation, the observed WebKit
+transition type, functional completion, and exit/trap behavior.
 
 ## Reusable rules
 
 - Do not validate, normalize, or submit while Japanese composition is active.
 - Hide bottom tabs on keyboard will-show and scroll after keyboard did-show.
-- Let Quasar own native top and bottom safe areas exactly once.
+- Follow the Task 0 safe-area policy; Quasar owns fixed top/bottom CSS while
+  page, toolbar, and footer tabs own horizontal insets.
 - Route links and tabs through app-owned chronological `mobileDepth`.
 - Restore saved scroll positions on back and forward.
 - Resume does not navigate without a newly validated entry event.
+- Ordinary pushed routes share visible-back/native-swipe history; a
+  replace-on-entry fallback can intentionally differ.
 ```
 
 Do not pre-populate unrun environments with passing results.
@@ -2003,7 +2439,10 @@ Add:
 - the diagnostic route and development-only More entry;
 - Japanese native keyboard setup;
 - the `build:ios:assets` and `verify:production-diagnostics` commands;
+- the fact that the real Capacitor artifact scan is a local macOS pre-merge
+  gate because it runs `cap sync ios`;
 - chronological tab/swipe history behavior;
+- the M2 revisit point for bounded or tab-specific history;
 - safe-area ownership rules;
 - app-level resume rule;
 - a link to `docs/ios-interaction-baseline.md`;
@@ -2016,28 +2455,51 @@ Run:
 ```bash
 # workdir: apps/vela-mobile
 rtk bun run test:unit
+rtk bun run test:coverage
 rtk bun run lint
 rtk bun run typecheck
-rtk bun run build
+rtk env VITE_MOBILE_API_URL=https://example.invalid/api/ bun run build
+```
+
+Expected: all commands exit 0, including the configured 95% line threshold.
+
+On macOS, run the real production artifact gate and final native sync:
+
+```bash
+# workdir: apps/vela-mobile
 rtk env VITE_MOBILE_API_URL=https://example.invalid/api/ bun run verify:production-diagnostics
 # workdir: apps/vela-mobile/src-capacitor
 rtk bunx cap sync ios
 ```
 
-Expected: all commands exit 0, and the production scanner reports no diagnostic marker under `src-capacitor/www`.
+Expected: both commands exit 0, and the scanner reports no diagnostic marker
+under `src-capacitor/www`.
 
 - [ ] **Step 4: Run simulator validation**
 
-Use XcodeBuildMCP to build and launch the synchronized app on:
+Start the development Capacitor build and keep its LAN server running:
+
+```bash
+# workdir: apps/vela-mobile
+rtk bun run dev:ios
+```
+
+Use XcodeBuildMCP to build and launch the synchronized Debug development app
+on:
 
 - one small-screen iPhone simulator in portrait and landscape;
 - one Dynamic Island simulator.
 
-Record only observed results. While the keyboard remains open, rotate from portrait to landscape and verify the focused block and Submit remain reachable. Dismiss the keyboard and verify the footer returns once without stale space or doubled inset.
+Record `Debug development` and `LAN development server` in every diagnostic
+row. Record only observed results. While the keyboard remains open, rotate
+from portrait to landscape and verify the focused block and Submit remain
+reachable. Dismiss the keyboard and verify the footer returns once without
+stale space or doubled inset.
 
 - [ ] **Step 5: Run the physical Japanese IME scenario**
 
-On a connected iPhone with a Japanese keyboard:
+Run the development-only diagnostics on a connected iPhone with a Japanese
+keyboard. Record `Debug development` and `LAN development server`:
 
 1. Enter `にほんご`.
 2. Select `日本語`.
@@ -2054,16 +2516,43 @@ On a connected iPhone with a Japanese keyboard:
 3. Re-enter Detail and use native swipe-back.
 4. Use native swipe-forward.
 5. From Detail, tap Home.
-6. Swipe back and verify the exact Detail page returns with visible content throughout the animation.
+6. Swipe back and verify the exact Detail page returns at completion. A
+   WebKit snapshot or cross-fade during the gesture is acceptable; a blank
+   frame is not.
 7. Swipe forward and verify Home returns.
 8. Repeat current-route navigation and verify depth is unchanged.
 9. Background/resume and verify the route is preserved.
 10. Simulate the same route entry twice and verify no duplicate.
-11. Stage Detail, terminate, relaunch, and verify one-shot cold entry.
-12. Verify fresh-entry swipe-back is a no-op while header fallback reaches the diagnostic root.
-13. Record any blank frame, unexpected route, exit, or trap as a blocking failure.
+11. Alternate Home and Review twenty times.
+12. Traverse backward repeatedly and record whether the chronological policy
+    remains usable or should change in M2.
+13. Stage Detail, terminate, relaunch, and verify one-shot cold entry.
+14. Verify fresh-entry swipe-back is a no-op while header fallback reaches the
+    diagnostic root.
+15. Record any blank frame, unexpected final route, exit, or trap as a
+    blocking failure.
 
-- [ ] **Step 7: Fill the evidence document with observed values**
+- [ ] **Step 7: Run a Release core-shell smoke pass**
+
+Use XcodeBuildMCP in this order:
+
+1. `session_show_defaults`
+2. `session_set_defaults` with workspace
+   `apps/vela-mobile/src-capacitor/ios/App/App.xcworkspace`, scheme `App`, an
+   available iPhone simulator, and configuration `Release`
+3. `build_run_sim`
+
+This launches the packaged WebView assets produced by the macOS artifact gate.
+Diagnostics must be absent. Record:
+
+- Home and More launch successfully;
+- the footer and its first/last tabs avoid every tested safe-area edge;
+- portrait and both landscape directions remain operable;
+- the selected Task 0 inset policy still produces one top/bottom inset;
+- build configuration is `Release smoke` and asset source is
+  `packaged WebView assets`.
+
+- [ ] **Step 8: Fill the evidence document with observed values**
 
 Use:
 
@@ -2073,15 +2562,18 @@ rtk git rev-parse HEAD
 rtk xcodebuild -version
 ```
 
-Record the actual commit, Xcode version, device models, OS versions, Japanese keyboard layout, orientations, results, and reproduction details. Do not infer or copy values from another run.
+Record the actual commit, Xcode version, build configurations, asset sources,
+device models, OS versions, Japanese keyboard layout, orientations, results,
+and reproduction details. Do not infer or copy values from another run.
 
-- [ ] **Step 8: Run final repository verification after documentation**
+- [ ] **Step 9: Run final repository verification after documentation**
 
 Run:
 
 ```bash
 # workdir: apps/vela-mobile
 rtk bun run test:unit
+rtk bun run test:coverage
 rtk bun run lint
 rtk bun run typecheck
 # workdir: repository root
@@ -2089,9 +2581,10 @@ rtk git diff --check
 rtk git status --short
 ```
 
-Expected: tests, lint, typecheck, and diff check pass; status contains only the intended README/evidence changes.
+Expected: tests, the 95% coverage threshold, lint, typecheck, and diff check
+pass; status contains only the intended README/evidence changes.
 
-- [ ] **Step 9: Commit**
+- [ ] **Step 10: Commit**
 
 ```bash
 # workdir: repository root
@@ -2107,9 +2600,16 @@ rtk git commit -m "docs(mobile): record iOS interaction baseline"
 Before reporting HPA-209 complete:
 
 - Confirm every task commit is present.
-- Re-run `bun run test:unit`, `bun run lint`, `bun run typecheck`, `bun run build`, and the real Capacitor production marker scan.
+- Confirm Task 0 selected and recorded one safe-area owner before harness work.
+- Re-run `bun run test:unit`, `bun run test:coverage`, `bun run lint`,
+  `bun run typecheck`, `bun run build`, and the real macOS Capacitor
+  production marker scan.
 - Confirm the simulator build succeeds after the final `cap sync ios`.
-- Confirm the evidence document names the exact tested commit.
+- Confirm the evidence document names the exact tested commit, build
+  configuration, and LAN-versus-packaged asset source for every row.
 - Confirm physical Japanese IME submission preserves `日本語` exactly.
-- Confirm native back, forward, and tab-switch history match the chronological policy without blank frames, exit, or trap.
+- Confirm native back, forward, and tab-switch history—including twenty
+  alternating tab switches—matches the chronological M1 policy without blank
+  frames, wrong final routes, exit, or trap.
+- Confirm the Release packaged-assets smoke row passes with diagnostics absent.
 - If a physical device is unavailable or either physical scenario fails, report HPA-209 as blocked rather than complete.
