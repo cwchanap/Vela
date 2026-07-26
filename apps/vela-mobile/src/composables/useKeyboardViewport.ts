@@ -118,11 +118,9 @@ export function useKeyboardViewport(options: KeyboardViewportOptions = {}) {
       nativeStatus.value = 'native';
     } catch (error) {
       nativeReady = false;
+      nativeStatus.value = 'unavailable';
+      lastError.value = errorMessage(error);
       await removeHandles();
-      if (mounted) {
-        nativeStatus.value = 'unavailable';
-        lastError.value = errorMessage(error);
-      }
     }
   }
 

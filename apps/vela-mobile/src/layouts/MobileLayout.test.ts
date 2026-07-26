@@ -3,7 +3,12 @@ import { resolve } from 'node:path';
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
 import { flushPromises, mount, type VueWrapper, type DOMWrapper } from '@vue/test-utils';
 import { Quasar, Dark } from 'quasar';
-import { createRouter, createMemoryHistory } from 'vue-router';
+import {
+  createRouter,
+  createMemoryHistory,
+  isNavigationFailure,
+  NavigationFailureType,
+} from 'vue-router';
 import { nextTick } from 'vue';
 import { safeAreaPolicy } from '../ios/safe-area-policy';
 import MobileLayout from './MobileLayout.vue';
@@ -37,14 +42,19 @@ const routes = [
   { path: '/more', component: { template: '<div/>' } },
 ];
 
-const mountLayout = async (initialPath = '/') => {
+const mountLayout = async (initialPath = '/', errorHandler?: (error: unknown) => void) => {
   const router = createRouter({
     history: createMemoryHistory(),
     routes,
   });
   await router.push({ path: initialPath, state: { mobileDepth: 0 } });
   await router.isReady();
-  const wrapper = mount(MobileLayout, { global: { plugins: [Quasar, router] } });
+  const wrapper = mount(MobileLayout, {
+    global: {
+      plugins: [Quasar, router],
+      ...(errorHandler ? { config: { errorHandler } } : {}),
+    },
+  });
   // Wait for route-tab active state to settle after navigation.
   await nextTick();
   await nextTick();
@@ -66,6 +76,7 @@ describe('MobileLayout', () => {
 
   afterEach(() => {
     Dark.set(false);
+    vi.restoreAllMocks();
   });
 
   it('renders a q-layout', async () => {
@@ -162,6 +173,22 @@ describe('MobileLayout', () => {
     await flushPromises();
     expect(wrapper.vm.$router.currentRoute.value.fullPath).toBe('/more');
     expect(wrapper.vm.$router.options.history.state.mobileDepth).toBe(0);
+  });
+
+  it('contains and logs an aborted tab navigation', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const unhandledEventError = vi.fn();
+    const wrapper = await mountLayout('/', unhandledEventError);
+    wrapper.vm.$router.beforeEach((to) => (to.path === '/review' ? false : true));
+
+    await tabByLabel(wrapper, 'Review').trigger('click');
+    await flushPromises();
+
+    expect(wrapper.vm.$router.currentRoute.value.fullPath).toBe('/');
+    expect(unhandledEventError).not.toHaveBeenCalled();
+    expect(consoleError).toHaveBeenCalledWith('Mobile tab navigation failed', expect.anything());
+    const failure = consoleError.mock.calls[0]?.[1];
+    expect(isNavigationFailure(failure, NavigationFailureType.aborted)).toBe(true);
   });
 
   it('removes the footer while the keyboard is visible and restores it once', async () => {

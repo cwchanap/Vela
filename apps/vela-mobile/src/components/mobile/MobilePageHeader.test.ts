@@ -3,8 +3,13 @@ import { resolve } from 'node:path';
 import { flushPromises, mount } from '@vue/test-utils';
 import { QLayout, QPageContainer, Quasar } from 'quasar';
 import { defineComponent } from 'vue';
-import { describe, expect, it } from 'vitest';
-import { createMemoryHistory, createRouter } from 'vue-router';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import {
+  createMemoryHistory,
+  createRouter,
+  isNavigationFailure,
+  NavigationFailureType,
+} from 'vue-router';
 import MobilePageHeader from './MobilePageHeader.vue';
 
 const routes = [
@@ -32,13 +37,21 @@ async function mountHeader(initialPath: string, mobileDepth?: number) {
     components: { MobilePageHeader, QLayout, QPageContainer },
     template: '<q-layout view="hHh lpR fFf"><mobile-page-header/><q-page-container/></q-layout>',
   });
+  const unhandledEventError = vi.fn();
   const wrapper = mount(HeaderHarness, {
-    global: { plugins: [Quasar, router] },
+    global: {
+      plugins: [Quasar, router],
+      config: { errorHandler: unhandledEventError },
+    },
   });
-  return { router, wrapper };
+  return { router, unhandledEventError, wrapper };
 }
 
 describe('MobilePageHeader', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   it('renders the title from route metadata', async () => {
     const { wrapper } = await mountHeader('/detail');
     expect(wrapper.get('.q-toolbar__title').text()).toBe('Details');
@@ -67,5 +80,20 @@ describe('MobilePageHeader', () => {
     await flushPromises();
     expect(router.currentRoute.value.fullPath).toBe('/fallback');
     expect(router.options.history.state.mobileDepth).toBe(0);
+  });
+
+  it('contains and logs an aborted fallback navigation', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const { router, unhandledEventError, wrapper } = await mountHeader('/detail');
+    router.beforeEach((to) => (to.path === '/fallback' ? false : true));
+
+    await wrapper.get('[aria-label="Back"]').trigger('click');
+    await flushPromises();
+
+    expect(router.currentRoute.value.fullPath).toBe('/detail');
+    expect(unhandledEventError).not.toHaveBeenCalled();
+    expect(consoleError).toHaveBeenCalledWith('Mobile header navigation failed', expect.anything());
+    const failure = consoleError.mock.calls[0]?.[1];
+    expect(isNavigationFailure(failure, NavigationFailureType.aborted)).toBe(true);
   });
 });

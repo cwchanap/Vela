@@ -66,6 +66,29 @@ describe('useKeyboardViewport', () => {
     expect(remove).toHaveBeenCalledTimes(3);
   });
 
+  it('removes a listener resolved after unmount and stops registering', async () => {
+    const remove = vi.fn(async () => undefined);
+    let resolveHandle!: (handle: { remove: typeof remove }) => void;
+    const addListener = vi.fn(
+      () =>
+        new Promise<{ remove: typeof remove }>((resolve) => {
+          resolveHandle = resolve;
+        }),
+    );
+    const { wrapper } = mountHarness({
+      isNative: () => true,
+      addListener,
+    });
+    expect(addListener).toHaveBeenCalledOnce();
+
+    wrapper.unmount();
+    resolveHandle({ remove });
+    await flushPromises();
+
+    expect(remove).toHaveBeenCalledOnce();
+    expect(addListener).toHaveBeenCalledOnce();
+  });
+
   it('rolls back partial registration before native callbacks can mutate layout', async () => {
     const listeners = new Map<KeyboardListenerEvent, KeyboardListener>();
     const remove = vi.fn(async () => undefined);
@@ -89,6 +112,25 @@ describe('useKeyboardViewport', () => {
     wrapper.unmount();
     await flushPromises();
     expect(remove).toHaveBeenCalledTimes(1);
+  });
+
+  it('reports registration failure before a non-settling rollback finishes', async () => {
+    const remove = vi.fn(() => new Promise<void>(() => undefined));
+    const { state } = mountHarness({
+      isNative: () => true,
+      addListener: vi.fn(async (name) => {
+        if (name === 'keyboardDidShow') {
+          throw new Error('registration rejected');
+        }
+        return { remove };
+      }),
+    });
+
+    await vi.waitFor(() => {
+      expect(remove).toHaveBeenCalledOnce();
+    });
+    expect(state.nativeStatus.value).toBe('unavailable');
+    expect(state.lastError.value).toBe('registration rejected');
   });
 
   it('repeats settled scrolling when the native viewport resizes', async () => {
