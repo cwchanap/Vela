@@ -151,6 +151,59 @@ first.
 4. Select the device in Xcode's device dropdown
 5. Press Run
 
+## iOS Interaction Baseline
+
+The development build exposes the diagnostic route
+`/diagnostics/ios-interactions`. Open **More → iOS Interaction Diagnostics**;
+the More entry and both diagnostic routes are compiled only in development.
+They cover Japanese composition, keyboard viewport behavior, safe areas,
+chronological navigation, resume, and one-shot cold entry.
+
+On an iPhone, add the Japanese Kana keyboard before running the IME scenario:
+
+1. Open **Settings → General → Keyboard → Keyboards**.
+2. Choose **Add New Keyboard → Japanese → Kana**.
+3. In the diagnostics field, enter `にほんご`, choose `日本語`, and verify
+   composition does not submit early.
+4. Complete composition, submit, and confirm the draft, committed value,
+   bound model, post-render native input, and submitted value are all exactly
+   `日本語`.
+
+Use the asset-only build when preparing a Capacitor artifact without a
+headless signed device build:
+
+```bash
+cd apps/vela-mobile
+VITE_MOBILE_API_URL=https://example.invalid/api/ bun run build:ios:assets
+VITE_MOBILE_API_URL=https://example.invalid/api/ bun run verify:production-diagnostics
+```
+
+`verify:production-diagnostics` is a local macOS pre-merge gate. It performs a
+real production Capacitor asset build, runs `cap sync ios`, and scans the
+resulting `src-capacitor/www/` artifact to ensure the development diagnostics
+marker is absent. Run a final `bunx cap sync ios` from `src-capacitor/` after
+the artifact gate.
+
+Mobile navigation follows one chronological M1 history across links, footer
+tabs, and native back/forward gestures. In-session validated entry creates one
+unique push, so back returns to the exact prior route and forward restores the
+entry; repeated delivery on the current route is a depth-preserving no-op.
+Only a fresh cold entry replaces the depth-zero route and uses the declared
+header fallback. Resume preserves the current route unless a newly validated
+entry event is present. Bounded history or tab-specific stacks are an explicit
+M2 revisit point after physical-device evidence for the current policy.
+
+The selected iOS policy is native `contentInset: "never"` with CSS ownership
+of the headerless top inset. Quasar owns fixed top/bottom CSS behavior, while
+pages, toolbars, and footer tabs own horizontal safe-area insets. Do not add a
+second native or CSS owner for the same edge.
+
+See [docs/ios-interaction-baseline.md](docs/ios-interaction-baseline.md) for
+the measured policy, exact environment matrix, reusable rules, and current
+blockers. Completion requires real-iPhone Debug development evidence for both
+Japanese IME submission and WKWebView native swipe history; simulator and
+source-level tests do not replace those physical scenarios.
+
 ## Testing
 
 ```bash
