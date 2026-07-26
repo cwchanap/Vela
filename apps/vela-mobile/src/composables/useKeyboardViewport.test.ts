@@ -105,6 +105,70 @@ describe('useKeyboardViewport', () => {
     expect(state.isKeyboardVisible.value).toBe(true);
   });
 
+  it('schedules the settled scroll when keyboardDidShow is lost during registration', async () => {
+    // Simulates the race where the native keyboard fires keyboardDidShow
+    // before its listener is installed (the addListener round-trip for
+    // keyboardDidShow is still in flight). The keyboardWillShow listener IS
+    // installed, so that event is queued — but keyboardDidShow has no
+    // listener yet and is lost. The compensation after replay must schedule
+    // the scroll so the first focused form is not left obscured.
+    const listeners = new Map<KeyboardListenerEvent, KeyboardListener>();
+    const remove = vi.fn(async () => undefined);
+    const scrollIntoView = vi.fn();
+    let resolveDidShow!: () => void;
+    let resolveDidHide!: () => void;
+    const addListener = vi.fn(async (name: KeyboardListenerEvent, listener: KeyboardListener) => {
+      listeners.set(name, listener);
+      if (name === 'keyboardDidShow') {
+        await new Promise<void>((resolve) => {
+          resolveDidShow = resolve;
+        });
+      }
+      if (name === 'keyboardDidHide') {
+        await new Promise<void>((resolve) => {
+          resolveDidHide = resolve;
+        });
+      }
+      return { remove };
+    });
+
+    const { state } = mountHarness({
+      isNative: () => true,
+      addListener,
+      getFocusedBlock: () => ({ scrollIntoView }) as unknown as HTMLElement,
+      requestFrame: (callback) => {
+        callback(0);
+        return 1;
+      },
+      cancelFrame: vi.fn(),
+    });
+
+    // Wait for keyboardWillShow to install; keyboardDidShow/keyboardDidHide
+    // are still pending their bridge round-trips.
+    await vi.waitFor(() => expect(listeners.has('keyboardWillShow')).toBe(true));
+
+    // The keyboard opens: keyboardWillShow is captured (queued), but the
+    // subsequent keyboardDidShow has no listener yet — it is lost. We do NOT
+    // call listeners.get('keyboardDidShow') here, simulating the lost event.
+    listeners.get('keyboardWillShow')?.();
+    expect(state.isKeyboardVisible.value).toBe(false);
+
+    // Complete registration. The replayed keyboardWillShow sets
+    // isKeyboardVisible to true, but keyboardDidShow was never queued so
+    // scrollFocusedBlockAfterLayout would not run without compensation.
+    resolveDidShow();
+    await vi.waitFor(() => expect(listeners.has('keyboardDidHide')).toBe(true));
+    resolveDidHide();
+    await flushPromises();
+    await nextTick();
+
+    expect(state.nativeStatus.value).toBe('native');
+    expect(state.isKeyboardVisible.value).toBe(true);
+    // The compensation must have scheduled the scroll even though
+    // keyboardDidShow was never delivered.
+    expect(scrollIntoView).toHaveBeenCalledWith({ block: 'nearest' });
+  });
+
   it('removes every resolved listener handle on unmount', async () => {
     const remove = vi.fn(async () => undefined);
     const { wrapper } = mountHarness({

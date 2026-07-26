@@ -219,4 +219,19 @@ describe('MobileLayout', () => {
     expect(appScss).toContain('env(safe-area-inset-left, 0px)');
     expect(appScss).toContain('env(safe-area-inset-right, 0px)');
   });
+
+  it('applies horizontal safe-area padding to the page container for every core route', async () => {
+    const appScss = readFileSync(resolve(__dirname, '../css/app.scss'), 'utf8');
+    expect(appScss).toContain('.mobile-page-container--safe-x');
+    expect(appScss).toContain('env(safe-area-inset-left, 0px)');
+
+    for (const path of ['/', '/review', '/learn', '/words', '/more']) {
+      const wrapper = await mountLayout(path);
+      const container = wrapper.getComponent({ name: 'QPageContainer' });
+      expect(
+        container.classes(),
+        `QPageContainer on ${path} must carry the safe-x class`,
+      ).toContain('mobile-page-container--safe-x');
+    }
+  });
 });

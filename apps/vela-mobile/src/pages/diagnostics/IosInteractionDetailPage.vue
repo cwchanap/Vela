@@ -1,5 +1,5 @@
 <template>
-  <q-page padding class="mobile-safe-x">
+  <q-page padding>
     <section class="column q-gutter-md">
       <h1 class="text-h5">Navigation Detail</h1>
       <p data-testid="detail-route-identity">This is the nested iOS interaction route.</p>

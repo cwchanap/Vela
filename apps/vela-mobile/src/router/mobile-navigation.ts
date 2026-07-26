@@ -107,11 +107,16 @@ export async function replaceColdMobileRoute(
 // A timeout guards against router.back() being a no-op when the app-owned
 // mobileDepth disagrees with the real browser history length (e.g. a stale
 // depth left by a crashed navigation). In that case afterEach never fires and
-// the promise would hang forever, freezing backOrFallback's caller. The
-// timeout rejects so the caller surfaces the failure instead of hanging.
+// the promise would hang forever, freezing backOrFallback's caller. On timeout
+// the promise resolves with false (rather than rejecting) so backOrFallback
+// can recover by replacing with the fallback route — the user reaches a sane
+// destination instead of being trapped on a stale header. The timeout is not
+// definitive proof of a no-op (a slow guarded or lazy-loaded navigation could
+// take longer), but recovery via replace is safe: if a real navigation was
+// in flight, the replace supersedes it and the user still reaches the fallback.
 const ROUTE_BACK_SETTLE_TIMEOUT_MS = 1000;
 
-function whenRouteNavigationSettled(router: Router): Promise<void> {
+function whenRouteNavigationSettled(router: Router): Promise<boolean> {
   return new Promise((resolve, reject) => {
     let settled = false;
     const stop = router.afterEach((_to, _from, failure) => {
@@ -122,14 +127,14 @@ function whenRouteNavigationSettled(router: Router): Promise<void> {
       if (failure) {
         reject(failure);
       } else {
-        resolve();
+        resolve(true);
       }
     });
     const timer = setTimeout(() => {
       if (settled) return;
       settled = true;
       stop();
-      reject(new Error('router.back() did not produce a navigation within timeout'));
+      resolve(false);
     }, ROUTE_BACK_SETTLE_TIMEOUT_MS);
   });
 }
@@ -142,12 +147,16 @@ export async function backOrFallback(
   if (depth > 0) {
     const settled = whenRouteNavigationSettled(router);
     router.back();
-    await settled;
-    return {
-      kind: 'back',
-      fullPath: router.currentRoute.value.fullPath,
-      depth: readMobileDepth(router),
-    };
+    const navigated = await settled;
+    if (navigated) {
+      return {
+        kind: 'back',
+        fullPath: router.currentRoute.value.fullPath,
+        depth: readMobileDepth(router),
+      };
+    }
+    // router.back() was a no-op (stale positive depth with no matching history
+    // entry). Fall through to the fallback so the user is not trapped.
   }
   const resolved = router.resolve(fallback);
   const result = await router.replace(routeLocation(resolved, 0));

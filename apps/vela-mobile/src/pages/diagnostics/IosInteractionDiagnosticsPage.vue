@@ -1,7 +1,7 @@
 <template>
   <q-page
     padding
-    class="mobile-safe-x ios-interaction-page"
+    class="ios-interaction-page"
     :data-testid="IOS_INTERACTION_DIAGNOSTICS_MARKER"
     @pointerdown.self="dismissFocusedControl"
   >
