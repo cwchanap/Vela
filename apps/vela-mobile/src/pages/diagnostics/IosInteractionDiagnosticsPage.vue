@@ -96,8 +96,11 @@ import { useRoute, useRouter } from 'vue-router';
 import { stageDiagnosticColdEntry } from 'src/boot/diagnostic-cold-entry';
 import JapaneseInputProbe from 'src/components/mobile/JapaneseInputProbe.vue';
 import { useKeyboardViewport } from 'src/composables/useKeyboardViewport';
-import { IOS_INTERACTION_DIAGNOSTICS_MARKER } from 'src/diagnostics/ios-interaction-contract';
-import { IOS_DIAGNOSTIC_DETAIL_PATH, IOS_DIAGNOSTIC_ROOT_PATH } from 'src/router/diagnostic-routes';
+import {
+  IOS_DIAGNOSTIC_DETAIL_PATH,
+  IOS_DIAGNOSTIC_ROOT_PATH,
+  IOS_INTERACTION_DIAGNOSTICS_MARKER,
+} from 'src/diagnostics/ios-interaction-contract';
 import {
   enterMobileRoute,
   pushMobileRoute,

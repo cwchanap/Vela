@@ -5,8 +5,6 @@ import {
   IOS_INTERACTION_DIAGNOSTICS_LABEL,
 } from 'src/diagnostics/ios-interaction-contract';
 
-export { IOS_DIAGNOSTIC_DETAIL_PATH, IOS_DIAGNOSTIC_ROOT_PATH };
-
 const coreRoutes: RouteRecordRaw[] = [
   { path: '', name: 'home', component: () => import('pages/HomePage.vue') },
   { path: 'review', name: 'review', component: () => import('pages/ReviewPage.vue') },

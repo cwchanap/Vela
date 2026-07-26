@@ -207,7 +207,7 @@ describe('MobileLayout', () => {
     const container = wrapper.getComponent({ name: 'QPageContainer' });
     expect(container.classes()).toContain('mobile-page-container--headerless');
     expect(container.classes().includes('mobile-page-container--css-safe-top')).toBe(
-      String(safeAreaPolicy.headerlessTopOwner) === 'css',
+      safeAreaPolicy.headerlessTopOwner === 'css',
     );
   });
 

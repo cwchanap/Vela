@@ -15,4 +15,16 @@ describe('mobile boot files', () => {
       'diagnostic-cold-entry',
     ]);
   });
+
+  it('includes both native lifecycle and cold entry in Capacitor development', () => {
+    expect(getMobileBootFiles({ isCapacitor: true, isDevelopment: true })).toEqual([
+      'main',
+      'capacitor-lifecycle',
+      'diagnostic-cold-entry',
+    ]);
+  });
+
+  it('includes only main when neither flag is set', () => {
+    expect(getMobileBootFiles({ isCapacitor: false, isDevelopment: false })).toEqual(['main']);
+  });
 });

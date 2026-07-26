@@ -1,9 +1,9 @@
 import { describe, it, expect } from 'vitest';
 import {
-  buildMobileChildRoutes,
   IOS_DIAGNOSTIC_DETAIL_PATH,
   IOS_DIAGNOSTIC_ROOT_PATH,
-} from './diagnostic-routes';
+} from 'src/diagnostics/ios-interaction-contract';
+import { buildMobileChildRoutes } from './diagnostic-routes';
 import routes from './routes';
 
 // Route components are lazy: `() => import('pages/HomePage.vue')`. Asserting
