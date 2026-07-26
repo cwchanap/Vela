@@ -3,31 +3,40 @@ import { mkdtemp, mkdir, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { IOS_INTERACTION_DIAGNOSTICS_MARKER } from '../src/diagnostics/ios-interaction-contract.ts';
-import { findDiagnosticMarker } from './verify-production-diagnostics.mjs';
+import {
+  findDiagnosticTokens,
+  findProductionDiagnosticTokens,
+} from './verify-production-diagnostics.mjs';
+
+const forbiddenTokens = [
+  'ios-interaction-diagnostics',
+  'iOS Interaction Diagnostics',
+  '/diagnostics/ios-interactions',
+];
 
 describe('verify-production-diagnostics', () => {
-  it('returns no files when emitted JavaScript excludes the marker', async () => {
+  it('returns no matches when emitted JavaScript excludes every forbidden token', async () => {
     const root = await mkdtemp(join(tmpdir(), 'vela-prod-scan-'));
     await writeFile(join(root, 'app.js'), 'console.log("production")');
-    expect(await findDiagnosticMarker(root, IOS_INTERACTION_DIAGNOSTICS_MARKER)).toEqual([]);
+    expect(await findDiagnosticTokens(root, forbiddenTokens)).toEqual([]);
   });
 
-  it('finds the marker in nested emitted JavaScript', async () => {
+  it.each(forbiddenTokens)('finds forbidden token %s in nested emitted JavaScript', async (token) => {
     const root = await mkdtemp(join(tmpdir(), 'vela-prod-scan-'));
     await mkdir(join(root, 'assets'));
-    await writeFile(
-      join(root, 'assets', 'diagnostic.js'),
-      `const marker=${JSON.stringify(IOS_INTERACTION_DIAGNOSTICS_MARKER)}`,
-    );
-    expect(await findDiagnosticMarker(root, IOS_INTERACTION_DIAGNOSTICS_MARKER)).toEqual([
-      join(root, 'assets', 'diagnostic.js'),
+    const artifact = join(root, 'assets', 'diagnostic.js');
+    await writeFile(artifact, `const leaked=${JSON.stringify(token)}`);
+    expect(await findProductionDiagnosticTokens(root)).toEqual([
+      {
+        path: artifact,
+        token,
+      },
     ]);
   });
 
   it('ignores non-JavaScript assets', async () => {
     const root = await mkdtemp(join(tmpdir(), 'vela-prod-scan-'));
-    await writeFile(join(root, 'notes.txt'), IOS_INTERACTION_DIAGNOSTICS_MARKER);
-    expect(await findDiagnosticMarker(root, IOS_INTERACTION_DIAGNOSTICS_MARKER)).toEqual([]);
+    await writeFile(join(root, 'notes.txt'), forbiddenTokens.join('\n'));
+    expect(await findDiagnosticTokens(root, forbiddenTokens)).toEqual([]);
   });
 });

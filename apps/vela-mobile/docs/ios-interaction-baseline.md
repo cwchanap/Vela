@@ -197,8 +197,9 @@ with all five observed values exactly `日本語`.
 
 ## Automated verification
 
-All commands were run against
-`d261de358a54d8ffd41a02e0107c84e5e3d90c2d`:
+The automated web and Capacitor asset commands below were run against
+`d261de358a54d8ffd41a02e0107c84e5e3d90c2d`; the final post-sync simulator
+compilation used the documentation commit identified in its own bullet:
 
 - `bun run test:unit`: 27 files, 187 tests passed. The intentional
   guard-failure test still emits its expected Vue Router warning.

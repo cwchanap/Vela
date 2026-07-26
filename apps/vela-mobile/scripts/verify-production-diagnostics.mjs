@@ -1,11 +1,11 @@
 import { readdir, readFile } from 'node:fs/promises';
 import { relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { IOS_INTERACTION_DIAGNOSTICS_MARKER } from '../src/diagnostics/ios-interaction-contract.ts';
+import { IOS_INTERACTION_PRODUCTION_FORBIDDEN_TOKENS } from '../src/diagnostics/ios-interaction-contract.ts';
 
 const defaultRoot = fileURLToPath(new URL('../src-capacitor/www/', import.meta.url));
 
-export async function findDiagnosticMarker(root, marker) {
+export async function findDiagnosticTokens(root, tokens) {
   const absoluteRoot = resolve(root);
   const matches = [];
 
@@ -26,27 +26,36 @@ export async function findDiagnosticMarker(root, marker) {
         await scan(path);
       } else if (entry.isFile() && entry.name.endsWith('.js')) {
         const contents = await readFile(path, 'utf8');
-        if (contents.includes(marker)) matches.push(path);
+        for (const token of tokens) {
+          if (contents.includes(token)) matches.push({ path, token });
+        }
       }
     }
   }
 
   await scan(absoluteRoot);
-  return matches.sort();
+  return matches.sort((left, right) => {
+    const pathOrder = left.path.localeCompare(right.path);
+    return pathOrder === 0 ? left.token.localeCompare(right.token) : pathOrder;
+  });
+}
+
+export function findProductionDiagnosticTokens(root) {
+  return findDiagnosticTokens(root, IOS_INTERACTION_PRODUCTION_FORBIDDEN_TOKENS);
 }
 
 if (import.meta.main) {
   try {
-    const matches = await findDiagnosticMarker(defaultRoot, IOS_INTERACTION_DIAGNOSTICS_MARKER);
+    const matches = await findProductionDiagnosticTokens(defaultRoot);
     if (matches.length > 0) {
       console.error(
-        `Production diagnostics marker found:\n${matches
-          .map((match) => relative(defaultRoot, match))
+        `Production diagnostics token found:\n${matches
+          .map((match) => `${relative(defaultRoot, match.path)}: ${JSON.stringify(match.token)}`)
           .join('\n')}`,
       );
       process.exit(1);
     }
-    console.log(`No production diagnostics marker found under ${defaultRoot}`);
+    console.log(`No production diagnostics tokens found under ${defaultRoot}`);
   } catch (error) {
     console.error(error instanceof Error ? error.message : error);
     process.exit(1);
