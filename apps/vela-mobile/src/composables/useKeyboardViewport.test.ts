@@ -54,6 +54,57 @@ describe('useKeyboardViewport', () => {
     expect(state.isKeyboardVisible.value).toBe(false);
   });
 
+  it('replays a keyboardWillShow event that arrives while later listeners are still registering', async () => {
+    const listeners = new Map<KeyboardListenerEvent, KeyboardListener>();
+    const remove = vi.fn(async () => undefined);
+    const scrollIntoView = vi.fn();
+    let resolveDidShow!: () => void;
+    let resolveDidHide!: () => void;
+    const addListener = vi.fn(async (name: KeyboardListenerEvent, listener: KeyboardListener) => {
+      listeners.set(name, listener);
+      if (name === 'keyboardDidShow') {
+        await new Promise<void>((resolve) => {
+          resolveDidShow = resolve;
+        });
+      }
+      if (name === 'keyboardDidHide') {
+        await new Promise<void>((resolve) => {
+          resolveDidHide = resolve;
+        });
+      }
+      return { remove };
+    });
+
+    const { state } = mountHarness({
+      isNative: () => true,
+      addListener,
+      getFocusedBlock: () => ({ scrollIntoView }) as unknown as HTMLElement,
+      requestFrame: (callback) => {
+        callback(0);
+        return 1;
+      },
+      cancelFrame: vi.fn(),
+    });
+
+    // Wait for the first listener (keyboardWillShow) to install, but the
+    // later two addListener calls are still pending their bridge round-trips.
+    await vi.waitFor(() => expect(listeners.has('keyboardWillShow')).toBe(true));
+    expect(state.nativeStatus.value).toBe('unavailable');
+
+    // The keyboard opens before registration completes.
+    listeners.get('keyboardWillShow')?.();
+    expect(state.isKeyboardVisible.value).toBe(false);
+
+    // Complete registration; the queued will-show event must be replayed.
+    resolveDidShow();
+    await vi.waitFor(() => expect(listeners.has('keyboardDidHide')).toBe(true));
+    resolveDidHide();
+    await flushPromises();
+
+    expect(state.nativeStatus.value).toBe('native');
+    expect(state.isKeyboardVisible.value).toBe(true);
+  });
+
   it('removes every resolved listener handle on unmount', async () => {
     const remove = vi.fn(async () => undefined);
     const { wrapper } = mountHarness({

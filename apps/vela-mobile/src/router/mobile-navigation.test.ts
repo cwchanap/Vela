@@ -150,6 +150,24 @@ describe('mobile navigation', () => {
     });
   });
 
+  it('surfaces an aborted back navigation instead of reporting success', async () => {
+    const router = makeRouter();
+    await router.replace({ path: '/', state: { mobileDepth: 0 } });
+    await pushMobileRoute(router, '/detail');
+    expect(readMobileDepth(router)).toBe(1);
+
+    router.beforeEach(() => false);
+    let failure: unknown;
+    try {
+      await backOrFallback(router, '/more');
+    } catch (error) {
+      failure = error;
+    }
+    expect(isNavigationFailure(failure, NavigationFailureType.aborted)).toBe(true);
+    expect(router.currentRoute.value.fullPath).toBe('/detail');
+    expect(readMobileDepth(router)).toBe(1);
+  });
+
   it('uses fallback when app-owned depth is zero', async () => {
     const router = makeRouter();
     await router.replace({ path: '/detail', state: { mobileDepth: 0 } });

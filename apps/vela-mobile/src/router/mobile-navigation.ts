@@ -100,11 +100,18 @@ export async function replaceColdMobileRoute(
 // router.back() triggers an asynchronous popstate navigation but returns void.
 // Await the destination route via afterEach so the result reports the actual
 // destination fullPath and recomputed mobile depth instead of the pre-back route.
+// afterEach fires with a NavigationFailure when the pop is aborted/cancelled by
+// a guard; rejecting here propagates the failure to backOrFallback's caller
+// instead of letting it report a successful back with the unchanged route.
 function whenRouteNavigationSettled(router: Router): Promise<void> {
-  return new Promise((resolve) => {
-    const stop = router.afterEach(() => {
+  return new Promise((resolve, reject) => {
+    const stop = router.afterEach((_to, _from, failure) => {
       stop();
-      resolve();
+      if (failure) {
+        reject(failure);
+      } else {
+        resolve();
+      }
     });
   });
 }

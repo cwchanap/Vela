@@ -54,6 +54,11 @@ export function useKeyboardViewport(options: KeyboardViewportOptions = {}) {
   const nativeStatus = ref<KeyboardNativeStatus>('browser');
   const lastError = ref<string | null>(null);
   const handles: PluginListenerHandle[] = [];
+  // Events that arrive after a listener is installed but before nativeReady
+  // flips true (i.e. while later addListener round-trips are still pending)
+  // are queued and replayed once registration completes, so the first focus
+  // can't leave the footer visible or skip the focused-block scroll.
+  const pendingEvents: KeyboardListenerEvent[] = [];
   let mounted = false;
   let nativeReady = false;
   let pendingFrame: number | null = null;
@@ -74,17 +79,29 @@ export function useKeyboardViewport(options: KeyboardViewportOptions = {}) {
 
   const listeners: Record<KeyboardListenerEvent, KeyboardListener> = {
     keyboardWillShow: () => {
-      if (!mounted || !nativeReady) return;
+      if (!mounted) return;
+      if (!nativeReady) {
+        pendingEvents.push('keyboardWillShow');
+        return;
+      }
       isKeyboardVisible.value = true;
     },
     // iOS fires keyboardWillShow before keyboardDidShow; scrollFocusedBlockAfterLayout
     // guards on isKeyboardVisible, so this ordering is required for the scroll to run.
     keyboardDidShow: () => {
-      if (!mounted || !nativeReady) return;
+      if (!mounted) return;
+      if (!nativeReady) {
+        pendingEvents.push('keyboardDidShow');
+        return;
+      }
       void scrollFocusedBlockAfterLayout();
     },
     keyboardDidHide: () => {
-      if (!mounted || !nativeReady) return;
+      if (!mounted) return;
+      if (!nativeReady) {
+        pendingEvents.push('keyboardDidHide');
+        return;
+      }
       isKeyboardVisible.value = false;
     },
   };
@@ -115,8 +132,8 @@ export function useKeyboardViewport(options: KeyboardViewportOptions = {}) {
     //      after unmount is removed immediately.
     //   2. Registration partially succeeds — nativeReady only flips true once
     //      all three handles are pushed, so callbacks that arrive while
-    //      registration is incomplete are dropped instead of acting on a
-    //      half-registered listener set.
+    //      registration is incomplete are queued (pendingEvents) and replayed
+    //      after the loop instead of acting on a half-registered listener set.
     try {
       for (const eventName of eventNames) {
         if (!mounted) return;
@@ -129,10 +146,20 @@ export function useKeyboardViewport(options: KeyboardViewportOptions = {}) {
       }
       nativeReady = true;
       nativeStatus.value = 'native';
+      // Replay any events that arrived between individual listener installation
+      // and nativeReady. Listeners re-check nativeReady (now true) and run their
+      // normal path; ordering is preserved because events are pushed in arrival
+      // order.
+      const queued = pendingEvents.splice(0);
+      for (const event of queued) {
+        if (!mounted) break;
+        listeners[event]();
+      }
     } catch (error) {
       nativeReady = false;
       nativeStatus.value = 'unavailable';
       lastError.value = errorMessage(error);
+      pendingEvents.length = 0;
       await removeHandles();
     }
   }
@@ -151,6 +178,7 @@ export function useKeyboardViewport(options: KeyboardViewportOptions = {}) {
   onUnmounted(() => {
     mounted = false;
     nativeReady = false;
+    pendingEvents.length = 0;
     window.removeEventListener('resize', onWindowResize);
     void removeHandles();
     if (pendingFrame !== null) {
