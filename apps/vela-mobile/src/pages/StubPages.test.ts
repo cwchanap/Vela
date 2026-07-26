@@ -1,5 +1,5 @@
-import { describe, it, expect } from 'vitest';
-import { mount } from '@vue/test-utils';
+import { describe, it, expect, vi } from 'vitest';
+import { flushPromises, mount } from '@vue/test-utils';
 import { Quasar, QLayout, QPageContainer } from 'quasar';
 import { defineComponent, type Component } from 'vue';
 import { createMemoryHistory, createRouter } from 'vue-router';
@@ -40,10 +40,13 @@ describe.each([
 });
 
 describe('MorePage diagnostics entry', () => {
-  it('shows the iOS interaction diagnostics entry in development', () => {
+  it('shows the iOS interaction diagnostics entry in development', async () => {
     const wrapper = mountPage(MorePage);
+    await flushPromises();
+    await vi.waitFor(() => {
+      expect(wrapper.find('[data-testid="ios-interaction-entry"]').exists()).toBe(true);
+    });
     const entry = wrapper.find('[data-testid="ios-interaction-entry"]');
-    expect(entry.exists()).toBe(true);
     expect(entry.text()).toContain('iOS Interaction Diagnostics');
   });
 });

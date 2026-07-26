@@ -12,6 +12,7 @@ const forbiddenTokens = [
   'ios-interaction-diagnostics',
   'iOS Interaction Diagnostics',
   '/diagnostics/ios-interactions',
+  'ios-interaction-entry',
 ];
 
 describe('verify-production-diagnostics', () => {
