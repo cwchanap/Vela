@@ -1,11 +1,11 @@
 import { Capacitor, type PluginListenerHandle } from '@capacitor/core';
 import { Keyboard, type KeyboardInfo } from '@capacitor/keyboard';
-import { type InjectionKey, nextTick, onMounted, onUnmounted, ref } from 'vue';
+import { type InjectionKey, type Ref, nextTick, onMounted, onUnmounted, ref } from 'vue';
 
 export type KeyboardViewportState = {
-  isKeyboardVisible: ReturnType<typeof ref<boolean>>;
-  nativeStatus: ReturnType<typeof ref<KeyboardNativeStatus>>;
-  lastError: ReturnType<typeof ref<string | null>>;
+  isKeyboardVisible: Ref<boolean>;
+  nativeStatus: Ref<KeyboardNativeStatus>;
+  lastError: Ref<string | null>;
 };
 
 export const KEYBOARD_VIEWPORT_INJECTION_KEY: InjectionKey<KeyboardViewportState> =
