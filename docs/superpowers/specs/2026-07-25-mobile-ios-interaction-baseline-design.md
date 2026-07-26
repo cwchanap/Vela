@@ -136,10 +136,11 @@ The implementation should keep these responsibilities isolated:
 - `JapaneseInputProbe.vue`: owns text input, IME composition state, exact committed/submitted values, and explicit focus dismissal.
 - `useKeyboardViewport.ts`: adapts the typed Capacitor Keyboard listener API to
   reactive keyboard visibility and focused-block scrolling. It skips native
-  listener registration in browser mode and removes every returned listener
-  handle.
-- `mobile-navigation.ts`: owns unique push for ordinary links and tab switches,
-  replace-on-entry, back-or-fallback, and resume-preservation rules.
+  listener registration in browser mode, makes native registration
+  transactional, and removes native, window, and animation-frame resources.
+- `mobile-navigation.ts`: owns unique push for ordinary links, tab switches,
+  and validated in-session entries; checked navigation-failure handling; and
+  back-or-fallback behavior.
 - `mobile-route-meta.d.ts`: augments Vue Router's `RouteMeta` with the exact
   optional mobile-header contract.
 - `mobile-lifecycle.ts`: exposes app-level lifecycle observations without
@@ -148,7 +149,9 @@ The implementation should keep these responsibilities isolated:
   the typed Capacitor App resume listener once, and forwards observations to
   `mobile-lifecycle.ts`.
 - `IosInteractionDiagnosticsPage.vue`: assembles selectable text, scroll stress content, input probe, lifecycle/navigation readouts, and navigation controls.
-- `IosInteractionDetailPage.vue`: provides a real nested destination for header-back and native swipe validation.
+- `IosInteractionDetailPage.vue`: provides a real nested destination for
+  header-back/native-swipe validation and keeps repeated-entry/resume controls
+  visible after the root page navigates away.
 - `VelaBridgeViewController.swift`: enables the native WKWebView back/forward gesture in `capacitorDidLoad()`.
 - `scripts/verify-production-diagnostics.mjs`: scans the production Capacitor
   JavaScript artifact for the canonical diagnostics marker.
@@ -177,16 +180,24 @@ The bound QInput model and the displayed draft are separate values. The model
 continues to receive Quasar's ordinary `update:model-value` events; native
 `input` events update the diagnostic draft without writing that in-progress
 value back through the model and risking disruption of the active IME session.
+At `compositionend`, the native listener explicitly synchronizes the exact
+native value into the bound model as well as the draft and committed readouts.
+This synchronization is required because Quasar's earlier-registered
+composition handler can emit its final model update while the probe's own
+composition flag is still true.
 
 ### State
 
-The probe exposes three distinct values:
+The probe exposes three distinct semantic values:
 
 - **Draft**: the current visible input value, including in-progress composition.
 - **Committed**: the value observed when composition ends.
 - **Submitted**: the exact value accepted by an explicit submission.
 
-It also displays whether composition is active. These values make premature commitment, corruption, trimming, or normalization visible during physical testing.
+It also displays the bound QInput model and whether composition is active. The
+model readout makes the post-composition controlled-input synchronization
+physically observable; the semantic values make premature commitment,
+corruption, trimming, or normalization visible during physical testing.
 
 ### Event rules
 
@@ -198,11 +209,15 @@ It also displays whether composition is active. These values make premature comm
    `compositionend`.
 3. Enter is handled on native `keydown`, not `keyup`, and does nothing while
    either the tracked flag or `KeyboardEvent.isComposing` is true.
-4. Native `compositionend` marks composition inactive and records the exact
-   value read from the native element.
+4. Native `compositionend` reads the native value once, marks composition
+   inactive, and writes that exact value to the bound model, draft, and
+   committed readouts.
 5. A later Enter `keydown` or explicit Submit tap records the exact submitted
    value.
-6. Submission does not clear the field automatically; the tester must be able to compare all three values.
+6. After Vue's next render, the native input and bound model must still contain
+   the committed value.
+7. Submission does not clear the field automatically; the tester must be able
+   to compare all three values.
 
 The reusable guidance is: never validate, normalize, or submit Japanese answer text until composition has ended.
 
@@ -258,11 +273,13 @@ The keyboard adapter imports the typed `Keyboard` API:
 - `keyboardDidHide` marks the keyboard hidden and restores the footer after the
   resized viewport has settled.
 
-Each `Keyboard.addListener(...)` call returns a `PluginListenerHandle`; all
-handles are removed on unmount. Browser mode deliberately skips native
-registration and uses standard focus scrolling. A rejected listener
-registration on a native build is caught, surfaced by the diagnostic, and
-degrades to the same focus-scrolling behavior.
+Each `Keyboard.addListener(...)` call returns a `PluginListenerHandle`.
+Registration is transactional: callbacks remain inactive until all three
+listener handles resolve. If any registration rejects, every already-resolved
+handle is removed immediately, native callbacks remain disabled, the failure
+is surfaced by the diagnostic, and the page degrades to browser-style focus
+scrolling. On unmount, the adapter removes all native handles and its window
+`resize` listener and cancels any pending animation frame.
 
 When `keyboardDidShow` fires:
 
@@ -308,6 +325,12 @@ simulator using:
 - screenshots and element bounds for the first page control, header back
   control, and first/last footer tabs.
 
+Each orientation uses an explicit cycle: remove the temporary header, capture
+the headerless measurements and screenshot, install the header, capture the
+header measurements and screenshot, then remove the header before rotating.
+This produces twelve distinct screenshots rather than reusing a header state
+across orientations.
+
 Choose the policy using these rules:
 
 1. Headerless content has exactly one top inset.
@@ -350,6 +373,9 @@ Portrait is the primary presentation. Landscape must remain fully operable even 
 ### Interaction baseline
 
 - Buttons and navigation controls have a minimum 44-by-44-point hit area.
+- A shared mobile touch-target class applies that minimum to Done, Submit,
+  diagnostic navigation/lifecycle actions, and the header back control;
+  standard Quasar tabs are verified by computed bounds on the simulator.
 - Japanese sample text remains selectable.
 - The page scrolls vertically with touch momentum.
 - Focus dismissal does not prevent text selection, button activation, or route navigation.
@@ -421,8 +447,12 @@ A route-entry event represents a future recognized deep link or a diagnostic sim
 - Resolve and validate the target against mobile-owned routes.
 - Reject unknown or disallowed targets.
 - If the target equals the current `fullPath`, do nothing.
-- Otherwise use `router.replace` with `mobileDepth: 0`, so an external entry
-  does not add an artificial app-owned page behind the destination.
+- When the app is already running, use the same unique chronological push as
+  ordinary navigation. This preserves one coherent visible-back/native-swipe
+  destination and increments `mobileDepth`.
+- Only a cold entry before router installation uses `router.replace` with
+  `mobileDepth: 0`, because a fresh WebView session has no app-owned
+  destination to preserve.
 
 HPA-209 does not register a new external URL. The existing custom scheme remains reserved for OAuth callback/logout paths. Future universal-link or app-scheme work can call the route-entry function after it authenticates and validates its URL.
 
@@ -435,7 +465,8 @@ Development boot performs these steps in order:
 2. Resolve and validate the value against the exact allowlist of the two
    diagnostic paths.
 3. Ignore an absent, invalid, or disallowed value.
-4. Directly `await router.replace(...)` with `mobileDepth: 0`.
+4. Await the checked cold-entry helper, which performs `router.replace(...)`
+   with `mobileDepth: 0` and surfaces a resolved navigation failure.
 
 Quasar executes boot functions before it installs Vue Router into the app, so
 the consumer must not await `router.isReady()`; that promise represents the
@@ -543,11 +574,12 @@ A cold route entry uses `router.replace` at `mobileDepth: 0` and therefore
 creates no app-owned back destination. The staged cold-entry action plus
 terminate-and-relaunch flow creates the required fresh WebView session. Native
 swipe-back is intentionally a no-op and the visible header uses its fallback.
-Because `replace` cannot erase entries from an already-running WebView session,
-an ordinary in-session route-entry simulation is not accepted as cold-entry
-evidence. Existing-session entry remains covered by the general physical
-history-consistency checks and is a blocker if native swipe escapes the
-app-owned route policy.
+
+An in-session validated entry instead pushes once. Header back and native
+swipe-back must both return to the exact prior app route, and swipe-forward must
+restore the entered route and its recorded depth. Repeated delivery while
+already on that route is a no-op. This behavior is validated separately from
+the fresh-session cold-entry scenario.
 
 After a pushed detail route returns through `router.back()`, native
 swipe-forward must restore the detail route and its `mobileDepth`. This confirms
@@ -579,7 +611,7 @@ The main page contains:
 - The Japanese input probe near the lower half of the content.
 - Keyboard visibility and orientation readouts.
 - Current route and last navigation outcome.
-- Controls to simulate unique push, repeated push, route entry, repeated route entry, and resume.
+- Controls to perform unique push and validated in-session route entry.
 - A development-only control that stages a one-shot cold-entry target for the
   next app launch.
 - A button to navigate to the detail route.
@@ -592,6 +624,8 @@ The detail page contains:
 - A metadata-driven header and back control.
 - Enough content to confirm page identity after transitions.
 - A control that attempts repeated navigation to the current detail route.
+- Controls that repeat validated entry to the current detail route and simulate
+  resume without navigating, so they remain reachable after entry.
 - Instructions to test both the visible back button and the native left-edge swipe.
 
 The diagnostic does not send input or device information to a backend.
@@ -602,11 +636,14 @@ The diagnostic does not send input or device information to a backend.
   focus scrolling.
 - Native Keyboard listener rejection leaves the page usable and displays the
   unavailable native status in development.
-- All returned Capacitor listener handles are removed when their owner
-  unmounts.
+- Partial native Keyboard registration is rolled back immediately; native
+  handles, the window resize listener, and pending animation frames are cleaned
+  up on unmount.
 - Unknown route-entry targets are rejected without changing the current route.
 - Duplicate navigation is a successful no-op, not a notification-worthy error.
-- Unexpected Vue Router failures are surfaced in the diagnostic readout and logged.
+- Resolved Vue Router navigation failures are detected with
+  `isNavigationFailure`; unexpected failures are surfaced in the diagnostic
+  readout and logged rather than reported as successful pushes/replacements.
 - Back without history uses the declared fallback.
 - Native swipe/history failures are recorded as physical-device blockers.
 - Device-matrix failures include reproduction steps rather than being silently marked unsupported.
@@ -623,6 +660,8 @@ The diagnostic does not send input or device information to a backend.
 - Enter `keydown` during composition does not submit when either composition
   guard is active.
 - Composition end records the exact committed value.
+- After composition end and a Vue render, the bound-model readout, controlled
+  QInput, and native element retain the exact committed value.
 - Enter `keydown` after composition submits the exact value.
 - Submit button submits the exact value.
 - Done and safe background taps dismiss focus.
@@ -630,7 +669,8 @@ The diagnostic does not send input or device information to a backend.
 - Keyboard show hides the footer and scrolls the form block after layout settles.
 - Keyboard hide restores the footer without duplicated bottom-safe-area
   padding or an unreachable Submit action.
-- Keyboard listener handles are removed on unmount.
+- Partial Keyboard registration is rolled back immediately, and native
+  handles, window resize listeners, and pending frames are removed on unmount.
 - Vitest resolves and mocks both `@capacitor/app` and
   `@capacitor/keyboard` from `src-capacitor/node_modules`.
 - Browser fallback does not require a native plugin.
@@ -640,11 +680,11 @@ The diagnostic does not send input or device information to a backend.
   `savedPosition`.
 - Header title, back control, and fallback follow the typed route metadata.
 - Safe-area content classes and minimum target classes are present.
-- `IosInteractionDiagnosticsPage` tests cover every control, readout,
-  lifecycle/navigation outcome, cold-entry staging, marker binding, and IME
-  probe integration.
-- `IosInteractionDetailPage` tests cover route identity and repeated
-  current-route navigation.
+- Router-view journey tests cover only controls visible on the active route,
+  including navigation, validated entry, repeated current-route navigation,
+  repeated entry, resume, and cold-entry staging.
+- Diagnostic page tests cover every readout, marker binding, IME integration,
+  and shared 44-point touch-target class.
 - The full mobile suite passes the configured 95% line threshold with
   `bun run test:coverage`; diagnostic pages are covered rather than excluded.
 
@@ -661,8 +701,10 @@ The diagnostic does not send input or device information to a backend.
   unchanged, including Detail to the same Detail route.
 - After Detail to Home through a tab, simulated back traversal returns to
   Detail with its original `mobileDepth`.
-- Route entry replaces rather than pushes and resets `mobileDepth` to zero.
-- Repeated route entry is a no-op.
+- Validated in-session route entry pushes once and increments `mobileDepth`.
+- Repeated in-session route entry is a no-op.
+- Header back and native swipe after an in-session entry return to the same
+  prior route; forward restores the entry route and depth.
 - Resume preserves the current route.
 - Capacitor resume registration records one lifecycle event and performs no
   navigation.
@@ -676,6 +718,8 @@ The diagnostic does not send input or device information to a backend.
 - Back without history replaces with the fallback.
 - Back and forward restore the depth attached to their history entries.
 - Unknown entry targets do not navigate.
+- Aborted and cancelled Vue Router navigations are surfaced as failures rather
+  than reported as successful pushes or replacements.
 - Development route construction includes the diagnostic journey.
 - Production route construction excludes the diagnostic journey.
 - The shared diagnostics marker is present on the development page.
@@ -767,7 +811,8 @@ Each row records:
 5. Confirm that no submission occurred prematurely.
 6. Finish composition.
 7. Press Return again or tap Submit.
-8. Confirm draft, committed, and submitted values remain exactly `日本語`.
+8. Confirm the model, draft, committed, submitted, and visible native-input
+   values remain exactly `日本語`.
 
 ### Required keyboard and orientation scenario
 
@@ -799,15 +844,19 @@ Each row records:
 11. Repeat navigation to the current route and confirm its depth does not
     change.
 12. Background and resume the app.
-13. Simulate route entry to detail twice.
-14. Stage the detail route as the next cold-entry target, terminate the app,
+13. From the diagnostic root, perform an in-session entry to Detail.
+14. Repeat entry on Detail and confirm it is a depth-preserving no-op.
+15. Swipe back and confirm the diagnostic root returns; swipe forward and
+    confirm Detail and its entry depth return.
+16. Simulate resume on Detail and confirm the route remains unchanged.
+17. Stage the detail route as the next cold-entry target, terminate the app,
     relaunch it, and confirm the target is consumed once.
-15. Confirm native swipe-back is a no-op from that fresh detail entry while
+18. Confirm native swipe-back is a no-op from that fresh detail entry while
     header back uses its fallback.
-16. Alternate Home and Review twenty times, then traverse backward repeatedly
+19. Alternate Home and Review twenty times, then traverse backward repeatedly
     and record whether chronological tab history remains usable or feels
     product-hostile.
-17. Confirm that the app remains on one predictable route with no duplicated
+20. Confirm that the app remains on one predictable route with no duplicated
     pages, blank content, exit, or trap.
 
 The diagnostic matrix necessarily uses a Debug development build because the
@@ -829,15 +878,15 @@ The mobile README and device evidence will record these conventions:
 - Keep interactive targets at least 44 by 44 points.
 - Route ordinary links and bottom tabs through one unique-push helper; M1 uses
   chronological history rather than independent tab stacks.
-- Use replace for validated external entry.
+- Use a unique push for validated in-session entry and a depth-zero replace
+  only for a validated cold entry before router installation.
 - Restore saved scroll positions for back/forward navigation.
 - Register resume observation at the app boundary; resume preserves route
   state unless a new entry event is consumed.
 - Header back always has a route fallback.
-- For ordinary pushed navigation, native swipe and visible back controls
-  traverse the same WKWebView/Vue Router history. After a validated
-  replace-on-entry at depth zero, header fallback may intentionally differ
-  from any older native session entry.
+- For ordinary navigation and validated in-session entry, native swipe and
+  visible back controls traverse the same WKWebView/Vue Router history. A fresh
+  cold entry has no prior session entry and uses the declared header fallback.
 - Treat physical-device IME and swipe results as authoritative.
 
 ## Acceptance criteria mapping
