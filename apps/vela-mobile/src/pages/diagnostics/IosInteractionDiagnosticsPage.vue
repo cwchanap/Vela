@@ -109,14 +109,14 @@ import {
 } from 'src/router/mobile-navigation';
 import { mobileLifecycleState } from 'src/services/mobile-lifecycle';
 
-const $q = useQuasar();
+const quasar = useQuasar();
 const route = useRoute();
 const router = useRouter();
 const allowedDiagnosticEntries = new Set([IOS_DIAGNOSTIC_ROOT_PATH, IOS_DIAGNOSTIC_DETAIL_PATH]);
 const lastNavigationOutcome = ref('none');
 const mobileDepth = computed(() => readMobileDepth(router));
 const orientation = computed(() =>
-  $q.screen.width >= $q.screen.height ? 'landscape' : 'portrait',
+  quasar.screen.width >= quasar.screen.height ? 'landscape' : 'portrait',
 );
 const { isKeyboardVisible, nativeStatus, lastError } = useKeyboardViewport();
 

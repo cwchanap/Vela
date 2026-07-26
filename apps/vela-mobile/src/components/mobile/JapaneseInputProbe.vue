@@ -46,6 +46,10 @@ export default defineComponent({
 
     function onNativeKeydown(event: KeyboardEvent): void {
       if (event.key !== 'Enter') return;
+      // Guard against both the tracked composition state and the event's
+      // isComposing flag: cross-browser IME behavior can leave a keydown
+      // marked as composing immediately after compositionend fires, so either
+      // signal must block submission until composition has fully settled.
       if (isComposing.value || event.isComposing) return;
       event.preventDefault();
       submitExactValue();

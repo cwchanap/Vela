@@ -98,18 +98,18 @@ headerless top edge under the task contract.
 
 ## Evidence
 
-- `docs/evidence/hpa-209/safe-area-always-headerless-portrait.png`
-- `docs/evidence/hpa-209/safe-area-always-header-portrait.png`
-- `docs/evidence/hpa-209/safe-area-always-headerless-landscape-left.png`
-- `docs/evidence/hpa-209/safe-area-always-header-landscape-left.png`
-- `docs/evidence/hpa-209/safe-area-always-headerless-landscape-right.png`
-- `docs/evidence/hpa-209/safe-area-always-header-landscape-right.png`
-- `docs/evidence/hpa-209/safe-area-never-headerless-portrait.png`
-- `docs/evidence/hpa-209/safe-area-never-header-portrait.png`
-- `docs/evidence/hpa-209/safe-area-never-headerless-landscape-left.png`
-- `docs/evidence/hpa-209/safe-area-never-header-landscape-left.png`
-- `docs/evidence/hpa-209/safe-area-never-headerless-landscape-right.png`
-- `docs/evidence/hpa-209/safe-area-never-header-landscape-right.png`
+- `apps/vela-mobile/docs/evidence/hpa-209/safe-area-always-headerless-portrait.png`
+- `apps/vela-mobile/docs/evidence/hpa-209/safe-area-always-header-portrait.png`
+- `apps/vela-mobile/docs/evidence/hpa-209/safe-area-always-headerless-landscape-left.png`
+- `apps/vela-mobile/docs/evidence/hpa-209/safe-area-always-header-landscape-left.png`
+- `apps/vela-mobile/docs/evidence/hpa-209/safe-area-always-headerless-landscape-right.png`
+- `apps/vela-mobile/docs/evidence/hpa-209/safe-area-always-header-landscape-right.png`
+- `apps/vela-mobile/docs/evidence/hpa-209/safe-area-never-headerless-portrait.png`
+- `apps/vela-mobile/docs/evidence/hpa-209/safe-area-never-header-portrait.png`
+- `apps/vela-mobile/docs/evidence/hpa-209/safe-area-never-headerless-landscape-left.png`
+- `apps/vela-mobile/docs/evidence/hpa-209/safe-area-never-header-landscape-left.png`
+- `apps/vela-mobile/docs/evidence/hpa-209/safe-area-never-headerless-landscape-right.png`
+- `apps/vela-mobile/docs/evidence/hpa-209/safe-area-never-header-landscape-right.png`
 
 Selected-mode replacement hashes after the page-control fix:
 

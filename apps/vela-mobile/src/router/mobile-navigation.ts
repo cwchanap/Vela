@@ -46,22 +46,42 @@ export async function pushMobileRoute(
   return { kind: 'pushed', fullPath: resolved.fullPath, depth: nextDepth };
 }
 
+type AllowlistDecision =
+  | { kind: 'allowed'; resolved: RouteLocationResolved }
+  | { kind: 'rejected' | 'noop'; result: MobileNavigationResult };
+
+function resolveAllowedTarget(
+  router: Router,
+  target: RouteLocationRaw,
+  allowedFullPaths: ReadonlySet<string>,
+): AllowlistDecision {
+  const resolved = router.resolve(target);
+  if (!allowedFullPaths.has(resolved.fullPath)) {
+    return {
+      kind: 'rejected',
+      result: {
+        kind: 'rejected',
+        fullPath: router.currentRoute.value.fullPath,
+        depth: readMobileDepth(router),
+      },
+    };
+  }
+  if (resolved.fullPath === router.currentRoute.value.fullPath) {
+    return {
+      kind: 'noop',
+      result: { kind: 'noop', fullPath: resolved.fullPath, depth: readMobileDepth(router) },
+    };
+  }
+  return { kind: 'allowed', resolved };
+}
+
 export async function enterMobileRoute(
   router: Router,
   target: RouteLocationRaw,
   allowedFullPaths: ReadonlySet<string>,
 ): Promise<MobileNavigationResult> {
-  const resolved = router.resolve(target);
-  if (!allowedFullPaths.has(resolved.fullPath)) {
-    return {
-      kind: 'rejected',
-      fullPath: router.currentRoute.value.fullPath,
-      depth: readMobileDepth(router),
-    };
-  }
-  if (resolved.fullPath === router.currentRoute.value.fullPath) {
-    return { kind: 'noop', fullPath: resolved.fullPath, depth: readMobileDepth(router) };
-  }
+  const decision = resolveAllowedTarget(router, target, allowedFullPaths);
+  if (decision.kind !== 'allowed') return decision.result;
   return pushMobileRoute(router, target);
 }
 
@@ -70,20 +90,23 @@ export async function replaceColdMobileRoute(
   target: RouteLocationRaw,
   allowedFullPaths: ReadonlySet<string>,
 ): Promise<MobileNavigationResult> {
-  const resolved = router.resolve(target);
-  if (!allowedFullPaths.has(resolved.fullPath)) {
-    return {
-      kind: 'rejected',
-      fullPath: router.currentRoute.value.fullPath,
-      depth: readMobileDepth(router),
-    };
-  }
-  if (resolved.fullPath === router.currentRoute.value.fullPath) {
-    return { kind: 'noop', fullPath: resolved.fullPath, depth: readMobileDepth(router) };
-  }
-  const result = await router.replace(routeLocation(resolved, 0));
+  const decision = resolveAllowedTarget(router, target, allowedFullPaths);
+  if (decision.kind !== 'allowed') return decision.result;
+  const result = await router.replace(routeLocation(decision.resolved, 0));
   throwNavigationFailure(result);
-  return { kind: 'replaced', fullPath: resolved.fullPath, depth: 0 };
+  return { kind: 'replaced', fullPath: decision.resolved.fullPath, depth: 0 };
+}
+
+// router.back() triggers an asynchronous popstate navigation but returns void.
+// Await the destination route via afterEach so the result reports the actual
+// destination fullPath and recomputed mobile depth instead of the pre-back route.
+function whenRouteNavigationSettled(router: Router): Promise<void> {
+  return new Promise((resolve) => {
+    const stop = router.afterEach(() => {
+      stop();
+      resolve();
+    });
+  });
 }
 
 export async function backOrFallback(
@@ -92,8 +115,14 @@ export async function backOrFallback(
 ): Promise<MobileNavigationResult> {
   const depth = readMobileDepth(router);
   if (depth > 0) {
+    const settled = whenRouteNavigationSettled(router);
     router.back();
-    return { kind: 'back', fullPath: router.currentRoute.value.fullPath, depth };
+    await settled;
+    return {
+      kind: 'back',
+      fullPath: router.currentRoute.value.fullPath,
+      depth: readMobileDepth(router),
+    };
   }
   const resolved = router.resolve(fallback);
   const result = await router.replace(routeLocation(resolved, 0));
