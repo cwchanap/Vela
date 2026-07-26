@@ -27,7 +27,9 @@
 - M1 uses chronological browser history; it does not emulate independent
   native tab stacks. Treat this as a revisitable M1 spike policy, not a
   permanent product commitment.
-- Use `router.replace` with `mobileDepth: 0` only for validated route-entry events and header fallbacks.
+- Use unique push for validated in-session route entry. Use
+  `router.replace` with `mobileDepth: 0` only for validated cold entry before
+  router installation and header fallbacks.
 - Never use `window.history.length` or Vue Router's internal `back` state as an app-history predicate.
 - Never await `router.isReady()` from the development cold-entry boot file.
 - Handle submission on native `keydown` and block it while either tracked composition state or `KeyboardEvent.isComposing` is true.
@@ -55,7 +57,8 @@
 - `apps/vela-mobile/docs/evidence/hpa-209/` — twelve safe-area preflight
   screenshots using the exact mode/state/orientation naming below.
 - `apps/vela-mobile/src/ios/capacitor-plugins.test.ts` — dependency, config, and Vitest-resolution contracts.
-- `apps/vela-mobile/src/router/mobile-navigation.ts` — unique push, validated replace, depth reading, and back/fallback.
+- `apps/vela-mobile/src/router/mobile-navigation.ts` — checked unique push,
+  validated in-session entry, cold replace, depth reading, and back/fallback.
 - `apps/vela-mobile/src/router/mobile-navigation.test.ts` — history-state behavior.
 - `apps/vela-mobile/src/router/mobile-route-meta.d.ts` — typed optional header metadata.
 - `apps/vela-mobile/src/router/diagnostic-routes.ts` — compile-time development route branch and pure route builder.
@@ -77,7 +80,9 @@
 - `apps/vela-mobile/src/pages/diagnostics/IosInteractionDiagnosticsPage.vue` — development interaction harness and canonical marker.
 - `apps/vela-mobile/src/pages/diagnostics/IosInteractionDiagnosticsPage.test.ts` — diagnostic controls and readouts.
 - `apps/vela-mobile/src/pages/diagnostics/IosInteractionDetailPage.vue` — nested history identity page.
-- `apps/vela-mobile/src/pages/diagnostics/IosInteractionDetailPage.test.ts` — metadata and duplicate-navigation control.
+- `apps/vela-mobile/src/pages/diagnostics/IosInteractionDetailPage.test.ts` —
+  route identity, duplicate navigation, repeated entry, resume, and touch
+  targets.
 - `apps/vela-mobile/scripts/verify-production-diagnostics.mjs` — recursive emitted-JavaScript marker scanner.
 - `apps/vela-mobile/scripts/verify-production-diagnostics.test.mjs` — scanner positive and negative cases.
 - `apps/vela-mobile/src-capacitor/ios/App/App/VelaBridgeViewController.swift` — native WKWebView gesture enablement.
@@ -262,7 +267,7 @@ function installSafeAreaStyleProbe(headerlessTopOwner) {
 }
 
 function installSafeAreaHeaderProbe() {
-  document.querySelector('#safe-area-preflight-header')?.remove();
+  removeSafeAreaHeaderProbe();
   const layout = document.querySelector('.q-layout');
   if (!(layout instanceof HTMLElement)) {
     throw new Error('Missing .q-layout');
@@ -278,23 +283,28 @@ function installSafeAreaHeaderProbe() {
   ].join('');
   layout.prepend(header);
 }
+
+function removeSafeAreaHeaderProbe() {
+  document.querySelector('#safe-area-preflight-header')?.remove();
+}
 ```
 
-Then install the exact candidate horizontal rules with native-scroll
-headerless-top ownership, capture the headerless result, install the header
-probe, and capture the header result:
+For each orientation, run this exact cycle. Save the first result/screenshot as
+`headerless` and the second as `header`, then remove the probe before rotating:
 
 ```js
+removeSafeAreaHeaderProbe();
 installSafeAreaStyleProbe('native-scroll-view');
 readSafeAreaPreflight();
 installSafeAreaHeaderProbe();
 readSafeAreaPreflight();
+removeSafeAreaHeaderProbe();
 ```
 
-Capture `readSafeAreaPreflight()` output and a screenshot in portrait,
-landscape-left, and landscape-right. Record whether the headerless page,
-injected toolbar, footer tabs, and their first/last controls have exactly one
-inset and remain outside the sensor housing. Save screenshots under
+Repeat the full five-call cycle independently in portrait, landscape-left, and
+landscape-right. Record whether the headerless page, injected toolbar, footer
+tabs, and their first/last controls have exactly one inset and remain outside
+the sensor housing. Save the six distinct screenshots under
 `docs/evidence/hpa-209/` as
 `safe-area-always-{headerless,header}-{portrait,landscape-left,landscape-right}.png`.
 Stop the first development process after all `"always"` evidence is saved.
@@ -318,10 +328,12 @@ rtk bunx cap sync ios
 rtk bun run dev:ios
 ```
 
-Run the same inspector snippet, orientations, screenshots, and measurements.
-For this run, replace the first call with
+Run the same five-call cycle in every orientation. For this mode, replace
+`installSafeAreaStyleProbe('native-scroll-view')` with
 `installSafeAreaStyleProbe('css')` so the candidate app-owned headerless top
-inset is present. The horizontal rules remain identical between modes.
+inset is present. The horizontal rules remain identical between modes, and the
+header is removed before every headerless capture and after every header
+capture.
 Save the six screenshots as
 `safe-area-never-{headerless,header}-{portrait,landscape-left,landscape-right}.png`.
 Do not reuse values from the `"always"` run.
@@ -563,6 +575,7 @@ rtk git commit -m "feat(mobile): configure typed keyboard plugin"
   - `readMobileDepth(router: Router): number`
   - `pushMobileRoute(router: Router, target: RouteLocationRaw): Promise<MobileNavigationResult>`
   - `enterMobileRoute(router: Router, target: RouteLocationRaw, allowedFullPaths: ReadonlySet<string>): Promise<MobileNavigationResult>`
+  - `replaceColdMobileRoute(router: Router, target: RouteLocationRaw, allowedFullPaths: ReadonlySet<string>): Promise<MobileNavigationResult>`
   - `backOrFallback(router: Router, fallback: RouteLocationRaw): Promise<MobileNavigationResult>`
   - `mobileScrollBehavior: RouterScrollBehavior`
   - `IOS_DIAGNOSTIC_ROOT_PATH` and `IOS_DIAGNOSTIC_DETAIL_PATH`
@@ -572,12 +585,19 @@ rtk git commit -m "feat(mobile): configure typed keyboard plugin"
 
 ```ts
 import { describe, expect, it, vi } from 'vitest';
-import { createMemoryHistory, createRouter, type RouteRecordRaw } from 'vue-router';
+import {
+  createMemoryHistory,
+  createRouter,
+  isNavigationFailure,
+  NavigationFailureType,
+  type RouteRecordRaw,
+} from 'vue-router';
 import {
   backOrFallback,
   enterMobileRoute,
   pushMobileRoute,
   readMobileDepth,
+  replaceColdMobileRoute,
 } from './mobile-navigation';
 import { mobileScrollBehavior } from './index';
 
@@ -616,21 +636,92 @@ describe('mobile navigation', () => {
     expect(router.currentRoute.value.fullPath).toBe('/');
   });
 
-  it('replaces allowed entry at depth zero', async () => {
+  it('pushes an allowed in-session entry with chronological depth', async () => {
     const router = makeRouter();
-    await router.replace('/');
+    await router.replace({ path: '/', state: { mobileDepth: 0 } });
     await enterMobileRoute(router, '/detail', new Set(['/detail']));
     expect(router.currentRoute.value.fullPath).toBe('/detail');
-    expect(readMobileDepth(router)).toBe(0);
+    expect(readMobileDepth(router)).toBe(1);
   });
 
   it('treats repeated route entry as a depth-preserving no-op', async () => {
     const router = makeRouter();
-    await router.replace('/');
+    await router.replace({ path: '/', state: { mobileDepth: 0 } });
     await enterMobileRoute(router, '/detail', new Set(['/detail']));
     const result = await enterMobileRoute(router, '/detail', new Set(['/detail']));
     expect(result.kind).toBe('noop');
+    expect(readMobileDepth(router)).toBe(1);
+  });
+
+  it('replaces an allowed cold entry at depth zero', async () => {
+    const router = makeRouter();
+    await router.replace({ path: '/', state: { mobileDepth: 3 } });
+    await replaceColdMobileRoute(router, '/detail', new Set(['/detail']));
+    expect(router.currentRoute.value.fullPath).toBe('/detail');
     expect(readMobileDepth(router)).toBe(0);
+  });
+
+  it('keeps in-session entry coherent across back and forward', async () => {
+    const router = makeRouter();
+    await router.replace({ path: '/', state: { mobileDepth: 0 } });
+    await enterMobileRoute(router, '/detail', new Set(['/detail']));
+
+    router.back();
+    await vi.waitFor(() => {
+      expect(router.currentRoute.value.fullPath).toBe('/');
+      expect(readMobileDepth(router)).toBe(0);
+    });
+
+    router.forward();
+    await vi.waitFor(() => {
+      expect(router.currentRoute.value.fullPath).toBe('/detail');
+      expect(readMobileDepth(router)).toBe(1);
+    });
+  });
+
+  it('rejects when a guard aborts navigation instead of reporting success', async () => {
+    const router = makeRouter();
+    await router.replace('/');
+    router.beforeEach(() => false);
+    let failure: unknown;
+    try {
+      await pushMobileRoute(router, '/detail');
+    } catch (error) {
+      failure = error;
+    }
+    expect(isNavigationFailure(failure, NavigationFailureType.aborted)).toBe(true);
+    expect(router.currentRoute.value.fullPath).toBe('/');
+  });
+
+  it('surfaces cancellation when a newer navigation supersedes an in-flight push', async () => {
+    const router = makeRouter();
+    await router.replace('/');
+    let releaseMore: (() => void) | undefined;
+    router.beforeEach(async (to) => {
+      if (to.path === '/more') {
+        await new Promise<void>((resolve) => {
+          releaseMore = resolve;
+        });
+      }
+    });
+
+    const first = pushMobileRoute(router, '/more');
+    await vi.waitFor(() => expect(releaseMore).toBeTypeOf('function'));
+    const second = pushMobileRoute(router, '/detail');
+    releaseMore?.();
+
+    let cancellation: unknown;
+    try {
+      await first;
+    } catch (error) {
+      cancellation = error;
+    }
+    expect(isNavigationFailure(cancellation, NavigationFailureType.cancelled)).toBe(true);
+    await expect(second).resolves.toMatchObject({
+      kind: 'pushed',
+      fullPath: '/detail',
+      depth: 1,
+    });
   });
 
   it('uses browser history when app-owned depth is positive', async () => {
@@ -704,7 +795,12 @@ Expected: FAIL because the navigation module and exported scroll behavior do not
 Create `mobile-navigation.ts` with this public shape:
 
 ```ts
-import type { RouteLocationRaw, RouteLocationResolved, Router } from 'vue-router';
+import {
+  isNavigationFailure,
+  type RouteLocationRaw,
+  type RouteLocationResolved,
+  type Router,
+} from 'vue-router';
 
 export type MobileNavigationResult = {
   kind: 'pushed' | 'replaced' | 'back' | 'fallback' | 'noop' | 'rejected';
@@ -726,6 +822,12 @@ function routeLocation(resolved: RouteLocationResolved, mobileDepth: number): Ro
   };
 }
 
+function throwNavigationFailure(result: Awaited<ReturnType<Router['push']>>): void {
+  if (isNavigationFailure(result)) {
+    throw result;
+  }
+}
+
 export async function pushMobileRoute(
   router: Router,
   target: RouteLocationRaw,
@@ -736,7 +838,8 @@ export async function pushMobileRoute(
     return { kind: 'noop', fullPath: resolved.fullPath, depth };
   }
   const nextDepth = depth + 1;
-  await router.push(routeLocation(resolved, nextDepth));
+  const result = await router.push(routeLocation(resolved, nextDepth));
+  throwNavigationFailure(result);
   return { kind: 'pushed', fullPath: resolved.fullPath, depth: nextDepth };
 }
 
@@ -756,7 +859,27 @@ export async function enterMobileRoute(
   if (resolved.fullPath === router.currentRoute.value.fullPath) {
     return { kind: 'noop', fullPath: resolved.fullPath, depth: readMobileDepth(router) };
   }
-  await router.replace(routeLocation(resolved, 0));
+  return pushMobileRoute(router, target);
+}
+
+export async function replaceColdMobileRoute(
+  router: Router,
+  target: RouteLocationRaw,
+  allowedFullPaths: ReadonlySet<string>,
+): Promise<MobileNavigationResult> {
+  const resolved = router.resolve(target);
+  if (!allowedFullPaths.has(resolved.fullPath)) {
+    return {
+      kind: 'rejected',
+      fullPath: router.currentRoute.value.fullPath,
+      depth: readMobileDepth(router),
+    };
+  }
+  if (resolved.fullPath === router.currentRoute.value.fullPath) {
+    return { kind: 'noop', fullPath: resolved.fullPath, depth: readMobileDepth(router) };
+  }
+  const result = await router.replace(routeLocation(resolved, 0));
+  throwNavigationFailure(result);
   return { kind: 'replaced', fullPath: resolved.fullPath, depth: 0 };
 }
 
@@ -770,10 +893,18 @@ export async function backOrFallback(
     return { kind: 'back', fullPath: router.currentRoute.value.fullPath, depth };
   }
   const resolved = router.resolve(fallback);
-  await router.replace(routeLocation(resolved, 0));
+  const result = await router.replace(routeLocation(resolved, 0));
+  throwNavigationFailure(result);
   return { kind: 'fallback', fullPath: resolved.fullPath, depth: 0 };
 }
 ```
+
+Vue Router resolves aborted, cancelled, and duplicated navigation with a
+`NavigationFailure` value. Same-route duplication is handled by the explicit
+precheck; every other resolved navigation failure is thrown for the caller to
+log and surface. Diagnostic actions catch these failures and store the exact
+message in their last-outcome readout. Shell tab handlers catch and log them so
+no rejected promise is left unhandled.
 
 - [ ] **Step 4: Add typed mobile header metadata**
 
@@ -1177,7 +1308,7 @@ Create `diagnostic-cold-entry.ts`:
 import { defineBoot } from '#q-app/wrappers';
 import type { Router } from 'vue-router';
 import { IOS_DIAGNOSTIC_DETAIL_PATH, IOS_DIAGNOSTIC_ROOT_PATH } from 'src/router/diagnostic-routes';
-import { enterMobileRoute, type MobileNavigationResult } from 'src/router/mobile-navigation';
+import { replaceColdMobileRoute, type MobileNavigationResult } from 'src/router/mobile-navigation';
 
 export const DIAGNOSTIC_COLD_ENTRY_KEY = 'vela:dev:ios-interaction-cold-entry';
 
@@ -1197,7 +1328,7 @@ export async function consumeDiagnosticColdEntry(
   const target = storage.getItem(DIAGNOSTIC_COLD_ENTRY_KEY);
   if (target === null) return null;
   storage.removeItem(DIAGNOSTIC_COLD_ENTRY_KEY);
-  return enterMobileRoute(router, target, allowedDiagnosticEntries);
+  return replaceColdMobileRoute(router, target, allowedDiagnosticEntries);
 }
 
 export default defineBoot(async ({ router }) => {
@@ -1264,7 +1395,8 @@ rtk git commit -m "feat(mobile): own resume and cold entry lifecycle"
 
 **Interfaces:**
 
-- Produces a self-contained probe with `draft`, `committed`, `submitted`, and `isComposing` readouts.
+- Produces a self-contained probe with `fieldModel`, `draft`, `committed`,
+  `submitted`, and `isComposing` readouts.
 - Exposes no normalized or trimmed answer value.
 
 - [ ] **Step 1: Write failing native-event component tests**
@@ -1272,6 +1404,7 @@ rtk git commit -m "feat(mobile): own resume and cold entry lifecycle"
 ```ts
 import { mount } from '@vue/test-utils';
 import { Quasar } from 'quasar';
+import { nextTick } from 'vue';
 import { describe, expect, it } from 'vitest';
 import JapaneseInputProbe from './JapaneseInputProbe.vue';
 
@@ -1299,6 +1432,10 @@ describe('JapaneseInputProbe', () => {
     input.element.value = '日本語';
     await input.trigger('input');
     await input.trigger('compositionend', { data: '日本語' });
+    await nextTick();
+    expect(wrapper.getComponent({ name: 'QInput' }).props('modelValue')).toBe('日本語');
+    expect(wrapper.get('[data-testid="ime-model"]').text()).toContain('日本語');
+    expect((wrapper.get('input').element as HTMLInputElement).value).toBe('日本語');
     await input.trigger('keydown', { key: 'Enter', isComposing: false });
     expect(wrapper.get('[data-testid="ime-committed"]').text()).toContain('日本語');
     expect(wrapper.get('[data-testid="ime-submitted"]').text()).toContain('日本語');
@@ -1370,9 +1507,11 @@ function onFieldModelUpdate(value: string | number | null): void {
 }
 
 function onCompositionEnd(event: CompositionEvent): void {
+  const value = nativeValue(event);
   isComposing.value = false;
-  committed.value = nativeValue(event);
-  draft.value = nativeValue(event);
+  fieldModel.value = value;
+  committed.value = value;
+  draft.value = value;
 }
 
 function submitExactValue(): void {
@@ -1402,14 +1541,26 @@ The template must include:
   spellcheck="false"
   @update:model-value="onFieldModelUpdate"
 />
+<div data-testid="ime-model">Model: {{ fieldModel }}</div>
 <div data-testid="ime-draft">Draft: {{ draft }}</div>
 <div data-testid="ime-committed">Committed: {{ committed }}</div>
 <div data-testid="ime-submitted">Submitted: {{ submitted }}</div>
 <div data-testid="ime-composing">
   Composing: {{ isComposing ? 'yes' : 'no' }}
 </div>
-<q-btn data-testid="ime-done" label="Done" @click="qInput?.nativeEl?.blur()" />
-<q-btn data-testid="ime-submit" label="Submit" color="primary" @click="submitExactValue" />
+<q-btn
+  data-testid="ime-done"
+  class="mobile-touch-target"
+  label="Done"
+  @click="qInput?.nativeEl?.blur()"
+/>
+<q-btn
+  data-testid="ime-submit"
+  class="mobile-touch-target"
+  label="Submit"
+  color="primary"
+  @click="submitExactValue"
+/>
 ```
 
 - [ ] **Step 4: Add button, background-dismissal, and listener-cleanup cases**
@@ -1417,6 +1568,7 @@ The template must include:
 Add tests that:
 
 - dispatch an ordinary non-composing `input` and Submit click and expect exact whitespace-preserving output;
+- assert Done and Submit both carry `mobile-touch-target`;
 - tap the component's non-interactive background and expect blur;
 - tap Submit and expect it to remain focused long enough to activate;
 - unmount, dispatch native events, and verify readouts no longer change.
@@ -1513,7 +1665,7 @@ describe('useKeyboardViewport', () => {
       },
       cancelFrame: vi.fn(),
     });
-    await nextTick();
+    await flushPromises();
     listeners.get('keyboardWillShow')?.();
     expect(state.isKeyboardVisible.value).toBe(true);
     listeners.get('keyboardDidShow')?.();
@@ -1529,18 +1681,22 @@ describe('useKeyboardViewport', () => {
       isNative: () => true,
       addListener: vi.fn(async () => ({ remove })),
     });
-    await nextTick();
+    await flushPromises();
     wrapper.unmount();
-    await nextTick();
+    await flushPromises();
     expect(remove).toHaveBeenCalledTimes(3);
   });
 
-  it('surfaces listener registration failure and keeps resolved handles removable', async () => {
+  it('rolls back partial registration before native callbacks can mutate layout', async () => {
+    const listeners = new Map<KeyboardListenerEvent, KeyboardListener>();
     const remove = vi.fn(async () => undefined);
-    const addListener = vi
-      .fn()
-      .mockResolvedValueOnce({ remove })
-      .mockRejectedValueOnce(new Error('native listener unavailable'));
+    const addListener = vi.fn(async (name: KeyboardListenerEvent, listener: KeyboardListener) => {
+      listeners.set(name, listener);
+      if (name === 'keyboardDidShow') {
+        throw new Error('native listener unavailable');
+      }
+      return { remove };
+    });
     const { state, wrapper } = mountHarness({
       isNative: () => true,
       addListener,
@@ -1548,6 +1704,9 @@ describe('useKeyboardViewport', () => {
     await flushPromises();
     expect(state.nativeStatus.value).toBe('unavailable');
     expect(state.lastError.value).toBe('native listener unavailable');
+    expect(remove).toHaveBeenCalledTimes(1);
+    listeners.get('keyboardWillShow')?.();
+    expect(state.isKeyboardVisible.value).toBe(false);
     wrapper.unmount();
     await flushPromises();
     expect(remove).toHaveBeenCalledTimes(1);
@@ -1576,6 +1735,36 @@ describe('useKeyboardViewport', () => {
     window.dispatchEvent(new Event('resize'));
     await nextTick();
     expect(scrollIntoView).toHaveBeenCalledTimes(2);
+  });
+
+  it('removes the resize listener and cancels a pending frame on unmount', async () => {
+    const removeNative = vi.fn(async () => undefined);
+    const removeWindow = vi.spyOn(window, 'removeEventListener');
+    const requestFrame = vi.fn(() => 17);
+    const cancelFrame = vi.fn();
+    const listeners = new Map<KeyboardListenerEvent, KeyboardListener>();
+    const { wrapper } = mountHarness({
+      isNative: () => true,
+      addListener: vi.fn(async (name, listener) => {
+        listeners.set(name, listener);
+        return { remove: removeNative };
+      }),
+      getFocusedBlock: () => document.createElement('section'),
+      requestFrame,
+      cancelFrame,
+    });
+    await flushPromises();
+    listeners.get('keyboardWillShow')?.();
+    listeners.get('keyboardDidShow')?.();
+    await nextTick();
+    expect(requestFrame).toHaveBeenCalledOnce();
+
+    wrapper.unmount();
+
+    expect(removeNative).toHaveBeenCalledTimes(3);
+    expect(removeWindow).toHaveBeenCalledWith('resize', expect.any(Function));
+    expect(cancelFrame).toHaveBeenCalledWith(17);
+    removeWindow.mockRestore();
   });
 });
 ```
@@ -1633,18 +1822,63 @@ function addNativeKeyboardListener(
 }
 ```
 
-Register `keyboardWillShow`, `keyboardDidShow`, and `keyboardDidHide` sequentially so already-resolved handles remain removable if a later registration rejects. Keep a mounted flag so handles resolving after unmount are removed immediately. On `keyboardDidShow`, await `nextTick()`, then request one animation frame, then call:
+Register `keyboardWillShow`, `keyboardDidShow`, and `keyboardDidHide`
+sequentially behind a `nativeReady` boolean. Listener callbacks return without
+changing state until all three handles resolve. If any registration rejects,
+set `nativeReady` false, remove every already-resolved handle immediately,
+clear the handle list, set `nativeStatus` to `'unavailable'`, and retain the
+error message. Keep a mounted flag so handles resolving after unmount are
+removed immediately.
+
+Install one named window `resize` listener on mount. On unmount, remove that
+listener, set `nativeReady` false, remove all remaining native handles, and
+cancel the last pending animation-frame id. On `keyboardDidShow`, await
+`nextTick()`, cancel any earlier pending frame, then request one animation
+frame and call:
 
 ```ts
 focusedBlock.scrollIntoView({ block: 'nearest' });
 ```
 
-While the keyboard is visible, a window `resize` event repeats the settled scroll. Set `nativeStatus` to `'browser'`, `'native'`, or `'unavailable'`; store a rejected registration message in `lastError`.
+While the keyboard is visible and `nativeReady` is true, a window `resize`
+event repeats the settled scroll. Set `nativeStatus` to `'browser'`, `'native'`,
+or `'unavailable'`; store a rejected registration message in `lastError`.
 
 - [ ] **Step 4: Write failing header and shell integration tests**
 
-Import `safeAreaPolicy` from `src/ios/safe-area-policy`, then extend
-`MobileLayout.test.ts` with a table-driven test covering every tab:
+Add `beforeEach`, `vi`, and `flushPromises` to the existing Vitest/Test Utils
+imports. Install these hoisted native plugin fakes before importing
+`MobileLayout.vue`, import `safeAreaPolicy`, then extend
+`MobileLayout.test.ts`:
+
+```ts
+type TestKeyboardEvent = 'keyboardWillShow' | 'keyboardDidShow' | 'keyboardDidHide';
+
+const keyboardListeners = vi.hoisted(
+  () => new Map<TestKeyboardEvent, (info?: { keyboardHeight: number }) => void>(),
+);
+
+vi.mock('@capacitor/core', () => ({
+  Capacitor: { isNativePlatform: () => true },
+}));
+
+vi.mock('@capacitor/keyboard', () => ({
+  Keyboard: {
+    addListener: vi.fn(
+      async (name: TestKeyboardEvent, listener: (info?: { keyboardHeight: number }) => void) => {
+        keyboardListeners.set(name, listener);
+        return { remove: vi.fn(async () => undefined) };
+      },
+    ),
+  },
+}));
+
+beforeEach(() => {
+  keyboardListeners.clear();
+});
+```
+
+Add the table-driven tab cases and shell contracts:
 
 ```ts
 it.each([
@@ -1671,7 +1905,9 @@ it('does not duplicate navigation to the active tab', async () => {
 });
 
 it('removes the footer while the keyboard is visible and restores it once', async () => {
-  keyboardListeners.get('keyboardWillShow')?.();
+  const wrapper = await mountLayout('/');
+  await flushPromises();
+  keyboardListeners.get('keyboardWillShow')?.({ keyboardHeight: 320 });
   await nextTick();
   expect(wrapper.findComponent({ name: 'QFooter' }).exists()).toBe(false);
   keyboardListeners.get('keyboardDidHide')?.();
@@ -1692,13 +1928,14 @@ it('pins horizontal safe areas for fixed header and footer content', () => {
   const appScss = readFileSync(resolve(__dirname, '../css/app.scss'), 'utf8');
   expect(appScss).toContain('.mobile-header .q-toolbar');
   expect(appScss).toContain('.mobile-nav .q-tabs__content');
+  expect(appScss).toContain('.mobile-touch-target');
   expect(appScss).toContain('env(safe-area-inset-left, 0px)');
   expect(appScss).toContain('env(safe-area-inset-right, 0px)');
 });
 ```
 
-Add `flushPromises` from `@vue/test-utils`, `readFileSync` from `node:fs`, and
-`resolve` from `node:path` to the test imports.
+Also add `readFileSync` from `node:fs` and `resolve` from `node:path` to the
+test imports. Keep the existing Quasar dark-mode reset in `afterEach`.
 
 Create `MobilePageHeader.test.ts` cases for:
 
@@ -1719,7 +1956,7 @@ Use:
       round
       dense
       icon="arrow_back_ios_new"
-      class="mobile-back-target"
+      class="mobile-back-target mobile-touch-target"
       aria-label="Back"
       @click="back"
     />
@@ -1728,10 +1965,17 @@ Use:
 </q-header>
 ```
 
-The `back` method calls:
+The `back` method surfaces fallback navigation failures without leaving a
+rejected event-handler promise:
 
 ```ts
-await backOrFallback(router, header.value.fallback);
+async function back(): Promise<void> {
+  try {
+    await backOrFallback(router, header.value.fallback);
+  } catch (error) {
+    console.error('Mobile header navigation failed', error);
+  }
+}
 ```
 
 - [ ] **Step 6: Integrate header, keyboard state, and custom QRouteTab navigation**
@@ -1750,14 +1994,18 @@ In `MobileLayout.vue`:
 - attach `@click="onTabClick($event, '/target')"` to every tab;
 - call `event.preventDefault()` synchronously, deliberately do not invoke
   Quasar's emitted `go()` callback, and then call
-  `pushMobileRoute(router, target)`.
+  `pushMobileRoute(router, target)`;
+- catch and log a rejected navigation helper so cancelled/aborted navigation
+  never becomes an unhandled promise rejection.
 
 Use this handler:
 
 ```ts
 function onTabClick(event: Event, target: RouteLocationRaw): void {
   event.preventDefault();
-  void pushMobileRoute(router, target);
+  void pushMobileRoute(router, target).catch((error: unknown) => {
+    console.error('Mobile tab navigation failed', error);
+  });
 }
 ```
 
@@ -1766,6 +2014,7 @@ function onTabClick(event: Event, target: RouteLocationRaw): void {
 Add:
 
 ```scss
+.mobile-touch-target,
 .mobile-back-target {
   min-width: 44px;
   min-height: 44px;
@@ -1853,84 +2102,116 @@ rtk git commit -m "feat(mobile): integrate keyboard-safe navigation shell"
 ```ts
 import { flushPromises, mount } from '@vue/test-utils';
 import { Quasar } from 'quasar';
+import { defineComponent } from 'vue';
 import { createMemoryHistory, createRouter } from 'vue-router';
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { IOS_INTERACTION_DIAGNOSTICS_MARKER } from 'src/diagnostics/ios-interaction-contract';
+import { resetMobileLifecycleForTests, mobileLifecycleState } from 'src/services/mobile-lifecycle';
+import IosInteractionDetailPage from './IosInteractionDetailPage.vue';
 import IosInteractionDiagnosticsPage from './IosInteractionDiagnosticsPage.vue';
 
-async function mountPage() {
+const ROOT_PATH = '/diagnostics/ios-interactions';
+const DETAIL_PATH = '/diagnostics/ios-interactions/detail';
+
+const JourneyHost = defineComponent({
+  template:
+    '<q-layout view="hHh Lpr fFf"><q-page-container><router-view /></q-page-container></q-layout>',
+});
+
+async function mountJourney() {
   const router = createRouter({
     history: createMemoryHistory(),
     routes: [
-      { path: '/diagnostics/ios-interactions', component: IosInteractionDiagnosticsPage },
-      {
-        path: '/diagnostics/ios-interactions/detail',
-        component: { template: '<div>detail</div>' },
-      },
+      { path: ROOT_PATH, component: IosInteractionDiagnosticsPage },
+      { path: DETAIL_PATH, component: IosInteractionDetailPage },
     ],
   });
-  await router.replace({
-    path: '/diagnostics/ios-interactions',
-    state: { mobileDepth: 1 },
-  });
+  await router.replace({ path: ROOT_PATH, state: { mobileDepth: 1 } });
   await router.isReady();
-  return mount(IosInteractionDiagnosticsPage, {
+  const wrapper = mount(JourneyHost, {
     global: { plugins: [Quasar, router] },
   });
+  await flushPromises();
+  return { router, wrapper };
 }
 
-describe('IosInteractionDiagnosticsPage', () => {
-  it('renders the canonical production-exclusion marker', async () => {
-    const wrapper = await mountPage();
+beforeEach(() => {
+  window.localStorage.clear();
+  resetMobileLifecycleForTests();
+});
+
+describe('iOS interaction diagnostic journey', () => {
+  it('renders the canonical marker, Japanese samples, and IME probe', async () => {
+    const { wrapper } = await mountJourney();
     expect(wrapper.find(`[data-testid="${IOS_INTERACTION_DIAGNOSTICS_MARKER}"]`).exists()).toBe(
       true,
     );
-  });
-
-  it('renders selectable Japanese samples and the IME probe', async () => {
-    const wrapper = await mountPage();
     expect(wrapper.text()).toContain('日本語');
     expect(wrapper.text()).toContain('かな');
     expect(wrapper.findComponent({ name: 'JapaneseInputProbe' }).exists()).toBe(true);
+    expect(wrapper.get('[data-testid="ime-model"]').exists()).toBe(true);
   });
 
-  it('pushes detail once and ignores repeated current-route navigation', async () => {
-    const wrapper = await mountPage();
+  it('pushes Detail and repeats navigation only from the visible Detail control', async () => {
+    const { router, wrapper } = await mountJourney();
     await wrapper.get('[data-testid="navigate-detail"]').trigger('click');
     await flushPromises();
-    expect(wrapper.vm.$router.currentRoute.value.fullPath).toBe(
-      '/diagnostics/ios-interactions/detail',
-    );
-    const depth = wrapper.vm.$router.options.history.state.mobileDepth;
-    await wrapper.get('[data-testid="navigate-detail"]').trigger('click');
+    expect(router.currentRoute.value.fullPath).toBe(DETAIL_PATH);
+    expect(router.options.history.state.mobileDepth).toBe(2);
+    expect(wrapper.find('[data-testid="navigate-detail"]').exists()).toBe(false);
+
+    await wrapper.get('[data-testid="repeat-detail-navigation"]').trigger('click');
     await flushPromises();
-    expect(wrapper.vm.$router.options.history.state.mobileDepth).toBe(depth);
+    expect(router.currentRoute.value.fullPath).toBe(DETAIL_PATH);
+    expect(router.options.history.state.mobileDepth).toBe(2);
   });
 
-  it('applies repeated route entry once and resume preserves it', async () => {
-    const wrapper = await mountPage();
+  it('pushes in-session entry once, then keeps repeated entry and resume route-neutral', async () => {
+    const { router, wrapper } = await mountJourney();
     await wrapper.get('[data-testid="simulate-entry"]').trigger('click');
     await flushPromises();
-    expect(wrapper.vm.$router.currentRoute.value.fullPath).toBe(
-      '/diagnostics/ios-interactions/detail',
-    );
-    expect(wrapper.vm.$router.options.history.state.mobileDepth).toBe(0);
+    expect(router.currentRoute.value.fullPath).toBe(DETAIL_PATH);
+    expect(router.options.history.state.mobileDepth).toBe(2);
+
     await wrapper.get('[data-testid="simulate-entry-again"]').trigger('click');
     await wrapper.get('[data-testid="simulate-resume"]').trigger('click');
     await flushPromises();
-    expect(wrapper.vm.$router.currentRoute.value.fullPath).toBe(
-      '/diagnostics/ios-interactions/detail',
-    );
-    expect(wrapper.vm.$router.options.history.state.mobileDepth).toBe(0);
+    expect(router.currentRoute.value.fullPath).toBe(DETAIL_PATH);
+    expect(router.options.history.state.mobileDepth).toBe(2);
+    expect(mobileLifecycleState.resumeCount.value).toBe(1);
   });
 
   it('stages the allowlisted detail route for one cold entry', async () => {
-    const wrapper = await mountPage();
-    window.localStorage.clear();
+    const { wrapper } = await mountJourney();
     await wrapper.get('[data-testid="stage-cold-entry"]').trigger('click');
-    expect(window.localStorage.getItem('vela:dev:ios-interaction-cold-entry')).toBe(
-      '/diagnostics/ios-interactions/detail',
+    expect(window.localStorage.getItem('vela:dev:ios-interaction-cold-entry')).toBe(DETAIL_PATH);
+  });
+
+  it('surfaces an aborted navigation in the visible outcome', async () => {
+    const { router, wrapper } = await mountJourney();
+    const log = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    router.beforeEach(() => false);
+    await wrapper.get('[data-testid="navigate-detail"]').trigger('click');
+    await flushPromises();
+    expect(router.currentRoute.value.fullPath).toBe(ROOT_PATH);
+    expect(wrapper.get('[data-testid="navigation-outcome"]').text()).toContain(
+      'push-detail:failed:',
     );
+    expect(log).toHaveBeenCalled();
+    log.mockRestore();
+  });
+
+  it('applies the shared 44-point class to every visible diagnostic action', async () => {
+    const { wrapper } = await mountJourney();
+    for (const selector of [
+      '[data-testid="navigate-detail"]',
+      '[data-testid="simulate-entry"]',
+      '[data-testid="stage-cold-entry"]',
+      '[data-testid="ime-done"]',
+      '[data-testid="ime-submit"]',
+    ]) {
+      expect(wrapper.get(selector).classes()).toContain('mobile-touch-target');
+    }
   });
 });
 ```
@@ -1940,12 +2221,15 @@ Create `IosInteractionDetailPage.test.ts` with:
 ```ts
 import { flushPromises, mount } from '@vue/test-utils';
 import { Quasar } from 'quasar';
+import { defineComponent } from 'vue';
 import { createMemoryHistory, createRouter } from 'vue-router';
 import { describe, expect, it } from 'vitest';
+import { mobileLifecycleState, resetMobileLifecycleForTests } from 'src/services/mobile-lifecycle';
 import IosInteractionDetailPage from './IosInteractionDetailPage.vue';
 
 describe('IosInteractionDetailPage', () => {
   it('keeps its route identity and ignores repeated current navigation', async () => {
+    resetMobileLifecycleForTests();
     const router = createRouter({
       history: createMemoryHistory(),
       routes: [
@@ -1960,17 +2244,32 @@ describe('IosInteractionDetailPage', () => {
       state: { mobileDepth: 2 },
     });
     await router.isReady();
-    const wrapper = mount(IosInteractionDetailPage, {
+    const Host = defineComponent({
+      template:
+        '<q-layout view="hHh Lpr fFf"><q-page-container><router-view /></q-page-container></q-layout>',
+    });
+    const wrapper = mount(Host, {
       global: { plugins: [Quasar, router] },
     });
+    await flushPromises();
 
     expect(wrapper.get('[data-testid="detail-route-identity"]').text()).toContain(
       'nested iOS interaction route',
     );
     await wrapper.get('[data-testid="repeat-detail-navigation"]').trigger('click');
+    await wrapper.get('[data-testid="simulate-entry-again"]').trigger('click');
+    await wrapper.get('[data-testid="simulate-resume"]').trigger('click');
     await flushPromises();
     expect(router.currentRoute.value.fullPath).toBe('/diagnostics/ios-interactions/detail');
     expect(router.options.history.state.mobileDepth).toBe(2);
+    expect(mobileLifecycleState.resumeCount.value).toBe(1);
+    for (const selector of [
+      '[data-testid="repeat-detail-navigation"]',
+      '[data-testid="simulate-entry-again"]',
+      '[data-testid="simulate-resume"]',
+    ]) {
+      expect(wrapper.get(selector).classes()).toContain('mobile-touch-target');
+    }
   });
 });
 ```
@@ -2016,11 +2315,81 @@ Include these exact sections:
 - selectable `かな`, `カタカナ`, `日本語`, and `日本語を勉強しています。`;
 - scroll-stress content before and after the form;
 - `<JapaneseInputProbe data-keyboard-scroll-block />`;
-- current route, current `mobileDepth`, keyboard visibility/status/error, orientation, resume count, and last navigation outcome;
-- buttons with `data-testid` values `navigate-detail`, `navigate-detail-again`, `simulate-entry`, `simulate-entry-again`, `simulate-resume`, and `stage-cold-entry`;
+  - current route, current `mobileDepth`, keyboard visibility/status/error,
+    orientation, resume count, and
+    `<div data-testid="navigation-outcome">{{ lastNavigationOutcome }}</div>`;
+- `mobile-touch-target` buttons with `data-testid` values `navigate-detail`,
+  `simulate-entry`, and `stage-cold-entry`;
 - concise Japanese keyboard instructions matching the design scenario.
 
-Use `pushMobileRoute` for detail navigation, `enterMobileRoute` for route-entry simulation, `recordAppResume` for browser simulation, and `stageDiagnosticColdEntry(window.localStorage, IOS_DIAGNOSTIC_DETAIL_PATH)` for the one-shot action.
+Use `pushMobileRoute` for detail navigation, `enterMobileRoute` for in-session
+entry simulation, and
+`stageDiagnosticColdEntry(window.localStorage, IOS_DIAGNOSTIC_DETAIL_PATH)` for
+the one-shot action. Both asynchronous navigation buttons call this exact
+failure-recording wrapper:
+
+Import `ref` from Vue; `useRouter`; `MobileNavigationResult`,
+`enterMobileRoute`, and `pushMobileRoute`; both diagnostic path constants; and
+`stageDiagnosticColdEntry`.
+
+```ts
+const allowedDiagnosticEntries = new Set([IOS_DIAGNOSTIC_ROOT_PATH, IOS_DIAGNOSTIC_DETAIL_PATH]);
+const lastNavigationOutcome = ref('none');
+
+async function recordNavigation(
+  label: string,
+  action: () => Promise<MobileNavigationResult>,
+): Promise<void> {
+  try {
+    const result = await action();
+    lastNavigationOutcome.value = `${label}:${result.kind}:${result.fullPath}:depth=${result.depth}`;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    lastNavigationOutcome.value = `${label}:failed:${message}`;
+    console.error(`Diagnostic navigation failed (${label})`, error);
+  }
+}
+```
+
+The root actions are:
+
+```ts
+const openDetail = () =>
+  recordNavigation('push-detail', () => pushMobileRoute(router, IOS_DIAGNOSTIC_DETAIL_PATH));
+
+const simulateEntry = () =>
+  recordNavigation('entry-detail', () =>
+    enterMobileRoute(router, IOS_DIAGNOSTIC_DETAIL_PATH, allowedDiagnosticEntries),
+  );
+
+function stageColdEntry(): void {
+  stageDiagnosticColdEntry(window.localStorage, IOS_DIAGNOSTIC_DETAIL_PATH);
+  lastNavigationOutcome.value = `cold-entry:staged:${IOS_DIAGNOSTIC_DETAIL_PATH}`;
+}
+```
+
+Bind the three root actions with:
+
+```vue
+<q-btn
+  data-testid="navigate-detail"
+  class="mobile-touch-target"
+  label="Navigate to detail"
+  @click="openDetail"
+/>
+<q-btn
+  data-testid="simulate-entry"
+  class="mobile-touch-target"
+  label="Enter detail in this session"
+  @click="simulateEntry"
+/>
+<q-btn
+  data-testid="stage-cold-entry"
+  class="mobile-touch-target"
+  label="Stage cold entry"
+  @click="stageColdEntry"
+/>
+```
 
 - [ ] **Step 4: Complete the detail page**
 
@@ -2035,9 +2404,25 @@ Render:
     </p>
     <q-btn
       data-testid="repeat-detail-navigation"
+      class="mobile-touch-target"
       label="Navigate to this detail again"
       @click="repeatCurrentRoute"
     />
+    <q-btn
+      data-testid="simulate-entry-again"
+      class="mobile-touch-target"
+      label="Deliver this route entry again"
+      @click="repeatRouteEntry"
+    />
+    <q-btn
+      data-testid="simulate-resume"
+      class="mobile-touch-target"
+      label="Simulate resume"
+      @click="simulateResume"
+    />
+    <div data-testid="detail-navigation-outcome">
+      Last outcome: {{ lastNavigationOutcome }}
+    </div>
     <p>
       Test the visible header back control, native left-edge swipe-back, and
       native swipe-forward from this page.
@@ -2046,7 +2431,43 @@ Render:
 </q-page>
 ```
 
-`repeatCurrentRoute` calls `pushMobileRoute(router, IOS_DIAGNOSTIC_DETAIL_PATH)`.
+Use these exact Detail actions:
+
+Import `ref`, `useRoute`, `useRouter`, `MobileNavigationResult`,
+`enterMobileRoute`, `pushMobileRoute`, both diagnostic path constants, and
+`recordAppResume`.
+
+```ts
+const allowedDiagnosticEntries = new Set([IOS_DIAGNOSTIC_ROOT_PATH, IOS_DIAGNOSTIC_DETAIL_PATH]);
+const lastNavigationOutcome = ref('none');
+
+async function recordNavigation(
+  label: string,
+  action: () => Promise<MobileNavigationResult>,
+): Promise<void> {
+  try {
+    const result = await action();
+    lastNavigationOutcome.value = `${label}:${result.kind}:${result.fullPath}:depth=${result.depth}`;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    lastNavigationOutcome.value = `${label}:failed:${message}`;
+    console.error(`Diagnostic navigation failed (${label})`, error);
+  }
+}
+
+const repeatCurrentRoute = () =>
+  recordNavigation('repeat-push', () => pushMobileRoute(router, IOS_DIAGNOSTIC_DETAIL_PATH));
+
+const repeatRouteEntry = () =>
+  recordNavigation('repeat-entry', () =>
+    enterMobileRoute(router, IOS_DIAGNOSTIC_DETAIL_PATH, allowedDiagnosticEntries),
+  );
+
+function simulateResume(): void {
+  recordAppResume();
+  lastNavigationOutcome.value = `resume:preserved:${route.fullPath}`;
+}
+```
 
 - [ ] **Step 5: Add the development-only More entry**
 
@@ -2067,7 +2488,15 @@ Import `{ config }` and render the entry only with:
 </q-item>
 ```
 
-`openDiagnostics` calls `pushMobileRoute(router, IOS_DIAGNOSTIC_ROOT_PATH)`.
+Use:
+
+```ts
+function openDiagnostics(): void {
+  void pushMobileRoute(router, IOS_DIAGNOSTIC_ROOT_PATH).catch((error: unknown) => {
+    console.error('Opening iOS interaction diagnostics failed', error);
+  });
+}
+```
 
 - [ ] **Step 6: Run diagnostic, route, and shell tests**
 
@@ -2404,7 +2833,8 @@ result rules and matrix columns:
 
 ## Japanese IME evidence
 
-Record the exact draft, committed, and submitted values observed for `日本語`.
+Record the exact draft, committed, bound-model, post-render native-input, and
+submitted values observed for `日本語`.
 
 ## Keyboard, safe-area, and orientation evidence
 
@@ -2414,8 +2844,9 @@ block visibility, Submit reachability, footer restoration, and inset ownership.
 ## Navigation evidence
 
 Record visible back, native swipe-back, swipe-forward, Detail-to-Home tab
-history, cold entry, resume, duplicate navigation, the observed WebKit
-transition type, functional completion, and exit/trap behavior.
+history, in-session entry back/forward, cold entry, resume, duplicate
+navigation, the observed WebKit transition type, functional completion, and
+exit/trap behavior.
 
 ## Reusable rules
 
@@ -2423,11 +2854,13 @@ transition type, functional completion, and exit/trap behavior.
 - Hide bottom tabs on keyboard will-show and scroll after keyboard did-show.
 - Follow the Task 0 safe-area policy; Quasar owns fixed top/bottom CSS while
   page, toolbar, and footer tabs own horizontal insets.
-- Route links and tabs through app-owned chronological `mobileDepth`.
+- Route links, tabs, and validated in-session entry through app-owned
+  chronological `mobileDepth`.
 - Restore saved scroll positions on back and forward.
 - Resume does not navigate without a newly validated entry event.
-- Ordinary pushed routes share visible-back/native-swipe history; a
-  replace-on-entry fallback can intentionally differ.
+- Ordinary pushes and validated in-session entry share
+  visible-back/native-swipe history. Only a fresh cold entry replaces at depth
+  zero and uses its declared header fallback.
 ```
 
 Do not pre-populate unrun environments with passing results.
@@ -2442,6 +2875,7 @@ Add:
 - the fact that the real Capacitor artifact scan is a local macOS pre-merge
   gate because it runs `cap sync ios`;
 - chronological tab/swipe history behavior;
+- unique-push in-session entry versus depth-zero cold-entry behavior;
 - the M2 revisit point for bounded or tab-specific history;
 - safe-area ownership rules;
 - app-level resume rule;
@@ -2507,7 +2941,8 @@ keyboard. Record `Debug development` and `LAN development server`:
 4. Verify no premature submission.
 5. Finish composition.
 6. Press Return again or tap Submit.
-7. Record that draft, committed, and submitted values are exactly `日本語`.
+7. Record that the model, draft, committed, submitted, and visible native-input
+   values are exactly `日本語`.
 
 - [ ] **Step 6: Run the physical history scenario**
 
@@ -2522,14 +2957,18 @@ keyboard. Record `Debug development` and `LAN development server`:
 7. Swipe forward and verify Home returns.
 8. Repeat current-route navigation and verify depth is unchanged.
 9. Background/resume and verify the route is preserved.
-10. Simulate the same route entry twice and verify no duplicate.
-11. Alternate Home and Review twenty times.
-12. Traverse backward repeatedly and record whether the chronological policy
+10. Return to the diagnostic root and perform the in-session entry to Detail.
+11. Repeat entry from Detail and verify it is a depth-preserving no-op.
+12. Swipe back and confirm the diagnostic root returns, then swipe forward and
+    confirm Detail and its entry depth return.
+13. Simulate resume from Detail and verify the route is preserved.
+14. Alternate Home and Review twenty times.
+15. Traverse backward repeatedly and record whether the chronological policy
     remains usable or should change in M2.
-13. Stage Detail, terminate, relaunch, and verify one-shot cold entry.
-14. Verify fresh-entry swipe-back is a no-op while header fallback reaches the
+16. Stage Detail, terminate, relaunch, and verify one-shot cold entry.
+17. Verify fresh-entry swipe-back is a no-op while header fallback reaches the
     diagnostic root.
-15. Record any blank frame, unexpected final route, exit, or trap as a
+18. Record any blank frame, unexpected final route, exit, or trap as a
     blocking failure.
 
 - [ ] **Step 7: Run a Release core-shell smoke pass**
@@ -2608,8 +3047,13 @@ Before reporting HPA-209 complete:
 - Confirm the evidence document names the exact tested commit, build
   configuration, and LAN-versus-packaged asset source for every row.
 - Confirm physical Japanese IME submission preserves `日本語` exactly.
+- Confirm the bound model and native input still contain `日本語` after the
+  post-composition render.
 - Confirm native back, forward, and tab-switch history—including twenty
   alternating tab switches—matches the chronological M1 policy without blank
   frames, wrong final routes, exit, or trap.
+- Confirm an in-session entry pushes once, back returns to the exact prior
+  route, forward restores the entry, repeated delivery is a no-op, and cold
+  entry alone replaces at depth zero.
 - Confirm the Release packaged-assets smoke row passes with diagnostics absent.
 - If a physical device is unavailable or either physical scenario fails, report HPA-209 as blocked rather than complete.
