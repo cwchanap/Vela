@@ -95,6 +95,12 @@ describe('useKeyboardViewport', () => {
     listeners.get('keyboardWillShow')?.();
     expect(state.isKeyboardVisible.value).toBe(false);
 
+    // Wait for the keyboardDidShow addListener round-trip to begin — the mock
+    // assigns resolveDidShow synchronously when it is called, but the call
+    // itself only happens after the keyboardWillShow handle resolves on a
+    // later microtask. Without this guard, resolveDidShow may still be
+    // undefined here.
+    await vi.waitFor(() => expect(listeners.has('keyboardDidShow')).toBe(true));
     // Complete registration; the queued will-show event must be replayed.
     resolveDidShow();
     await vi.waitFor(() => expect(listeners.has('keyboardDidHide')).toBe(true));
@@ -153,6 +159,12 @@ describe('useKeyboardViewport', () => {
     listeners.get('keyboardWillShow')?.();
     expect(state.isKeyboardVisible.value).toBe(false);
 
+    // Wait for the keyboardDidShow addListener round-trip to begin — the mock
+    // assigns resolveDidShow synchronously when it is called, but the call
+    // itself only happens after the keyboardWillShow handle resolves on a
+    // later microtask. Without this guard, resolveDidShow may still be
+    // undefined here.
+    await vi.waitFor(() => expect(listeners.has('keyboardDidShow')).toBe(true));
     // Complete registration. The replayed keyboardWillShow sets
     // isKeyboardVisible to true, but keyboardDidShow was never queued so
     // scrollFocusedBlockAfterLayout would not run without compensation.
