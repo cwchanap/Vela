@@ -31,5 +31,11 @@ export function resetCapacitorLifecycleForTests(): void {
 }
 
 export default defineBoot(async () => {
-  await registerCapacitorLifecycle();
+  // recordAppResume only bumps a diagnostics counter; a failed native
+  // listener subscription must not block app launch. The registration
+  // promise is still cached so a later explicit caller can observe the
+  // failure, but the boot path swallows it.
+  await registerCapacitorLifecycle().catch((error: unknown) => {
+    console.error('Capacitor resume listener registration failed', error);
+  });
 });

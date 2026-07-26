@@ -52,19 +52,24 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue';
+import { computed, provide } from 'vue';
 import { useRoute, useRouter, type RouteLocationRaw } from 'vue-router';
 import MobilePageHeader from '../components/mobile/MobilePageHeader.vue';
-import { useKeyboardViewport } from '../composables/useKeyboardViewport';
+import {
+  KEYBOARD_VIEWPORT_INJECTION_KEY,
+  useKeyboardViewport,
+} from '../composables/useKeyboardViewport';
 import { safeAreaPolicy } from '../ios/safe-area-policy';
 import { pushMobileRoute } from '../router/mobile-navigation';
 
 const route = useRoute();
 const router = useRouter();
 const hasMobileHeader = computed(() => Boolean(route.meta.mobileHeader));
-const { isKeyboardVisible } = useKeyboardViewport({
+const keyboardViewport = useKeyboardViewport({
   getFocusedBlock: () => document.querySelector<HTMLElement>('[data-keyboard-scroll-block]'),
 });
+provide(KEYBOARD_VIEWPORT_INJECTION_KEY, keyboardViewport);
+const { isKeyboardVisible } = keyboardViewport;
 
 function onTabClick(event: Event, target: RouteLocationRaw): void {
   event.preventDefault();

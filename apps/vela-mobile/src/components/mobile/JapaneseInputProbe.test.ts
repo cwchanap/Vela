@@ -119,7 +119,7 @@ describe('JapaneseInputProbe', () => {
     const wrapper = mountProbe();
     const input = wrapper.get('input');
     input.element.focus();
-    await wrapper.get('[data-testid="ime-probe"]').trigger('click');
+    await wrapper.get('[data-testid="ime-probe"]').trigger('pointerdown');
     expect(document.activeElement).not.toBe(input.element);
   });
 

@@ -90,12 +90,15 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue';
+import { computed, inject, ref } from 'vue';
 import { useQuasar } from 'quasar';
 import { useRoute, useRouter } from 'vue-router';
-import { stageDiagnosticColdEntry } from 'src/boot/diagnostic-cold-entry';
+import { stageDiagnosticColdEntry } from 'src/diagnostics/cold-entry';
 import JapaneseInputProbe from 'src/components/mobile/JapaneseInputProbe.vue';
-import { useKeyboardViewport } from 'src/composables/useKeyboardViewport';
+import {
+  KEYBOARD_VIEWPORT_INJECTION_KEY,
+  useKeyboardViewport,
+} from 'src/composables/useKeyboardViewport';
 import {
   IOS_DIAGNOSTIC_DETAIL_PATH,
   IOS_DIAGNOSTIC_ROOT_PATH,
@@ -119,7 +122,8 @@ const mobileDepth = computed(() => readMobileDepth(router));
 const orientation = computed(() =>
   quasar.screen.width >= quasar.screen.height ? 'landscape' : 'portrait',
 );
-const { isKeyboardVisible, nativeStatus, lastError } = useKeyboardViewport();
+const { isKeyboardVisible, nativeStatus, lastError } =
+  inject(KEYBOARD_VIEWPORT_INJECTION_KEY, null) ?? useKeyboardViewport();
 
 async function recordNavigation(
   label: string,
