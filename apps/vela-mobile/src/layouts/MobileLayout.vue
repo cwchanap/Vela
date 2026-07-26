@@ -3,6 +3,7 @@
     <MobilePageHeader />
 
     <q-page-container
+      class="mobile-page-container--safe-x"
       :class="{
         'mobile-page-container--headerless': !hasMobileHeader,
         'mobile-page-container--css-safe-top':

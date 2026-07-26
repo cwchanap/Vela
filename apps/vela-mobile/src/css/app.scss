@@ -23,6 +23,16 @@ body.body--dark .q-page-container {
   padding-right: max(16px, env(safe-area-inset-right, 0px));
 }
 
+/* Horizontal safe-area inset on the page container so every route receives
+ * left/right protection by default — pages don't need to opt in via
+ * .mobile-safe-x. Only the env() inset is applied here (no minimum 16px) so
+ * pages keep their own design padding (e.g. the `padding` attr on QPage) and
+ * the container adds only the sensor-region inset on top. */
+.mobile-page-container--safe-x {
+  padding-left: env(safe-area-inset-left, 0px);
+  padding-right: env(safe-area-inset-right, 0px);
+}
+
 .mobile-header .q-toolbar {
   padding-left: max(12px, env(safe-area-inset-left, 0px));
   padding-right: max(12px, env(safe-area-inset-right, 0px));

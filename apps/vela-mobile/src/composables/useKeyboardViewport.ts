@@ -168,6 +168,18 @@ export function useKeyboardViewport(options: KeyboardViewportOptions = {}) {
         if (!mounted) break;
         listeners[event]();
       }
+      // Compensate for a lost keyboardDidShow. Listeners are installed
+      // sequentially (each addListener awaits a bridge round-trip), so between
+      // the keyboardWillShow and keyboardDidShow installations the native
+      // keyboard can fire keyboardDidShow before its listener exists — that
+      // event is never queued and scrollFocusedBlockAfterLayout is never
+      // called. If the replayed state indicates the keyboard is visible (a
+      // keyboardWillShow was replayed), schedule the settled scroll now so the
+      // first focused form is not left obscured. scrollFocusedBlockAfterLayout
+      // is idempotent: it no-ops if the block is already in view.
+      if (mounted && isKeyboardVisible.value) {
+        void scrollFocusedBlockAfterLayout();
+      }
     } catch (error) {
       nativeReady = false;
       nativeStatus.value = 'unavailable';

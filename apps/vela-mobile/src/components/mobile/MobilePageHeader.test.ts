@@ -10,6 +10,7 @@ import {
   isNavigationFailure,
   NavigationFailureType,
 } from 'vue-router';
+import { readMobileDepth } from '../../router/mobile-navigation';
 import MobilePageHeader from './MobilePageHeader.vue';
 
 const routes = [
@@ -95,5 +96,27 @@ describe('MobilePageHeader', () => {
     expect(consoleError).toHaveBeenCalledWith('Mobile header navigation failed', expect.anything());
     const failure = consoleError.mock.calls[0]?.[1];
     expect(isNavigationFailure(failure, NavigationFailureType.aborted)).toBe(true);
+  });
+
+  it('recovers to the fallback when mobileDepth is stale and router.back() is a no-op', async () => {
+    vi.useFakeTimers();
+    try {
+      const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+      // mobileDepth=5 with no real prior pushes — router.back() has nothing
+      // to pop, so the settle timeout fires and backOrFallback must recover.
+      const { router, wrapper } = await mountHeader('/detail', 5);
+      expect(readMobileDepth(router)).toBe(5);
+
+      await wrapper.get('[aria-label="Back"]').trigger('click');
+      // Advance past the settle timeout so the no-op recovery fires.
+      vi.advanceTimersByTime(2000);
+      await flushPromises();
+
+      expect(router.currentRoute.value.fullPath).toBe('/fallback');
+      expect(readMobileDepth(router)).toBe(0);
+      expect(consoleError).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
