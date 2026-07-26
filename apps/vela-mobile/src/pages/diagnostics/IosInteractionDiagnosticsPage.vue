@@ -6,7 +6,7 @@
     @pointerdown.self="dismissFocusedControl"
   >
     <section class="column q-gutter-md">
-      <h1 class="text-h5">iOS Interaction Diagnostics</h1>
+      <h1 class="text-h5">{{ IOS_INTERACTION_DIAGNOSTICS_LABEL }}</h1>
 
       <p>
         日本語キーボードでかなを入力し、変換候補から漢字を選びます。確定前後の値と Done・Submit
@@ -99,6 +99,7 @@ import { useKeyboardViewport } from 'src/composables/useKeyboardViewport';
 import {
   IOS_DIAGNOSTIC_DETAIL_PATH,
   IOS_DIAGNOSTIC_ROOT_PATH,
+  IOS_INTERACTION_DIAGNOSTICS_LABEL,
   IOS_INTERACTION_DIAGNOSTICS_MARKER,
 } from 'src/diagnostics/ios-interaction-contract';
 import {

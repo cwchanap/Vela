@@ -103,9 +103,21 @@ export async function replaceColdMobileRoute(
 // afterEach fires with a NavigationFailure when the pop is aborted/cancelled by
 // a guard; rejecting here propagates the failure to backOrFallback's caller
 // instead of letting it report a successful back with the unchanged route.
+//
+// A timeout guards against router.back() being a no-op when the app-owned
+// mobileDepth disagrees with the real browser history length (e.g. a stale
+// depth left by a crashed navigation). In that case afterEach never fires and
+// the promise would hang forever, freezing backOrFallback's caller. The
+// timeout rejects so the caller surfaces the failure instead of hanging.
+const ROUTE_BACK_SETTLE_TIMEOUT_MS = 1000;
+
 function whenRouteNavigationSettled(router: Router): Promise<void> {
   return new Promise((resolve, reject) => {
+    let settled = false;
     const stop = router.afterEach((_to, _from, failure) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
       stop();
       if (failure) {
         reject(failure);
@@ -113,6 +125,12 @@ function whenRouteNavigationSettled(router: Router): Promise<void> {
         resolve();
       }
     });
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      stop();
+      reject(new Error('router.back() did not produce a navigation within timeout'));
+    }, ROUTE_BACK_SETTLE_TIMEOUT_MS);
   });
 }
 

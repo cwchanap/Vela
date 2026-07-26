@@ -176,6 +176,23 @@ describe('mobile navigation', () => {
     expect(readMobileDepth(router)).toBe(0);
   });
 
+  it('rejects when router.back() is a no-op on inconsistent history state', async () => {
+    vi.useFakeTimers();
+    try {
+      const router = makeRouter();
+      // Set mobileDepth > 0 without any real prior push, so router.back() has
+      // nothing to pop and afterEach never fires.
+      await router.replace({ path: '/detail', state: { mobileDepth: 3 } });
+      const pending = backOrFallback(router, '/more');
+      // Advance past the settle timeout so the fallback rejection fires.
+      vi.advanceTimersByTime(2000);
+      await expect(pending).rejects.toThrow('did not produce a navigation within timeout');
+      expect(router.currentRoute.value.fullPath).toBe('/detail');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('restores the original route depth across back and forward', async () => {
     const router = makeRouter();
     await router.replace({ path: '/detail', state: { mobileDepth: 2 } });

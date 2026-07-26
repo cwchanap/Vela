@@ -199,18 +199,25 @@ with all five observed values exactly `日本語`.
 
 The automated web and Capacitor asset commands below were run against
 `94da5e455a12c47fbb7dd7ff02dfff2267548e73`; the final post-sync simulator
-compilation used the documentation commit identified in its own bullet:
+compilation used the documentation commit identified in its own bullet.
+The test/coverage/lint/typecheck/build/scan commands were re-run at
+`bcfe0436f694243a790260bd0cd0bf07d27188b4` with the review fixes applied
+(timeout fallback, forbidden-token list update, label constant usage); the
+updated counts are recorded in the re-run bullets below.
 
-- `bun run test:unit`: 27 files, 191 tests passed. The intentional
-  guard-failure test still emits its expected Vue Router warning.
-- `bun run test:coverage`: 27 files, 191 tests passed; line coverage was
-  `97.45%`, above the configured 95% threshold. The same expected warning was
+- `bun run test:unit`: 27 files, 195 tests passed (193 at `bcfe043` before
+  review fixes; +2 from the timeout-fallback and forbidden-token tests). The
+  intentional guard-failure test still emits its expected Vue Router warning.
+- `bun run test:coverage`: 27 files, 195 tests passed; line coverage was
+  `97.17%`, above the configured 95% threshold. The same expected warning was
   emitted.
 - `bun run lint`, `bun run typecheck`, and the SPA production build with
   `VITE_MOBILE_API_URL=https://example.invalid/api/`: passed.
 - `verify:production-diagnostics`: re-run at HEAD after the leak-fix commits
   (`9cdb99b`, `94da5e4`) with a real macOS Capacitor build and `cap sync ios`;
-  no diagnostic marker was found under `src-capacitor/www`.
+  no diagnostic marker was found under `src-capacitor/www`. Re-run again after
+  the review fixes (which added `DIAGNOSTIC_COLD_ENTRY_KEY` to the forbidden
+  token list); still no marker found.
 - Final `bunx cap sync ios`: passed and found `@capacitor/app@7.1.2` and
   `@capacitor/keyboard@7.0.6`.
 - Post-final-sync simulator compilation: passed against

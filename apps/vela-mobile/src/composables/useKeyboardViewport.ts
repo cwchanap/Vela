@@ -57,7 +57,11 @@ export function useKeyboardViewport(options: KeyboardViewportOptions = {}) {
   // Events that arrive after a listener is installed but before nativeReady
   // flips true (i.e. while later addListener round-trips are still pending)
   // are queued and replayed once registration completes, so the first focus
-  // can't leave the footer visible or skip the focused-block scroll.
+  // can't leave the footer visible or skip the focused-block scroll. Replay is
+  // idempotent: multiple keyboardWillShow events in the queue each set
+  // isKeyboardVisible to true, and multiple keyboardDidShow events each
+  // schedule a scroll that no-ops if the block is already in view, so a burst
+  // of repeated events is harmless.
   const pendingEvents: KeyboardListenerEvent[] = [];
   let mounted = false;
   let nativeReady = false;
