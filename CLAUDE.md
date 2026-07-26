@@ -195,6 +195,15 @@ The following M2 work is required before the mobile OAuth flow can complete end-
 - **API tests** use Bun's built-in test runner (no Vitest)
 - **Composable testing**: use `withQueryClient` from `src/test-utils/withQueryClient.ts` to mount composables inside a Vue component with a fresh isolated QueryClient (retry and gcTime set to 0)
 
+### iOS interaction diagnostics — pending physical-device validation (HPA-209)
+
+The iOS interaction diagnostics page (`apps/vela-mobile/src/pages/diagnostics/IosInteractionDiagnosticsPage.vue`) and the `JapaneseInputProbe` were validated only on the iOS Simulator. Two behaviors are **not** confirmed on a physical iPhone and must be verified before HPA-209 closes:
+
+1. **IME composition flow** — `compositionstart` / `compositionend` / `input` listeners on the native `<input>` (see `JapaneseInputProbe.vue`) and the `isComposing` guard against premature Enter submission. The simulator's software keyboard does not exercise the real iOS Kana IME candidate-selection path.
+2. **Native edge-swipe back gesture** — `mobile-navigation.ts` depth tracking and the back-navigation outcome surfacing. The simulator's swipe was a no-op, so the depth-decrement path was not exercised on-device.
+
+Code is merge-safe (unit tests cover the logic); the device run is a closure gate, not a merge gate. Remove this section once a physical-device run confirms both behaviors.
+
 ## Environment Variables
 
 - **Vela App**: `VITE_*` prefix, Cognito config required — validated at startup via `src/config/index.ts`

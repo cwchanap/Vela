@@ -91,7 +91,7 @@ export default defineComponent({
 </script>
 
 <template>
-  <section data-testid="ime-probe" @click.self="blurInput">
+  <section data-testid="ime-probe" @pointerdown.self="blurInput">
     <q-input
       ref="qInput"
       :model-value="fieldModel"

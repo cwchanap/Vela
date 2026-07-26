@@ -4,7 +4,7 @@ import {
   consumeDiagnosticColdEntry,
   DIAGNOSTIC_COLD_ENTRY_KEY,
   stageDiagnosticColdEntry,
-} from './diagnostic-cold-entry';
+} from 'src/diagnostics/cold-entry';
 
 function memoryStorage(): Storage {
   const values = new Map<string, string>();
