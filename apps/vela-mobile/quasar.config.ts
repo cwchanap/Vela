@@ -16,6 +16,7 @@ export default defineConfig((ctx) => {
 
     build: {
       alias: {
+        '@capacitor/app': resolve(__dirname, 'src-capacitor/node_modules/@capacitor/app'),
         '@capacitor/core': resolve(__dirname, 'src-capacitor/node_modules/@capacitor/core'),
         '@capacitor/keyboard': resolve(__dirname, 'src-capacitor/node_modules/@capacitor/keyboard'),
       },

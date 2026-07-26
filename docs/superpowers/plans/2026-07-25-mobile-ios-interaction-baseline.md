@@ -131,7 +131,7 @@
   - `safeAreaPolicy.headerlessTopOwner: 'native-scroll-view' | 'css'`
 - Blocks every later task until one mode has recorded single-inset evidence.
 
-- [ ] **Step 1: Write the failing policy/config consistency test**
+- [x] **Step 1: Write the failing policy/config consistency test**
 
 ```ts
 import { readFileSync } from 'node:fs';
@@ -164,7 +164,7 @@ describe('safeAreaPolicy', () => {
 });
 ```
 
-- [ ] **Step 2: Run the policy test and verify the missing module fails**
+- [x] **Step 2: Run the policy test and verify the missing module fails**
 
 ```bash
 # workdir: apps/vela-mobile
@@ -173,7 +173,7 @@ rtk bunx vitest run src/ios/safe-area-policy.test.ts
 
 Expected: FAIL because `safe-area-policy.ts` does not exist.
 
-- [ ] **Step 3: Measure the existing `"always"` mode before adding the full harness**
+- [x] **Step 3: Measure the existing `"always"` mode before adding the full harness**
 
 Start the current development shell on a notched or Dynamic Island simulator:
 
@@ -309,7 +309,7 @@ the sensor housing. Save the six distinct screenshots under
 `safe-area-always-{headerless,header}-{portrait,landscape-left,landscape-right}.png`.
 Stop the first development process after all `"always"` evidence is saved.
 
-- [ ] **Step 4: Repeat the same measurements with `"never"`**
+- [x] **Step 4: Repeat the same measurements with `"never"`**
 
 Set only the native inset value in `capacitor.config.json`:
 
@@ -338,7 +338,7 @@ Save the six screenshots as
 `safe-area-never-{headerless,header}-{portrait,landscape-left,landscape-right}.png`.
 Do not reuse values from the `"always"` run.
 
-- [ ] **Step 5: Apply the deterministic ownership decision**
+- [x] **Step 5: Apply the deterministic ownership decision**
 
 Choose `"always"` only when all of these observations are true:
 
@@ -355,7 +355,7 @@ the existing native configuration. If neither passes, stop execution and
 report HPA-209 blocked; do not build the full harness against an unknown
 ownership model.
 
-- [ ] **Step 6: Commit the selected policy as one of two exact variants**
+- [x] **Step 6: Commit the selected policy as one of two exact variants**
 
 If `"always"` wins, keep it in `capacitor.config.json` and create:
 
@@ -394,7 +394,7 @@ Create `docs/ios-interaction-baseline.md` with:
 - an explicit pass/fail result for each decision rule;
 - reproduction details for any failure.
 
-- [ ] **Step 7: Run the policy test and typecheck**
+- [x] **Step 7: Run the policy test and typecheck**
 
 ```bash
 # workdir: apps/vela-mobile
@@ -404,7 +404,7 @@ rtk bun run typecheck
 
 Expected: PASS with the policy literal matching `capacitor.config.json`.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 # workdir: repository root
@@ -434,7 +434,7 @@ rtk git commit -m "test(mobile): record safe-area ownership"
 - Consumes: existing Capacitor 7 packages under `src-capacitor/node_modules`.
 - Produces: resolvable `@capacitor/app`, `@capacitor/core`, and `@capacitor/keyboard` modules in Vitest; native Keyboard resize configuration.
 
-- [ ] **Step 1: Write the failing dependency/configuration test**
+- [x] **Step 1: Write the failing dependency/configuration test**
 
 ```ts
 import { readFileSync } from 'node:fs';
@@ -466,7 +466,7 @@ describe('Capacitor plugin contracts', () => {
 });
 ```
 
-- [ ] **Step 2: Run the test and verify the missing Keyboard module fails**
+- [x] **Step 2: Run the test and verify the missing Keyboard module fails**
 
 Run:
 
@@ -477,7 +477,7 @@ rtk bunx vitest run src/ios/capacitor-plugins.test.ts
 
 Expected: FAIL because `@capacitor/keyboard` is absent and the standalone Vitest resolver has no Capacitor aliases.
 
-- [ ] **Step 3: Install Keyboard in the Capacitor project and configure native resize**
+- [x] **Step 3: Install Keyboard in the Capacitor project and configure native resize**
 
 Run:
 
@@ -500,7 +500,7 @@ top-level plugin block to `capacitor.config.json`:
 The explicit value pins Capacitor iOS's existing default; it is not expected
 to change behavior.
 
-- [ ] **Step 4: Add explicit Vitest aliases**
+- [x] **Step 4: Add explicit Vitest aliases**
 
 Add these entries to `vitest.config.ts` under `resolve.alias`:
 
@@ -513,7 +513,7 @@ Add these entries to `vitest.config.ts` under `resolve.alias`:
 ),
 ```
 
-- [ ] **Step 5: Synchronize iOS native dependencies and generated TypeScript paths**
+- [x] **Step 5: Synchronize iOS native dependencies and generated TypeScript paths**
 
 Run:
 
@@ -526,7 +526,7 @@ rtk bunx quasar prepare
 
 Expected: `Podfile` contains `CapacitorKeyboard`, `src-capacitor/bun.lock` contains the v7 package, and `.quasar/tsconfig.json` contains the generated Keyboard path alias.
 
-- [ ] **Step 6: Run the focused test and typecheck**
+- [x] **Step 6: Run the focused test and typecheck**
 
 Run:
 
@@ -538,7 +538,7 @@ rtk bun run typecheck
 
 Expected: PASS.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 # workdir: repository root
@@ -581,7 +581,7 @@ rtk git commit -m "feat(mobile): configure typed keyboard plugin"
   - `IOS_DIAGNOSTIC_ROOT_PATH` and `IOS_DIAGNOSTIC_DETAIL_PATH`
   - `buildMobileChildRoutes(diagnosticRoutes?: RouteRecordRaw[]): RouteRecordRaw[]`
 
-- [ ] **Step 1: Write failing navigation and scroll tests**
+- [x] **Step 1: Write failing navigation and scroll tests**
 
 ```ts
 import { describe, expect, it, vi } from 'vitest';
@@ -779,7 +779,7 @@ describe('mobileScrollBehavior', () => {
 });
 ```
 
-- [ ] **Step 2: Run the focused tests and verify missing exports fail**
+- [x] **Step 2: Run the focused tests and verify missing exports fail**
 
 Run:
 
@@ -790,7 +790,7 @@ rtk bunx vitest run src/router/mobile-navigation.test.ts src/router/index.test.t
 
 Expected: FAIL because the navigation module and exported scroll behavior do not exist.
 
-- [ ] **Step 3: Implement the navigation helper**
+- [x] **Step 3: Implement the navigation helper**
 
 Create `mobile-navigation.ts` with this public shape:
 
@@ -906,7 +906,7 @@ log and surface. Diagnostic actions catch these failures and store the exact
 message in their last-outcome readout. Shell tab handlers catch and log them so
 no rejected promise is left unhandled.
 
-- [ ] **Step 4: Add typed mobile header metadata**
+- [x] **Step 4: Add typed mobile header metadata**
 
 Create `mobile-route-meta.d.ts`:
 
@@ -925,7 +925,7 @@ declare module 'vue-router' {
 export {};
 ```
 
-- [ ] **Step 5: Write failing development-route construction tests**
+- [x] **Step 5: Write failing development-route construction tests**
 
 ```ts
 import { describe, expect, it } from 'vitest';
@@ -960,7 +960,7 @@ describe('diagnostic route construction', () => {
 });
 ```
 
-- [ ] **Step 6: Implement the compile-time route branch and minimal route pages**
+- [x] **Step 6: Implement the compile-time route branch and minimal route pages**
 
 Create `diagnostic-routes.ts` so the dynamic imports remain lexically inside the module-level development branch:
 
@@ -1036,7 +1036,7 @@ Replace the root route's inline children in `routes.ts` with:
 children: buildMobileChildRoutes(),
 ```
 
-- [ ] **Step 7: Export and use native-like scroll behavior**
+- [x] **Step 7: Export and use native-like scroll behavior**
 
 In `router/index.ts`:
 
@@ -1049,7 +1049,7 @@ export const mobileScrollBehavior: RouterScrollBehavior = (_to, _from, savedPosi
 
 Pass `mobileScrollBehavior` to `createRouter`.
 
-- [ ] **Step 8: Update existing route tests and run the router suite**
+- [x] **Step 8: Update existing route tests and run the router suite**
 
 Update `routes.test.ts` to expect five core children plus two development children and to exercise `buildMobileChildRoutes([])` for production. Continue awaiting every development lazy component.
 
@@ -1062,7 +1062,7 @@ rtk bunx vitest run src/router
 
 Expected: PASS.
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 
 ```bash
 # workdir: repository root
@@ -1098,7 +1098,7 @@ rtk git commit -m "feat(mobile): define chronological route history"
   - `stageDiagnosticColdEntry(storage, target): void`
   - `consumeDiagnosticColdEntry(router, storage): Promise<MobileNavigationResult | null>`
 
-- [ ] **Step 1: Write failing lifecycle and boot-selection tests**
+- [x] **Step 1: Write failing lifecycle and boot-selection tests**
 
 ```ts
 import { describe, expect, it, vi } from 'vitest';
@@ -1147,7 +1147,7 @@ describe('mobile lifecycle', () => {
 });
 ```
 
-- [ ] **Step 2: Run the focused tests and verify missing modules fail**
+- [x] **Step 2: Run the focused tests and verify missing modules fail**
 
 Run:
 
@@ -1160,7 +1160,7 @@ rtk bunx vitest run src/boot/boot-files.test.ts \
 
 Expected: FAIL because the new boot and service modules do not exist.
 
-- [ ] **Step 3: Implement route-neutral lifecycle state**
+- [x] **Step 3: Implement route-neutral lifecycle state**
 
 Create `mobile-lifecycle.ts`:
 
@@ -1215,7 +1215,7 @@ export default defineBoot(async () => {
 });
 ```
 
-- [ ] **Step 4: Write failing one-shot cold-entry tests**
+- [x] **Step 4: Write failing one-shot cold-entry tests**
 
 ```ts
 import { createMemoryHistory, createRouter } from 'vue-router';
@@ -1300,7 +1300,7 @@ describe('diagnostic cold entry', () => {
 });
 ```
 
-- [ ] **Step 5: Implement staged-entry consumption without `router.isReady()`**
+- [x] **Step 5: Implement staged-entry consumption without `router.isReady()`**
 
 Create `diagnostic-cold-entry.ts`:
 
@@ -1336,7 +1336,7 @@ export default defineBoot(async ({ router }) => {
 });
 ```
 
-- [ ] **Step 6: Make boot inclusion explicit in Quasar configuration**
+- [x] **Step 6: Make boot inclusion explicit in Quasar configuration**
 
 Create `boot-files.ts`:
 
@@ -1362,7 +1362,7 @@ boot: getMobileBootFiles({
 }),
 ```
 
-- [ ] **Step 7: Run the lifecycle/cold-entry tests and full boot tests**
+- [x] **Step 7: Run the lifecycle/cold-entry tests and full boot tests**
 
 Run:
 
@@ -1373,7 +1373,7 @@ rtk bunx vitest run src/boot src/services/mobile-lifecycle.test.ts
 
 Expected: PASS with no call to `router.isReady()`.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 # workdir: repository root
@@ -1399,7 +1399,7 @@ rtk git commit -m "feat(mobile): own resume and cold entry lifecycle"
   `submitted`, and `isComposing` readouts.
 - Exposes no normalized or trimmed answer value.
 
-- [ ] **Step 1: Write failing native-event component tests**
+- [x] **Step 1: Write failing native-event component tests**
 
 ```ts
 import { mount } from '@vue/test-utils';
@@ -1461,7 +1461,7 @@ describe('JapaneseInputProbe', () => {
 });
 ```
 
-- [ ] **Step 2: Run the test and verify the component is missing**
+- [x] **Step 2: Run the test and verify the component is missing**
 
 Run:
 
@@ -1472,7 +1472,7 @@ rtk bunx vitest run src/components/mobile/JapaneseInputProbe.test.ts
 
 Expected: FAIL because the component does not exist.
 
-- [ ] **Step 3: Implement native listener ownership and exact submission**
+- [x] **Step 3: Implement native listener ownership and exact submission**
 
 Do not use Quasar's internal `qComposing` flag as the probe's source of truth.
 The installed Quasar version sets it during `compositionupdate` only after CJK
@@ -1563,7 +1563,7 @@ The template must include:
 />
 ```
 
-- [ ] **Step 4: Add button, background-dismissal, and listener-cleanup cases**
+- [x] **Step 4: Add button, background-dismissal, and listener-cleanup cases**
 
 Add tests that:
 
@@ -1573,7 +1573,7 @@ Add tests that:
 - tap Submit and expect it to remain focused long enough to activate;
 - unmount, dispatch native events, and verify readouts no longer change.
 
-- [ ] **Step 5: Run the focused tests and typecheck**
+- [x] **Step 5: Run the focused tests and typecheck**
 
 Run:
 
@@ -1585,7 +1585,7 @@ rtk bun run typecheck
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 # workdir: repository root
@@ -1616,7 +1616,7 @@ rtk git commit -m "feat(mobile): add Japanese IME probe"
   - bottom tabs using `pushMobileRoute`
   - layout classes driven by `safeAreaPolicy.headerlessTopOwner`
 
-- [ ] **Step 1: Write failing keyboard adapter tests**
+- [x] **Step 1: Write failing keyboard adapter tests**
 
 ```ts
 import { flushPromises, mount } from '@vue/test-utils';
@@ -1769,7 +1769,7 @@ describe('useKeyboardViewport', () => {
 });
 ```
 
-- [ ] **Step 2: Run the focused test and verify the composable is missing**
+- [x] **Step 2: Run the focused test and verify the composable is missing**
 
 Run:
 
@@ -1780,7 +1780,7 @@ rtk bunx vitest run src/composables/useKeyboardViewport.test.ts
 
 Expected: FAIL.
 
-- [ ] **Step 3: Implement typed listener registration and settled scrolling**
+- [x] **Step 3: Implement typed listener registration and settled scrolling**
 
 Define a narrow adapter instead of inheriting Capacitor's overloaded method
 type. This keeps the production wrapper exact while allowing structurally typed
@@ -1844,7 +1844,7 @@ While the keyboard is visible and `nativeReady` is true, a window `resize`
 event repeats the settled scroll. Set `nativeStatus` to `'browser'`, `'native'`,
 or `'unavailable'`; store a rejected registration message in `lastError`.
 
-- [ ] **Step 4: Write failing header and shell integration tests**
+- [x] **Step 4: Write failing header and shell integration tests**
 
 Add `beforeEach`, `vi`, and `flushPromises` to the existing Vitest/Test Utils
 imports. Install these hoisted native plugin fakes before importing
@@ -1944,7 +1944,7 @@ Create `MobilePageHeader.test.ts` cases for:
 - `router.back()` when depth is positive;
 - fallback replace with depth zero when depth is absent.
 
-- [ ] **Step 5: Implement the metadata header**
+- [x] **Step 5: Implement the metadata header**
 
 Use:
 
@@ -1978,7 +1978,7 @@ async function back(): Promise<void> {
 }
 ```
 
-- [ ] **Step 6: Integrate header, keyboard state, and custom QRouteTab navigation**
+- [x] **Step 6: Integrate header, keyboard state, and custom QRouteTab navigation**
 
 In `MobileLayout.vue`:
 
@@ -2009,7 +2009,7 @@ function onTabClick(event: Event, target: RouteLocationRaw): void {
 }
 ```
 
-- [ ] **Step 7: Add safe-area and hit-target CSS**
+- [x] **Step 7: Add safe-area and hit-target CSS**
 
 Add:
 
@@ -2047,7 +2047,7 @@ app-owned native top rule is the policy-selected headerless
 `QPageContainer`. Horizontal toolbar/tab padding is required in both inset
 modes.
 
-- [ ] **Step 8: Run component/composable tests and typecheck**
+- [x] **Step 8: Run component/composable tests and typecheck**
 
 Run:
 
@@ -2061,7 +2061,7 @@ rtk bun run typecheck
 
 Expected: PASS.
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 
 ```bash
 # workdir: repository root
@@ -2097,7 +2097,7 @@ rtk git commit -m "feat(mobile): integrate keyboard-safe navigation shell"
   - the only application-bundle source literal
     `ios-interaction-diagnostics`
 
-- [ ] **Step 1: Write failing diagnostic-page tests**
+- [x] **Step 1: Write failing diagnostic-page tests**
 
 ```ts
 import { flushPromises, mount } from '@vue/test-utils';
@@ -2279,7 +2279,7 @@ In `StubPages.test.ts`, mock the named `config` export with a hoisted mutable
 exists when `config.app.isDev` is true and is absent when it is false. Keep the
 existing section-label and “Coming soon” coverage.
 
-- [ ] **Step 2: Run the focused tests and verify the minimal pages fail the contract**
+- [x] **Step 2: Run the focused tests and verify the minimal pages fail the contract**
 
 Run:
 
@@ -2290,7 +2290,7 @@ rtk bunx vitest run src/pages/diagnostics src/pages/StubPages.test.ts
 
 Expected: FAIL because the marker, controls, and More entry are absent.
 
-- [ ] **Step 3: Build the diagnostic page structure**
+- [x] **Step 3: Build the diagnostic page structure**
 
 Create the marker contract:
 
@@ -2391,7 +2391,7 @@ Bind the three root actions with:
 />
 ```
 
-- [ ] **Step 4: Complete the detail page**
+- [x] **Step 4: Complete the detail page**
 
 Render:
 
@@ -2469,7 +2469,7 @@ function simulateResume(): void {
 }
 ```
 
-- [ ] **Step 5: Add the development-only More entry**
+- [x] **Step 5: Add the development-only More entry**
 
 Import `{ config }` and render the entry only with:
 
@@ -2498,7 +2498,7 @@ function openDiagnostics(): void {
 }
 ```
 
-- [ ] **Step 6: Run diagnostic, route, and shell tests**
+- [x] **Step 6: Run diagnostic, route, and shell tests**
 
 Run:
 
@@ -2513,7 +2513,7 @@ rtk bun run test:coverage
 
 Expected: PASS, including the configured 95% mobile line-coverage threshold.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 # workdir: repository root
@@ -2542,7 +2542,7 @@ rtk git commit -m "feat(mobile): add iOS interaction diagnostics"
   - `build:ios:assets`
   - `verify:production-diagnostics`
 
-- [ ] **Step 1: Write failing scanner tests**
+- [x] **Step 1: Write failing scanner tests**
 
 ```js
 // @vitest-environment node
@@ -2580,7 +2580,7 @@ describe('verify-production-diagnostics', () => {
 });
 ```
 
-- [ ] **Step 2: Run the test and verify the scanner module is missing**
+- [x] **Step 2: Run the test and verify the scanner module is missing**
 
 Run:
 
@@ -2591,7 +2591,7 @@ rtk bunx vitest run scripts/verify-production-diagnostics.test.mjs
 
 Expected: FAIL.
 
-- [ ] **Step 3: Implement recursive `.js` scanning and a failing CLI**
+- [x] **Step 3: Implement recursive `.js` scanning and a failing CLI**
 
 The script must:
 
@@ -2622,7 +2622,7 @@ if (import.meta.main) {
 }
 ```
 
-- [ ] **Step 4: Add exact package scripts**
+- [x] **Step 4: Add exact package scripts**
 
 Add:
 
@@ -2631,7 +2631,7 @@ Add:
 "verify:production-diagnostics": "bun run build:ios:assets && bun run scripts/verify-production-diagnostics.mjs"
 ```
 
-- [ ] **Step 5: Run scanner tests**
+- [x] **Step 5: Run scanner tests**
 
 Run:
 
@@ -2642,7 +2642,7 @@ rtk bunx vitest run scripts/verify-production-diagnostics.test.mjs
 
 Expected: PASS.
 
-- [ ] **Step 6: Build the real production Capacitor asset and scan it**
+- [x] **Step 6: Build the real production Capacitor asset and scan it**
 
 This is a local macOS pre-merge gate, not an `ubuntu-latest` CI command.
 Quasar runs `cap sync ios` and CocoaPods before honoring `--skip-pkg`. On
@@ -2655,7 +2655,7 @@ rtk env VITE_MOBILE_API_URL=https://example.invalid/api/ bun run verify:producti
 
 Expected: the Capacitor production build fills `src-capacitor/www`, the scanner checks its emitted JavaScript, and the marker is absent.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 # workdir: repository root
@@ -2680,7 +2680,7 @@ rtk git commit -m "test(mobile): verify diagnostics stay out of production"
 
 - Produces: storyboard-instantiated `App.VelaBridgeViewController` with WKWebView back/forward gestures enabled.
 
-- [ ] **Step 1: Write the failing native contract test**
+- [x] **Step 1: Write the failing native contract test**
 
 ```ts
 import { readFileSync } from 'node:fs';
@@ -2713,7 +2713,7 @@ describe('native interaction bridge contract', () => {
 });
 ```
 
-- [ ] **Step 2: Run the test and verify the missing Swift file fails**
+- [x] **Step 2: Run the test and verify the missing Swift file fails**
 
 Run:
 
@@ -2724,7 +2724,7 @@ rtk bunx vitest run src/ios/native-interaction-contract.test.ts
 
 Expected: FAIL at module load because the Swift file does not exist.
 
-- [ ] **Step 3: Add the Swift subclass**
+- [x] **Step 3: Add the Swift subclass**
 
 ```swift
 import Capacitor
@@ -2737,7 +2737,7 @@ final class VelaBridgeViewController: CAPBridgeViewController {
 }
 ```
 
-- [ ] **Step 4: Update the storyboard module contract**
+- [x] **Step 4: Update the storyboard module contract**
 
 Replace the root view-controller element with:
 
@@ -2745,7 +2745,7 @@ Replace the root view-controller element with:
 <viewController id="BYZ-38-t0r" customClass="VelaBridgeViewController" customModule="App" customModuleProvider="target" sceneMemberID="viewController"/>
 ```
 
-- [ ] **Step 5: Add the Swift file to the Xcode project**
+- [x] **Step 5: Add the Swift file to the Xcode project**
 
 Use these unused stable pbxproj identifiers:
 
@@ -2763,7 +2763,7 @@ A20900012D00000100000001 /* VelaBridgeViewController.swift */ = {isa = PBXFileRe
 
 Add the file reference to the `App` group and the build-file reference to `504EC3001FED79650016851F /* Sources */`.
 
-- [ ] **Step 6: Run the contract test**
+- [x] **Step 6: Run the contract test**
 
 Run:
 
@@ -2774,7 +2774,7 @@ rtk bunx vitest run src/ios/native-interaction-contract.test.ts
 
 Expected: PASS.
 
-- [ ] **Step 7: Build the iOS simulator target**
+- [x] **Step 7: Build the iOS simulator target**
 
 Use XcodeBuildMCP in this order:
 
@@ -2784,7 +2784,7 @@ Use XcodeBuildMCP in this order:
 
 Expected: Swift compilation and storyboard instantiation complete successfully without signing.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 # workdir: repository root
@@ -2809,7 +2809,7 @@ rtk git commit -m "feat(mobile): enable native WebView swipe history"
 - Consumes: all implementation tasks and the exact physical scenarios from the design.
 - Produces: durable simulator/device evidence and reusable shell guidance.
 
-- [ ] **Step 1: Extend the checked-in evidence document**
+- [x] **Step 1: Extend the checked-in evidence document**
 
 Preserve Task 0's safe-area measurements and selected policy. Add these exact
 result rules and matrix columns:
@@ -2865,7 +2865,7 @@ exit/trap behavior.
 
 Do not pre-populate unrun environments with passing results.
 
-- [ ] **Step 2: Update the mobile README**
+- [x] **Step 2: Update the mobile README**
 
 Add:
 
@@ -2882,7 +2882,7 @@ Add:
 - a link to `docs/ios-interaction-baseline.md`;
 - the physical-device completion requirement.
 
-- [ ] **Step 3: Run the complete automated verification**
+- [x] **Step 3: Run the complete automated verification**
 
 Run:
 
@@ -2909,7 +2909,7 @@ rtk bunx cap sync ios
 Expected: both commands exit 0, and the scanner reports no diagnostic marker
 under `src-capacitor/www`.
 
-- [ ] **Step 4: Run simulator validation**
+- [x] **Step 4: Run simulator validation**
 
 Start the development Capacitor build and keep its LAN server running:
 
@@ -2971,7 +2971,7 @@ keyboard. Record `Debug development` and `LAN development server`:
 18. Record any blank frame, unexpected final route, exit, or trap as a
     blocking failure.
 
-- [ ] **Step 7: Run a Release core-shell smoke pass**
+- [x] **Step 7: Run a Release core-shell smoke pass**
 
 Use XcodeBuildMCP in this order:
 
@@ -2991,7 +2991,7 @@ Diagnostics must be absent. Record:
 - build configuration is `Release smoke` and asset source is
   `packaged WebView assets`.
 
-- [ ] **Step 8: Fill the evidence document with observed values**
+- [x] **Step 8: Fill the evidence document with observed values**
 
 Use:
 
@@ -3005,7 +3005,7 @@ Record the actual commit, Xcode version, build configurations, asset sources,
 device models, OS versions, Japanese keyboard layout, orientations, results,
 and reproduction details. Do not infer or copy values from another run.
 
-- [ ] **Step 9: Run final repository verification after documentation**
+- [x] **Step 9: Run final repository verification after documentation**
 
 Run:
 
@@ -3023,7 +3023,7 @@ rtk git status --short
 Expected: tests, the 95% coverage threshold, lint, typecheck, and diff check
 pass; status contains only the intended README/evidence changes.
 
-- [ ] **Step 10: Commit**
+- [x] **Step 10: Commit**
 
 ```bash
 # workdir: repository root

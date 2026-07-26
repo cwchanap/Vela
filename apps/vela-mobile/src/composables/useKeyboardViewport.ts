@@ -106,6 +106,17 @@ export function useKeyboardViewport(options: KeyboardViewportOptions = {}) {
       'keyboardDidHide',
     ];
 
+    // Each addListener call awaits a Capacitor bridge round-trip, so the whole
+    // loop is asynchronous. The mounted check before each await and the
+    // nativeReady gate on every callback defend against two races:
+    //   1. The component unmounts mid-registration — late callbacks would
+    //      mutate reactive state after onUnmounted tore it down, so every
+    //      listener bails out when mounted is false and a handle obtained
+    //      after unmount is removed immediately.
+    //   2. Registration partially succeeds — nativeReady only flips true once
+    //      all three handles are pushed, so callbacks that arrive while
+    //      registration is incomplete are dropped instead of acting on a
+    //      half-registered listener set.
     try {
       for (const eventName of eventNames) {
         if (!mounted) return;
