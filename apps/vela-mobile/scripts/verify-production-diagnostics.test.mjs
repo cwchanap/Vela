@@ -7,13 +7,9 @@ import {
   findDiagnosticTokens,
   findProductionDiagnosticTokens,
 } from './verify-production-diagnostics.mjs';
+import { IOS_INTERACTION_PRODUCTION_FORBIDDEN_TOKENS } from '../src/diagnostics/ios-interaction-contract.ts';
 
-const forbiddenTokens = [
-  'ios-interaction-diagnostics',
-  'iOS Interaction Diagnostics',
-  '/diagnostics/ios-interactions',
-  'ios-interaction-entry',
-];
+const forbiddenTokens = [...IOS_INTERACTION_PRODUCTION_FORBIDDEN_TOKENS];
 
 describe('verify-production-diagnostics', () => {
   it('returns no matches when emitted JavaScript excludes every forbidden token', async () => {
