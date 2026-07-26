@@ -125,3 +125,107 @@ Selected-mode replacement hashes after the page-control fix:
   — `safe-area-never-headerless-landscape-right.png`
 - `b1a55d5420699af4874d154a72127105d850c128`
   — `safe-area-never-header-landscape-right.png`
+
+## Result policy
+
+- Record a row only after running that environment.
+- Put the exact tested commit SHA in every environment row.
+- Record whether the row used Debug development, Release smoke, or production
+  Capacitor assets.
+- Record whether the WebView loaded from the LAN development server or
+  packaged assets.
+- A failure includes reproduction steps and a linked follow-up issue.
+- Physical Japanese IME and WKWebView swipe results are release-blocking.
+
+## Environment matrix
+
+| Environment                                     | Commit                                     | Build configuration | Asset source                                 | Model         | OS       | Xcode         | Japanese keyboard                  | Orientation                                                       | Result                                                                                                                                                                                                                                                                                                                                                                                             |
+| ----------------------------------------------- | ------------------------------------------ | ------------------- | -------------------------------------------- | ------------- | -------- | ------------- | ---------------------------------- | ----------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| iOS Simulator, small-screen keyboard/layout run | `d261de358a54d8ffd41a02e0107c84e5e3d90c2d` | Debug development   | LAN development server (`192.168.1.66:9100`) | iPhone 17e    | iOS 26.5 | 26.6 (17F113) | English (US); Japanese IME not run | Portrait, then landscape left while keyboard remained open        | **PASS for the observed simulator layout checks.** The focused native input remained focused. In landscape, the keyboard-reduced viewport was `844×182`; scrolling placed the 44-point Submit control at `top=138.078125`, `bottom=182.078125`. After blur, the viewport returned to `844×390`, keyboard readout changed to `no`, and one footer returned at `top=314`, `bottom=390`, `height=76`. |
+| iOS Simulator, Dynamic Island development run   | `d261de358a54d8ffd41a02e0107c84e5e3d90c2d` | Debug development   | LAN development server (`192.168.1.66:9100`) | iPhone 17 Pro | iOS 26.5 | 26.6 (17F113) | English (US); not opened           | Portrait; an earlier launch also observed one landscape direction | **PARTIAL.** Home, More, Diagnostics, Detail, and visible back were observed with the Dynamic Island clear of content. Visible back returned to the exact diagnostic root. Two injected native left-edge gesture attempts completed as no-ops on Detail, so native swipe behavior is not marked passing.                                                                                           |
+| iOS Simulator, packaged core-shell run          | `d261de358a54d8ffd41a02e0107c84e5e3d90c2d` | Release smoke       | packaged WebView assets                      | iPhone 17 Pro | iOS 26.5 | 26.6 (17F113) | Not opened                         | Landscape; direction not exposed by the headless capture          | **PARTIAL.** The Release build installed and launched Home with the Production badge; first and last footer tabs were visible inside the tested safe edges. The production artifact scan found no diagnostic marker. More, portrait, and both landscape directions were not all interactively exercised, so the full Release smoke is not marked passing.                                          |
+
+The paired physical inventory contained an available iPhone 15
+(`iPhone15,4`, CoreDevice identifier
+`6D61BD3D-227F-5333-8430-DFF74E0ED65B`). This XcodeBuildMCP session exposed
+simulator workflows only, with no physical-device build or UI interaction
+tools. The physical scenarios were therefore not run, no physical environment
+row was added, and HPA-209 remains release-blocked.
+
+## Japanese IME evidence
+
+The mandatory physical Japanese IME scenario was not run. No draft, committed,
+bound-model, post-render native-input, or submitted value was observed, so
+none is recorded as `日本語`. Completion still requires an iPhone Debug
+development run using the LAN development server and a Japanese Kana keyboard,
+with all five observed values exactly `日本語`.
+
+## Keyboard, safe-area, and orientation evidence
+
+- The small-screen simulator opened the real iOS software keyboard after the
+  live `WKWebView` input was focused. Portrait kept the focused block and
+  Submit visible and hid the footer.
+- The same focused input was rotated to landscape left through
+  `UIWindowScene.requestGeometryUpdate`. The focused block remained present.
+  Submit was below the initial reduced viewport, then became reachable after a
+  real page scroll, with its full 44-point height ending at the viewport edge.
+- Blurring the native input changed the diagnostic keyboard readout from
+  `yes` to `no`; the footer returned once with no stale keyboard gap. The
+  selected inset owner remained native `contentInset: "never"` plus CSS
+  headerless-top ownership.
+- The iPhone 17 Pro portrait capture kept the Dynamic Island above the app
+  content. The earlier Task 0 measurements remain the authoritative
+  portrait/landscape-left/landscape-right safe-area evidence.
+
+## Navigation evidence
+
+- Real DOM control actions produced the chronology
+  Home → More → Diagnostics → Detail on the iPhone 17 Pro simulator.
+- The visible Detail back button returned to the exact Diagnostics root.
+- After re-entering Detail, two XcodeBuildMCP native
+  `swipe-from-left-edge` gestures (default and `190px` over `1.2s`) reported
+  successful input delivery but left the completed route at
+  `#/diagnostics/ios-interactions/detail`. Swipe-forward was not run after
+  that no-op.
+- Detail-to-Home chronology, in-session entry back/forward, resume/no-op,
+  cold entry, twenty Home/Review alternations, blank-frame observation, and
+  exit/trap behavior were not completed on a physical iPhone. Automated tests
+  cover their source contracts, but those source-level change detectors are
+  not substitutes for the required native run.
+- Because the physical WKWebView swipe scenario was not run, no WebKit
+  transition type or physical completion behavior is recorded.
+
+## Automated verification
+
+All commands were run against
+`d261de358a54d8ffd41a02e0107c84e5e3d90c2d`:
+
+- `bun run test:unit`: 27 files, 187 tests passed. The intentional
+  guard-failure test still emits its expected Vue Router warning.
+- `bun run test:coverage`: 27 files, 187 tests passed; line coverage was
+  `97.53%`, above the configured 95% threshold. The same expected warning was
+  emitted.
+- `bun run lint`, `bun run typecheck`, and the SPA production build with
+  `VITE_MOBILE_API_URL=https://example.invalid/api/`: passed.
+- `verify:production-diagnostics`: passed after a real macOS Capacitor build
+  and `cap sync ios`; no diagnostic marker was found under
+  `src-capacitor/www`.
+- Final `bunx cap sync ios`: passed and found `@capacitor/app@7.1.2` and
+  `@capacitor/keyboard@7.0.6`.
+- Debug simulator builds passed on iPhone 17e and iPhone 17 Pro. The Release
+  simulator build passed with eight dependency/build-phase warnings; it was
+  not pristine warning-free output.
+
+## Reusable rules
+
+- Do not validate, normalize, or submit while Japanese composition is active.
+- Hide bottom tabs on keyboard will-show and scroll after keyboard did-show.
+- Follow the Task 0 safe-area policy; Quasar owns fixed top/bottom CSS while
+  page, toolbar, and footer tabs own horizontal insets.
+- Route links, tabs, and validated in-session entry through app-owned
+  chronological `mobileDepth`.
+- Restore saved scroll positions on back and forward.
+- Resume does not navigate without a newly validated entry event.
+- Ordinary pushes and validated in-session entry share
+  visible-back/native-swipe history. Only a fresh cold entry replaces at depth
+  zero and uses its declared header fallback.
