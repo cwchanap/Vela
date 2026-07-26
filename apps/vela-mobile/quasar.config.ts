@@ -15,6 +15,11 @@ export default defineConfig((ctx) => {
     extras: ['material-icons', 'roboto-font'],
 
     build: {
+      alias: {
+        '@capacitor/core': resolve(__dirname, 'src-capacitor/node_modules/@capacitor/core'),
+        '@capacitor/keyboard': resolve(__dirname, 'src-capacitor/node_modules/@capacitor/keyboard'),
+      },
+
       target: {
         browser: ['es2022', 'safari14'],
         node: 'node20',
