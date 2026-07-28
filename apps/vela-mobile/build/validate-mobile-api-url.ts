@@ -8,7 +8,22 @@ type VitePluginLike = {
   config: (config: unknown, env: { mode: string }) => void;
 };
 
-function loadMobileApiUrl(mode: string, rootDir: string): string | undefined {
+const mobileBuildEnvKeys = [
+  'VITE_MOBILE_API_URL',
+  'VITE_COGNITO_USER_POOL_ID',
+  'VITE_COGNITO_MOBILE_USER_POOL_CLIENT_ID',
+  'VITE_COGNITO_OAUTH_DOMAIN',
+  'VITE_AWS_REGION',
+] as const;
+
+type MobileBuildEnvKey = (typeof mobileBuildEnvKeys)[number];
+type MobileBuildEnv = Partial<Record<MobileBuildEnvKey, string>>;
+
+export function loadMobileBuildEnv(
+  mode: string,
+  rootDir: string,
+  processEnv: Record<string, string | undefined> = process.env,
+): MobileBuildEnv {
   const parsed: Record<string, string> = {};
   const envFiles = ['.env', '.env.local', `.env.${mode}`, `.env.${mode}.local`];
 
@@ -19,19 +34,50 @@ function loadMobileApiUrl(mode: string, rootDir: string): string | undefined {
     }
   }
 
-  const processEnv = Object.fromEntries(
-    Object.entries(process.env).filter((entry): entry is [string, string] => entry[1] !== undefined),
+  const expandedProcessEnv = Object.fromEntries(
+    Object.entries(processEnv).filter((entry): entry is [string, string] => entry[1] !== undefined),
   );
-  const expanded = expand({ parsed, processEnv }).parsed ?? {};
+  const expanded = expand({ parsed, processEnv: expandedProcessEnv }).parsed ?? {};
 
   // Match Vite's precedence exactly: an existing process.env key wins even
   // when its value is empty, so validation reports it as missing instead of
   // silently falling back to a lower-precedence .env file.
-  if (Object.prototype.hasOwnProperty.call(process.env, 'VITE_MOBILE_API_URL')) {
-    return process.env.VITE_MOBILE_API_URL;
-  }
+  return Object.fromEntries(
+    mobileBuildEnvKeys.map((key) => [
+      key,
+      Object.prototype.hasOwnProperty.call(processEnv, key) ? processEnv[key] : expanded[key],
+    ]),
+  ) as MobileBuildEnv;
+}
 
-  return expanded.VITE_MOBILE_API_URL;
+function isMissingEnvValue(value: string | undefined): boolean {
+  return !value || value.trim() === '';
+}
+
+function containsWhitespace(value: string): boolean {
+  return /\s/.test(value);
+}
+
+function isValidHostOnlyDomain(value: string): boolean {
+  try {
+    const url = new URL(`https://${value}`);
+    return (
+      url.username === '' &&
+      url.password === '' &&
+      url.port === '' &&
+      url.search === '' &&
+      url.hash === '' &&
+      url.pathname === '/' &&
+      url.hostname.toLowerCase() === value.toLowerCase()
+    );
+  } catch {
+    return false;
+  }
+}
+
+function hasMatchingUserPoolRegion(userPoolId: string, region: string): boolean {
+  const separatorIndex = userPoolId.indexOf('_');
+  return separatorIndex > 0 && userPoolId.slice(0, separatorIndex) === region;
 }
 
 /**
@@ -74,16 +120,11 @@ export function validateMobileApiUrl(
 
   try {
     const parsed = new URL(url);
-    if (
-      (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') ||
-      !parsed.hostname
-    ) {
+    if ((parsed.protocol !== 'http:' && parsed.protocol !== 'https:') || !parsed.hostname) {
       throw new Error('invalid');
     }
     if (options.requireHttps && parsed.protocol === 'http:') {
-      throw new Error(
-        `VITE_MOBILE_API_URL must be https: in production, got: ${url}`,
-      );
+      throw new Error(`VITE_MOBILE_API_URL must be https: in production, got: ${url}`);
     }
   } catch (err) {
     // Re-throw the explicit HTTPS-requirement message verbatim; only wrap
@@ -93,6 +134,47 @@ export function validateMobileApiUrl(
     }
     throw new Error(
       `VITE_MOBILE_API_URL must be a valid absolute http(s) URL with a hostname, got: ${url}`,
+    );
+  }
+}
+
+/**
+ * Validate the full production build contract for mobile OAuth. Keep this in
+ * sync with `src/config/index.ts` so deployment-time mistakes fail before an
+ * iOS bundle is produced rather than at application boot.
+ */
+export function validateMobileBuildEnv(env: MobileBuildEnv): void {
+  validateMobileApiUrl(env.VITE_MOBILE_API_URL, { requireHttps: true });
+
+  const requiredCognitoKeys = mobileBuildEnvKeys.slice(1);
+  for (const key of requiredCognitoKeys) {
+    if (isMissingEnvValue(env[key])) {
+      throw new Error(`Missing required environment variable: ${key}`);
+    }
+  }
+
+  const userPoolId = env.VITE_COGNITO_USER_POOL_ID!;
+  const mobileClientId = env.VITE_COGNITO_MOBILE_USER_POOL_CLIENT_ID!;
+  const oauthDomain = env.VITE_COGNITO_OAUTH_DOMAIN!;
+  const region = env.VITE_AWS_REGION!;
+
+  for (const [key, value] of [
+    ['VITE_COGNITO_USER_POOL_ID', userPoolId],
+    ['VITE_COGNITO_MOBILE_USER_POOL_CLIENT_ID', mobileClientId],
+    ['VITE_AWS_REGION', region],
+  ] as const) {
+    if (containsWhitespace(value)) {
+      throw new Error(`${key} must not contain whitespace`);
+    }
+  }
+
+  if (!isValidHostOnlyDomain(oauthDomain)) {
+    throw new Error('VITE_COGNITO_OAUTH_DOMAIN must be a valid host-only domain');
+  }
+
+  if (!hasMatchingUserPoolRegion(userPoolId, region)) {
+    throw new Error(
+      'VITE_COGNITO_USER_POOL_ID must start with the configured VITE_AWS_REGION followed by an underscore',
     );
   }
 }
@@ -123,10 +205,7 @@ export function validateMobileApiUrlPlugin(rootDir: string): VitePluginLike {
       if (mode !== 'production') return;
       if (process.env.MOBILE_SKIP_ENV_VALIDATION === 'true') return;
 
-      // The plugin only runs in production mode, so require HTTPS to match
-      // the runtime validateConfig() contract. A misconfigured HTTP release
-      // must fail here, not at app boot in a native WebView.
-      validateMobileApiUrl(loadMobileApiUrl(mode, rootDir), { requireHttps: true });
+      validateMobileBuildEnv(loadMobileBuildEnv(mode, rootDir));
     },
   };
 }

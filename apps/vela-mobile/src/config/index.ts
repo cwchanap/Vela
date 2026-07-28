@@ -1,4 +1,5 @@
 import { version as pkgVersion } from '../../package.json';
+import { MOBILE_OAUTH_CALLBACK_URI } from '../auth/mobile-auth-contract';
 
 type ConfigEnv = Record<string, unknown> | null | undefined;
 
@@ -17,6 +18,45 @@ function isValidAbsoluteUrl(value: string): boolean {
   }
 }
 
+function containsWhitespace(value: string): boolean {
+  return /\s/.test(value);
+}
+
+function isValidHostOnlyDomain(value: string): boolean {
+  try {
+    const url = new URL(`https://${value}`);
+    return (
+      url.username === '' &&
+      url.password === '' &&
+      url.port === '' &&
+      url.search === '' &&
+      url.hash === '' &&
+      url.pathname === '/' &&
+      url.hostname.toLowerCase() === value.toLowerCase()
+    );
+  } catch {
+    return false;
+  }
+}
+
+function hasMatchingUserPoolRegion(userPoolId: string, region: string): boolean {
+  const separatorIndex = userPoolId.indexOf('_');
+  return separatorIndex > 0 && userPoolId.slice(0, separatorIndex) === region;
+}
+
+function reportConfigIssue(
+  isProd: boolean,
+  productionMessage: string,
+  developmentMessage: string,
+): void {
+  if (isProd) {
+    console.error(productionMessage);
+    throw new Error(productionMessage);
+  }
+
+  console.warn(developmentMessage);
+}
+
 export const config = {
   app: {
     name: import.meta.env.VITE_APP_NAME || 'Vela',
@@ -26,6 +66,13 @@ export const config = {
   },
   api: {
     url: import.meta.env.VITE_MOBILE_API_URL || '',
+  },
+  auth: {
+    userPoolId: import.meta.env.VITE_COGNITO_USER_POOL_ID || '',
+    mobileClientId: import.meta.env.VITE_COGNITO_MOBILE_USER_POOL_CLIENT_ID || '',
+    oauthDomain: import.meta.env.VITE_COGNITO_OAUTH_DOMAIN || '',
+    region: import.meta.env.VITE_AWS_REGION || '',
+    callbackUri: MOBILE_OAUTH_CALLBACK_URI,
   },
 } as const;
 
@@ -37,26 +84,22 @@ export const validateConfig = (env?: ConfigEnv): boolean => {
     return true;
   }
 
-  const apiUrl = resolvedEnv.VITE_MOBILE_API_URL;
   const isProd = resolvedEnv.PROD === true;
+  const apiUrl = resolvedEnv.VITE_MOBILE_API_URL;
 
   if (isMissingEnvValue(apiUrl)) {
     const msg = 'Missing required environment variable: VITE_MOBILE_API_URL';
-    if (isProd) {
-      console.error(msg);
-      throw new Error(msg);
-    }
-    console.warn('VITE_MOBILE_API_URL not set — API calls will fail until configured.');
+    reportConfigIssue(
+      isProd,
+      msg,
+      'VITE_MOBILE_API_URL not set — API calls will fail until configured.',
+    );
     return true;
   }
 
   if (typeof apiUrl === 'string' && !isValidAbsoluteUrl(apiUrl)) {
     const msg = `VITE_MOBILE_API_URL must be a valid absolute http(s) URL, got: ${apiUrl}`;
-    if (isProd) {
-      console.error(msg);
-      throw new Error(msg);
-    }
-    console.warn(`VITE_MOBILE_API_URL is not a valid absolute URL: ${apiUrl}`);
+    reportConfigIssue(isProd, msg, `VITE_MOBILE_API_URL is not a valid absolute URL: ${apiUrl}`);
     return true;
   }
 
@@ -68,6 +111,51 @@ export const validateConfig = (env?: ConfigEnv): boolean => {
     const msg = `VITE_MOBILE_API_URL must be https: in production, got: ${apiUrl}`;
     console.error(msg);
     throw new Error(msg);
+  }
+
+  const requiredCognitoKeys = [
+    'VITE_COGNITO_USER_POOL_ID',
+    'VITE_COGNITO_MOBILE_USER_POOL_CLIENT_ID',
+    'VITE_COGNITO_OAUTH_DOMAIN',
+    'VITE_AWS_REGION',
+  ] as const;
+
+  for (const key of requiredCognitoKeys) {
+    if (isMissingEnvValue(resolvedEnv[key])) {
+      const message = `Missing required environment variable: ${key}`;
+      reportConfigIssue(isProd, message, `${key} not set — mobile OAuth sign-in is unavailable.`);
+      return true;
+    }
+  }
+
+  const userPoolId = resolvedEnv.VITE_COGNITO_USER_POOL_ID as string;
+  const mobileClientId = resolvedEnv.VITE_COGNITO_MOBILE_USER_POOL_CLIENT_ID as string;
+  const oauthDomain = resolvedEnv.VITE_COGNITO_OAUTH_DOMAIN as string;
+  const region = resolvedEnv.VITE_AWS_REGION as string;
+
+  for (const [key, value] of [
+    ['VITE_COGNITO_USER_POOL_ID', userPoolId],
+    ['VITE_COGNITO_MOBILE_USER_POOL_CLIENT_ID', mobileClientId],
+    ['VITE_AWS_REGION', region],
+  ] as const) {
+    if (containsWhitespace(value)) {
+      const message = `${key} must not contain whitespace`;
+      reportConfigIssue(isProd, message, message);
+      return true;
+    }
+  }
+
+  if (!isValidHostOnlyDomain(oauthDomain)) {
+    const message = 'VITE_COGNITO_OAUTH_DOMAIN must be a valid host-only domain';
+    reportConfigIssue(isProd, message, message);
+    return true;
+  }
+
+  if (!hasMatchingUserPoolRegion(userPoolId, region)) {
+    const message =
+      'VITE_COGNITO_USER_POOL_ID must start with the configured VITE_AWS_REGION followed by an underscore';
+    reportConfigIssue(isProd, message, message);
+    return true;
   }
 
   return true;
