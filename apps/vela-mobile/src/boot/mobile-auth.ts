@@ -13,7 +13,14 @@ export default defineBoot(({ app }) => {
     browser: Browser,
     transactionStore: createOAuthTransactionStore(Preferences, Date.now),
     tokenTransport: {
-      request: (options) => CapacitorHttp.request(options),
+      request: (options) => {
+        const { timeoutMs, ...httpOptions } = options;
+        return CapacitorHttp.request(
+          timeoutMs === undefined
+            ? httpOptions
+            : { ...httpOptions, connectTimeout: timeoutMs, readTimeout: timeoutMs },
+        );
+      },
     },
     crypto: window.crypto,
     isSecureContext: window.isSecureContext,

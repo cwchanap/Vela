@@ -194,8 +194,9 @@ export function buildTokenRequest(
   config: MobileOAuthConfig,
   transaction: OAuthTransaction,
   code: string,
+  options: { timeoutMs?: number } = {},
 ): MobileTokenRequest {
-  return {
+  const request: MobileTokenRequest = {
     url: `https://${config.oauthDomain}/oauth2/token`,
     method: 'POST',
     headers: {
@@ -209,6 +210,10 @@ export function buildTokenRequest(
       code_verifier: transaction.codeVerifier,
     }).toString(),
   };
+  if (options.timeoutMs !== undefined) {
+    request.timeoutMs = options.timeoutMs;
+  }
+  return request;
 }
 
 export function parseTokenResponse(value: unknown, now: number): OAuthTokenBundle {

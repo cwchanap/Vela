@@ -143,6 +143,9 @@ const primaryAction = ref<HTMLButtonElement | null>(null);
 const errorHeading = ref<HTMLHeadingElement | null>(null);
 const landingErrorHeading = ref<HTMLHeadingElement | null>(null);
 let landingAttempt = 0;
+// Single source for the gate surface colors. Applied via `:style` below; the
+// scoped `.mobile-auth-gate` rule intentionally omits `background`/`color` so
+// the literals live in one place and the contrast test reads this surface.
 const gateSurfaceStyle = {
   backgroundColor: '#f7f7fb',
   color: '#1f2030',
@@ -353,8 +356,6 @@ async function retrySessionVerification(): Promise<void> {
   place-items: center;
   padding: max(1.5rem, env(safe-area-inset-top)) max(1.5rem, env(safe-area-inset-right))
     max(1.5rem, env(safe-area-inset-bottom)) max(1.5rem, env(safe-area-inset-left));
-  background: #f7f7fb;
-  color: #1f2030;
 }
 
 .mobile-auth-gate__panel {
