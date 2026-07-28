@@ -114,12 +114,24 @@ function main(): void {
     VITE_API_URL: '/api/',
   } as const;
 
+  const mobileEnvVars = {
+    VITE_MOBILE_API_URL: mobileApiUrl,
+    VITE_COGNITO_USER_POOL_ID: outputs.CognitoUserPoolId,
+    VITE_COGNITO_MOBILE_USER_POOL_CLIENT_ID: outputs.CognitoMobileUserPoolClientId,
+    VITE_COGNITO_OAUTH_DOMAIN: cognitoOAuthDomain,
+    VITE_AWS_REGION: awsRegion,
+  } as const;
+
   if (!envVars.VITE_COGNITO_USER_POOL_ID) {
     throw new Error('Missing CognitoUserPoolId in CloudFormation outputs');
   }
 
   if (!envVars.VITE_COGNITO_USER_POOL_CLIENT_ID) {
     throw new Error('Missing CognitoUserPoolClientId in CloudFormation outputs');
+  }
+
+  if (!mobileEnvVars.VITE_COGNITO_MOBILE_USER_POOL_CLIENT_ID) {
+    throw new Error('Missing CognitoMobileUserPoolClientId in CloudFormation outputs');
   }
 
   if (!envVars.VITE_COGNITO_OAUTH_DOMAIN) {
@@ -154,7 +166,7 @@ function main(): void {
   const mobileEnvDir = path.dirname(mobileEnvFilePath);
   fs.mkdirSync(mobileEnvDir, { recursive: true });
 
-  const mobileLines = [`VITE_MOBILE_API_URL=${mobileApiUrl}`];
+  const mobileLines = Object.entries(mobileEnvVars).map(([key, value]) => `${key}=${value}`);
   const mobileContent = `${mobileLines.join('\n')}\n`;
 
   try {
