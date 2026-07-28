@@ -53,8 +53,13 @@ export default defineConfig({
       boot: resolve(__dirname, './src/boot'),
       '#q-app/wrappers': resolve(__dirname, './src/test/mocks/q-app-wrappers.ts'),
       '@capacitor/app': resolve(__dirname, './src-capacitor/node_modules/@capacitor/app'),
+      '@capacitor/browser': resolve(__dirname, './src-capacitor/node_modules/@capacitor/browser'),
       '@capacitor/core': resolve(__dirname, './src-capacitor/node_modules/@capacitor/core'),
       '@capacitor/keyboard': resolve(__dirname, './src-capacitor/node_modules/@capacitor/keyboard'),
+      '@capacitor/preferences': resolve(
+        __dirname,
+        './src-capacitor/node_modules/@capacitor/preferences',
+      ),
     },
   },
 });
