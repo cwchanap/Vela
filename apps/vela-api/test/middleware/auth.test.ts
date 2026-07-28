@@ -1,4 +1,4 @@
-import { describe, test, expect, beforeEach, mock } from 'bun:test';
+import { describe, test, expect, beforeEach, afterEach, mock } from 'bun:test';
 import { Hono } from 'hono';
 import type { AuthContext } from '../../src/middleware/auth';
 
@@ -65,7 +65,7 @@ describe('requireAuth middleware', () => {
     mockCreate.mockClear();
     const { restore } = suppressConsoleLog();
     try {
-      initializeAuthVerifier('us-east-1_test', 'test-client-id');
+      initializeAuthVerifier('us-east-1_test', 'test-client-id', 'mobile-client-id');
     } finally {
       restore();
     }
@@ -165,13 +165,146 @@ describe('requireAuth middleware', () => {
 });
 
 describe('initializeAuthVerifier', () => {
+  const originalNodeEnv = process.env.NODE_ENV;
+
+  beforeEach(() => {
+    mockVerify.mockClear();
+    mockCreate.mockClear();
+  });
+
+  afterEach(() => {
+    if (originalNodeEnv === undefined) {
+      delete process.env.NODE_ENV;
+    } else {
+      process.env.NODE_ENV = originalNodeEnv;
+    }
+  });
+
   test('does not throw with valid config', () => {
     const { restore } = suppressConsoleLog();
     try {
-      expect(() => initializeAuthVerifier('us-east-1_test', 'client-id')).not.toThrow();
+      expect(() =>
+        initializeAuthVerifier('us-east-1_test', 'client-id', 'mobile-client-id'),
+      ).not.toThrow();
     } finally {
       restore();
     }
+  });
+
+  test('configures one verifier for both web and mobile audiences', () => {
+    const { restore } = suppressConsoleLog();
+    try {
+      initializeAuthVerifier('us-east-1_test', 'web-client-id', 'mobile-client-id');
+    } finally {
+      restore();
+    }
+
+    expect(mockCreate).toHaveBeenLastCalledWith({
+      userPoolId: 'us-east-1_test',
+      tokenUse: 'id',
+      clientId: ['web-client-id', 'mobile-client-id'],
+    });
+  });
+
+  test('configures the web audience and emits one safe warning when mobile is absent', () => {
+    const warning = suppressConsoleWarn();
+    const logging = suppressConsoleLog();
+    try {
+      initializeAuthVerifier('us-east-1_test', 'web-client-id');
+    } finally {
+      logging.restore();
+      warning.restore();
+    }
+
+    expect(mockCreate).toHaveBeenLastCalledWith({
+      userPoolId: 'us-east-1_test',
+      tokenUse: 'id',
+      clientId: 'web-client-id',
+    });
+    expect(warning.messages).toEqual([
+      'Mobile Cognito client ID missing. Mobile authenticated requests will be rejected.',
+    ]);
+  });
+
+  test('verifies protected requests after either audience configuration path', async () => {
+    const logging = suppressConsoleLog();
+    const warning = suppressConsoleWarn();
+    try {
+      for (const mobileClientId of ['mobile-client-id', undefined]) {
+        initializeAuthVerifier('us-east-1_test', 'web-client-id', mobileClientId);
+        const res = await createTestApp().request('/test', {
+          headers: { Authorization: 'Bearer valid-token' },
+        });
+        expect(res.status).toBe(200);
+      }
+    } finally {
+      warning.restore();
+      logging.restore();
+    }
+
+    expect(mockVerify).toHaveBeenCalledTimes(2);
+  });
+
+  test('never logs verifier error objects or secret-bearing fields in production', async () => {
+    process.env.NODE_ENV = 'production';
+    const secretError = {
+      name: 'JwtInvalidClaimError_SECRET_NAME',
+      message: 'SECRET_MESSAGE',
+      rawJwt: 'SECRET_RAW_JWT',
+      claims: {
+        sub: 'SECRET_SUB',
+        email: 'SECRET_EMAIL',
+      },
+    };
+    mockVerify.mockImplementationOnce(() => Promise.reject(secretError));
+    const captured = suppressConsoleError();
+
+    try {
+      const res = await createTestApp().request('/test', {
+        headers: { Authorization: 'Bearer SECRET_REQUEST_TOKEN' },
+      });
+      expect(res.status).toBe(401);
+    } finally {
+      captured.restore();
+    }
+
+    expect(captured.messages).toEqual([['Token verification failed']]);
+    expect(captured.messages.flat()).not.toContain(secretError);
+    const serializedLogs = JSON.stringify(captured.messages);
+    for (const sentinel of [
+      'SECRET_NAME',
+      'SECRET_MESSAGE',
+      'SECRET_RAW_JWT',
+      'SECRET_SUB',
+      'SECRET_EMAIL',
+      'SECRET_REQUEST_TOKEN',
+    ]) {
+      expect(serializedLogs).not.toContain(sentinel);
+    }
+  });
+
+  test('logs only a bounded sanitized verifier error name in development', async () => {
+    process.env.NODE_ENV = 'development';
+    mockVerify.mockImplementationOnce(() =>
+      Promise.reject({
+        name: 'JwtInvalidClaimError',
+        message: 'SECRET_MESSAGE',
+        rawJwt: 'SECRET_RAW_JWT',
+      }),
+    );
+    const captured = suppressConsoleError();
+
+    try {
+      const res = await createTestApp().request('/test', {
+        headers: { Authorization: 'Bearer SECRET_REQUEST_TOKEN' },
+      });
+      expect(res.status).toBe(401);
+    } finally {
+      captured.restore();
+    }
+
+    expect(captured.messages).toEqual([['Token verification failed', 'JwtInvalidClaimError']]);
+    expect(JSON.stringify(captured.messages)).not.toContain('SECRET_');
   });
 
   test('warns and returns without throwing when userPoolId is missing', () => {

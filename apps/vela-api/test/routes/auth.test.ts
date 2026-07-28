@@ -237,6 +237,41 @@ describe('Auth Route', () => {
   });
 
   describe('POST /refresh - client ID configuration', () => {
+    test('uses only the web client ID when a different mobile client ID is configured', async () => {
+      await withTempEnv(
+        {
+          COGNITO_CLIENT_ID: 'web-client-id',
+          COGNITO_MOBILE_CLIENT_ID: 'mobile-client-id',
+          VITE_COGNITO_USER_POOL_CLIENT_ID: 'legacy-web-client-id',
+        },
+        async () => {
+          mockCognitoSend.mockResolvedValueOnce({
+            AuthenticationResult: {
+              AccessToken: 'new-access-token',
+              IdToken: 'new-id-token',
+            },
+          });
+          const app = createTestApp({ VITE_COGNITO_USER_POOL_ID: 'us-east-1_test123' });
+
+          const res = await app.request('/refresh', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ refreshToken: 'old-refresh-token' }),
+          });
+
+          expect(res.status).toBe(200);
+          expect(mockCognitoSend).toHaveBeenCalledWith({
+            __type: 'InitiateAuthCommand',
+            AuthFlow: 'REFRESH_TOKEN_AUTH',
+            ClientId: 'web-client-id',
+            AuthParameters: {
+              REFRESH_TOKEN: 'old-refresh-token',
+            },
+          });
+        },
+      );
+    });
+
     test('returns 500 when Cognito client ID is not configured for refresh', async () => {
       await withTempEnv(
         { COGNITO_CLIENT_ID: undefined, VITE_COGNITO_USER_POOL_CLIENT_ID: undefined },

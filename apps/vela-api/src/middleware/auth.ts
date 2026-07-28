@@ -10,7 +10,7 @@ export type AuthContext = {
 };
 
 // Create verifier for Cognito ID tokens
-const createVerifier = (userPoolId: string, clientId: string) => {
+const createVerifier = (userPoolId: string, clientId: string | string[]) => {
   return CognitoJwtVerifier.create({
     userPoolId,
     tokenUse: 'id',
@@ -23,13 +23,37 @@ let verifier: ReturnType<typeof createVerifier> | null = null;
 /**
  * Initialize the JWT verifier with Cognito configuration
  */
-export function initializeAuthVerifier(userPoolId: string, clientId: string) {
-  if (!userPoolId || !clientId) {
+export function initializeAuthVerifier(
+  userPoolId: string,
+  webClientId: string,
+  mobileClientId?: string,
+): void {
+  if (!userPoolId || !webClientId) {
     console.warn('⚠️ Cognito configuration missing. Auth middleware will reject all requests.');
     return;
   }
-  verifier = createVerifier(userPoolId, clientId);
+  if (!mobileClientId) {
+    console.warn(
+      'Mobile Cognito client ID missing. Mobile authenticated requests will be rejected.',
+    );
+  }
+  verifier = createVerifier(
+    userPoolId,
+    mobileClientId ? [webClientId, mobileClientId] : webClientId,
+  );
   console.log('✅ Auth verifier initialized');
+}
+
+function safeVerificationErrorName(error: unknown): string {
+  try {
+    const name =
+      typeof error === 'object' && error !== null ? (error as { name?: unknown }).name : undefined;
+    return typeof name === 'string' && /^[A-Za-z][A-Za-z0-9]{0,63}$/.test(name)
+      ? name
+      : 'UnknownVerificationError';
+  } catch {
+    return 'UnknownVerificationError';
+  }
 }
 
 /**
@@ -51,7 +75,11 @@ async function getUserClaimsFromToken(
       userEmail: typeof payload.email === 'string' ? payload.email : null,
     };
   } catch (error) {
-    console.error('Token verification failed:', error);
+    if (process.env.NODE_ENV === 'development') {
+      console.error('Token verification failed', safeVerificationErrorName(error));
+    } else {
+      console.error('Token verification failed');
+    }
     return null;
   }
 }

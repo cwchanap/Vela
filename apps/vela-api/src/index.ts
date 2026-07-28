@@ -17,7 +17,7 @@ import { buildEnv } from './env';
 import { readFileSync, existsSync } from 'fs';
 import { resolve } from 'path';
 import { Context, Next } from 'hono';
-import { initializeAuthVerifier } from './middleware/auth';
+import { initializeAuthFromEnv } from './auth-initialization';
 import { corsMiddleware } from './middleware/cors';
 
 const app = new Hono<{ Bindings: Env }>();
@@ -55,15 +55,8 @@ if (process.env.NODE_ENV === 'development') {
 // Build env once and reuse
 const appEnv = buildEnv();
 
-// Initialize auth verifier using values from appEnv for consistency
-const userPoolId = appEnv.VITE_COGNITO_USER_POOL_ID;
-const clientId = appEnv.COGNITO_CLIENT_ID;
-
-if (userPoolId && clientId) {
-  initializeAuthVerifier(userPoolId, clientId);
-} else {
-  console.warn('⚠️ Cognito configuration missing. Authentication will fail for protected routes.');
-}
+// Initialize auth verifier using values from appEnv for consistency.
+initializeAuthFromEnv(appEnv);
 
 if (process.env.NODE_ENV === 'development') {
   console.log('Environment variables loaded:', {
@@ -73,6 +66,7 @@ if (process.env.NODE_ENV === 'development') {
       ? 'present'
       : 'missing',
     COGNITO_CLIENT_ID: appEnv.COGNITO_CLIENT_ID ? 'present' : 'missing',
+    COGNITO_MOBILE_CLIENT_ID: appEnv.COGNITO_MOBILE_CLIENT_ID ? 'present' : 'missing',
     AWS_ACCESS_KEY_ID: appEnv.AWS_ACCESS_KEY_ID ? 'present' : 'missing',
     DDB_ENDPOINT: appEnv.DDB_ENDPOINT ? appEnv.DDB_ENDPOINT : 'not set',
     DDB_TABLE: appEnv.DDB_TABLE ? appEnv.DDB_TABLE : 'not set',

@@ -82,6 +82,7 @@ export class ApiStack extends Stack {
         VITE_COGNITO_USER_POOL_ID: auth.userPool.userPoolId,
         VITE_COGNITO_USER_POOL_CLIENT_ID: auth.userPoolClient.userPoolClientId,
         COGNITO_CLIENT_ID: auth.userPoolClient.userPoolClientId,
+        COGNITO_MOBILE_CLIENT_ID: auth.mobileUserPoolClient.userPoolClientId,
         DDB_REGION: Stack.of(this).region,
         CORS_ALLOWED_ORIGINS: corsAllowedOrigins,
         ...(corsAllowedExtensionIds ? { CORS_ALLOWED_EXTENSION_IDS: corsAllowedExtensionIds } : {}),

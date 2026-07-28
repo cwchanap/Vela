@@ -7,6 +7,7 @@ export interface Env {
   AWS_REGION?: string;
   VITE_COGNITO_USER_POOL_ID?: string;
   COGNITO_CLIENT_ID?: string;
+  COGNITO_MOBILE_CLIENT_ID?: string;
 
   // Aurora DSQL configuration
   AURORA_DB_CLUSTER_ARN?: string;

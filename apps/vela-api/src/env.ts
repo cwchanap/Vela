@@ -18,6 +18,7 @@ export function buildEnv(): Env {
     COGNITO_CLIENT_ID:
       process.env.COGNITO_CLIENT_ID ||
       (isDev ? process.env.VITE_COGNITO_USER_POOL_CLIENT_ID : undefined),
+    COGNITO_MOBILE_CLIENT_ID: process.env.COGNITO_MOBILE_CLIENT_ID,
     TTS_AUDIO_BUCKET_NAME: process.env.TTS_AUDIO_BUCKET_NAME,
     ELEVENLABS_API_KEY: process.env.ELEVENLABS_API_KEY,
     GOOGLE_API_KEY: process.env.GOOGLE_API_KEY,
