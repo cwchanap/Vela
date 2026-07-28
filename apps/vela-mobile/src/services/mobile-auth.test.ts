@@ -87,6 +87,7 @@ class FakePreferences implements OAuthTransactionPreferences {
   value: string | null = null;
   readonly calls: string[] = [];
   setGate: Promise<void> | undefined;
+  removeGate: Promise<void> | undefined;
   getFailure: unknown;
   setFailure: unknown;
   removeFailure: unknown;
@@ -114,6 +115,7 @@ class FakePreferences implements OAuthTransactionPreferences {
   async remove({ key }: { key: string }): Promise<void> {
     expect(key).toBe(MOBILE_OAUTH_TRANSACTION_KEY);
     this.calls.push('preferences:remove');
+    await this.removeGate;
     if (this.removeFailure) {
       throw this.removeFailure;
     }
@@ -445,6 +447,22 @@ describe('mobile auth initialization', () => {
     });
   });
 
+  it('rejects a whitespace-bearing user pool before registering native listeners', async () => {
+    const harness = makeHarness({
+      authConfig: { ...config, userPoolId: 'us-east-1_example value' },
+      isDevelopment: true,
+    });
+
+    await harness.coordinator.initialize();
+
+    expect(harness.order).toEqual([]);
+    expect(harness.preferences.calls).toEqual([]);
+    expect(harness.coordinator.state).toMatchObject({
+      phase: 'error',
+      errorCode: 'configuration_error',
+    });
+  });
+
   it('surfaces malformed URL configuration without registering native listeners', async () => {
     const harness = makeHarness({
       authConfig: { ...config, apiUrl: 'not a URL' },
@@ -721,6 +739,7 @@ describe('callback completion and cleanup', () => {
     async (_name, value, errorCode) => {
       const harness = makeHarness();
       await harness.coordinator.initialize();
+      await harness.coordinator.startSignIn();
       harness.preferences.value = value;
 
       await harness.coordinator.completeCallback(callback(activeTransaction));
@@ -791,6 +810,7 @@ describe('callback completion and cleanup', () => {
   it('maps transaction-load failure safely without exchanging the code', async () => {
     const harness = makeHarness();
     await harness.coordinator.initialize();
+    await harness.coordinator.startSignIn();
     harness.preferences.getFailure = new Error('SECRET-preferences-get');
 
     await harness.coordinator.completeCallback(callback(activeTransaction));
@@ -850,6 +870,84 @@ describe('callback completion and cleanup', () => {
 
     expect(harness.tokenTransport.requests).toHaveLength(1);
     expect(harness.coordinator.state.phase).toBe('authenticated');
+  });
+
+  it('preserves a terminal provider error when the callback is delivered twice', async () => {
+    const cleanup = deferred<void>();
+    const harness = makeHarness();
+    await harness.persist(activeTransaction);
+    await harness.coordinator.initialize();
+    harness.preferences.calls.length = 0;
+    harness.preferences.removeGate = cleanup.promise;
+    const providerError = `${MOBILE_OAUTH_CALLBACK_URI}?error=server_error&state=${activeTransaction.state}`;
+
+    const completing = harness.coordinator.completeCallback(providerError);
+    await vi.waitFor(() => expect(harness.preferences.calls).toContain('preferences:remove'));
+
+    expect(harness.coordinator.state).toMatchObject({
+      phase: 'error',
+      errorCode: 'provider_error',
+    });
+
+    cleanup.resolve();
+    await completing;
+    await harness.coordinator.completeCallback(providerError);
+
+    expect(harness.browser.closeCalls).toBe(1);
+    expect(harness.tokenTransport.requests).toHaveLength(0);
+    expect(harness.coordinator.state).toMatchObject({
+      phase: 'error',
+      errorCode: 'provider_error',
+    });
+  });
+
+  it('ignores a late callback after cancellation even when transaction removal fails', async () => {
+    const harness = makeHarness();
+    await harness.coordinator.initialize();
+    await harness.coordinator.startSignIn();
+    const transaction = harness.preferences.transaction();
+    harness.prepareSuccessfulExchange(transaction);
+    harness.preferences.removeFailure = new Error('SECRET-preferences-remove');
+
+    harness.browser.finish();
+    await harness.flush();
+    expect(harness.coordinator.state).toMatchObject({
+      phase: 'error',
+      errorCode: 'cancelled',
+    });
+
+    await harness.coordinator.completeCallback(callback(transaction));
+
+    expect(harness.tokenTransport.requests).toHaveLength(0);
+    expect(harness.coordinator.state).toMatchObject({
+      phase: 'error',
+      errorCode: 'cancelled',
+    });
+  });
+
+  it('marks a cleanup-failed exchange terminal before a duplicate callback', async () => {
+    const harness = makeHarness();
+    await harness.persist(activeTransaction);
+    harness.prepareSuccessfulExchange(activeTransaction);
+    await harness.coordinator.initialize();
+    harness.preferences.removeFailure = new Error('SECRET-preferences-remove');
+
+    await harness.coordinator.completeCallback(callback(activeTransaction));
+
+    expect(harness.tokenTransport.requests).toHaveLength(1);
+    expect(harness.coordinator.state).toMatchObject({
+      phase: 'error',
+      errorCode: 'code_exchange_failed',
+    });
+
+    await harness.coordinator.completeCallback(callback(activeTransaction));
+
+    expect(harness.tokenTransport.requests).toHaveLength(1);
+    expect(harness.sessionFetch).not.toHaveBeenCalled();
+    expect(harness.coordinator.state).toMatchObject({
+      phase: 'error',
+      errorCode: 'code_exchange_failed',
+    });
   });
 
   it('ignores a duplicate callback while retaining a retryable verified token bundle', async () => {

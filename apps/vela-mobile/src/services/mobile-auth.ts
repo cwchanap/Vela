@@ -71,6 +71,7 @@ function hasValidConfig(config: MobileOAuthConfig): boolean {
       oauthUrl.search === '' &&
       oauthUrl.hash === '' &&
       config.userPoolId.startsWith(`${config.region}_`) &&
+      !/\s/u.test(config.userPoolId) &&
       !/\s/u.test(config.mobileClientId) &&
       !/\s/u.test(config.region)
     );
@@ -171,8 +172,8 @@ export function createMobileAuthCoordinator(
 
   async function failCallback(errorCode: MobileAuthErrorCode): Promise<void> {
     tokenBundle = undefined;
-    await clearTransaction();
     setError(errorCode);
+    await clearTransaction();
   }
 
   async function closeBrowser(): Promise<void> {
@@ -234,7 +235,13 @@ export function createMobileAuthCoordinator(
   }
 
   async function completeCallbackUnlocked(rawUrl: string): Promise<void> {
-    if (disposed || state.phase === 'authenticated' || tokenBundle) {
+    const isActiveCallbackPhase =
+      state.phase === 'initializing' ||
+      state.phase === 'openingBrowser' ||
+      state.phase === 'awaitingCallback' ||
+      (state.phase === 'error' && state.errorCode === 'interrupted');
+
+    if (disposed || !initialized || tokenBundle || !isActiveCallbackPhase) {
       return;
     }
 
@@ -429,8 +436,8 @@ export function createMobileAuthCoordinator(
       return;
     }
 
-    await clearTransaction();
     setError('cancelled');
+    await clearTransaction();
     if (dependencies.isDevelopment ?? import.meta.env.DEV) {
       console.info('browser_closed_before_callback');
     }
