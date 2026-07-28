@@ -11,3 +11,30 @@ export type MobileOAuthConfig = {
   region: string;
   callbackUri: typeof MOBILE_OAUTH_CALLBACK_URI;
 };
+
+export type OAuthTransaction = {
+  state: string;
+  codeVerifier: string;
+  nonce: string;
+  createdAt: number;
+};
+
+export type OAuthTokenBundle = {
+  accessToken: string;
+  idToken: string;
+  refreshToken?: string;
+  expiresAt: number;
+};
+
+export type ParsedOAuthCallback =
+  | { kind: 'unrelated' }
+  | { kind: 'success'; code: string; state: string }
+  | { kind: 'providerError'; error: 'access_denied' | 'other'; state: string }
+  | { kind: 'malformed' };
+
+export type MobileTokenRequest = {
+  url: string;
+  method: 'POST';
+  headers: { 'Content-Type': 'application/x-www-form-urlencoded' };
+  data: string;
+};
