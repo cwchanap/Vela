@@ -1,23 +1,88 @@
-import { describe, it, expect } from 'vitest';
-import { mount } from '@vue/test-utils';
-import { defineComponent } from 'vue';
+import { flushPromises, mount } from '@vue/test-utils';
+import { defineComponent, nextTick, onMounted, reactive } from 'vue';
 import { createRouter, createMemoryHistory } from 'vue-router';
+import { describe, expect, it, vi } from 'vitest';
+import type { MobileAuthCoordinator, MobileAuthState } from './auth/mobile-auth-contract';
+import { MOBILE_AUTH_KEY } from './services/mobile-auth';
 import App from './App.vue';
 
-const mountApp = async () => {
-  const Routed = defineComponent({ template: '<div data-test="routed">routed</div>' });
-  const router = createRouter({
-    history: createMemoryHistory(),
-    routes: [{ path: '/', component: Routed }],
+function deferred() {
+  let resolve!: () => void;
+  const promise = new Promise<void>((resolvePromise) => {
+    resolve = resolvePromise;
   });
-  await router.push('/');
-  await router.isReady();
-  return mount(App, { global: { plugins: [router] } });
-};
+  return { promise, resolve };
+}
 
 describe('App', () => {
-  it('renders the matched route via router-view', async () => {
-    const wrapper = await mountApp();
-    expect(wrapper.find('[data-test="routed"]').exists()).toBe(true);
+  it('keeps route components unmounted until verified auth lands on home', async () => {
+    const mountedRoutes: string[] = [];
+    const routedComponent = (label: string) =>
+      defineComponent({
+        setup() {
+          onMounted(() => mountedRoutes.push(label));
+          return { label };
+        },
+        template: '<div :data-testid="`${label}-route`">{{ label }}</div>',
+      });
+
+    const Home = routedComponent('home');
+    const Review = routedComponent('review');
+    const state = reactive<MobileAuthState>({
+      phase: 'signedOut',
+      errorCode: null,
+      user: null,
+    });
+    const coordinator: MobileAuthCoordinator = {
+      state,
+      initialize: vi.fn().mockResolvedValue(undefined),
+      startSignIn: vi.fn().mockResolvedValue(undefined),
+      completeCallback: vi.fn().mockResolvedValue(undefined),
+      retrySessionVerification: vi.fn().mockResolvedValue(undefined),
+      dispose: vi.fn().mockResolvedValue(undefined),
+    };
+    const landing = deferred();
+    const router = createRouter({
+      history: createMemoryHistory(),
+      routes: [
+        { path: '/', component: Home },
+        { path: '/review', component: Review },
+      ],
+    });
+    await router.push('/review');
+    await router.isReady();
+    const originalReplace = router.replace.bind(router);
+    vi.spyOn(router, 'replace').mockImplementation(async (to) => {
+      await landing.promise;
+      return originalReplace(to);
+    });
+
+    const wrapper = mount(App, {
+      global: {
+        plugins: [router],
+        provide: {
+          [MOBILE_AUTH_KEY as symbol]: coordinator,
+        },
+      },
+    });
+
+    expect(mountedRoutes).toEqual([]);
+    expect(wrapper.find('[data-testid$="-route"]').exists()).toBe(false);
+
+    state.phase = 'authenticated';
+    state.user = { userId: 'user-1', email: null };
+    await nextTick();
+
+    expect(router.replace).toHaveBeenCalledWith('/');
+    expect(mountedRoutes).toEqual([]);
+
+    landing.resolve();
+    await flushPromises();
+    await nextTick();
+
+    expect(router.currentRoute.value.fullPath).toBe('/');
+    expect(mountedRoutes).toEqual(['home']);
+    expect(wrapper.find('[data-testid="review-route"]').exists()).toBe(false);
+    expect(wrapper.get('[data-testid="home-route"]').text()).toBe('home');
   });
 });
