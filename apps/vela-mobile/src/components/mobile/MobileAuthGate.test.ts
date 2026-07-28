@@ -45,6 +45,31 @@ function deferred<T>(): Deferred<T> {
   return { promise, resolve, reject };
 }
 
+function parseRgb(value: string): [number, number, number] {
+  const channels = value
+    .match(/\d+(?:\.\d+)?/gu)
+    ?.slice(0, 3)
+    .map(Number);
+  if (!channels || channels.length !== 3) {
+    throw new Error(`Expected an RGB color, received ${value}`);
+  }
+  return channels as [number, number, number];
+}
+
+function relativeLuminance([red, green, blue]: [number, number, number]): number {
+  const channel = (value: number) => {
+    const normalized = value / 255;
+    return normalized <= 0.04045 ? normalized / 12.92 : ((normalized + 0.055) / 1.055) ** 2.4;
+  };
+  return 0.2126 * channel(red) + 0.7152 * channel(green) + 0.0722 * channel(blue);
+}
+
+function contrastRatio(first: [number, number, number], second: [number, number, number]): number {
+  const brighter = Math.max(relativeLuminance(first), relativeLuminance(second));
+  const darker = Math.min(relativeLuminance(first), relativeLuminance(second));
+  return (brighter + 0.05) / (darker + 0.05);
+}
+
 function createFakeCoordinator(
   initial: Partial<MobileAuthState> = {},
   overrides: Partial<MobileAuthCoordinator> = {},
@@ -192,9 +217,10 @@ describe('MobileAuthGate', () => {
   it('keeps content closed until the authenticated home replacement settles', async () => {
     const landing = deferred<void>();
     const { state, router, wrapper } = await mountGate({ phase: 'signedOut' });
-    const replace = vi.spyOn(router, 'replace').mockImplementation(async () => {
+    const originalReplace = router.replace.bind(router);
+    const replace = vi.spyOn(router, 'replace').mockImplementation(async (target) => {
       await landing.promise;
-      return undefined;
+      return originalReplace(target);
     });
 
     state.phase = 'authenticated';
@@ -209,6 +235,92 @@ describe('MobileAuthGate', () => {
     await nextTick();
 
     expect(wrapper.get('[data-testid="protected-slot"]').text()).toBe('Protected content');
+  });
+
+  it('keeps the old route closed after an aborted home replacement and recovers on retry', async () => {
+    let abortHome = true;
+    const { state, router, wrapper } = await mountGate({ phase: 'signedOut' }, { path: '/review' });
+    const removeGuard = router.beforeEach((to) => {
+      if (to.path === '/' && abortHome) {
+        return false;
+      }
+    });
+
+    state.phase = 'authenticated';
+    state.user = { userId: 'user-1', email: null };
+    await flushPromises();
+    await nextTick();
+
+    expect(router.currentRoute.value.fullPath).toBe('/review');
+    expect(wrapper.find('[data-testid="protected-slot"]').exists()).toBe(false);
+    expect(wrapper.get('[role="alert"]').text()).toContain('could not open your home');
+
+    abortHome = false;
+    await wrapper.get('button').trigger('click');
+    await flushPromises();
+    await nextTick();
+
+    expect(router.currentRoute.value.fullPath).toBe('/');
+    expect(wrapper.find('[data-testid="protected-slot"]').exists()).toBe(true);
+    removeGuard();
+  });
+
+  it('keeps the competing route closed after a cancelled home replacement and recovers on retry', async () => {
+    const pendingHomeGuard = deferred<void>();
+    let holdHome = true;
+    const { state, router, wrapper } = await mountGate({ phase: 'signedOut' }, { path: '/review' });
+    const removeGuard = router.beforeEach(async (to) => {
+      if (to.path === '/' && holdHome) {
+        await pendingHomeGuard.promise;
+      }
+    });
+
+    state.phase = 'authenticated';
+    state.user = { userId: 'user-1', email: null };
+    await nextTick();
+    await router.push('/diagnostics-without-bypass');
+    pendingHomeGuard.resolve();
+    await flushPromises();
+    await nextTick();
+
+    expect(router.currentRoute.value.fullPath).toBe('/diagnostics-without-bypass');
+    expect(wrapper.find('[data-testid="protected-slot"]').exists()).toBe(false);
+    expect(wrapper.get('[role="alert"]').text()).toContain('could not open your home');
+
+    holdHome = false;
+    await wrapper.get('button').trigger('click');
+    await flushPromises();
+    await nextTick();
+
+    expect(router.currentRoute.value.fullPath).toBe('/');
+    expect(wrapper.find('[data-testid="protected-slot"]').exists()).toBe(true);
+    removeGuard();
+  });
+
+  it('keeps the old route closed after a rejected home replacement without rendering raw errors', async () => {
+    const { state, router, wrapper } = await mountGate({ phase: 'signedOut' }, { path: '/review' });
+    const originalReplace = router.replace.bind(router);
+    vi.spyOn(router, 'replace')
+      .mockRejectedValueOnce(new Error('SECRET navigation failure'))
+      .mockImplementation(originalReplace);
+
+    state.phase = 'authenticated';
+    state.user = { userId: 'user-1', email: null };
+    await flushPromises();
+    await nextTick();
+
+    const alert = wrapper.get('[role="alert"]');
+    expect(alert.text()).toContain('could not open your home');
+    expect(alert.text()).not.toContain('SECRET');
+    expect(router.currentRoute.value.fullPath).toBe('/review');
+    expect(wrapper.find('[data-testid="protected-slot"]').exists()).toBe(false);
+
+    await wrapper.get('button').trigger('click');
+    await flushPromises();
+    await nextTick();
+
+    expect(router.currentRoute.value.fullPath).toBe('/');
+    expect(wrapper.find('[data-testid="protected-slot"]').exists()).toBe(true);
   });
 
   it('renders authenticated content only after replacing the active route with home', async () => {
@@ -317,5 +429,22 @@ describe('MobileAuthGate', () => {
       { path: '/diagnostics-without-bypass' },
     );
     expect(wrapper.find('[data-testid="protected-slot"]').exists()).toBe(false);
+  });
+
+  it('keeps gate copy at enhanced contrast even when Quasar dark tokens are both dark', async () => {
+    const host = document.createElement('div');
+    host.style.setProperty('--q-dark', '#1d1d1d');
+    host.style.setProperty('--q-dark-page', '#121212');
+    document.body.append(host);
+
+    try {
+      const { wrapper } = await mountGate({ phase: 'signedOut' }, { attachTo: host });
+      const styles = getComputedStyle(wrapper.get('.mobile-auth-gate').element);
+      const ratio = contrastRatio(parseRgb(styles.color), parseRgb(styles.backgroundColor));
+
+      expect(ratio).toBeGreaterThanOrEqual(7);
+    } finally {
+      host.remove();
+    }
   });
 });

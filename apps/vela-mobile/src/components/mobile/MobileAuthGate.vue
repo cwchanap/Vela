@@ -17,7 +17,7 @@ export function shouldBypassMobileAuth(
 
 <script setup lang="ts">
 import { computed, inject, nextTick, ref, watch } from 'vue';
-import { useRoute, useRouter } from 'vue-router';
+import { isNavigationFailure, NavigationFailureType, useRoute, useRouter } from 'vue-router';
 import type { MobileAuthErrorCode, MobileAuthPhase } from '../../auth/mobile-auth-contract';
 import { MOBILE_AUTH_KEY } from '../../services/mobile-auth';
 
@@ -120,6 +120,12 @@ const FOCUS_RETURN_PHASES = new Set<MobileAuthPhase>([
   'verifyingSession',
 ]);
 
+const LANDING_NAVIGATION_ERROR = {
+  heading: 'Vela could not open your home',
+  message: 'Your session is verified, but the app could not finish opening the home screen.',
+  actionLabel: 'Retry opening Vela',
+} as const;
+
 const providedCoordinator = inject(MOBILE_AUTH_KEY);
 if (!providedCoordinator) {
   throw new Error('Mobile auth coordinator was not provided');
@@ -131,16 +137,23 @@ const router = useRouter();
 const state = coordinator.state;
 const actionPending = ref(false);
 const authenticatedLandingReady = ref(false);
+const landingNavigationFailed = ref(false);
+const landingNavigationPending = ref(false);
 const primaryAction = ref<HTMLButtonElement | null>(null);
 const errorHeading = ref<HTMLHeadingElement | null>(null);
+const landingErrorHeading = ref<HTMLHeadingElement | null>(null);
 let landingAttempt = 0;
+const gateSurfaceStyle = {
+  backgroundColor: '#f7f7fb',
+  color: '#1f2030',
+} as const;
 
 const diagnosticBypass = computed(() =>
   shouldBypassMobileAuth(import.meta.env.DEV, route.meta.bypassMobileAuth === true, state),
 );
 const contentVisible = computed(() => authenticatedLandingReady.value || diagnosticBypass.value);
 const progressCopy = computed(() => {
-  if (state.phase === 'authenticated' && !authenticatedLandingReady.value) {
+  if (state.phase === 'authenticated' && landingNavigationPending.value) {
     return 'Opening Vela…';
   }
   return PROGRESS_COPY[state.phase] ?? null;
@@ -149,26 +162,67 @@ const errorPresentation = computed(() =>
   state.errorCode ? ERROR_PRESENTATIONS[state.errorCode] : null,
 );
 
+async function showLandingNavigationFailure(attempt: number): Promise<void> {
+  if (attempt !== landingAttempt || state.phase !== 'authenticated') {
+    return;
+  }
+
+  landingNavigationPending.value = false;
+  landingNavigationFailed.value = true;
+  await nextTick();
+  landingErrorHeading.value?.focus();
+}
+
+async function attemptLandingNavigation(): Promise<void> {
+  if (state.phase !== 'authenticated' || landingNavigationPending.value) {
+    return;
+  }
+
+  const attempt = ++landingAttempt;
+  authenticatedLandingReady.value = false;
+  landingNavigationFailed.value = false;
+  landingNavigationPending.value = true;
+
+  let result: Awaited<ReturnType<typeof router.replace>>;
+  try {
+    result = await router.replace('/');
+  } catch {
+    await showLandingNavigationFailure(attempt);
+    return;
+  }
+
+  if (attempt !== landingAttempt || state.phase !== 'authenticated') {
+    return;
+  }
+
+  const duplicatedAtHome =
+    isNavigationFailure(result, NavigationFailureType.duplicated) &&
+    router.currentRoute.value.fullPath === '/';
+  const reachedHomeWithoutFailure =
+    !isNavigationFailure(result) && router.currentRoute.value.fullPath === '/';
+
+  landingNavigationPending.value = false;
+  if (!duplicatedAtHome && !reachedHomeWithoutFailure) {
+    await showLandingNavigationFailure(attempt);
+    return;
+  }
+
+  landingNavigationFailed.value = false;
+  authenticatedLandingReady.value = true;
+}
+
 watch(
   () => state.phase,
   async (phase) => {
     if (phase !== 'authenticated') {
       landingAttempt += 1;
       authenticatedLandingReady.value = false;
+      landingNavigationFailed.value = false;
+      landingNavigationPending.value = false;
       return;
     }
 
-    const attempt = ++landingAttempt;
-    authenticatedLandingReady.value = false;
-    try {
-      await router.replace('/');
-    } catch {
-      return;
-    }
-
-    if (attempt === landingAttempt && state.phase === 'authenticated') {
-      authenticatedLandingReady.value = true;
-    }
+    await attemptLandingNavigation();
   },
   { immediate: true },
 );
@@ -228,10 +282,29 @@ async function retrySessionVerification(): Promise<void> {
 <template>
   <slot v-if="contentVisible" />
 
-  <main v-else class="mobile-auth-gate">
+  <main v-else class="mobile-auth-gate" :style="gateSurfaceStyle">
     <section v-if="progressCopy" class="mobile-auth-gate__panel" role="status" aria-live="polite">
       <h1>Vela</h1>
       <p>{{ progressCopy }}</p>
+    </section>
+
+    <section
+      v-else-if="state.phase === 'authenticated' && landingNavigationFailed"
+      class="mobile-auth-gate__panel"
+      role="alert"
+    >
+      <h1 ref="landingErrorHeading" data-testid="landing-error-heading" tabindex="-1">
+        {{ LANDING_NAVIGATION_ERROR.heading }}
+      </h1>
+      <p>{{ LANDING_NAVIGATION_ERROR.message }}</p>
+      <button
+        ref="primaryAction"
+        type="button"
+        :disabled="landingNavigationPending"
+        @click="attemptLandingNavigation"
+      >
+        {{ LANDING_NAVIGATION_ERROR.actionLabel }}
+      </button>
     </section>
 
     <section v-else-if="state.phase === 'signedOut'" class="mobile-auth-gate__panel">
@@ -280,8 +353,8 @@ async function retrySessionVerification(): Promise<void> {
   place-items: center;
   padding: max(1.5rem, env(safe-area-inset-top)) max(1.5rem, env(safe-area-inset-right))
     max(1.5rem, env(safe-area-inset-bottom)) max(1.5rem, env(safe-area-inset-left));
-  background: var(--q-dark-page, #f7f7fb);
-  color: var(--q-dark, #1f2030);
+  background: #f7f7fb;
+  color: #1f2030;
 }
 
 .mobile-auth-gate__panel {
