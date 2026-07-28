@@ -103,6 +103,56 @@ describe('OAuth transaction store', () => {
     expect(preferences.value).toBeNull();
   });
 
+  it.each([
+    [
+      'id token',
+      '{"state":"state-value","codeVerifier":"verifier-value","nonce":"nonce-value","createdAt":999999,"idToken":"secret"}',
+    ],
+    [
+      'access token',
+      '{"state":"state-value","codeVerifier":"verifier-value","nonce":"nonce-value","createdAt":999999,"accessToken":"secret"}',
+    ],
+    [
+      'authorization code',
+      '{"state":"state-value","codeVerifier":"verifier-value","nonce":"nonce-value","createdAt":999999,"code":"secret"}',
+    ],
+    [
+      'prototype-shaped property',
+      '{"state":"state-value","codeVerifier":"verifier-value","nonce":"nonce-value","createdAt":999999,"__proto__":{"idToken":"secret"}}',
+    ],
+  ])('clears an entry with an extra %s', async (_description, persisted) => {
+    const preferences = new FakePreferences();
+    preferences.value = persisted;
+
+    await expect(createOAuthTransactionStore(preferences, () => now).load()).resolves.toEqual({
+      kind: 'corrupt',
+    });
+    expect(preferences.value).toBeNull();
+  });
+
+  it('rejects transaction fields inherited from Object.prototype', async () => {
+    Object.defineProperties(Object.prototype, {
+      state: { configurable: true, value: transaction.state },
+      codeVerifier: { configurable: true, value: transaction.codeVerifier },
+      nonce: { configurable: true, value: transaction.nonce },
+      createdAt: { configurable: true, value: transaction.createdAt },
+    });
+    const preferences = new FakePreferences();
+    preferences.value = '{}';
+
+    try {
+      await expect(createOAuthTransactionStore(preferences, () => now).load()).resolves.toEqual({
+        kind: 'corrupt',
+      });
+      expect(preferences.value).toBeNull();
+    } finally {
+      delete (Object.prototype as Record<string, unknown>).state;
+      delete (Object.prototype as Record<string, unknown>).codeVerifier;
+      delete (Object.prototype as Record<string, unknown>).nonce;
+      delete (Object.prototype as Record<string, unknown>).createdAt;
+    }
+  });
+
   it('clears a transaction exactly at the TTL boundary and reports it as expired', async () => {
     const preferences = new FakePreferences();
     preferences.value = storedTransaction({ createdAt: now - MOBILE_OAUTH_TRANSACTION_TTL_MS });

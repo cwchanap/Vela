@@ -30,6 +30,18 @@ function isNonEmptyString(value: unknown): value is string {
   return typeof value === 'string' && value.length > 0;
 }
 
+function hasExactTransactionSchema(value: Record<string, unknown>): boolean {
+  const keys = Object.keys(value);
+  return (
+    keys.length === 4 &&
+    keys.every((key) => ['state', 'codeVerifier', 'nonce', 'createdAt'].includes(key)) &&
+    Object.hasOwn(value, 'state') &&
+    Object.hasOwn(value, 'codeVerifier') &&
+    Object.hasOwn(value, 'nonce') &&
+    Object.hasOwn(value, 'createdAt')
+  );
+}
+
 function parseTransaction(value: string, now: number): LoadedOAuthTransaction {
   let parsed: unknown;
   try {
@@ -40,6 +52,7 @@ function parseTransaction(value: string, now: number): LoadedOAuthTransaction {
 
   if (
     !isRecord(parsed) ||
+    !hasExactTransactionSchema(parsed) ||
     !isNonEmptyString(parsed.state) ||
     !isNonEmptyString(parsed.codeVerifier) ||
     !isNonEmptyString(parsed.nonce) ||
