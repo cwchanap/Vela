@@ -38,3 +38,68 @@ export type MobileTokenRequest = {
   headers: { 'Content-Type': 'application/x-www-form-urlencoded' };
   data: string;
 };
+
+export type MobileAuthPhase =
+  | 'initializing'
+  | 'signedOut'
+  | 'openingBrowser'
+  | 'awaitingCallback'
+  | 'exchangingCode'
+  | 'verifyingSession'
+  | 'authenticated'
+  | 'error';
+
+export type MobileAuthErrorCode =
+  | 'configuration_error'
+  | 'browser_launch_failed'
+  | 'cancelled'
+  | 'interrupted'
+  | 'transaction_expired'
+  | 'malformed_callback'
+  | 'state_mismatch'
+  | 'provider_error'
+  | 'code_exchange_failed'
+  | 'token_validation_failed'
+  | 'session_unauthorized'
+  | 'session_verification_failed';
+
+export type MobileAuthUser = {
+  userId: string;
+  email: string | null;
+};
+
+export type MobileAuthState = {
+  phase: MobileAuthPhase;
+  errorCode: MobileAuthErrorCode | null;
+  user: MobileAuthUser | null;
+};
+
+export type MobileAppAdapter = {
+  addListener(
+    eventName: 'appUrlOpen',
+    listener: (event: { url: string }) => void,
+  ): Promise<{ remove(): Promise<void> }>;
+  getLaunchUrl(): Promise<{ url: string } | undefined>;
+};
+
+export type MobileBrowserAdapter = {
+  addListener(
+    eventName: 'browserFinished',
+    listener: () => void,
+  ): Promise<{ remove(): Promise<void> }>;
+  open(options: { url: string }): Promise<void>;
+  close(): Promise<void>;
+};
+
+export type MobileTokenTransportAdapter = {
+  request(options: MobileTokenRequest): Promise<{ status: number; data: unknown }>;
+};
+
+export type MobileAuthCoordinator = {
+  state: Readonly<MobileAuthState>;
+  initialize(): Promise<void>;
+  startSignIn(): Promise<void>;
+  completeCallback(url: string): Promise<void>;
+  retrySessionVerification(): Promise<void>;
+  dispose(): Promise<void>;
+};
