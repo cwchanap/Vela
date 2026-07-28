@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, test } from 'vitest';
+import { MOBILE_OAUTH_CALLBACK_URI } from '../auth/mobile-auth-contract';
 
 // The Xcode project wires the build configurations to separate plists:
 //   Debug   → Info-Debug.plist (carries the NSAppTransportSecurity exception
@@ -116,9 +117,10 @@ function describeSharedPlistAssertions(label: string, path: string, content: str
       ).toBe(true);
     });
 
-    test('registers the dev.cwchanap.vela.oauth custom URL scheme', () => {
+    test('registers the custom URL scheme used by the OAuth callback URI', () => {
       const schemes = extractSchemes(content);
-      expect(schemes).toContain('dev.cwchanap.vela.oauth');
+      const callbackScheme = new URL(MOBILE_OAUTH_CALLBACK_URI).protocol.replace(/:$/u, '');
+      expect(schemes).toContain(callbackScheme);
     });
 
     test('CFBundleURLTypes entry declares CFBundleURLName and CFBundleTypeRole', () => {
