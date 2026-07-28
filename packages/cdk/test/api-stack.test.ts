@@ -1,6 +1,6 @@
 import { App } from 'aws-cdk-lib';
 import { Match, Template } from 'aws-cdk-lib/assertions';
-import { afterEach, beforeEach, describe, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { ApiStack } from '../lib/api-stack';
 import { AuthStack } from '../lib/auth-stack';
 import { DatabaseStack } from '../lib/database-stack';
@@ -165,5 +165,20 @@ describe('ApiStack', () => {
         }),
       },
     });
+  });
+
+  test('passes distinct web and mobile Cognito client IDs to the Lambda', () => {
+    const template = synthesizeTemplate();
+    const functions = template.findResources('AWS::Lambda::Function');
+    const lambda = Object.values(functions).find(
+      (resource) => resource.Properties?.FunctionName === 'vela-api',
+    );
+    const variables = lambda?.Properties?.Environment?.Variables;
+    const webClientId = variables?.COGNITO_CLIENT_ID;
+    const mobileClientId = variables?.COGNITO_MOBILE_CLIENT_ID;
+
+    expect(Object.keys(webClientId ?? {})).toEqual(['Fn::ImportValue']);
+    expect(Object.keys(mobileClientId ?? {})).toEqual(['Fn::ImportValue']);
+    expect(mobileClientId).not.toEqual(webClientId);
   });
 });

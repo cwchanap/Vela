@@ -1,4 +1,4 @@
-import { describe, test, expect, afterEach } from 'bun:test';
+import { describe, test, expect, afterEach, vi } from 'bun:test';
 import { buildEnv } from '../src/env';
 
 describe('buildEnv', () => {
@@ -57,5 +57,29 @@ describe('buildEnv', () => {
     const env = buildEnv();
 
     expect(env.CORS_ALLOWED_ORIGINS).toBeUndefined();
+  });
+
+  test('returns the dedicated mobile Cognito client ID', () => {
+    process.env.COGNITO_MOBILE_CLIENT_ID = 'mobile-client-id';
+
+    const env = buildEnv();
+
+    expect(env.COGNITO_MOBILE_CLIENT_ID).toBe('mobile-client-id');
+  });
+
+  test('passes web and optional mobile client IDs separately to auth initialization', async () => {
+    const { initializeAuthFromEnv } = await import('../src/auth-initialization');
+    const initialize = vi.fn();
+
+    initializeAuthFromEnv(
+      {
+        VITE_COGNITO_USER_POOL_ID: 'us-east-1_test',
+        COGNITO_CLIENT_ID: 'web-client-id',
+        COGNITO_MOBILE_CLIENT_ID: 'mobile-client-id',
+      },
+      initialize,
+    );
+
+    expect(initialize).toHaveBeenCalledWith('us-east-1_test', 'web-client-id', 'mobile-client-id');
   });
 });
