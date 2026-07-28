@@ -20,6 +20,7 @@ export const developmentDiagnosticRoutes: RouteRecordRaw[] = import.meta.env.DEV
         name: 'iosInteractionDiagnostics',
         component: () => import('pages/diagnostics/IosInteractionDiagnosticsPage.vue'),
         meta: {
+          bypassMobileAuth: true,
           mobileHeader: {
             title: IOS_INTERACTION_DIAGNOSTICS_LABEL,
             fallback: '/more',
@@ -31,6 +32,7 @@ export const developmentDiagnosticRoutes: RouteRecordRaw[] = import.meta.env.DEV
         name: 'ios-interaction-detail',
         component: () => import('pages/diagnostics/IosInteractionDetailPage.vue'),
         meta: {
+          bypassMobileAuth: true,
           mobileHeader: {
             title: 'Navigation Detail',
             fallback: IOS_DIAGNOSTIC_ROOT_PATH,
