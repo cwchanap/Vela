@@ -406,6 +406,33 @@ describe('mobile auth initialization', () => {
     expect(harness.coordinator.state.phase).toBe('authenticated');
   });
 
+  it.each([
+    ['mismatched-state', `${MOBILE_OAUTH_CALLBACK_URI}?code=authorization-code&state=WRONG-state`],
+    // Multiple `code` params parse as `malformed` — same scheme/path as a
+    // real callback, so it is not `unrelated`, but structurally invalid.
+    ['malformed-callback', `${MOBILE_OAUTH_CALLBACK_URI}?code=one&code=two&state=SECRET-state`],
+  ] as const)(
+    'falls through to resumeStoredTransaction when a cold-launch %s is ignored',
+    async (_name, launchUrlString) => {
+      const harness = makeHarness();
+      await harness.persist(activeTransaction);
+      harness.app.launchUrl = { url: launchUrlString };
+
+      await harness.coordinator.initialize();
+
+      // The ignored callback must not strand the coordinator in
+      // `initializing`. resumeStoredTransactionUnlocked runs and
+      // surfaces the interrupted transaction so the user can retry.
+      expect(harness.coordinator.state).toMatchObject({
+        phase: 'error',
+        errorCode: 'interrupted',
+      });
+      expect(harness.tokenTransport.requests).toHaveLength(0);
+      // The stored transaction is preserved for a late warm callback.
+      expect(harness.preferences.value).not.toBeNull();
+    },
+  );
+
   it('ignores unexpected warm URLs without changing state', async () => {
     const harness = makeHarness();
     await harness.coordinator.initialize();

@@ -280,7 +280,7 @@ export function createMobileAuthCoordinator(
     }
   }
 
-  async function completeCallbackUnlocked(rawUrl: string): Promise<void> {
+  async function completeCallbackUnlocked(rawUrl: string): Promise<boolean> {
     const isActiveCallbackPhase =
       state.phase === 'initializing' ||
       state.phase === 'openingBrowser' ||
@@ -288,12 +288,12 @@ export function createMobileAuthCoordinator(
       (state.phase === 'error' && state.errorCode === 'interrupted');
 
     if (disposed || !initialized || tokenBundle || !isActiveCallbackPhase) {
-      return;
+      return false;
     }
 
     const parsed = parseOAuthCallback(rawUrl);
     if (parsed.kind === 'unrelated') {
-      return;
+      return false;
     }
 
     // Load the transaction and validate the callback state before closing the
@@ -311,29 +311,32 @@ export function createMobileAuthCoordinator(
       setPhase('exchangingCode');
       await closeBrowser();
       await failCallback('interrupted');
-      return;
+      return true;
     }
 
     if (loaded.kind === 'missing' || loaded.kind === 'corrupt') {
       setPhase('exchangingCode');
       await closeBrowser();
       await failCallback(parsed.kind === 'malformed' ? 'malformed_callback' : 'interrupted');
-      return;
+      return true;
     }
     if (loaded.kind === 'expired') {
       setPhase('exchangingCode');
       await closeBrowser();
       await failCallback('transaction_expired');
-      return;
+      return true;
     }
 
     const { transaction } = loaded;
 
     // The callback belongs to an older or unsolicited flow — ignore it
     // without touching the phase, browser, or stored transaction so the
-    // current sign-in remains viable for the legitimate callback.
+    // current sign-in remains viable for the legitimate callback. Report
+    // that the URL was not consumed so the cold-launch path can fall
+    // through to resumeStoredTransactionUnlocked rather than stranding
+    // the coordinator in `initializing`.
     if (parsed.kind === 'malformed' || parsed.state !== transaction.state) {
-      return;
+      return false;
     }
 
     setPhase('exchangingCode');
@@ -341,7 +344,7 @@ export function createMobileAuthCoordinator(
 
     if (parsed.kind === 'providerError') {
       await failCallback(parsed.error === 'access_denied' ? 'cancelled' : 'provider_error');
-      return;
+      return true;
     }
 
     let bundle: OAuthTokenBundle;
@@ -357,7 +360,7 @@ export function createMobileAuthCoordinator(
       bundle = parseTokenResponse(parseTransportData(response.data), dependencies.now());
     } catch {
       await failCallback('code_exchange_failed');
-      return;
+      return true;
     }
 
     try {
@@ -368,7 +371,7 @@ export function createMobileAuthCoordinator(
       });
     } catch {
       await failCallback('token_validation_failed');
-      return;
+      return true;
     }
 
     tokenBundle = bundle;
@@ -377,10 +380,11 @@ export function createMobileAuthCoordinator(
     } catch {
       tokenBundle = undefined;
       setError('code_exchange_failed');
-      return;
+      return true;
     }
 
     await verifySessionUnlocked();
+    return true;
   }
 
   async function resumeStoredTransactionUnlocked(): Promise<void> {
@@ -428,8 +432,15 @@ export function createMobileAuthCoordinator(
       });
       const launchUrl = await dependencies.app.getLaunchUrl();
       if (launchUrl && parseOAuthCallback(launchUrl.url).kind !== 'unrelated') {
-        await completeCallbackUnlocked(launchUrl.url);
-        return;
+        const consumed = await completeCallbackUnlocked(launchUrl.url);
+        if (consumed) {
+          return;
+        }
+        // The callback was ignored (malformed or state mismatch) to
+        // preserve an in-flight transaction. Fall through to
+        // resumeStoredTransactionUnlocked so the coordinator leaves the
+        // `initializing` phase instead of stranding the user with no
+        // retry action.
       }
     } catch {
       await removeListener(appUrlHandle);
@@ -536,7 +547,7 @@ export function createMobileAuthCoordinator(
     state: publicState,
     initialize: () => serialize(initializeUnlocked),
     startSignIn: () => serialize(startSignInUnlocked),
-    completeCallback: (url) => serialize(() => completeCallbackUnlocked(url)),
+    completeCallback: (url) => serialize(() => completeCallbackUnlocked(url).then(() => undefined)),
     retrySessionVerification: () => serialize(retrySessionVerificationUnlocked),
     dispose: () => serialize(disposeUnlocked),
   };
