@@ -683,7 +683,8 @@ describe('starting and cancelling sign-in', () => {
 
     expect(harness.preferences.value).toBeNull();
     expect(harness.coordinator.state).toMatchObject({ phase: 'error', errorCode: 'cancelled' });
-    expect(info).toHaveBeenCalledWith('browser_closed_before_callback');
+    expect(info).toHaveBeenCalledWith(expect.stringContaining('browser_closed_before_callback'));
+    expect(info.mock.calls[0]?.[0]).toMatch(/verify the deployed.*client ID.*redirect URI/i);
     expect(info.mock.calls.flat().join(' ')).not.toMatch(/vela\.auth|oauth|SECRET|mobile-client/u);
     info.mockRestore();
   });
