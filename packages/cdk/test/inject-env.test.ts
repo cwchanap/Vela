@@ -41,6 +41,7 @@ describe('inject-env', () => {
   const BASE_OUTPUTS = [
     { OutputKey: 'CognitoUserPoolId', OutputValue: 'us-east-1_testPool' },
     { OutputKey: 'CognitoUserPoolClientId', OutputValue: 'test-client-id' },
+    { OutputKey: 'CognitoMobileUserPoolClientId', OutputValue: 'test-mobile-client-id' },
     { OutputKey: 'CognitoRegion', OutputValue: 'us-east-1' },
     { OutputKey: 'WebsiteOrigin', OutputValue: 'https://vela.cwchanap.dev' },
     { OutputKey: 'MobileApiURL', OutputValue: 'https://vela.cwchanap.dev/api/' },
@@ -94,9 +95,16 @@ describe('inject-env', () => {
     const envFile = fs.readFileSync(path.join(tempRoot, 'apps', 'vela', '.env.production'), 'utf8');
     expect(envFile).toContain('VITE_COGNITO_OAUTH_DOMAIN=custom.auth.us-east-1.amazoncognito.com');
     expect(envFile).not.toContain('different-prefix');
+    const mobileEnv = fs.readFileSync(
+      path.join(tempRoot, 'apps', 'vela-mobile', '.env.production'),
+      'utf8',
+    );
+    expect(mobileEnv).toContain(
+      'VITE_COGNITO_OAUTH_DOMAIN=custom.auth.us-east-1.amazoncognito.com',
+    );
   });
 
-  test('generates apps/vela-mobile/.env.production with absolute VITE_MOBILE_API_URL from MobileApiURL output', () => {
+  test('generates the complete mobile OAuth environment from CloudFormation outputs', () => {
     writeOutputs(BASE_OUTPUTS);
 
     const result = runInjectEnv();
@@ -105,8 +113,65 @@ describe('inject-env', () => {
     const mobileEnvPath = path.join(tempRoot, 'apps', 'vela-mobile', '.env.production');
     expect(fs.existsSync(mobileEnvPath)).toBe(true);
     const mobileEnv = fs.readFileSync(mobileEnvPath, 'utf8');
-    expect(mobileEnv).toContain('VITE_MOBILE_API_URL=https://vela.cwchanap.dev/api/');
-    expect(mobileEnv).not.toContain('VITE_MOBILE_API_URL=/api/');
+    expect(mobileEnv).toBe(
+      [
+        'VITE_MOBILE_API_URL=https://vela.cwchanap.dev/api/',
+        'VITE_COGNITO_USER_POOL_ID=us-east-1_testPool',
+        'VITE_COGNITO_MOBILE_USER_POOL_CLIENT_ID=test-mobile-client-id',
+        'VITE_COGNITO_OAUTH_DOMAIN=vela-cwchanap-auth.auth.us-east-1.amazoncognito.com',
+        'VITE_AWS_REGION=us-east-1',
+        '',
+      ].join('\n'),
+    );
+  });
+
+  test('rejects a missing mobile client output before writing either environment file', () => {
+    writeOutputs(
+      BASE_OUTPUTS.filter(({ OutputKey }) => OutputKey !== 'CognitoMobileUserPoolClientId'),
+    );
+
+    const result = runInjectEnv();
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain('Missing CognitoMobileUserPoolClientId');
+    expect(fs.existsSync(path.join(tempRoot, 'apps', 'vela', '.env.production'))).toBe(false);
+    expect(fs.existsSync(path.join(tempRoot, 'apps', 'vela-mobile', '.env.production'))).toBe(
+      false,
+    );
+  });
+
+  test.each([
+    ['VITE_AWS_REGION', { VITE_AWS_REGION: 'us-west-2', AWS_REGION: undefined }, 'us-west-2'],
+    ['CognitoRegion', { VITE_AWS_REGION: undefined, AWS_REGION: 'us-west-2' }, 'us-east-1'],
+    ['AWS_REGION', { VITE_AWS_REGION: undefined, AWS_REGION: 'us-west-2' }, 'us-west-2'],
+  ])('uses %s in the existing region precedence', (_source, env, expectedRegion) => {
+    const outputs =
+      _source === 'CognitoRegion'
+        ? BASE_OUTPUTS
+        : BASE_OUTPUTS.filter(({ OutputKey }) => OutputKey !== 'CognitoRegion');
+    writeOutputs(outputs);
+
+    const result = runInjectEnv(env);
+
+    expect(result.status).toBe(0);
+    const mobileEnv = fs.readFileSync(
+      path.join(tempRoot, 'apps', 'vela-mobile', '.env.production'),
+      'utf8',
+    );
+    expect(mobileEnv).toContain(`VITE_AWS_REGION=${expectedRegion}`);
+  });
+
+  test('uses us-east-1 when no region source is configured', () => {
+    writeOutputs(BASE_OUTPUTS.filter(({ OutputKey }) => OutputKey !== 'CognitoRegion'));
+
+    const result = runInjectEnv({ VITE_AWS_REGION: undefined, AWS_REGION: undefined });
+
+    expect(result.status).toBe(0);
+    const mobileEnv = fs.readFileSync(
+      path.join(tempRoot, 'apps', 'vela-mobile', '.env.production'),
+      'utf8',
+    );
+    expect(mobileEnv).toContain('VITE_AWS_REGION=us-east-1');
   });
 
   test('routes mobile traffic to the deployed stack origin, not production', () => {
@@ -117,6 +182,7 @@ describe('inject-env', () => {
     writeOutputs([
       { OutputKey: 'CognitoUserPoolId', OutputValue: 'us-east-1_testPool' },
       { OutputKey: 'CognitoUserPoolClientId', OutputValue: 'test-client-id' },
+      { OutputKey: 'CognitoMobileUserPoolClientId', OutputValue: 'test-mobile-client-id' },
       { OutputKey: 'CognitoRegion', OutputValue: 'us-east-1' },
       { OutputKey: 'WebsiteOrigin', OutputValue: 'https://staging.vela.example' },
       { OutputKey: 'MobileApiURL', OutputValue: 'https://staging.vela.example/api/' },
@@ -151,6 +217,7 @@ describe('inject-env', () => {
     writeOutputs([
       { OutputKey: 'CognitoUserPoolId', OutputValue: 'us-east-1_testPool' },
       { OutputKey: 'CognitoUserPoolClientId', OutputValue: 'test-client-id' },
+      { OutputKey: 'CognitoMobileUserPoolClientId', OutputValue: 'test-mobile-client-id' },
       { OutputKey: 'CognitoRegion', OutputValue: 'us-east-1' },
       { OutputKey: 'CloudFrontDomain', OutputValue: 'd1234567890abc.cloudfront.net' },
     ]);
@@ -175,6 +242,7 @@ describe('inject-env', () => {
     writeOutputs([
       { OutputKey: 'CognitoUserPoolId', OutputValue: 'us-east-1_testPool' },
       { OutputKey: 'CognitoUserPoolClientId', OutputValue: 'test-client-id' },
+      { OutputKey: 'CognitoMobileUserPoolClientId', OutputValue: 'test-mobile-client-id' },
       { OutputKey: 'CognitoRegion', OutputValue: 'us-east-1' },
       { OutputKey: 'CloudFrontDomain', OutputValue: 'd1234567890abc.cloudfront.net' },
     ]);
@@ -198,6 +266,7 @@ describe('inject-env', () => {
     writeOutputs([
       { OutputKey: 'CognitoUserPoolId', OutputValue: 'us-east-1_testPool' },
       { OutputKey: 'CognitoUserPoolClientId', OutputValue: 'test-client-id' },
+      { OutputKey: 'CognitoMobileUserPoolClientId', OutputValue: 'test-mobile-client-id' },
       { OutputKey: 'CognitoRegion', OutputValue: 'us-east-1' },
       { OutputKey: 'CloudFrontDomain', OutputValue: 'd1234567890abc.cloudfront.net' },
     ]);
@@ -223,6 +292,7 @@ describe('inject-env', () => {
     writeOutputs([
       { OutputKey: 'CognitoUserPoolId', OutputValue: 'us-east-1_testPool' },
       { OutputKey: 'CognitoUserPoolClientId', OutputValue: 'test-client-id' },
+      { OutputKey: 'CognitoMobileUserPoolClientId', OutputValue: 'test-mobile-client-id' },
       { OutputKey: 'CognitoRegion', OutputValue: 'us-east-1' },
       // Stale outputs from the currently-deployed production stack.
       { OutputKey: 'WebsiteOrigin', OutputValue: 'https://vela.cwchanap.dev' },

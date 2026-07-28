@@ -8,7 +8,7 @@ on:
   workflow_dispatch:
 
 env:
-  BUN_VERSION: "1.3.1"
+  BUN_VERSION: '1.3.1'
 
 jobs:
   build-and-lint:
@@ -41,6 +41,10 @@ jobs:
         # that run inject-env.ts (which writes a reachable URL).
         env:
           VITE_MOBILE_API_URL: 'https://example.invalid/api/'
+          VITE_COGNITO_USER_POOL_ID: us-east-1_ciPlaceholder
+          VITE_COGNITO_MOBILE_USER_POOL_CLIENT_ID: ci-mobile-client-id
+          VITE_COGNITO_OAUTH_DOMAIN: ci-placeholder.auth.us-east-1.amazoncognito.com
+          VITE_AWS_REGION: us-east-1
         run: bun run build
 
       - name: Build Lambda function
