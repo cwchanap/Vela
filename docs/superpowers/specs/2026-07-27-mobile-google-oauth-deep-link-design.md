@@ -47,6 +47,18 @@ HPA-206 owns long-term, Keychain-backed token persistence, refresh after relaunc
 | Route protection | Full-app auth gate | Normal mobile routes never render while signed out or while a callback is being processed. Development-only iOS diagnostics retain an explicit development bypass. |
 | API audience configuration | Add `COGNITO_MOBILE_CLIENT_ID`; retain `COGNITO_CLIENT_ID` for web refresh | The verifier can accept both audiences without turning a single-client Cognito refresh request into an invalid comma-separated client ID. |
 
+`ASWebAuthenticationSession` is Apple's authentication-specific API: it routes the callback
+to the initiating session and can request an ephemeral/private browser session (off by
+default). HPA-205 intentionally uses Capacitor Browser's `SFSafariViewController` integration
+and `appUrlOpen` callback delivery instead, accepting its separate cookie jar to avoid adding
+a custom Swift plugin. This is still the secure in-app browser-tab pattern described by
+[RFC 8252](https://www.rfc-editor.org/rfc/rfc8252.html); RFC 8252 section 7.3 concerns
+loopback redirect URIs, not the choice between Apple browser APIs. See Apple's
+[`ASWebAuthenticationSession`](https://developer.apple.com/documentation/authenticationservices/aswebauthenticationsession)
+and
+[`SFSafariViewController`](https://developer.apple.com/documentation/safariservices/sfsafariviewcontroller/)
+documentation for the API distinction.
+
 ## Scope
 
 ### In scope
@@ -200,8 +212,10 @@ The gate uses `role="status"` for progress, an alert region for errors, disables
 3. Capacitor URL and browser listeners are registered.
 4. `getLaunchUrl()` is read.
 5. If it is an OAuth callback, the coordinator processes it.
-6. If it is absent and a stale/interrupted transaction exists, that transaction is cleared and a signed-out interruption notice is shown.
-7. Otherwise the gate enters `signedOut`.
+6. If it is absent and a stored transaction exists, validate the transaction and check its age first.
+7. A transaction older than ten minutes is cleared and surfaces `transaction_expired`.
+8. A still-fresh transaction without a callback is cleared and surfaces `interrupted`.
+9. Otherwise the gate enters `signedOut`.
 
 Core protected routes do not render during these steps.
 
@@ -228,12 +242,14 @@ Core protected routes do not render during these steps.
 8. Compare state exactly before honoring an error or making any token request.
 9. If Cognito returned `error`, map it to a safe provider outcome and clear the transaction.
 10. Otherwise require exactly one non-empty `code`.
-11. Enter `exchangingCode`, best-effort close the browser, and POST the code with the verifier to Cognito's token endpoint.
+11. Enter `exchangingCode`, best-effort close the browser, and POST to Cognito's token endpoint with `Content-Type: application/x-www-form-urlencoded`. The body contains `grant_type=authorization_code`, the mobile `client_id`, `code`, the exact callback URI as `redirect_uri`, and `code_verifier`; it contains no client secret.
 12. Require an access token and ID token; retain a returned refresh token only in memory.
 13. Decode the ID token and validate `token_use=id`, exact mobile `aud`, exact Cognito issuer, future `exp`, and exact nonce.
 14. Clear the OAuth transaction; code exchange is complete and it is no longer needed.
 15. Enter `verifyingSession` and call the API's `auth/session` path with the ID token as a Bearer token. The API URL helper joins the path without assuming `VITE_MOBILE_API_URL` already has a trailing slash.
-16. Only a successful `{ authenticated: true, user: { userId, email } }` response creates the in-memory session and enters `authenticated`.
+16. A 401/403 response clears the in-memory token bundle and surfaces `session_unauthorized`.
+17. Any other non-success status, fetch rejection, response-parse failure, or response-shape failure retains the in-memory token bundle and surfaces `session_verification_failed`.
+18. Only a successful `{ authenticated: true, user: { userId, email } }` response creates the in-memory session and enters `authenticated`.
 
 The API verification step is the mobile client's signature-verification boundary. The client-side claim checks prevent obvious substitution and nonce replay before the request, while `aws-jwt-verify` establishes signature, issuer, token use, expiry, and allowed audience before the app trusts the user.
 
@@ -254,7 +270,7 @@ Errors use stable internal codes and safe user messages:
 | `code_exchange_failed` | Token endpoint rejected the request or returned invalid fields | Start again |
 | `token_validation_failed` | ID-token claims do not match the request/configuration | Start again |
 | `session_unauthorized` | Vela API rejected the ID token with 401/403 | Clear tokens and start again |
-| `session_verification_failed` | Network/server failure prevented the API proof | Retain the in-memory token bundle and retry verification |
+| `session_verification_failed` | A non-401/403 response, fetch failure, parse failure, or invalid response shape prevented the API proof | Retain the in-memory token bundle and retry verification |
 
 Raw `error_description`, callback query values, token response fields, decoded claims, and thrown request objects are not rendered or logged. Browser-close failures after a callback are ignored because they do not invalidate the authentication result.
 
@@ -301,21 +317,28 @@ COGNITO_MOBILE_CLIENT_ID=<mobile-client-id>
 
 `COGNITO_CLIENT_ID` keeps its current meaning and remains the single client passed to the existing web refresh route. It is not converted to a comma-separated value.
 
-At boot, the API creates one ID-token verifier with:
+`Env` and `buildEnv()` read the new `COGNITO_MOBILE_CLIENT_ID`. The existing
+`initializeAuthVerifier(userPoolId, clientId)` contract changes to
+`initializeAuthVerifier(userPoolId, webClientId, mobileClientId?)`, and `index.ts` passes the
+web and optional mobile values separately. The initializer creates one ID-token verifier
+with:
 
 ```ts
-clientId: [webClientId, mobileClientId]
+clientId: mobileClientId ? [webClientId, mobileClientId] : webClientId
 ```
 
 Development remains compatible with a missing mobile client ID by creating a web-only verifier and warning that mobile authenticated calls cannot succeed until configured. CDK production always provides both.
 
-Verifier failures log only a stable category/name, not the token, callback, claims, or complete third-party error object.
+The existing verifier catch no longer logs the complete `aws-jwt-verify` error object.
+Verifier failures log only a stable category/name, not the token, callback, claims, or
+complete third-party error object. API middleware tests reject with a secret-bearing sentinel
+error and prove that neither the object nor any sentinel field reaches `console`.
 
 No route is added. `GET /api/auth/session` remains the proof endpoint.
 
 ## Concurrency and Cleanup Rules
 
-- One start operation and one callback completion may run at a time.
+- `startSignIn()` and `completeCallback()` share one operation guard that covers start-vs-completion and completion-vs-completion. The guard does not remain held while the browser is open; the active phase and stored transaction separately reject another start while an attempt is outstanding.
 - The coordinator sets the callback phase before awaiting browser close or network I/O.
 - A callback received after cancellation finds no active transaction and cannot exchange a code.
 - A duplicate callback after success is ignored and cannot clear an authenticated session.
@@ -347,6 +370,7 @@ Table-driven tests cover:
 - base64url and PKCE S256 known vectors;
 - random output shape and non-reuse;
 - exact authorization parameters, including `identity_provider=Google`;
+- the exact token-endpoint URL, `application/x-www-form-urlencoded` content type, and body fields `grant_type`, `client_id`, `code`, `redirect_uri`, and `code_verifier`, with no client secret;
 - the RFC 8252 single-slash callback;
 - wrong scheme, authority, path, port, credentials, fragment, and unrelated URLs;
 - missing, blank, and duplicate `code`, `state`, and `error`;
@@ -369,6 +393,8 @@ Adapters for browser, app URL delivery, clock, crypto, storage, token exchange, 
 - transaction cleanup for every terminal outcome;
 - session-verification retry without repeating OAuth;
 - 401/403 token clearing;
+- non-401/403 HTTP, fetch, parse, and response-shape failures retaining the token bundle;
+- start-vs-completion and completion-vs-completion serialization;
 - unexpected non-OAuth URLs; and
 - absence of secret-bearing console calls.
 
@@ -377,6 +403,7 @@ Adapters for browser, app URL delivery, clock, crypto, storage, token exchange, 
 Tests prove:
 
 - protected router content does not render during initialization or signed-out states;
+- the existing `src/App.test.ts` is rewritten to inject auth state instead of asserting unconditional router rendering;
 - the sign-in action cannot be triggered twice;
 - every progress and error state has the correct accessible semantics;
 - only authenticated state renders the core mobile shell;
@@ -389,7 +416,9 @@ Tests pin:
 
 - `CognitoJwtVerifier.create` receives both client IDs when configured;
 - web-only development configuration remains supported;
+- `Env`, `buildEnv()`, `index.ts`, and `initializeAuthVerifier()` pass web and mobile client IDs without changing the web client's meaning;
 - both web and mobile ID-token audiences reach protected routes;
+- verifier-failure logs contain only a stable category/name and exclude the error object, raw JWT, claims, and secret sentinels;
 - the web refresh route still receives only `COGNITO_CLIENT_ID`;
 - Lambda configuration includes a separate mobile client ID;
 - production mobile env generation uses `CognitoMobileUserPoolClientId`;
@@ -417,7 +446,7 @@ Run:
 With deployed Cognito configuration:
 
 1. Launch signed out and confirm the core shell is not visible.
-2. Start Google sign-in and confirm the Capacitor browser presents the provider flow.
+2. Start Google sign-in and confirm the Capacitor browser redirects directly to Google's provider flow without rendering Cognito's provider-selection page.
 3. Complete a warm callback and confirm `/api/auth/session` returns the mobile user.
 4. Repeat with the app terminated before callback delivery and confirm the custom URL cold-launches Vela and completes through `getLaunchUrl()`.
 5. Close the browser and confirm cancellation returns to an actionable signed-out state.
@@ -425,6 +454,9 @@ With deployed Cognito configuration:
 7. Confirm no callback, verifier, code, or token appears in Xcode, Safari Web Inspector, or API logs.
 
 The simulator run is required evidence for HPA-205. Physical-device authentication is useful follow-up evidence but is not added as a new merge gate by this issue.
+
+The direct-provider redirect check is deployed acceptance evidence. Repository unit tests and
+default PR CI do not make live requests to Cognito or Google.
 
 ## Acceptance-Criteria Mapping
 
