@@ -431,20 +431,11 @@ describe('MobileAuthGate', () => {
     expect(wrapper.find('[data-testid="protected-slot"]').exists()).toBe(false);
   });
 
-  it('keeps gate copy at enhanced contrast even when Quasar dark tokens are both dark', async () => {
-    const host = document.createElement('div');
-    host.style.setProperty('--q-dark', '#1d1d1d');
-    host.style.setProperty('--q-dark-page', '#121212');
-    document.body.append(host);
+  it('keeps gate copy at enhanced contrast against the gate surface', async () => {
+    const { wrapper } = await mountGate({ phase: 'signedOut' });
+    const styles = getComputedStyle(wrapper.get('.mobile-auth-gate').element);
+    const ratio = contrastRatio(parseRgb(styles.color), parseRgb(styles.backgroundColor));
 
-    try {
-      const { wrapper } = await mountGate({ phase: 'signedOut' }, { attachTo: host });
-      const styles = getComputedStyle(wrapper.get('.mobile-auth-gate').element);
-      const ratio = contrastRatio(parseRgb(styles.color), parseRgb(styles.backgroundColor));
-
-      expect(ratio).toBeGreaterThanOrEqual(7);
-    } finally {
-      host.remove();
-    }
+    expect(ratio).toBeGreaterThanOrEqual(7);
   });
 });

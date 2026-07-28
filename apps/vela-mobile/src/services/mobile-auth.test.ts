@@ -15,7 +15,7 @@ import {
   createOAuthTransactionStore,
   type OAuthTransactionPreferences,
 } from '../auth/oauth-transaction-store';
-import { createMobileAuthCoordinator } from './mobile-auth';
+import { createMobileAuthCoordinator, MOBILE_AUTH_NETWORK_TIMEOUT_MS } from './mobile-auth';
 
 const NOW = 1_000_000;
 
@@ -308,6 +308,8 @@ function makeHarness(options: HarnessOptions = {}) {
     };
   }
 
+  // Drains the coordinator serialization queue by issuing an intentionally
+  // unrelated callback URL so the previous serialized operation resolves.
   async function flush(): Promise<void> {
     await coordinator.completeCallback('https://unrelated.example/path');
   }
@@ -478,6 +480,53 @@ describe('mobile auth initialization', () => {
     });
   });
 
+  it.each([
+    ['production build', false],
+    ['development build', true],
+  ] as const)('rejects a non-loopback http API URL in %s', async (_name, isDevelopment) => {
+    const harness = makeHarness({
+      authConfig: { ...config, apiUrl: 'http://vela.example/api/' },
+      isDevelopment,
+    });
+
+    await harness.coordinator.initialize();
+
+    expect(harness.order).toEqual([]);
+    expect(harness.coordinator.state).toMatchObject({
+      phase: 'error',
+      errorCode: 'configuration_error',
+    });
+  });
+
+  it('rejects a loopback http API URL outside development', async () => {
+    const harness = makeHarness({
+      authConfig: { ...config, apiUrl: 'http://127.0.0.1:9005/api/' },
+      isDevelopment: false,
+    });
+
+    await harness.coordinator.initialize();
+
+    expect(harness.order).toEqual([]);
+    expect(harness.coordinator.state).toMatchObject({
+      phase: 'error',
+      errorCode: 'configuration_error',
+    });
+  });
+
+  it.each([
+    ['localhost', 'http://localhost:9005/api/'],
+    ['127.0.0.1', 'http://127.0.0.1:9005/api/'],
+  ] as const)('accepts a loopback http API URL in development (%s)', async (_name, apiUrl) => {
+    const harness = makeHarness({
+      authConfig: { ...config, apiUrl },
+      isDevelopment: true,
+    });
+
+    await harness.coordinator.initialize();
+
+    expect(harness.coordinator.state.phase).toBe('signedOut');
+  });
+
   it('maps transaction-storage startup failure to configuration error', async () => {
     const harness = makeHarness();
     harness.preferences.getFailure = new Error('SECRET-preferences-get');
@@ -586,8 +635,10 @@ describe('starting and cancelling sign-in', () => {
 
     await harness.coordinator.startSignIn();
 
+    expect(harness.browser.openCalls).toHaveLength(1);
+    const openedUrl = harness.browser.openCalls[0]!;
     const output = spies.flatMap((spy) => spy.mock.calls.flat()).join(' ');
-    expect(output).not.toContain(harness.browser.openCalls[0]);
+    expect(output).not.toContain(openedUrl);
     for (const spy of spies) {
       spy.mockRestore();
     }
@@ -852,6 +903,7 @@ describe('callback completion and cleanup', () => {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         data: expect.stringContaining('code=SECRET-code'),
+        timeoutMs: expect.any(Number),
       },
     ]);
     expect(harness.sessionFetch).toHaveBeenCalledOnce();
@@ -1002,6 +1054,7 @@ describe('session verification', () => {
         Accept: 'application/json',
         Authorization: expect.stringMatching(/^Bearer /u),
       },
+      signal: expect.any(AbortSignal),
     });
     const authorization = (
       harness.sessionFetch.mock.calls[0]![1]?.headers as Record<string, string>
@@ -1084,6 +1137,32 @@ describe('session verification', () => {
       errorCode: 'session_verification_failed',
       user: null,
     });
+  });
+
+  it('routes a hung session-verification fetch to session_verification_failed via the abort signal', async () => {
+    const harness = await exchangedHarness();
+    vi.useFakeTimers();
+    try {
+      harness.sessionFetch.mockImplementationOnce(
+        (_url, init) =>
+          new Promise<void>((_resolve, reject) => {
+            init?.signal?.addEventListener('abort', () => {
+              reject(new Error('aborted'));
+            });
+          }),
+      );
+
+      const completing = harness.coordinator.completeCallback(callback(activeTransaction));
+      await vi.advanceTimersByTimeAsync(MOBILE_AUTH_NETWORK_TIMEOUT_MS);
+      await completing;
+
+      expect(harness.coordinator.state).toMatchObject({
+        phase: 'error',
+        errorCode: 'session_verification_failed',
+      });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 

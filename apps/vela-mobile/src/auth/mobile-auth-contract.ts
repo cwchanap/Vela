@@ -37,6 +37,13 @@ export type MobileTokenRequest = {
   method: 'POST';
   headers: { 'Content-Type': 'application/x-www-form-urlencoded' };
   data: string;
+  /**
+   * Optional total timeout in milliseconds. The token-request adapter is
+   * expected to terminate the underlying native request when this elapses so
+   * the coordinator cannot remain stuck in `exchangingCode`. The Capacitor
+   * boot adapter maps this to `connectTimeout`/`readTimeout`.
+   */
+  timeoutMs?: number;
 };
 
 export type MobileAuthPhase =

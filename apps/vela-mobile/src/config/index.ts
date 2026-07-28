@@ -1,4 +1,9 @@
 import { version as pkgVersion } from '../../package.json';
+import {
+  containsWhitespace,
+  hasMatchingUserPoolRegion,
+  isValidHostOnlyDomain,
+} from '../auth/config-validators';
 import { MOBILE_OAUTH_CALLBACK_URI } from '../auth/mobile-auth-contract';
 
 type ConfigEnv = Record<string, unknown> | null | undefined;
@@ -16,32 +21,6 @@ function isValidAbsoluteUrl(value: string): boolean {
   } catch {
     return false;
   }
-}
-
-function containsWhitespace(value: string): boolean {
-  return /\s/.test(value);
-}
-
-function isValidHostOnlyDomain(value: string): boolean {
-  try {
-    const url = new URL(`https://${value}`);
-    return (
-      url.username === '' &&
-      url.password === '' &&
-      url.port === '' &&
-      url.search === '' &&
-      url.hash === '' &&
-      url.pathname === '/' &&
-      url.hostname.toLowerCase() === value.toLowerCase()
-    );
-  } catch {
-    return false;
-  }
-}
-
-function hasMatchingUserPoolRegion(userPoolId: string, region: string): boolean {
-  const separatorIndex = userPoolId.indexOf('_');
-  return separatorIndex > 0 && userPoolId.slice(0, separatorIndex) === region;
 }
 
 function reportConfigIssue(

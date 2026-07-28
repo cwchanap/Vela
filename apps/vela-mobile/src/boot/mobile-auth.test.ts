@@ -113,6 +113,20 @@ describe('mobile auth boot', () => {
       await dependencies?.tokenTransport.request(tokenRequest);
       expect(mocks.capacitorHttpRequest).toHaveBeenCalledWith(tokenRequest);
 
+      // The adapter strips timeoutMs (CapacitorHttp does not understand it)
+      // and maps it to connectTimeout/readTimeout so the native layer can
+      // terminate a hung token exchange instead of leaving the coordinator
+      // pinned in exchangingCode.
+      await dependencies?.tokenTransport.request({ ...tokenRequest, timeoutMs: 15_000 });
+      expect(mocks.capacitorHttpRequest).toHaveBeenLastCalledWith({
+        url: tokenRequest.url,
+        method: tokenRequest.method,
+        headers: tokenRequest.headers,
+        data: tokenRequest.data,
+        connectTimeout: 15_000,
+        readTimeout: 15_000,
+      });
+
       dependencies?.fetch('/session');
       expect(fetchImplementation).toHaveBeenCalledWith('/session');
     } finally {

@@ -2,6 +2,11 @@ import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { parse } from 'dotenv';
 import { expand } from 'dotenv-expand';
+import {
+  containsWhitespace,
+  hasMatchingUserPoolRegion,
+  isValidHostOnlyDomain,
+} from '../src/auth/config-validators';
 
 type VitePluginLike = {
   name: string;
@@ -18,6 +23,16 @@ const mobileBuildEnvKeys = [
 
 type MobileBuildEnvKey = (typeof mobileBuildEnvKeys)[number];
 type MobileBuildEnv = Partial<Record<MobileBuildEnvKey, string>>;
+
+// Explicit presence-checked Cognito keys. Decoupled from `mobileBuildEnvKeys`
+// ordering so reordering the build-env list cannot silently change which keys
+// are validated as required.
+const requiredCognitoKeys = [
+  'VITE_COGNITO_USER_POOL_ID',
+  'VITE_COGNITO_MOBILE_USER_POOL_CLIENT_ID',
+  'VITE_COGNITO_OAUTH_DOMAIN',
+  'VITE_AWS_REGION',
+] as const satisfies readonly MobileBuildEnvKey[];
 
 export function loadMobileBuildEnv(
   mode: string,
@@ -52,32 +67,6 @@ export function loadMobileBuildEnv(
 
 function isMissingEnvValue(value: string | undefined): boolean {
   return !value || value.trim() === '';
-}
-
-function containsWhitespace(value: string): boolean {
-  return /\s/.test(value);
-}
-
-function isValidHostOnlyDomain(value: string): boolean {
-  try {
-    const url = new URL(`https://${value}`);
-    return (
-      url.username === '' &&
-      url.password === '' &&
-      url.port === '' &&
-      url.search === '' &&
-      url.hash === '' &&
-      url.pathname === '/' &&
-      url.hostname.toLowerCase() === value.toLowerCase()
-    );
-  } catch {
-    return false;
-  }
-}
-
-function hasMatchingUserPoolRegion(userPoolId: string, region: string): boolean {
-  const separatorIndex = userPoolId.indexOf('_');
-  return separatorIndex > 0 && userPoolId.slice(0, separatorIndex) === region;
 }
 
 /**
@@ -146,7 +135,6 @@ export function validateMobileApiUrl(
 export function validateMobileBuildEnv(env: MobileBuildEnv): void {
   validateMobileApiUrl(env.VITE_MOBILE_API_URL, { requireHttps: true });
 
-  const requiredCognitoKeys = mobileBuildEnvKeys.slice(1);
   for (const key of requiredCognitoKeys) {
     if (isMissingEnvValue(env[key])) {
       throw new Error(`Missing required environment variable: ${key}`);

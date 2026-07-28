@@ -11,6 +11,11 @@ import {
   type OAuthTokenBundle,
 } from '../auth/mobile-auth-contract';
 import {
+  containsWhitespace,
+  hasMatchingUserPoolRegion,
+  isValidHostOnlyDomain,
+} from '../auth/config-validators';
+import {
   buildAuthorizationUrl,
   buildTokenRequest,
   createOAuthTransaction,
@@ -41,11 +46,34 @@ export type MobileAuthCoordinatorDependencies = {
 
 export const MOBILE_AUTH_KEY: InjectionKey<MobileAuthCoordinator> = Symbol('mobile-auth');
 
+/**
+ * Upper bound for the token-exchange and session-verification network calls.
+ * A hung request would otherwise leave the coordinator pinned in
+ * `exchangingCode` or `verifyingSession`; the timeout routes both operations
+ * back through their existing failure paths so the user can retry.
+ */
+export const MOBILE_AUTH_NETWORK_TIMEOUT_MS = 15_000;
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-function hasValidConfig(config: MobileOAuthConfig): boolean {
+/**
+ * Hostnames that are safe to contact over plain `http:` from the coordinator.
+ * The coordinator sends a bearer id-token to the API; allowing non-loopback
+ * HTTP would leak that token on the wire. Loopback is the only HTTP surface
+ * permitted, and only in development builds.
+ */
+function isLoopbackHostname(hostname: string): boolean {
+  const normalized = hostname.toLowerCase();
+  if (normalized === 'localhost' || normalized === '::1') {
+    return true;
+  }
+  const parts = normalized.split('.');
+  return parts.length === 4 && parts[0] === '127' && parts.every((part) => /^\d{1,3}$/u.test(part));
+}
+
+function hasValidConfig(config: MobileOAuthConfig, isDevelopment: boolean): boolean {
   if (
     !config.apiUrl ||
     !config.userPoolId ||
@@ -59,21 +87,26 @@ function hasValidConfig(config: MobileOAuthConfig): boolean {
 
   try {
     const apiUrl = new URL(config.apiUrl);
-    const oauthUrl = new URL(`https://${config.oauthDomain}`);
+    if (apiUrl.hostname.length === 0) {
+      return false;
+    }
+    // HTTPS is always permitted under the hostname rules below. Plain HTTP is
+    // rejected by default because the coordinator bearer token would travel in
+    // cleartext; only dev builds targeting a loopback address may use it.
+    if (apiUrl.protocol === 'http:') {
+      if (!isDevelopment || !isLoopbackHostname(apiUrl.hostname)) {
+        return false;
+      }
+    } else if (apiUrl.protocol !== 'https:') {
+      return false;
+    }
+
     return (
-      (apiUrl.protocol === 'http:' || apiUrl.protocol === 'https:') &&
-      apiUrl.hostname.length > 0 &&
-      oauthUrl.hostname.toLowerCase() === config.oauthDomain.toLowerCase() &&
-      oauthUrl.username === '' &&
-      oauthUrl.password === '' &&
-      oauthUrl.port === '' &&
-      oauthUrl.pathname === '/' &&
-      oauthUrl.search === '' &&
-      oauthUrl.hash === '' &&
-      config.userPoolId.startsWith(`${config.region}_`) &&
-      !/\s/u.test(config.userPoolId) &&
-      !/\s/u.test(config.mobileClientId) &&
-      !/\s/u.test(config.region)
+      isValidHostOnlyDomain(config.oauthDomain) &&
+      hasMatchingUserPoolRegion(config.userPoolId, config.region) &&
+      !containsWhitespace(config.userPoolId) &&
+      !containsWhitespace(config.mobileClientId) &&
+      !containsWhitespace(config.region)
     );
   } catch {
     return false;
@@ -124,6 +157,7 @@ export function createMobileAuthCoordinator(
   let tokenBundle: OAuthTokenBundle | undefined;
   let initialized = false;
   let disposed = false;
+  const isDevelopment = dependencies.isDevelopment ?? import.meta.env.DEV;
 
   function serialize<T>(operation: () => Promise<T>): Promise<T> {
     const result = operationTail.then(operation, operation);
@@ -192,6 +226,8 @@ export function createMobileAuthCoordinator(
 
     setPhase('verifyingSession');
 
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), MOBILE_AUTH_NETWORK_TIMEOUT_MS);
     let response: Response;
     try {
       response = await dependencies.fetch(sessionUrl(dependencies.config.apiUrl), {
@@ -200,10 +236,13 @@ export function createMobileAuthCoordinator(
           Accept: 'application/json',
           Authorization: `Bearer ${bundle.idToken}`,
         },
+        signal: controller.signal,
       });
     } catch {
       setError('session_verification_failed');
       return;
+    } finally {
+      clearTimeout(timeout);
     }
 
     if (response.status === 401 || response.status === 403) {
@@ -289,7 +328,9 @@ export function createMobileAuthCoordinator(
     let bundle: OAuthTokenBundle;
     try {
       const response = await dependencies.tokenTransport.request(
-        buildTokenRequest(dependencies.config, transaction, parsed.code),
+        buildTokenRequest(dependencies.config, transaction, parsed.code, {
+          timeoutMs: MOBILE_AUTH_NETWORK_TIMEOUT_MS,
+        }),
       );
       if (response.status < 200 || response.status >= 300) {
         throw new Error('token_endpoint_rejected');
@@ -354,7 +395,7 @@ export function createMobileAuthCoordinator(
     initialized = true;
     setPhase('initializing');
 
-    if (!hasValidConfig(dependencies.config)) {
+    if (!hasValidConfig(dependencies.config, isDevelopment)) {
       setError('configuration_error');
       return;
     }
@@ -400,7 +441,7 @@ export function createMobileAuthCoordinator(
     }
 
     if (
-      !hasValidConfig(dependencies.config) ||
+      !hasValidConfig(dependencies.config, isDevelopment) ||
       !hasOAuthCryptoCapabilities(dependencies.crypto, dependencies.isSecureContext)
     ) {
       setError('configuration_error');
@@ -438,7 +479,7 @@ export function createMobileAuthCoordinator(
 
     setError('cancelled');
     await clearTransaction();
-    if (dependencies.isDevelopment ?? import.meta.env.DEV) {
+    if (isDevelopment) {
       console.info('browser_closed_before_callback');
     }
   }
