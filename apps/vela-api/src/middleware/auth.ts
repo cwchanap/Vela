@@ -44,16 +44,8 @@ export function initializeAuthVerifier(
   console.log('✅ Auth verifier initialized');
 }
 
-function safeVerificationErrorName(error: unknown): string {
-  try {
-    const name =
-      typeof error === 'object' && error !== null ? (error as { name?: unknown }).name : undefined;
-    return typeof name === 'string' && /^[A-Za-z][A-Za-z0-9]{0,63}$/.test(name)
-      ? name
-      : 'UnknownVerificationError';
-  } catch {
-    return 'UnknownVerificationError';
-  }
+function safeVerificationErrorName(): string {
+  return 'UnknownVerificationError';
 }
 
 /**
@@ -74,9 +66,9 @@ async function getUserClaimsFromToken(
       userId: payload.sub,
       userEmail: typeof payload.email === 'string' ? payload.email : null,
     };
-  } catch (error) {
+  } catch {
     if (process.env.NODE_ENV === 'development') {
-      console.error('Token verification failed', safeVerificationErrorName(error));
+      console.error('Token verification failed', safeVerificationErrorName());
     } else {
       console.error('Token verification failed');
     }

@@ -283,7 +283,7 @@ describe('initializeAuthVerifier', () => {
     }
   });
 
-  test('logs only a bounded sanitized verifier error name in development', async () => {
+  test('logs only a fixed safe verifier error category in development', async () => {
     process.env.NODE_ENV = 'development';
     mockVerify.mockImplementationOnce(() =>
       Promise.reject({
@@ -303,8 +303,46 @@ describe('initializeAuthVerifier', () => {
       captured.restore();
     }
 
-    expect(captured.messages).toEqual([['Token verification failed', 'JwtInvalidClaimError']]);
+    expect(captured.messages).toEqual([['Token verification failed', 'UnknownVerificationError']]);
     expect(JSON.stringify(captured.messages)).not.toContain('SECRET_');
+  });
+
+  test('never logs an all-alphanumeric secret-bearing verifier name in development', async () => {
+    process.env.NODE_ENV = 'development';
+    const secretError = {
+      name: 'SECRETALPHANUMERICNAME',
+      message: 'SECRETMESSAGE',
+      rawJwt: 'SECRETRAWJWT',
+      claims: {
+        sub: 'SECRETSUB',
+        email: 'SECRETEMAIL',
+      },
+    };
+    mockVerify.mockImplementationOnce(() => Promise.reject(secretError));
+    const captured = suppressConsoleError();
+
+    try {
+      const res = await createTestApp().request('/test', {
+        headers: { Authorization: 'Bearer SECRETREQUESTTOKEN' },
+      });
+      expect(res.status).toBe(401);
+    } finally {
+      captured.restore();
+    }
+
+    expect(captured.messages).toEqual([['Token verification failed', 'UnknownVerificationError']]);
+    expect(captured.messages.flat()).not.toContain(secretError);
+    const serializedLogs = JSON.stringify(captured.messages);
+    for (const sentinel of [
+      'SECRETALPHANUMERICNAME',
+      'SECRETMESSAGE',
+      'SECRETRAWJWT',
+      'SECRETSUB',
+      'SECRETEMAIL',
+      'SECRETREQUESTTOKEN',
+    ]) {
+      expect(serializedLogs).not.toContain(sentinel);
+    }
   });
 
   test('warns and returns without throwing when userPoolId is missing', () => {
