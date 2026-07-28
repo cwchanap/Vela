@@ -480,7 +480,9 @@ export function createMobileAuthCoordinator(
     setError('cancelled');
     await clearTransaction();
     if (isDevelopment) {
-      console.info('browser_closed_before_callback');
+      console.info(
+        'browser_closed_before_callback — verify the deployed Cognito client ID and redirect URI configuration.',
+      );
     }
   }
 
