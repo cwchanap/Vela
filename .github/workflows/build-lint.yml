@@ -33,8 +33,9 @@ jobs:
         # a deployment: there is no cdk-outputs.json to feed inject-env.ts, so
         # apps/vela-mobile/.env.production (gitignored) is absent. Rather than
         # bypassing the build-time mobile env guard (MOBILE_SKIP_ENV_VALIDATION),
-        # set a harmless placeholder that passes the guard's format check
-        # (valid absolute https URL with a hostname) while being unreachable.
+        # set five harmless placeholders that satisfy the complete mobile build
+        # contract (API URL, pool, client, OAuth domain, and region) while the
+        # reserved example.invalid API hostname remains unreachable.
         # This exercises the normal validation path so a regression in env-file
         # loading or plugin registration fails PR CI instead of slipping through
         # to the release build. The guard still fires for real release builds
