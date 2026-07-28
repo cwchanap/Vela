@@ -226,51 +226,58 @@ export function createMobileAuthCoordinator(
 
     setPhase('verifyingSession');
 
+    // The timeout and AbortController must remain active until the response
+    // body has been fully consumed. fetch() resolves as soon as the response
+    // headers arrive; a server that sends headers but stalls or truncates the
+    // body would otherwise leave response.json() hanging indefinitely, pinned
+    // in `verifyingSession` and blocking both retry and a new sign-in.
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), MOBILE_AUTH_NETWORK_TIMEOUT_MS);
-    let response: Response;
     try {
-      response = await dependencies.fetch(sessionUrl(dependencies.config.apiUrl), {
-        method: 'GET',
-        headers: {
-          Accept: 'application/json',
-          Authorization: `Bearer ${bundle.idToken}`,
-        },
-        signal: controller.signal,
-      });
-    } catch {
-      setError('session_verification_failed');
-      return;
+      let response: Response;
+      try {
+        response = await dependencies.fetch(sessionUrl(dependencies.config.apiUrl), {
+          method: 'GET',
+          headers: {
+            Accept: 'application/json',
+            Authorization: `Bearer ${bundle.idToken}`,
+          },
+          signal: controller.signal,
+        });
+      } catch {
+        setError('session_verification_failed');
+        return;
+      }
+
+      if (response.status === 401 || response.status === 403) {
+        tokenBundle = undefined;
+        setError('session_unauthorized');
+        return;
+      }
+
+      if (!response.ok) {
+        setError('session_verification_failed');
+        return;
+      }
+
+      let data: unknown;
+      try {
+        data = await response.json();
+      } catch {
+        setError('session_verification_failed');
+        return;
+      }
+
+      const user = parseSessionUser(data);
+      if (!user) {
+        setError('session_verification_failed');
+        return;
+      }
+
+      setAuthenticated(user);
     } finally {
       clearTimeout(timeout);
     }
-
-    if (response.status === 401 || response.status === 403) {
-      tokenBundle = undefined;
-      setError('session_unauthorized');
-      return;
-    }
-
-    if (!response.ok) {
-      setError('session_verification_failed');
-      return;
-    }
-
-    let data: unknown;
-    try {
-      data = await response.json();
-    } catch {
-      setError('session_verification_failed');
-      return;
-    }
-
-    const user = parseSessionUser(data);
-    if (!user) {
-      setError('session_verification_failed');
-      return;
-    }
-
-    setAuthenticated(user);
   }
 
   async function completeCallbackUnlocked(rawUrl: string): Promise<void> {
@@ -289,36 +296,48 @@ export function createMobileAuthCoordinator(
       return;
     }
 
-    setPhase('exchangingCode');
-    await closeBrowser();
-
-    if (parsed.kind === 'malformed') {
-      await failCallback('malformed_callback');
-      return;
-    }
-
+    // Load the transaction and validate the callback state before closing the
+    // browser or changing the phase. A stale callback (from an interrupted
+    // transaction that was replaced) or an unsolicited callback (any external
+    // caller capable of opening the custom URL scheme) would otherwise cancel
+    // a valid in-progress sign-in: the old state mismatches the new
+    // transaction, failCallback clears it, and the replacement flow is dead.
+    // By validating first we preserve the current transaction, phase, and
+    // browser session for the legitimate callback.
     let loaded: Awaited<ReturnType<OAuthTransactionStore['load']>>;
     try {
       loaded = await dependencies.transactionStore.load();
     } catch {
+      setPhase('exchangingCode');
+      await closeBrowser();
       await failCallback('interrupted');
       return;
     }
 
     if (loaded.kind === 'missing' || loaded.kind === 'corrupt') {
-      await failCallback('interrupted');
+      setPhase('exchangingCode');
+      await closeBrowser();
+      await failCallback(parsed.kind === 'malformed' ? 'malformed_callback' : 'interrupted');
       return;
     }
     if (loaded.kind === 'expired') {
+      setPhase('exchangingCode');
+      await closeBrowser();
       await failCallback('transaction_expired');
       return;
     }
 
     const { transaction } = loaded;
-    if (parsed.state !== transaction.state) {
-      await failCallback('state_mismatch');
+
+    // The callback belongs to an older or unsolicited flow — ignore it
+    // without touching the phase, browser, or stored transaction so the
+    // current sign-in remains viable for the legitimate callback.
+    if (parsed.kind === 'malformed' || parsed.state !== transaction.state) {
       return;
     }
+
+    setPhase('exchangingCode');
+    await closeBrowser();
 
     if (parsed.kind === 'providerError') {
       await failCallback(parsed.error === 'access_denied' ? 'cancelled' : 'provider_error');

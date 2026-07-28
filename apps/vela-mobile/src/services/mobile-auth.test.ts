@@ -744,16 +744,6 @@ describe('starting and cancelling sign-in', () => {
 describe('callback completion and cleanup', () => {
   it.each([
     [
-      'malformed callback',
-      `${MOBILE_OAUTH_CALLBACK_URI}?code=code-without-state`,
-      'malformed_callback',
-    ],
-    [
-      'state mismatch before provider handling',
-      `${MOBILE_OAUTH_CALLBACK_URI}?error=access_denied&state=wrong-state`,
-      'state_mismatch',
-    ],
-    [
       'provider cancellation',
       `${MOBILE_OAUTH_CALLBACK_URI}?error=access_denied&state=${activeTransaction.state}`,
       'cancelled',
@@ -773,6 +763,90 @@ describe('callback completion and cleanup', () => {
     expect(harness.preferences.value).toBeNull();
     expect(harness.tokenTransport.requests).toHaveLength(0);
     expect(harness.coordinator.state).toMatchObject({ phase: 'error', errorCode });
+  });
+
+  it.each([
+    ['malformed callback', `${MOBILE_OAUTH_CALLBACK_URI}?code=code-without-state`],
+    ['state mismatch', `${MOBILE_OAUTH_CALLBACK_URI}?error=access_denied&state=wrong-state`],
+    [
+      'unsolicited success callback',
+      `${MOBILE_OAUTH_CALLBACK_URI}?code=foreign-code&state=foreign-state`,
+    ],
+  ] as const)(
+    'preserves the current transaction when %s arrives with an active flow',
+    async (_name, url) => {
+      const harness = makeHarness();
+      await harness.persist(activeTransaction);
+      await harness.coordinator.initialize();
+      const phaseBefore = harness.coordinator.state.phase;
+      const errorCodeBefore = harness.coordinator.state.errorCode;
+
+      await harness.coordinator.completeCallback(url);
+
+      // The transaction, phase, and error code are unchanged — the callback
+      // is ignored because it cannot be matched to the stored transaction.
+      expect(harness.preferences.value).not.toBeNull();
+      expect(harness.browser.closeCalls).toBe(0);
+      expect(harness.tokenTransport.requests).toHaveLength(0);
+      expect(harness.coordinator.state.phase).toBe(phaseBefore);
+      expect(harness.coordinator.state.errorCode).toBe(errorCodeBefore);
+    },
+  );
+
+  it('surfaces malformed_callback when no transaction is stored', async () => {
+    const harness = makeHarness();
+    await harness.coordinator.initialize();
+    await harness.coordinator.startSignIn();
+    // Simulate the transaction being lost after the browser opened.
+    harness.preferences.value = null;
+
+    await harness.coordinator.completeCallback(
+      `${MOBILE_OAUTH_CALLBACK_URI}?code=code-without-state`,
+    );
+
+    expect(harness.preferences.value).toBeNull();
+    expect(harness.tokenTransport.requests).toHaveLength(0);
+    expect(harness.coordinator.state).toMatchObject({
+      phase: 'error',
+      errorCode: 'malformed_callback',
+    });
+  });
+
+  it('preserves a replacement sign-in when a stale callback from an interrupted transaction arrives', async () => {
+    const harness = makeHarness();
+    // Simulate an interrupted transaction from a previous session.
+    await harness.persist(activeTransaction);
+    await harness.coordinator.initialize();
+    expect(harness.coordinator.state).toMatchObject({
+      phase: 'error',
+      errorCode: 'interrupted',
+    });
+
+    // The user starts a replacement sign-in, which replaces the stored
+    // transaction with a new one.
+    await harness.coordinator.startSignIn();
+    const newTransaction = harness.preferences.transaction();
+    expect(newTransaction.state).not.toBe(activeTransaction.state);
+    expect(harness.coordinator.state.phase).toBe('awaitingCallback');
+    harness.prepareSuccessfulExchange(newTransaction);
+
+    // The old callback for the interrupted transaction arrives late.
+    // Its state matches the old transaction, not the replacement.
+    await harness.coordinator.completeCallback(callback(activeTransaction));
+
+    // The replacement transaction is preserved; the browser stays open and
+    // the phase is unchanged so the legitimate callback can still complete.
+    expect(harness.browser.closeCalls).toBe(0);
+    expect(harness.preferences.value).not.toBeNull();
+    expect(harness.preferences.transaction()).toEqual(newTransaction);
+    expect(harness.coordinator.state.phase).toBe('awaitingCallback');
+    expect(harness.tokenTransport.requests).toHaveLength(0);
+
+    // The legitimate callback for the replacement transaction completes.
+    await harness.coordinator.completeCallback(callback(newTransaction));
+
+    expect(harness.tokenTransport.requests).toHaveLength(1);
+    expect(harness.coordinator.state.phase).toBe('authenticated');
   });
 
   it.each([
@@ -1151,6 +1225,39 @@ describe('session verification', () => {
               reject(new Error('aborted'));
             });
           }),
+      );
+
+      const completing = harness.coordinator.completeCallback(callback(activeTransaction));
+      await vi.advanceTimersByTimeAsync(MOBILE_AUTH_NETWORK_TIMEOUT_MS);
+      await completing;
+
+      expect(harness.coordinator.state).toMatchObject({
+        phase: 'error',
+        errorCode: 'session_verification_failed',
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('aborts a hung response body and routes to session_verification_failed', async () => {
+    const harness = await exchangedHarness();
+    vi.useFakeTimers();
+    try {
+      // fetch() resolves as soon as headers arrive, but the body never
+      // arrives. The timeout must stay active through response.json() so
+      // the coordinator is not pinned in verifyingSession indefinitely.
+      harness.sessionFetch.mockImplementationOnce((_url, init) =>
+        Promise.resolve({
+          ok: true,
+          status: 200,
+          json: () =>
+            new Promise((_resolve, reject) => {
+              init?.signal?.addEventListener('abort', () => {
+                reject(new Error('aborted'));
+              });
+            }),
+        } as unknown as Response),
       );
 
       const completing = harness.coordinator.completeCallback(callback(activeTransaction));
