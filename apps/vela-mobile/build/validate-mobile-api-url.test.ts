@@ -1,6 +1,6 @@
 // @vitest-environment node
 //
-// The plugin's config hook invokes loadMobileApiUrl, which reads .env files
+// The plugin's configResolved hook invokes loadMobileBuildEnv, which reads .env files
 // from disk via node:fs and reads process.env directly. The tests also
 // reassign process.env wholesale in afterEach to isolate env state between
 // cases. No DOM globals are needed, so the node environment is the natural
@@ -105,19 +105,19 @@ describe('validateMobileApiUrl', () => {
 });
 
 describe('validateMobileApiUrlPlugin', () => {
-  // The plugin's config hook is what Vite invokes at build time. Driving it
-  // directly avoids shelling out to a full Vite build while still exercising
-  // the mode/skip/validate branches a real build would hit.
-  function invokeConfigHook(
+  // Vite invokes configResolved after it resolves the final build mode.
+  // Driving that hook directly avoids a full build while exercising the
+  // mode/skip/validate branches used in production.
+  function invokeConfigResolvedHook(
     mode: string,
     options: { skipValidation?: boolean; envDir?: string } = {},
   ) {
     const plugin = validateMobileApiUrlPlugin(options.envDir ?? '/nonexistent-root');
-    const configHook = plugin.config;
-    if (typeof configHook !== 'function') {
-      throw new Error('plugin.config is not a function');
+    const configResolvedHook = plugin.configResolved;
+    if (typeof configResolvedHook !== 'function') {
+      throw new Error('plugin.configResolved is not a function');
     }
-    return configHook({}, { mode });
+    return configResolvedHook({ mode });
   }
 
   function setValidProductionEnv(): void {
@@ -130,28 +130,28 @@ describe('validateMobileApiUrlPlugin', () => {
   });
 
   it('is a no-op in development mode (no throw even with no env)', () => {
-    expect(() => invokeConfigHook('development')).not.toThrow();
+    expect(() => invokeConfigResolvedHook('development')).not.toThrow();
   });
 
   it('is a no-op in non-production modes (e.g. test)', () => {
-    expect(() => invokeConfigHook('test')).not.toThrow();
+    expect(() => invokeConfigResolvedHook('test')).not.toThrow();
   });
 
   it('bypasses validation when MOBILE_SKIP_ENV_VALIDATION=true in production', () => {
     process.env.MOBILE_SKIP_ENV_VALIDATION = 'true';
     // No .env files at /nonexistent-root, so without the bypass this would
     // throw "VITE_MOBILE_API_URL is missing".
-    expect(() => invokeConfigHook('production')).not.toThrow();
+    expect(() => invokeConfigResolvedHook('production')).not.toThrow();
   });
 
   it('does not bypass when MOBILE_SKIP_ENV_VALIDATION is set but not "true"', () => {
     process.env.MOBILE_SKIP_ENV_VALIDATION = 'false';
-    expect(() => invokeConfigHook('production')).toThrow('VITE_MOBILE_API_URL is missing');
+    expect(() => invokeConfigResolvedHook('production')).toThrow('VITE_MOBILE_API_URL is missing');
   });
 
   it('throws in production when .env.production is absent (no env files at root)', () => {
     delete process.env.MOBILE_SKIP_ENV_VALIDATION;
-    expect(() => invokeConfigHook('production')).toThrow('VITE_MOBILE_API_URL is missing');
+    expect(() => invokeConfigResolvedHook('production')).toThrow('VITE_MOBILE_API_URL is missing');
   });
 
   it('accepts a VITE_MOBILE_API_URL from process.env in production', () => {
@@ -161,14 +161,14 @@ describe('validateMobileApiUrlPlugin', () => {
     delete process.env.MOBILE_SKIP_ENV_VALIDATION;
     setValidProductionEnv();
     process.env.VITE_MOBILE_API_URL = 'https://example.invalid/api/';
-    expect(() => invokeConfigHook('production')).not.toThrow();
+    expect(() => invokeConfigResolvedHook('production')).not.toThrow();
   });
 
   it('rejects a malformed VITE_MOBILE_API_URL from process.env in production', () => {
     delete process.env.MOBILE_SKIP_ENV_VALIDATION;
     setValidProductionEnv();
     process.env.VITE_MOBILE_API_URL = '/api/';
-    expect(() => invokeConfigHook('production')).toThrow(
+    expect(() => invokeConfigResolvedHook('production')).toThrow(
       /must be a valid absolute http\(s\) URL with a hostname/,
     );
   });
@@ -180,7 +180,7 @@ describe('validateMobileApiUrlPlugin', () => {
     delete process.env.MOBILE_SKIP_ENV_VALIDATION;
     setValidProductionEnv();
     process.env.VITE_MOBILE_API_URL = 'http://example.com/api/';
-    expect(() => invokeConfigHook('production')).toThrow(/must be https: in production/);
+    expect(() => invokeConfigResolvedHook('production')).toThrow(/must be https: in production/);
   });
 
   it.each([
@@ -192,7 +192,7 @@ describe('validateMobileApiUrlPlugin', () => {
     delete process.env.MOBILE_SKIP_ENV_VALIDATION;
     setValidProductionEnv();
     delete process.env[missingKey];
-    expect(() => invokeConfigHook('production')).toThrow(missingKey);
+    expect(() => invokeConfigResolvedHook('production')).toThrow(missingKey);
   });
 
   it.each([
@@ -206,7 +206,7 @@ describe('validateMobileApiUrlPlugin', () => {
     delete process.env.MOBILE_SKIP_ENV_VALIDATION;
     setValidProductionEnv();
     process.env.VITE_COGNITO_OAUTH_DOMAIN = oauthDomain;
-    expect(() => invokeConfigHook('production')).toThrow(
+    expect(() => invokeConfigResolvedHook('production')).toThrow(
       /VITE_COGNITO_OAUTH_DOMAIN must be a valid host-only domain/,
     );
   });
@@ -218,7 +218,7 @@ describe('validateMobileApiUrlPlugin', () => {
     delete process.env.MOBILE_SKIP_ENV_VALIDATION;
     setValidProductionEnv();
     process.env[key] = value;
-    expect(() => invokeConfigHook('production')).toThrow(
+    expect(() => invokeConfigResolvedHook('production')).toThrow(
       new RegExp(`${key} must not contain whitespace`),
     );
   });
@@ -227,7 +227,7 @@ describe('validateMobileApiUrlPlugin', () => {
     delete process.env.MOBILE_SKIP_ENV_VALIDATION;
     setValidProductionEnv();
     process.env.VITE_COGNITO_USER_POOL_ID = 'us-west-2_example';
-    expect(() => invokeConfigHook('production')).toThrow(
+    expect(() => invokeConfigResolvedHook('production')).toThrow(
       /VITE_COGNITO_USER_POOL_ID must start with the configured VITE_AWS_REGION/,
     );
   });
@@ -243,7 +243,7 @@ describe('validateMobileApiUrlPlugin', () => {
       );
       for (const key of Object.keys(validBuildEnv)) delete process.env[key];
       delete process.env.MOBILE_SKIP_ENV_VALIDATION;
-      expect(() => invokeConfigHook('production', { envDir })).not.toThrow();
+      expect(() => invokeConfigResolvedHook('production', { envDir })).not.toThrow();
     } finally {
       rmSync(envDir, { recursive: true, force: true });
     }
@@ -266,7 +266,7 @@ describe('validateMobileApiUrlPlugin', () => {
       for (const envKey of Object.keys(validBuildEnv)) delete process.env[envKey];
       delete process.env.MOBILE_SKIP_ENV_VALIDATION;
       process.env[key] = override;
-      expect(() => invokeConfigHook('production', { envDir })).toThrow(key);
+      expect(() => invokeConfigResolvedHook('production', { envDir })).toThrow(key);
     } finally {
       rmSync(envDir, { recursive: true, force: true });
     }
