@@ -5,7 +5,7 @@ import { expand } from 'dotenv-expand';
 
 type VitePluginLike = {
   name: string;
-  config: (config: unknown, env: { mode: string }) => void;
+  configResolved: (config: { mode: string }) => void;
 };
 
 const mobileBuildEnvKeys = [
@@ -201,7 +201,7 @@ export function validateMobileBuildEnv(env: MobileBuildEnv): void {
 export function validateMobileApiUrlPlugin(rootDir: string): VitePluginLike {
   return {
     name: 'validate-mobile-api-url',
-    config(_, { mode }) {
+    configResolved({ mode }) {
       if (mode !== 'production') return;
       if (process.env.MOBILE_SKIP_ENV_VALIDATION === 'true') return;
 
