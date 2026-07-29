@@ -90,5 +90,19 @@ describe('App', () => {
     expect(mountedRoutes).toEqual(['home']);
     expect(wrapper.find('[data-testid="review-route"]').exists()).toBe(false);
     expect(wrapper.get('[data-testid="home-route"]').text()).toBe('home');
+
+    Object.assign(state, {
+      phase: 'signedOut',
+      operation: 'signingOut',
+      sessionUsable: false,
+      errorCode: null,
+      retryAction: null,
+      notice: null,
+      user: null,
+    });
+    await nextTick();
+
+    expect(wrapper.find('[data-testid="home-route"]').exists()).toBe(false);
+    expect(wrapper.get('[role="status"]').text()).toContain('Signing out…');
   });
 });
