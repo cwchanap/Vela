@@ -67,6 +67,25 @@ describe('mobile session store', () => {
     await expect(store.loadRefreshToken()).resolves.toBeNull();
   });
 
+  it.each(['', '   '])(
+    'rejects blank refresh token saves without invoking secure storage',
+    async (refreshToken) => {
+      const secureStorage = {
+        get: vi.fn(),
+        set: vi.fn(),
+        remove: vi.fn(),
+      };
+      const store = createNativeStore(secureStorage);
+
+      await expect(store.saveRefreshToken(refreshToken)).rejects.toMatchObject({
+        name: 'MobileSessionStoreError',
+        code: 'corrupt',
+        message: 'corrupt',
+      } satisfies Partial<MobileSessionStoreError>);
+      expect(secureStorage.set).not.toHaveBeenCalled();
+    },
+  );
+
   it.each([[''], ['   '], [42], [false], [{}], [[]]])(
     'rejects malformed stored refresh token %p as corrupt',
     async (value) => {
