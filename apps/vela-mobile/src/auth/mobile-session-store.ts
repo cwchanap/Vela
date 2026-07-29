@@ -74,6 +74,9 @@ export function createIosKeychainSessionStore(options: {
 
     async saveRefreshToken(refreshToken) {
       assertNativeIos(options.runtime);
+      if (refreshToken.trim().length === 0) {
+        throw new MobileSessionStoreError('corrupt');
+      }
       try {
         await options.secureStorage.set(
           key,
