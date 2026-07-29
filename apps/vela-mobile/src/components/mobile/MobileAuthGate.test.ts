@@ -89,7 +89,7 @@ function createFakeCoordinator(
     initialize: vi.fn().mockResolvedValue(undefined),
     startSignIn: vi.fn().mockResolvedValue(undefined),
     completeCallback: vi.fn().mockResolvedValue(undefined),
-    retrySessionVerification: vi.fn().mockResolvedValue(undefined),
+    retryCurrentOperation: vi.fn().mockResolvedValue(undefined),
     dispose: vi.fn().mockResolvedValue(undefined),
     ...overrides,
   };
@@ -161,10 +161,10 @@ describe('MobileAuthGate', () => {
   });
 
   it('retries only API session verification for session_verification_failed', async () => {
-    const retrySessionVerification = vi.fn().mockResolvedValue(undefined);
+    const retryCurrentOperation = vi.fn().mockResolvedValue(undefined);
     const { coordinator } = createFakeCoordinator(
       { phase: 'error', errorCode: 'session_verification_failed' },
-      { retrySessionVerification },
+      { retryCurrentOperation },
     );
     const { wrapper } = await mountGate({}, { coordinator });
 
@@ -173,7 +173,7 @@ describe('MobileAuthGate', () => {
     expect(wrapper.findAll('button')).toHaveLength(1);
     await wrapper.get('button').trigger('click');
 
-    expect(retrySessionVerification).toHaveBeenCalledOnce();
+    expect(retryCurrentOperation).toHaveBeenCalledOnce();
     expect(coordinator.startSignIn).not.toHaveBeenCalled();
   });
 
@@ -201,7 +201,7 @@ describe('MobileAuthGate', () => {
     await wrapper.get('button').trigger('click');
 
     expect(startSignIn).toHaveBeenCalledOnce();
-    expect(coordinator.retrySessionVerification).not.toHaveBeenCalled();
+    expect(coordinator.retryCurrentOperation).not.toHaveBeenCalled();
   });
 
   it('renders configuration_error without a retry loop', async () => {
@@ -214,7 +214,7 @@ describe('MobileAuthGate', () => {
     expect(wrapper.get('[role="alert"]').text()).toContain('configured');
     expect(wrapper.find('button').exists()).toBe(false);
     expect(coordinator.startSignIn).not.toHaveBeenCalled();
-    expect(coordinator.retrySessionVerification).not.toHaveBeenCalled();
+    expect(coordinator.retryCurrentOperation).not.toHaveBeenCalled();
   });
 
   it('keeps content closed until the authenticated home replacement settles', async () => {

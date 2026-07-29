@@ -18,7 +18,7 @@ import {
   type OAuthTokenBundleBase,
 } from '../auth/mobile-auth-contract';
 import type { MobileInstallationStore } from '../auth/mobile-installation-store';
-import type { MobileSessionStore } from '../auth/mobile-session-store';
+import { MobileSessionStoreError, type MobileSessionStore } from '../auth/mobile-session-store';
 import {
   containsWhitespace,
   hasMatchingUserPoolRegion,
@@ -27,14 +27,20 @@ import {
 import {
   buildAuthorizationUrl,
   buildAuthorizationCodeTokenRequest,
+  buildRefreshTokenRequest,
   createOAuthTransaction,
   createPkceChallenge,
   hasOAuthCryptoCapabilities,
   parseOAuthCallback,
   parseAuthorizationCodeTokenResponse,
+  parseRefreshTokenResponse,
   validateAuthorizationCodeIdTokenClaims,
+  validateRefreshedIdTokenClaims,
 } from '../auth/mobile-oauth';
-import type { OAuthTransactionStore } from '../auth/oauth-transaction-store';
+import type {
+  LoadedOAuthTransaction,
+  OAuthTransactionStore,
+} from '../auth/oauth-transaction-store';
 
 type ListenerHandle = {
   remove(): Promise<void>;
@@ -47,7 +53,21 @@ type PendingCandidate = {
   context: 'authorizationCode' | 'restore' | 'refresh';
 };
 
+type ActiveSession = {
+  bundle: OAuthTokenBundleBase & { refreshToken: string };
+  user: MobileAuthUser;
+};
+
 type CleanupContext = { kind: 'terminalSession' } | { kind: 'installationReset' };
+
+type SettledRefreshToken =
+  | { kind: 'loaded'; refreshToken: string | null }
+  | { kind: 'corrupt' }
+  | { kind: 'unavailable' };
+
+type SettledTransaction =
+  | { kind: 'loaded'; transaction: LoadedOAuthTransaction }
+  | { kind: 'unavailable' };
 
 export type MobileAuthCoordinatorDependencies = {
   app: MobileAppAdapter;
@@ -191,8 +211,10 @@ export function createMobileAuthCoordinator(
   let operationTail = Promise.resolve();
   let appUrlHandle: ListenerHandle | undefined;
   let browserFinishedHandle: ListenerHandle | undefined;
-  let tokenBundle: AuthorizationCodeTokenBundle | undefined;
+  let active: ActiveSession | undefined;
   let pendingCandidate: PendingCandidate | undefined;
+  let pendingSubject: string | undefined;
+  let restoreRefreshToken: string | undefined;
   let cleanupContext: CleanupContext | undefined;
   let initialized = false;
   let disposed = false;
@@ -209,7 +231,7 @@ export function createMobileAuthCoordinator(
 
   function applyState(next: MobileAuthState): void {
     assertMobileAuthState(next, {
-      activeBundle: tokenBundle ?? null,
+      activeBundle: active?.bundle ?? null,
       now: dependencies.now(),
     });
     Object.assign(state, next);
@@ -300,6 +322,35 @@ export function createMobileAuthCoordinator(
       });
     },
 
+    enterRetryOperation(retryAction: MobileAuthRetryAction): void {
+      const operationByAction: Record<
+        MobileAuthRetryAction,
+        Exclude<MobileAuthOperation, 'idle'>
+      > = {
+        restore: 'restoring',
+        refresh: 'refreshing',
+        persist: 'persisting',
+        verify: 'verifying',
+        cleanup: 'cleaningUp',
+      };
+      const phaseByAction: Record<MobileAuthRetryAction, MobileAuthPhase> = {
+        restore: 'initializing',
+        refresh: 'authenticated',
+        persist: 'exchangingCode',
+        verify: 'verifyingSession',
+        cleanup: 'signedOut',
+      };
+      applyState({
+        phase: phaseByAction[retryAction],
+        operation: operationByAction[retryAction],
+        sessionUsable: false,
+        errorCode: null,
+        retryAction: null,
+        notice: null,
+        user: retryAction === 'refresh' ? (active?.user ?? null) : null,
+      });
+    },
+
     enterTerminalNotice(): void {
       applyState({
         phase: 'signedOut',
@@ -342,8 +393,10 @@ export function createMobileAuthCoordinator(
   }
 
   async function failCallback(errorCode: MobileAuthErrorCode): Promise<void> {
-    tokenBundle = undefined;
+    active = undefined;
     pendingCandidate = undefined;
+    pendingSubject = undefined;
+    restoreRefreshToken = undefined;
     cleanupContext = undefined;
     transitions.enterOAuthError(errorCode);
     await clearTransaction();
@@ -355,6 +408,22 @@ export function createMobileAuthCoordinator(
     } catch {
       // A callback is authoritative even if SFSafariViewController cannot close.
     }
+  }
+
+  async function terminalSessionCleanupUnlocked(): Promise<void> {
+    active = undefined;
+    pendingCandidate = undefined;
+    pendingSubject = undefined;
+    restoreRefreshToken = undefined;
+    cleanupContext = { kind: 'terminalSession' };
+    try {
+      await dependencies.sessionStore.clearRefreshToken();
+    } catch {
+      transitions.enterCleanupFailure();
+      return;
+    }
+    cleanupContext = undefined;
+    transitions.enterTerminalNotice();
   }
 
   async function verifyCandidateSessionUnlocked(): Promise<void> {
@@ -394,24 +463,14 @@ export function createMobileAuthCoordinator(
           phase: 'error',
           sessionUsable: false,
           errorCode: 'session_verification_failed',
-          retryAction: null,
+          retryAction: 'verify',
           user: null,
         });
         return;
       }
 
       if (response.status === 401 || response.status === 403) {
-        tokenBundle = undefined;
-        cleanupContext = { kind: 'terminalSession' };
-        try {
-          await dependencies.sessionStore.clearRefreshToken();
-        } catch {
-          transitions.enterCleanupFailure();
-          return;
-        }
-        pendingCandidate = undefined;
-        cleanupContext = undefined;
-        transitions.enterTerminalNotice();
+        await terminalSessionCleanupUnlocked();
         return;
       }
 
@@ -420,7 +479,7 @@ export function createMobileAuthCoordinator(
           phase: 'error',
           sessionUsable: false,
           errorCode: 'session_verification_failed',
-          retryAction: null,
+          retryAction: 'verify',
           user: null,
         });
         return;
@@ -434,7 +493,7 @@ export function createMobileAuthCoordinator(
           phase: 'error',
           sessionUsable: false,
           errorCode: 'session_verification_failed',
-          retryAction: null,
+          retryAction: 'verify',
           user: null,
         });
         return;
@@ -446,17 +505,27 @@ export function createMobileAuthCoordinator(
           phase: 'error',
           sessionUsable: false,
           errorCode: 'session_verification_failed',
-          retryAction: null,
+          retryAction: 'verify',
           user: null,
         });
         return;
       }
 
-      tokenBundle = {
-        ...candidate.bundle,
-        refreshToken: candidate.durableRefreshToken,
+      if (pendingSubject !== undefined && user.userId !== pendingSubject) {
+        await terminalSessionCleanupUnlocked();
+        return;
+      }
+
+      active = {
+        bundle: {
+          ...candidate.bundle,
+          refreshToken: candidate.durableRefreshToken,
+        },
+        user,
       };
       pendingCandidate = undefined;
+      pendingSubject = undefined;
+      restoreRefreshToken = undefined;
       cleanupContext = undefined;
       transitions.enterAuthenticated(user);
     } finally {
@@ -470,44 +539,51 @@ export function createMobileAuthCoordinator(
       return;
     }
 
-    transitions.enterOperation({
-      phase: 'exchangingCode',
-      operation: 'persisting',
-      sessionUsable: false,
-      notice: null,
-      user: null,
-    });
-    try {
-      await dependencies.sessionStore.saveRefreshToken(candidate.durableRefreshToken);
-    } catch {
-      transitions.enterSessionFailure({
-        phase: 'error',
+    const needsPersistence =
+      candidate.context === 'authorizationCode' || candidate.returnedRefreshToken !== undefined;
+    if (needsPersistence) {
+      transitions.enterOperation({
+        phase: 'exchangingCode',
+        operation: 'persisting',
         sessionUsable: false,
-        errorCode: 'session_persistence_failed',
-        retryAction: 'persist',
+        notice: null,
         user: null,
       });
-      return;
-    }
+      try {
+        await dependencies.sessionStore.saveRefreshToken(candidate.durableRefreshToken);
+      } catch {
+        transitions.enterSessionFailure({
+          phase: 'error',
+          sessionUsable: false,
+          errorCode: 'session_persistence_failed',
+          retryAction: 'persist',
+          user: null,
+        });
+        return;
+      }
 
-    if (candidate.context === 'authorizationCode') {
-      // Only a durable refresh credential permits transaction removal. A
-      // failed Preferences cleanup remains best effort because the exchanged
-      // authorization code is single-use.
-      await clearTransaction();
+      if (candidate.context === 'authorizationCode') {
+        // Only a durable refresh credential permits transaction removal. A
+        // failed Preferences cleanup remains best effort because the exchanged
+        // authorization code is single-use.
+        await clearTransaction();
+      }
     }
 
     await verifyCandidateSessionUnlocked();
   }
 
-  async function completeCallbackUnlocked(rawUrl: string): Promise<boolean> {
+  async function completeCallbackUnlocked(
+    rawUrl: string,
+    loadedTransaction?: LoadedOAuthTransaction,
+  ): Promise<boolean> {
     const isActiveCallbackPhase =
       state.phase === 'initializing' ||
       state.phase === 'openingBrowser' ||
       state.phase === 'awaitingCallback' ||
       (state.phase === 'error' && state.errorCode === 'interrupted');
 
-    if (disposed || !initialized || tokenBundle || pendingCandidate || !isActiveCallbackPhase) {
+    if (disposed || !initialized || active || pendingCandidate || !isActiveCallbackPhase) {
       return false;
     }
 
@@ -524,14 +600,16 @@ export function createMobileAuthCoordinator(
     // transaction, failCallback clears it, and the replacement flow is dead.
     // By validating first we preserve the current transaction, phase, and
     // browser session for the legitimate callback.
-    let loaded: Awaited<ReturnType<OAuthTransactionStore['load']>>;
-    try {
-      loaded = await dependencies.transactionStore.load();
-    } catch {
-      transitions.enterOAuthProgress('exchangingCode');
-      await closeBrowser();
-      await failCallback('interrupted');
-      return true;
+    let loaded = loadedTransaction;
+    if (!loaded) {
+      try {
+        loaded = await dependencies.transactionStore.load();
+      } catch {
+        transitions.enterOAuthProgress('exchangingCode');
+        await closeBrowser();
+        await failCallback('interrupted');
+        return true;
+      }
     }
 
     if (loaded.kind === 'missing' || loaded.kind === 'corrupt') {
@@ -606,32 +684,248 @@ export function createMobileAuthCoordinator(
       durableRefreshToken: refreshToken,
       context: 'authorizationCode',
     };
+    pendingSubject = undefined;
     await persistPendingCandidateUnlocked();
     return true;
   }
 
-  async function resumeStoredTransactionUnlocked(): Promise<void> {
-    let loaded: Awaited<ReturnType<OAuthTransactionStore['load']>>;
+  function classifyRefreshTokenLoad(
+    result: PromiseSettledResult<string | null>,
+  ): SettledRefreshToken {
+    if (result.status === 'fulfilled') {
+      return { kind: 'loaded', refreshToken: result.value };
+    }
+    if (result.reason instanceof MobileSessionStoreError && result.reason.code === 'corrupt') {
+      return { kind: 'corrupt' };
+    }
+    return { kind: 'unavailable' };
+  }
+
+  async function loadRefreshTokenSettled(): Promise<SettledRefreshToken> {
+    const [result] = await Promise.allSettled([dependencies.sessionStore.loadRefreshToken()]);
+    return classifyRefreshTokenLoad(result!);
+  }
+
+  async function loadTransactionSettled(): Promise<SettledTransaction> {
     try {
-      loaded = await dependencies.transactionStore.load();
+      return { kind: 'loaded', transaction: await dependencies.transactionStore.load() };
     } catch {
-      transitions.enterOAuthError('configuration_error');
+      return { kind: 'unavailable' };
+    }
+  }
+
+  function enterRefreshFailure(context: 'restore' | 'refresh'): void {
+    transitions.enterSessionFailure({
+      phase: 'error',
+      sessionUsable: false,
+      errorCode: context === 'restore' ? 'session_restore_failed' : 'session_refresh_failed',
+      retryAction: context,
+      user: null,
+    });
+  }
+
+  function isTerminalRefreshStatus(status: number): boolean {
+    return status === 400 || status === 401 || status === 403;
+  }
+
+  async function refreshCandidateUnlocked(
+    refreshToken: string,
+    context: 'restore' | 'refresh',
+    expectedSubject?: string,
+  ): Promise<void> {
+    if (disposed) {
       return;
     }
 
-    if (loaded.kind === 'missing') {
+    transitions.enterOperation({
+      phase: context === 'restore' ? 'initializing' : 'authenticated',
+      operation: context === 'restore' ? 'restoring' : 'refreshing',
+      sessionUsable: false,
+      notice: null,
+      user: context === 'refresh' ? (active?.user ?? null) : null,
+    });
+
+    let response: { status: number; data: unknown };
+    try {
+      response = await dependencies.tokenTransport.request(
+        buildRefreshTokenRequest(dependencies.config, refreshToken, {
+          timeoutMs: MOBILE_AUTH_NETWORK_TIMEOUT_MS,
+        }),
+      );
+    } catch {
+      enterRefreshFailure(context);
+      return;
+    }
+
+    if (response.status < 200 || response.status >= 300) {
+      if (isTerminalRefreshStatus(response.status)) {
+        await terminalSessionCleanupUnlocked();
+      } else {
+        enterRefreshFailure(context);
+      }
+      return;
+    }
+
+    try {
+      const refreshed = parseRefreshTokenResponse(
+        parseTransportData(response.data),
+        dependencies.now(),
+      );
+      const subject = validateRefreshedIdTokenClaims(refreshed.idToken, {
+        config: dependencies.config,
+        now: dependencies.now(),
+        ...(expectedSubject === undefined ? {} : { expectedSubject }),
+      });
+      const { refreshToken: returnedRefreshToken, ...bundle } = refreshed;
+      pendingCandidate = {
+        bundle,
+        durableRefreshToken: returnedRefreshToken ?? refreshToken,
+        ...(returnedRefreshToken === undefined ? {} : { returnedRefreshToken }),
+        context,
+      };
+      pendingSubject = subject;
+    } catch {
+      await terminalSessionCleanupUnlocked();
+      return;
+    }
+
+    await persistPendingCandidateUnlocked();
+  }
+
+  async function restoreSessionUnlocked(refreshToken?: string): Promise<void> {
+    let durableRefreshToken = refreshToken ?? restoreRefreshToken;
+    if (!durableRefreshToken) {
+      const loaded = await loadRefreshTokenSettled();
+      if (loaded.kind === 'corrupt') {
+        await terminalSessionCleanupUnlocked();
+        return;
+      }
+      if (loaded.kind === 'unavailable') {
+        enterRefreshFailure('restore');
+        return;
+      }
+      if (loaded.refreshToken === null) {
+        restoreRefreshToken = undefined;
+        transitions.enterSignedOut();
+        return;
+      }
+      durableRefreshToken = loaded.refreshToken;
+    }
+
+    restoreRefreshToken = durableRefreshToken;
+    await refreshCandidateUnlocked(durableRefreshToken, 'restore');
+  }
+
+  async function refreshActiveSessionUnlocked(): Promise<void> {
+    const current = active;
+    if (!current || disposed) {
+      return;
+    }
+    await refreshCandidateUnlocked(current.bundle.refreshToken, 'refresh', current.user.userId);
+  }
+
+  function resumeStoredTransactionUnlocked(loaded: SettledTransaction): void {
+    if (loaded.kind === 'unavailable') {
+      transitions.enterOAuthError('configuration_error');
+      return;
+    }
+    if (loaded.transaction.kind === 'missing') {
       transitions.enterSignedOut();
       return;
     }
-    if (loaded.kind === 'expired') {
+    if (loaded.transaction.kind === 'expired') {
       transitions.enterOAuthError('transaction_expired');
       return;
     }
-    if (loaded.kind === 'corrupt') {
+    if (loaded.transaction.kind === 'corrupt') {
       transitions.enterOAuthError('interrupted');
       return;
     }
     transitions.enterOAuthError('interrupted');
+  }
+
+  function isMatchingLaunchCallback(
+    rawUrl: string,
+    loaded: SettledTransaction,
+  ): loaded is {
+    kind: 'loaded';
+    transaction: Extract<LoadedOAuthTransaction, { kind: 'active' }>;
+  } {
+    if (loaded.kind !== 'loaded' || loaded.transaction.kind !== 'active') {
+      return false;
+    }
+    const parsed = parseOAuthCallback(rawUrl);
+    return (
+      (parsed.kind === 'success' || parsed.kind === 'providerError') &&
+      parsed.state === loaded.transaction.transaction.state
+    );
+  }
+
+  async function continueColdInitializationUnlocked(
+    refreshTokenResultPromise: Promise<SettledRefreshToken>,
+  ): Promise<void> {
+    let launchUrl: { url: string } | undefined;
+    try {
+      launchUrl = await dependencies.app.getLaunchUrl();
+    } catch {
+      await removeListener(appUrlHandle);
+      await removeListener(browserFinishedHandle);
+      appUrlHandle = undefined;
+      browserFinishedHandle = undefined;
+      transitions.enterOAuthError('configuration_error');
+      return;
+    }
+
+    const transaction = await loadTransactionSettled();
+    if (launchUrl && isMatchingLaunchCallback(launchUrl.url, transaction)) {
+      await completeCallbackUnlocked(launchUrl.url, transaction.transaction);
+      await refreshTokenResultPromise;
+      return;
+    }
+
+    const refreshTokenResult = await refreshTokenResultPromise;
+    if (refreshTokenResult.kind === 'corrupt') {
+      await terminalSessionCleanupUnlocked();
+      return;
+    }
+    if (refreshTokenResult.kind === 'unavailable') {
+      enterRefreshFailure('restore');
+      return;
+    }
+    if (refreshTokenResult.refreshToken !== null) {
+      restoreRefreshToken = refreshTokenResult.refreshToken;
+      if (transaction.kind === 'unavailable' || transaction.transaction.kind !== 'missing') {
+        await clearTransaction();
+      }
+      await restoreSessionUnlocked(refreshTokenResult.refreshToken);
+      return;
+    }
+
+    resumeStoredTransactionUnlocked(transaction);
+  }
+
+  async function performInstallationResetUnlocked(): Promise<void> {
+    cleanupContext = { kind: 'installationReset' };
+    transitions.enterOperation({
+      phase: 'initializing',
+      operation: 'cleaningUp',
+      sessionUsable: false,
+      notice: null,
+      user: null,
+    });
+    try {
+      await dependencies.sessionStore.clearRefreshToken();
+      await dependencies.installationStore.markCurrentInstallation();
+    } catch {
+      transitions.enterCleanupFailure();
+      return;
+    }
+    cleanupContext = undefined;
+    restoreRefreshToken = undefined;
+    transitions.enterOAuthProgress('initializing');
+    await continueColdInitializationUnlocked(
+      Promise.resolve({ kind: 'loaded', refreshToken: null }),
+    );
   }
 
   async function initializeUnlocked(): Promise<void> {
@@ -667,50 +961,24 @@ export function createMobileAuthCoordinator(
       return;
     }
 
-    try {
+    const installationMarkerPromise = dependencies.installationStore.isCurrentInstallationMarked();
+    const refreshTokenResultPromise = loadRefreshTokenSettled();
+    const [installationMarkerResult] = await Promise.allSettled([installationMarkerPromise]);
+
+    if (installationMarkerResult.status === 'rejected') {
+      await refreshTokenResultPromise;
       cleanupContext = { kind: 'installationReset' };
-      const isMarked = await dependencies.installationStore.isCurrentInstallationMarked();
-      if (!isMarked) {
-        transitions.enterOperation({
-          phase: 'initializing',
-          operation: 'cleaningUp',
-          sessionUsable: false,
-          notice: null,
-          user: null,
-        });
-        await dependencies.sessionStore.clearRefreshToken();
-        await dependencies.installationStore.markCurrentInstallation();
-        transitions.enterOAuthProgress('initializing');
-      }
-      cleanupContext = undefined;
-    } catch {
       transitions.enterCleanupFailure();
       return;
     }
-
-    try {
-      const launchUrl = await dependencies.app.getLaunchUrl();
-      if (launchUrl && parseOAuthCallback(launchUrl.url).kind !== 'unrelated') {
-        const consumed = await completeCallbackUnlocked(launchUrl.url);
-        if (consumed) {
-          return;
-        }
-        // The callback was ignored (malformed or state mismatch) to
-        // preserve an in-flight transaction. Fall through to
-        // resumeStoredTransactionUnlocked so the coordinator leaves the
-        // `initializing` phase instead of stranding the user with no
-        // retry action.
-      }
-    } catch {
-      await removeListener(appUrlHandle);
-      await removeListener(browserFinishedHandle);
-      appUrlHandle = undefined;
-      browserFinishedHandle = undefined;
-      transitions.enterOAuthError('configuration_error');
+    if (!installationMarkerResult.value) {
+      await refreshTokenResultPromise;
+      await performInstallationResetUnlocked();
       return;
     }
 
-    await resumeStoredTransactionUnlocked();
+    cleanupContext = undefined;
+    await continueColdInitializationUnlocked(refreshTokenResultPromise);
   }
 
   async function startSignInUnlocked(): Promise<void> {
@@ -774,19 +1042,39 @@ export function createMobileAuthCoordinator(
     }
   }
 
-  async function retrySessionVerificationUnlocked(): Promise<void> {
-    // Cleanup retries have distinct installation-reset versus terminal-session
-    // semantics. Retain that context for the dedicated cleanup flow rather
-    // than routing either case through a verification retry.
-    if (disposed || cleanupContext || state.phase !== 'error' || !pendingCandidate) {
+  async function retryCleanupUnlocked(): Promise<void> {
+    if (cleanupContext?.kind === 'installationReset') {
+      await performInstallationResetUnlocked();
       return;
     }
-    if (state.errorCode === 'session_persistence_failed' && state.retryAction === 'persist') {
-      await persistPendingCandidateUnlocked();
+    if (cleanupContext?.kind === 'terminalSession') {
+      await terminalSessionCleanupUnlocked();
+    }
+  }
+
+  async function retryCurrentOperationUnlocked(): Promise<void> {
+    const retryAction = state.retryAction;
+    if (disposed || retryAction === null || state.operation !== 'idle') {
       return;
     }
-    if (state.errorCode === 'session_verification_failed') {
-      await verifyCandidateSessionUnlocked();
+
+    transitions.enterRetryOperation(retryAction);
+    switch (retryAction) {
+      case 'restore':
+        await restoreSessionUnlocked();
+        return;
+      case 'refresh':
+        await refreshActiveSessionUnlocked();
+        return;
+      case 'persist':
+        await persistPendingCandidateUnlocked();
+        return;
+      case 'verify':
+        await verifyCandidateSessionUnlocked();
+        return;
+      case 'cleanup':
+        await retryCleanupUnlocked();
+        return;
     }
   }
 
@@ -799,8 +1087,10 @@ export function createMobileAuthCoordinator(
     await removeListener(browserFinishedHandle);
     appUrlHandle = undefined;
     browserFinishedHandle = undefined;
-    tokenBundle = undefined;
+    active = undefined;
     pendingCandidate = undefined;
+    pendingSubject = undefined;
+    restoreRefreshToken = undefined;
     cleanupContext = undefined;
     transitions.enterSignedOut();
   }
@@ -810,7 +1100,7 @@ export function createMobileAuthCoordinator(
     initialize: () => serialize(initializeUnlocked),
     startSignIn: () => serialize(startSignInUnlocked),
     completeCallback: (url) => serialize(() => completeCallbackUnlocked(url).then(() => undefined)),
-    retrySessionVerification: () => serialize(retrySessionVerificationUnlocked),
+    retryCurrentOperation: () => serialize(retryCurrentOperationUnlocked),
     dispose: () => serialize(disposeUnlocked),
   };
 
