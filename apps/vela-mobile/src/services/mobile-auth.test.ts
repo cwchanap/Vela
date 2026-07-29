@@ -157,6 +157,7 @@ class FakeSessionStore implements MobileSessionStore {
   readonly saveAttempts: string[] = [];
   clearCalls = 0;
   saveGate: Promise<void> | undefined;
+  clearGate: Promise<void> | undefined;
   loadFailure: unknown;
   saveFailure: unknown;
   clearFailure: unknown;
@@ -180,6 +181,7 @@ class FakeSessionStore implements MobileSessionStore {
   async clearRefreshToken(): Promise<void> {
     this.order.push('session:clear');
     this.clearCalls += 1;
+    await this.clearGate;
     if (this.clearFailure) throw this.clearFailure;
     this.refreshToken = null;
   }
@@ -506,6 +508,49 @@ async function authenticateWithExpiry(
   };
   await harness.coordinator.initialize();
   await harness.coordinator.completeCallback(callback(activeTransaction));
+}
+
+async function authenticate(harness: ReturnType<typeof makeHarness>): Promise<void> {
+  await harness.persist(activeTransaction);
+  harness.prepareSuccessfulExchange(activeTransaction);
+  await harness.coordinator.initialize();
+  await harness.coordinator.completeCallback(callback(activeTransaction));
+}
+
+async function arrangeBlockingRetry(
+  retryAction: 'restore' | 'refresh' | 'persist' | 'verify',
+): Promise<ReturnType<typeof makeHarness>> {
+  if (retryAction === 'restore') {
+    const harness = makeHarness();
+    harness.sessionStore.refreshToken = 'SECRET-durable-token';
+    harness.tokenTransport.result = { status: 503, data: {} };
+    await harness.coordinator.initialize();
+    return harness;
+  }
+
+  if (retryAction === 'refresh') {
+    let currentNow = NOW;
+    const harness = makeHarness({ now: () => currentNow });
+    await authenticate(harness);
+    harness.tokenTransport.failure = new Error('SECRET-refresh-network');
+    currentNow += 3_541_000;
+    harness.app.emitState(true);
+    await harness.flush();
+    return harness;
+  }
+
+  const harness = makeHarness();
+  harness.sessionStore.refreshToken = 'SECRET-durable-token';
+  prepareSuccessfulRefresh(harness, {
+    ...(retryAction === 'persist' ? { rotatedRefreshToken: 'SECRET-rotated-refresh-token' } : {}),
+  });
+  if (retryAction === 'persist') {
+    harness.sessionStore.saveFailure = new Error('SECRET-persist');
+  } else {
+    harness.sessionFetch.mockResolvedValueOnce(response(503, { error: 'temporary' }));
+  }
+  await harness.coordinator.initialize();
+  return harness;
 }
 
 function refreshRequests(harness: ReturnType<typeof makeHarness>): MobileTokenRequest[] {
@@ -1373,6 +1418,304 @@ describe('generalized retry dispatch', () => {
     expect(harness.tokenTransport.requests).toHaveLength(0);
     expect(harness.sessionFetch).not.toHaveBeenCalled();
     expect(harness.coordinator.state.phase).toBe('signedOut');
+  });
+});
+
+describe('local sign-out and cleanup retry', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('hides content before asynchronous durable cleanup and preserves cleanup ordering', async () => {
+    const harness = makeHarness();
+    await authenticate(harness);
+    await harness.persist(activeTransaction);
+    const clearGate = deferred<void>();
+    harness.sessionStore.clearGate = clearGate.promise;
+
+    const result = harness.coordinator.signOut();
+
+    expect(harness.coordinator.state).toMatchObject({
+      operation: 'signingOut',
+      sessionUsable: false,
+    });
+    await vi.waitFor(() => expect(harness.sessionStore.clearCalls).toBe(1));
+    expect(harness.preferences.value).not.toBeNull();
+    expect(harness.preferences.calls.at(-1)).not.toBe('preferences:remove');
+
+    clearGate.resolve();
+    await result;
+
+    expectOrderedCalls(harness.order, ['session:clear', 'preferences:remove']);
+    expect(harness.coordinator.state).toEqual({
+      phase: 'signedOut',
+      operation: 'idle',
+      sessionUsable: false,
+      errorCode: null,
+      retryAction: null,
+      notice: null,
+      user: null,
+    });
+  });
+
+  it.each(['restore', 'refresh', 'persist', 'verify'] as const)(
+    'allows start-over cleanup from blocking %s recovery',
+    async (retryAction) => {
+      const harness = await arrangeBlockingRetry(retryAction);
+      expect(harness.coordinator.state.retryAction).toBe(retryAction);
+      await harness.persist(activeTransaction);
+
+      await harness.coordinator.signOut();
+
+      expect(harness.sessionStore.clearCalls).toBe(1);
+      expect(harness.preferences.value).toBeNull();
+      expect(harness.coordinator.state).toEqual({
+        phase: 'signedOut',
+        operation: 'idle',
+        sessionUsable: false,
+        errorCode: null,
+        retryAction: null,
+        notice: null,
+        user: null,
+      });
+    },
+  );
+
+  it('reports incomplete Keychain cleanup without claiming sign-out success', async () => {
+    const harness = makeHarness();
+    await authenticate(harness);
+    await harness.persist(activeTransaction);
+    harness.sessionStore.clearFailure = new Error('SECRET-delete-failure');
+
+    await harness.coordinator.signOut();
+
+    expect(harness.coordinator.state).toEqual({
+      phase: 'signedOut',
+      operation: 'idle',
+      sessionUsable: false,
+      errorCode: 'session_cleanup_failed',
+      retryAction: 'cleanup',
+      notice: 'cleanup_incomplete',
+      user: null,
+    });
+    expect(harness.preferences.value).not.toBeNull();
+    expect(snapshot(harness.coordinator.state)).not.toContain('SECRET');
+  });
+
+  it('reports incomplete transaction cleanup after deleting the Keychain token', async () => {
+    const harness = makeHarness();
+    await authenticate(harness);
+    await harness.persist(activeTransaction);
+    harness.preferences.removeFailure = new Error('SECRET-transaction-delete');
+
+    await harness.coordinator.signOut();
+
+    expect(harness.sessionStore.refreshToken).toBeNull();
+    expect(harness.preferences.value).not.toBeNull();
+    expect(harness.coordinator.state).toMatchObject({
+      phase: 'signedOut',
+      sessionUsable: false,
+      errorCode: 'session_cleanup_failed',
+      retryAction: 'cleanup',
+      notice: 'cleanup_incomplete',
+    });
+    expect(snapshot(harness.coordinator.state)).not.toContain('SECRET');
+  });
+
+  it('retries sign-out cleanup to ordinary signed out', async () => {
+    const harness = makeHarness();
+    await authenticate(harness);
+    await harness.persist(activeTransaction);
+    harness.sessionStore.clearFailure = new Error('SECRET-delete-failure');
+    await harness.coordinator.signOut();
+
+    harness.sessionStore.clearFailure = undefined;
+    await harness.coordinator.retryCurrentOperation();
+
+    expect(harness.sessionStore.clearCalls).toBe(2);
+    expect(harness.preferences.value).toBeNull();
+    expect(harness.coordinator.state).toEqual({
+      phase: 'signedOut',
+      operation: 'idle',
+      sessionUsable: false,
+      errorCode: null,
+      retryAction: null,
+      notice: null,
+      user: null,
+    });
+  });
+
+  it('keeps failed sign-out cleanup retryable until all cleanup succeeds', async () => {
+    const harness = makeHarness();
+    await authenticate(harness);
+    harness.sessionStore.clearFailure = new Error('SECRET-delete-failure');
+    await harness.coordinator.signOut();
+
+    await harness.coordinator.retryCurrentOperation();
+
+    expect(harness.sessionStore.clearCalls).toBe(2);
+    expect(harness.coordinator.state).toMatchObject({
+      errorCode: 'session_cleanup_failed',
+      retryAction: 'cleanup',
+      notice: 'cleanup_incomplete',
+    });
+  });
+
+  it('coalesces duplicate sign-out calls into one cleanup flight', async () => {
+    const harness = makeHarness();
+    await authenticate(harness);
+    const clearGate = deferred<void>();
+    harness.sessionStore.clearGate = clearGate.promise;
+
+    const first = harness.coordinator.signOut();
+    const second = harness.coordinator.signOut();
+
+    expect(second).toBe(first);
+    await vi.waitFor(() => expect(harness.sessionStore.clearCalls).toBe(1));
+    clearGate.resolve();
+    await Promise.all([first, second]);
+    expect(harness.sessionStore.clearCalls).toBe(1);
+  });
+
+  it('cancels proactive refresh and access-expiry timers', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+    const harness = makeHarness({ now: () => Date.now() });
+    await authenticateWithExpiry(harness, NOW + 120_000);
+
+    await harness.coordinator.signOut();
+    await vi.advanceTimersByTimeAsync(120_000);
+
+    expect(refreshRequests(harness)).toHaveLength(0);
+    expect(harness.coordinator.state).toMatchObject({
+      phase: 'signedOut',
+      sessionUsable: false,
+      notice: null,
+    });
+  });
+
+  it('cancels a queued automatic refresh retry', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+    const harness = makeHarness({ now: () => Date.now() });
+    await authenticateWithExpiry(harness, NOW + 61_000);
+    harness.tokenTransport.queuedFailures.push(new Error('SECRET-refresh-network'));
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(refreshRequests(harness)).toHaveLength(1);
+
+    await harness.coordinator.signOut();
+    await vi.advanceTimersByTimeAsync(60_000);
+
+    expect(refreshRequests(harness)).toHaveLength(1);
+    expect(harness.coordinator.state.phase).toBe('signedOut');
+  });
+
+  it('prevents an in-flight refresh from republishing session capability', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+    const harness = makeHarness({ now: () => Date.now() });
+    await authenticateWithExpiry(harness, NOW + 61_000);
+    const heldRefresh = deferred<{ status: number; data: unknown }>();
+    harness.tokenTransport.gate = heldRefresh.promise;
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(harness.coordinator.state.operation).toBe('refreshing');
+    const clearGate = deferred<void>();
+    harness.sessionStore.clearGate = clearGate.promise;
+
+    const signOut = harness.coordinator.signOut();
+    heldRefresh.resolve({
+      status: 200,
+      data: {
+        access_token: 'SECRET-late-access-token',
+        id_token: refreshedIdToken({ exp: 10_000 }),
+        expires_in: 3_600,
+      },
+    });
+    await vi.waitFor(() => expect(harness.sessionStore.clearCalls).toBe(1));
+
+    expect(harness.sessionFetch).toHaveBeenCalledOnce();
+    expect(harness.coordinator.state).toMatchObject({
+      operation: 'signingOut',
+      sessionUsable: false,
+    });
+    clearGate.resolve();
+    await signOut;
+    expect(harness.coordinator.state.phase).toBe('signedOut');
+  });
+
+  it('erases a failed pending candidate before the next sign-in', async () => {
+    const harness = await arrangeBlockingRetry('persist');
+    expect(harness.coordinator.state.retryAction).toBe('persist');
+    harness.sessionStore.saveFailure = undefined;
+
+    await harness.coordinator.signOut();
+    await harness.coordinator.startSignIn();
+    const replacement = harness.preferences.transaction();
+    harness.prepareSuccessfulExchange(replacement);
+    await harness.coordinator.completeCallback(callback(replacement));
+
+    expect(harness.coordinator.state).toMatchObject({
+      phase: 'authenticated',
+      sessionUsable: true,
+      errorCode: null,
+    });
+  });
+
+  it('retains the installation marker and makes no remote logout or browser request', async () => {
+    const harness = makeHarness();
+    await authenticate(harness);
+    const tokenRequestCount = harness.tokenTransport.requests.length;
+    const sessionRequestCount = harness.sessionFetch.mock.calls.length;
+    const browserOpenCount = harness.browser.openCalls.length;
+
+    await harness.coordinator.signOut();
+
+    expect(harness.installationStore.marked).toBe(true);
+    expect(harness.installationStore.markCalls).toBe(0);
+    expect(harness.tokenTransport.requests).toHaveLength(tokenRequestCount);
+    expect(harness.sessionFetch).toHaveBeenCalledTimes(sessionRequestCount);
+    expect(harness.browser.openCalls).toHaveLength(browserOpenCount);
+  });
+
+  it('dispose waits behind sign-out but never deletes durable state itself', async () => {
+    const harness = makeHarness();
+    await authenticate(harness);
+    const clearGate = deferred<void>();
+    harness.sessionStore.clearGate = clearGate.promise;
+
+    const signOut = harness.coordinator.signOut();
+    const dispose = harness.coordinator.dispose();
+    await vi.waitFor(() => expect(harness.sessionStore.clearCalls).toBe(1));
+    clearGate.resolve();
+    await signOut;
+    await dispose;
+
+    expect(harness.sessionStore.clearCalls).toBe(1);
+    expect(harness.preferences.value).toBeNull();
+  });
+
+  it('makes every public operation a no-op after disposal', async () => {
+    const harness = makeHarness();
+    harness.sessionStore.refreshToken = 'SECRET-durable-token';
+    await harness.coordinator.dispose();
+    const before = {
+      clearCalls: harness.sessionStore.clearCalls,
+      tokenRequests: harness.tokenTransport.requests.length,
+      browserOpens: harness.browser.openCalls.length,
+      preferenceCalls: harness.preferences.calls.length,
+    };
+
+    await harness.coordinator.initialize();
+    await harness.coordinator.startSignIn();
+    await harness.coordinator.completeCallback(callback(activeTransaction));
+    await harness.coordinator.retryCurrentOperation();
+    await harness.coordinator.signOut();
+
+    expect(harness.sessionStore.clearCalls).toBe(before.clearCalls);
+    expect(harness.tokenTransport.requests).toHaveLength(before.tokenRequests);
+    expect(harness.browser.openCalls).toHaveLength(before.browserOpens);
+    expect(harness.preferences.calls).toHaveLength(before.preferenceCalls);
+    expect(harness.sessionStore.refreshToken).toBe('SECRET-durable-token');
   });
 });
 
