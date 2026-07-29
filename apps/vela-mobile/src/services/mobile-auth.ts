@@ -1,6 +1,7 @@
 import { reactive, readonly, type InjectionKey } from 'vue';
 import {
   MOBILE_OAUTH_CALLBACK_URI,
+  type AuthorizationCodeTokenBundle,
   type MobileAppAdapter,
   type MobileAuthCoordinator,
   type MobileAuthErrorCode,
@@ -8,7 +9,6 @@ import {
   type MobileBrowserAdapter,
   type MobileOAuthConfig,
   type MobileTokenTransportAdapter,
-  type OAuthTokenBundle,
 } from '../auth/mobile-auth-contract';
 import {
   containsWhitespace,
@@ -17,13 +17,13 @@ import {
 } from '../auth/config-validators';
 import {
   buildAuthorizationUrl,
-  buildTokenRequest,
+  buildAuthorizationCodeTokenRequest,
   createOAuthTransaction,
   createPkceChallenge,
   hasOAuthCryptoCapabilities,
   parseOAuthCallback,
-  parseTokenResponse,
-  validateIdTokenClaims,
+  parseAuthorizationCodeTokenResponse,
+  validateAuthorizationCodeIdTokenClaims,
 } from '../auth/mobile-oauth';
 import type { OAuthTransactionStore } from '../auth/oauth-transaction-store';
 
@@ -154,7 +154,7 @@ export function createMobileAuthCoordinator(
   let operationTail = Promise.resolve();
   let appUrlHandle: ListenerHandle | undefined;
   let browserFinishedHandle: ListenerHandle | undefined;
-  let tokenBundle: OAuthTokenBundle | undefined;
+  let tokenBundle: AuthorizationCodeTokenBundle | undefined;
   let initialized = false;
   let disposed = false;
   const isDevelopment = dependencies.isDevelopment ?? import.meta.env.DEV;
@@ -347,24 +347,30 @@ export function createMobileAuthCoordinator(
       return true;
     }
 
-    let bundle: OAuthTokenBundle;
+    let response: { status: number; data: unknown };
     try {
-      const response = await dependencies.tokenTransport.request(
-        buildTokenRequest(dependencies.config, transaction, parsed.code, {
+      response = await dependencies.tokenTransport.request(
+        buildAuthorizationCodeTokenRequest(dependencies.config, transaction, parsed.code, {
           timeoutMs: MOBILE_AUTH_NETWORK_TIMEOUT_MS,
         }),
       );
-      if (response.status < 200 || response.status >= 300) {
-        throw new Error('token_endpoint_rejected');
-      }
-      bundle = parseTokenResponse(parseTransportData(response.data), dependencies.now());
     } catch {
       await failCallback('code_exchange_failed');
       return true;
     }
 
+    if (response.status < 200 || response.status >= 300) {
+      await failCallback('code_exchange_failed');
+      return true;
+    }
+
+    let bundle: AuthorizationCodeTokenBundle;
     try {
-      validateIdTokenClaims(bundle.idToken, {
+      bundle = parseAuthorizationCodeTokenResponse(
+        parseTransportData(response.data),
+        dependencies.now(),
+      );
+      validateAuthorizationCodeIdTokenClaims(bundle.idToken, {
         config: dependencies.config,
         transaction,
         now: dependencies.now(),
