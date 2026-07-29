@@ -7,6 +7,26 @@ import LearnPage from './LearnPage.vue';
 import ReviewPage from './ReviewPage.vue';
 import WordsPage from './WordsPage.vue';
 import MorePage from './MorePage.vue';
+import type { MobileAuthCoordinator } from '../auth/mobile-auth-contract';
+import { MOBILE_AUTH_KEY } from '../services/mobile-auth';
+
+const coordinator: MobileAuthCoordinator = {
+  state: {
+    phase: 'authenticated',
+    operation: 'idle',
+    sessionUsable: true,
+    errorCode: null,
+    retryAction: null,
+    notice: null,
+    user: { userId: 'user-1', email: null },
+  },
+  initialize: vi.fn().mockResolvedValue(undefined),
+  startSignIn: vi.fn().mockResolvedValue(undefined),
+  completeCallback: vi.fn().mockResolvedValue(undefined),
+  retryCurrentOperation: vi.fn().mockResolvedValue(undefined),
+  signOut: vi.fn().mockResolvedValue(undefined),
+  dispose: vi.fn().mockResolvedValue(undefined),
+};
 
 // q-page must be a deep child of q-layout; wrap so Quasar renders under jsdom.
 const mountPage = (Page: Component) => {
@@ -19,7 +39,14 @@ const mountPage = (Page: Component) => {
     template:
       '<q-layout view="hHh Lpr fFf"><q-page-container><page/></q-page-container></q-layout>',
   });
-  return mount(Host, { global: { plugins: [Quasar, router] } });
+  return mount(Host, {
+    global: {
+      plugins: [Quasar, router],
+      provide: {
+        [MOBILE_AUTH_KEY as symbol]: coordinator,
+      },
+    },
+  });
 };
 
 describe.each([

@@ -15,6 +15,8 @@ const ProtectedSlot = defineComponent({
   template: '<div data-testid="protected-slot">Protected content</div>',
 });
 
+const user = { userId: 'user-1', email: 'vela@example.com' };
+
 const routes: RouteRecordRaw[] = [
   { path: '/', component: ProtectedSlot },
   { path: '/review', component: ProtectedSlot },
@@ -164,15 +166,22 @@ describe('MobileAuthGate', () => {
   it('retries only API session verification for session_verification_failed', async () => {
     const retryCurrentOperation = vi.fn().mockResolvedValue(undefined);
     const { coordinator } = createFakeCoordinator(
-      { phase: 'error', errorCode: 'session_verification_failed' },
+      {
+        phase: 'error',
+        errorCode: 'session_verification_failed',
+        retryAction: 'verify',
+      },
       { retryCurrentOperation },
     );
     const { wrapper } = await mountGate({}, { coordinator });
 
     const alert = wrapper.get('[role="alert"]');
     expect(alert.text()).toContain('Vela could not verify your session');
-    expect(wrapper.findAll('button')).toHaveLength(1);
-    await wrapper.get('button').trigger('click');
+    expect(wrapper.findAll('button').map((button) => button.text())).toEqual([
+      'Retry',
+      'Sign out and start over',
+    ]);
+    await wrapper.findAll('button')[0]?.trigger('click');
 
     expect(retryCurrentOperation).toHaveBeenCalledOnce();
     expect(coordinator.startSignIn).not.toHaveBeenCalled();
@@ -348,6 +357,8 @@ describe('MobileAuthGate', () => {
     const { wrapper } = await mountGate({
       phase: 'authenticated',
       sessionUsable: false,
+      errorCode: 'session_refresh_failed',
+      retryAction: 'refresh',
       user: { userId: 'user-1', email: null },
     });
 
@@ -430,6 +441,23 @@ describe('MobileAuthGate', () => {
     expect(wrapper.find('[role="alert"]').exists()).toBe(false);
   });
 
+  it('allows marked development diagnostics for unsupported browser boot', async () => {
+    const { wrapper } = await mountGate(
+      {
+        phase: 'error',
+        operation: 'idle',
+        sessionUsable: false,
+        errorCode: 'unsupported_platform',
+        retryAction: null,
+        notice: null,
+        user: null,
+      },
+      { path: '/diagnostics' },
+    );
+
+    expect(wrapper.find('[data-testid="protected-slot"]').exists()).toBe(true);
+  });
+
   it('shows non-configuration auth errors instead of marked diagnostics', async () => {
     const { wrapper } = await mountGate(
       { phase: 'error', errorCode: 'provider_error' },
@@ -453,6 +481,33 @@ describe('MobileAuthGate', () => {
     expect(shouldBypassMobileAuth(true, true, signedOut)).toBe(true);
     expect(shouldBypassMobileAuth(false, true, signedOut)).toBe(false);
     expect(shouldBypassMobileAuth(true, false, signedOut)).toBe(false);
+    expect(
+      shouldBypassMobileAuth(true, true, {
+        ...signedOut,
+        phase: 'error',
+        errorCode: 'unsupported_platform',
+      }),
+    ).toBe(true);
+    expect(
+      shouldBypassMobileAuth(true, true, {
+        ...signedOut,
+        notice: 'session_unusable',
+      }),
+    ).toBe(false);
+    expect(
+      shouldBypassMobileAuth(true, true, {
+        ...signedOut,
+        operation: 'signingOut',
+      }),
+    ).toBe(false);
+    expect(
+      shouldBypassMobileAuth(true, true, {
+        ...signedOut,
+        errorCode: 'session_cleanup_failed',
+        retryAction: 'cleanup',
+        notice: 'cleanup_incomplete',
+      }),
+    ).toBe(false);
 
     const { wrapper } = await mountGate(
       { phase: 'signedOut' },
@@ -467,5 +522,204 @@ describe('MobileAuthGate', () => {
     const ratio = contrastRatio(parseRgb(styles.color), parseRgb(styles.backgroundColor));
 
     expect(ratio).toBeGreaterThanOrEqual(7);
+  });
+
+  it('renders retry and start-over for an expired refresh failure', async () => {
+    const { wrapper, coordinator } = await mountGate({
+      phase: 'authenticated',
+      operation: 'idle',
+      sessionUsable: false,
+      errorCode: 'session_refresh_failed',
+      retryAction: 'refresh',
+      notice: null,
+      user,
+    });
+
+    expect(wrapper.find('[data-testid="protected-slot"]').exists()).toBe(false);
+    expect(wrapper.findAll('button').map((button) => button.text())).toEqual([
+      'Retry',
+      'Sign out and start over',
+    ]);
+    await wrapper.findAll('button')[1]?.trigger('click');
+    expect(coordinator.signOut).toHaveBeenCalledOnce();
+  });
+
+  it('renders a non-blocking retry banner over usable content', async () => {
+    const retryCurrentOperation = vi.fn().mockResolvedValue(undefined);
+    const { coordinator } = createFakeCoordinator(
+      {
+        phase: 'authenticated',
+        operation: 'idle',
+        sessionUsable: true,
+        errorCode: 'session_refresh_failed',
+        retryAction: 'refresh',
+        notice: null,
+        user,
+      },
+      { retryCurrentOperation },
+    );
+    const { wrapper } = await mountGate({}, { coordinator });
+    await flushPromises();
+
+    expect(wrapper.find('[data-testid="protected-slot"]').exists()).toBe(true);
+    const alert = wrapper.get('[role="alert"]');
+    expect(alert.text()).toContain('Vela cannot use this session');
+    expect(alert.get('button').text()).toBe('Retry');
+    await alert.get('button').trigger('click');
+    expect(retryCurrentOperation).toHaveBeenCalledOnce();
+  });
+
+  it.each<[MobileAuthState['operation'], string]>([
+    ['restoring', 'Restoring your Vela session…'],
+    ['refreshing', 'Refreshing your Vela session…'],
+    ['persisting', 'Securing your Vela session…'],
+    ['verifying', 'Verifying your Vela session…'],
+    ['signingOut', 'Signing out…'],
+    ['cleaningUp', 'Finishing secure sign-out…'],
+  ])('announces blocking %s operation with exact copy', async (operation, copy) => {
+    const operationState: Partial<MobileAuthState> =
+      operation === 'restoring'
+        ? { phase: 'initializing', operation }
+        : operation === 'refreshing'
+          ? { phase: 'authenticated', operation, user }
+          : operation === 'persisting'
+            ? { phase: 'exchangingCode', operation }
+            : operation === 'verifying'
+              ? { phase: 'verifyingSession', operation }
+              : { phase: 'signedOut', operation };
+    const { wrapper } = await mountGate(operationState);
+
+    const status = wrapper.get('[role="status"]');
+    expect(status.attributes('aria-live')).toBe('polite');
+    expect(status.text()).toContain(copy);
+    expect(wrapper.find('[data-testid="protected-slot"]').exists()).toBe(false);
+  });
+
+  it('does not announce a successful background refresh while content stays usable', async () => {
+    const { wrapper } = await mountGate({
+      phase: 'authenticated',
+      operation: 'refreshing',
+      sessionUsable: true,
+      user,
+    });
+    await flushPromises();
+
+    expect(wrapper.find('[data-testid="protected-slot"]').exists()).toBe(true);
+    expect(wrapper.find('[aria-live]').exists()).toBe(false);
+  });
+
+  it('offers only cleanup retry with the exact incomplete-cleanup warning', async () => {
+    const { wrapper, coordinator } = await mountGate({
+      phase: 'signedOut',
+      operation: 'idle',
+      sessionUsable: false,
+      errorCode: 'session_cleanup_failed',
+      retryAction: 'cleanup',
+      notice: 'cleanup_incomplete',
+      user: null,
+    });
+
+    const alert = wrapper.get('[role="alert"]');
+    expect(alert.text()).toContain(
+      'Vela could not finish secure sign-out. Your session may return if you close and reopen the app before cleanup succeeds.',
+    );
+    expect(wrapper.findAll('button').map((button) => button.text())).toEqual(['Retry']);
+    await wrapper.get('button').trigger('click');
+    expect(coordinator.retryCurrentOperation).toHaveBeenCalledOnce();
+    expect(coordinator.signOut).not.toHaveBeenCalled();
+  });
+
+  it('renders the terminal session notice as an alert with a Google action', async () => {
+    const { wrapper } = await mountGate({
+      phase: 'signedOut',
+      notice: 'session_unusable',
+    });
+
+    const alert = wrapper.get('[role="alert"]');
+    expect(alert.text()).toContain(
+      'Your Vela session is no longer usable. Continue with Google to sign in again.',
+    );
+    expect(alert.get('button').text()).toBe('Continue with Google');
+  });
+
+  it('deduplicates blocking retry actions and disables both recovery controls', async () => {
+    const pending = deferred<void>();
+    const retryCurrentOperation = vi.fn(() => pending.promise);
+    const { coordinator } = createFakeCoordinator(
+      {
+        phase: 'error',
+        errorCode: 'session_restore_failed',
+        retryAction: 'restore',
+      },
+      { retryCurrentOperation },
+    );
+    const { wrapper } = await mountGate({}, { coordinator });
+    const [retry, startOver] = wrapper.findAll('button');
+
+    retry?.element.click();
+    retry?.element.click();
+    startOver?.element.click();
+    await nextTick();
+
+    expect(retryCurrentOperation).toHaveBeenCalledOnce();
+    expect(coordinator.signOut).not.toHaveBeenCalled();
+    expect(retry?.attributes('disabled')).toBeDefined();
+    expect(startOver?.attributes('disabled')).toBeDefined();
+    pending.resolve();
+    await flushPromises();
+  });
+
+  it('returns focus when a background refresh becomes a blocking failure', async () => {
+    const host = document.createElement('div');
+    document.body.append(host);
+    const { state, wrapper } = await mountGate(
+      {
+        phase: 'authenticated',
+        operation: 'refreshing',
+        sessionUsable: false,
+        user,
+      },
+      { attachTo: host },
+    );
+
+    Object.assign(state, {
+      operation: 'idle',
+      errorCode: 'session_refresh_failed',
+      retryAction: 'refresh',
+    });
+    await nextTick();
+    await nextTick();
+
+    expect(document.activeElement).toBe(wrapper.get('[data-testid="auth-error-heading"]').element);
+  });
+
+  it('fails closed and emits only the sanitized diagnostic once per invalid-state entry', async () => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const { state, wrapper } = await mountGate({
+      phase: 'signedOut',
+      sessionUsable: true,
+    });
+
+    expect(wrapper.find('[data-testid="protected-slot"]').exists()).toBe(false);
+    expect(wrapper.get('[role="alert"]').text()).not.toContain('signedOut');
+    expect(error).toHaveBeenCalledTimes(1);
+    expect(error).toHaveBeenLastCalledWith('mobile_auth_invalid_state');
+
+    state.errorCode = 'provider_error';
+    await nextTick();
+    expect(error).toHaveBeenCalledTimes(1);
+
+    Object.assign(state, {
+      phase: 'signedOut',
+      sessionUsable: false,
+      errorCode: null,
+    });
+    await nextTick();
+    state.sessionUsable = true;
+    await nextTick();
+
+    expect(error).toHaveBeenCalledTimes(2);
+    expect(error).toHaveBeenLastCalledWith('mobile_auth_invalid_state');
+    error.mockRestore();
   });
 });
