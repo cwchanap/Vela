@@ -116,4 +116,10 @@ describe('hasMatchingUserPoolRegion', () => {
   it('returns false when the suffix contains a digit-only segment but the prefix has an invalid char', () => {
     expect(hasMatchingUserPoolRegion('us-east-1!_abc123', 'us-east-1')).toBe(false);
   });
+
+  it('returns false when the malformed prefix equals the configured region (prefix format not validated by equality alone)', () => {
+    // Both env values share the malformed prefix `us-east-1!`; without
+    // independent prefix format validation this would pass.
+    expect(hasMatchingUserPoolRegion('us-east-1!_abc123', 'us-east-1!')).toBe(false);
+  });
 });

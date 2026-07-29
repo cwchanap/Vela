@@ -43,9 +43,14 @@ export function hasMatchingUserPoolRegion(userPoolId: string, region: string): b
     return false;
   }
   const separatorIndex = userPoolId.indexOf('_');
-  if (separatorIndex <= 0 || userPoolId.slice(0, separatorIndex) !== region) {
+  if (separatorIndex <= 0) {
     return false;
   }
+  const prefix = userPoolId.slice(0, separatorIndex);
   const suffix = userPoolId.slice(separatorIndex + 1);
-  return /^[A-Za-z0-9]+$/u.test(suffix);
+  // Validate the prefix independently so a malformed prefix cannot slip through
+  // by matching an equally malformed `region` env value. Real AWS regions are
+  // lowercase ASCII letters, digits, and hyphens only — no underscores (which
+  // would also break the first-underscore split), no punctuation, no Unicode.
+  return prefix === region && /^[A-Za-z0-9-]+$/u.test(prefix) && /^[A-Za-z0-9]+$/u.test(suffix);
 }
