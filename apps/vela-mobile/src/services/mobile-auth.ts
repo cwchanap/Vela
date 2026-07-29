@@ -1,11 +1,17 @@
 import { reactive, readonly, type InjectionKey } from 'vue';
 import {
   MOBILE_OAUTH_CALLBACK_URI,
+  assertMobileAuthState,
   type AuthorizationCodeTokenBundle,
   type MobileAppAdapter,
   type MobileAuthCoordinator,
   type MobileAuthErrorCode,
+  type MobileAuthNotice,
+  type MobileAuthOperation,
+  type MobileAuthPhase,
+  type MobileAuthRetryAction,
   type MobileAuthState,
+  type MobileAuthUser,
   type MobileBrowserAdapter,
   type MobileOAuthConfig,
   type MobileTokenTransportAdapter,
@@ -146,7 +152,11 @@ export function createMobileAuthCoordinator(
 ): MobileAuthCoordinator {
   const state = reactive<MobileAuthState>({
     phase: 'initializing',
+    operation: 'idle',
+    sessionUsable: false,
     errorCode: null,
+    retryAction: null,
+    notice: null,
     user: null,
   });
   const publicState = readonly(state) as Readonly<MobileAuthState>;
@@ -168,25 +178,123 @@ export function createMobileAuthCoordinator(
     return result;
   }
 
-  function setPhase(phase: MobileAuthState['phase']): void {
-    state.phase = phase;
-    state.errorCode = null;
-    if (phase !== 'authenticated') {
-      state.user = null;
-    }
+  function applyState(next: MobileAuthState): void {
+    assertMobileAuthState(next, {
+      activeBundle: tokenBundle ?? null,
+      now: dependencies.now(),
+    });
+    Object.assign(state, next);
   }
 
-  function setError(errorCode: MobileAuthErrorCode): void {
-    state.phase = 'error';
-    state.errorCode = errorCode;
-    state.user = null;
-  }
+  const transitions = {
+    enterOAuthProgress(phase: MobileAuthPhase): void {
+      applyState({
+        phase,
+        operation: 'idle',
+        sessionUsable: false,
+        errorCode: null,
+        retryAction: null,
+        notice: null,
+        user: null,
+      });
+    },
 
-  function setAuthenticated(user: { userId: string; email: string | null }): void {
-    state.phase = 'authenticated';
-    state.errorCode = null;
-    state.user = user;
-  }
+    enterOAuthError(errorCode: MobileAuthErrorCode): void {
+      applyState({
+        phase: 'error',
+        operation: 'idle',
+        sessionUsable: false,
+        errorCode,
+        retryAction: null,
+        notice: null,
+        user: null,
+      });
+    },
+
+    enterAuthenticated(user: MobileAuthUser): void {
+      applyState({
+        phase: 'authenticated',
+        operation: 'idle',
+        sessionUsable: true,
+        errorCode: null,
+        retryAction: null,
+        notice: null,
+        user,
+      });
+    },
+
+    enterSignedOut(notice: Extract<MobileAuthNotice, 'session_unusable' | null> = null): void {
+      applyState({
+        phase: 'signedOut',
+        operation: 'idle',
+        sessionUsable: false,
+        errorCode: null,
+        retryAction: null,
+        notice,
+        user: null,
+      });
+    },
+
+    enterSessionFailure(options: {
+      phase: MobileAuthPhase;
+      sessionUsable: boolean;
+      errorCode: MobileAuthErrorCode;
+      retryAction: MobileAuthRetryAction | null;
+      user: MobileAuthUser | null;
+    }): void {
+      applyState({
+        phase: options.phase,
+        operation: 'idle',
+        sessionUsable: options.sessionUsable,
+        errorCode: options.errorCode,
+        retryAction: options.retryAction,
+        notice: null,
+        user: options.user,
+      });
+    },
+
+    enterOperation(options: {
+      phase: MobileAuthPhase;
+      operation: Exclude<MobileAuthOperation, 'idle'>;
+      sessionUsable: boolean;
+      notice: MobileAuthNotice;
+      user: MobileAuthUser | null;
+    }): void {
+      applyState({
+        phase: options.phase,
+        operation: options.operation,
+        sessionUsable: options.sessionUsable,
+        errorCode: null,
+        retryAction: null,
+        notice: options.notice,
+        user: options.user,
+      });
+    },
+
+    enterTerminalNotice(): void {
+      applyState({
+        phase: 'signedOut',
+        operation: 'idle',
+        sessionUsable: false,
+        errorCode: null,
+        retryAction: null,
+        notice: 'session_unusable',
+        user: null,
+      });
+    },
+
+    enterCleanupFailure(): void {
+      applyState({
+        phase: 'signedOut',
+        operation: 'idle',
+        sessionUsable: false,
+        errorCode: 'session_cleanup_failed',
+        retryAction: 'cleanup',
+        notice: 'cleanup_incomplete',
+        user: null,
+      });
+    },
+  };
 
   async function removeListener(handle: ListenerHandle | undefined): Promise<void> {
     try {
@@ -206,7 +314,7 @@ export function createMobileAuthCoordinator(
 
   async function failCallback(errorCode: MobileAuthErrorCode): Promise<void> {
     tokenBundle = undefined;
-    setError(errorCode);
+    transitions.enterOAuthError(errorCode);
     await clearTransaction();
   }
 
@@ -224,7 +332,7 @@ export function createMobileAuthCoordinator(
       return;
     }
 
-    setPhase('verifyingSession');
+    transitions.enterOAuthProgress('verifyingSession');
 
     // The timeout and AbortController must remain active until the response
     // body has been fully consumed. fetch() resolves as soon as the response
@@ -245,18 +353,30 @@ export function createMobileAuthCoordinator(
           signal: controller.signal,
         });
       } catch {
-        setError('session_verification_failed');
+        transitions.enterSessionFailure({
+          phase: 'error',
+          sessionUsable: false,
+          errorCode: 'session_verification_failed',
+          retryAction: null,
+          user: null,
+        });
         return;
       }
 
       if (response.status === 401 || response.status === 403) {
         tokenBundle = undefined;
-        setError('session_unauthorized');
+        transitions.enterOAuthError('session_unauthorized');
         return;
       }
 
       if (!response.ok) {
-        setError('session_verification_failed');
+        transitions.enterSessionFailure({
+          phase: 'error',
+          sessionUsable: false,
+          errorCode: 'session_verification_failed',
+          retryAction: null,
+          user: null,
+        });
         return;
       }
 
@@ -264,17 +384,29 @@ export function createMobileAuthCoordinator(
       try {
         data = await response.json();
       } catch {
-        setError('session_verification_failed');
+        transitions.enterSessionFailure({
+          phase: 'error',
+          sessionUsable: false,
+          errorCode: 'session_verification_failed',
+          retryAction: null,
+          user: null,
+        });
         return;
       }
 
       const user = parseSessionUser(data);
       if (!user) {
-        setError('session_verification_failed');
+        transitions.enterSessionFailure({
+          phase: 'error',
+          sessionUsable: false,
+          errorCode: 'session_verification_failed',
+          retryAction: null,
+          user: null,
+        });
         return;
       }
 
-      setAuthenticated(user);
+      transitions.enterAuthenticated(user);
     } finally {
       clearTimeout(timeout);
     }
@@ -308,20 +440,20 @@ export function createMobileAuthCoordinator(
     try {
       loaded = await dependencies.transactionStore.load();
     } catch {
-      setPhase('exchangingCode');
+      transitions.enterOAuthProgress('exchangingCode');
       await closeBrowser();
       await failCallback('interrupted');
       return true;
     }
 
     if (loaded.kind === 'missing' || loaded.kind === 'corrupt') {
-      setPhase('exchangingCode');
+      transitions.enterOAuthProgress('exchangingCode');
       await closeBrowser();
       await failCallback(parsed.kind === 'malformed' ? 'malformed_callback' : 'interrupted');
       return true;
     }
     if (loaded.kind === 'expired') {
-      setPhase('exchangingCode');
+      transitions.enterOAuthProgress('exchangingCode');
       await closeBrowser();
       await failCallback('transaction_expired');
       return true;
@@ -339,7 +471,7 @@ export function createMobileAuthCoordinator(
       return false;
     }
 
-    setPhase('exchangingCode');
+    transitions.enterOAuthProgress('exchangingCode');
     await closeBrowser();
 
     if (parsed.kind === 'providerError') {
@@ -395,23 +527,23 @@ export function createMobileAuthCoordinator(
     try {
       loaded = await dependencies.transactionStore.load();
     } catch {
-      setError('configuration_error');
+      transitions.enterOAuthError('configuration_error');
       return;
     }
 
     if (loaded.kind === 'missing') {
-      setPhase('signedOut');
+      transitions.enterSignedOut();
       return;
     }
     if (loaded.kind === 'expired') {
-      setError('transaction_expired');
+      transitions.enterOAuthError('transaction_expired');
       return;
     }
     if (loaded.kind === 'corrupt') {
-      setError('interrupted');
+      transitions.enterOAuthError('interrupted');
       return;
     }
-    setError('interrupted');
+    transitions.enterOAuthError('interrupted');
   }
 
   async function initializeUnlocked(): Promise<void> {
@@ -419,10 +551,10 @@ export function createMobileAuthCoordinator(
       return;
     }
     initialized = true;
-    setPhase('initializing');
+    transitions.enterOAuthProgress('initializing');
 
     if (!hasValidConfig(dependencies.config, isDevelopment)) {
-      setError('configuration_error');
+      transitions.enterOAuthError('configuration_error');
       return;
     }
 
@@ -450,7 +582,7 @@ export function createMobileAuthCoordinator(
       await removeListener(browserFinishedHandle);
       appUrlHandle = undefined;
       browserFinishedHandle = undefined;
-      setError('configuration_error');
+      transitions.enterOAuthError('configuration_error');
       return;
     }
 
@@ -477,11 +609,11 @@ export function createMobileAuthCoordinator(
       !hasValidConfig(dependencies.config, isDevelopment) ||
       !hasOAuthCryptoCapabilities(dependencies.crypto, dependencies.isSecureContext)
     ) {
-      setError('configuration_error');
+      transitions.enterOAuthError('configuration_error');
       return;
     }
 
-    setPhase('openingBrowser');
+    transitions.enterOAuthProgress('openingBrowser');
 
     let authorizationUrl: string;
     try {
@@ -490,7 +622,7 @@ export function createMobileAuthCoordinator(
       authorizationUrl = buildAuthorizationUrl(dependencies.config, transaction, challenge);
       await dependencies.transactionStore.replace(transaction);
     } catch {
-      setError('configuration_error');
+      transitions.enterOAuthError('configuration_error');
       return;
     }
 
@@ -498,11 +630,11 @@ export function createMobileAuthCoordinator(
       await dependencies.browser.open({ url: authorizationUrl });
     } catch {
       await clearTransaction();
-      setError('browser_launch_failed');
+      transitions.enterOAuthError('browser_launch_failed');
       return;
     }
 
-    setPhase('awaitingCallback');
+    transitions.enterOAuthProgress('awaitingCallback');
   }
 
   async function handleBrowserFinishedUnlocked(): Promise<void> {
@@ -510,7 +642,7 @@ export function createMobileAuthCoordinator(
       return;
     }
 
-    setError('cancelled');
+    transitions.enterOAuthError('cancelled');
     await clearTransaction();
     if (isDevelopment) {
       console.info(
@@ -541,9 +673,7 @@ export function createMobileAuthCoordinator(
     appUrlHandle = undefined;
     browserFinishedHandle = undefined;
     tokenBundle = undefined;
-    state.phase = 'signedOut';
-    state.errorCode = null;
-    state.user = null;
+    transitions.enterSignedOut();
   }
 
   const coordinator: MobileAuthCoordinator = {

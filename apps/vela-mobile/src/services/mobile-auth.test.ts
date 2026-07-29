@@ -3,6 +3,7 @@ import {
   MOBILE_OAUTH_CALLBACK_URI,
   MOBILE_OAUTH_TRANSACTION_KEY,
   MOBILE_OAUTH_TRANSACTION_TTL_MS,
+  assertMobileAuthState,
   type MobileAppAdapter,
   type MobileAuthState,
   type MobileBrowserAdapter,
@@ -145,14 +146,16 @@ class FakeApp implements MobileAppAdapter {
   }
 
   async addListener(
-    eventName: 'appUrlOpen',
-    listener: (event: { url: string }) => void,
+    eventName: 'appUrlOpen' | 'appStateChange',
+    listener: ((event: { url: string }) => void) | ((event: { isActive: boolean }) => void),
   ): Promise<{ remove(): Promise<void> }> {
     this.order.push(`app:add:${eventName}`);
     if (this.failAdd) {
       throw new Error('SECRET-app-plugin-failure');
     }
-    this.listener = listener;
+    if (eventName === 'appUrlOpen') {
+      this.listener = listener as (event: { url: string }) => void;
+    }
     return {
       remove: async () => {
         this.removeCalls += 1;
@@ -341,6 +344,51 @@ const activeTransaction: OAuthTransaction = {
 };
 
 describe('mobile auth initialization', () => {
+  it('rejects invalid published state tuples with a stable internal error', () => {
+    expect(() =>
+      assertMobileAuthState(
+        {
+          phase: 'signedOut',
+          operation: 'idle',
+          sessionUsable: true,
+          errorCode: null,
+          retryAction: null,
+          notice: null,
+          user: null,
+        },
+        {
+          activeBundle: null,
+          now: NOW,
+        },
+      ),
+    ).toThrow('invalid_mobile_auth_state');
+  });
+
+  it('publishes the complete authenticated tuple after verification', async () => {
+    const harness = makeHarness();
+    await harness.persist(activeTransaction);
+    harness.prepareSuccessfulExchange(activeTransaction);
+    harness.sessionFetch.mockResolvedValueOnce(
+      response(200, {
+        authenticated: true,
+        user: { userId: 'user-1', email: null },
+      }),
+    );
+    await harness.coordinator.initialize();
+
+    await harness.coordinator.completeCallback(callback(activeTransaction));
+
+    expect(harness.coordinator.state).toEqual({
+      phase: 'authenticated',
+      operation: 'idle',
+      sessionUsable: true,
+      errorCode: null,
+      retryAction: null,
+      notice: null,
+      user: { userId: 'user-1', email: null },
+    });
+  });
+
   it('registers both listeners before reading the cold-launch URL', async () => {
     const harness = makeHarness();
 
@@ -353,7 +401,11 @@ describe('mobile auth initialization', () => {
     ]);
     expect(harness.coordinator.state).toEqual({
       phase: 'signedOut',
+      operation: 'idle',
+      sessionUsable: false,
       errorCode: null,
+      retryAction: null,
+      notice: null,
       user: null,
     });
   });
@@ -389,7 +441,11 @@ describe('mobile auth initialization', () => {
 
     expect(harness.coordinator.state).toEqual({
       phase: 'authenticated',
+      operation: 'idle',
+      sessionUsable: true,
       errorCode: null,
+      retryAction: null,
+      notice: null,
       user: { userId: 'user-123', email: 'person@example.com' },
     });
     expect(harness.preferences.value).toBeNull();
@@ -1258,7 +1314,11 @@ describe('session verification', () => {
       expect(harness.sessionFetch).toHaveBeenCalledTimes(2);
       expect(harness.coordinator.state).toEqual({
         phase: 'authenticated',
+        operation: 'idle',
+        sessionUsable: true,
         errorCode: null,
+        retryAction: null,
+        notice: null,
         user: { userId: 'retry-user', email: null },
       });
     },
@@ -1382,7 +1442,11 @@ describe('serialization, disposal, and secret handling', () => {
     expect(harness.preferences.value).not.toBeNull();
     expect(harness.coordinator.state).toEqual({
       phase: 'signedOut',
+      operation: 'idle',
+      sessionUsable: false,
       errorCode: null,
+      retryAction: null,
+      notice: null,
       user: null,
     });
   });

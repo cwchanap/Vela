@@ -30,7 +30,7 @@ type ErrorPresentation = {
   actionLabel?: string;
 };
 
-const ERROR_PRESENTATIONS: Record<MobileAuthErrorCode, ErrorPresentation> = {
+const ERROR_PRESENTATIONS: Partial<Record<MobileAuthErrorCode, ErrorPresentation>> = {
   configuration_error: {
     heading: 'Vela is not configured for sign-in',
     message:
@@ -99,6 +99,12 @@ const ERROR_PRESENTATIONS: Record<MobileAuthErrorCode, ErrorPresentation> = {
   },
 };
 
+const SESSION_STATE_FALLBACK: ErrorPresentation = {
+  heading: 'Vela cannot use this session',
+  message: 'Vela could not safely continue with the current session.',
+  action: null,
+};
+
 const PROGRESS_COPY: Partial<Record<MobileAuthPhase, string>> = {
   initializing: 'Preparing secure sign-in…',
   openingBrowser: 'Opening Google sign-in…',
@@ -148,7 +154,9 @@ const gateSurfaceStyle = {
 const diagnosticBypass = computed(() =>
   shouldBypassMobileAuth(import.meta.env.DEV, route.meta.bypassMobileAuth === true, state),
 );
-const contentVisible = computed(() => authenticatedLandingReady.value || diagnosticBypass.value);
+const contentVisible = computed(
+  () => diagnosticBypass.value || (state.sessionUsable && authenticatedLandingReady.value),
+);
 const progressCopy = computed(() => {
   if (state.phase === 'authenticated' && landingNavigationPending.value) {
     return 'Opening Vela…';
@@ -156,7 +164,7 @@ const progressCopy = computed(() => {
   return PROGRESS_COPY[state.phase] ?? null;
 });
 const errorPresentation = computed(() =>
-  state.errorCode ? ERROR_PRESENTATIONS[state.errorCode] : null,
+  state.errorCode ? (ERROR_PRESENTATIONS[state.errorCode] ?? SESSION_STATE_FALLBACK) : null,
 );
 
 async function showLandingNavigationFailure(attempt: number): Promise<void> {
