@@ -322,6 +322,7 @@ describe('mobile auth boot', () => {
         refreshToken: 'SECRET-refresh-token',
         rotatedRefreshToken: 'SECRET-rotated-refresh-token',
         email: 'SECRET-claim-email',
+        rawResponse: 'SECRET-raw-response',
       },
     };
     const nativeFailure = Object.assign(
@@ -332,6 +333,9 @@ describe('mobile auth boot', () => {
         codeVerifier: 'SECRET-code-verifier',
         nonce: 'SECRET-nonce',
         decodedClaimEmail: 'SECRET-claim-email',
+        rawRequest: 'SECRET-raw-request',
+        rawResponse: 'SECRET-raw-response',
+        nativeException: 'SECRET-native-exception',
       },
     );
     mocks.capacitorHttpRequest
@@ -364,6 +368,10 @@ describe('mobile auth boot', () => {
         preferenceCalls: mocks.preferencesPlugin.set.mock.calls,
         renderedText: '',
       });
+      expect(searchable(consoleCapture.calls())).not.toContain('SECRET-');
+      expect(mocks.preferencesPlugin.set).not.toHaveBeenCalled();
+      expect(storageSnapshot(window.localStorage)).toBe('');
+      expect(storageSnapshot(window.sessionStorage)).toBe('');
     } finally {
       if (originalFetch === undefined) {
         Reflect.deleteProperty(window, 'fetch');
