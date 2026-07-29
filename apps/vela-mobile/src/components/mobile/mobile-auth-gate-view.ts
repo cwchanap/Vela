@@ -79,20 +79,26 @@ function hasValidOperationTuple(state: Readonly<MobileAuthState>): boolean {
     case 'persisting':
       return (
         (state.phase === 'authenticated' && state.user !== null) ||
+        (state.phase === 'initializing' && !state.sessionUsable && state.user === null) ||
         (state.phase === 'exchangingCode' && !state.sessionUsable && state.user === null)
       );
     case 'verifying':
       return (
         (state.phase === 'authenticated' && state.user !== null) ||
+        (state.phase === 'initializing' && !state.sessionUsable && state.user === null) ||
         (state.phase === 'verifyingSession' && !state.sessionUsable && state.user === null)
       );
     case 'signingOut':
-      return state.phase === 'signedOut' && !state.sessionUsable && state.user === null;
+      return (
+        !state.sessionUsable &&
+        ((state.phase === 'initializing' && state.user === null) ||
+          (state.phase === 'authenticated' && state.user !== null))
+      );
     case 'cleaningUp':
       return (
-        (state.phase === 'signedOut' || state.phase === 'initializing') &&
         !state.sessionUsable &&
-        state.user === null
+        ((state.phase === 'authenticated' && state.user !== null) ||
+          ((state.phase === 'signedOut' || state.phase === 'initializing') && state.user === null))
       );
   }
 }
@@ -152,9 +158,10 @@ function hasValidIdleTuple(state: Readonly<MobileAuthState>): boolean {
       return false;
     }
     if (state.errorCode === 'session_restore_failed') {
-      return state.phase === 'error' && !state.sessionUsable && state.user === null;
+      return state.phase === 'initializing' && !state.sessionUsable && state.user === null;
     }
     return (
+      (state.phase === 'initializing' && !state.sessionUsable && state.user === null) ||
       (state.phase === 'error' && !state.sessionUsable && state.user === null) ||
       (state.phase === 'authenticated' && state.user !== null)
     );

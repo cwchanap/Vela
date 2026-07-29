@@ -665,21 +665,29 @@ describe('MobileAuthGate', () => {
     expect(wrapper.find('[data-testid="protected-slot"]').exists()).toBe(true);
   });
 
-  it('renders unsupported runtime as a closed non-retryable gate outside diagnostics', async () => {
-    const { wrapper } = await mountGate({
-      phase: 'error',
-      operation: 'idle',
-      sessionUsable: false,
-      errorCode: 'unsupported_platform',
-      retryAction: null,
-      notice: null,
-      user: null,
-    });
+  it.each(['browser', 'Android'])(
+    'renders %s as a dedicated native-iOS-only non-retryable gate',
+    async () => {
+      const { wrapper } = await mountGate({
+        phase: 'error',
+        operation: 'idle',
+        sessionUsable: false,
+        errorCode: 'unsupported_platform',
+        retryAction: null,
+        notice: null,
+        user: null,
+      });
 
-    expect(wrapper.find('[data-testid="protected-slot"]').exists()).toBe(false);
-    expect(wrapper.get('[role="alert"]').text()).toContain('Vela cannot use this session');
-    expect(wrapper.find('button').exists()).toBe(false);
-  });
+      expect(wrapper.find('[data-testid="protected-slot"]').exists()).toBe(false);
+      expect(wrapper.get('[role="alert"]').text()).toContain(
+        'Vela mobile sign-in is unavailable here',
+      );
+      expect(wrapper.get('[role="alert"]').text()).toContain(
+        'Vela mobile sign-in is supported only on native iOS.',
+      );
+      expect(wrapper.find('button').exists()).toBe(false);
+    },
+  );
 
   it('shows non-configuration auth errors instead of marked diagnostics', async () => {
     const { wrapper } = await mountGate(
@@ -720,7 +728,9 @@ describe('MobileAuthGate', () => {
     expect(
       shouldBypassMobileAuth(true, true, {
         ...signedOut,
+        phase: 'authenticated',
         operation: 'signingOut',
+        user,
       }),
     ).toBe(false);
     expect(
@@ -809,7 +819,9 @@ describe('MobileAuthGate', () => {
             ? { phase: 'exchangingCode', operation }
             : operation === 'verifying'
               ? { phase: 'verifyingSession', operation }
-              : { phase: 'signedOut', operation };
+              : operation === 'signingOut'
+                ? { phase: 'authenticated', operation, user }
+                : { phase: 'signedOut', operation };
     const { wrapper } = await mountGate(operationState);
 
     const status = wrapper.get('[role="status"]');
@@ -870,7 +882,7 @@ describe('MobileAuthGate', () => {
     const retryCurrentOperation = vi.fn(() => pending.promise);
     const { coordinator } = createFakeCoordinator(
       {
-        phase: 'error',
+        phase: 'initializing',
         errorCode: 'session_restore_failed',
         retryAction: 'restore',
       },

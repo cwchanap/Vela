@@ -144,13 +144,38 @@ export function assertMobileAuthState(
       state.errorCode !== 'session_cleanup_failed' ||
       state.retryAction !== 'cleanup' ||
       state.user !== null);
+  const restoreFailurePhaseIsInvalid =
+    state.errorCode === 'session_restore_failed' && state.phase !== 'initializing';
+  const signOutOperationIsInvalid =
+    state.operation === 'signingOut' &&
+    ((state.phase !== 'initializing' && state.phase !== 'authenticated') ||
+      (state.phase === 'initializing' && state.user !== null) ||
+      (state.phase === 'authenticated' && state.user === null) ||
+      state.sessionUsable ||
+      state.errorCode !== null ||
+      state.retryAction !== null ||
+      state.notice !== null);
+  const cleanupOperationIsInvalid =
+    state.operation === 'cleaningUp' &&
+    ((state.phase !== 'initializing' &&
+      state.phase !== 'authenticated' &&
+      state.phase !== 'signedOut') ||
+      (state.phase === 'authenticated' && state.user === null) ||
+      (state.phase !== 'authenticated' && state.user !== null) ||
+      state.sessionUsable ||
+      state.errorCode !== null ||
+      state.retryAction !== null ||
+      state.notice !== null);
 
   if (
     usableSessionIsInvalid ||
     errorPhaseIsInvalid ||
     retryIsInvalid ||
     terminalNoticeIsInvalid ||
-    cleanupNoticeIsInvalid
+    cleanupNoticeIsInvalid ||
+    restoreFailurePhaseIsInvalid ||
+    signOutOperationIsInvalid ||
+    cleanupOperationIsInvalid
   ) {
     throw new Error('invalid_mobile_auth_state');
   }
