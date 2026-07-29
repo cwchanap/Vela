@@ -85,4 +85,35 @@ describe('hasMatchingUserPoolRegion', () => {
   it('returns false when the region is empty but a suffix is present', () => {
     expect(hasMatchingUserPoolRegion('_abc123', '')).toBe(false);
   });
+
+  it('returns false when the suffix contains punctuation (dot)', () => {
+    expect(hasMatchingUserPoolRegion('us-east-1_abc.def', 'us-east-1')).toBe(false);
+  });
+
+  it('returns false when the suffix contains a hyphen', () => {
+    expect(hasMatchingUserPoolRegion('us-east-1_abc-def', 'us-east-1')).toBe(false);
+  });
+
+  it('returns false when the suffix contains a non-ASCII Unicode character', () => {
+    expect(hasMatchingUserPoolRegion('us-east-1_💥', 'us-east-1')).toBe(false);
+  });
+
+  it('returns false when the suffix contains a space', () => {
+    expect(hasMatchingUserPoolRegion('us-east-1_abc def', 'us-east-1')).toBe(false);
+  });
+
+  it('returns false when the user-pool ID exceeds the 55-character Cognito maximum', () => {
+    const longSuffix = 'a'.repeat(100);
+    expect(hasMatchingUserPoolRegion(`us-east-1_${longSuffix}`, 'us-east-1')).toBe(false);
+  });
+
+  it('returns true for a user-pool ID at exactly the 55-character maximum', () => {
+    // `us-east-1_` is 10 chars; suffix of 45 alphanumerics => total 55.
+    const suffix = 'a'.repeat(45);
+    expect(hasMatchingUserPoolRegion(`us-east-1_${suffix}`, 'us-east-1')).toBe(true);
+  });
+
+  it('returns false when the suffix contains a digit-only segment but the prefix has an invalid char', () => {
+    expect(hasMatchingUserPoolRegion('us-east-1!_abc123', 'us-east-1')).toBe(false);
+  });
 });

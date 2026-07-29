@@ -29,10 +29,23 @@ export function isValidHostOnlyDomain(value: string): boolean {
 }
 
 export function hasMatchingUserPoolRegion(userPoolId: string, region: string): boolean {
+  // Amazon Cognito UserPoolId: max length 55, pattern `[\w-]+_[0-9a-zA-Z]+`
+  // (https://docs.aws.amazon.com/cognito-user-identity-pools/latest/APIReference/API_UserPoolType.html)
+  // The suffix must be strictly alphanumeric — no punctuation, no Unicode,
+  // no additional underscores. We split on the FIRST underscore (the region
+  // separator) and require the remainder to match `[A-Za-z0-9]+`; the AWS
+  // pattern's `[\w-]+` prefix is looser, but real AWS regions never contain
+  // underscores, so splitting on the first underscore matches real Cognito
+  // IDs and rejects malformed values like `us-east-1_foo_bar` that the loose
+  // pattern would accept. This helper guards the build-time, boot-time, and
+  // coordinator-time config checks, so it must reject every malformed value.
+  if (userPoolId.length > 55) {
+    return false;
+  }
   const separatorIndex = userPoolId.indexOf('_');
   if (separatorIndex <= 0 || userPoolId.slice(0, separatorIndex) !== region) {
     return false;
   }
   const suffix = userPoolId.slice(separatorIndex + 1);
-  return suffix.length > 0 && !suffix.includes('_');
+  return /^[A-Za-z0-9]+$/u.test(suffix);
 }
