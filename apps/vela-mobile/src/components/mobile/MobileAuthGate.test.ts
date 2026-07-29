@@ -90,6 +90,7 @@ function createFakeCoordinator(
     startSignIn: vi.fn().mockResolvedValue(undefined),
     completeCallback: vi.fn().mockResolvedValue(undefined),
     retryCurrentOperation: vi.fn().mockResolvedValue(undefined),
+    signOut: vi.fn().mockResolvedValue(undefined),
     dispose: vi.fn().mockResolvedValue(undefined),
     ...overrides,
   };

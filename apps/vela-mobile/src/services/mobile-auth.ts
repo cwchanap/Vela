@@ -51,6 +51,8 @@ type PendingCandidate = {
   durableRefreshToken: string;
   returnedRefreshToken?: string;
   context: 'authorizationCode' | 'restore' | 'refresh';
+  refreshOwner?: ActiveSession;
+  refreshGeneration?: number;
 };
 
 type ActiveSession = {
@@ -58,7 +60,10 @@ type ActiveSession = {
   user: MobileAuthUser;
 };
 
-type CleanupContext = { kind: 'terminalSession' } | { kind: 'installationReset' };
+type CleanupContext =
+  | { kind: 'signOut' }
+  | { kind: 'terminalSession' }
+  | { kind: 'installationReset' };
 
 type SettledRefreshToken =
   | { kind: 'loaded'; refreshToken: string | null }
@@ -226,8 +231,10 @@ export function createMobileAuthCoordinator(
   let pendingSubject: string | undefined;
   let restoreRefreshToken: string | undefined;
   let cleanupContext: CleanupContext | undefined;
+  let signOutPromise: Promise<void> | undefined;
   let initialized = false;
   let disposed = false;
+  let disposalRequested = false;
   const isDevelopment = dependencies.isDevelopment ?? import.meta.env.DEV;
 
   function serialize<T>(operation: () => Promise<T>): Promise<T> {
@@ -249,6 +256,10 @@ export function createMobileAuthCoordinator(
 
   function activeSessionIsUsable(): boolean {
     return active !== undefined && active.bundle.expiresAt > dependencies.now();
+  }
+
+  function unavailable(): boolean {
+    return disposed || disposalRequested;
   }
 
   const transitions = {
@@ -430,7 +441,7 @@ export function createMobileAuthCoordinator(
   }
 
   function closeExpiredActiveSession(owner: ActiveSession, generation: number): void {
-    if (disposed || active !== owner || activeBundleGeneration !== generation) {
+    if (unavailable() || active !== owner || activeBundleGeneration !== generation) {
       return;
     }
     if (owner.bundle.expiresAt > dependencies.now()) {
@@ -486,7 +497,12 @@ export function createMobileAuthCoordinator(
 
   function scheduleProactiveRefreshTimer(owner: ActiveSession, generation: number): void {
     cancelProactiveRefreshTimer();
-    if (!appIsActive || disposed || active !== owner || activeBundleGeneration !== generation) {
+    if (
+      !appIsActive ||
+      unavailable() ||
+      active !== owner ||
+      activeBundleGeneration !== generation
+    ) {
       return;
     }
     const delay = Math.max(
@@ -501,7 +517,7 @@ export function createMobileAuthCoordinator(
 
   function scheduleActiveSessionTimers(): void {
     const owner = active;
-    if (!owner || disposed) {
+    if (!owner || unavailable()) {
       return;
     }
     const generation = activeBundleGeneration;
@@ -514,6 +530,9 @@ export function createMobileAuthCoordinator(
     owner?: ActiveSession;
     generation?: number;
   }): Promise<void> {
+    if (unavailable()) {
+      return Promise.resolve();
+    }
     if (refreshPromise !== undefined) {
       return refreshPromise;
     }
@@ -527,7 +546,7 @@ export function createMobileAuthCoordinator(
     cancelProactiveRefreshTimer();
     const operation = serialize(async () => {
       if (
-        disposed ||
+        unavailable() ||
         !appIsActive ||
         active !== owner ||
         activeBundleGeneration !== generation ||
@@ -542,7 +561,7 @@ export function createMobileAuthCoordinator(
         scheduleProactiveRefreshTimer(owner, generation);
         return;
       }
-      await refreshActiveSessionUnlocked();
+      await refreshActiveSessionUnlocked(owner, generation);
     });
     let tracked!: Promise<void>;
     tracked = operation.finally(() => {
@@ -555,7 +574,7 @@ export function createMobileAuthCoordinator(
   }
 
   function queueRecordedRetry(): void {
-    if (state.retryAction === null || state.operation !== 'idle' || disposed || !appIsActive) {
+    if (state.retryAction === null || state.operation !== 'idle' || unavailable() || !appIsActive) {
       return;
     }
     if (state.retryAction === 'refresh') {
@@ -572,7 +591,7 @@ export function createMobileAuthCoordinator(
     const retryAction = state.retryAction;
     if (
       !owner ||
-      disposed ||
+      unavailable() ||
       !appIsActive ||
       automaticRetryUsed ||
       automaticRetryTimer !== undefined ||
@@ -591,7 +610,7 @@ export function createMobileAuthCoordinator(
     automaticRetryTimer = setTimeout(() => {
       automaticRetryTimer = undefined;
       if (
-        disposed ||
+        unavailable() ||
         !appIsActive ||
         active !== owner ||
         owner.bundle.expiresAt <= dependencies.now() ||
@@ -612,7 +631,7 @@ export function createMobileAuthCoordinator(
     }
 
     const owner = active;
-    if (!owner || disposed) {
+    if (!owner || unavailable()) {
       return;
     }
     if (state.retryAction === 'persist' || state.retryAction === 'verify') {
@@ -652,6 +671,15 @@ export function createMobileAuthCoordinator(
     }
   }
 
+  function candidateIsCurrent(candidate: PendingCandidate): boolean {
+    return (
+      !unavailable() &&
+      (candidate.context !== 'refresh' ||
+        (candidate.refreshOwner === active &&
+          candidate.refreshGeneration === activeBundleGeneration))
+    );
+  }
+
   async function failCallback(errorCode: MobileAuthErrorCode): Promise<void> {
     clearActiveSession();
     pendingCandidate = undefined;
@@ -672,6 +700,7 @@ export function createMobileAuthCoordinator(
 
   async function terminalSessionCleanupUnlocked(): Promise<void> {
     clearActiveSession();
+    const cleanupGeneration = activeBundleGeneration;
     pendingCandidate = undefined;
     pendingSubject = undefined;
     restoreRefreshToken = undefined;
@@ -679,7 +708,13 @@ export function createMobileAuthCoordinator(
     try {
       await dependencies.sessionStore.clearRefreshToken();
     } catch {
+      if (unavailable() || activeBundleGeneration !== cleanupGeneration) {
+        return;
+      }
       transitions.enterCleanupFailure();
+      return;
+    }
+    if (unavailable() || activeBundleGeneration !== cleanupGeneration) {
       return;
     }
     cleanupContext = undefined;
@@ -709,7 +744,7 @@ export function createMobileAuthCoordinator(
 
   async function verifyCandidateSessionUnlocked(): Promise<void> {
     const candidate = pendingCandidate;
-    if (!candidate || disposed) {
+    if (!candidate || !candidateIsCurrent(candidate)) {
       return;
     }
 
@@ -740,10 +775,16 @@ export function createMobileAuthCoordinator(
           signal: controller.signal,
         });
       } catch {
+        if (!candidateIsCurrent(candidate)) {
+          return;
+        }
         enterCandidateFailure(candidate, 'session_verification_failed', 'verify');
         return;
       }
 
+      if (!candidateIsCurrent(candidate)) {
+        return;
+      }
       if (response.status === 401 || response.status === 403) {
         await terminalSessionCleanupUnlocked();
         return;
@@ -758,10 +799,16 @@ export function createMobileAuthCoordinator(
       try {
         data = await response.json();
       } catch {
+        if (!candidateIsCurrent(candidate)) {
+          return;
+        }
         enterCandidateFailure(candidate, 'session_verification_failed', 'verify');
         return;
       }
 
+      if (!candidateIsCurrent(candidate)) {
+        return;
+      }
       const user = parseSessionUser(data);
       if (!user) {
         enterCandidateFailure(candidate, 'session_verification_failed', 'verify');
@@ -796,7 +843,7 @@ export function createMobileAuthCoordinator(
 
   async function persistPendingCandidateUnlocked(): Promise<void> {
     const candidate = pendingCandidate;
-    if (!candidate || disposed) {
+    if (!candidate || !candidateIsCurrent(candidate)) {
       return;
     }
 
@@ -813,15 +860,24 @@ export function createMobileAuthCoordinator(
       try {
         await dependencies.sessionStore.saveRefreshToken(candidate.durableRefreshToken);
       } catch {
+        if (!candidateIsCurrent(candidate)) {
+          return;
+        }
         enterCandidateFailure(candidate, 'session_persistence_failed', 'persist');
         return;
       }
 
+      if (!candidateIsCurrent(candidate)) {
+        return;
+      }
       if (candidate.context === 'authorizationCode') {
         // Only a durable refresh credential permits transaction removal. A
         // failed Preferences cleanup remains best effort because the exchanged
         // authorization code is single-use.
         await clearTransaction();
+        if (!candidateIsCurrent(candidate)) {
+          return;
+        }
       }
     }
 
@@ -838,7 +894,7 @@ export function createMobileAuthCoordinator(
       state.phase === 'awaitingCallback' ||
       (state.phase === 'error' && state.errorCode === 'interrupted');
 
-    if (disposed || !initialized || active || pendingCandidate || !isActiveCallbackPhase) {
+    if (unavailable() || !initialized || active || pendingCandidate || !isActiveCallbackPhase) {
       return false;
     }
 
@@ -860,22 +916,37 @@ export function createMobileAuthCoordinator(
       try {
         loaded = await dependencies.transactionStore.load();
       } catch {
+        if (unavailable()) {
+          return false;
+        }
         transitions.enterOAuthProgress('exchangingCode');
         await closeBrowser();
+        if (unavailable()) {
+          return false;
+        }
         await failCallback('interrupted');
         return true;
       }
     }
 
+    if (unavailable()) {
+      return false;
+    }
     if (loaded.kind === 'missing' || loaded.kind === 'corrupt') {
       transitions.enterOAuthProgress('exchangingCode');
       await closeBrowser();
+      if (unavailable()) {
+        return true;
+      }
       await failCallback(parsed.kind === 'malformed' ? 'malformed_callback' : 'interrupted');
       return true;
     }
     if (loaded.kind === 'expired') {
       transitions.enterOAuthProgress('exchangingCode');
       await closeBrowser();
+      if (unavailable()) {
+        return true;
+      }
       await failCallback('transaction_expired');
       return true;
     }
@@ -894,6 +965,9 @@ export function createMobileAuthCoordinator(
 
     transitions.enterOAuthProgress('exchangingCode');
     await closeBrowser();
+    if (unavailable()) {
+      return true;
+    }
 
     if (parsed.kind === 'providerError') {
       await failCallback(parsed.error === 'access_denied' ? 'cancelled' : 'provider_error');
@@ -908,10 +982,16 @@ export function createMobileAuthCoordinator(
         }),
       );
     } catch {
+      if (unavailable()) {
+        return true;
+      }
       await failCallback('code_exchange_failed');
       return true;
     }
 
+    if (unavailable()) {
+      return true;
+    }
     if (response.status < 200 || response.status >= 300) {
       await failCallback('code_exchange_failed');
       return true;
@@ -998,8 +1078,14 @@ export function createMobileAuthCoordinator(
     refreshToken: string,
     context: 'restore' | 'refresh',
     expectedSubject?: string,
+    refreshOwner?: ActiveSession,
+    refreshGeneration?: number,
   ): Promise<void> {
-    if (disposed) {
+    const refreshIsCurrent = () =>
+      !unavailable() &&
+      (context !== 'refresh' ||
+        (refreshOwner === active && refreshGeneration === activeBundleGeneration));
+    if (!refreshIsCurrent()) {
       return;
     }
 
@@ -1019,10 +1105,16 @@ export function createMobileAuthCoordinator(
         }),
       );
     } catch {
+      if (!refreshIsCurrent()) {
+        return;
+      }
       enterRefreshFailure(context);
       return;
     }
 
+    if (!refreshIsCurrent()) {
+      return;
+    }
     if (response.status < 200 || response.status >= 300) {
       if (isTerminalRefreshStatus(response.status)) {
         await terminalSessionCleanupUnlocked();
@@ -1048,6 +1140,12 @@ export function createMobileAuthCoordinator(
         durableRefreshToken: returnedRefreshToken ?? refreshToken,
         ...(returnedRefreshToken === undefined ? {} : { returnedRefreshToken }),
         context,
+        ...(context === 'refresh'
+          ? {
+              refreshOwner: refreshOwner!,
+              refreshGeneration: refreshGeneration!,
+            }
+          : {}),
       };
       pendingSubject = subject;
     } catch {
@@ -1062,6 +1160,9 @@ export function createMobileAuthCoordinator(
     let durableRefreshToken = refreshToken ?? restoreRefreshToken;
     if (!durableRefreshToken) {
       const loaded = await loadRefreshTokenSettled();
+      if (unavailable()) {
+        return;
+      }
       if (loaded.kind === 'corrupt') {
         await terminalSessionCleanupUnlocked();
         return;
@@ -1082,15 +1183,26 @@ export function createMobileAuthCoordinator(
     await refreshCandidateUnlocked(durableRefreshToken, 'restore');
   }
 
-  async function refreshActiveSessionUnlocked(): Promise<void> {
-    const current = active;
-    if (!current || disposed) {
+  async function refreshActiveSessionUnlocked(
+    current = active,
+    generation = activeBundleGeneration,
+  ): Promise<void> {
+    if (!current || unavailable() || active !== current || activeBundleGeneration !== generation) {
       return;
     }
-    await refreshCandidateUnlocked(current.bundle.refreshToken, 'refresh', current.user.userId);
+    await refreshCandidateUnlocked(
+      current.bundle.refreshToken,
+      'refresh',
+      current.user.userId,
+      current,
+      generation,
+    );
   }
 
   function resumeStoredTransactionUnlocked(loaded: SettledTransaction): void {
+    if (unavailable()) {
+      return;
+    }
     if (loaded.kind === 'unavailable') {
       transitions.enterOAuthError('configuration_error');
       return;
@@ -1140,11 +1252,20 @@ export function createMobileAuthCoordinator(
       appUrlHandle = undefined;
       appStateHandle = undefined;
       browserFinishedHandle = undefined;
+      if (unavailable()) {
+        return;
+      }
       transitions.enterOAuthError('configuration_error');
       return;
     }
 
+    if (unavailable()) {
+      return;
+    }
     const transaction = await loadTransactionSettled();
+    if (unavailable()) {
+      return;
+    }
     if (launchUrl && isMatchingLaunchCallback(launchUrl.url, transaction)) {
       await completeCallbackUnlocked(launchUrl.url, transaction.transaction);
       await refreshTokenResultPromise;
@@ -1152,6 +1273,9 @@ export function createMobileAuthCoordinator(
     }
 
     const refreshTokenResult = await refreshTokenResultPromise;
+    if (unavailable()) {
+      return;
+    }
     if (refreshTokenResult.kind === 'corrupt') {
       await terminalSessionCleanupUnlocked();
       return;
@@ -1164,6 +1288,9 @@ export function createMobileAuthCoordinator(
       restoreRefreshToken = refreshTokenResult.refreshToken;
       if (transaction.kind === 'unavailable' || transaction.transaction.kind !== 'missing') {
         await clearTransaction();
+        if (unavailable()) {
+          return;
+        }
       }
       await restoreSessionUnlocked(refreshTokenResult.refreshToken);
       return;
@@ -1173,6 +1300,9 @@ export function createMobileAuthCoordinator(
   }
 
   async function performInstallationResetUnlocked(): Promise<void> {
+    if (unavailable()) {
+      return;
+    }
     cleanupContext = { kind: 'installationReset' };
     transitions.enterOperation({
       phase: 'initializing',
@@ -1183,9 +1313,18 @@ export function createMobileAuthCoordinator(
     });
     try {
       await dependencies.sessionStore.clearRefreshToken();
+      if (unavailable()) {
+        return;
+      }
       await dependencies.installationStore.markCurrentInstallation();
     } catch {
+      if (unavailable()) {
+        return;
+      }
       transitions.enterCleanupFailure();
+      return;
+    }
+    if (unavailable()) {
       return;
     }
     cleanupContext = undefined;
@@ -1197,7 +1336,7 @@ export function createMobileAuthCoordinator(
   }
 
   async function initializeUnlocked(): Promise<void> {
-    if (disposed || initialized) {
+    if (unavailable() || initialized) {
       return;
     }
     initialized = true;
@@ -1230,14 +1369,30 @@ export function createMobileAuthCoordinator(
       appUrlHandle = undefined;
       appStateHandle = undefined;
       browserFinishedHandle = undefined;
+      if (unavailable()) {
+        return;
+      }
       transitions.enterOAuthError('configuration_error');
       return;
     }
 
+    if (unavailable()) {
+      await removeListener(appUrlHandle);
+      await removeListener(appStateHandle);
+      await removeListener(browserFinishedHandle);
+      appUrlHandle = undefined;
+      appStateHandle = undefined;
+      browserFinishedHandle = undefined;
+      return;
+    }
     const installationMarkerPromise = dependencies.installationStore.isCurrentInstallationMarked();
     const refreshTokenResultPromise = loadRefreshTokenSettled();
     const [installationMarkerResult] = await Promise.allSettled([installationMarkerPromise]);
 
+    if (unavailable()) {
+      await refreshTokenResultPromise;
+      return;
+    }
     if (installationMarkerResult.status === 'rejected') {
       await refreshTokenResultPromise;
       cleanupContext = { kind: 'installationReset' };
@@ -1265,7 +1420,7 @@ export function createMobileAuthCoordinator(
           state.errorCode !== null &&
           RESTARTABLE_OAUTH_ERRORS.has(state.errorCode)));
 
-    if (disposed || !canStartSignIn) {
+    if (unavailable() || !canStartSignIn) {
       return;
     }
 
@@ -1283,39 +1438,133 @@ export function createMobileAuthCoordinator(
     try {
       const transaction = createOAuthTransaction(dependencies.crypto, dependencies.now());
       const challenge = await createPkceChallenge(transaction.codeVerifier, dependencies.crypto);
+      if (unavailable()) {
+        return;
+      }
       authorizationUrl = buildAuthorizationUrl(dependencies.config, transaction, challenge);
       await dependencies.transactionStore.replace(transaction);
     } catch {
+      if (unavailable()) {
+        return;
+      }
       transitions.enterOAuthError('configuration_error');
       return;
     }
 
+    if (unavailable()) {
+      return;
+    }
     try {
       await dependencies.browser.open({ url: authorizationUrl });
     } catch {
+      if (unavailable()) {
+        return;
+      }
       await clearTransaction();
       transitions.enterOAuthError('browser_launch_failed');
       return;
     }
 
+    if (unavailable()) {
+      return;
+    }
     transitions.enterOAuthProgress('awaitingCallback');
   }
 
   async function handleBrowserFinishedUnlocked(): Promise<void> {
-    if (disposed || state.phase !== 'awaitingCallback') {
+    if (unavailable() || state.phase !== 'awaitingCallback') {
       return;
     }
 
     transitions.enterOAuthError('cancelled');
     await clearTransaction();
-    if (isDevelopment) {
+    if (!unavailable() && isDevelopment) {
       console.info(
         'browser_closed_before_callback — verify the deployed Cognito client ID and redirect URI configuration.',
       );
     }
   }
 
+  function eraseSessionMaterial(): void {
+    active = undefined;
+    pendingCandidate = undefined;
+    pendingSubject = undefined;
+    restoreRefreshToken = undefined;
+    automaticRetryUsed = false;
+  }
+
+  async function finishSignOutCleanupUnlocked(): Promise<void> {
+    cleanupContext = { kind: 'signOut' };
+    cancelActiveSessionTimers();
+    activeBundleGeneration += 1;
+
+    let cleanupSucceeded = false;
+    try {
+      await dependencies.sessionStore.clearRefreshToken();
+      await dependencies.transactionStore.clear();
+      cleanupSucceeded = true;
+    } catch {
+      // Cleanup failures publish only the stable retry context below.
+    }
+
+    eraseSessionMaterial();
+    if (!cleanupSucceeded) {
+      transitions.enterCleanupFailure();
+      return;
+    }
+
+    cleanupContext = undefined;
+    transitions.enterSignedOut();
+  }
+
+  function canSignOutOrStartOver(): boolean {
+    if (unavailable()) {
+      return false;
+    }
+    return (
+      state.phase === 'authenticated' ||
+      (state.operation === 'idle' &&
+        state.sessionUsable === false &&
+        state.retryAction !== null &&
+        ['restore', 'refresh', 'persist', 'verify'].includes(state.retryAction))
+    );
+  }
+
+  function signOut(): Promise<void> {
+    if (signOutPromise !== undefined) {
+      return signOutPromise;
+    }
+    if (!canSignOutOrStartOver()) {
+      return Promise.resolve();
+    }
+
+    cancelActiveSessionTimers();
+    activeBundleGeneration += 1;
+    automaticRetryUsed = false;
+    transitions.enterOperation({
+      phase: 'signedOut',
+      operation: 'signingOut',
+      sessionUsable: false,
+      notice: null,
+      user: null,
+    });
+
+    const cleanup = serialize(finishSignOutCleanupUnlocked);
+    let tracked!: Promise<void>;
+    tracked = cleanup.finally(() => {
+      if (signOutPromise === tracked) {
+        signOutPromise = undefined;
+      }
+    });
+    signOutPromise = tracked;
+    return tracked;
+  }
+
   async function retryCleanupUnlocked(): Promise<void> {
+    if (cleanupContext?.kind === 'signOut') {
+      await finishSignOutCleanupUnlocked();
+      return;
+    }
     if (cleanupContext?.kind === 'installationReset') {
       await performInstallationResetUnlocked();
       return;
@@ -1327,7 +1576,7 @@ export function createMobileAuthCoordinator(
 
   async function retryCurrentOperationUnlocked(): Promise<void> {
     const retryAction = state.retryAction;
-    if (disposed || retryAction === null || state.operation !== 'idle') {
+    if (unavailable() || retryAction === null || state.operation !== 'idle') {
       return;
     }
 
@@ -1352,6 +1601,9 @@ export function createMobileAuthCoordinator(
   }
 
   function retryCurrentOperation(): Promise<void> {
+    if (unavailable()) {
+      return Promise.resolve();
+    }
     if (refreshPromise !== undefined) {
       cancelAutomaticRetryTimer();
       return refreshPromise;
@@ -1391,13 +1643,30 @@ export function createMobileAuthCoordinator(
     transitions.enterSignedOut();
   }
 
+  function dispose(): Promise<void> {
+    if (disposed) {
+      return Promise.resolve();
+    }
+    if (disposalRequested) {
+      return operationTail;
+    }
+    disposalRequested = true;
+    cancelActiveSessionTimers();
+    activeBundleGeneration += 1;
+    return serialize(disposeUnlocked);
+  }
+
   const coordinator: MobileAuthCoordinator = {
     state: publicState,
-    initialize: () => serialize(initializeUnlocked),
-    startSignIn: () => serialize(startSignInUnlocked),
-    completeCallback: (url) => serialize(() => completeCallbackUnlocked(url).then(() => undefined)),
+    initialize: () => (unavailable() ? Promise.resolve() : serialize(initializeUnlocked)),
+    startSignIn: () => (unavailable() ? Promise.resolve() : serialize(startSignInUnlocked)),
+    completeCallback: (url) =>
+      unavailable()
+        ? Promise.resolve()
+        : serialize(() => completeCallbackUnlocked(url).then(() => undefined)),
     retryCurrentOperation,
-    dispose: () => serialize(disposeUnlocked),
+    signOut,
+    dispose,
   };
 
   return coordinator;
