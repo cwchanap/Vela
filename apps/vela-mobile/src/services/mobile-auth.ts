@@ -94,6 +94,8 @@ export const MOBILE_AUTH_KEY: InjectionKey<MobileAuthCoordinator> = Symbol('mobi
  * back through their existing failure paths so the user can retry.
  */
 export const MOBILE_AUTH_NETWORK_TIMEOUT_MS = 15_000;
+export const MOBILE_AUTH_REFRESH_LEAD_MS = 60_000;
+export const MOBILE_AUTH_SOFT_RETRY_DELAY_MS = 5_000;
 
 const RESTARTABLE_OAUTH_ERRORS = new Set<MobileAuthErrorCode>([
   'browser_launch_failed',
@@ -210,8 +212,16 @@ export function createMobileAuthCoordinator(
 
   let operationTail = Promise.resolve();
   let appUrlHandle: ListenerHandle | undefined;
+  let appStateHandle: ListenerHandle | undefined;
   let browserFinishedHandle: ListenerHandle | undefined;
+  let proactiveRefreshTimer: ReturnType<typeof setTimeout> | undefined;
+  let accessExpiryTimer: ReturnType<typeof setTimeout> | undefined;
+  let automaticRetryTimer: ReturnType<typeof setTimeout> | undefined;
+  let refreshPromise: Promise<void> | undefined;
   let active: ActiveSession | undefined;
+  let activeBundleGeneration = 0;
+  let appIsActive = true;
+  let automaticRetryUsed = false;
   let pendingCandidate: PendingCandidate | undefined;
   let pendingSubject: string | undefined;
   let restoreRefreshToken: string | undefined;
@@ -235,6 +245,10 @@ export function createMobileAuthCoordinator(
       now: dependencies.now(),
     });
     Object.assign(state, next);
+  }
+
+  function activeSessionIsUsable(): boolean {
+    return active !== undefined && active.bundle.expiresAt > dependencies.now();
   }
 
   const transitions = {
@@ -333,21 +347,26 @@ export function createMobileAuthCoordinator(
         verify: 'verifying',
         cleanup: 'cleaningUp',
       };
+      const isInSessionRetry =
+        active !== undefined &&
+        (retryAction === 'refresh' ||
+          ((retryAction === 'persist' || retryAction === 'verify') &&
+            pendingCandidate?.context === 'refresh'));
       const phaseByAction: Record<MobileAuthRetryAction, MobileAuthPhase> = {
         restore: 'initializing',
         refresh: 'authenticated',
-        persist: 'exchangingCode',
-        verify: 'verifyingSession',
+        persist: isInSessionRetry ? 'authenticated' : 'exchangingCode',
+        verify: isInSessionRetry ? 'authenticated' : 'verifyingSession',
         cleanup: 'signedOut',
       };
       applyState({
         phase: phaseByAction[retryAction],
         operation: operationByAction[retryAction],
-        sessionUsable: false,
+        sessionUsable: isInSessionRetry && activeSessionIsUsable(),
         errorCode: null,
         retryAction: null,
         notice: null,
-        user: retryAction === 'refresh' ? (active?.user ?? null) : null,
+        user: isInSessionRetry ? (active?.user ?? null) : null,
       });
     },
 
@@ -376,6 +395,238 @@ export function createMobileAuthCoordinator(
     },
   };
 
+  function cancelProactiveRefreshTimer(): void {
+    if (proactiveRefreshTimer !== undefined) {
+      clearTimeout(proactiveRefreshTimer);
+      proactiveRefreshTimer = undefined;
+    }
+  }
+
+  function cancelAccessExpiryTimer(): void {
+    if (accessExpiryTimer !== undefined) {
+      clearTimeout(accessExpiryTimer);
+      accessExpiryTimer = undefined;
+    }
+  }
+
+  function cancelAutomaticRetryTimer(): void {
+    if (automaticRetryTimer !== undefined) {
+      clearTimeout(automaticRetryTimer);
+      automaticRetryTimer = undefined;
+    }
+  }
+
+  function cancelActiveSessionTimers(): void {
+    cancelProactiveRefreshTimer();
+    cancelAccessExpiryTimer();
+    cancelAutomaticRetryTimer();
+  }
+
+  function clearActiveSession(): void {
+    cancelActiveSessionTimers();
+    active = undefined;
+    activeBundleGeneration += 1;
+    automaticRetryUsed = false;
+  }
+
+  async function closeExpiredActiveSessionUnlocked(
+    owner: ActiveSession,
+    generation: number,
+  ): Promise<void> {
+    if (disposed || active !== owner || activeBundleGeneration !== generation) {
+      return;
+    }
+    if (owner.bundle.expiresAt > dependencies.now()) {
+      scheduleAccessExpiryTimer(owner, generation);
+      return;
+    }
+
+    cancelProactiveRefreshTimer();
+    cancelAutomaticRetryTimer();
+    const retainedRetry =
+      state.operation === 'idle' &&
+      state.errorCode !== null &&
+      (state.retryAction === 'refresh' ||
+        state.retryAction === 'persist' ||
+        state.retryAction === 'verify')
+        ? {
+            errorCode: state.errorCode,
+            retryAction: state.retryAction,
+          }
+        : {
+            errorCode: 'session_refresh_failed' as const,
+            retryAction: 'refresh' as const,
+          };
+    transitions.enterSessionFailure({
+      phase: 'authenticated',
+      sessionUsable: false,
+      errorCode: retainedRetry.errorCode,
+      retryAction: retainedRetry.retryAction,
+      user: owner.user,
+    });
+  }
+
+  function scheduleAccessExpiryTimer(owner: ActiveSession, generation: number): void {
+    cancelAccessExpiryTimer();
+    const delay = Math.max(0, owner.bundle.expiresAt - dependencies.now());
+    accessExpiryTimer = setTimeout(() => {
+      accessExpiryTimer = undefined;
+      void serialize(() => closeExpiredActiveSessionUnlocked(owner, generation));
+    }, delay);
+  }
+
+  function scheduleProactiveRefreshTimer(owner: ActiveSession, generation: number): void {
+    cancelProactiveRefreshTimer();
+    if (!appIsActive || disposed || active !== owner || activeBundleGeneration !== generation) {
+      return;
+    }
+    const delay = Math.max(
+      0,
+      owner.bundle.expiresAt - dependencies.now() - MOBILE_AUTH_REFRESH_LEAD_MS,
+    );
+    proactiveRefreshTimer = setTimeout(() => {
+      proactiveRefreshTimer = undefined;
+      void queueRefresh({ requireDue: true, owner, generation });
+    }, delay);
+  }
+
+  function scheduleActiveSessionTimers(): void {
+    const owner = active;
+    if (!owner || disposed) {
+      return;
+    }
+    const generation = activeBundleGeneration;
+    scheduleAccessExpiryTimer(owner, generation);
+    scheduleProactiveRefreshTimer(owner, generation);
+  }
+
+  function queueRefresh(options: {
+    requireDue: boolean;
+    owner?: ActiveSession;
+    generation?: number;
+  }): Promise<void> {
+    if (refreshPromise !== undefined) {
+      return refreshPromise;
+    }
+
+    const owner = options.owner ?? active;
+    const generation = options.generation ?? activeBundleGeneration;
+    if (!owner) {
+      return Promise.resolve();
+    }
+
+    cancelProactiveRefreshTimer();
+    const operation = serialize(async () => {
+      if (
+        disposed ||
+        !appIsActive ||
+        active !== owner ||
+        activeBundleGeneration !== generation ||
+        pendingCandidate !== undefined
+      ) {
+        return;
+      }
+      if (
+        options.requireDue &&
+        owner.bundle.expiresAt - dependencies.now() > MOBILE_AUTH_REFRESH_LEAD_MS
+      ) {
+        scheduleProactiveRefreshTimer(owner, generation);
+        return;
+      }
+      await refreshActiveSessionUnlocked();
+    });
+    let tracked!: Promise<void>;
+    tracked = operation.finally(() => {
+      if (refreshPromise === tracked) {
+        refreshPromise = undefined;
+      }
+    });
+    refreshPromise = tracked;
+    return tracked;
+  }
+
+  function queueRecordedRetry(): void {
+    if (state.retryAction === null || state.operation !== 'idle' || disposed || !appIsActive) {
+      return;
+    }
+    if (state.retryAction === 'refresh') {
+      void queueRefresh({ requireDue: false });
+      return;
+    }
+    if (state.retryAction === 'persist' || state.retryAction === 'verify') {
+      void serialize(retryCurrentOperationUnlocked);
+    }
+  }
+
+  function scheduleAutomaticRetry(): void {
+    const owner = active;
+    const retryAction = state.retryAction;
+    if (
+      !owner ||
+      disposed ||
+      !appIsActive ||
+      automaticRetryUsed ||
+      automaticRetryTimer !== undefined ||
+      (retryAction !== 'refresh' && retryAction !== 'persist' && retryAction !== 'verify')
+    ) {
+      return;
+    }
+    const enoughLifetime =
+      owner.bundle.expiresAt - dependencies.now() >
+      MOBILE_AUTH_SOFT_RETRY_DELAY_MS + MOBILE_AUTH_NETWORK_TIMEOUT_MS;
+    if (!enoughLifetime) {
+      return;
+    }
+
+    automaticRetryUsed = true;
+    automaticRetryTimer = setTimeout(() => {
+      automaticRetryTimer = undefined;
+      if (
+        disposed ||
+        !appIsActive ||
+        active !== owner ||
+        owner.bundle.expiresAt <= dependencies.now() ||
+        state.retryAction !== retryAction
+      ) {
+        return;
+      }
+      queueRecordedRetry();
+    }, MOBILE_AUTH_SOFT_RETRY_DELAY_MS);
+  }
+
+  function handleAppStateChange(isActive: boolean): void {
+    appIsActive = isActive;
+    if (!isActive) {
+      cancelProactiveRefreshTimer();
+      cancelAutomaticRetryTimer();
+      return;
+    }
+
+    const owner = active;
+    if (!owner || disposed) {
+      return;
+    }
+    if (state.retryAction === 'persist' || state.retryAction === 'verify') {
+      queueRecordedRetry();
+      return;
+    }
+
+    const generation = activeBundleGeneration;
+    if (owner.bundle.expiresAt <= dependencies.now()) {
+      void serialize(() => closeExpiredActiveSessionUnlocked(owner, generation));
+      void queueRefresh({ requireDue: false, owner, generation });
+      return;
+    }
+    if (
+      state.retryAction === 'refresh' ||
+      owner.bundle.expiresAt - dependencies.now() <= MOBILE_AUTH_REFRESH_LEAD_MS
+    ) {
+      void queueRefresh({ requireDue: state.retryAction !== 'refresh', owner, generation });
+      return;
+    }
+    scheduleProactiveRefreshTimer(owner, generation);
+  }
+
   async function removeListener(handle: ListenerHandle | undefined): Promise<void> {
     try {
       await handle?.remove();
@@ -393,7 +644,7 @@ export function createMobileAuthCoordinator(
   }
 
   async function failCallback(errorCode: MobileAuthErrorCode): Promise<void> {
-    active = undefined;
+    clearActiveSession();
     pendingCandidate = undefined;
     pendingSubject = undefined;
     restoreRefreshToken = undefined;
@@ -411,7 +662,7 @@ export function createMobileAuthCoordinator(
   }
 
   async function terminalSessionCleanupUnlocked(): Promise<void> {
-    active = undefined;
+    clearActiveSession();
     pendingCandidate = undefined;
     pendingSubject = undefined;
     restoreRefreshToken = undefined;
@@ -426,6 +677,27 @@ export function createMobileAuthCoordinator(
     transitions.enterTerminalNotice();
   }
 
+  function enterCandidateFailure(
+    candidate: PendingCandidate,
+    errorCode: Extract<
+      MobileAuthErrorCode,
+      'session_persistence_failed' | 'session_verification_failed'
+    >,
+    retryAction: Extract<MobileAuthRetryAction, 'persist' | 'verify'>,
+  ): void {
+    const isInSession = candidate.context === 'refresh' && active !== undefined;
+    transitions.enterSessionFailure({
+      phase: isInSession ? 'authenticated' : 'error',
+      sessionUsable: isInSession && activeSessionIsUsable(),
+      errorCode,
+      retryAction,
+      user: isInSession ? (active?.user ?? null) : null,
+    });
+    if (isInSession) {
+      scheduleAutomaticRetry();
+    }
+  }
+
   async function verifyCandidateSessionUnlocked(): Promise<void> {
     const candidate = pendingCandidate;
     if (!candidate || disposed) {
@@ -433,11 +705,11 @@ export function createMobileAuthCoordinator(
     }
 
     transitions.enterOperation({
-      phase: 'verifyingSession',
+      phase: candidate.context === 'refresh' ? 'authenticated' : 'verifyingSession',
       operation: 'verifying',
-      sessionUsable: false,
+      sessionUsable: candidate.context === 'refresh' && activeSessionIsUsable(),
       notice: null,
-      user: null,
+      user: candidate.context === 'refresh' ? (active?.user ?? null) : null,
     });
 
     // The timeout and AbortController must remain active until the response
@@ -459,13 +731,7 @@ export function createMobileAuthCoordinator(
           signal: controller.signal,
         });
       } catch {
-        transitions.enterSessionFailure({
-          phase: 'error',
-          sessionUsable: false,
-          errorCode: 'session_verification_failed',
-          retryAction: 'verify',
-          user: null,
-        });
+        enterCandidateFailure(candidate, 'session_verification_failed', 'verify');
         return;
       }
 
@@ -475,13 +741,7 @@ export function createMobileAuthCoordinator(
       }
 
       if (!response.ok) {
-        transitions.enterSessionFailure({
-          phase: 'error',
-          sessionUsable: false,
-          errorCode: 'session_verification_failed',
-          retryAction: 'verify',
-          user: null,
-        });
+        enterCandidateFailure(candidate, 'session_verification_failed', 'verify');
         return;
       }
 
@@ -489,25 +749,13 @@ export function createMobileAuthCoordinator(
       try {
         data = await response.json();
       } catch {
-        transitions.enterSessionFailure({
-          phase: 'error',
-          sessionUsable: false,
-          errorCode: 'session_verification_failed',
-          retryAction: 'verify',
-          user: null,
-        });
+        enterCandidateFailure(candidate, 'session_verification_failed', 'verify');
         return;
       }
 
       const user = parseSessionUser(data);
       if (!user) {
-        transitions.enterSessionFailure({
-          phase: 'error',
-          sessionUsable: false,
-          errorCode: 'session_verification_failed',
-          retryAction: 'verify',
-          user: null,
-        });
+        enterCandidateFailure(candidate, 'session_verification_failed', 'verify');
         return;
       }
 
@@ -516,6 +764,7 @@ export function createMobileAuthCoordinator(
         return;
       }
 
+      cancelActiveSessionTimers();
       active = {
         bundle: {
           ...candidate.bundle,
@@ -523,11 +772,14 @@ export function createMobileAuthCoordinator(
         },
         user,
       };
+      activeBundleGeneration += 1;
+      automaticRetryUsed = false;
       pendingCandidate = undefined;
       pendingSubject = undefined;
       restoreRefreshToken = undefined;
       cleanupContext = undefined;
       transitions.enterAuthenticated(user);
+      scheduleActiveSessionTimers();
     } finally {
       clearTimeout(timeout);
     }
@@ -543,22 +795,16 @@ export function createMobileAuthCoordinator(
       candidate.context === 'authorizationCode' || candidate.returnedRefreshToken !== undefined;
     if (needsPersistence) {
       transitions.enterOperation({
-        phase: 'exchangingCode',
+        phase: candidate.context === 'refresh' ? 'authenticated' : 'exchangingCode',
         operation: 'persisting',
-        sessionUsable: false,
+        sessionUsable: candidate.context === 'refresh' && activeSessionIsUsable(),
         notice: null,
-        user: null,
+        user: candidate.context === 'refresh' ? (active?.user ?? null) : null,
       });
       try {
         await dependencies.sessionStore.saveRefreshToken(candidate.durableRefreshToken);
       } catch {
-        transitions.enterSessionFailure({
-          phase: 'error',
-          sessionUsable: false,
-          errorCode: 'session_persistence_failed',
-          retryAction: 'persist',
-          user: null,
-        });
+        enterCandidateFailure(candidate, 'session_persistence_failed', 'persist');
         return;
       }
 
@@ -715,6 +961,17 @@ export function createMobileAuthCoordinator(
   }
 
   function enterRefreshFailure(context: 'restore' | 'refresh'): void {
+    if (context === 'refresh' && active !== undefined) {
+      transitions.enterSessionFailure({
+        phase: 'authenticated',
+        sessionUsable: activeSessionIsUsable(),
+        errorCode: 'session_refresh_failed',
+        retryAction: 'refresh',
+        user: active.user,
+      });
+      scheduleAutomaticRetry();
+      return;
+    }
     transitions.enterSessionFailure({
       phase: 'error',
       sessionUsable: false,
@@ -740,7 +997,7 @@ export function createMobileAuthCoordinator(
     transitions.enterOperation({
       phase: context === 'restore' ? 'initializing' : 'authenticated',
       operation: context === 'restore' ? 'restoring' : 'refreshing',
-      sessionUsable: false,
+      sessionUsable: context === 'refresh' && activeSessionIsUsable(),
       notice: null,
       user: context === 'refresh' ? (active?.user ?? null) : null,
     });
@@ -869,8 +1126,10 @@ export function createMobileAuthCoordinator(
       launchUrl = await dependencies.app.getLaunchUrl();
     } catch {
       await removeListener(appUrlHandle);
+      await removeListener(appStateHandle);
       await removeListener(browserFinishedHandle);
       appUrlHandle = undefined;
+      appStateHandle = undefined;
       browserFinishedHandle = undefined;
       transitions.enterOAuthError('configuration_error');
       return;
@@ -949,13 +1208,18 @@ export function createMobileAuthCoordinator(
       appUrlHandle = await dependencies.app.addListener('appUrlOpen', (event) => {
         void coordinator.completeCallback(event.url);
       });
+      appStateHandle = await dependencies.app.addListener('appStateChange', (event) => {
+        handleAppStateChange(event.isActive);
+      });
       browserFinishedHandle = await dependencies.browser.addListener('browserFinished', () => {
         void serialize(handleBrowserFinishedUnlocked);
       });
     } catch {
       await removeListener(appUrlHandle);
+      await removeListener(appStateHandle);
       await removeListener(browserFinishedHandle);
       appUrlHandle = undefined;
+      appStateHandle = undefined;
       browserFinishedHandle = undefined;
       transitions.enterOAuthError('configuration_error');
       return;
@@ -1078,16 +1342,39 @@ export function createMobileAuthCoordinator(
     }
   }
 
+  function retryCurrentOperation(): Promise<void> {
+    if (refreshPromise !== undefined) {
+      cancelAutomaticRetryTimer();
+      return refreshPromise;
+    }
+
+    const retryAction = state.retryAction;
+    if (
+      active !== undefined &&
+      (retryAction === 'refresh' || retryAction === 'persist' || retryAction === 'verify')
+    ) {
+      cancelAutomaticRetryTimer();
+      automaticRetryUsed = true;
+    }
+    if (retryAction === 'refresh') {
+      return queueRefresh({ requireDue: false });
+    }
+    return serialize(retryCurrentOperationUnlocked);
+  }
+
   async function disposeUnlocked(): Promise<void> {
     if (disposed) {
       return;
     }
     disposed = true;
+    cancelActiveSessionTimers();
     await removeListener(appUrlHandle);
+    await removeListener(appStateHandle);
     await removeListener(browserFinishedHandle);
     appUrlHandle = undefined;
+    appStateHandle = undefined;
     browserFinishedHandle = undefined;
-    active = undefined;
+    clearActiveSession();
     pendingCandidate = undefined;
     pendingSubject = undefined;
     restoreRefreshToken = undefined;
@@ -1100,7 +1387,7 @@ export function createMobileAuthCoordinator(
     initialize: () => serialize(initializeUnlocked),
     startSignIn: () => serialize(startSignInUnlocked),
     completeCallback: (url) => serialize(() => completeCallbackUnlocked(url).then(() => undefined)),
-    retryCurrentOperation: () => serialize(retryCurrentOperationUnlocked),
+    retryCurrentOperation,
     dispose: () => serialize(disposeUnlocked),
   };
 

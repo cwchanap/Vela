@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { toRaw, watch } from 'vue';
 import {
   MOBILE_OAUTH_CALLBACK_URI,
@@ -212,7 +212,8 @@ class FakeInstallationStore implements MobileInstallationStore {
 class FakeApp implements MobileAppAdapter {
   readonly order: string[];
   launchUrl: { url: string } | undefined;
-  listener: ((event: { url: string }) => void) | undefined;
+  urlListener: ((event: { url: string }) => void) | undefined;
+  stateListener: ((event: { isActive: boolean }) => void) | undefined;
   failAdd = false;
   failLaunch = false;
   removeCalls = 0;
@@ -231,7 +232,9 @@ class FakeApp implements MobileAppAdapter {
       throw new Error('SECRET-app-plugin-failure');
     }
     if (eventName === 'appUrlOpen') {
-      this.listener = listener as (event: { url: string }) => void;
+      this.urlListener = listener as (event: { url: string }) => void;
+    } else {
+      this.stateListener = listener as (event: { isActive: boolean }) => void;
     }
     return {
       remove: async () => {
@@ -239,7 +242,11 @@ class FakeApp implements MobileAppAdapter {
         if (this.failRemove) {
           throw new Error('SECRET-app-remove-failure');
         }
-        this.listener = undefined;
+        if (eventName === 'appUrlOpen') {
+          this.urlListener = undefined;
+        } else {
+          this.stateListener = undefined;
+        }
       },
     };
   }
@@ -253,7 +260,11 @@ class FakeApp implements MobileAppAdapter {
   }
 
   emit(url: string): void {
-    this.listener?.({ url });
+    this.urlListener?.({ url });
+  }
+
+  emitState(isActive: boolean): void {
+    this.stateListener?.({ isActive });
   }
 }
 
@@ -322,6 +333,7 @@ class FakeBrowser implements MobileBrowserAdapter {
 
 class FakeTokenTransport implements MobileTokenTransportAdapter {
   readonly requests: MobileTokenRequest[] = [];
+  readonly queuedFailures: unknown[] = [];
   result: { status: number; data: unknown } = { status: 500, data: {} };
   failure: unknown;
   gate: Promise<{ status: number; data: unknown }> | undefined;
@@ -335,6 +347,9 @@ class FakeTokenTransport implements MobileTokenTransportAdapter {
         ? 'token:refresh'
         : 'token:authorizationCode',
     );
+    if (this.queuedFailures.length > 0) {
+      throw this.queuedFailures.shift();
+    }
     if (this.failure) {
       throw this.failure;
     }
@@ -354,6 +369,7 @@ type HarnessOptions = {
   isSecureContext?: boolean;
   authConfig?: MobileOAuthConfig;
   isDevelopment?: boolean;
+  now?: () => number;
 };
 
 function makeHarness(options: HarnessOptions = {}) {
@@ -389,7 +405,7 @@ function makeHarness(options: HarnessOptions = {}) {
     crypto,
     isSecureContext: options.isSecureContext ?? true,
     fetch: sessionFetch as unknown as typeof fetch,
-    now: () => NOW,
+    now: options.now ?? (() => NOW),
     config: options.authConfig ?? config,
     isDevelopment: options.isDevelopment ?? false,
   });
@@ -445,17 +461,57 @@ function expectOrderedCalls(order: string[], sequence: string[]): void {
 
 function prepareSuccessfulRefresh(
   harness: ReturnType<typeof makeHarness>,
-  options: { subject?: string; rotatedRefreshToken?: string } = {},
+  options: {
+    subject?: string;
+    rotatedRefreshToken?: string;
+    expiresInSeconds?: number;
+    claimExpirySeconds?: number;
+  } = {},
 ): void {
   harness.tokenTransport.result = {
     status: 200,
     data: {
       access_token: 'SECRET-refreshed-access-token',
-      id_token: refreshedIdToken({ sub: options.subject ?? 'user-123' }),
-      expires_in: 3_600,
+      id_token: refreshedIdToken({
+        sub: options.subject ?? 'user-123',
+        ...(options.claimExpirySeconds === undefined ? {} : { exp: options.claimExpirySeconds }),
+      }),
+      expires_in: options.expiresInSeconds ?? 3_600,
       ...(options.rotatedRefreshToken ? { refresh_token: options.rotatedRefreshToken } : {}),
     },
   };
+}
+
+async function authenticateWithExpiry(
+  harness: ReturnType<typeof makeHarness>,
+  expiresAt: number,
+  clockNow = Date.now(),
+): Promise<void> {
+  const expiresInSeconds = (expiresAt - clockNow) / 1_000;
+  if (!Number.isInteger(expiresInSeconds) || expiresInSeconds <= 0) {
+    throw new Error('Test expiry must be a positive whole number of seconds');
+  }
+
+  await harness.persist(activeTransaction);
+  harness.tokenTransport.result = {
+    status: 200,
+    data: {
+      access_token: 'SECRET-access-token',
+      id_token: idToken(activeTransaction, {
+        exp: Math.ceil((expiresAt + 3_600_000) / 1_000),
+      }),
+      refresh_token: 'SECRET-refresh-token',
+      expires_in: expiresInSeconds,
+    },
+  };
+  await harness.coordinator.initialize();
+  await harness.coordinator.completeCallback(callback(activeTransaction));
+}
+
+function refreshRequests(harness: ReturnType<typeof makeHarness>): MobileTokenRequest[] {
+  return harness.tokenTransport.requests.filter((request) =>
+    request.data.includes('grant_type=refresh_token'),
+  );
 }
 
 function snapshot(state: Readonly<MobileAuthState>): string {
@@ -522,6 +578,7 @@ describe('mobile auth initialization', () => {
 
     expect(harness.order).toEqual([
       'app:add:appUrlOpen',
+      'app:add:appStateChange',
       'browser:add:browserFinished',
       'installation:isMarked',
       'session:load',
@@ -881,6 +938,7 @@ describe('mobile auth initialization', () => {
 
     expect(harness.order).toEqual([
       'app:add:appUrlOpen',
+      'app:add:appStateChange',
       'browser:add:browserFinished',
       'installation:isMarked',
       'session:load',
@@ -1315,6 +1373,308 @@ describe('generalized retry dispatch', () => {
     expect(harness.tokenTransport.requests).toHaveLength(0);
     expect(harness.sessionFetch).not.toHaveBeenCalled();
     expect(harness.coordinator.state.phase).toBe('signedOut');
+  });
+});
+
+describe('active-session lifecycle refresh', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('refreshes exactly 60 seconds before access expiry', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+    const harness = makeHarness({ now: () => Date.now() });
+    await authenticateWithExpiry(harness, NOW + 3_600_000);
+    harness.tokenTransport.queuedFailures.push(new Error('SECRET-refresh-network'));
+
+    await vi.advanceTimersByTimeAsync(3_539_999);
+    expect(refreshRequests(harness)).toHaveLength(0);
+    await vi.advanceTimersByTimeAsync(1);
+
+    expect(refreshRequests(harness)).toHaveLength(1);
+  });
+
+  it('cancels the foreground timer while inactive and rechecks on resume', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+    const harness = makeHarness({ now: () => Date.now() });
+    await authenticateWithExpiry(harness, NOW + 120_000);
+
+    harness.app.emitState(false);
+    await vi.advanceTimersByTimeAsync(60_000);
+
+    expect(refreshRequests(harness)).toHaveLength(0);
+    harness.app.emitState(true);
+    await harness.flush();
+    expect(refreshRequests(harness)).toHaveLength(1);
+  });
+
+  it('reschedules from the absolute expiry when the app becomes active', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+    const harness = makeHarness({ now: () => Date.now() });
+    await authenticateWithExpiry(harness, NOW + 180_000);
+    harness.app.emitState(false);
+    await vi.advanceTimersByTimeAsync(30_000);
+
+    harness.app.emitState(true);
+    await vi.advanceTimersByTimeAsync(89_999);
+    expect(refreshRequests(harness)).toHaveLength(0);
+    await vi.advanceTimersByTimeAsync(1);
+
+    expect(refreshRequests(harness)).toHaveLength(1);
+  });
+
+  it('refreshes immediately on resume inside the lead window', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+    const harness = makeHarness({ now: () => Date.now() });
+    await authenticateWithExpiry(harness, NOW + 120_000);
+    harness.app.emitState(false);
+    await vi.advanceTimersByTimeAsync(70_000);
+    harness.tokenTransport.queuedFailures.push(new Error('SECRET-refresh-network'));
+
+    harness.app.emitState(true);
+    await harness.flush();
+
+    expect(refreshRequests(harness)).toHaveLength(1);
+  });
+
+  it('coalesces resume, automatic timer, and manual retry into one grant', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+    const harness = makeHarness({ now: () => Date.now() });
+    await authenticateWithExpiry(harness, NOW + 120_000);
+    harness.tokenTransport.queuedFailures.push(new Error('SECRET-refresh-network'));
+    await vi.advanceTimersByTimeAsync(60_000);
+
+    const heldRefresh = deferred<{ status: number; data: unknown }>();
+    harness.tokenTransport.gate = heldRefresh.promise;
+    const manualRetry = harness.coordinator.retryCurrentOperation();
+    await Promise.resolve();
+    await Promise.resolve();
+    harness.app.emitState(true);
+    await vi.advanceTimersByTimeAsync(5_000);
+
+    expect(refreshRequests(harness)).toHaveLength(2);
+    heldRefresh.resolve({
+      status: 200,
+      data: {
+        access_token: 'SECRET-refreshed-access-token',
+        id_token: refreshedIdToken({ exp: 10_000 }),
+        expires_in: 3_600,
+      },
+    });
+    await manualRetry;
+  });
+
+  it('rechecks app activity at the serialized refresh queue head', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+    const harness = makeHarness({ now: () => Date.now() });
+    await authenticateWithExpiry(harness, NOW + 61_000);
+    prepareSuccessfulRefresh(harness, { claimExpirySeconds: 10_000 });
+    harness.sessionFetch.mockResolvedValueOnce(response(500, { error: 'temporary' }));
+    await vi.advanceTimersByTimeAsync(1_000);
+
+    const heldVerification = deferred<Response>();
+    harness.sessionFetch.mockImplementationOnce(async () => heldVerification.promise);
+    const manualRetry = harness.coordinator.retryCurrentOperation();
+    await Promise.resolve();
+    await Promise.resolve();
+    harness.app.emitState(true);
+    harness.app.emitState(false);
+    heldVerification.resolve(response(500, { error: 'temporary' }));
+    await manualRetry;
+    await harness.flush();
+
+    expect(refreshRequests(harness)).toHaveLength(1);
+  });
+
+  it('retries one soft failure after five seconds with enough lifetime', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+    const harness = makeHarness({ now: () => Date.now() });
+    await authenticateWithExpiry(harness, NOW + 61_000);
+    harness.tokenTransport.queuedFailures.push(
+      new Error('SECRET-refresh-network-1'),
+      new Error('SECRET-refresh-network-2'),
+    );
+
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(harness.coordinator.state.sessionUsable).toBe(true);
+    await vi.advanceTimersByTimeAsync(4_999);
+    expect(refreshRequests(harness)).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(refreshRequests(harness)).toHaveLength(2);
+    await vi.advanceTimersByTimeAsync(5_000);
+
+    expect(refreshRequests(harness)).toHaveLength(2);
+  });
+
+  it('does not retry automatically at the exact 20-second lifetime budget', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+    const harness = makeHarness({ now: () => Date.now() });
+    await authenticateWithExpiry(harness, NOW + 20_000);
+    harness.tokenTransport.queuedFailures.push(new Error('SECRET-refresh-network'));
+
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(5_000);
+
+    expect(refreshRequests(harness)).toHaveLength(1);
+  });
+
+  it('cancels a pending automatic retry when the user retries manually', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+    const harness = makeHarness({ now: () => Date.now() });
+    await authenticateWithExpiry(harness, NOW + 61_000);
+    harness.tokenTransport.queuedFailures.push(new Error('SECRET-refresh-network'));
+    await vi.advanceTimersByTimeAsync(1_000);
+    prepareSuccessfulRefresh(harness, { claimExpirySeconds: 10_000 });
+
+    await harness.coordinator.retryCurrentOperation();
+    await vi.advanceTimersByTimeAsync(5_000);
+
+    expect(refreshRequests(harness)).toHaveLength(2);
+  });
+
+  it('closes the gate at exact old-token expiry after a soft failure', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+    const harness = makeHarness({ now: () => Date.now() });
+    await authenticateWithExpiry(harness, NOW + 61_000);
+    harness.tokenTransport.queuedFailures.push(
+      new Error('SECRET-refresh-network-1'),
+      new Error('SECRET-refresh-network-2'),
+    );
+    await vi.advanceTimersByTimeAsync(1_000);
+    await vi.advanceTimersByTimeAsync(5_000);
+
+    await vi.advanceTimersByTimeAsync(54_999);
+    expect(harness.coordinator.state.sessionUsable).toBe(true);
+    await vi.advanceTimersByTimeAsync(1);
+
+    expect(harness.coordinator.state).toMatchObject({
+      phase: 'authenticated',
+      operation: 'idle',
+      sessionUsable: false,
+      errorCode: 'session_refresh_failed',
+      retryAction: 'refresh',
+      user: { userId: 'user-123', email: 'person@example.com' },
+    });
+  });
+
+  it('retries rotated-candidate persistence without issuing another grant', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+    const harness = makeHarness({ now: () => Date.now() });
+    await authenticateWithExpiry(harness, NOW + 120_000);
+    prepareSuccessfulRefresh(harness, {
+      rotatedRefreshToken: 'SECRET-rotated-refresh-token',
+      claimExpirySeconds: 10_000,
+    });
+    harness.sessionStore.saveFailure = new Error('SECRET-save');
+
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(harness.coordinator.state).toMatchObject({
+      phase: 'authenticated',
+      sessionUsable: true,
+      errorCode: 'session_persistence_failed',
+      retryAction: 'persist',
+    });
+    harness.sessionStore.saveFailure = undefined;
+    await vi.advanceTimersByTimeAsync(5_000);
+
+    expect(refreshRequests(harness)).toHaveLength(1);
+    expect(harness.sessionStore.saveAttempts).toEqual([
+      'SECRET-refresh-token',
+      'SECRET-rotated-refresh-token',
+      'SECRET-rotated-refresh-token',
+    ]);
+    expect(harness.sessionFetch).toHaveBeenCalledTimes(2);
+    expect(harness.coordinator.state.sessionUsable).toBe(true);
+  });
+
+  it('retries candidate verification without issuing another grant', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+    const harness = makeHarness({ now: () => Date.now() });
+    await authenticateWithExpiry(harness, NOW + 120_000);
+    prepareSuccessfulRefresh(harness, { claimExpirySeconds: 10_000 });
+    harness.sessionFetch.mockResolvedValueOnce(response(500, { error: 'temporary' }));
+
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(harness.coordinator.state).toMatchObject({
+      phase: 'authenticated',
+      sessionUsable: true,
+      errorCode: 'session_verification_failed',
+      retryAction: 'verify',
+    });
+    await vi.advanceTimersByTimeAsync(5_000);
+
+    expect(refreshRequests(harness)).toHaveLength(1);
+    expect(harness.sessionStore.saveAttempts).toEqual(['SECRET-refresh-token']);
+    expect(harness.sessionFetch).toHaveBeenCalledTimes(3);
+    expect(harness.coordinator.state.sessionUsable).toBe(true);
+  });
+
+  it('retains an expired candidate for manual verification retry', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+    const harness = makeHarness({ now: () => Date.now() });
+    await authenticateWithExpiry(harness, NOW + 61_000);
+    prepareSuccessfulRefresh(harness, { claimExpirySeconds: 10_000 });
+    harness.sessionFetch
+      .mockResolvedValueOnce(response(500, { error: 'temporary' }))
+      .mockResolvedValueOnce(response(500, { error: 'temporary' }));
+    await vi.advanceTimersByTimeAsync(1_000);
+    await vi.advanceTimersByTimeAsync(5_000);
+
+    await vi.advanceTimersByTimeAsync(55_000);
+    expect(harness.coordinator.state).toMatchObject({
+      phase: 'authenticated',
+      sessionUsable: false,
+      errorCode: 'session_verification_failed',
+      retryAction: 'verify',
+    });
+    await harness.coordinator.retryCurrentOperation();
+
+    expect(refreshRequests(harness)).toHaveLength(1);
+    expect(harness.sessionFetch).toHaveBeenCalledTimes(4);
+    expect(harness.coordinator.state.sessionUsable).toBe(true);
+  });
+
+  it('replaces both old deadlines after successful promotion', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+    const harness = makeHarness({ now: () => Date.now() });
+    await authenticateWithExpiry(harness, NOW + 120_000);
+    prepareSuccessfulRefresh(harness, { claimExpirySeconds: 10_000 });
+
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(refreshRequests(harness)).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(harness.coordinator.state.sessionUsable).toBe(true);
+    await vi.advanceTimersByTimeAsync(3_479_999);
+    expect(refreshRequests(harness)).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(1);
+
+    expect(refreshRequests(harness)).toHaveLength(2);
+  });
+
+  it('uses only the injected clock for lifecycle delay decisions', async () => {
+    const injectedNow = 2_000_000_000_000;
+    const harness = makeHarness({ now: () => injectedNow });
+
+    await authenticateWithExpiry(harness, injectedNow + 60_000, injectedNow);
+    prepareSuccessfulRefresh(harness, {
+      claimExpirySeconds: Math.ceil((injectedNow + 7_200_000) / 1_000),
+    });
+    await vi.waitFor(() => expect(refreshRequests(harness)).toHaveLength(1));
+    await harness.coordinator.dispose();
   });
 });
 
@@ -2235,7 +2595,7 @@ describe('serialization, disposal, and secret handling', () => {
 
     await harness.coordinator.dispose();
 
-    expect(harness.app.removeCalls).toBe(1);
+    expect(harness.app.removeCalls).toBe(2);
     expect(harness.browser.removeCalls).toBe(1);
     expect(harness.preferences.value).not.toBeNull();
     expect(harness.coordinator.state).toEqual({
@@ -2258,7 +2618,7 @@ describe('serialization, disposal, and secret handling', () => {
     await harness.coordinator.dispose();
     await harness.coordinator.dispose();
 
-    expect(harness.app.removeCalls).toBe(1);
+    expect(harness.app.removeCalls).toBe(2);
     expect(harness.browser.removeCalls).toBe(1);
     expect(harness.coordinator.state.phase).toBe('signedOut');
   });
