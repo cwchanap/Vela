@@ -5,6 +5,7 @@
     "": {
       "name": "@vela/mobile",
       "dependencies": {
+        "@aparajita/capacitor-secure-storage": "7.1.6",
         "@capacitor/app": "^7.0.0",
         "@capacitor/browser": "^7.0.0",
         "@capacitor/core": "^7.0.0",
@@ -18,6 +19,10 @@
     },
   },
   "packages": {
+    "@aparajita/capacitor-secure-storage": ["@aparajita/capacitor-secure-storage@7.1.6", "", { "dependencies": { "@capacitor/android": "^7.4.4", "@capacitor/app": "^7.1.0", "@capacitor/core": "^7.4.4", "@capacitor/ios": "^7.4.4" } }, "sha512-KIfLOm/oSciUiWsOMtMv2nzlnwW3LERid0DvZ3djt7UORBQvFqpvSefiLG5kkc8D34pGkb2ZqAz0ZprrI9LiTQ=="],
+
+    "@capacitor/android": ["@capacitor/android@7.6.8", "", { "peerDependencies": { "@capacitor/core": "^7.6.0" } }, "sha512-N5LXe1ls+TA0mq+RhtyDdP1JISzAAI+OuLGL3G7OWQxfQQOZYkiEjEJMYqMV6JR421IqpRsYj08JOfC0PFC3NA=="],
+
     "@capacitor/app": ["@capacitor/app@7.1.2", "", { "peerDependencies": { "@capacitor/core": ">=7.0.0" } }, "sha512-d4I/oF/PRu4megL7/IGKYfe5j7yzSON1FRFgq6kH+m5kH6g7V+wyjHRLauCzGNjdRx4S+nWOumINds0qcRBtKg=="],
 
     "@capacitor/browser": ["@capacitor/browser@7.0.5", "", { "peerDependencies": { "@capacitor/core": ">=7.0.0" } }, "sha512-YF/kC1m1e6c81X/agtAnYItVlqiQ/nXLG+Q3QXNDuiMoRynqa3Guu8ZaV9kWvqQcHoE2w18xz7WGpPOuh+R1fA=="],

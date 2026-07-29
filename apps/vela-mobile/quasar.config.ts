@@ -24,6 +24,10 @@ export default defineConfig((ctx) => {
           __dirname,
           'src-capacitor/node_modules/@capacitor/preferences',
         ),
+        '@aparajita/capacitor-secure-storage': resolve(
+          __dirname,
+          'src-capacitor/node_modules/@aparajita/capacitor-secure-storage',
+        ),
       },
 
       target: {
