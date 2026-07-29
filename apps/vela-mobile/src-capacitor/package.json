@@ -5,6 +5,7 @@
   "author": "cwchanap <cwchanap@connect.ust.hk>",
   "private": true,
   "dependencies": {
+    "@aparajita/capacitor-secure-storage": "7.1.6",
     "@capacitor/app": "^7.0.0",
     "@capacitor/browser": "^7.0.0",
     "@capacitor/core": "^7.0.0",
