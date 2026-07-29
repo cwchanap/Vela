@@ -136,12 +136,57 @@ describe('selectMobileAuthGateView', () => {
       },
     ],
     [
+      'blocking restore persistence failure',
+      state({
+        phase: 'initializing',
+        errorCode: 'session_persistence_failed',
+        retryAction: 'persist',
+      }),
+      'ready',
+      {
+        kind: 'blocking_session_failure',
+        errorCode: 'session_persistence_failed',
+        retryAction: 'persist',
+        allowStartOver: true,
+      },
+    ],
+    [
+      'blocking restore verification failure',
+      state({
+        phase: 'initializing',
+        errorCode: 'session_verification_failed',
+        retryAction: 'verify',
+      }),
+      'ready',
+      {
+        kind: 'blocking_session_failure',
+        errorCode: 'session_verification_failed',
+        retryAction: 'verify',
+        allowStartOver: true,
+      },
+    ],
+    [
       'blocking expired refresh failure',
       state({
         phase: 'authenticated',
         errorCode: 'session_refresh_failed',
         retryAction: 'refresh',
         user,
+      }),
+      'ready',
+      {
+        kind: 'blocking_session_failure',
+        errorCode: 'session_refresh_failed',
+        retryAction: 'refresh',
+        allowStartOver: true,
+      },
+    ],
+    [
+      'blocking refresh failure without an active session',
+      state({
+        phase: 'error',
+        errorCode: 'session_refresh_failed',
+        retryAction: 'refresh',
       }),
       'ready',
       {
@@ -278,6 +323,11 @@ describe('selectMobileAuthGateView', () => {
     state({
       phase: 'error',
       errorCode: 'session_restore_failed',
+      retryAction: 'refresh',
+    }),
+    state({
+      phase: 'initializing',
+      errorCode: 'session_refresh_failed',
       retryAction: 'refresh',
     }),
     state({

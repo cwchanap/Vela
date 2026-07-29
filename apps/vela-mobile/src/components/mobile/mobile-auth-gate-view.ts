@@ -160,6 +160,12 @@ function hasValidIdleTuple(state: Readonly<MobileAuthState>): boolean {
     if (state.errorCode === 'session_restore_failed') {
       return state.phase === 'initializing' && !state.sessionUsable && state.user === null;
     }
+    if (state.errorCode === 'session_refresh_failed') {
+      return (
+        (state.phase === 'error' && !state.sessionUsable && state.user === null) ||
+        (state.phase === 'authenticated' && state.user !== null)
+      );
+    }
     return (
       (state.phase === 'initializing' && !state.sessionUsable && state.user === null) ||
       (state.phase === 'error' && !state.sessionUsable && state.user === null) ||
