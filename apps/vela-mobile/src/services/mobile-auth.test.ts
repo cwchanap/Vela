@@ -17,7 +17,10 @@ import {
   createOAuthTransactionStore,
   type OAuthTransactionPreferences,
 } from '../auth/oauth-transaction-store';
-import type { MobileInstallationStore } from '../auth/mobile-installation-store';
+import {
+  createMobileInstallationKey,
+  type MobileInstallationStore,
+} from '../auth/mobile-installation-store';
 import { MobileSessionStoreError, type MobileSessionStore } from '../auth/mobile-session-store';
 import { createMobileAuthCoordinator, MOBILE_AUTH_NETWORK_TIMEOUT_MS } from './mobile-auth';
 
@@ -39,6 +42,14 @@ const LOG_AND_DOM_SENTINELS = [
   'SECRET-claim-email',
 ] as const;
 
+const NON_SCHEMA_STORAGE_SENTINELS = [
+  'SECRET-callback-code',
+  'SECRET-claim-email',
+  'SECRET-raw-request',
+  'SECRET-raw-response',
+  'SECRET-native-exception',
+] as const;
+
 function searchable(value: unknown): string {
   try {
     return JSON.stringify(value);
@@ -52,6 +63,55 @@ function storageSnapshot(storage: Storage): string {
     const key = storage.key(index) ?? '';
     return `${key}=${storage.getItem(key) ?? ''}`;
   }).join('\n');
+}
+
+function expectApprovedPreferenceWrites(preferenceCalls: unknown[][]): void {
+  const installationKey = createMobileInstallationKey(config);
+
+  for (const call of preferenceCalls) {
+    expect(call).toHaveLength(1);
+    const options = call[0];
+    expect(options).toEqual(
+      expect.objectContaining({
+        key: expect.any(String),
+        value: expect.any(String),
+      }),
+    );
+    const { key, value } = options as { key: string; value: string };
+    expect(Object.keys(options as object).sort()).toEqual(['key', 'value']);
+
+    if (key === MOBILE_OAUTH_TRANSACTION_KEY) {
+      let parsed: unknown = null;
+      try {
+        parsed = JSON.parse(value);
+      } catch {
+        expect.fail('OAuth transaction Preferences value must be valid JSON');
+      }
+      expect(parsed).toEqual(
+        expect.objectContaining({
+          state: expect.any(String),
+          codeVerifier: expect.any(String),
+          nonce: expect.any(String),
+          createdAt: expect.any(Number),
+        }),
+      );
+      const transaction = parsed as Record<string, unknown>;
+      expect(Object.keys(transaction).sort()).toEqual([
+        'codeVerifier',
+        'createdAt',
+        'nonce',
+        'state',
+      ]);
+      expect((transaction.state as string).length).toBeGreaterThan(0);
+      expect((transaction.codeVerifier as string).length).toBeGreaterThan(0);
+      expect((transaction.nonce as string).length).toBeGreaterThan(0);
+      expect(Number.isFinite(transaction.createdAt)).toBe(true);
+      continue;
+    }
+
+    expect(key).toBe(installationKey);
+    expect(value).toBe('1');
+  }
 }
 
 function expectNoSecretLeak(input: {
@@ -72,9 +132,16 @@ function expectNoSecretLeak(input: {
   for (const secret of LOG_AND_DOM_SENTINELS) {
     expect(logsAndDom).not.toContain(secret);
   }
+  expect(logsAndDom).not.toContain('SECRET-');
   for (const secret of SECRET_SENTINELS) {
     expect(browserAndPreferenceStorage).not.toContain(secret);
   }
+  for (const secret of NON_SCHEMA_STORAGE_SENTINELS) {
+    expect(browserAndPreferenceStorage).not.toContain(secret);
+  }
+  expectApprovedPreferenceWrites(input.preferenceCalls);
+  expect(storageSnapshot(window.localStorage)).toBe('');
+  expect(storageSnapshot(window.sessionStorage)).toBe('');
 }
 
 const config: MobileOAuthConfig = {
@@ -3264,6 +3331,80 @@ describe('cross-boundary secret leakage regressions', () => {
     window.sessionStorage.clear();
   });
 
+  it('rejects a Preferences write with callback, claim, and raw transport fields outside the transaction schema', () => {
+    const transactionWithRogueFields = JSON.stringify({
+      ...securityTransaction,
+      callbackCode: 'SECRET-callback-code',
+      decodedClaimEmail: 'SECRET-claim-email',
+      rawRequest: 'SECRET-raw-request',
+      rawResponse: 'SECRET-raw-response',
+    });
+
+    expect(() =>
+      expectNoSecretLeak({
+        consoleCalls: [],
+        preferenceCalls: [
+          [
+            {
+              key: MOBILE_OAUTH_TRANSACTION_KEY,
+              value: transactionWithRogueFields,
+            },
+          ],
+        ],
+        renderedText: '',
+      }),
+    ).toThrow();
+  });
+
+  it('rejects unenumerated native removal failures from captured logs and errors', () => {
+    expect(() =>
+      expectNoSecretLeak({
+        consoleCalls: [
+          [new Error('SECRET-app-remove-failure')],
+          [{ cause: 'SECRET-browser-remove-failure' }],
+        ],
+        preferenceCalls: [],
+        renderedText: '',
+      }),
+    ).toThrow();
+  });
+
+  it('rejects raw transport values from browser storage', () => {
+    window.localStorage.setItem('rogue-request', 'SECRET-raw-request');
+    window.sessionStorage.setItem('rogue-response', 'SECRET-raw-response');
+
+    expect(() =>
+      expectNoSecretLeak({
+        consoleCalls: [],
+        preferenceCalls: [],
+        renderedText: '',
+      }),
+    ).toThrow();
+  });
+
+  it('allows only the exact token-free transaction and installation-marker Preferences schemas', () => {
+    expect(() =>
+      expectNoSecretLeak({
+        consoleCalls: [],
+        preferenceCalls: [
+          [
+            {
+              key: MOBILE_OAUTH_TRANSACTION_KEY,
+              value: JSON.stringify(securityTransaction),
+            },
+          ],
+          [
+            {
+              key: createMobileInstallationKey(config),
+              value: '1',
+            },
+          ],
+        ],
+        renderedText: '',
+      }),
+    ).not.toThrow();
+  });
+
   it('keeps callback-success credentials, claims, URL, code, verifier, and nonce out of logs and non-secure storage', async () => {
     const consoleCapture = captureConsoleCalls();
     const harness = makeHarness({ isDevelopment: true });
@@ -3521,6 +3662,10 @@ describe('cross-boundary secret leakage regressions', () => {
       notice: null,
       user: null,
     });
+    const disposalOutput = searchable(consoleCapture.calls());
+    expect(disposalOutput).not.toContain('SECRET-app-remove-failure');
+    expect(disposalOutput).not.toContain('SECRET-browser-remove-failure');
+    expect(disposalOutput).not.toContain('SECRET-');
     expectHarnessHasNoSecretLeak(harness, consoleCapture.calls());
   });
 });

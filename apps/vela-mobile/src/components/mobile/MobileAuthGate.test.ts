@@ -159,6 +159,9 @@ function withRawSecretState(state: Partial<MobileAuthState>): Partial<MobileAuth
     codeVerifier: 'SECRET-code-verifier',
     nonce: 'SECRET-nonce',
     decodedClaimEmail: 'SECRET-claim-email',
+    rawRequest: 'SECRET-raw-request',
+    rawResponse: 'SECRET-raw-response',
+    nativeException: 'SECRET-native-exception',
   });
 }
 
@@ -419,6 +422,10 @@ describe('MobileAuthGate', () => {
         preferenceCalls: [],
         renderedText: wrapper.text(),
       });
+      expect(searchable(consoleCapture.calls())).not.toContain('SECRET-');
+      expect(wrapper.text()).not.toContain('SECRET-');
+      expect(storageSnapshot(window.localStorage)).toBe('');
+      expect(storageSnapshot(window.sessionStorage)).toBe('');
     } finally {
       wrapper?.unmount();
       consoleCapture.restore();
