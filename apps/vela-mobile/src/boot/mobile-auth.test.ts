@@ -90,6 +90,82 @@ import { MOBILE_AUTH_KEY } from '../services/mobile-auth';
 import { config } from '../config';
 import boot from './mobile-auth';
 
+const SECRET_SENTINELS = [
+  'SECRET-access-token',
+  'SECRET-id-token',
+  'SECRET-refresh-token',
+  'SECRET-rotated-refresh-token',
+] as const;
+
+const LOG_AND_DOM_SENTINELS = [
+  ...SECRET_SENTINELS,
+  'SECRET-authorization-url',
+  'SECRET-callback-code',
+  'SECRET-code-verifier',
+  'SECRET-nonce',
+  'SECRET-claim-email',
+] as const;
+
+function searchable(value: unknown): string {
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
+}
+
+function storageSnapshot(storage: Storage): string {
+  return Array.from({ length: storage.length }, (_, index) => {
+    const key = storage.key(index) ?? '';
+    return `${key}=${storage.getItem(key) ?? ''}`;
+  }).join('\n');
+}
+
+function expectNoSecretLeak(input: {
+  consoleCalls: unknown[][];
+  preferenceCalls: unknown[][];
+  renderedText?: string;
+}): void {
+  const logsAndDom = [
+    searchable(input.consoleCalls),
+    input.renderedText ?? document.body.textContent ?? '',
+  ].join('\n');
+  const browserAndPreferenceStorage = [
+    searchable(input.preferenceCalls),
+    storageSnapshot(window.localStorage),
+    storageSnapshot(window.sessionStorage),
+  ].join('\n');
+
+  for (const secret of LOG_AND_DOM_SENTINELS) {
+    expect(logsAndDom).not.toContain(secret);
+  }
+  for (const secret of SECRET_SENTINELS) {
+    expect(browserAndPreferenceStorage).not.toContain(secret);
+  }
+}
+
+function captureConsoleCalls(): {
+  calls: () => unknown[][];
+  restore: () => void;
+} {
+  const spies = (['debug', 'info', 'log', 'warn', 'error'] as const).map((method) =>
+    vi.spyOn(console, method).mockImplementation(() => undefined),
+  );
+  return {
+    calls: () =>
+      spies.flatMap((spy) =>
+        spy.mock.calls.map((call) =>
+          call.map((value) =>
+            value instanceof Error ? { ...value, name: value.name, message: value.message } : value,
+          ),
+        ),
+      ),
+    restore: () => {
+      for (const spy of spies) spy.mockRestore();
+    },
+  };
+}
+
 describe('mobile auth boot', () => {
   const runBoot = boot as unknown as (params: {
     app: { provide: ReturnType<typeof vi.fn> };
@@ -225,6 +301,81 @@ describe('mobile auth boot', () => {
         value: originalSecureContext,
       });
       Reflect.deleteProperty(window, 'fetch');
+    }
+  });
+
+  it('keeps secret-bearing native transport results and exceptions out of logging and non-secure storage', async () => {
+    window.localStorage.clear();
+    window.sessionStorage.clear();
+    const consoleCapture = captureConsoleCalls();
+    const app = { provide: vi.fn() };
+    const originalFetch = window.fetch;
+    Object.defineProperty(window, 'fetch', {
+      configurable: true,
+      value: vi.fn(),
+    });
+    const rawResponse = {
+      status: 400,
+      data: {
+        accessToken: 'SECRET-access-token',
+        idToken: 'SECRET-id-token',
+        refreshToken: 'SECRET-refresh-token',
+        rotatedRefreshToken: 'SECRET-rotated-refresh-token',
+        email: 'SECRET-claim-email',
+      },
+    };
+    const nativeFailure = Object.assign(
+      new Error('SECRET-access-token SECRET-id-token SECRET-refresh-token'),
+      {
+        authorizationUrl: 'SECRET-authorization-url',
+        callbackCode: 'SECRET-callback-code',
+        codeVerifier: 'SECRET-code-verifier',
+        nonce: 'SECRET-nonce',
+        decodedClaimEmail: 'SECRET-claim-email',
+      },
+    );
+    mocks.capacitorHttpRequest
+      .mockResolvedValueOnce(rawResponse)
+      .mockRejectedValueOnce(nativeFailure);
+
+    try {
+      runBoot({ app });
+      const dependencies = mocks.createCoordinator.mock.calls[0]?.[0] as
+        | MobileAuthCoordinatorDependencies
+        | undefined;
+      const request = {
+        url: 'https://example.invalid/SECRET-authorization-url',
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        data: [
+          'code=SECRET-callback-code',
+          'code_verifier=SECRET-code-verifier',
+          'nonce=SECRET-nonce',
+          'access_token=SECRET-access-token',
+          'refresh_token=SECRET-refresh-token',
+        ].join('&'),
+      } as const;
+
+      await expect(dependencies?.tokenTransport.request(request)).resolves.toEqual(rawResponse);
+      await expect(dependencies?.tokenTransport.request(request)).rejects.toBe(nativeFailure);
+
+      expectNoSecretLeak({
+        consoleCalls: consoleCapture.calls(),
+        preferenceCalls: mocks.preferencesPlugin.set.mock.calls,
+        renderedText: '',
+      });
+    } finally {
+      if (originalFetch === undefined) {
+        Reflect.deleteProperty(window, 'fetch');
+      } else {
+        Object.defineProperty(window, 'fetch', {
+          configurable: true,
+          value: originalFetch,
+        });
+      }
+      consoleCapture.restore();
+      window.localStorage.clear();
+      window.sessionStorage.clear();
     }
   });
 });
