@@ -429,10 +429,7 @@ export function createMobileAuthCoordinator(
     automaticRetryUsed = false;
   }
 
-  async function closeExpiredActiveSessionUnlocked(
-    owner: ActiveSession,
-    generation: number,
-  ): Promise<void> {
+  function closeExpiredActiveSession(owner: ActiveSession, generation: number): void {
     if (disposed || active !== owner || activeBundleGeneration !== generation) {
       return;
     }
@@ -443,8 +440,20 @@ export function createMobileAuthCoordinator(
 
     cancelProactiveRefreshTimer();
     cancelAutomaticRetryTimer();
+    if (state.operation !== 'idle') {
+      applyState({
+        phase: state.phase,
+        operation: state.operation,
+        sessionUsable: false,
+        errorCode: state.errorCode,
+        retryAction: state.retryAction,
+        notice: state.notice,
+        user: state.user,
+      });
+      return;
+    }
+
     const retainedRetry =
-      state.operation === 'idle' &&
       state.errorCode !== null &&
       (state.retryAction === 'refresh' ||
         state.retryAction === 'persist' ||
@@ -471,7 +480,7 @@ export function createMobileAuthCoordinator(
     const delay = Math.max(0, owner.bundle.expiresAt - dependencies.now());
     accessExpiryTimer = setTimeout(() => {
       accessExpiryTimer = undefined;
-      void serialize(() => closeExpiredActiveSessionUnlocked(owner, generation));
+      closeExpiredActiveSession(owner, generation);
     }, delay);
   }
 
@@ -613,7 +622,7 @@ export function createMobileAuthCoordinator(
 
     const generation = activeBundleGeneration;
     if (owner.bundle.expiresAt <= dependencies.now()) {
-      void serialize(() => closeExpiredActiveSessionUnlocked(owner, generation));
+      closeExpiredActiveSession(owner, generation);
       void queueRefresh({ requireDue: false, owner, generation });
       return;
     }
