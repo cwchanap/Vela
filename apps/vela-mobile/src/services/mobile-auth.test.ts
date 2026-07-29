@@ -981,6 +981,26 @@ describe('callback completion and cleanup', () => {
     expect(harness.coordinator.state.errorCode).toBe('token_validation_failed');
   });
 
+  it('maps a whitespace-only callback refresh token to token validation failure', async () => {
+    const harness = makeHarness();
+    await harness.coordinator.initialize();
+    await harness.coordinator.startSignIn();
+    const transaction = harness.preferences.transaction();
+    harness.tokenTransport.result = {
+      status: 200,
+      data: {
+        access_token: 'access',
+        id_token: idToken(transaction),
+        refresh_token: ' \t\n',
+        expires_in: 3_600,
+      },
+    };
+
+    harness.app.emit(callback(transaction));
+    await harness.flush();
+    expect(harness.coordinator.state.errorCode).toBe('token_validation_failed');
+  });
+
   it('maps transaction-load failure safely without exchanging the code', async () => {
     const harness = makeHarness();
     await harness.coordinator.initialize();

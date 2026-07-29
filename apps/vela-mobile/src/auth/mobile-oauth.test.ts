@@ -351,6 +351,12 @@ describe('OAuth token parsing and ID-token claim validation', () => {
       expires_in: 3_600,
       refresh_token: '',
     },
+    {
+      access_token: 'access-token',
+      id_token: 'id-token',
+      expires_in: 3_600,
+      refresh_token: ' \t\n',
+    },
   ])('rejects malformed token response %#', (value) => {
     expect(() => parseAuthorizationCodeTokenResponse(value, 1_000)).toThrow(
       'Invalid token response',
