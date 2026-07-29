@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { toRaw, watch } from 'vue';
 import {
   MOBILE_OAUTH_CALLBACK_URI,
@@ -22,6 +22,60 @@ import { MobileSessionStoreError, type MobileSessionStore } from '../auth/mobile
 import { createMobileAuthCoordinator, MOBILE_AUTH_NETWORK_TIMEOUT_MS } from './mobile-auth';
 
 const NOW = 1_000_000;
+
+const SECRET_SENTINELS = [
+  'SECRET-access-token',
+  'SECRET-id-token',
+  'SECRET-refresh-token',
+  'SECRET-rotated-refresh-token',
+] as const;
+
+const LOG_AND_DOM_SENTINELS = [
+  ...SECRET_SENTINELS,
+  'SECRET-authorization-url',
+  'SECRET-callback-code',
+  'SECRET-code-verifier',
+  'SECRET-nonce',
+  'SECRET-claim-email',
+] as const;
+
+function searchable(value: unknown): string {
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
+}
+
+function storageSnapshot(storage: Storage): string {
+  return Array.from({ length: storage.length }, (_, index) => {
+    const key = storage.key(index) ?? '';
+    return `${key}=${storage.getItem(key) ?? ''}`;
+  }).join('\n');
+}
+
+function expectNoSecretLeak(input: {
+  consoleCalls: unknown[][];
+  preferenceCalls: unknown[][];
+  renderedText?: string;
+}): void {
+  const logsAndDom = [
+    searchable(input.consoleCalls),
+    input.renderedText ?? document.body.textContent ?? '',
+  ].join('\n');
+  const browserAndPreferenceStorage = [
+    searchable(input.preferenceCalls),
+    storageSnapshot(window.localStorage),
+    storageSnapshot(window.sessionStorage),
+  ].join('\n');
+
+  for (const secret of LOG_AND_DOM_SENTINELS) {
+    expect(logsAndDom).not.toContain(secret);
+  }
+  for (const secret of SECRET_SENTINELS) {
+    expect(browserAndPreferenceStorage).not.toContain(secret);
+  }
+}
 
 const config: MobileOAuthConfig = {
   apiUrl: 'https://vela.example/api/',
@@ -63,7 +117,11 @@ function base64UrlJson(value: unknown): string {
   return btoa(JSON.stringify(value)).replace(/\+/gu, '-').replace(/\//gu, '_').replace(/=+$/u, '');
 }
 
-function idToken(transaction: OAuthTransaction, overrides: Record<string, unknown> = {}): string {
+function idToken(
+  transaction: OAuthTransaction,
+  overrides: Record<string, unknown> = {},
+  signature = 'unsigned',
+): string {
   const claims = {
     token_use: 'id',
     aud: config.mobileClientId,
@@ -73,10 +131,10 @@ function idToken(transaction: OAuthTransaction, overrides: Record<string, unknow
     exp: 2_000,
     ...overrides,
   };
-  return `${base64UrlJson({ alg: 'none' })}.${base64UrlJson(claims)}.unsigned`;
+  return `${base64UrlJson({ alg: 'none' })}.${base64UrlJson(claims)}.${signature}`;
 }
 
-function refreshedIdToken(overrides: Record<string, unknown> = {}): string {
+function refreshedIdToken(overrides: Record<string, unknown> = {}, signature = 'unsigned'): string {
   return `${base64UrlJson({ alg: 'none' })}.${base64UrlJson({
     token_use: 'id',
     aud: config.mobileClientId,
@@ -84,7 +142,7 @@ function refreshedIdToken(overrides: Record<string, unknown> = {}): string {
     sub: 'user-123',
     exp: 2_000,
     ...overrides,
-  })}.unsigned`;
+  })}.${signature}`;
 }
 
 function callback(transaction: OAuthTransaction, code = 'authorization-code'): string {
@@ -102,6 +160,8 @@ function response(status: number, value: unknown, jsonError?: unknown): Response
 class FakePreferences implements OAuthTransactionPreferences {
   value: string | null = null;
   readonly calls: string[] = [];
+  readonly setCalls: unknown[][] = [];
+  getGate: Promise<void> | undefined;
   setGate: Promise<void> | undefined;
   removeGate: Promise<void> | undefined;
   getFailure: unknown;
@@ -114,6 +174,7 @@ class FakePreferences implements OAuthTransactionPreferences {
     expect(key).toBe(MOBILE_OAUTH_TRANSACTION_KEY);
     this.calls.push('preferences:get');
     this.order?.push('preferences:get');
+    await this.getGate;
     if (this.getFailure) {
       throw this.getFailure;
     }
@@ -122,6 +183,7 @@ class FakePreferences implements OAuthTransactionPreferences {
 
   async set({ key, value }: { key: string; value: string }): Promise<void> {
     expect(key).toBe(MOBILE_OAUTH_TRANSACTION_KEY);
+    this.setCalls.push([{ key, value }]);
     this.calls.push('preferences:set:start');
     this.order?.push('preferences:set:start');
     if (this.setFailure) {
@@ -156,6 +218,7 @@ class FakeSessionStore implements MobileSessionStore {
   refreshToken: string | null = null;
   readonly saveAttempts: string[] = [];
   clearCalls = 0;
+  loadGate: Promise<void> | undefined;
   saveGate: Promise<void> | undefined;
   clearGate: Promise<void> | undefined;
   loadFailure: unknown;
@@ -166,6 +229,7 @@ class FakeSessionStore implements MobileSessionStore {
 
   async loadRefreshToken(): Promise<string | null> {
     this.order.push('session:load');
+    await this.loadGate;
     if (this.loadFailure) throw this.loadFailure;
     return this.refreshToken;
   }
@@ -191,6 +255,8 @@ class FakeInstallationStore implements MobileInstallationStore {
   marked = true;
   readFailure: unknown;
   markFailure: unknown;
+  readGate: Promise<void> | undefined;
+  markGate: Promise<void> | undefined;
   readCalls = 0;
   markCalls = 0;
 
@@ -199,6 +265,7 @@ class FakeInstallationStore implements MobileInstallationStore {
   async isCurrentInstallationMarked(): Promise<boolean> {
     this.order.push('installation:isMarked');
     this.readCalls += 1;
+    await this.readGate;
     if (this.readFailure) throw this.readFailure;
     return this.marked;
   }
@@ -206,6 +273,7 @@ class FakeInstallationStore implements MobileInstallationStore {
   async markCurrentInstallation(): Promise<void> {
     this.order.push('installation:mark');
     this.markCalls += 1;
+    await this.markGate;
     if (this.markFailure) throw this.markFailure;
     this.marked = true;
   }
@@ -216,6 +284,7 @@ class FakeApp implements MobileAppAdapter {
   launchUrl: { url: string } | undefined;
   urlListener: ((event: { url: string }) => void) | undefined;
   stateListener: ((event: { isActive: boolean }) => void) | undefined;
+  addGate: Promise<void> | undefined;
   failAdd = false;
   failLaunch = false;
   removeCalls = 0;
@@ -230,6 +299,7 @@ class FakeApp implements MobileAppAdapter {
     listener: ((event: { url: string }) => void) | ((event: { isActive: boolean }) => void),
   ): Promise<{ remove(): Promise<void> }> {
     this.order.push(`app:add:${eventName}`);
+    await this.addGate;
     if (this.failAdd) {
       throw new Error('SECRET-app-plugin-failure');
     }
@@ -282,6 +352,7 @@ class FakeBrowser implements MobileBrowserAdapter {
   failRemove = false;
   finishOnClose = false;
   openGate: Promise<void> | undefined;
+  closeGate: Promise<void> | undefined;
   onClose: (() => void) | undefined;
 
   constructor(order: string[]) {
@@ -320,6 +391,7 @@ class FakeBrowser implements MobileBrowserAdapter {
   async close(): Promise<void> {
     this.closeCalls += 1;
     this.onClose?.();
+    await this.closeGate;
     if (this.failClose) {
       throw new Error('SECRET-browser-close-failure');
     }
@@ -569,6 +641,69 @@ const activeTransaction: OAuthTransaction = {
   nonce: 'SECRET-nonce',
   createdAt: NOW - 1,
 };
+
+const securityTransaction: OAuthTransaction = {
+  state: 'SECRET-authorization-url',
+  codeVerifier: 'SECRET-code-verifier',
+  nonce: 'SECRET-nonce',
+  createdAt: NOW - 1,
+};
+
+function captureConsoleCalls(): {
+  calls: () => unknown[][];
+} {
+  const spies = (['debug', 'info', 'log', 'warn', 'error'] as const).map((method) =>
+    vi.spyOn(console, method).mockImplementation(() => undefined),
+  );
+  return {
+    calls: () =>
+      spies.flatMap((spy) =>
+        spy.mock.calls.map((call) =>
+          call.map((value) =>
+            value instanceof Error ? { ...value, name: value.name, message: value.message } : value,
+          ),
+        ),
+      ),
+  };
+}
+
+function prepareSentinelExchange(harness: ReturnType<typeof makeHarness>): void {
+  harness.tokenTransport.result = {
+    status: 200,
+    data: {
+      access_token: 'SECRET-access-token',
+      id_token: idToken(securityTransaction, { email: 'SECRET-claim-email' }, 'SECRET-id-token'),
+      refresh_token: 'SECRET-refresh-token',
+      expires_in: 3_600,
+    },
+  };
+}
+
+function prepareSentinelRefresh(
+  harness: ReturnType<typeof makeHarness>,
+  options: { rotated?: boolean; expiresInSeconds?: number } = {},
+): void {
+  harness.tokenTransport.result = {
+    status: 200,
+    data: {
+      access_token: 'SECRET-access-token',
+      id_token: refreshedIdToken({ email: 'SECRET-claim-email', exp: 10_000 }, 'SECRET-id-token'),
+      expires_in: options.expiresInSeconds ?? 3_600,
+      ...(options.rotated ? { refresh_token: 'SECRET-rotated-refresh-token' } : {}),
+    },
+  };
+}
+
+function expectHarnessHasNoSecretLeak(
+  harness: ReturnType<typeof makeHarness>,
+  consoleCalls: unknown[][],
+): void {
+  expectNoSecretLeak({
+    consoleCalls,
+    preferenceCalls: harness.preferences.setCalls,
+    renderedText: '',
+  });
+}
 
 describe('mobile auth initialization', () => {
   it('rejects invalid published state tuples with a stable internal error', () => {
@@ -3113,5 +3248,561 @@ describe('serialization, disposal, and secret handling', () => {
     for (const spy of spies) {
       spy.mockRestore();
     }
+  });
+});
+
+describe('cross-boundary secret leakage regressions', () => {
+  beforeEach(() => {
+    window.localStorage.clear();
+    window.sessionStorage.clear();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+    window.localStorage.clear();
+    window.sessionStorage.clear();
+  });
+
+  it('keeps callback-success credentials, claims, URL, code, verifier, and nonce out of logs and non-secure storage', async () => {
+    const consoleCapture = captureConsoleCalls();
+    const harness = makeHarness({ isDevelopment: true });
+    await harness.persist(securityTransaction);
+    prepareSentinelExchange(harness);
+    harness.sessionFetch.mockResolvedValueOnce(
+      response(200, {
+        authenticated: true,
+        user: { userId: 'user-123', email: 'SECRET-claim-email' },
+      }),
+    );
+    await harness.coordinator.initialize();
+
+    await harness.coordinator.completeCallback(
+      callback(securityTransaction, 'SECRET-callback-code'),
+    );
+
+    expect(harness.coordinator.state).toMatchObject({
+      phase: 'authenticated',
+      sessionUsable: true,
+    });
+    expectHarnessHasNoSecretLeak(harness, consoleCapture.calls());
+  });
+
+  it('sanitizes callback failures containing request, response, token, and native exception sentinels', async () => {
+    const consoleCapture = captureConsoleCalls();
+    const harness = makeHarness({ isDevelopment: true });
+    await harness.persist(securityTransaction);
+    harness.tokenTransport.failure = Object.assign(
+      new Error(
+        [
+          'SECRET-callback-code',
+          'SECRET-code-verifier',
+          'SECRET-nonce',
+          'SECRET-access-token',
+          'SECRET-id-token',
+          'SECRET-refresh-token',
+          'SECRET-authorization-url',
+          'SECRET-claim-email',
+        ].join(' '),
+      ),
+      { rawResponse: 'SECRET-rotated-refresh-token' },
+    );
+    await harness.coordinator.initialize();
+
+    await harness.coordinator.completeCallback(
+      callback(securityTransaction, 'SECRET-callback-code'),
+    );
+
+    expect(harness.coordinator.state).toMatchObject({
+      phase: 'error',
+      errorCode: 'code_exchange_failed',
+    });
+    expectHarnessHasNoSecretLeak(harness, consoleCapture.calls());
+  });
+
+  it('keeps cold-restore credentials and decoded claims out of logs and non-secure storage', async () => {
+    const consoleCapture = captureConsoleCalls();
+    const harness = makeHarness({ isDevelopment: true });
+    harness.sessionStore.refreshToken = 'SECRET-refresh-token';
+    prepareSentinelRefresh(harness);
+    harness.sessionFetch.mockResolvedValueOnce(
+      response(200, {
+        authenticated: true,
+        user: { userId: 'user-123', email: 'SECRET-claim-email' },
+      }),
+    );
+
+    await harness.coordinator.initialize();
+
+    expect(harness.coordinator.state).toMatchObject({
+      phase: 'authenticated',
+      sessionUsable: true,
+    });
+    expectHarnessHasNoSecretLeak(harness, consoleCapture.calls());
+  });
+
+  it('keeps soft-refresh credentials and decoded claims out of logs and non-secure storage', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+    const consoleCapture = captureConsoleCalls();
+    const harness = makeHarness({ isDevelopment: true, now: () => Date.now() });
+    await harness.persist(securityTransaction);
+    harness.tokenTransport.result = {
+      status: 200,
+      data: {
+        access_token: 'SECRET-access-token',
+        id_token: idToken(
+          securityTransaction,
+          { email: 'SECRET-claim-email', exp: 10_000 },
+          'SECRET-id-token',
+        ),
+        refresh_token: 'SECRET-refresh-token',
+        expires_in: 61,
+      },
+    };
+    await harness.coordinator.initialize();
+    await harness.coordinator.completeCallback(
+      callback(securityTransaction, 'SECRET-callback-code'),
+    );
+    prepareSentinelRefresh(harness);
+    harness.sessionFetch.mockResolvedValueOnce(
+      response(200, {
+        authenticated: true,
+        user: { userId: 'user-123', email: 'SECRET-claim-email' },
+      }),
+    );
+
+    await vi.advanceTimersByTimeAsync(1_000);
+
+    expect(refreshRequests(harness)).toHaveLength(1);
+    expect(harness.coordinator.state.sessionUsable).toBe(true);
+    expectHarnessHasNoSecretLeak(harness, consoleCapture.calls());
+  });
+
+  it('sanitizes a rotated-token save failure without writing the candidate to Preferences or browser storage', async () => {
+    const consoleCapture = captureConsoleCalls();
+    const harness = makeHarness({ isDevelopment: true });
+    harness.sessionStore.refreshToken = 'SECRET-refresh-token';
+    prepareSentinelRefresh(harness, { rotated: true });
+    harness.sessionStore.saveFailure = Object.assign(
+      new Error('SECRET-rotated-refresh-token SECRET-id-token SECRET-claim-email'),
+      { request: 'SECRET-access-token', response: 'SECRET-refresh-token' },
+    );
+
+    await harness.coordinator.initialize();
+
+    expect(harness.coordinator.state).toMatchObject({
+      errorCode: 'session_persistence_failed',
+      retryAction: 'persist',
+      sessionUsable: false,
+    });
+    expectHarnessHasNoSecretLeak(harness, consoleCapture.calls());
+  });
+
+  it('sanitizes an API rejection and clears its durable callback credential', async () => {
+    const consoleCapture = captureConsoleCalls();
+    const harness = makeHarness({ isDevelopment: true });
+    await harness.persist(securityTransaction);
+    prepareSentinelExchange(harness);
+    harness.sessionFetch.mockResolvedValueOnce(
+      response(401, {
+        request: 'SECRET-access-token',
+        idToken: 'SECRET-id-token',
+        refreshToken: 'SECRET-refresh-token',
+        rotatedRefreshToken: 'SECRET-rotated-refresh-token',
+        email: 'SECRET-claim-email',
+      }),
+    );
+    await harness.coordinator.initialize();
+
+    await harness.coordinator.completeCallback(
+      callback(securityTransaction, 'SECRET-callback-code'),
+    );
+
+    expect(harness.sessionStore.refreshToken).toBeNull();
+    expect(harness.coordinator.state).toMatchObject({
+      phase: 'signedOut',
+      sessionUsable: false,
+      notice: 'session_unusable',
+    });
+    expectHarnessHasNoSecretLeak(harness, consoleCapture.calls());
+  });
+
+  it('keeps start-over cleanup from exposing retained credentials or a raw state tuple', async () => {
+    const consoleCapture = captureConsoleCalls();
+    const harness = makeHarness({ isDevelopment: true });
+    harness.sessionStore.refreshToken = 'SECRET-refresh-token';
+    harness.tokenTransport.failure = Object.assign(
+      new Error('SECRET-access-token SECRET-id-token SECRET-refresh-token'),
+      {
+        authorizationUrl: 'SECRET-authorization-url',
+        code: 'SECRET-callback-code',
+        verifier: 'SECRET-code-verifier',
+        nonce: 'SECRET-nonce',
+        email: 'SECRET-claim-email',
+      },
+    );
+    await harness.persist(securityTransaction);
+    await harness.coordinator.initialize();
+    expect(harness.coordinator.state.retryAction).toBe('restore');
+
+    await harness.coordinator.signOut();
+
+    expect(harness.coordinator.state).toMatchObject({
+      phase: 'signedOut',
+      sessionUsable: false,
+      errorCode: null,
+      retryAction: null,
+      notice: null,
+    });
+    expectHarnessHasNoSecretLeak(harness, consoleCapture.calls());
+  });
+
+  it('sanitizes cleanup failure while preserving the exact incomplete-cleanup gate state', async () => {
+    const consoleCapture = captureConsoleCalls();
+    const harness = makeHarness({ isDevelopment: true });
+    await harness.persist(securityTransaction);
+    prepareSentinelExchange(harness);
+    await harness.coordinator.initialize();
+    await harness.coordinator.completeCallback(
+      callback(securityTransaction, 'SECRET-callback-code'),
+    );
+    await harness.persist(securityTransaction);
+    harness.sessionStore.clearFailure = Object.assign(
+      new Error('SECRET-refresh-token SECRET-rotated-refresh-token'),
+      {
+        accessToken: 'SECRET-access-token',
+        idToken: 'SECRET-id-token',
+        authorizationUrl: 'SECRET-authorization-url',
+        code: 'SECRET-callback-code',
+        verifier: 'SECRET-code-verifier',
+        nonce: 'SECRET-nonce',
+        email: 'SECRET-claim-email',
+      },
+    );
+
+    await harness.coordinator.signOut();
+
+    expect(harness.coordinator.state).toEqual({
+      phase: 'signedOut',
+      operation: 'idle',
+      sessionUsable: false,
+      errorCode: 'session_cleanup_failed',
+      retryAction: 'cleanup',
+      notice: 'cleanup_incomplete',
+      user: null,
+    });
+    expectHarnessHasNoSecretLeak(harness, consoleCapture.calls());
+  });
+
+  it('sanitizes disposal failures without deleting or exposing durable state', async () => {
+    const consoleCapture = captureConsoleCalls();
+    const harness = makeHarness({ isDevelopment: true });
+    await harness.persist(securityTransaction);
+    prepareSentinelExchange(harness);
+    await harness.coordinator.initialize();
+    await harness.coordinator.completeCallback(
+      callback(securityTransaction, 'SECRET-callback-code'),
+    );
+    await harness.persist(securityTransaction);
+    harness.app.failRemove = true;
+    harness.browser.failRemove = true;
+
+    await harness.coordinator.dispose();
+
+    expect(harness.sessionStore.refreshToken).toBe('SECRET-refresh-token');
+    expect(harness.preferences.value).not.toBeNull();
+    expect(harness.coordinator.state).toEqual({
+      phase: 'signedOut',
+      operation: 'idle',
+      sessionUsable: false,
+      errorCode: null,
+      retryAction: null,
+      notice: null,
+      user: null,
+    });
+    expectHarnessHasNoSecretLeak(harness, consoleCapture.calls());
+  });
+});
+
+describe('simulated process lifecycle persistence', () => {
+  it('restores after process relaunch but clears on a new installation marker', async () => {
+    const firstRelaunch = makeHarness();
+    firstRelaunch.sessionStore.refreshToken = 'refresh-token';
+    firstRelaunch.installationStore.marked = true;
+    prepareSuccessfulRefresh(firstRelaunch, { subject: 'user-123' });
+
+    await firstRelaunch.coordinator.initialize();
+
+    expect(firstRelaunch.coordinator.state.sessionUsable).toBe(true);
+
+    const reinstalled = makeHarness({
+      sessionStore: firstRelaunch.sessionStore,
+      installationStore: new FakeInstallationStore([]),
+    });
+    reinstalled.installationStore.marked = false;
+
+    await reinstalled.coordinator.initialize();
+
+    expect(firstRelaunch.sessionStore.clearCalls).toBe(1);
+    expect(reinstalled.coordinator.state.phase).toBe('signedOut');
+    expect(reinstalled.coordinator.state.sessionUsable).toBe(false);
+  });
+
+  it('keeps successful local sign-out durable across relaunch', async () => {
+    const first = makeHarness();
+    first.sessionStore.refreshToken = 'refresh-token';
+    prepareSuccessfulRefresh(first);
+    await first.coordinator.initialize();
+
+    await first.coordinator.signOut();
+
+    const relaunched = makeHarness({
+      sessionStore: first.sessionStore,
+      installationStore: first.installationStore,
+    });
+    await relaunched.coordinator.initialize();
+
+    expect(relaunched.coordinator.state.phase).toBe('signedOut');
+    expect(relaunched.tokenTransport.requests).toHaveLength(0);
+  });
+
+  it('restores after relaunch when secure sign-out cleanup was incomplete', async () => {
+    const first = makeHarness();
+    first.sessionStore.refreshToken = 'refresh-token';
+    prepareSuccessfulRefresh(first);
+    await first.coordinator.initialize();
+    first.sessionStore.clearFailure = new Error('SECRET-delete-failure');
+
+    await first.coordinator.signOut();
+
+    expect(first.coordinator.state.notice).toBe('cleanup_incomplete');
+
+    first.sessionStore.clearFailure = undefined;
+    const relaunched = makeHarness({
+      sessionStore: first.sessionStore,
+      installationStore: first.installationStore,
+    });
+    prepareSuccessfulRefresh(relaunched);
+
+    await relaunched.coordinator.initialize();
+
+    expect(relaunched.coordinator.state.sessionUsable).toBe(true);
+  });
+});
+
+describe('disposal race boundaries', () => {
+  it('stops initialization before storage when disposal begins during listener attachment', async () => {
+    const listener = deferred<void>();
+    const harness = makeHarness();
+    harness.app.addGate = listener.promise;
+
+    const initializing = harness.coordinator.initialize();
+    await vi.waitFor(() => expect(harness.order).toContain('app:add:appUrlOpen'));
+    const disposing = harness.coordinator.dispose();
+    listener.resolve();
+    await Promise.all([initializing, disposing]);
+
+    expect(harness.installationStore.readCalls).toBe(0);
+    expect(harness.sessionStore.clearCalls).toBe(0);
+    expect(harness.app.removeCalls).toBe(2);
+    expect(harness.browser.removeCalls).toBe(1);
+    expect(harness.coordinator.state.phase).toBe('signedOut');
+  });
+
+  it('stops initialization before cold-launch handling when disposal begins during marker read', async () => {
+    const markerRead = deferred<void>();
+    const harness = makeHarness();
+    harness.installationStore.readGate = markerRead.promise;
+
+    const initializing = harness.coordinator.initialize();
+    await vi.waitFor(() => expect(harness.installationStore.readCalls).toBe(1));
+    const disposing = harness.coordinator.dispose();
+    markerRead.resolve();
+    await Promise.all([initializing, disposing]);
+
+    expect(harness.order).not.toContain('app:getLaunchUrl');
+    expect(harness.tokenTransport.requests).toHaveLength(0);
+    expect(harness.coordinator.state.phase).toBe('signedOut');
+  });
+
+  it('does not mark an installation when disposal begins during first-install Keychain cleanup', async () => {
+    const keychainClear = deferred<void>();
+    const harness = makeHarness();
+    harness.installationStore.marked = false;
+    harness.sessionStore.clearGate = keychainClear.promise;
+
+    const initializing = harness.coordinator.initialize();
+    await vi.waitFor(() => expect(harness.sessionStore.clearCalls).toBe(1));
+    const disposing = harness.coordinator.dispose();
+    keychainClear.resolve();
+    await Promise.all([initializing, disposing]);
+
+    expect(harness.installationStore.markCalls).toBe(0);
+    expect(harness.order).not.toContain('app:getLaunchUrl');
+    expect(harness.coordinator.state.phase).toBe('signedOut');
+  });
+
+  it('stops cold initialization when disposal begins during transaction discovery', async () => {
+    const transactionRead = deferred<void>();
+    const harness = makeHarness();
+    harness.preferences.getGate = transactionRead.promise;
+
+    const initializing = harness.coordinator.initialize();
+    await vi.waitFor(() => expect(harness.preferences.calls).toContain('preferences:get'));
+    const disposing = harness.coordinator.dispose();
+    transactionRead.resolve();
+    await Promise.all([initializing, disposing]);
+
+    expect(harness.tokenTransport.requests).toHaveLength(0);
+    expect(harness.coordinator.state.phase).toBe('signedOut');
+  });
+
+  it('does not exchange a callback when disposal begins while its browser is closing', async () => {
+    const browserClose = deferred<void>();
+    const harness = makeHarness();
+    await harness.persist(activeTransaction);
+    await harness.coordinator.initialize();
+    harness.browser.closeGate = browserClose.promise;
+
+    const completing = harness.coordinator.completeCallback(callback(activeTransaction));
+    await vi.waitFor(() => expect(harness.browser.closeCalls).toBe(1));
+    const disposing = harness.coordinator.dispose();
+    browserClose.resolve();
+    await Promise.all([completing, disposing]);
+
+    expect(harness.tokenTransport.requests).toHaveLength(0);
+    expect(harness.preferences.value).not.toBeNull();
+    expect(harness.coordinator.state.phase).toBe('signedOut');
+  });
+
+  it('does not accept a callback response when disposal begins during token exchange', async () => {
+    const tokenResponse = deferred<{ status: number; data: unknown }>();
+    const harness = makeHarness();
+    await harness.persist(activeTransaction);
+    await harness.coordinator.initialize();
+    harness.tokenTransport.gate = tokenResponse.promise;
+
+    const completing = harness.coordinator.completeCallback(callback(activeTransaction));
+    await vi.waitFor(() => expect(harness.tokenTransport.requests).toHaveLength(1));
+    const disposing = harness.coordinator.dispose();
+    tokenResponse.resolve({
+      status: 200,
+      data: {
+        access_token: 'SECRET-access-token',
+        id_token: idToken(activeTransaction),
+        refresh_token: 'SECRET-refresh-token',
+        expires_in: 3_600,
+      },
+    });
+    await Promise.all([completing, disposing]);
+
+    expect(harness.sessionStore.saveAttempts).toEqual([]);
+    expect(harness.preferences.value).not.toBeNull();
+    expect(harness.coordinator.state.phase).toBe('signedOut');
+  });
+
+  it('does not promote a callback candidate when disposal begins during durable persistence', async () => {
+    const persistence = deferred<void>();
+    const harness = makeHarness();
+    await harness.persist(activeTransaction);
+    harness.prepareSuccessfulExchange(activeTransaction);
+    harness.sessionStore.saveGate = persistence.promise;
+    await harness.coordinator.initialize();
+
+    const completing = harness.coordinator.completeCallback(callback(activeTransaction));
+    await vi.waitFor(() =>
+      expect(harness.sessionStore.saveAttempts).toEqual(['SECRET-refresh-token']),
+    );
+    const disposing = harness.coordinator.dispose();
+    persistence.resolve();
+    await Promise.all([completing, disposing]);
+
+    expect(harness.sessionFetch).not.toHaveBeenCalled();
+    expect(harness.sessionStore.refreshToken).toBe('SECRET-refresh-token');
+    expect(harness.coordinator.state.phase).toBe('signedOut');
+  });
+
+  it('does not promote a callback candidate when disposal begins during API fetch', async () => {
+    const sessionResponse = deferred<Response>();
+    const harness = makeHarness();
+    await harness.persist(activeTransaction);
+    harness.prepareSuccessfulExchange(activeTransaction);
+    harness.sessionFetch.mockImplementationOnce(async () => sessionResponse.promise);
+    await harness.coordinator.initialize();
+
+    const completing = harness.coordinator.completeCallback(callback(activeTransaction));
+    await vi.waitFor(() => expect(harness.sessionFetch).toHaveBeenCalledOnce());
+    const disposing = harness.coordinator.dispose();
+    sessionResponse.resolve(
+      response(200, {
+        authenticated: true,
+        user: { userId: 'user-123', email: 'SECRET-claim-email' },
+      }),
+    );
+    await Promise.all([completing, disposing]);
+
+    expect(harness.sessionStore.refreshToken).toBe('SECRET-refresh-token');
+    expect(harness.coordinator.state.phase).toBe('signedOut');
+    expect(harness.coordinator.state.sessionUsable).toBe(false);
+  });
+
+  it('does not promote a callback candidate when disposal begins during API body parsing', async () => {
+    const sessionBody = deferred<unknown>();
+    const json = vi.fn(async () => sessionBody.promise);
+    const harness = makeHarness();
+    await harness.persist(activeTransaction);
+    harness.prepareSuccessfulExchange(activeTransaction);
+    harness.sessionFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json,
+    } as unknown as Response);
+    await harness.coordinator.initialize();
+
+    const completing = harness.coordinator.completeCallback(callback(activeTransaction));
+    await vi.waitFor(() => expect(json).toHaveBeenCalledOnce());
+    const disposing = harness.coordinator.dispose();
+    sessionBody.resolve({
+      authenticated: true,
+      user: { userId: 'user-123', email: 'SECRET-claim-email' },
+    });
+    await Promise.all([completing, disposing]);
+
+    expect(harness.coordinator.state.phase).toBe('signedOut');
+    expect(harness.coordinator.state.sessionUsable).toBe(false);
+  });
+
+  it('keeps the transaction durable when disposal begins during browser launch', async () => {
+    const browserOpen = deferred<void>();
+    const harness = makeHarness();
+    harness.browser.openGate = browserOpen.promise;
+    await harness.coordinator.initialize();
+
+    const starting = harness.coordinator.startSignIn();
+    await vi.waitFor(() => expect(harness.browser.openCalls).toHaveLength(1));
+    const disposing = harness.coordinator.dispose();
+    browserOpen.resolve();
+    await Promise.all([starting, disposing]);
+
+    expect(harness.preferences.value).not.toBeNull();
+    expect(harness.coordinator.state.phase).toBe('signedOut');
+  });
+
+  it('does not launch the browser when disposal begins during transaction persistence', async () => {
+    const transactionWrite = deferred<void>();
+    const harness = makeHarness();
+    harness.preferences.setGate = transactionWrite.promise;
+    await harness.coordinator.initialize();
+
+    const starting = harness.coordinator.startSignIn();
+    await vi.waitFor(() => expect(harness.preferences.calls).toContain('preferences:set:start'));
+    const disposing = harness.coordinator.dispose();
+    transactionWrite.resolve();
+    await Promise.all([starting, disposing]);
+
+    expect(harness.preferences.value).not.toBeNull();
+    expect(harness.browser.openCalls).toHaveLength(0);
+    expect(harness.coordinator.state.phase).toBe('signedOut');
   });
 });
