@@ -44,10 +44,6 @@ export function initializeAuthVerifier(
   console.log('✅ Auth verifier initialized');
 }
 
-function safeVerificationErrorName(): string {
-  return 'UnknownVerificationError';
-}
-
 /**
  * Extract userId from Cognito JWT token
  */
@@ -68,7 +64,7 @@ async function getUserClaimsFromToken(
     };
   } catch {
     if (process.env.NODE_ENV === 'development') {
-      console.error('Token verification failed', safeVerificationErrorName());
+      console.error('Token verification failed', 'UnknownVerificationError');
     } else {
       console.error('Token verification failed');
     }

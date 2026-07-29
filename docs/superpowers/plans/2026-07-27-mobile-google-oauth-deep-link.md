@@ -708,7 +708,6 @@ export type MobileAuthErrorCode =
   | 'interrupted'
   | 'transaction_expired'
   | 'malformed_callback'
-  | 'state_mismatch'
   | 'provider_error'
   | 'code_exchange_failed'
   | 'token_validation_failed'
@@ -795,13 +794,14 @@ Cover:
 
 - [ ] **Step 4: Write completion/cleanup tests**
 
-Cover malformed callback, missing/corrupt/expired transaction, state mismatch before
-provider/error handling, provider cancellation, provider failure, targeted native
-token-transport rejection/status/data/parse/shape failures, claim failures, and success.
-Every terminal pre-session outcome clears the transaction except the intentionally
-non-terminal fresh `interrupted` startup state. Prove the token request uses the injected
-native port, not session `fetch`, and that the Vela session endpoint still uses fetch. A
-duplicate callback after authentication is ignored.
+Cover malformed callback, missing/corrupt/expired transaction, state mismatch silently
+ignored before provider/error handling (no phase change, no error code, transaction
+preserved), provider cancellation, provider failure, targeted native token-transport
+rejection/status/data/parse/shape failures, claim failures, and success. Every terminal
+pre-session outcome clears the transaction except the intentionally non-terminal fresh
+`interrupted` startup state. Prove the token request uses the injected native port, not
+session `fetch`, and that the Vela session endpoint still uses fetch. A duplicate callback
+after authentication is ignored.
 
 - [ ] **Step 5: Write session-verification tests**
 
