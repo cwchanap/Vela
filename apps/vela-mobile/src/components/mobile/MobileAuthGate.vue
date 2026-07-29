@@ -67,12 +67,6 @@ const ERROR_PRESENTATIONS: Record<MobileAuthErrorCode, ErrorPresentation> = {
     action: 'restart',
     actionLabel: 'Start Google sign-in again',
   },
-  state_mismatch: {
-    heading: 'Google sign-in could not be verified',
-    message: 'The sign-in response did not match this request. Start a new secure sign-in.',
-    action: 'restart',
-    actionLabel: 'Start Google sign-in again',
-  },
   provider_error: {
     heading: 'Google sign-in was unsuccessful',
     message: 'The identity provider could not complete sign-in. Please try again.',

@@ -346,7 +346,10 @@ Core protected routes do not render during these steps.
 5. Reject duplicate `code`, `state`, or `error` parameters and reject a response containing both `code` and `error`.
 6. Require exactly one non-empty `state` for both success and error callbacks.
 7. Load and validate the active transaction.
-8. Compare state exactly before honoring an error or making any token request.
+8. Compare state exactly before honoring an error or making any token request. A mismatched
+   or malformed callback is silently ignored (returns without changing phase, browser session,
+   or stored transaction) so a stale or unsolicited callback cannot cancel a valid in-progress
+   sign-in; the legitimate callback remains viable. No `state_mismatch` error is surfaced.
 9. If Cognito returned `error`, map it to a safe provider outcome and clear the transaction.
 10. Otherwise require exactly one non-empty `code`.
 11. Enter `exchangingCode`, best-effort close the browser, and use the targeted
@@ -382,7 +385,6 @@ Errors use stable internal codes and safe user messages:
 | `interrupted` | A fresh prior transaction exists on a normal launch without a callback; the transaction remains available for a late callback | `startSignIn()` clears/replaces it |
 | `transaction_expired` | Transaction is older than ten minutes | `startSignIn()` |
 | `malformed_callback` | Callback origin/path/parameters are invalid or incomplete | `startSignIn()` |
-| `state_mismatch` | Callback does not belong to the active request | `startSignIn()` |
 | `provider_error` | Cognito or Google returned another OAuth error | `startSignIn()` |
 | `code_exchange_failed` | Native token request failed, was rejected, or returned invalid fields | `startSignIn()` |
 | `token_validation_failed` | ID-token claims do not match the request/configuration | `startSignIn()` |

@@ -975,7 +975,7 @@ describe('callback completion and cleanup', () => {
     });
   });
 
-  it('does not verify a session when successful exchange cleanup fails', async () => {
+  it('proceeds to session verification when successful exchange cleanup fails', async () => {
     const harness = makeHarness();
     await harness.persist(activeTransaction);
     harness.prepareSuccessfulExchange(activeTransaction);
@@ -984,10 +984,10 @@ describe('callback completion and cleanup', () => {
 
     await harness.coordinator.completeCallback(callback(activeTransaction));
 
-    expect(harness.sessionFetch).not.toHaveBeenCalled();
+    expect(harness.sessionFetch).toHaveBeenCalledOnce();
     expect(harness.coordinator.state).toMatchObject({
-      phase: 'error',
-      errorCode: 'code_exchange_failed',
+      phase: 'authenticated',
+      errorCode: null,
     });
   });
 
@@ -1079,7 +1079,7 @@ describe('callback completion and cleanup', () => {
     });
   });
 
-  it('marks a cleanup-failed exchange terminal before a duplicate callback', async () => {
+  it('ignores a duplicate callback after a cleanup-failed exchange succeeds', async () => {
     const harness = makeHarness();
     await harness.persist(activeTransaction);
     harness.prepareSuccessfulExchange(activeTransaction);
@@ -1090,17 +1090,17 @@ describe('callback completion and cleanup', () => {
 
     expect(harness.tokenTransport.requests).toHaveLength(1);
     expect(harness.coordinator.state).toMatchObject({
-      phase: 'error',
-      errorCode: 'code_exchange_failed',
+      phase: 'authenticated',
+      errorCode: null,
     });
 
     await harness.coordinator.completeCallback(callback(activeTransaction));
 
     expect(harness.tokenTransport.requests).toHaveLength(1);
-    expect(harness.sessionFetch).not.toHaveBeenCalled();
+    expect(harness.sessionFetch).toHaveBeenCalledOnce();
     expect(harness.coordinator.state).toMatchObject({
-      phase: 'error',
-      errorCode: 'code_exchange_failed',
+      phase: 'authenticated',
+      errorCode: null,
     });
   });
 

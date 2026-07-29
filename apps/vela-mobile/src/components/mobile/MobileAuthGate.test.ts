@@ -179,7 +179,6 @@ describe('MobileAuthGate', () => {
     'interrupted',
     'transaction_expired',
     'malformed_callback',
-    'state_mismatch',
     'provider_error',
     'code_exchange_failed',
     'token_validation_failed',

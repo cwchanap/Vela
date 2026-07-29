@@ -375,13 +375,10 @@ export function createMobileAuthCoordinator(
     }
 
     tokenBundle = bundle;
-    try {
-      await dependencies.transactionStore.clear();
-    } catch {
-      tokenBundle = undefined;
-      setError('code_exchange_failed');
-      return true;
-    }
+    // Best-effort cleanup: a clear failure does not invalidate the exchanged
+    // tokens. The transaction is single-use (Cognito rejects a replayed
+    // verifier), so a stale entry only affects the next launch's resume path.
+    await clearTransaction();
 
     await verifySessionUnlocked();
     return true;
