@@ -15,7 +15,10 @@ import {
   type MobileBrowserAdapter,
   type MobileOAuthConfig,
   type MobileTokenTransportAdapter,
+  type OAuthTokenBundleBase,
 } from '../auth/mobile-auth-contract';
+import type { MobileInstallationStore } from '../auth/mobile-installation-store';
+import type { MobileSessionStore } from '../auth/mobile-session-store';
 import {
   containsWhitespace,
   hasMatchingUserPoolRegion,
@@ -37,11 +40,23 @@ type ListenerHandle = {
   remove(): Promise<void>;
 };
 
+type PendingCandidate = {
+  bundle: OAuthTokenBundleBase;
+  durableRefreshToken: string;
+  returnedRefreshToken?: string;
+  context: 'authorizationCode' | 'restore' | 'refresh';
+};
+
+type CleanupContext = { kind: 'terminalSession' } | { kind: 'installationReset' };
+
 export type MobileAuthCoordinatorDependencies = {
   app: MobileAppAdapter;
   browser: MobileBrowserAdapter;
   transactionStore: OAuthTransactionStore;
   tokenTransport: MobileTokenTransportAdapter;
+  sessionStore: MobileSessionStore;
+  installationStore: MobileInstallationStore;
+  isNativeIos: boolean;
   crypto: Crypto | undefined;
   isSecureContext: boolean;
   fetch: typeof fetch;
@@ -59,6 +74,18 @@ export const MOBILE_AUTH_KEY: InjectionKey<MobileAuthCoordinator> = Symbol('mobi
  * back through their existing failure paths so the user can retry.
  */
 export const MOBILE_AUTH_NETWORK_TIMEOUT_MS = 15_000;
+
+const RESTARTABLE_OAUTH_ERRORS = new Set<MobileAuthErrorCode>([
+  'browser_launch_failed',
+  'cancelled',
+  'interrupted',
+  'transaction_expired',
+  'malformed_callback',
+  'provider_error',
+  'code_exchange_failed',
+  'token_validation_failed',
+  'session_unauthorized',
+]);
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -165,6 +192,8 @@ export function createMobileAuthCoordinator(
   let appUrlHandle: ListenerHandle | undefined;
   let browserFinishedHandle: ListenerHandle | undefined;
   let tokenBundle: AuthorizationCodeTokenBundle | undefined;
+  let pendingCandidate: PendingCandidate | undefined;
+  let cleanupContext: CleanupContext | undefined;
   let initialized = false;
   let disposed = false;
   const isDevelopment = dependencies.isDevelopment ?? import.meta.env.DEV;
@@ -314,6 +343,8 @@ export function createMobileAuthCoordinator(
 
   async function failCallback(errorCode: MobileAuthErrorCode): Promise<void> {
     tokenBundle = undefined;
+    pendingCandidate = undefined;
+    cleanupContext = undefined;
     transitions.enterOAuthError(errorCode);
     await clearTransaction();
   }
@@ -326,13 +357,19 @@ export function createMobileAuthCoordinator(
     }
   }
 
-  async function verifySessionUnlocked(): Promise<void> {
-    const bundle = tokenBundle;
-    if (!bundle || disposed) {
+  async function verifyCandidateSessionUnlocked(): Promise<void> {
+    const candidate = pendingCandidate;
+    if (!candidate || disposed) {
       return;
     }
 
-    transitions.enterOAuthProgress('verifyingSession');
+    transitions.enterOperation({
+      phase: 'verifyingSession',
+      operation: 'verifying',
+      sessionUsable: false,
+      notice: null,
+      user: null,
+    });
 
     // The timeout and AbortController must remain active until the response
     // body has been fully consumed. fetch() resolves as soon as the response
@@ -348,7 +385,7 @@ export function createMobileAuthCoordinator(
           method: 'GET',
           headers: {
             Accept: 'application/json',
-            Authorization: `Bearer ${bundle.idToken}`,
+            Authorization: `Bearer ${candidate.bundle.idToken}`,
           },
           signal: controller.signal,
         });
@@ -365,7 +402,16 @@ export function createMobileAuthCoordinator(
 
       if (response.status === 401 || response.status === 403) {
         tokenBundle = undefined;
-        transitions.enterOAuthError('session_unauthorized');
+        cleanupContext = { kind: 'terminalSession' };
+        try {
+          await dependencies.sessionStore.clearRefreshToken();
+        } catch {
+          transitions.enterCleanupFailure();
+          return;
+        }
+        pendingCandidate = undefined;
+        cleanupContext = undefined;
+        transitions.enterTerminalNotice();
         return;
       }
 
@@ -406,10 +452,52 @@ export function createMobileAuthCoordinator(
         return;
       }
 
+      tokenBundle = {
+        ...candidate.bundle,
+        refreshToken: candidate.durableRefreshToken,
+      };
+      pendingCandidate = undefined;
+      cleanupContext = undefined;
       transitions.enterAuthenticated(user);
     } finally {
       clearTimeout(timeout);
     }
+  }
+
+  async function persistPendingCandidateUnlocked(): Promise<void> {
+    const candidate = pendingCandidate;
+    if (!candidate || disposed) {
+      return;
+    }
+
+    transitions.enterOperation({
+      phase: 'exchangingCode',
+      operation: 'persisting',
+      sessionUsable: false,
+      notice: null,
+      user: null,
+    });
+    try {
+      await dependencies.sessionStore.saveRefreshToken(candidate.durableRefreshToken);
+    } catch {
+      transitions.enterSessionFailure({
+        phase: 'error',
+        sessionUsable: false,
+        errorCode: 'session_persistence_failed',
+        retryAction: 'persist',
+        user: null,
+      });
+      return;
+    }
+
+    if (candidate.context === 'authorizationCode') {
+      // Only a durable refresh credential permits transaction removal. A
+      // failed Preferences cleanup remains best effort because the exchanged
+      // authorization code is single-use.
+      await clearTransaction();
+    }
+
+    await verifyCandidateSessionUnlocked();
   }
 
   async function completeCallbackUnlocked(rawUrl: string): Promise<boolean> {
@@ -419,7 +507,7 @@ export function createMobileAuthCoordinator(
       state.phase === 'awaitingCallback' ||
       (state.phase === 'error' && state.errorCode === 'interrupted');
 
-    if (disposed || !initialized || tokenBundle || !isActiveCallbackPhase) {
+    if (disposed || !initialized || tokenBundle || pendingCandidate || !isActiveCallbackPhase) {
       return false;
     }
 
@@ -512,13 +600,13 @@ export function createMobileAuthCoordinator(
       return true;
     }
 
-    tokenBundle = bundle;
-    // Best-effort cleanup: a clear failure does not invalidate the exchanged
-    // tokens. The transaction is single-use (Cognito rejects a replayed
-    // verifier), so a stale entry only affects the next launch's resume path.
-    await clearTransaction();
-
-    await verifySessionUnlocked();
+    const { refreshToken, ...candidateBundle } = bundle;
+    pendingCandidate = {
+      bundle: candidateBundle,
+      durableRefreshToken: refreshToken,
+      context: 'authorizationCode',
+    };
+    await persistPendingCandidateUnlocked();
     return true;
   }
 
@@ -558,6 +646,11 @@ export function createMobileAuthCoordinator(
       return;
     }
 
+    if (!dependencies.isNativeIos) {
+      transitions.enterOAuthError('unsupported_platform');
+      return;
+    }
+
     try {
       appUrlHandle = await dependencies.app.addListener('appUrlOpen', (event) => {
         void coordinator.completeCallback(event.url);
@@ -565,6 +658,37 @@ export function createMobileAuthCoordinator(
       browserFinishedHandle = await dependencies.browser.addListener('browserFinished', () => {
         void serialize(handleBrowserFinishedUnlocked);
       });
+    } catch {
+      await removeListener(appUrlHandle);
+      await removeListener(browserFinishedHandle);
+      appUrlHandle = undefined;
+      browserFinishedHandle = undefined;
+      transitions.enterOAuthError('configuration_error');
+      return;
+    }
+
+    try {
+      cleanupContext = { kind: 'installationReset' };
+      const isMarked = await dependencies.installationStore.isCurrentInstallationMarked();
+      if (!isMarked) {
+        transitions.enterOperation({
+          phase: 'initializing',
+          operation: 'cleaningUp',
+          sessionUsable: false,
+          notice: null,
+          user: null,
+        });
+        await dependencies.sessionStore.clearRefreshToken();
+        await dependencies.installationStore.markCurrentInstallation();
+        transitions.enterOAuthProgress('initializing');
+      }
+      cleanupContext = undefined;
+    } catch {
+      transitions.enterCleanupFailure();
+      return;
+    }
+
+    try {
       const launchUrl = await dependencies.app.getLaunchUrl();
       if (launchUrl && parseOAuthCallback(launchUrl.url).kind !== 'unrelated') {
         const consumed = await completeCallbackUnlocked(launchUrl.url);
@@ -590,18 +714,17 @@ export function createMobileAuthCoordinator(
   }
 
   async function startSignInUnlocked(): Promise<void> {
-    if (
-      disposed ||
-      state.phase === 'initializing' ||
-      state.phase === 'openingBrowser' ||
-      state.phase === 'awaitingCallback' ||
-      state.phase === 'exchangingCode' ||
-      state.phase === 'verifyingSession' ||
-      state.phase === 'authenticated' ||
-      (state.phase === 'error' &&
-        (state.errorCode === 'configuration_error' ||
-          state.errorCode === 'session_verification_failed'))
-    ) {
+    const canStartSignIn =
+      dependencies.isNativeIos &&
+      state.operation === 'idle' &&
+      ((state.phase === 'signedOut' &&
+        state.retryAction === null &&
+        (state.notice === null || state.notice === 'session_unusable')) ||
+        (state.phase === 'error' &&
+          state.errorCode !== null &&
+          RESTARTABLE_OAUTH_ERRORS.has(state.errorCode)));
+
+    if (disposed || !canStartSignIn) {
       return;
     }
 
@@ -652,15 +775,19 @@ export function createMobileAuthCoordinator(
   }
 
   async function retrySessionVerificationUnlocked(): Promise<void> {
-    if (
-      disposed ||
-      state.phase !== 'error' ||
-      state.errorCode !== 'session_verification_failed' ||
-      !tokenBundle
-    ) {
+    // Cleanup retries have distinct installation-reset versus terminal-session
+    // semantics. Retain that context for the dedicated cleanup flow rather
+    // than routing either case through a verification retry.
+    if (disposed || cleanupContext || state.phase !== 'error' || !pendingCandidate) {
       return;
     }
-    await verifySessionUnlocked();
+    if (state.errorCode === 'session_persistence_failed' && state.retryAction === 'persist') {
+      await persistPendingCandidateUnlocked();
+      return;
+    }
+    if (state.errorCode === 'session_verification_failed') {
+      await verifyCandidateSessionUnlocked();
+    }
   }
 
   async function disposeUnlocked(): Promise<void> {
@@ -673,6 +800,8 @@ export function createMobileAuthCoordinator(
     appUrlHandle = undefined;
     browserFinishedHandle = undefined;
     tokenBundle = undefined;
+    pendingCandidate = undefined;
+    cleanupContext = undefined;
     transitions.enterSignedOut();
   }
 

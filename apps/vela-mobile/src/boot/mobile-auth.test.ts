@@ -20,22 +20,52 @@ const mocks = vi.hoisted(() => {
       set: vi.fn(),
       remove: vi.fn(),
     },
+    secureStorage: {
+      get: vi.fn(),
+      set: vi.fn(),
+      remove: vi.fn(),
+    },
+    capacitor: {
+      isNativePlatform: vi.fn(),
+      getPlatform: vi.fn(),
+    },
     capacitorHttpRequest: vi.fn(),
     transactionStore: {
       replace: vi.fn(),
       load: vi.fn(),
       clear: vi.fn(),
     },
+    sessionStore: {
+      loadRefreshToken: vi.fn(),
+      saveRefreshToken: vi.fn(),
+      clearRefreshToken: vi.fn(),
+    },
+    unsupportedSessionStore: {
+      loadRefreshToken: vi.fn(),
+      saveRefreshToken: vi.fn(),
+      clearRefreshToken: vi.fn(),
+    },
+    installationStore: {
+      isCurrentInstallationMarked: vi.fn(),
+      markCurrentInstallation: vi.fn(),
+    },
     coordinator,
     createCoordinator: vi.fn((_dependencies: unknown) => coordinator),
     createTransactionStore: vi.fn(),
+    createIosStore: vi.fn(),
+    createUnsupportedStore: vi.fn(),
+    createInstallationStore: vi.fn(),
   };
 });
 
+vi.mock('@aparajita/capacitor-secure-storage', () => ({
+  SecureStorage: mocks.secureStorage,
+}));
 vi.mock('@capacitor/app', () => ({ App: mocks.appPlugin }));
 vi.mock('@capacitor/browser', () => ({ Browser: mocks.browserPlugin }));
 vi.mock('@capacitor/preferences', () => ({ Preferences: mocks.preferencesPlugin }));
 vi.mock('@capacitor/core', () => ({
+  Capacitor: mocks.capacitor,
   CapacitorHttp: { request: mocks.capacitorHttpRequest },
 }));
 vi.mock('../services/mobile-auth', async (importOriginal) => {
@@ -47,6 +77,13 @@ vi.mock('../services/mobile-auth', async (importOriginal) => {
 });
 vi.mock('../auth/oauth-transaction-store', () => ({
   createOAuthTransactionStore: mocks.createTransactionStore,
+}));
+vi.mock('../auth/mobile-session-store', () => ({
+  createIosKeychainSessionStore: mocks.createIosStore,
+  createUnsupportedMobileSessionStore: mocks.createUnsupportedStore,
+}));
+vi.mock('../auth/mobile-installation-store', () => ({
+  createMobileInstallationStore: mocks.createInstallationStore,
 }));
 
 import { MOBILE_AUTH_KEY } from '../services/mobile-auth';
@@ -60,7 +97,53 @@ describe('mobile auth boot', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.capacitor.isNativePlatform.mockReturnValue(true);
+    mocks.capacitor.getPlatform.mockReturnValue('ios');
     mocks.createTransactionStore.mockReturnValue(mocks.transactionStore);
+    mocks.createIosStore.mockReturnValue(mocks.sessionStore);
+    mocks.createUnsupportedStore.mockReturnValue(mocks.unsupportedSessionStore);
+    mocks.createInstallationStore.mockReturnValue(mocks.installationStore);
+  });
+
+  it('injects Keychain storage only on native iOS', () => {
+    mocks.capacitor.isNativePlatform.mockReturnValue(true);
+    mocks.capacitor.getPlatform.mockReturnValue('ios');
+
+    runBoot({ app: { provide: vi.fn() } });
+
+    expect(mocks.createIosStore).toHaveBeenCalledWith({
+      secureStorage: mocks.secureStorage,
+      runtime: mocks.capacitor,
+      config: {
+        userPoolId: config.auth.userPoolId,
+        mobileClientId: config.auth.mobileClientId,
+      },
+    });
+    expect(mocks.createUnsupportedStore).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [false, 'web'],
+    [true, 'android'],
+  ] as const)('injects the unsupported store for native=%s platform=%s', (isNative, platform) => {
+    mocks.capacitor.isNativePlatform.mockReturnValue(isNative);
+    mocks.capacitor.getPlatform.mockReturnValue(platform);
+
+    runBoot({ app: { provide: vi.fn() } });
+
+    expect(mocks.createUnsupportedStore).toHaveBeenCalledOnce();
+    expect(mocks.createIosStore).not.toHaveBeenCalled();
+    const dependencies = mocks.createCoordinator.mock.calls[0]?.[0] as
+      | MobileAuthCoordinatorDependencies
+      | undefined;
+    expect(dependencies).toMatchObject({
+      sessionStore: mocks.unsupportedSessionStore,
+      installationStore: mocks.installationStore,
+      isNativeIos: false,
+    });
+    expect(mocks.secureStorage.get).not.toHaveBeenCalled();
+    expect(mocks.secureStorage.set).not.toHaveBeenCalled();
+    expect(mocks.secureStorage.remove).not.toHaveBeenCalled();
   });
 
   it('provides the coordinator and starts initialization without blocking app mount', () => {
@@ -83,6 +166,10 @@ describe('mobile auth boot', () => {
     try {
       runBoot({ app });
       expect(mocks.createTransactionStore).toHaveBeenCalledWith(mocks.preferencesPlugin, Date.now);
+      expect(mocks.createInstallationStore).toHaveBeenCalledWith(mocks.preferencesPlugin, {
+        userPoolId: config.auth.userPoolId,
+        mobileClientId: config.auth.mobileClientId,
+      });
 
       const dependencies = mocks.createCoordinator.mock.calls[0]?.[0] as
         | MobileAuthCoordinatorDependencies
@@ -91,6 +178,9 @@ describe('mobile auth boot', () => {
         app: mocks.appPlugin,
         browser: mocks.browserPlugin,
         transactionStore: mocks.transactionStore,
+        sessionStore: mocks.sessionStore,
+        installationStore: mocks.installationStore,
+        isNativeIos: true,
         crypto: window.crypto,
         isSecureContext: true,
         now: Date.now,
