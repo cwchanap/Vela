@@ -123,7 +123,7 @@ describe('selectMobileAuthGateView', () => {
     [
       'blocking restore failure',
       state({
-        phase: 'error',
+        phase: 'initializing',
         errorCode: 'session_restore_failed',
         retryAction: 'restore',
       }),
@@ -201,7 +201,7 @@ describe('selectMobileAuthGateView', () => {
     expect(selectMobileAuthGateView(current, landingState)).toEqual(expected);
   });
 
-  it.each<[MobileAuthOperation, MobileAuthState]>([
+  it.each<[string, MobileAuthState]>([
     ['restoring', state({ phase: 'initializing', operation: 'restoring' })],
     [
       'refreshing',
@@ -209,12 +209,15 @@ describe('selectMobileAuthGateView', () => {
     ],
     ['persisting', state({ phase: 'exchangingCode', operation: 'persisting' })],
     ['verifying', state({ phase: 'verifyingSession', operation: 'verifying' })],
-    ['signingOut', state({ operation: 'signingOut' })],
-    ['cleaningUp', state({ operation: 'cleaningUp' })],
-  ])('maps blocking %s operation to progress', (operation, current) => {
+    ['authenticated signingOut', state({ phase: 'authenticated', operation: 'signingOut', user })],
+    ['initializing signingOut', state({ phase: 'initializing', operation: 'signingOut' })],
+    ['initializing cleaningUp', state({ phase: 'initializing', operation: 'cleaningUp' })],
+    ['authenticated cleaningUp', state({ phase: 'authenticated', operation: 'cleaningUp', user })],
+    ['signedOut cleanup retry', state({ phase: 'signedOut', operation: 'cleaningUp' })],
+  ])('maps blocking %s operation to progress', (_label, current) => {
     expect(selectMobileAuthGateView(current, 'ready')).toEqual({
       kind: 'progress',
-      operation,
+      operation: current.operation,
       phase: current.phase,
     });
   });
@@ -280,6 +283,10 @@ describe('selectMobileAuthGateView', () => {
     state({
       operation: 'refreshing',
       errorCode: 'session_refresh_failed',
+    }),
+    state({
+      phase: 'signedOut',
+      operation: 'signingOut',
     }),
     state({
       phase: 'authenticated',

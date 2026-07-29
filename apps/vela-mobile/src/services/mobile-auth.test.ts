@@ -793,6 +793,76 @@ describe('mobile auth initialization', () => {
     ).toThrow('invalid_mobile_auth_state');
   });
 
+  it.each([
+    {
+      label: 'restore failure outside initialization',
+      value: {
+        phase: 'error',
+        operation: 'idle',
+        sessionUsable: false,
+        errorCode: 'session_restore_failed',
+        retryAction: 'restore',
+        notice: null,
+        user: null,
+      } satisfies MobileAuthState,
+    },
+    {
+      label: 'sign-out work that already claims signed-out phase',
+      value: {
+        phase: 'signedOut',
+        operation: 'signingOut',
+        sessionUsable: false,
+        errorCode: null,
+        retryAction: null,
+        notice: null,
+        user: null,
+      } satisfies MobileAuthState,
+    },
+    {
+      label: 'authenticated sign-out work without its originating user',
+      value: {
+        phase: 'authenticated',
+        operation: 'signingOut',
+        sessionUsable: false,
+        errorCode: null,
+        retryAction: null,
+        notice: null,
+        user: null,
+      } satisfies MobileAuthState,
+    },
+    {
+      label: 'initialization cleanup carrying an authenticated user',
+      value: {
+        phase: 'initializing',
+        operation: 'cleaningUp',
+        sessionUsable: false,
+        errorCode: null,
+        retryAction: null,
+        notice: null,
+        user: { userId: 'user-1', email: null },
+      } satisfies MobileAuthState,
+    },
+    {
+      label: 'authenticated cleanup without its originating user',
+      value: {
+        phase: 'authenticated',
+        operation: 'cleaningUp',
+        sessionUsable: false,
+        errorCode: null,
+        retryAction: null,
+        notice: null,
+        user: null,
+      } satisfies MobileAuthState,
+    },
+  ])('rejects $label', ({ value }) => {
+    expect(() =>
+      assertMobileAuthState(value, {
+        activeBundle: null,
+        now: NOW,
+      }),
+    ).toThrow('invalid_mobile_auth_state');
+  });
+
   it('publishes the complete authenticated tuple after verification', async () => {
     const harness = makeHarness();
     await harness.persist(activeTransaction);
@@ -881,6 +951,27 @@ describe('mobile auth initialization', () => {
     expect(harness.installationStore.marked).toBe(true);
     expect(harness.tokenTransport.requests).toHaveLength(0);
     expect(harness.sessionStore.refreshToken).toBeNull();
+    expect(harness.order).not.toContain('session:load');
+  });
+
+  it('does not let a slow Keychain load delay first-install reset', async () => {
+    const harness = makeHarness();
+    const loadGate = deferred<void>();
+    harness.installationStore.marked = false;
+    harness.sessionStore.refreshToken = 'SECRET-reinstall-residue';
+    harness.sessionStore.loadGate = loadGate.promise;
+
+    const initialization = harness.coordinator.initialize();
+    try {
+      await vi.waitFor(() => expect(harness.installationStore.markCalls).toBe(1), {
+        timeout: 100,
+      });
+      expect(harness.order).not.toContain('session:load');
+      await initialization;
+    } finally {
+      loadGate.resolve();
+      await initialization;
+    }
   });
 
   it('fails closed when first-install cleanup cannot complete', async () => {
@@ -900,6 +991,7 @@ describe('mobile auth initialization', () => {
       user: null,
     });
     expect(harness.order).not.toContain('app:getLaunchUrl');
+    expect(harness.order).not.toContain('session:load');
     expect(harness.preferences.calls).toEqual([]);
     expect(harness.installationStore.markCalls).toBe(0);
   });
@@ -917,7 +1009,7 @@ describe('mobile auth initialization', () => {
       notice: 'cleanup_incomplete',
     });
     expect(harness.sessionStore.clearCalls).toBe(0);
-    expect(harness.order).toContain('session:load');
+    expect(harness.order).not.toContain('session:load');
     expect(harness.order).not.toContain('app:getLaunchUrl');
     expect(harness.preferences.calls).toEqual([]);
   });
@@ -936,6 +1028,7 @@ describe('mobile auth initialization', () => {
     ]);
     expect(harness.sessionStore.clearCalls).toBe(1);
     expect(harness.installationStore.marked).toBe(false);
+    expect(harness.order).not.toContain('session:load');
     expect(harness.order).not.toContain('app:getLaunchUrl');
     expect(harness.coordinator.state).toMatchObject({
       phase: 'signedOut',
@@ -1223,6 +1316,24 @@ describe('durable session restoration and cold-launch precedence', () => {
     expect(harness.coordinator.state.phase).toBe('authenticated');
   });
 
+  it('restores a durable token when cold-launch URL discovery fails', async () => {
+    const harness = makeHarness();
+    harness.app.failLaunch = true;
+    harness.sessionStore.refreshToken = 'SECRET-durable-token';
+    prepareSuccessfulRefresh(harness);
+
+    await harness.coordinator.initialize();
+
+    expect(harness.tokenTransport.requests).toHaveLength(1);
+    expect(harness.tokenTransport.requests[0]?.data).toContain('grant_type=refresh_token');
+    expect(harness.coordinator.state).toMatchObject({
+      phase: 'authenticated',
+      operation: 'idle',
+      sessionUsable: true,
+      errorCode: null,
+    });
+  });
+
   it('restores and verifies before publishing a usable session', async () => {
     const harness = makeHarness();
     harness.sessionStore.refreshToken = 'SECRET-durable-token';
@@ -1302,7 +1413,7 @@ describe('durable session restoration and cold-launch precedence', () => {
     expect(harness.installationStore.readCalls).toBe(1);
     expect(harness.preferences.calls).toContain('preferences:get');
     expect(harness.coordinator.state).toMatchObject({
-      phase: 'error',
+      phase: 'initializing',
       errorCode: 'session_restore_failed',
       retryAction: 'restore',
     });
@@ -1377,6 +1488,26 @@ describe('restore terminal and retryable classification', () => {
     expect(harness.coordinator.state.notice).toBe('session_unusable');
   });
 
+  it('keeps terminal restore cleanup in initializing until deletion resolves', async () => {
+    const harness = makeRestoreHarness();
+    const clearGate = deferred<void>();
+    harness.tokenTransport.result = { status: 400, data: { error: 'invalid_grant' } };
+    harness.sessionStore.clearGate = clearGate.promise;
+
+    const initialization = harness.coordinator.initialize();
+    try {
+      await vi.waitFor(() => expect(harness.sessionStore.clearCalls).toBe(1));
+      expect(harness.coordinator.state).toMatchObject({
+        phase: 'initializing',
+        operation: 'cleaningUp',
+        sessionUsable: false,
+      });
+    } finally {
+      clearGate.resolve();
+      await initialization;
+    }
+  });
+
   it.each([429, 500, 503])(
     'preserves the durable token for retryable status %s',
     async (status) => {
@@ -1407,7 +1538,7 @@ describe('restore terminal and retryable classification', () => {
     });
   });
 
-  it('clears a malformed successful refresh response', async () => {
+  it('preserves the durable token after a malformed successful refresh response', async () => {
     const harness = makeRestoreHarness();
     harness.tokenTransport.result = {
       status: 200,
@@ -1419,8 +1550,16 @@ describe('restore terminal and retryable classification', () => {
 
     await harness.coordinator.initialize();
 
-    expect(harness.sessionStore.clearCalls).toBe(1);
-    expect(harness.coordinator.state.notice).toBe('session_unusable');
+    expect(harness.sessionStore.clearCalls).toBe(0);
+    expect(harness.sessionStore.refreshToken).toBe('SECRET-durable-token');
+    expect(harness.coordinator.state).toMatchObject({
+      phase: 'initializing',
+      operation: 'idle',
+      sessionUsable: false,
+      errorCode: 'session_restore_failed',
+      retryAction: 'restore',
+      notice: null,
+    });
   });
 
   it('clears a refresh response whose ID-token claims are invalid', async () => {
@@ -1621,6 +1760,29 @@ describe('generalized retry dispatch', () => {
     expect(harness.sessionFetch).not.toHaveBeenCalled();
     expect(harness.coordinator.state.phase).toBe('signedOut');
   });
+
+  it('retains signedOut while installation cleanup retry is unresolved', async () => {
+    const harness = makeHarness();
+    const markGate = deferred<void>();
+    harness.installationStore.marked = false;
+    harness.sessionStore.clearFailure = new Error('SECRET-clear');
+    await harness.coordinator.initialize();
+
+    harness.sessionStore.clearFailure = undefined;
+    harness.installationStore.markGate = markGate.promise;
+    const retry = harness.coordinator.retryCurrentOperation();
+    try {
+      await vi.waitFor(() => expect(harness.installationStore.markCalls).toBe(1));
+      expect(harness.coordinator.state).toMatchObject({
+        phase: 'signedOut',
+        operation: 'cleaningUp',
+        sessionUsable: false,
+      });
+    } finally {
+      markGate.resolve();
+      await retry;
+    }
+  });
 });
 
 describe('local sign-out and cleanup retry', () => {
@@ -1638,8 +1800,10 @@ describe('local sign-out and cleanup retry', () => {
     const result = harness.coordinator.signOut();
 
     expect(harness.coordinator.state).toMatchObject({
+      phase: 'authenticated',
       operation: 'signingOut',
       sessionUsable: false,
+      user: { userId: 'user-123', email: 'person@example.com' },
     });
     await vi.waitFor(() => expect(harness.sessionStore.clearCalls).toBe(1));
     expect(harness.preferences.value).not.toBeNull();
@@ -1683,7 +1847,27 @@ describe('local sign-out and cleanup retry', () => {
     },
   );
 
-  it('reports incomplete Keychain cleanup without claiming sign-out success', async () => {
+  it('retains initializing while start-over cleanup is unresolved', async () => {
+    const harness = await arrangeBlockingRetry('restore');
+    const clearGate = deferred<void>();
+    harness.sessionStore.clearGate = clearGate.promise;
+
+    const signOut = harness.coordinator.signOut();
+    try {
+      await vi.waitFor(() => expect(harness.sessionStore.clearCalls).toBe(1));
+      expect(harness.coordinator.state).toMatchObject({
+        phase: 'initializing',
+        operation: 'signingOut',
+        sessionUsable: false,
+        user: null,
+      });
+    } finally {
+      clearGate.resolve();
+      await signOut;
+    }
+  });
+
+  it('clears PKCE state when Keychain cleanup fails without claiming sign-out success', async () => {
     const harness = makeHarness();
     await authenticate(harness);
     await harness.persist(activeTransaction);
@@ -1700,7 +1884,8 @@ describe('local sign-out and cleanup retry', () => {
       notice: 'cleanup_incomplete',
       user: null,
     });
-    expect(harness.preferences.value).not.toBeNull();
+    expect(harness.preferences.value).toBeNull();
+    expect(harness.preferences.calls).toContain('preferences:remove');
     expect(snapshot(harness.coordinator.state)).not.toContain('SECRET');
   });
 
@@ -1938,6 +2123,62 @@ describe('active-session lifecycle refresh', () => {
     await vi.advanceTimersByTimeAsync(1);
 
     expect(refreshRequests(harness)).toHaveLength(1);
+  });
+
+  it('preserves the active durable token after a malformed successful refresh response', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+    const harness = makeHarness({ now: () => Date.now() });
+    await authenticateWithExpiry(harness, NOW + 61_000);
+    const durableRefreshToken = harness.sessionStore.refreshToken;
+    harness.tokenTransport.result = {
+      status: 200,
+      data: {
+        access_token: 'SECRET-malformed-access-token',
+        expires_in: 3_600,
+      },
+    };
+
+    await vi.advanceTimersByTimeAsync(1_000);
+
+    expect(harness.sessionStore.clearCalls).toBe(0);
+    expect(harness.sessionStore.refreshToken).toBe(durableRefreshToken);
+    expect(harness.coordinator.state).toMatchObject({
+      phase: 'authenticated',
+      operation: 'idle',
+      sessionUsable: true,
+      errorCode: 'session_refresh_failed',
+      retryAction: 'refresh',
+      notice: null,
+      user: { userId: 'user-123', email: 'person@example.com' },
+    });
+  });
+
+  it('keeps terminal active-session cleanup authenticated until deletion resolves', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+    const harness = makeHarness({ now: () => Date.now() });
+    await authenticateWithExpiry(harness, NOW + 61_000);
+    const clearGate = deferred<void>();
+    harness.tokenTransport.result = {
+      status: 400,
+      data: { error: 'invalid_grant' },
+    };
+    harness.sessionStore.clearGate = clearGate.promise;
+
+    await vi.advanceTimersByTimeAsync(1_000);
+    try {
+      await vi.waitFor(() => expect(harness.sessionStore.clearCalls).toBe(1));
+      expect(harness.coordinator.state).toMatchObject({
+        phase: 'authenticated',
+        operation: 'cleaningUp',
+        sessionUsable: false,
+        user: { userId: 'user-123', email: 'person@example.com' },
+      });
+    } finally {
+      clearGate.resolve();
+      await harness.flush();
+    }
   });
 
   it('cancels the foreground timer while inactive and rechecks on resume', async () => {

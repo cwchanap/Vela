@@ -92,13 +92,13 @@ describe('App', () => {
     expect(wrapper.get('[data-testid="home-route"]').text()).toBe('home');
 
     Object.assign(state, {
-      phase: 'signedOut',
+      phase: 'authenticated',
       operation: 'signingOut',
       sessionUsable: false,
       errorCode: null,
       retryAction: null,
       notice: null,
-      user: null,
+      user: { userId: 'user-1', email: null },
     });
     await nextTick();
 

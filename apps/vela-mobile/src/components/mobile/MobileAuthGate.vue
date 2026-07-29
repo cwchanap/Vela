@@ -148,6 +148,10 @@ const SESSION_UNUSABLE_COPY =
   'Your Vela session is no longer usable. Continue with Google to sign in again.';
 const CLEANUP_INCOMPLETE_COPY =
   'Vela could not finish secure sign-out. Your session may return if you close and reopen the app before cleanup succeeds.';
+const UNSUPPORTED_PLATFORM_COPY = {
+  heading: 'Vela mobile sign-in is unavailable here',
+  message: 'Vela mobile sign-in is supported only on native iOS.',
+} as const;
 
 const LANDING_NAVIGATION_ERROR = {
   heading: 'Vela could not open your home',
@@ -446,9 +450,9 @@ async function signOutAndStartOver(): Promise<void> {
       role="alert"
     >
       <h1 ref="errorHeading" data-testid="auth-error-heading" tabindex="-1">
-        {{ SESSION_STATE_FALLBACK.heading }}
+        {{ UNSUPPORTED_PLATFORM_COPY.heading }}
       </h1>
-      <p>{{ SESSION_STATE_FALLBACK.message }}</p>
+      <p>{{ UNSUPPORTED_PLATFORM_COPY.message }}</p>
     </section>
 
     <section
