@@ -86,10 +86,51 @@ The coordinator gains four responsibilities:
 1. restore a durable refresh token during initialization;
 2. refresh the Cognito token bundle;
 3. schedule and re-evaluate proactive refresh; and
-4. dispose of all session material during sign-out.
+4. clear all session material during sign-out.
 
 The web app's Amplify auth store is unchanged and is not imported into the
 mobile app.
+
+### Coordinator surface
+
+HPA-206 makes the coordinator's new public surface explicit. The existing
+session-verification retry is generalized so the gate does not need a separate
+method for every internal recovery step:
+
+```ts
+type MobileAuthRetryAction =
+  | 'restore'
+  | 'refresh'
+  | 'persist'
+  | 'verify'
+  | 'cleanup';
+
+type MobileAuthCoordinator = {
+  state: Readonly<MobileAuthState & { retryAction: MobileAuthRetryAction | null }>;
+  initialize(): Promise<void>;
+  startSignIn(): Promise<void>;
+  completeCallback(url: string): Promise<void>;
+  retryCurrentOperation(): Promise<void>;
+  signOut(): Promise<void>;
+  dispose(): Promise<void>;
+};
+```
+
+`retryCurrentOperation()` replaces the narrow
+`retrySessionVerification()` entry point and dispatches only to the retry action
+recorded in state. The method never infers recovery from user-facing copy.
+
+| Method | Preconditions and effect |
+| --- | --- |
+| `initialize()` | Runs at most once before disposal; installs listeners and resolves callback, transaction, then durable-session state |
+| `startSignIn()` | Runs only from ordinary signed out or a terminal-session notice that permits a new sign-in |
+| `completeCallback(url)` | Consumes only a matching callback in an active callback phase, preserving the HPA-205 transaction guards |
+| `retryCurrentOperation()` | Runs only while the coordinator exposes a non-null retry action for a retryable failure |
+| `signOut()` | Runs from authenticated state, including while a background refresh status leaves the current access token valid |
+| `dispose()` | Idempotent teardown from any phase; queues behind earlier operations and rejects or ignores new work once disposal begins |
+
+The `MobileAuthGate` uses `retryAction` to choose whether to offer a retry.
+The More page calls only `signOut()`.
 
 ### Vela-owned storage boundary
 
@@ -112,9 +153,26 @@ The adapter owns:
 - non-empty string validation;
 - plugin option selection;
 - normalization of a missing item to `null`; and
+- normalization of plugin failures to Vela-owned `corrupt` or `unavailable`
+  storage failures; and
 - rejection of unsupported platforms before any plugin call.
 
 The adapter must not expose plugin-specific types to the coordinator.
+
+For pinned plugin version 7.1.6, `get()` returns `null` for a missing item and
+can also collapse an iOS Keychain read failure to `null`; its native read path
+does not expose the underlying `OSStatus`. The adapter therefore cannot promise
+a distinct "device has not been unlocked yet" result. It applies this contract:
+
+- `null` means missing;
+- `invalidData` means corrupt and terminal;
+- a thrown `osError`, `unknownError`, or other operational failure means
+  unavailable and retryable.
+
+HPA-206 does not perform pre-first-unlock background restoration. Its supported
+path is a user-launched foreground app after the device has been unlocked. A
+future requirement to distinguish a pre-unlock read from a missing item would
+require a different plugin or Vela-owned native Keychain code.
 
 ### Keychain record
 
@@ -126,14 +184,34 @@ for example:
 vela:mobile:cognito:<user-pool-id>:<client-id>:refresh:v1
 ```
 
+The adapter leaves the plugin's default `capacitor-storage_` key prefix
+unchanged and passes the complete logical key above to `get`, `set`, and
+`remove`. The effective native key is therefore:
+
+```text
+capacitor-storage_vela:mobile:cognito:<user-pool-id>:<client-id>:refresh:v1
+```
+
+The plugin has no public Keychain-service option. The adapter does not call the
+global `setKeyPrefix()` mutator.
+
 This prevents a development or staging build from restoring a production
 credential and allows a future schema migration without guessing the stored
 format.
 
-Every write uses:
+Every operation overrides synchronization explicitly:
 
-- `KeychainAccess.afterFirstUnlockThisDeviceOnly`; and
-- `sync: false`.
+```ts
+secureStorage.get(logicalKey, false, false);
+secureStorage.set(
+  logicalKey,
+  refreshToken,
+  false,
+  false,
+  KeychainAccess.afterFirstUnlockThisDeviceOnly,
+);
+secureStorage.remove(logicalKey, false);
+```
 
 `afterFirstUnlockThisDeviceOnly` makes the item available after the user first
 unlocks the device following a restart and prevents it from migrating to a new
@@ -143,10 +221,34 @@ iCloud Keychain.
 The adapter checks that Capacitor is running natively on iOS before calling the
 plugin. Browser, Android, and unknown platforms fail closed. This guard is
 required because the selected plugin uses `localStorage` as its web fallback.
+An unsupported Android build shows a non-retryable configuration message and
+does not offer sign-in. That is intentional until Android Keystore support
+enters scope.
 
 ### In-memory token bundle
 
-The current `OAuthTokenBundle` remains process-local:
+HPA-206 splits the current optional-refresh-token shape into flow-specific
+types:
+
+```ts
+type OAuthTokenBundleBase = {
+  accessToken: string;
+  idToken: string;
+  expiresAt: number;
+};
+
+type AuthorizationCodeTokenBundle = OAuthTokenBundleBase & {
+  refreshToken: string;
+};
+
+type RefreshedTokenBundle = OAuthTokenBundleBase & {
+  refreshToken?: string;
+};
+```
+
+The authorization-code parser requires a non-empty refresh token at the type
+boundary. A refresh response may omit it when rotation is disabled. Both shapes
+remain process-local and contain:
 
 - access token;
 - ID token;
@@ -159,6 +261,27 @@ re-created with a refresh grant after relaunch.
 If Cognito returns a rotated refresh token, that token may be held temporarily
 in memory while its Keychain write is retried. It is not accepted as the
 durable session until the write succeeds.
+
+### Lifecycle event ownership
+
+The injectable `MobileAppAdapter` gains an `appStateChange` listener alongside
+its existing `appUrlOpen` listener:
+
+```ts
+addListener(
+  eventName: 'appStateChange',
+  listener: (event: { isActive: boolean }) => void,
+): Promise<{ remove(): Promise<void> }>;
+```
+
+The auth coordinator registers and removes this listener. `isActive: false`
+cancels the foreground refresh timer; `isActive: true` recomputes token lifetime
+and schedules or immediately queues refresh.
+
+`apps/vela-mobile/src/boot/capacitor-lifecycle.ts` keeps its existing `resume`
+listener because that listener only records interaction-diagnostics metadata.
+It does not drive auth recovery, and its best-effort failure semantics remain
+independent from the auth coordinator.
 
 ### Auth state and protected-content gate
 
@@ -262,10 +385,22 @@ refresh_token=<durable-refresh-token>
 
 No client secret is used or bundled in the app.
 
-The refreshed ID token is validated using the same issuer, audience, token-use,
-expiry, and temporal checks as the callback flow, except that the original
-OAuth nonce is not expected on a refresh response. During an in-process refresh,
-the refreshed subject must match the current authenticated subject.
+The current nonce-coupled validator is split into two public entry points backed
+by one private base validator:
+
+- `validateAuthorizationCodeIdTokenClaims()` requires the exact nonce from the
+  active OAuth transaction; and
+- `validateRefreshedIdTokenClaims()` has no transaction or nonce parameter,
+  requires a non-empty subject, and accepts an optional expected subject for
+  continuity checks.
+
+The shared base performs issuer, audience, token-use, expiry, temporal, and
+non-empty-subject validation. During an in-process refresh, the refreshed
+subject must match the current authenticated subject. On cold restoration,
+there is no prior in-memory subject to compare.
+
+Separate entry points prevent a refresh-specific nonce exemption from silently
+weakening callback validation.
 
 The Vela API remains the signature-verification boundary. A refreshed session
 does not become authenticated until `/api/auth/session` succeeds.
@@ -279,10 +414,24 @@ If Cognito returns a new refresh token:
 
 If no refresh token is returned, retain the existing durable refresh token.
 
+The current CDK mobile client does not enable refresh-token rotation, so this
+branch is forward-compatible rather than active production behavior. If
+rotation is enabled later and the process terminates after Cognito issues a new
+refresh token but before its Keychain write succeeds, the in-memory candidate
+is lost. The prior token may work only for any configured rotation grace period;
+afterward, the next relaunch reaches the terminal-session notice and requires
+sign-in. This is an accepted security-biased edge case. The implementation must
+not "fix" it by accepting a rotated token before durable persistence succeeds.
+
 ### 4. Proactive refresh and resume
 
-While the app is active and authenticated, schedule one refresh for
-approximately 60 seconds before access-token expiry.
+While the app is active and authenticated, calculate the next refresh delay as:
+
+```ts
+Math.max(0, expiresAt - now - 60_000);
+```
+
+A zero delay queues refresh immediately rather than creating a negative timer.
 
 When the app becomes inactive, cancel the foreground timer. Do not poll in the
 background. When the app becomes active again:
@@ -310,6 +459,13 @@ deletion fails, and protected content must be hidden. The UI then offers a
 cleanup retry because the durable credential could otherwise restore on a
 future relaunch.
 
+`signOut()` is the user action described above. `dispose()` remains
+teardown-only: it cancels timers, removes native listeners, and destroys
+process-memory candidates, but it never removes the Keychain credential or the
+PKCE transaction. Both methods use the same serialized operation queue. A
+`dispose()` call queued after `signOut()` waits for sign-out cleanup before
+teardown; once disposal begins, later public auth actions are ignored.
+
 Remote Cognito revocation and global sign-out are deliberately separate work.
 HPA-206 guarantees local disposal on this installation.
 
@@ -320,15 +476,26 @@ credential is safe.
 
 | Condition | Classification | Durable credential | User experience |
 | --- | --- | --- | --- |
-| Keychain item missing | Normal signed out | None | Show sign-in |
+| Keychain read returns `null` | Normal signed out | Unknown to the adapter; plugin reports missing | Show sign-in |
 | Empty or malformed Keychain value | Terminal local data | Clear it | Show sign-in with a clear session notice |
+| Keychain load throws an operational error | Retryable storage | Preserve it | Keep gate closed; expose the `restore` retry action |
 | Cognito `invalid_grant`, revoked, expired, or otherwise non-refreshable token | Terminal remote session | Clear it | Show sign-in with a clear session notice |
 | API session verification returns 401 or 403 | Terminal session | Clear it | Show sign-in with a clear session notice |
 | Network loss, timeout, 429, or server-side 5xx | Retryable | Preserve it | Keep gate closed at startup; offer retry |
-| Keychain unavailable before first device unlock | Retryable | Preserve it | Keep gate closed; retry after unlock/foreground |
 | Initial or rotated-token Keychain write fails | Retryable persistence | Do not accept candidate as durable | Keep gate closed; retry secure save |
 | Keychain deletion fails | Retryable cleanup | May remain present | Hide protected content; show incomplete sign-out and retry |
-| Unsupported platform reaches production adapter | Configuration error | Do not access browser storage | Fail closed without invoking plugin fallback |
+| Unsupported platform reaches production adapter | Non-retryable configuration error | Do not access browser storage | Fail closed, disable sign-in, and explain the unsupported platform |
+
+Retryable failures map to public retry actions without making UI components
+reconstruct coordinator internals:
+
+| Failure context | `retryAction` |
+| --- | --- |
+| Keychain load or startup refresh transport | `restore` |
+| Foreground refresh transport | `refresh` |
+| Initial or rotated refresh-token write | `persist` |
+| Transient `/api/auth/session` verification | `verify` |
+| Keychain deletion during sign-out or terminal cleanup | `cleanup` |
 
 If clearing a terminal credential also fails, the app enters the same incomplete
 secure-cleanup state as failed sign-out. It must not repeatedly attempt refresh
@@ -365,10 +532,16 @@ Keychain errors, tokens, claims, or raw HTTP bodies.
 Unit tests cover:
 
 - deterministic environment and version namespacing;
+- leaving the plugin's default prefix unchanged while passing the complete
+  logical key;
 - `afterFirstUnlockThisDeviceOnly`;
-- explicit `sync: false`;
-- missing-item normalization;
-- rejection of empty or malformed values;
+- exact `get`, `set`, and `remove` arguments, including per-operation
+  `sync: false`;
+- `null`-to-missing normalization and the documented inability to distinguish
+  an iOS read failure collapsed to `null`;
+- normalization of `invalidData` to corrupt and thrown operational failures to
+  unavailable;
+- rejection of empty values;
 - save, load, and clear error propagation;
 - native-iOS platform gating; and
 - proof that browser and Android paths never invoke the plugin.
@@ -378,7 +551,10 @@ Unit tests cover:
 Unit tests cover:
 
 - the form-encoded public-client request;
-- response validation;
+- an authorization-code response that requires a refresh token and a refresh
+  response that permits its omission;
+- nonce-mandatory callback validation;
+- nonce-free refresh validation with a mandatory subject;
 - no-rotation and rotation responses;
 - persistence-before-acceptance for a rotated token;
 - refreshed subject continuity during an active session;
@@ -394,11 +570,14 @@ Unit tests cover:
 - retryable restoration failure and retry;
 - revoked, expired, corrupt, and API-rejected sessions;
 - restoration before protected-content mounting;
-- proactive timer calculation;
-- inactive timer cancellation and resume re-evaluation;
+- non-negative proactive timer calculation;
+- `appStateChange` inactive timer cancellation and active re-evaluation;
+- independence from the diagnostics-only `resume` listener;
 - expired-token gate closure;
 - operation serialization;
+- retry-action preconditions and dispatch;
 - pending rotated-token save retry;
+- accepted process-loss behavior for an unpersisted rotated token;
 - listener and timer disposal; and
 - preservation of callback-first and home-first behavior.
 
@@ -413,6 +592,8 @@ Unit and component tests cover:
 - PKCE transaction cleanup;
 - Keychain cleanup;
 - cleanup retry after deletion failure;
+- `dispose()` waiting behind queued sign-out while never deleting durable
+  credentials on its own;
 - signed-out persistence after a simulated relaunch;
 - terminal-session notice copy; and
 - loading/restoring states with no protected-content flash.
@@ -445,11 +626,25 @@ The closure pass uses a configured iOS build and real Cognito environment:
 1. sign in through Google once;
 2. force-terminate Vela and relaunch it;
 3. confirm the authenticated home screen restores without another Google prompt;
-4. invalidate the durable Cognito session and relaunch;
-5. confirm the sign-in screen shows a clear session-expired notice;
-6. sign in again, use Sign out on More, force-terminate, and relaunch;
-7. confirm Vela remains signed out; and
-8. inspect device logs and WebView storage to confirm no credential leakage.
+4. set `VELA_ACCEPTANCE_USER_POOL_ID` from the deployed
+   `CognitoUserPoolId` output and `VELA_ACCEPTANCE_COGNITO_USERNAME` to the
+   test user's Cognito `Username`, then invalidate that user's sessions with
+   administrative AWS credentials:
+
+   ```sh
+   aws cognito-idp admin-user-global-sign-out \
+     --user-pool-id "$VELA_ACCEPTANCE_USER_POOL_ID" \
+     --username "$VELA_ACCEPTANCE_COGNITO_USERNAME"
+   ```
+
+   This administrative command is acceptance-test setup only; it does not add
+   remote revocation to Vela's local Sign out behavior.
+
+5. force-terminate Vela and relaunch it;
+6. confirm the sign-in screen shows a clear session-expired notice;
+7. sign in again, use Sign out on More, force-terminate, and relaunch;
+8. confirm Vela remains signed out; and
+9. inspect device logs and WebView storage to confirm no credential leakage.
 
 The iOS Simulator is sufficient to exercise Keychain persistence and process
 relaunch. If the Google/Cognito environment or native signing prevents the real
@@ -505,5 +700,8 @@ prevent relaunch restoration on the same installation.
 
 - [Apple: `kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly`](https://developer.apple.com/documentation/security/ksecattraccessibleafterfirstunlockthisdeviceonly)
 - [`@aparajita/capacitor-secure-storage` v7.1.6](https://github.com/aparajita/capacitor-secure-storage/tree/v7.1.6)
+- [Secure-storage v7.1.6 public API and error types](https://github.com/aparajita/capacitor-secure-storage/blob/v7.1.6/src/definitions.ts)
+- [Secure-storage v7.1.6 iOS Keychain implementation](https://github.com/aparajita/capacitor-secure-storage/blob/v7.1.6/ios/Plugin/Plugin.swift)
 - [Amazon Cognito token endpoint](https://docs.aws.amazon.com/cognito/latest/developerguide/token-endpoint.html)
 - [Amazon Cognito refresh-token rotation](https://docs.aws.amazon.com/cognito/latest/developerguide/amazon-cognito-user-pools-using-the-refresh-token.html#amazon-cognito-user-pools-refresh-token-rotation)
+- [AWS CLI: `admin-user-global-sign-out`](https://docs.aws.amazon.com/cli/latest/reference/cognito-idp/admin-user-global-sign-out.html)
