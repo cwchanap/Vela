@@ -30,5 +30,9 @@ export function isValidHostOnlyDomain(value: string): boolean {
 
 export function hasMatchingUserPoolRegion(userPoolId: string, region: string): boolean {
   const separatorIndex = userPoolId.indexOf('_');
-  return separatorIndex > 0 && userPoolId.slice(0, separatorIndex) === region;
+  if (separatorIndex <= 0 || userPoolId.slice(0, separatorIndex) !== region) {
+    return false;
+  }
+  const suffix = userPoolId.slice(separatorIndex + 1);
+  return suffix.length > 0 && !suffix.includes('_');
 }
