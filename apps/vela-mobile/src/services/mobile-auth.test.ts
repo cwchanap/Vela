@@ -64,6 +64,7 @@ function idToken(transaction: OAuthTransaction, overrides: Record<string, unknow
     token_use: 'id',
     aud: config.mobileClientId,
     iss: `https://cognito-idp.${config.region}.amazonaws.com/${config.userPoolId}`,
+    sub: 'user-123',
     nonce: transaction.nonce,
     exp: 2_000,
     ...overrides,
@@ -911,12 +912,12 @@ describe('callback completion and cleanup', () => {
       null,
       'code_exchange_failed',
     ],
-    ['invalid JSON', { status: 200, data: '{not-json' }, null, 'code_exchange_failed'],
+    ['invalid JSON', { status: 200, data: '{not-json' }, null, 'token_validation_failed'],
     [
       'invalid shape',
       { status: 200, data: { id_token: 'SECRET-id' } },
       null,
-      'code_exchange_failed',
+      'token_validation_failed',
     ],
   ] as const)(
     'maps %s safely and clears the transaction',
@@ -945,6 +946,7 @@ describe('callback completion and cleanup', () => {
       data: {
         access_token: 'SECRET-access-token',
         id_token: idToken(activeTransaction, { nonce: 'SECRET-wrong-nonce' }),
+        refresh_token: 'SECRET-refresh-token',
         expires_in: 3_600,
       },
     };
@@ -958,6 +960,25 @@ describe('callback completion and cleanup', () => {
       errorCode: 'token_validation_failed',
     });
     expect(harness.sessionFetch).not.toHaveBeenCalled();
+  });
+
+  it('maps a successful callback response without a refresh token to token validation failure', async () => {
+    const harness = makeHarness();
+    await harness.coordinator.initialize();
+    await harness.coordinator.startSignIn();
+    const transaction = harness.preferences.transaction();
+    harness.tokenTransport.result = {
+      status: 200,
+      data: {
+        access_token: 'access',
+        id_token: idToken(transaction),
+        expires_in: 3_600,
+      },
+    };
+
+    harness.app.emit(callback(transaction));
+    await harness.flush();
+    expect(harness.coordinator.state.errorCode).toBe('token_validation_failed');
   });
 
   it('maps transaction-load failure safely without exchanging the code', async () => {
@@ -1319,6 +1340,7 @@ describe('serialization, disposal, and secret handling', () => {
       data: {
         access_token: 'SECRET-access-token',
         id_token: idToken(activeTransaction),
+        refresh_token: 'SECRET-refresh-token',
         expires_in: 3_600,
       },
     });

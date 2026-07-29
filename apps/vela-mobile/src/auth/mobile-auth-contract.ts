@@ -19,11 +19,18 @@ export type OAuthTransaction = {
   createdAt: number;
 };
 
-export type OAuthTokenBundle = {
+export type OAuthTokenBundleBase = {
   accessToken: string;
   idToken: string;
-  refreshToken?: string;
   expiresAt: number;
+};
+
+export type AuthorizationCodeTokenBundle = OAuthTokenBundleBase & {
+  refreshToken: string;
+};
+
+export type RefreshedTokenBundle = OAuthTokenBundleBase & {
+  refreshToken?: string;
 };
 
 export type ParsedOAuthCallback =

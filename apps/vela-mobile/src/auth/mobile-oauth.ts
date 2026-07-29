@@ -1,11 +1,12 @@
 import {
   MOBILE_OAUTH_CALLBACK_URI,
   MOBILE_OAUTH_SCHEME,
+  type AuthorizationCodeTokenBundle,
   type MobileOAuthConfig,
   type MobileTokenRequest,
-  type OAuthTokenBundle,
   type OAuthTransaction,
   type ParsedOAuthCallback,
+  type RefreshedTokenBundle,
 } from './mobile-auth-contract';
 
 const OAUTH_RANDOM_BYTE_LENGTH = 32;
@@ -35,11 +36,11 @@ function isNonEmptyString(value: unknown): value is string {
 }
 
 function invalidTokenResponse(): never {
-  throw new Error('invalid_token_response');
+  throw new Error('Invalid token response');
 }
 
 function invalidIdToken(): never {
-  throw new Error('invalid_id_token');
+  throw new Error('Invalid ID token');
 }
 
 function decodeJwtPayload(idToken: string): Record<string, unknown> {
@@ -190,7 +191,7 @@ export function parseOAuthCallback(rawUrl: string): ParsedOAuthCallback {
   return { kind: 'success', code, state };
 }
 
-export function buildTokenRequest(
+export function buildAuthorizationCodeTokenRequest(
   config: MobileOAuthConfig,
   transaction: OAuthTransaction,
   code: string,
@@ -216,14 +217,42 @@ export function buildTokenRequest(
   return request;
 }
 
-export function parseTokenResponse(value: unknown, now: number): OAuthTokenBundle {
+export function buildRefreshTokenRequest(
+  config: MobileOAuthConfig,
+  refreshToken: string,
+  options: { timeoutMs?: number } = {},
+): MobileTokenRequest {
+  const request: MobileTokenRequest = {
+    url: `https://${config.oauthDomain}/oauth2/token`,
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/x-www-form-urlencoded',
+    },
+    data: new URLSearchParams({
+      grant_type: 'refresh_token',
+      client_id: config.mobileClientId,
+      refresh_token: refreshToken,
+    }).toString(),
+  };
+  if (options.timeoutMs !== undefined) {
+    request.timeoutMs = options.timeoutMs;
+  }
+  return request;
+}
+
+function parseTokenResponseBase(
+  value: unknown,
+  now: number,
+  requireRefreshToken: boolean,
+): RefreshedTokenBundle {
   if (
     !isRecord(value) ||
     !isNonEmptyString(value.access_token) ||
     !isNonEmptyString(value.id_token) ||
     typeof value.expires_in !== 'number' ||
     !Number.isFinite(value.expires_in) ||
-    value.expires_in <= 0
+    value.expires_in <= 0 ||
+    (requireRefreshToken && !isNonEmptyString(value.refresh_token))
   ) {
     return invalidTokenResponse();
   }
@@ -233,7 +262,7 @@ export function parseTokenResponse(value: unknown, now: number): OAuthTokenBundl
     return invalidTokenResponse();
   }
 
-  const tokenBundle: OAuthTokenBundle = {
+  const tokenBundle: RefreshedTokenBundle = {
     accessToken: value.access_token,
     idToken: value.id_token,
     expiresAt,
@@ -249,14 +278,40 @@ export function parseTokenResponse(value: unknown, now: number): OAuthTokenBundl
   return tokenBundle;
 }
 
-export function validateIdTokenClaims(
+export function parseAuthorizationCodeTokenResponse(
+  value: unknown,
+  now: number,
+): AuthorizationCodeTokenBundle {
+  const parsed = parseTokenResponseBase(value, now, true);
+  if (!parsed.refreshToken) return invalidTokenResponse();
+  return { ...parsed, refreshToken: parsed.refreshToken };
+}
+
+export function parseRefreshTokenResponse(value: unknown, now: number): RefreshedTokenBundle {
+  return parseTokenResponseBase(value, now, false);
+}
+
+type AuthorizationCodeClaimExpectation = {
+  config: MobileOAuthConfig;
+  transaction: OAuthTransaction;
+  now: number;
+};
+
+type RefreshedClaimExpectation = {
+  config: MobileOAuthConfig;
+  now: number;
+  expectedSubject?: string;
+};
+
+function validateIdTokenClaimsBase(
   idToken: string,
   expected: {
     config: MobileOAuthConfig;
-    transaction: OAuthTransaction;
     now: number;
+    expectedNonce?: string;
+    expectedSubject?: string;
   },
-): void {
+): string {
   const claims = decodeJwtPayload(idToken);
   const expectedIssuer = `https://cognito-idp.${expected.config.region}.amazonaws.com/${expected.config.userPoolId}`;
   const expiryWithSkew =
@@ -267,7 +322,9 @@ export function validateIdTokenClaims(
     typeof claims.aud !== 'string' ||
     claims.aud !== expected.config.mobileClientId ||
     claims.iss !== expectedIssuer ||
-    claims.nonce !== expected.transaction.nonce ||
+    !isNonEmptyString(claims.sub) ||
+    (expected.expectedNonce !== undefined && claims.nonce !== expected.expectedNonce) ||
+    (expected.expectedSubject !== undefined && claims.sub !== expected.expectedSubject) ||
     typeof claims.exp !== 'number' ||
     !Number.isFinite(claims.exp) ||
     !Number.isFinite(expiryWithSkew) ||
@@ -275,4 +332,24 @@ export function validateIdTokenClaims(
   ) {
     return invalidIdToken();
   }
+
+  return claims.sub;
+}
+
+export function validateAuthorizationCodeIdTokenClaims(
+  idToken: string,
+  expected: AuthorizationCodeClaimExpectation,
+): void {
+  validateIdTokenClaimsBase(idToken, {
+    config: expected.config,
+    now: expected.now,
+    expectedNonce: expected.transaction.nonce,
+  });
+}
+
+export function validateRefreshedIdTokenClaims(
+  idToken: string,
+  expected: RefreshedClaimExpectation,
+): string {
+  return validateIdTokenClaimsBase(idToken, expected);
 }

@@ -1,13 +1,16 @@
 import { describe, expect, it } from 'vitest';
 import {
   buildAuthorizationUrl,
-  buildTokenRequest,
+  buildAuthorizationCodeTokenRequest,
+  buildRefreshTokenRequest,
   createOAuthTransaction,
   createPkceChallenge,
   hasOAuthCryptoCapabilities,
   parseOAuthCallback,
-  parseTokenResponse,
-  validateIdTokenClaims,
+  parseAuthorizationCodeTokenResponse,
+  parseRefreshTokenResponse,
+  validateAuthorizationCodeIdTokenClaims,
+  validateRefreshedIdTokenClaims,
 } from './mobile-oauth';
 import {
   MOBILE_OAUTH_CALLBACK_URI,
@@ -58,7 +61,7 @@ function base64UrlText(value: string): string {
   return btoa(value).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/u, '');
 }
 
-function unsignedJwt(payload: unknown): string {
+function makeIdToken(payload: unknown): string {
   return `${base64UrlJson({ alg: 'none', typ: 'JWT' })}.${base64UrlJson(payload)}.unsigned`;
 }
 
@@ -66,6 +69,7 @@ const validClaims = {
   token_use: 'id',
   aud: config.mobileClientId,
   iss: `https://cognito-idp.${config.region}.amazonaws.com/${config.userPoolId}`,
+  sub: 'user-123',
   nonce: transaction.nonce,
   exp: 2_000,
 };
@@ -147,7 +151,7 @@ describe('OAuth request builders', () => {
   });
 
   it('builds the exact public-client native token request without a client secret', () => {
-    const request = buildTokenRequest(config, transaction, 'authorization-code');
+    const request = buildAuthorizationCodeTokenRequest(config, transaction, 'authorization-code');
     const body = new URLSearchParams(request.data);
 
     expect(request.url).toBe('https://vela.auth.us-east-1.amazoncognito.com/oauth2/token');
@@ -166,6 +170,24 @@ describe('OAuth request builders', () => {
       code_verifier: transaction.codeVerifier,
     });
     expect(body.has('client_secret')).toBe(false);
+  });
+
+  it('builds the exact refresh-token public-client request', () => {
+    const request = buildRefreshTokenRequest(config, 'refresh-token', {
+      timeoutMs: 15_000,
+    });
+    expect(request).toEqual({
+      url: `https://${config.oauthDomain}/oauth2/token`,
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      data: new URLSearchParams({
+        grant_type: 'refresh_token',
+        client_id: config.mobileClientId,
+        refresh_token: 'refresh-token',
+      }).toString(),
+      timeoutMs: 15_000,
+    });
+    expect(request.data).not.toContain('client_secret');
   });
 });
 
@@ -253,12 +275,13 @@ describe('OAuth callback parser', () => {
 });
 
 describe('OAuth token parsing and ID-token claim validation', () => {
-  it('parses required token fields and derives the expiry timestamp', () => {
+  it('parses required authorization-code token fields and derives the expiry timestamp', () => {
     expect(
-      parseTokenResponse(
+      parseAuthorizationCodeTokenResponse(
         {
           access_token: 'access-token',
           id_token: 'id-token',
+          refresh_token: 'refresh-token',
           token_type: 'Bearer',
           expires_in: 3_600,
         },
@@ -267,13 +290,14 @@ describe('OAuth token parsing and ID-token claim validation', () => {
     ).toEqual({
       accessToken: 'access-token',
       idToken: 'id-token',
+      refreshToken: 'refresh-token',
       expiresAt: 3_601_000,
     });
   });
 
-  it('retains an optional non-empty refresh token in memory', () => {
+  it('retains a rotated refresh token from refresh success', () => {
     expect(
-      parseTokenResponse(
+      parseRefreshTokenResponse(
         {
           access_token: 'access-token',
           id_token: 'id-token',
@@ -286,6 +310,28 @@ describe('OAuth token parsing and ID-token claim validation', () => {
       accessToken: 'access-token',
       idToken: 'id-token',
       refreshToken: 'refresh-token',
+      expiresAt: 3_601_000,
+    });
+  });
+
+  it('requires a refresh token from authorization-code success', () => {
+    expect(() =>
+      parseAuthorizationCodeTokenResponse(
+        { access_token: 'access', id_token: 'id', expires_in: 3600 },
+        1_000,
+      ),
+    ).toThrow('Invalid token response');
+  });
+
+  it('permits refresh-token omission from refresh success', () => {
+    expect(
+      parseRefreshTokenResponse(
+        { access_token: 'access', id_token: 'id', expires_in: 3600 },
+        1_000,
+      ),
+    ).toEqual({
+      accessToken: 'access',
+      idToken: 'id',
       expiresAt: 3_601_000,
     });
   });
@@ -306,12 +352,14 @@ describe('OAuth token parsing and ID-token claim validation', () => {
       refresh_token: '',
     },
   ])('rejects malformed token response %#', (value) => {
-    expect(() => parseTokenResponse(value, 1_000)).toThrow('invalid_token_response');
+    expect(() => parseAuthorizationCodeTokenResponse(value, 1_000)).toThrow(
+      'Invalid token response',
+    );
   });
 
   it('accepts exact valid mobile ID-token claims without local signature verification', () => {
     expect(() =>
-      validateIdTokenClaims(unsignedJwt(validClaims), {
+      validateAuthorizationCodeIdTokenClaims(makeIdToken(validClaims), {
         config,
         transaction,
         now: 2_000_000 - 59_999,
@@ -319,8 +367,48 @@ describe('OAuth token parsing and ID-token claim validation', () => {
     ).not.toThrow();
   });
 
+  it('validates a refreshed ID token without nonce and returns its subject', () => {
+    const idToken = makeIdToken({
+      token_use: 'id',
+      aud: config.mobileClientId,
+      iss: `https://cognito-idp.${config.region}.amazonaws.com/${config.userPoolId}`,
+      sub: 'user-1',
+      exp: 3_600,
+    });
+    expect(
+      validateRefreshedIdTokenClaims(idToken, {
+        config,
+        now: 1_000,
+        expectedSubject: 'user-1',
+      }),
+    ).toBe('user-1');
+  });
+
+  it.each([
+    ['missing subject', undefined, undefined],
+    ['empty subject', '', undefined],
+    ['subject mismatch', 'user-2', 'user-1'],
+  ] as const)('rejects %s', (_label, subject, expectedSubject) => {
+    const idToken = makeIdToken({
+      token_use: 'id',
+      aud: config.mobileClientId,
+      iss: `https://cognito-idp.${config.region}.amazonaws.com/${config.userPoolId}`,
+      sub: subject,
+      exp: 3_600,
+    });
+    expect(() =>
+      validateRefreshedIdTokenClaims(idToken, {
+        config,
+        now: 1_000,
+        ...(expectedSubject ? { expectedSubject } : {}),
+      }),
+    ).toThrow('Invalid ID token');
+  });
+
   it.each([
     ['wrong token use', { ...validClaims, token_use: 'access' }],
+    ['missing subject', { ...validClaims, sub: undefined }],
+    ['empty subject', { ...validClaims, sub: '' }],
     ['missing audience', { ...validClaims, aud: undefined }],
     ['non-string audience', { ...validClaims, aud: 123 }],
     ['array audience', { ...validClaims, aud: [config.mobileClientId] }],
@@ -331,12 +419,12 @@ describe('OAuth token parsing and ID-token claim validation', () => {
     ['non-numeric expiry', { ...validClaims, exp: '2000' }],
   ])('rejects %s', (_name, claims) => {
     expect(() =>
-      validateIdTokenClaims(unsignedJwt(claims), {
+      validateAuthorizationCodeIdTokenClaims(makeIdToken(claims), {
         config,
         transaction,
         now: 1_000,
       }),
-    ).toThrow('invalid_id_token');
+    ).toThrow('Invalid ID token');
   });
 
   it('rejects a non-finite expiry decoded from a JSON numeric overflow', () => {
@@ -344,26 +432,26 @@ describe('OAuth token parsing and ID-token claim validation', () => {
     const idToken = `${base64UrlJson({ alg: 'none' })}.${base64UrlText(rawClaims)}.unsigned`;
 
     expect(() =>
-      validateIdTokenClaims(idToken, {
+      validateAuthorizationCodeIdTokenClaims(idToken, {
         config,
         transaction,
         now: 1_000,
       }),
-    ).toThrow('invalid_id_token');
+    ).toThrow('Invalid ID token');
   });
 
   it('rejects expiry at the exact 60-second skew boundary', () => {
-    const idToken = unsignedJwt({ ...validClaims, exp: 2_000 });
+    const idToken = makeIdToken({ ...validClaims, exp: 2_000 });
 
     expect(() =>
-      validateIdTokenClaims(idToken, {
+      validateAuthorizationCodeIdTokenClaims(idToken, {
         config,
         transaction,
         now: 2_060_000,
       }),
-    ).toThrow('invalid_id_token');
+    ).toThrow('Invalid ID token');
     expect(() =>
-      validateIdTokenClaims(idToken, {
+      validateAuthorizationCodeIdTokenClaims(idToken, {
         config,
         transaction,
         now: 2_059_999,
@@ -383,13 +471,13 @@ describe('OAuth token parsing and ID-token claim validation', () => {
     let thrown: unknown;
 
     try {
-      validateIdTokenClaims(idToken, { config, transaction, now: 1_000 });
+      validateAuthorizationCodeIdTokenClaims(idToken, { config, transaction, now: 1_000 });
     } catch (error) {
       thrown = error;
     }
 
     expect(thrown).toBeInstanceOf(Error);
-    expect((thrown as Error).message).toBe('invalid_id_token');
+    expect((thrown as Error).message).toBe('Invalid ID token');
     if (idToken !== '') {
       expect((thrown as Error).message).not.toContain(idToken);
     }
