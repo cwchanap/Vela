@@ -146,6 +146,10 @@ export function assertMobileAuthState(
       state.user !== null);
   const restoreFailurePhaseIsInvalid =
     state.errorCode === 'session_restore_failed' && state.phase !== 'initializing';
+  const refreshFailurePhaseIsInvalid =
+    state.errorCode === 'session_refresh_failed' &&
+    state.phase !== 'authenticated' &&
+    state.phase !== 'error';
   const signOutOperationIsInvalid =
     state.operation === 'signingOut' &&
     ((state.phase !== 'initializing' && state.phase !== 'authenticated') ||
@@ -174,6 +178,7 @@ export function assertMobileAuthState(
     terminalNoticeIsInvalid ||
     cleanupNoticeIsInvalid ||
     restoreFailurePhaseIsInvalid ||
+    refreshFailurePhaseIsInvalid ||
     signOutOperationIsInvalid ||
     cleanupOperationIsInvalid
   ) {

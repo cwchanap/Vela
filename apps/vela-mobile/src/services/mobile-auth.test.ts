@@ -807,6 +807,18 @@ describe('mobile auth initialization', () => {
       } satisfies MobileAuthState,
     },
     {
+      label: 'refresh failure during cold initialization',
+      value: {
+        phase: 'initializing',
+        operation: 'idle',
+        sessionUsable: false,
+        errorCode: 'session_refresh_failed',
+        retryAction: 'refresh',
+        notice: null,
+        user: null,
+      } satisfies MobileAuthState,
+    },
+    {
       label: 'sign-out work that already claims signed-out phase',
       value: {
         phase: 'signedOut',
@@ -861,6 +873,54 @@ describe('mobile auth initialization', () => {
         now: NOW,
       }),
     ).toThrow('invalid_mobile_auth_state');
+  });
+
+  const retryFailureState = (
+    phase: MobileAuthState['phase'],
+    errorCode: NonNullable<MobileAuthState['errorCode']>,
+    retryAction: NonNullable<MobileAuthState['retryAction']>,
+    user: MobileAuthState['user'] = null,
+  ): MobileAuthState => ({
+    phase,
+    operation: 'idle',
+    sessionUsable: false,
+    errorCode,
+    retryAction,
+    notice: null,
+    user,
+  });
+
+  it.each([
+    {
+      label: 'initializing restore failure',
+      value: retryFailureState('initializing', 'session_restore_failed', 'restore'),
+    },
+    {
+      label: 'initializing persistence failure',
+      value: retryFailureState('initializing', 'session_persistence_failed', 'persist'),
+    },
+    {
+      label: 'initializing verification failure',
+      value: retryFailureState('initializing', 'session_verification_failed', 'verify'),
+    },
+    {
+      label: 'authenticated refresh failure',
+      value: retryFailureState('authenticated', 'session_refresh_failed', 'refresh', {
+        userId: 'user-1',
+        email: null,
+      }),
+    },
+    {
+      label: 'refresh failure without an active session',
+      value: retryFailureState('error', 'session_refresh_failed', 'refresh'),
+    },
+  ])('accepts $label', ({ value }) => {
+    expect(() =>
+      assertMobileAuthState(value, {
+        activeBundle: null,
+        now: NOW,
+      }),
+    ).not.toThrow();
   });
 
   it('publishes the complete authenticated tuple after verification', async () => {
