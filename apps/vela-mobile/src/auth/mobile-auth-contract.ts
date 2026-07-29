@@ -74,7 +74,25 @@ export type MobileAuthErrorCode =
   | 'code_exchange_failed'
   | 'token_validation_failed'
   | 'session_unauthorized'
-  | 'session_verification_failed';
+  | 'session_verification_failed'
+  | 'session_restore_failed'
+  | 'session_refresh_failed'
+  | 'session_persistence_failed'
+  | 'session_cleanup_failed'
+  | 'unsupported_platform';
+
+export type MobileAuthRetryAction = 'restore' | 'refresh' | 'persist' | 'verify' | 'cleanup';
+
+export type MobileAuthOperation =
+  | 'idle'
+  | 'restoring'
+  | 'refreshing'
+  | 'persisting'
+  | 'verifying'
+  | 'signingOut'
+  | 'cleaningUp';
+
+export type MobileAuthNotice = 'session_unusable' | 'cleanup_incomplete' | null;
 
 export type MobileAuthUser = {
   userId: string;
@@ -83,14 +101,69 @@ export type MobileAuthUser = {
 
 export type MobileAuthState = {
   phase: MobileAuthPhase;
+  operation: MobileAuthOperation;
+  sessionUsable: boolean;
   errorCode: MobileAuthErrorCode | null;
+  retryAction: MobileAuthRetryAction | null;
+  notice: MobileAuthNotice;
   user: MobileAuthUser | null;
 };
+
+export type MobileAuthStateAssertionContext = {
+  activeBundle: OAuthTokenBundleBase | null;
+  now: number;
+};
+
+export function assertMobileAuthState(
+  state: MobileAuthState,
+  context: MobileAuthStateAssertionContext,
+): void {
+  const usableSessionIsInvalid =
+    state.sessionUsable &&
+    (state.phase !== 'authenticated' ||
+      state.user === null ||
+      state.notice !== null ||
+      context.activeBundle === null ||
+      context.activeBundle.expiresAt <= context.now);
+  const errorPhaseIsInvalid = state.phase === 'error' && state.errorCode === null;
+  const retryIsInvalid =
+    state.retryAction !== null && (state.operation !== 'idle' || state.errorCode === null);
+  const terminalNoticeIsInvalid =
+    state.notice === 'session_unusable' &&
+    (state.phase !== 'signedOut' ||
+      state.operation !== 'idle' ||
+      state.sessionUsable ||
+      state.errorCode !== null ||
+      state.retryAction !== null ||
+      state.user !== null);
+  const cleanupNoticeIsInvalid =
+    state.notice === 'cleanup_incomplete' &&
+    (state.phase !== 'signedOut' ||
+      state.operation !== 'idle' ||
+      state.sessionUsable ||
+      state.errorCode !== 'session_cleanup_failed' ||
+      state.retryAction !== 'cleanup' ||
+      state.user !== null);
+
+  if (
+    usableSessionIsInvalid ||
+    errorPhaseIsInvalid ||
+    retryIsInvalid ||
+    terminalNoticeIsInvalid ||
+    cleanupNoticeIsInvalid
+  ) {
+    throw new Error('invalid_mobile_auth_state');
+  }
+}
 
 export type MobileAppAdapter = {
   addListener(
     eventName: 'appUrlOpen',
     listener: (event: { url: string }) => void,
+  ): Promise<{ remove(): Promise<void> }>;
+  addListener(
+    eventName: 'appStateChange',
+    listener: (event: { isActive: boolean }) => void,
   ): Promise<{ remove(): Promise<void> }>;
   getLaunchUrl(): Promise<{ url: string } | undefined>;
 };

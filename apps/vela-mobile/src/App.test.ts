@@ -30,7 +30,11 @@ describe('App', () => {
     const Review = routedComponent('review');
     const state = reactive<MobileAuthState>({
       phase: 'signedOut',
+      operation: 'idle',
+      sessionUsable: false,
       errorCode: null,
+      retryAction: null,
+      notice: null,
       user: null,
     });
     const coordinator: MobileAuthCoordinator = {
@@ -70,6 +74,7 @@ describe('App', () => {
     expect(wrapper.find('[data-testid$="-route"]').exists()).toBe(false);
 
     state.phase = 'authenticated';
+    state.sessionUsable = true;
     state.user = { userId: 'user-1', email: null };
     await nextTick();
 

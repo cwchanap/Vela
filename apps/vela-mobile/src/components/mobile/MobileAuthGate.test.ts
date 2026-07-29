@@ -76,7 +76,11 @@ function createFakeCoordinator(
 ): { coordinator: MobileAuthCoordinator; state: MobileAuthState } {
   const state = reactive<MobileAuthState>({
     phase: 'initializing',
+    operation: 'idle',
+    sessionUsable: false,
     errorCode: null,
+    retryAction: null,
+    notice: null,
     user: null,
     ...initial,
   });
@@ -223,6 +227,7 @@ describe('MobileAuthGate', () => {
     });
 
     state.phase = 'authenticated';
+    state.sessionUsable = true;
     state.user = { userId: 'user-1', email: 'vela@example.com' };
     await nextTick();
 
@@ -246,6 +251,7 @@ describe('MobileAuthGate', () => {
     });
 
     state.phase = 'authenticated';
+    state.sessionUsable = true;
     state.user = { userId: 'user-1', email: null };
     await flushPromises();
     await nextTick();
@@ -275,6 +281,7 @@ describe('MobileAuthGate', () => {
     });
 
     state.phase = 'authenticated';
+    state.sessionUsable = true;
     state.user = { userId: 'user-1', email: null };
     await nextTick();
     await router.push('/diagnostics-without-bypass');
@@ -304,6 +311,7 @@ describe('MobileAuthGate', () => {
       .mockImplementation(originalReplace);
 
     state.phase = 'authenticated';
+    state.sessionUsable = true;
     state.user = { userId: 'user-1', email: null };
     await flushPromises();
     await nextTick();
@@ -326,12 +334,26 @@ describe('MobileAuthGate', () => {
     const { state, router, wrapper } = await mountGate({ phase: 'signedOut' }, { path: '/review' });
 
     state.phase = 'authenticated';
+    state.sessionUsable = true;
     state.user = { userId: 'user-1', email: null };
     await flushPromises();
     await nextTick();
 
     expect(router.currentRoute.value.fullPath).toBe('/');
     expect(wrapper.find('[data-testid="protected-slot"]').exists()).toBe(true);
+  });
+
+  it('keeps protected content unmounted when the authenticated phase is not usable', async () => {
+    const { wrapper } = await mountGate({
+      phase: 'authenticated',
+      sessionUsable: false,
+      user: { userId: 'user-1', email: null },
+    });
+
+    await flushPromises();
+    await nextTick();
+
+    expect(wrapper.find('[data-testid="protected-slot"]').exists()).toBe(false);
   });
 
   it('suppresses duplicate sign-in actions while the first action is pending', async () => {
@@ -418,7 +440,15 @@ describe('MobileAuthGate', () => {
   });
 
   it('requires the development build flag and explicit metadata for a bypass', async () => {
-    const signedOut: MobileAuthState = { phase: 'signedOut', errorCode: null, user: null };
+    const signedOut: MobileAuthState = {
+      phase: 'signedOut',
+      operation: 'idle',
+      sessionUsable: false,
+      errorCode: null,
+      retryAction: null,
+      notice: null,
+      user: null,
+    };
     expect(shouldBypassMobileAuth(true, true, signedOut)).toBe(true);
     expect(shouldBypassMobileAuth(false, true, signedOut)).toBe(false);
     expect(shouldBypassMobileAuth(true, false, signedOut)).toBe(false);
