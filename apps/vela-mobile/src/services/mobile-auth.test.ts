@@ -1567,6 +1567,107 @@ describe('active-session lifecycle refresh', () => {
     });
   });
 
+  it('closes capability at exact expiry while the refresh grant is still pending', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+    const harness = makeHarness({ now: () => Date.now() });
+    await authenticateWithExpiry(harness, NOW + 61_000);
+    const heldRefresh = deferred<{ status: number; data: unknown }>();
+    harness.tokenTransport.gate = heldRefresh.promise;
+
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(harness.coordinator.state).toMatchObject({
+      operation: 'refreshing',
+      sessionUsable: true,
+    });
+    await vi.advanceTimersByTimeAsync(59_999);
+    expect(harness.coordinator.state.sessionUsable).toBe(true);
+    await vi.advanceTimersByTimeAsync(1);
+
+    expect(harness.coordinator.state).toMatchObject({
+      phase: 'authenticated',
+      operation: 'refreshing',
+      sessionUsable: false,
+      user: { userId: 'user-123', email: 'person@example.com' },
+    });
+    heldRefresh.reject(new Error('SECRET-late-refresh-failure'));
+    await harness.flush();
+    expect(harness.coordinator.state).toMatchObject({
+      operation: 'idle',
+      sessionUsable: false,
+      errorCode: 'session_refresh_failed',
+      retryAction: 'refresh',
+    });
+  });
+
+  it('closes capability at exact expiry while rotated-token persistence is pending', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+    const harness = makeHarness({ now: () => Date.now() });
+    await authenticateWithExpiry(harness, NOW + 61_000);
+    prepareSuccessfulRefresh(harness, {
+      rotatedRefreshToken: 'SECRET-rotated-refresh-token',
+      claimExpirySeconds: 10_000,
+    });
+    const heldPersistence = deferred<void>();
+    harness.sessionStore.saveGate = heldPersistence.promise;
+
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(harness.coordinator.state).toMatchObject({
+      operation: 'persisting',
+      sessionUsable: true,
+    });
+    await vi.advanceTimersByTimeAsync(60_000);
+
+    expect(harness.coordinator.state).toMatchObject({
+      phase: 'authenticated',
+      operation: 'persisting',
+      sessionUsable: false,
+    });
+    heldPersistence.resolve();
+    await harness.flush();
+    expect(harness.coordinator.state).toMatchObject({
+      phase: 'authenticated',
+      operation: 'idle',
+      sessionUsable: true,
+    });
+  });
+
+  it('closes capability at exact expiry while candidate verification is pending', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+    const harness = makeHarness({ now: () => Date.now() });
+    await authenticateWithExpiry(harness, NOW + 61_000);
+    prepareSuccessfulRefresh(harness, { claimExpirySeconds: 10_000 });
+    const heldVerification = deferred<Response>();
+    harness.sessionFetch.mockImplementationOnce(async () => heldVerification.promise);
+
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(harness.coordinator.state).toMatchObject({
+      operation: 'verifying',
+      sessionUsable: true,
+    });
+    await vi.advanceTimersByTimeAsync(60_000);
+
+    expect(harness.coordinator.state).toMatchObject({
+      phase: 'authenticated',
+      operation: 'verifying',
+      sessionUsable: false,
+    });
+    heldVerification.resolve(
+      response(200, {
+        authenticated: true,
+        user: { userId: 'user-123', email: 'person@example.com' },
+      }),
+    );
+    await harness.flush();
+    expect(harness.coordinator.state).toMatchObject({
+      phase: 'authenticated',
+      operation: 'idle',
+      sessionUsable: true,
+    });
+  });
+
   it('retries rotated-candidate persistence without issuing another grant', async () => {
     vi.useFakeTimers();
     vi.setSystemTime(NOW);
