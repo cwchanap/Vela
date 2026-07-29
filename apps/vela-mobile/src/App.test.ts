@@ -42,7 +42,7 @@ describe('App', () => {
       initialize: vi.fn().mockResolvedValue(undefined),
       startSignIn: vi.fn().mockResolvedValue(undefined),
       completeCallback: vi.fn().mockResolvedValue(undefined),
-      retrySessionVerification: vi.fn().mockResolvedValue(undefined),
+      retryCurrentOperation: vi.fn().mockResolvedValue(undefined),
       dispose: vi.fn().mockResolvedValue(undefined),
     };
     const landing = deferred();

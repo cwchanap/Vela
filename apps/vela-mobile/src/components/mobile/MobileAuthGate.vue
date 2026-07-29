@@ -269,7 +269,7 @@ async function beginSignIn(): Promise<void> {
   }
 }
 
-async function retrySessionVerification(): Promise<void> {
+async function retryCurrentOperation(): Promise<void> {
   const mayRetry = state.phase === 'error' && errorPresentation.value?.action === 'retrySession';
   if (!mayRetry || actionPending.value) {
     return;
@@ -277,7 +277,7 @@ async function retrySessionVerification(): Promise<void> {
 
   actionPending.value = true;
   try {
-    await coordinator.retrySessionVerification();
+    await coordinator.retryCurrentOperation();
   } finally {
     actionPending.value = false;
   }
@@ -343,7 +343,7 @@ async function retrySessionVerification(): Promise<void> {
         ref="primaryAction"
         type="button"
         :disabled="actionPending"
-        @click="retrySessionVerification"
+        @click="retryCurrentOperation"
       >
         {{ errorPresentation.actionLabel }}
       </button>

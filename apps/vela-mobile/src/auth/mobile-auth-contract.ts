@@ -186,6 +186,6 @@ export type MobileAuthCoordinator = {
   initialize(): Promise<void>;
   startSignIn(): Promise<void>;
   completeCallback(url: string): Promise<void>;
-  retrySessionVerification(): Promise<void>;
+  retryCurrentOperation(): Promise<void>;
   dispose(): Promise<void>;
 };
