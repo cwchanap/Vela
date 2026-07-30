@@ -3853,6 +3853,163 @@ describe('authenticated feature transport', () => {
     await expect(request).resolves.toMatchObject({ status });
   });
 
+  it('retries concurrent 401s once after one expired-token refresh promotion', async () => {
+    let currentNow = NOW;
+    const harness = makeHarness({ now: () => currentNow });
+    await authenticateWithExpiry(harness, currentNow + 1_000, currentNow);
+    prepareSuccessfulRefresh(harness, {
+      claimExpirySeconds: Math.ceil((currentNow + 3_600_000) / 1_000),
+    });
+    const initialResponses = [deferred<Response>(), deferred<Response>()];
+    let featureCalls = 0;
+    harness.sessionFetch.mockImplementation(async (target) => {
+      if (String(target).endsWith('/srs/stats')) {
+        const responseForCall = initialResponses[featureCalls++];
+        return responseForCall?.promise ?? response(200, {});
+      }
+      return response(200, {
+        authenticated: true,
+        user: { userId: 'user-123', email: 'person@example.com' },
+      });
+    });
+
+    const first = harness.coordinator.requestAuthenticatedApi({ path: 'srs/stats' });
+    const second = harness.coordinator.requestAuthenticatedApi({ path: 'srs/stats' });
+    await vi.waitFor(() => expect(featureCalls).toBe(2));
+    currentNow += 2_000;
+    initialResponses[0]?.resolve(response(401, {}));
+    initialResponses[1]?.resolve(response(401, {}));
+
+    await expect(Promise.all([first, second])).resolves.toEqual([
+      expect.objectContaining({ status: 200 }),
+      expect.objectContaining({ status: 200 }),
+    ]);
+    expect(refreshRequests(harness)).toHaveLength(1);
+    expect(featureCalls).toBe(4);
+  });
+
+  it('queues one terminal cleanup for concurrent still-valid-token 401s', async () => {
+    const harness = makeHarness();
+    await authenticate(harness);
+    harness.sessionFetch.mockImplementation(async (target) =>
+      String(target).endsWith('/srs/stats')
+        ? response(401, {})
+        : response(200, {
+            authenticated: true,
+            user: { userId: 'user-123', email: 'person@example.com' },
+          }),
+    );
+
+    await expect(
+      Promise.all([
+        harness.coordinator.requestAuthenticatedApi({ path: 'srs/stats' }),
+        harness.coordinator.requestAuthenticatedApi({ path: 'srs/stats' }),
+      ]),
+    ).resolves.toEqual([
+      expect.objectContaining({ status: 401 }),
+      expect.objectContaining({ status: 401 }),
+    ]);
+    expect(harness.sessionStore.clearCalls).toBe(1);
+    expect(refreshRequests(harness)).toHaveLength(0);
+  });
+
+  it('reports retryable recovery when an expired-token 401 cannot refresh while inactive', async () => {
+    let currentNow = NOW;
+    const harness = makeHarness({ now: () => currentNow });
+    await authenticateWithExpiry(harness, currentNow + 120_000, currentNow);
+    harness.sessionFetch.mockClear();
+    const featureResponse = deferred<Response>();
+    harness.sessionFetch.mockImplementation(async (target) =>
+      String(target).endsWith('/srs/stats')
+        ? featureResponse.promise
+        : response(200, {
+            authenticated: true,
+            user: { userId: 'user-123', email: 'person@example.com' },
+          }),
+    );
+
+    const request = harness.coordinator.requestAuthenticatedApi({ path: 'srs/stats' });
+    await vi.waitFor(() => expect(harness.sessionFetch).toHaveBeenCalledOnce());
+    harness.app.emitState(false);
+    currentNow += 121_000;
+    featureResponse.resolve(response(401, {}));
+
+    await expect(request).rejects.toMatchObject({ code: 'session_recovery_pending' });
+    expect(refreshRequests(harness)).toHaveLength(0);
+    expect(harness.sessionStore.clearCalls).toBe(0);
+  });
+
+  it('detaches an aborted caller while its peer completes the shared recovery', async () => {
+    let currentNow = NOW;
+    const harness = makeHarness({ now: () => currentNow });
+    await authenticateWithExpiry(harness, currentNow + 1_000, currentNow);
+    prepareSuccessfulRefresh(harness, {
+      claimExpirySeconds: Math.ceil((currentNow + 3_600_000) / 1_000),
+    });
+    const refreshGate = deferred<{ status: number; data: unknown }>();
+    harness.tokenTransport.gate = refreshGate.promise;
+    const firstFeatureResponse = deferred<Response>();
+    const secondFeatureResponse = deferred<Response>();
+    let featureCalls = 0;
+    harness.sessionFetch.mockImplementation(async (target) => {
+      if (String(target).endsWith('/srs/stats')) {
+        const responseForCall = [firstFeatureResponse, secondFeatureResponse][featureCalls++];
+        return responseForCall?.promise ?? response(200, {});
+      }
+      return response(200, {
+        authenticated: true,
+        user: { userId: 'user-123', email: 'person@example.com' },
+      });
+    });
+    const caller = new AbortController();
+    const first = harness.coordinator.requestAuthenticatedApi({
+      path: 'srs/stats',
+      init: { signal: caller.signal },
+    });
+    const second = harness.coordinator.requestAuthenticatedApi({ path: 'srs/stats' });
+    await vi.waitFor(() => expect(featureCalls).toBe(2));
+    currentNow += 2_000;
+    firstFeatureResponse.resolve(response(401, {}));
+    secondFeatureResponse.resolve(response(401, {}));
+    await vi.waitFor(() => expect(refreshRequests(harness)).toHaveLength(1));
+
+    caller.abort();
+    await expect(first).rejects.toMatchObject({ name: 'AbortError' });
+    refreshGate.resolve(harness.tokenTransport.result);
+    await expect(second).resolves.toMatchObject({ status: 200 });
+    expect(refreshRequests(harness)).toHaveLength(1);
+  });
+
+  it('performs terminal cleanup for a retry 401 without issuing another refresh', async () => {
+    let currentNow = NOW;
+    const harness = makeHarness({ now: () => currentNow });
+    await authenticateWithExpiry(harness, currentNow + 1_000, currentNow);
+    prepareSuccessfulRefresh(harness, {
+      claimExpirySeconds: Math.ceil((currentNow + 3_600_000) / 1_000),
+    });
+    const initialResponse = deferred<Response>();
+    let featureCalls = 0;
+    harness.sessionFetch.mockImplementation(async (target) => {
+      if (String(target).endsWith('/srs/stats')) {
+        featureCalls += 1;
+        return featureCalls === 1 ? initialResponse.promise : response(401, {});
+      }
+      return response(200, {
+        authenticated: true,
+        user: { userId: 'user-123', email: 'person@example.com' },
+      });
+    });
+
+    const request = harness.coordinator.requestAuthenticatedApi({ path: 'srs/stats' });
+    await vi.waitFor(() => expect(featureCalls).toBe(1));
+    currentNow += 2_000;
+    initialResponse.resolve(response(401, {}));
+
+    await expect(request).resolves.toMatchObject({ status: 401 });
+    expect(refreshRequests(harness)).toHaveLength(1);
+    expect(harness.sessionStore.clearCalls).toBe(1);
+  });
+
   it('rejects a stale-generation 401 without cleanup', async () => {
     const harness = makeHarness();
     await authenticate(harness);
