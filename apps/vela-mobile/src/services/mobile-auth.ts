@@ -564,7 +564,7 @@ export function createMobileAuthCoordinator(
     }
     const recovery = await waitForFeatureRecoveryOrCallerAbort(
       snapshot,
-      request.init?.signal,
+      request.init?.signal ?? undefined,
       !allowRefreshRetry,
     );
     switch (recovery.kind) {
