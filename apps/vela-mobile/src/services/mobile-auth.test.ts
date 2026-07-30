@@ -1413,19 +1413,40 @@ describe('restore terminal and retryable classification', () => {
     return harness;
   }
 
-  it.each([
-    [400, { error: 'invalid_grant' }],
-    [401, { error: 'unauthorized' }],
-    [403, { error: 'forbidden' }],
-  ] as const)('clears terminal refresh failures with status %s', async (status, data) => {
+  it('clears terminal refresh failures only for confirmed invalid_grant', async () => {
     const harness = makeRestoreHarness();
-    harness.tokenTransport.result = { status, data };
+    harness.tokenTransport.result = { status: 400, data: { error: 'invalid_grant' } };
 
     await harness.coordinator.initialize();
 
     expect(harness.sessionStore.clearCalls).toBe(1);
     expect(harness.coordinator.state.notice).toBe('session_unusable');
   });
+
+  it.each([
+    ['invalid_client', 400, { error: 'invalid_client' }],
+    ['invalid_request', 400, { error: 'invalid_request' }],
+    ['unauthorized_client', 400, { error: 'unauthorized_client' }],
+    ['unsupported_grant_type', 400, { error: 'unsupported_grant_type' }],
+    ['unknown OAuth error', 400, { error: 'SECRET-provider' }],
+    ['gateway 401', 401, { error: 'unauthorized' }],
+    ['WAF 403', 403, { error: 'forbidden' }],
+  ] as const)(
+    'preserves the durable token for non-invalid_grant %s',
+    async (_label, status, data) => {
+      const harness = makeRestoreHarness();
+      harness.tokenTransport.result = { status, data };
+
+      await harness.coordinator.initialize();
+
+      expect(harness.sessionStore.clearCalls).toBe(0);
+      expect(harness.sessionStore.refreshToken).toBe('SECRET-durable-token');
+      expect(harness.coordinator.state).toMatchObject({
+        errorCode: 'session_restore_failed',
+        retryAction: 'restore',
+      });
+    },
+  );
 
   it('keeps terminal restore cleanup in initializing until deletion resolves', async () => {
     const harness = makeRestoreHarness();
@@ -2462,6 +2483,41 @@ describe('active-session lifecycle refresh', () => {
 
     expect(refreshRequests(harness)).toHaveLength(1);
     expect(harness.sessionFetch).toHaveBeenCalledTimes(4);
+    expect(harness.coordinator.state.sessionUsable).toBe(true);
+  });
+
+  it('refreshes instead of verifying an expired retained candidate', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+    const harness = makeHarness({ now: () => Date.now() });
+    await authenticateWithExpiry(harness, NOW + 120_000);
+    // Short-lived candidate so it expires before the manual retry.
+    prepareSuccessfulRefresh(harness, { expiresInSeconds: 10 });
+    harness.sessionFetch
+      .mockResolvedValueOnce(response(500, { error: 'temporary' }))
+      .mockResolvedValueOnce(response(500, { error: 'temporary' }));
+
+    await vi.advanceTimersByTimeAsync(60_000);
+    await vi.advanceTimersByTimeAsync(5_000);
+    // Candidate expired at NOW + 70_000; advance past it.
+    await vi.advanceTimersByTimeAsync(6_000);
+
+    expect(harness.coordinator.state).toMatchObject({
+      phase: 'authenticated',
+      errorCode: 'session_verification_failed',
+      retryAction: 'verify',
+    });
+    expect(harness.sessionStore.clearCalls).toBe(0);
+
+    // The retry must obtain a fresh candidate via the refresh grant, not
+    // send the expired ID token to /auth/session (which would 401 and
+    // trigger terminal cleanup of the still-valid durable token).
+    prepareSuccessfulRefresh(harness);
+    await harness.coordinator.retryCurrentOperation();
+
+    expect(refreshRequests(harness)).toHaveLength(2);
+    expect(harness.sessionStore.clearCalls).toBe(0);
+    expect(harness.sessionStore.refreshToken).toBe('SECRET-refresh-token');
     expect(harness.coordinator.state.sessionUsable).toBe(true);
   });
 
