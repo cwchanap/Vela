@@ -8,28 +8,28 @@
 
 ## Goal
 
-Deliver the smallest production-shaped Vela Mobile product flow: a returning iOS user restores a secure Cognito session, reaches Home, and sees the current authenticated `due_today` value returned by `GET /api/srs/stats`.
+Deliver the smallest production-shaped Vela Mobile product flow: a returning iOS user restores a secure Cognito session, reaches Home, and sees the authenticated `due_today` value returned by `GET /api/srs/stats`.
 
 This slice establishes reusable mobile boundaries for authenticated feature requests and user-scoped server-state caching without importing the web Home page or exposing Cognito tokens to feature components.
 
-`due_today` is the API field name. Its current semantics are “due as of request time” (`next_review_date <= now`), not “scheduled within the current calendar day.” Home copy therefore says “caught up for now.”
+`due_today` is the API field name. Its current semantics are “due as of request time” (`next_review_date <= now`), not “scheduled within the current calendar day.” Home therefore says “caught up for now.”
 
 ## Current State
 
-HPA-204 established the absolute mobile API base URL and approved Capacitor CORS behavior.
+HPA-204 established the absolute mobile API base URL and Capacitor CORS behavior.
 
-HPA-206 established the single mobile Cognito session owner. The mobile auth coordinator now:
+HPA-206 established the single mobile Cognito session owner. The coordinator:
 
-- restores a Keychain-backed refresh credential during initialization;
+- restores a Keychain-backed refresh credential;
 - keeps ID and access tokens in process memory only;
-- refreshes the active token bundle proactively and on app resume;
-- verifies candidate sessions through `/api/auth/session` before exposing protected content;
-- marks protected content usable only while a verified active bundle remains valid; and
+- refreshes proactively and on app resume;
+- verifies candidates through `/api/auth/session` before exposing protected content;
+- marks protected content usable only while a verified bundle remains valid; and
 - clears local session material during sign-out or terminal credential failure.
 
-HPA-206 intentionally did not expose a general token accessor or authenticated feature client. HPA-207 introduces that feature-request boundary.
+HPA-206 intentionally did not expose a token accessor or general authenticated feature client. HPA-207 introduces that boundary.
 
-The API already exposes `GET /api/srs/stats`. It applies Cognito ID-token middleware and returns:
+The API already exposes `GET /api/srs/stats` through Cognito ID-token middleware and returns:
 
 ```ts
 interface SRSStats {
@@ -47,9 +47,11 @@ interface SRSStats {
 }
 ```
 
-The web application owns an equivalent interface and a web-specific SRS service. `@vela/common` already owns the `srsKeys` factory, but `srsKeys.stats()` has no production callers and is not user-scoped. HPA-207 makes mobile the first production consumer of that key; it does not migrate the web stats card to TanStack Query.
+The web app owns an equivalent interface and web-specific service. `@vela/common` owns `srsKeys`, but `srsKeys.stats()` has no production callers and is not user-scoped. Mobile becomes its first production consumer; this does not migrate the web stats card to TanStack Query.
 
-The mobile app does not yet install TanStack Query, and Home still renders the M1 scaffold.
+The API verifier already accepts both web and mobile Cognito client audiences. `CLAUDE.md` still lists that prerequisite as outstanding; the implementation change set updates that stale documentation.
+
+The mobile app does not install TanStack Query, does not alias `@vela/common` to source, and Home still renders the M1 scaffold.
 
 ## Approved Decisions
 
@@ -57,26 +59,25 @@ The mobile app does not yet install TanStack Query, and Home still renders the M
 | --- | --- |
 | Product scope | Display only the authenticated due-review count and required states |
 | Backend | Reuse `GET /api/srs/stats` unchanged |
-| Shared contract | Move the complete `SRSStats` response contract into `@vela/common` |
-| Shared package scope | Update the `@vela/common` module header to cover query utilities and domain contracts |
+| Shared contract | Move the complete `SRSStats` contract into `@vela/common` |
 | Query key | Include authenticated user ID in `srsKeys.stats()`; mobile is its first production consumer |
-| Token ownership | ID tokens remain private to the mobile auth coordinator |
-| Feature request surface | Add coordinator-owned authenticated requests; do not add `getIdToken()` |
-| URL/header safety | Share a trailing-slash-preserving API URL builder and reject Authorization overrides case-insensitively |
-| Response ordering | Return every non-401 response despite concurrent auth promotion; generation checks guard only 401-driven auth mutation |
-| Stale 401 | A 401 from a superseded generation becomes `session_changed` and cannot mutate the replacement session |
-| Current 401 | Share one refresh-or-cleanup decision per owner/generation across concurrent requests |
-| Refresh failure | A transient shared refresh failure settles callers as `session_recovery_pending`; it never deletes a potentially valid durable credential or hangs the feature request |
-| Timeout | Bound each feature transport attempt and final response-body read to 15 seconds; timeout is a retryable network failure |
-| Server state | Install TanStack Query in Vela Mobile |
-| Automatic retry | Retry only `network` and `server`, at most twice |
-| Control-flow recovery | Silently retry one same-user `session_changed`/recoverable `session_unavailable` race; wait for auth recovery when already pending |
-| Foreground/Home refresh | Refetch on native foreground and every Home mount, even when cached data is fresh |
-| Manual retry | Track manual retry separately from background fetching |
-| Cache isolation | Disable without usable identity, user-scope keys, and cancel then clear on sign-out/identity loss |
-| Cached zero | Keep the stale-data warning because time or another client can make reviews due |
+| Token ownership | ID tokens remain private to `MobileAuthCoordinator` |
+| Concurrency | Feature I/O runs outside `serialize()`/`operationTail`; only auth mutations enter the queue |
+| Refresh observation | Never infer promotion from `queueRefresh(): Promise<void>` settlement; inspect explicit postconditions |
+| Response ordering | Return every non-401 response despite concurrent session promotion |
+| Stale 401 | A superseded-generation 401 cannot mutate the replacement session |
+| Current 401 | Concurrent requests share one refresh-or-cleanup decision per owner/generation |
+| Refresh failure | Transient/no-op refresh settles as pending recovery without deleting credentials or hanging callers |
+| Timeout | One due-count query execution has an eight-second feature deadline |
+| Retry | Retry only `network` and `server`, at most twice |
+| Auth abstraction | Feature code consumes a stable session-capability selector, not raw auth operation/error fields |
+| Module resolution | Mobile Quasar and Vitest alias `@vela/common` to source while retaining the workspace dependency |
+| Cache isolation | User-scope keys; disable without usable identity; cancel then clear on sign-out/identity loss |
+| Foreground/Home refresh | Refetch on native foreground and every Home mount |
+| Manual retry | Track manual retry independently from background fetch |
+| Cached zero | Keep stale-data warning because time or another client can make reviews due |
+| Device verification | Automated/Simulator checks are merge gates; physical iPhone evidence is a closure gate |
 | Review navigation | Do not add Start Review |
-| Device verification | Simulator/automated checks are merge gates; physical-iPhone evidence is an HPA-207 closure gate |
 | Platform | Native iOS only for this milestone |
 
 ## Scope
@@ -86,15 +87,17 @@ HPA-207 includes:
 - a shared SRS statistics contract and parser;
 - a user-scoped stats query key;
 - a coordinator-owned authenticated request capability with typed failures;
-- boundary-safe URL/header handling;
-- generation-safe, single-flight 401 recovery;
-- bounded feature transport and body consumption;
+- boundary-safe URL and header handling;
+- feature I/O outside the auth mutation queue;
+- explicit refresh observation and single-flight 401 recovery;
+- bounded feature request and body consumption;
 - a mobile JSON API client and SRS service;
+- mobile source aliases for `@vela/common`;
 - TanStack Query bootstrap and native focus integration;
 - auth-driven query lifecycle and cache cleanup;
-- a minimal Home due-count presentation;
-- unit/component coverage for concurrency, timeout, retry, isolation, and view states; and
-- Simulator and physical-device verification evidence.
+- a minimal accessible Home due-count presentation;
+- tests for concurrency, timeouts, retries, isolation, and view states; and
+- Simulator and physical-device evidence.
 
 ## Non-goals
 
@@ -129,16 +132,16 @@ TanStack Query uses srsKeys.stats(userId)
 Mobile SRS service requests "srs/stats"
                     |
                     v
-Mobile API client manages cancellation/body timeout
+Mobile API client applies the feature deadline and consumes JSON
                     |
                     v
-Coordinator sends bounded request with current ID token
+Coordinator sends a bounded request with the current ID token
                     |
                     v
 GET {VITE_MOBILE_API_URL}srs/stats
 ```
 
-### One token owner and request contract
+### One token owner and public request contract
 
 `apps/vela-mobile/src/services/mobile-auth.ts` remains the only owner of active Cognito token material.
 
@@ -180,18 +183,20 @@ export type MobileAuthCoordinator = {
 
 Feature code never receives an ID token. The coordinator constructs the request, owns `Authorization`, and performs transport through its injected fetch.
 
-Observable non-HTTP outcomes:
+### Concurrency boundary: feature I/O is outside `operationTail`
 
-| Outcome | Coordinator result |
-| --- | --- |
-| Invalid path | `invalid_request_path` before network activity |
-| Caller supplies any Authorization case variant | `invalid_request_headers` before network activity |
-| No usable session before dispatch | `session_unavailable` before network activity |
-| One feature transport attempt exceeds 15 seconds | `request_timeout`; no auth mutation caused by the timeout itself |
-| Caller aborts | Preserve caller cancellation |
-| Other transport rejection | Propagate transport failure; no generation-based auth mutation |
-| Stale-generation 401 | `session_changed`; replacement session untouched |
-| Shared refresh attempt fails transiently | `session_recovery_pending`; HPA-206 retry state retained |
+`requestAuthenticatedApi()` is a public coordinator operation, but unlike `initialize()`, `startSignIn()`, callback completion, retry, sign-out, and disposal, it is **not** wrapped in `serialize()`.
+
+The method:
+
+1. synchronously validates the request and snapshots the active owner, generation, token, expiry, and user;
+2. starts feature transport outside `operationTail`;
+3. returns non-401 responses outside the auth queue; and
+4. enters `serialize()` only through existing refresh or cleanup helpers when a current-generation 401 requires an auth mutation.
+
+This prevents a slow feature request from head-of-line blocking auth operations. It also prevents the self-deadlock that would occur if a serialized feature request awaited `queueRefresh()`, whose work is itself chained onto `operationTail`.
+
+Tests prove that a pending feature fetch does not block proactive refresh, sign-out, retry, or disposal, and that 401 recovery does not wait behind its own request.
 
 ### Shared API URL normalization and Authorization ownership
 
@@ -205,7 +210,7 @@ function resolveMobileApiUrl(baseUrl: URL, relativePath: string): URL;
 The normalized base removes search/hash and has exactly one trailing pathname `/`. `resolveMobileApiUrl()` accepts non-empty relative paths such as `auth/session` and `srs/stats` and rejects:
 
 - absolute, scheme-relative, and every root-relative URL;
-- backslash-prefixed/separated escape attempts;
+- backslash-prefixed or backslash-separated escapes;
 - raw or encoded traversal outside the base;
 - different origins;
 - pathnames outside the trailing-slash base boundary; and
@@ -228,43 +233,80 @@ if (headers.has('authorization')) {
 headers.set('Authorization', `Bearer ${idToken}`);
 ```
 
-### Feature transport timeout
+Tests cover `Authorization`, lowercase, uppercase, and mixed-case variants.
 
-Each actual feature fetch attempt receives the same 15-second network bound as existing auth network calls.
+### Feature transport and overall latency budget
 
-The coordinator merges the caller signal with an attempt-local controller:
+The coordinator retains a 15-second safety cap for each physical feature fetch, matching existing auth network calls. The mobile API client additionally applies:
 
-- caller abort remains caller cancellation;
-- attempt timer abort becomes `request_timeout`;
-- timer/listener cleanup runs in `finally`;
-- the timer covers dispatch through response headers; and
-- retry after auth refresh gets a fresh attempt timer.
+```ts
+export const MOBILE_DUE_COUNT_EXECUTION_TIMEOUT_MS = 8_000;
+```
 
-The timeout does not wrap the whole refresh-and-verify sequence. Existing Cognito refresh and `/auth/session` verification already have their own bounded operations. A feature caller waiting on shared recovery races that wait with its caller signal, but one caller abort never cancels recovery needed by peers.
+This deadline spans one complete query-function execution:
+
+- initial feature transport;
+- waiting for the current shared 401 recovery decision;
+- the one permitted feature retry after verified promotion; and
+- final response-body consumption.
+
+The deadline is caller-local. If it expires while shared auth recovery is running, the feature caller detaches without cancelling recovery needed by peers and settles as `session_recovery_pending`. Otherwise expiry is `network`.
+
+Each TanStack automatic retry receives a fresh eight-second execution budget. With two retries and the shared one-second then two-second retry delays, initial loading on a persistently dead network is bounded to approximately 27 seconds before the blocking error appears. This is the accepted user-facing bound for M1.
+
+Caller cancellation remains cancellation, not timeout. Timer and abort-listener cleanup runs in `finally`.
 
 ### Response-arrival ordering
 
-Generation is an auth-mutation guard, not a general response-freshness rule. A normal proactive/resume refresh promotes a bundle and increments generation; that must not discard valid data or feature errors returned by the prior verified token.
+Generation is an auth-mutation guard, not a general response-freshness rule. A proactive or resume refresh promotes a new bundle and increments generation; that must not discard valid feature responses returned by the prior verified token.
 
 After transport settles:
 
-1. If caller-aborted, preserve cancellation.
-2. If transport rejected/timed out, propagate the corresponding failure without a generation-driven auth mutation.
-3. If status is not 401, return `Response` unchanged regardless of generation.
-4. Only for 401, compare captured owner/generation with current active session.
-5. Stale 401 returns `session_changed` without mutation.
-6. Current-generation 401 enters shared recovery.
+1. Preserve caller cancellation.
+2. Propagate raw transport rejection or timeout without generation-driven auth mutation.
+3. If status is not 401, return the `Response` regardless of generation.
+4. Only for 401, compare the captured owner/generation with the current active session.
+5. A stale 401 returns `session_changed` without mutation.
+6. A current-generation 401 enters shared recovery.
 
 | Response | Generation matches | Result |
 | --- | --- | --- |
 | 2xx | Yes or no | Return response |
 | 4xx except 401 | Yes or no | Return response |
 | 5xx | Yes or no | Return response |
-| Transport failure | Yes or no | Propagate; no auth mutation |
+| Transport rejection | Yes or no | Propagate; no auth mutation |
 | 401 | No | `session_changed`; no auth mutation |
-| 401 | Yes | Shared refresh-or-cleanup decision |
+| 401 | Yes | Shared recovery decision |
 
-Sign-out/data freshness is enforced by caller abort, TanStack cancellation, user-scoped keys, and cancel-then-clear isolation—not by discarding every old-generation HTTP response.
+Sign-out and data freshness are enforced by caller cancellation, TanStack cancellation, user-scoped keys, and cancel-then-clear—not by discarding every old-generation response.
+
+### Explicit refresh observation
+
+The existing `queueRefresh()` returns `Promise<void>` and may resolve without starting or completing a promotion. Its settlement is never interpreted as refresh success.
+
+Feature 401 recovery uses a feature-specific observer:
+
+```ts
+type FeatureRefreshObservation =
+  | { kind: 'promoted'; owner: ActiveSession; generation: number }
+  | { kind: 'terminal' }
+  | { kind: 'retryable_failure' }
+  | { kind: 'superseded' };
+
+async function observeFeatureRefresh(
+  owner: ActiveSession,
+  generation: number,
+): Promise<FeatureRefreshObservation>;
+```
+
+`observeFeatureRefresh()` calls or joins `queueRefresh({ requireDue: false, owner, generation })`, then derives outcome from coordinator postconditions—not from promise fulfillment:
+
+- `promoted`: a usable active session for the same user exists and `activeBundleGeneration > generation`;
+- `superseded`: owner/generation changed without a verified same-user promotion, including sign-out, disposal, or identity replacement;
+- `terminal`: terminal credential cleanup completed or entered its terminal cleanup-failure surface; and
+- `retryable_failure`: generation did not advance and no terminal result exists, including app inactive, pending candidate, no-op guard, transient refresh/persist/verify failure, or retryable auth state.
+
+This explicitly covers every silent `queueRefresh()` no-op path. A `superseded` outcome maps to `session_changed`; `retryable_failure` maps to `session_recovery_pending`.
 
 ### Single-flight current-generation 401 recovery
 
@@ -274,7 +316,8 @@ Concurrent 401s for one active owner/generation share one decision:
 type FeatureUnauthorizedRecoveryResult =
   | { kind: 'refreshed' }
   | { kind: 'terminal' }
-  | { kind: 'retryable_failure' };
+  | { kind: 'retryable_failure' }
+  | { kind: 'superseded' };
 
 type FeatureUnauthorizedRecovery = {
   owner: ActiveSession;
@@ -285,60 +328,70 @@ type FeatureUnauthorizedRecovery = {
 
 Rules:
 
-1. First current-generation 401 creates the recovery record.
-2. Peers for the same owner/generation await it.
+1. The first current-generation 401 creates the guarded record outside `operationTail`.
+2. Peers for the same owner/generation await the same promise.
 3. Caller abort detaches only that caller.
-4. Existing `refreshPromise`/serialization remains the refresh single-flight mechanism.
-5. At most one terminal cleanup runs for the generation.
-6. The guarded record clears only after settlement.
+4. Refresh work still uses `refreshPromise` and `serialize()` internally.
+5. Terminal cleanup is enqueued once through `serialize()`.
+6. The recovery record clears only after settlement.
 7. After `refreshed`, each caller retries its own feature request once.
-8. The feature retry captures the promoted generation and cannot recursively retry again.
+8. A feature retry captures the promoted generation and cannot recursively recover again.
 
 Decision:
 
-- join a refresh already in flight for the captured generation;
-- otherwise refresh when the captured token expired in flight;
-- otherwise treat rejection of a still-valid current token as terminal and clean up once.
+- join a refresh already in flight for the captured owner/generation;
+- otherwise use `observeFeatureRefresh()` when the captured token expired in flight;
+- otherwise treat rejection of a still-valid current token as terminal and enqueue one cleanup.
 
 | Shared result | Per-request result |
 | --- | --- |
 | `refreshed` | Retry own feature request once |
 | `terminal` | Return own original/final 401 after cleanup |
-| `retryable_failure` | Settle as `session_recovery_pending`; preserve credential and coordinator retry state |
+| `retryable_failure` | `session_recovery_pending`; preserve credentials and retry state |
+| `superseded` | `session_changed`; do not mutate replacement state |
 
-### Soft refresh failure interaction
+A feature waiter waits only for the current shared attempt, never a later automatic or user-initiated auth retry.
 
-A feature waiter waits only for the current shared refresh attempt, never a later five-second automatic retry or user retry.
+### Shared SRS contract and keys
 
-On transient refresh failure:
+Create `packages/common/src/contracts/srs.ts` with `SRSStats` and:
 
-- HPA-206 retains `session_refresh_failed` and `retryAction: 'refresh'`;
-- waiter settles as `session_recovery_pending`;
-- no terminal cleanup or credential deletion occurs;
-- if the prior session remains usable, content/cache remains and the existing auth-retry banner is visible;
-- if unusable, the gate replaces Home with blocking auth recovery; and
-- later successful auth retry triggers one due-count refetch.
-
-### Shared SRS contract
-
-Create `packages/common/src/contracts/srs.ts` with `SRSStats` and `parseSrsStats(value)`.
+```ts
+export function parseSrsStats(value: unknown): SRSStats;
+```
 
 The parser requires non-negative integer count fields, a finite non-negative ease factor, accuracy from 0 through 100, and all required nested fields. Unknown fields are ignored.
 
-The web SRS service imports/re-exports `SRSStats`, preserving its public type and direct loading behavior. Update `packages/common/src/index.ts` so its header describes query configuration, keys, domain contracts, and lightweight utilities.
+The web service imports and re-exports `SRSStats`, preserving its public type and direct loading behavior. Update the `@vela/common` header so the package describes query configuration, keys, domain contracts, and lightweight utilities.
 
-### User-scoped stats key
+Change only the stats key:
 
 ```ts
 srsKeys.stats(userId: string | null, jlpt?: number[])
 // ['srs', 'stats', userId, jlpt]
 ```
 
-The user ID is the cache correctness boundary; clearing is defense in depth. This slice changes only `stats`. Other SRS keys remain unscoped and must be revisited before mobile review uses them.
+Add a comment immediately above `srsKeys.due`, `progress`, and `allProgress` stating that these keys remain identity-unscoped and must not be used for mobile user data until their identity/cache-isolation contract is redesigned. This makes the hazard visible at future call sites rather than only in tests.
 
-### Mobile API client and body timeout
+### Mobile package resolution
 
-Create `mobile-api-client.ts`:
+Add `@vela/common` and `@tanstack/vue-query` as workspace dependencies of `@vela/mobile`.
+
+Also modify both mobile configuration files:
+
+```ts
+// apps/vela-mobile/quasar.config.ts
+'@vela/common': resolve(__dirname, '../../packages/common/src/index.ts')
+
+// apps/vela-mobile/vitest.config.ts
+'@vela/common': resolve(__dirname, '../../packages/common/src/index.ts')
+```
+
+The aliases ensure local `cd apps/vela-mobile && bun run test:unit`, Quasar development/build, and contract edits use current source instead of stale `packages/common/dist`. The workspace dependency remains authoritative for package ownership and Turbo dependency ordering.
+
+### Mobile API client classification
+
+Create `apps/vela-mobile/src/services/mobile-api-client.ts`:
 
 ```ts
 export type MobileApiErrorCode =
@@ -361,26 +414,21 @@ export class MobileApiError extends Error {
     this.name = 'MobileApiError';
   }
 }
-
-export const MOBILE_FEATURE_BODY_TIMEOUT_MS = MOBILE_AUTH_NETWORK_TIMEOUT_MS; // 15_000
 ```
-
-The client creates a caller-linked controller before invoking the coordinator. After the coordinator returns the final `Response`, it starts a fresh 15-second body-read timer and keeps it active until JSON consumption completes. Aborting that controller cancels a stalled/truncated body stream.
-
-Classification:
 
 | Outcome | Client code |
 | --- | --- |
 | Caller abort | Preserve cancellation |
-| Coordinator `request_timeout` or body timeout | `network` |
-| Invalid path/header | `invalid_request`; stable development diagnostic only, no path/header/token dump |
-| Session codes | Preserve `session_unavailable`, `session_changed`, or `session_recovery_pending` |
+| `request_timeout` or feature deadline | `network`, unless shared auth recovery is pending |
+| Raw non-abort fetch rejection, including `TypeError` | `network` |
+| Invalid path/header | `invalid_request`; stable development diagnostic without request/token data |
+| Session coordinator codes | Preserve `session_unavailable`, `session_changed`, or `session_recovery_pending` |
 | Final 401 | `unauthorized` |
 | 403 | `forbidden` |
 | Other non-2xx | `server` |
-| Invalid JSON/stats | `invalid_response` |
+| Invalid JSON/stats payload | `invalid_response` |
 
-Body timeout/caller cleanup removes timer and listeners. It does not cancel coordinator recovery already shared by peers.
+The client forwards one caller signal, enforces the eight-second execution deadline, reads JSON within the remaining deadline, and removes timers/listeners in `finally`.
 
 ### Mobile SRS service and provisioning
 
@@ -403,11 +451,11 @@ export function provideMobileServices(
 ): void;
 ```
 
-`mobile-auth` boot creates/provides the coordinator, passes it directly to `provideMobileServices()`, then initializes. No cross-boot `inject()` and no QueryClient import in service provisioning.
+`mobile-auth` boot creates/provides the coordinator, passes it directly to `provideMobileServices()`, then initializes. Service provisioning does not use cross-boot `inject()` and does not import the QueryClient.
 
-### QueryClient bootstrap and wiring
+### QueryClient bootstrap and boot order
 
-Add `@vela/common` and `@tanstack/vue-query` to mobile.
+Create:
 
 ```ts
 export const mobileQueryClient = createQueryClient();
@@ -417,7 +465,7 @@ export default defineBoot(({ app }) => {
 });
 ```
 
-Boot order:
+Boot order becomes:
 
 ```text
 main
@@ -428,12 +476,37 @@ diagnostic-cold-entry (development only)
 ```
 
 - auth isolation imports `mobileQueryClient`;
-- Vue Query composables receive that instance through the plugin;
+- Vue Query composables receive the same instance through the plugin;
 - lifecycle imports only `focusManager`;
-- coordinator/SRS service use typed Vue injection for consumers; and
+- coordinator and SRS service use typed Vue injection for consumers; and
 - service provisioning receives the coordinator directly.
 
-### Due-count query and automatic retry
+### Stable feature-session selector
+
+Feature code does not inspect raw `operation`, `retryAction`, or `errorCode` fields.
+
+Create an auth-owned pure selector:
+
+```ts
+export type MobileFeatureSessionStatus =
+  | { kind: 'usable'; userId: string }
+  | { kind: 'recovering'; userId: string; sessionUsable: boolean }
+  | { kind: 'unavailable' };
+
+export function selectMobileFeatureSessionStatus(
+  state: Readonly<MobileAuthState>,
+): MobileFeatureSessionStatus;
+```
+
+The selector alone understands the auth state machine:
+
+- ordinary verified idle state -> `usable`;
+- refresh/persist/verify operation or retry state for an authenticated user -> `recovering`;
+- restoration, sign-out, cleanup, terminal state, or missing user -> `unavailable` unless the authenticated recovery state explicitly retains a usable prior session.
+
+`useDueReviewCount()` watches this semantic status. A transition from same-user `recovering` to `usable` triggers one refetch. This keeps the dependency one-directional without introducing a feature-specific event API into the coordinator.
+
+### Due-count query and recovery behavior
 
 ```ts
 const DUE_COUNT_RETRY_LIMIT = 2;
@@ -450,7 +523,7 @@ export function retryDueCountQuery(failureCount: number, error: unknown): boolea
 ```ts
 useQuery({
   queryKey: computed(() => srsKeys.stats(userId.value)),
-  enabled: computed(() => sessionUsable.value && userId.value !== null),
+  enabled: computed(() => sessionStatus.value.kind !== 'unavailable'),
   queryFn: ({ signal }) => fetchStatsWithSessionRaceRecovery(signal),
   refetchOnMount: 'always',
   refetchOnWindowFocus: 'always',
@@ -458,30 +531,26 @@ useQuery({
 });
 ```
 
-Only network/server receive two automatic retries. Auth/control-flow, cancellation, authorization, invalid request, and invalid response do not.
-
-### Session-race and pending-recovery query behavior
-
 `fetchStatsWithSessionRaceRecovery()` captures user ID.
 
-For `session_changed` or `session_unavailable`:
+For `session_changed` or a dispatch-time `session_unavailable` race:
 
-- if not aborted, same user remains authenticated, and session is usable, silently retry once;
-- otherwise rethrow for gate/query enablement; and
+- if not aborted, the selector still reports the same user as usable, silently retry once;
+- otherwise rethrow and let query enablement/the gate resolve the state; and
 - never exceed one silent control-flow retry per query execution.
 
-If that retry also fails while Home remains usable, show generic blocking/cached failure with manual Retry. Never leave an empty, settled, invisible-error state.
+If the silent retry repeats while Home remains usable, show a generic manual-recovery error. Never leave an empty, settled, invisible-error state.
 
 For `session_recovery_pending`:
 
 - do not immediately retry;
-- with cache, select normal zero/positive content without a Home-specific error—the auth gate’s retry banner owns the recovery message;
+- with cache, keep normal zero/positive content and let the auth gate/banner own recovery messaging;
 - without cache, show accessible session-recovery loading;
-- watch `sessionUsable`, user ID, `retryAction`, `operation`, and `errorCode`;
-- after successful recovery for the same user (usable, idle, no retry/error), refetch once; and
-- if auth becomes unusable, let the gate replace Home.
+- watch only `MobileFeatureSessionStatus`;
+- after same-user `recovering -> usable`, refetch once; and
+- if status becomes unavailable, let the gate replace Home.
 
-### Native foreground integration
+### Native foreground integration and cache isolation
 
 Extend `capacitor-lifecycle`:
 
@@ -489,21 +558,18 @@ Extend `capacitor-lifecycle`:
 focusManager.setFocused(event.isActive);
 ```
 
-Keep resume diagnostics. No polling/background task.
+Keep existing resume diagnostics. Add no polling or background task.
 
-### Auth and cache isolation
+Install auth/cache isolation once from `App.vue` using the injected coordinator and imported `mobileQueryClient`:
 
-Install once from `App.vue` with injected coordinator and imported `mobileQueryClient`.
+1. Enable authenticated queries only for a usable/recovering identified user as defined above.
+2. Sign-out, terminal cleanup, or identity change cancels in-flight queries.
+3. Await cancellation before cache removal.
+4. Failed durable cleanup still leaves cache cleared.
+5. Soft refresh failure retains cached data while the prior session remains usable.
+6. Backgrounding does not clear.
 
-1. Enable queries only with usable auth/user ID.
-2. Usable-to-unusable stops data selection immediately.
-3. Sign-out, terminal cleanup, or identity change cancels queries.
-4. Remove cache only after cancellation settles.
-5. Failed durable cleanup still leaves cache cleared.
-6. Soft refresh failure retains cache while prior session is usable.
-7. Backgrounding does not clear.
-
-A non-401 may return after generation change; cancellation and canceled-query semantics prevent repopulation after identity loss.
+A non-401 may return after generation promotion; canceled-query semantics and user-scoped keys prevent repopulation after identity loss.
 
 ### Manual retry, view selector, and Home
 
@@ -527,96 +593,90 @@ Rules:
 
 - initial no-data fetch -> loading;
 - no data plus pending auth recovery -> recovery loading;
-- pending auth recovery with cache -> zero/positive, no Home error;
+- pending recovery with cache -> zero/positive, no Home-specific error;
 - zero/positive remains during background fetch;
 - retryable failure without/with cache -> blocking/cached error;
 - `invalid_request` -> generic non-retryable defect;
 - `invalid_response` -> generic manually retryable failure;
-- repeated control-race failure while still usable -> generic manually retryable failure;
-- cancellation -> no visible error;
+- repeated control race while usable -> generic manually retryable failure;
+- caller cancellation -> no visible error; and
 - unauthorized -> gate removes Home.
 
-Home copy/semantics:
+Home copy and semantics:
 
-- loading: “Loading your review count…” (`role=status`, polite live region);
+- loading: “Loading your review count…” with `role="status"` and polite live region;
 - auth recovery: “Refreshing your session…”;
 - zero: prominent `0`, “You’re caught up for now.”;
 - positive: prominent count with singular/plural copy;
 - background refresh: keep count, “Refreshing review count…”;
-- blocking network failure: alert + Retry;
-- cached failure, including cached `0`: keep count, “This count may be out of date.” + Retry;
-- manual retry: preserve error surface and disable/loading Retry;
+- blocking network failure: alert plus Retry;
+- cached failure, including cached `0`: keep count, “This count may be out of date.” plus Retry;
+- manual retry: preserve the error surface and disable/load Retry;
 - invalid request defect: generic alert without misleading Retry;
-- unauthorized: no Home message;
+- unauthorized: no Home-specific message; and
 - no Start Review or scaffold version/environment content.
-
-## Error Handling Summary
-
-- **Non-401 during promotion:** return normally.
-- **Stale 401:** `session_changed`, no cleanup; silent same-user retry once.
-- **Concurrent current 401s:** one recovery decision; each request retries once or returns own final 401.
-- **Transient refresh failure:** `session_recovery_pending`; preserve credential and retry state; settle promptly.
-- **Transport/body timeout:** `network`; caller abort remains cancellation.
-- **Invalid request:** dedicated feature code, stable dev diagnostic, non-retryable UI.
-- **Invalid API payload:** `invalid_response`, not cached, safe generic copy.
-- **Sign-out race:** cancel then clear; late non-401 cannot mutate auth, late 401 cannot clean replacement session.
 
 ## Testing Strategy
 
-### Shared package
+### Shared package and configuration
 
 - Parse complete production response and reject invalid fields.
 - Ignore unknown fields.
-- Distinguish users/JLPT filters in stats key.
-- Confirm package header covers contracts.
-- Document that non-stats SRS keys remain unscoped.
+- Distinguish users and JLPT filters in the stats key.
+- Assert the identity-warning comment remains adjacent to unscoped sibling SRS keys.
+- Confirm `@vela/common` source aliases in mobile Quasar and Vitest config.
+- Run mobile tests from `apps/vela-mobile` without a prebuilt `packages/common/dist`.
+- Confirm the common package header covers domain contracts.
 
-### Auth coordinator
+### Auth coordinator and concurrency
 
 - Apply ID token to allowed path.
-- Share URL builder across session/stats.
-- Reject all path escape classes and `/api-evil/` boundary bypass.
+- Share URL builder across session and stats.
+- Reject all escape classes and `/api-evil/` boundary bypass.
 - Reject every Authorization case variant.
 - Reject without usable session.
-- Caller abort versus attempt timeout are distinguishable.
-- Transport failure does not trigger generation mutation.
-- **In-flight 200 survives soft-refresh promotion.**
-- **In-flight 500 survives soft-refresh promotion.**
-- **In-flight 401 after promotion returns `session_changed` and does not clean new session.**
+- Caller abort and timeout are distinguishable.
+- Raw transport rejection does not trigger generation mutation.
+- In-flight 200 survives soft-refresh promotion.
+- In-flight 500 survives soft-refresh promotion.
+- In-flight 401 after promotion returns `session_changed` without cleaning the new session.
+- `queueRefresh()` no-op while app inactive yields `retryable_failure`, not `refreshed`.
+- Pending-candidate no-op yields `retryable_failure`.
+- Verified same-user generation advance yields `promoted`.
+- Sign-out or identity replacement while waiting yields `superseded`.
+- Invalid grant/terminal cleanup yields `terminal`.
 - Join an already-running refresh.
 - Concurrent expired-token 401s start one refresh and each retry at most once.
 - Concurrent valid-token 401s perform one cleanup.
 - One caller abort does not cancel peer recovery.
-- Transient shared refresh failure settles all waiters as `session_recovery_pending` without cleanup.
-- Terminal result returns each final 401.
-- Keep 403 feature-scoped and secrets out of errors/logs.
+- A pending feature fetch does not block auth operations through `operationTail`.
+- 401 recovery cannot self-deadlock behind the feature request.
+- Keep 403 feature-scoped and secrets out of logs/errors.
 
-### Mobile API/SRS services
+### API/SRS service and latency
 
-- Map every coordinator code, including `invalid_request` and timeout.
-- Transport stall -> network.
-- Body stall -> network.
+- Map every coordinator code.
+- Raw fetch `TypeError` -> `network`.
+- Feature deadline without auth recovery -> `network`.
+- Feature deadline during shared auth recovery -> `session_recovery_pending`.
 - Caller abort -> cancellation.
 - Timer/listener cleanup.
-- Body timeout does not cancel peer auth recovery.
-- Parse/validate JSON and classify HTTP/errors.
-- Forward exact path/signal.
+- Deadline does not cancel peer auth recovery.
+- Parse/validate JSON and classify HTTP errors.
+- Forward exact path and signal.
+- Verify three failed network attempts plus retry delays remain within the documented approximately 27-second bound under fake timers.
 - Provision without cross-boot injection.
 
-### Query/recovery/retry
+### Query, lifecycle, cache, and UI
 
 - QueryClient singleton/plugin identity and boot order.
 - Exact two-retry network/server predicate; all other codes false.
-- First same-user `session_changed` silently retries once.
-- Repeated control race produces visible manual recovery, never blank UI.
-- Recoverable `session_unavailable` retries once.
-- Pending recovery with cache retains count and uses auth banner.
+- First same-user session race silently retries once.
+- Repeated race produces visible manual recovery, never blank UI.
+- Pending recovery with cache retains count.
 - Pending recovery without cache shows recovery loading.
-- Successful later auth retry refetches once.
-- Unusable auth removes Home.
-
-### Lifecycle/cache/UI
-
+- Same-user `recovering -> usable` refetches once.
+- Composable does not inspect raw auth operation/retry/error fields.
 - Native focus updates and enabled-only refetch.
 - Sign-out/terminal cleanup cancel before clear.
 - Soft refresh failure retains usable cache.
@@ -624,7 +684,7 @@ Home copy/semantics:
 - Manual/background flags are distinct.
 - All loading, zero, positive, error, retry, stale, recovery, and defect states are accessible.
 - Cached positive and zero both show stale warning after failed refetch.
-- No Start Review/scaffold content.
+- No Start Review or scaffold content.
 
 ## Manual Verification Matrix and Gates
 
@@ -633,11 +693,11 @@ Home copy/semantics:
 | Fresh sign-in | Home fetches authenticated count |
 | Relaunch restoration | Restores without another Google prompt |
 | Positive/zero | Mobile agrees with web/API and renders correct copy |
-| Network failure/retry | Safe retryable failure then successful Retry |
+| Network failure/retry | Blocking failure appears within the documented bound; Retry succeeds after restoration |
 | Background/resume | Active transition refetches |
-| Soft auth-refresh failure | Cached count remains if session usable; auth recovery can refetch |
+| Soft auth-refresh failure | Cached count remains if usable; later auth recovery refetches |
 | Rejected token | Home disappears and authentication is shown |
-| Sign-out/account isolation | Data clears immediately; later account never sees it |
+| Sign-out/account isolation | Data clears immediately; a later account never sees it |
 | iOS Simulator | Complete flow passes before implementation PR merge |
 | Physical iPhone | Complete flow passes before HPA-207 closes |
 
@@ -645,7 +705,7 @@ Automated checks and Simulator flow are merge gates. Physical-device evidence is
 
 ## Expected File Boundaries
 
-### Shared
+### Shared and repository documentation
 
 - Create: `packages/common/src/contracts/srs.ts`
 - Create: `packages/common/src/contracts/srs.test.ts`
@@ -654,11 +714,14 @@ Automated checks and Simulator flow are merge gates. Physical-device evidence is
 - Modify: `packages/common/src/index.ts`
 - Modify: `apps/vela/src/services/srsService.ts`
 - Modify: `apps/vela/src/services/srsService.test.ts`
+- Modify: `CLAUDE.md`
 
-### Mobile boot/dependencies
+### Mobile dependencies, configuration, and boot
 
 - Modify: `apps/vela-mobile/package.json`
 - Modify: `bun.lock`
+- Modify: `apps/vela-mobile/quasar.config.ts`
+- Modify: `apps/vela-mobile/vitest.config.ts`
 - Create: `apps/vela-mobile/src/boot/query.ts`
 - Create: `apps/vela-mobile/src/boot/query.test.ts`
 - Modify: `apps/vela-mobile/src/boot/boot-files.ts`
@@ -668,9 +731,11 @@ Automated checks and Simulator flow are merge gates. Physical-device evidence is
 - Modify: `apps/vela-mobile/src/boot/mobile-auth.ts`
 - Modify: `apps/vela-mobile/src/boot/mobile-auth.test.ts`
 
-### Auth/services
+### Auth and services
 
 - Modify: `apps/vela-mobile/src/auth/mobile-auth-contract.ts`
+- Create: `apps/vela-mobile/src/auth/mobile-feature-session-status.ts`
+- Create: `apps/vela-mobile/src/auth/mobile-feature-session-status.test.ts`
 - Modify: `apps/vela-mobile/src/services/mobile-auth.ts`
 - Modify: `apps/vela-mobile/src/services/mobile-auth.test.ts`
 - Modify: `apps/vela-mobile/src/test/secret-leak-helpers.ts`
@@ -681,7 +746,7 @@ Automated checks and Simulator flow are merge gates. Physical-device evidence is
 - Create: `apps/vela-mobile/src/services/mobile-services.ts`
 - Create: `apps/vela-mobile/src/services/mobile-services.test.ts`
 
-### Query/presentation
+### Query and presentation
 
 - Create: `apps/vela-mobile/src/services/mobile-query-auth-isolation.ts`
 - Create: `apps/vela-mobile/src/services/mobile-query-auth-isolation.test.ts`
@@ -698,35 +763,39 @@ Automated checks and Simulator flow are merge gates. Physical-device evidence is
 
 | Criterion | Coverage |
 | --- | --- |
-| Restored user reaches Home | HPA-206 gate + enabled query |
-| Home displays stats count | Mobile SRS service + selector |
-| Rejected/expired token cannot leak another user’s data | 401-only generation guard, shared recovery, user key, cancellation, cache clear |
+| Restored user reaches Home | HPA-206 gate plus enabled query |
+| Home displays stats count | Mobile SRS service plus selector |
+| Rejected/expired token cannot leak another user’s data | 401-only generation guard, explicit recovery outcome, user key, cancellation, cache clear |
 | Accessible loading/empty/failure/retry | Exhaustive view including auth recovery and manual retry |
-| Sign-out clears user data | Cancel then clear |
+| Signing out clears user data | Cancel then clear |
 | Count agrees with web/API | Manual matrix |
-| Tests cover states/isolation | Concurrency, timeout, service, query, cache, UI suites |
-| Simulator/device verification | Merge gate + closure gate |
+| Tests cover states/isolation | Concurrency, no-op refresh, timeout, service, query, cache, and UI suites |
+| Simulator/device verification | Merge gate plus closure gate |
 
 ## Risks and Mitigations
 
+- **Refresh promise resolves without promotion:** derive the result from owner/generation/state postconditions.
+- **Feature request blocks or deadlocks auth:** keep feature I/O outside `operationTail`; serialize mutations only.
 - **Successful response discarded during refresh:** return non-401 before generation comparison.
-- **Duplicate refresh/cleanup:** one recovery promise per owner/generation.
-- **Hanging feature request/body:** bounded transport attempts, bounded body read, bounded existing auth operations.
-- **Transient refresh deletes credential:** settle as pending recovery; retain HPA-206 state/credential.
+- **Duplicate refresh/cleanup:** one recovery record per owner/generation.
+- **Long invisible loading:** eight-second execution budgets and an approximately 27-second total retry bound.
+- **Transient refresh deletes credential:** settle as pending recovery and retain HPA-206 state.
+- **Stale common build in per-app workflow:** alias mobile build/tests to current common source.
+- **Auth state machine leaks into feature code:** expose a stable auth-owned session-capability selector.
 - **Previous-user cache flash:** user key, disable, cancel then clear.
 - **Token/path leakage:** coordinator-owned bearer, header rejection, parsed path boundaries, secret-leak tests.
-- **Scope expansion:** count/status only; review execution later.
+- **Scope expansion:** count and status only; review execution later.
 
 ## Implementation Sequence
 
-1. Shared contract, package description, and user-scoped stats key.
-2. URL/header boundary and bounded feature transport.
-3. Non-401 ordering plus single-flight current-401 recovery.
-4. API body timeout/error normalization and SRS service provisioning.
-5. QueryClient boot, retry predicate, and native focus bridge.
-6. Cache isolation and pending-auth-recovery refetch.
-7. Composable control-race/manual-retry behavior and pure selector.
-8. Home presentation/accessibility.
+1. Shared contract, package description, stats key, sibling-key warning, and stale repository documentation.
+2. Mobile common-source aliases and QueryClient dependency/bootstrap.
+3. URL/header boundary and feature transport outside `operationTail`.
+4. Explicit refresh observation, non-401 ordering, and single-flight current-401 recovery.
+5. API execution deadline, raw transport classification, body parsing, and SRS provisioning.
+6. Stable feature-session selector, retry policy, native focus, and cache isolation.
+7. Composable control-race, pending-recovery, and manual-retry behavior.
+8. Pure view selector and Home accessibility states.
 9. Simulator merge-gate and physical-device closure evidence.
 
-Each stage must leave existing web authentication, web SRS loading, mobile OAuth restoration, and sign-out behavior unchanged except for the shared contract, package description, and stats-key signature.
+Each stage must leave existing web authentication, web SRS loading, mobile OAuth restoration, and sign-out behavior unchanged except for the shared contract, package description, stats-key signature, and corrected repository documentation.
