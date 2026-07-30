@@ -290,8 +290,8 @@ Feature 401 recovery uses a feature-specific observer:
 type FeatureRefreshObservation =
   | { kind: 'promoted'; owner: ActiveSession; generation: number }
   | { kind: 'terminal' }
-  | { kind: 'retryable_failure' }
-  | { kind: 'superseded' };
+  | { kind: 'superseded' }
+  | { kind: 'retryable_failure' };
 
 async function observeFeatureRefresh(
   owner: ActiveSession,
@@ -299,12 +299,16 @@ async function observeFeatureRefresh(
 ): Promise<FeatureRefreshObservation>;
 ```
 
-`observeFeatureRefresh()` calls or joins `queueRefresh({ requireDue: false, owner, generation })`, then derives outcome from coordinator postconditions—not from promise fulfillment:
+`observeFeatureRefresh()` calls or joins `queueRefresh({ requireDue: false, owner, generation })`, then derives outcome from coordinator postconditions—not from promise fulfillment.
 
-- `promoted`: a usable active session for the same user exists and `activeBundleGeneration > generation`;
-- `superseded`: owner/generation changed without a verified same-user promotion, including sign-out, disposal, or identity replacement;
-- `terminal`: terminal credential cleanup completed or entered its terminal cleanup-failure surface; and
-- `retryable_failure`: generation did not advance and no terminal result exists, including app inactive, pending candidate, no-op guard, transient refresh/persist/verify failure, or retryable auth state.
+Postconditions are evaluated in this normative order:
+
+1. `promoted`: a usable active session for the same user exists and `activeBundleGeneration > generation`;
+2. `terminal`: the terminal-cleanup path started by this recovery record settled, including its cleanup-failure surface;
+3. `superseded`: owner/generation changed for another reason without a verified same-user promotion, including user sign-out, disposal, or identity replacement; and
+4. `retryable_failure`: generation did not advance and no recovery-owned terminal result exists, including app inactive, pending candidate, no-op guard, transient refresh/persist/verify failure, or retryable auth state.
+
+The recovery record owns a boolean/enum indicating whether it initiated terminal cleanup, so ordinary sign-out or disposal cannot be misclassified as the recovery’s terminal result.
 
 This explicitly covers every silent `queueRefresh()` no-op path. A `superseded` outcome maps to `session_changed`; `retryable_failure` maps to `session_recovery_pending`.
 
@@ -316,8 +320,8 @@ Concurrent 401s for one active owner/generation share one decision:
 type FeatureUnauthorizedRecoveryResult =
   | { kind: 'refreshed' }
   | { kind: 'terminal' }
-  | { kind: 'retryable_failure' }
-  | { kind: 'superseded' };
+  | { kind: 'superseded' }
+  | { kind: 'retryable_failure' };
 
 type FeatureUnauthorizedRecovery = {
   owner: ActiveSession;
@@ -332,7 +336,7 @@ Rules:
 2. Peers for the same owner/generation await the same promise.
 3. Caller abort detaches only that caller.
 4. Refresh work still uses `refreshPromise` and `serialize()` internally.
-5. Terminal cleanup is enqueued once through `serialize()`.
+5. Terminal cleanup is enqueued once through `serialize()` and marked as recovery-owned.
 6. The recovery record clears only after settlement.
 7. After `refreshed`, each caller retries its own feature request once.
 8. A feature retry captures the promoted generation and cannot recursively recover again.
@@ -341,14 +345,14 @@ Decision:
 
 - join a refresh already in flight for the captured owner/generation;
 - otherwise use `observeFeatureRefresh()` when the captured token expired in flight;
-- otherwise treat rejection of a still-valid current token as terminal and enqueue one cleanup.
+- otherwise treat rejection of a still-valid current token as terminal and enqueue one recovery-owned cleanup.
 
 | Shared result | Per-request result |
 | --- | --- |
 | `refreshed` | Retry own feature request once |
 | `terminal` | Return own original/final 401 after cleanup |
-| `retryable_failure` | `session_recovery_pending`; preserve credentials and retry state |
 | `superseded` | `session_changed`; do not mutate replacement state |
+| `retryable_failure` | `session_recovery_pending`; preserve credentials and retry state |
 
 A feature waiter waits only for the current shared attempt, never a later automatic or user-initiated auth retry.
 
@@ -543,7 +547,7 @@ useQuery({
 
 For `session_changed` or a dispatch-time `session_unavailable` race:
 
-- if not aborted, the selector still reports the same user as usable, silently retry once;
+- if not aborted, the semantic selector still reports the same user and `queryEnabled` remains true, silently retry once;
 - otherwise rethrow and let query enablement/the gate resolve the state; and
 - never exceed one silent control-flow retry per query execution.
 
@@ -651,8 +655,9 @@ Home copy and semantics:
 - `queueRefresh()` no-op while app inactive yields `retryable_failure`, not `refreshed`.
 - Pending-candidate no-op yields `retryable_failure`.
 - Verified same-user generation advance yields `promoted`.
+- Recovery-owned terminal cleanup takes precedence over generic generation change.
 - Sign-out or identity replacement while waiting yields `superseded`.
-- Invalid grant/terminal cleanup yields `terminal`.
+- Invalid grant/recovery-owned terminal cleanup yields `terminal`.
 - Join an already-running refresh.
 - Concurrent expired-token 401s start one refresh and each retry at most once.
 - Concurrent valid-token 401s perform one cleanup.
@@ -783,7 +788,8 @@ Automated checks and Simulator flow are merge gates. Physical-device evidence is
 
 ## Risks and Mitigations
 
-- **Refresh promise resolves without promotion:** derive the result from owner/generation/state postconditions.
+- **Refresh promise resolves without promotion:** derive the result from ordered owner/generation/state postconditions.
+- **Terminal cleanup confused with sign-out:** track whether the recovery record initiated cleanup and apply normative outcome precedence.
 - **Feature request blocks or deadlocks auth:** keep feature I/O outside `operationTail`; serialize mutations only.
 - **Successful response discarded during refresh:** return non-401 before generation comparison.
 - **Duplicate refresh/cleanup:** one recovery record per owner/generation.
