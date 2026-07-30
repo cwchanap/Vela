@@ -79,6 +79,25 @@ type AuthenticatedFeatureSnapshot = {
   userId: string;
 };
 
+type FeatureRefreshObservation =
+  | { kind: 'promoted'; owner: ActiveSession; generation: number }
+  | { kind: 'terminal' }
+  | { kind: 'superseded' }
+  | { kind: 'retryable_failure' };
+
+type FeatureUnauthorizedRecoveryResult =
+  | { kind: 'refreshed' }
+  | { kind: 'terminal' }
+  | { kind: 'superseded' }
+  | { kind: 'retryable_failure' };
+
+type FeatureUnauthorizedRecovery = {
+  owner: ActiveSession;
+  generation: number;
+  terminalCleanupStarted: boolean;
+  promise: Promise<FeatureUnauthorizedRecoveryResult>;
+};
+
 type CleanupContext =
   | { kind: 'signOut' }
   | { kind: 'terminalSession' }
@@ -287,6 +306,7 @@ export function createMobileAuthCoordinator(
   let restoreRefreshToken: string | undefined;
   let cleanupContext: CleanupContext | undefined;
   let signOutPromise: Promise<void> | undefined;
+  let featureUnauthorizedRecovery: FeatureUnauthorizedRecovery | undefined;
   let initialized = false;
   let disposed = false;
   let disposalRequested = false;
@@ -365,8 +385,121 @@ export function createMobileAuthCoordinator(
     }
   }
 
-  async function requestAuthenticatedApi(
+  async function observeFeatureRefresh(
+    owner: ActiveSession,
+    generation: number,
+  ): Promise<FeatureRefreshObservation> {
+    await queueRefresh({ requireDue: false, owner, generation });
+
+    if (
+      active !== undefined &&
+      active.user.userId === owner.user.userId &&
+      activeBundleGeneration > generation &&
+      activeSessionIsUsable()
+    ) {
+      return { kind: 'promoted', owner: active, generation: activeBundleGeneration };
+    }
+
+    if (featureUnauthorizedRecovery?.terminalCleanupStarted === true) {
+      return { kind: 'terminal' };
+    }
+
+    if (unavailable() || active !== owner || activeBundleGeneration !== generation) {
+      return { kind: 'superseded' };
+    }
+
+    return { kind: 'retryable_failure' };
+  }
+
+  function getOrCreateFeatureUnauthorizedRecovery(
+    snapshot: AuthenticatedFeatureSnapshot,
+  ): Promise<FeatureUnauthorizedRecoveryResult> {
+    const existing = featureUnauthorizedRecovery;
+    if (existing?.owner === snapshot.owner && existing.generation === snapshot.generation) {
+      return existing.promise;
+    }
+
+    let record!: FeatureUnauthorizedRecovery;
+    const promise = (async (): Promise<FeatureUnauthorizedRecoveryResult> => {
+      try {
+        let observation: FeatureRefreshObservation;
+        if (snapshot.expiresAt <= dependencies.now()) {
+          observation = await observeFeatureRefresh(snapshot.owner, snapshot.generation);
+        } else {
+          let cleanupStarted = false;
+          await serialize(async () => {
+            if (
+              unavailable() ||
+              active !== snapshot.owner ||
+              activeBundleGeneration !== snapshot.generation
+            ) {
+              return;
+            }
+            cleanupStarted = true;
+            await terminalSessionCleanupUnlocked();
+          });
+          observation = cleanupStarted ? { kind: 'terminal' } : { kind: 'superseded' };
+        }
+
+        switch (observation.kind) {
+          case 'promoted':
+            return { kind: 'refreshed' };
+          case 'terminal':
+          case 'superseded':
+          case 'retryable_failure':
+            return observation;
+        }
+      } finally {
+        if (featureUnauthorizedRecovery === record) {
+          featureUnauthorizedRecovery = undefined;
+        }
+      }
+    })();
+    record = {
+      owner: snapshot.owner,
+      generation: snapshot.generation,
+      terminalCleanupStarted: false,
+      promise,
+    };
+    featureUnauthorizedRecovery = record;
+    return promise;
+  }
+
+  async function waitForFeatureRecoveryOrCallerAbort(
+    snapshot: AuthenticatedFeatureSnapshot,
+    signal: AbortSignal | undefined,
+  ): Promise<FeatureUnauthorizedRecoveryResult> {
+    const recovery = getOrCreateFeatureUnauthorizedRecovery(snapshot);
+    if (!signal) {
+      return recovery;
+    }
+
+    return new Promise<FeatureUnauthorizedRecoveryResult>((resolve, reject) => {
+      const abort = () => {
+        signal.removeEventListener('abort', abort);
+        reject(new DOMException('The operation was aborted.', 'AbortError'));
+      };
+      signal.addEventListener('abort', abort, { once: true });
+      if (signal.aborted) {
+        abort();
+        return;
+      }
+      void recovery.then(
+        (result) => {
+          signal.removeEventListener('abort', abort);
+          resolve(result);
+        },
+        (error: unknown) => {
+          signal.removeEventListener('abort', abort);
+          reject(error);
+        },
+      );
+    });
+  }
+
+  async function requestAuthenticatedApiInternal(
     request: MobileAuthenticatedApiRequest,
+    allowRefreshRetry: boolean,
   ): Promise<Response> {
     // Resolve caller-controlled URL and headers before consulting any session
     // material, so malformed requests can never trigger a bearer fetch.
@@ -397,7 +530,24 @@ export function createMobileAuthCoordinator(
     if (active !== snapshot.owner || activeBundleGeneration !== snapshot.generation) {
       throw new MobileAuthenticatedApiRequestError('session_changed');
     }
-    return response;
+    const recovery = await waitForFeatureRecoveryOrCallerAbort(snapshot, request.init?.signal);
+    switch (recovery.kind) {
+      case 'refreshed':
+        if (!allowRefreshRetry) {
+          return response;
+        }
+        return requestAuthenticatedApiInternal(request, false);
+      case 'terminal':
+        return response;
+      case 'superseded':
+        throw new MobileAuthenticatedApiRequestError('session_changed');
+      case 'retryable_failure':
+        throw new MobileAuthenticatedApiRequestError('session_recovery_pending');
+    }
+  }
+
+  function requestAuthenticatedApi(request: MobileAuthenticatedApiRequest): Promise<Response> {
+    return requestAuthenticatedApiInternal(request, true);
   }
 
   const transitions = {
@@ -866,6 +1016,14 @@ export function createMobileAuthCoordinator(
           : 'initializing';
     const cleanupUser =
       cleanupPhase === 'authenticated' ? (state.user ?? active?.user ?? null) : null;
+    const activeRecovery = featureUnauthorizedRecovery;
+    if (
+      activeRecovery !== undefined &&
+      activeRecovery.owner === active &&
+      activeRecovery.generation === activeBundleGeneration
+    ) {
+      activeRecovery.terminalCleanupStarted = true;
+    }
     clearActiveSession();
     const cleanupGeneration = activeBundleGeneration;
     pendingCandidate = undefined;
