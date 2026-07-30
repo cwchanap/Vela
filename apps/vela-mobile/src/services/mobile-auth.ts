@@ -797,6 +797,23 @@ export function createMobileAuthCoordinator(
       return;
     }
 
+    // An expired candidate must not be verified directly: the expired ID
+    // token would elicit a 401 from /auth/session, which terminal cleanup
+    // treats as proof the durable refresh token is unusable — destroying a
+    // still-valid credential. Discard the expired candidate and obtain a
+    // fresh one through the refresh grant instead.
+    if (candidate.bundle.expiresAt <= dependencies.now()) {
+      const durableRefreshToken = candidate.durableRefreshToken;
+      pendingCandidate = undefined;
+      pendingSubject = undefined;
+      if (candidate.context === 'refresh') {
+        await refreshActiveSessionUnlocked();
+      } else {
+        await restoreSessionUnlocked(durableRefreshToken);
+      }
+      return;
+    }
+
     transitions.enterOperation({
       phase:
         candidate.context === 'refresh'
@@ -1128,8 +1145,26 @@ export function createMobileAuthCoordinator(
     });
   }
 
-  function isTerminalRefreshStatus(status: number): boolean {
-    return status === 400 || status === 401 || status === 403;
+  // RFC 6749 §5.2 requires token-endpoint errors to use HTTP 400 with an
+  // `error` parameter. Only `invalid_grant` establishes that the refresh
+  // token itself is revoked or otherwise unusable; other 400 errors
+  // (`invalid_client`, `invalid_request`, `unauthorized_client`,
+  // `unsupported_grant_type`) indicate client/config faults that don't
+  // invalidate the credential. A 401/403 from a gateway or WAF in front of
+  // Cognito is not an OAuth error at all. Treating any of those as terminal
+  // would destroy a still-valid durable refresh token and force an
+  // unnecessary interactive sign-in.
+  function isInvalidGrantRefreshFailure(response: { status: number; data: unknown }): boolean {
+    if (response.status !== 400) {
+      return false;
+    }
+    let parsed: unknown;
+    try {
+      parsed = parseTransportData(response.data);
+    } catch {
+      return false;
+    }
+    return isRecord(parsed) && parsed.error === 'invalid_grant';
   }
 
   async function refreshCandidateUnlocked(
@@ -1174,7 +1209,7 @@ export function createMobileAuthCoordinator(
       return;
     }
     if (response.status < 200 || response.status >= 300) {
-      if (isTerminalRefreshStatus(response.status)) {
+      if (isInvalidGrantRefreshFailure(response)) {
         await terminalSessionCleanupUnlocked();
       } else {
         enterRefreshFailure(context);
