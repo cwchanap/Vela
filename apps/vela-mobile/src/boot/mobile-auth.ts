@@ -12,6 +12,7 @@ import {
 import { createOAuthTransactionStore } from '../auth/oauth-transaction-store';
 import { config } from '../config';
 import { createMobileAuthCoordinator, MOBILE_AUTH_KEY } from '../services/mobile-auth';
+import { provideMobileServices } from '../services/mobile-services';
 
 export default defineBoot(({ app }) => {
   const isNativeIos = Capacitor.isNativePlatform() && Capacitor.getPlatform() === 'ios';
@@ -61,5 +62,6 @@ export default defineBoot(({ app }) => {
   });
 
   app.provide(MOBILE_AUTH_KEY, coordinator);
+  provideMobileServices(app, coordinator);
   void coordinator.initialize();
 });

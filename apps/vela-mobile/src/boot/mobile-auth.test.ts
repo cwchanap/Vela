@@ -51,6 +51,7 @@ const mocks = vi.hoisted(() => {
     },
     coordinator,
     createCoordinator: vi.fn((_dependencies: unknown) => coordinator),
+    provideMobileServices: vi.fn(),
     createTransactionStore: vi.fn(),
     createIosStore: vi.fn(),
     createUnsupportedStore: vi.fn(),
@@ -75,6 +76,9 @@ vi.mock('../services/mobile-auth', async (importOriginal) => {
     createMobileAuthCoordinator: mocks.createCoordinator,
   };
 });
+vi.mock('../services/mobile-services', () => ({
+  provideMobileServices: mocks.provideMobileServices,
+}));
 vi.mock('../auth/oauth-transaction-store', () => ({
   createOAuthTransactionStore: mocks.createTransactionStore,
 }));
@@ -156,14 +160,18 @@ describe('mobile auth boot', () => {
     expect(mocks.secureStorage.remove).not.toHaveBeenCalled();
   });
 
-  it('provides the coordinator and starts initialization without blocking app mount', () => {
+  it('provides services with the coordinator before starting initialization without blocking mount', () => {
     const app = { provide: vi.fn() };
 
     const result = runBoot({ app });
 
     expect(result).toBeUndefined();
     expect(app.provide).toHaveBeenCalledWith(MOBILE_AUTH_KEY, mocks.coordinator);
+    expect(mocks.provideMobileServices).toHaveBeenCalledWith(app, mocks.coordinator);
     expect(mocks.coordinator.initialize).toHaveBeenCalledOnce();
+    expect(mocks.provideMobileServices.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.coordinator.initialize.mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY,
+    );
   });
 
   it('maps Capacitor, browser, preferences, Web Crypto, fetch, and config adapters', async () => {
