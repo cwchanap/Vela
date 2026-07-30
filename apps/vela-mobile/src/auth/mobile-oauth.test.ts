@@ -364,13 +364,13 @@ describe('OAuth token parsing and ID-token claim validation', () => {
   });
 
   it('accepts exact valid mobile ID-token claims without local signature verification', () => {
-    expect(() =>
+    expect(
       validateAuthorizationCodeIdTokenClaims(makeIdToken(validClaims), {
         config,
         transaction,
         now: 2_000_000 - 59_999,
       }),
-    ).not.toThrow();
+    ).toBe('user-123');
   });
 
   it('validates a refreshed ID token without nonce and returns its subject', () => {
@@ -434,7 +434,10 @@ describe('OAuth token parsing and ID-token claim validation', () => {
   });
 
   it('rejects a non-finite expiry decoded from a JSON numeric overflow', () => {
-    const rawClaims = JSON.stringify(validClaims).replace('"exp":2000', '"exp":1e400');
+    const serialized = JSON.stringify(validClaims);
+    const rawClaims = serialized.replace('"exp":2000', '"exp":1e400');
+    expect(rawClaims).not.toEqual(serialized);
+    expect(rawClaims).toContain('1e400');
     const idToken = `${base64UrlJson({ alg: 'none' })}.${base64UrlText(rawClaims)}.unsigned`;
 
     expect(() =>

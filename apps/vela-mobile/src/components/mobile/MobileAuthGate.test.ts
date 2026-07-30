@@ -9,67 +9,33 @@ import type {
   MobileAuthState,
 } from '../../auth/mobile-auth-contract';
 import { MOBILE_AUTH_KEY } from '../../services/mobile-auth';
+import {
+  captureConsoleCalls,
+  createSecretLeakAssertions,
+  searchable,
+  storageSnapshot,
+} from '../../test/secret-leak-helpers';
 import MobileAuthGate, { shouldBypassMobileAuth } from './MobileAuthGate.vue';
 
-const SECRET_SENTINELS = [
-  'SECRET-access-token',
-  'SECRET-id-token',
-  'SECRET-refresh-token',
-  'SECRET-rotated-refresh-token',
-] as const;
-
-const LOG_AND_DOM_SENTINELS = [
-  ...SECRET_SENTINELS,
-  'SECRET-authorization-url',
-  'SECRET-callback-code',
-  'SECRET-code-verifier',
-  'SECRET-nonce',
-  'SECRET-claim-email',
-] as const;
-
-function searchable(value: unknown): string {
-  try {
-    return JSON.stringify(value);
-  } catch {
-    return String(value);
-  }
-}
-
-function storageSnapshot(storage: Storage): string {
-  return Array.from({ length: storage.length }, (_, index) => {
-    const key = storage.key(index) ?? '';
-    return `${key}=${storage.getItem(key) ?? ''}`;
-  }).join('\n');
-}
-
-function expectNoSecretLeak(input: {
-  consoleCalls: unknown[][];
-  preferenceCalls: unknown[][];
-  renderedText?: string;
-}): void {
-  const logsAndDom = [
-    searchable(input.consoleCalls),
-    input.renderedText ?? document.body.textContent ?? '',
-  ].join('\n');
-  const browserAndPreferenceStorage = [
-    searchable(input.preferenceCalls),
-    storageSnapshot(window.localStorage),
-    storageSnapshot(window.sessionStorage),
-  ].join('\n');
-
-  for (const secret of LOG_AND_DOM_SENTINELS) {
-    expect(logsAndDom).not.toContain(secret);
-  }
-  for (const secret of SECRET_SENTINELS) {
-    expect(browserAndPreferenceStorage).not.toContain(secret);
-  }
-}
+const { expectNoSecretLeak } = createSecretLeakAssertions({
+  installationKey: 'vela:installation:us-east-1_example:mobile-client-id',
+});
 
 const ProtectedSlot = defineComponent({
   template: '<div data-testid="protected-slot">Protected content</div>',
 });
 
 const user = { userId: 'user-1', email: 'vela@example.com' };
+
+const BLOCKING_OPERATION_STATES: Record<MobileAuthState['operation'], Partial<MobileAuthState>> = {
+  idle: {},
+  restoring: { phase: 'initializing' },
+  refreshing: { phase: 'authenticated', user },
+  persisting: { phase: 'exchangingCode' },
+  verifying: { phase: 'verifyingSession' },
+  signingOut: { phase: 'authenticated', user },
+  cleaningUp: { phase: 'signedOut' },
+};
 
 const routes: RouteRecordRaw[] = [
   { path: '/', component: ProtectedSlot },
@@ -124,28 +90,6 @@ function contrastRatio(first: [number, number, number], second: [number, number,
   const brighter = Math.max(relativeLuminance(first), relativeLuminance(second));
   const darker = Math.min(relativeLuminance(first), relativeLuminance(second));
   return (brighter + 0.05) / (darker + 0.05);
-}
-
-function captureConsoleCalls(): {
-  calls: () => unknown[][];
-  restore: () => void;
-} {
-  const spies = (['debug', 'info', 'log', 'warn', 'error'] as const).map((method) =>
-    vi.spyOn(console, method).mockImplementation(() => undefined),
-  );
-  return {
-    calls: () =>
-      spies.flatMap((spy) =>
-        spy.mock.calls.map((call) =>
-          call.map((value) =>
-            value instanceof Error ? { ...value, name: value.name, message: value.message } : value,
-          ),
-        ),
-      ),
-    restore: () => {
-      for (const spy of spies) spy.mockRestore();
-    },
-  };
 }
 
 function withRawSecretState(state: Partial<MobileAuthState>): Partial<MobileAuthState> {
@@ -665,29 +609,26 @@ describe('MobileAuthGate', () => {
     expect(wrapper.find('[data-testid="protected-slot"]').exists()).toBe(true);
   });
 
-  it.each(['browser', 'Android'])(
-    'renders %s as a dedicated native-iOS-only non-retryable gate',
-    async () => {
-      const { wrapper } = await mountGate({
-        phase: 'error',
-        operation: 'idle',
-        sessionUsable: false,
-        errorCode: 'unsupported_platform',
-        retryAction: null,
-        notice: null,
-        user: null,
-      });
+  it('renders unsupported_platform as a dedicated native-iOS-only non-retryable gate', async () => {
+    const { wrapper } = await mountGate({
+      phase: 'error',
+      operation: 'idle',
+      sessionUsable: false,
+      errorCode: 'unsupported_platform',
+      retryAction: null,
+      notice: null,
+      user: null,
+    });
 
-      expect(wrapper.find('[data-testid="protected-slot"]').exists()).toBe(false);
-      expect(wrapper.get('[role="alert"]').text()).toContain(
-        'Vela mobile sign-in is unavailable here',
-      );
-      expect(wrapper.get('[role="alert"]').text()).toContain(
-        'Vela mobile sign-in is supported only on native iOS.',
-      );
-      expect(wrapper.find('button').exists()).toBe(false);
-    },
-  );
+    expect(wrapper.find('[data-testid="protected-slot"]').exists()).toBe(false);
+    expect(wrapper.get('[role="alert"]').text()).toContain(
+      'Vela mobile sign-in is unavailable here',
+    );
+    expect(wrapper.get('[role="alert"]').text()).toContain(
+      'Vela mobile sign-in is supported only on native iOS.',
+    );
+    expect(wrapper.find('button').exists()).toBe(false);
+  });
 
   it('shows non-configuration auth errors instead of marked diagnostics', async () => {
     const { wrapper } = await mountGate(
@@ -810,18 +751,10 @@ describe('MobileAuthGate', () => {
     ['signingOut', 'Signing out…'],
     ['cleaningUp', 'Finishing secure sign-out…'],
   ])('announces blocking %s operation with exact copy', async (operation, copy) => {
-    const operationState: Partial<MobileAuthState> =
-      operation === 'restoring'
-        ? { phase: 'initializing', operation }
-        : operation === 'refreshing'
-          ? { phase: 'authenticated', operation, user }
-          : operation === 'persisting'
-            ? { phase: 'exchangingCode', operation }
-            : operation === 'verifying'
-              ? { phase: 'verifyingSession', operation }
-              : operation === 'signingOut'
-                ? { phase: 'authenticated', operation, user }
-                : { phase: 'signedOut', operation };
+    const operationState: Partial<MobileAuthState> = {
+      operation,
+      ...BLOCKING_OPERATION_STATES[operation],
+    };
     const { wrapper } = await mountGate(operationState);
 
     const status = wrapper.get('[role="status"]');
@@ -919,6 +852,32 @@ describe('MobileAuthGate', () => {
 
     Object.assign(state, {
       operation: 'idle',
+      errorCode: 'session_refresh_failed',
+      retryAction: 'refresh',
+    });
+    await nextTick();
+    await nextTick();
+
+    expect(document.activeElement).toBe(wrapper.get('[data-testid="auth-error-heading"]').element);
+  });
+
+  it('returns focus to the error heading when usable content becomes a blocking session failure', async () => {
+    const host = document.createElement('div');
+    document.body.append(host);
+    const { state, wrapper } = await mountGate(
+      { phase: 'signedOut' },
+      { attachTo: host, path: '/review' },
+    );
+
+    state.phase = 'authenticated';
+    state.sessionUsable = true;
+    state.user = { userId: 'user-1', email: null };
+    await flushPromises();
+    await nextTick();
+    expect(wrapper.find('[data-testid="protected-slot"]').exists()).toBe(true);
+
+    Object.assign(state, {
+      sessionUsable: false,
       errorCode: 'session_refresh_failed',
       retryAction: 'refresh',
     });

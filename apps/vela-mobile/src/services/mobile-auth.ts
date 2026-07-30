@@ -46,14 +46,23 @@ type ListenerHandle = {
   remove(): Promise<void>;
 };
 
-type PendingCandidate = {
+type PendingCandidateBase = {
   bundle: OAuthTokenBundleBase;
   durableRefreshToken: string;
+  // Captured at candidate creation so candidateIsCurrent can reject any
+  // candidate (not just refresh) whose owning generation was invalidated by
+  // sign-out, disposal, or an intervening session reset.
+  generation: number;
   returnedRefreshToken?: string;
-  context: 'authorizationCode' | 'restore' | 'refresh';
-  refreshOwner?: ActiveSession;
-  refreshGeneration?: number;
 };
+
+type PendingCandidate =
+  | (PendingCandidateBase & { context: 'authorizationCode' })
+  | (PendingCandidateBase & { context: 'restore' })
+  | (PendingCandidateBase & {
+      context: 'refresh';
+      refreshOwner: ActiveSession;
+    });
 
 type ActiveSession = {
   bundle: OAuthTokenBundleBase & { refreshToken: string };
@@ -674,6 +683,15 @@ export function createMobileAuthCoordinator(
     }
   }
 
+  async function removeListenerHandles(): Promise<void> {
+    await removeListener(appUrlHandle);
+    await removeListener(appStateHandle);
+    await removeListener(browserFinishedHandle);
+    appUrlHandle = undefined;
+    appStateHandle = undefined;
+    browserFinishedHandle = undefined;
+  }
+
   async function clearTransaction(): Promise<void> {
     try {
       await dependencies.transactionStore.clear();
@@ -683,12 +701,13 @@ export function createMobileAuthCoordinator(
   }
 
   function candidateIsCurrent(candidate: PendingCandidate): boolean {
-    return (
-      !unavailable() &&
-      (candidate.context !== 'refresh' ||
-        (candidate.refreshOwner === active &&
-          candidate.refreshGeneration === activeBundleGeneration))
-    );
+    if (unavailable() || candidate.generation !== activeBundleGeneration) {
+      return false;
+    }
+    if (candidate.context === 'refresh') {
+      return candidate.refreshOwner === active;
+    }
+    return true;
   }
 
   async function failCallback(errorCode: MobileAuthErrorCode): Promise<void> {
@@ -1038,12 +1057,13 @@ export function createMobileAuthCoordinator(
     }
 
     let bundle: AuthorizationCodeTokenBundle;
+    let authorizationCodeSubject: string;
     try {
       bundle = parseAuthorizationCodeTokenResponse(
         parseTransportData(response.data),
         dependencies.now(),
       );
-      validateAuthorizationCodeIdTokenClaims(bundle.idToken, {
+      authorizationCodeSubject = validateAuthorizationCodeIdTokenClaims(bundle.idToken, {
         config: dependencies.config,
         transaction,
         now: dependencies.now(),
@@ -1058,27 +1078,25 @@ export function createMobileAuthCoordinator(
       bundle: candidateBundle,
       durableRefreshToken: refreshToken,
       context: 'authorizationCode',
+      generation: activeBundleGeneration,
     };
-    pendingSubject = undefined;
+    pendingSubject = authorizationCodeSubject;
     await persistPendingCandidateUnlocked();
     return true;
   }
 
-  function classifyRefreshTokenLoad(
-    result: PromiseSettledResult<string | null>,
-  ): SettledRefreshToken {
-    if (result.status === 'fulfilled') {
-      return { kind: 'loaded', refreshToken: result.value };
-    }
-    if (result.reason instanceof MobileSessionStoreError && result.reason.code === 'corrupt') {
-      return { kind: 'corrupt' };
-    }
-    return { kind: 'unavailable' };
-  }
-
   async function loadRefreshTokenSettled(): Promise<SettledRefreshToken> {
-    const [result] = await Promise.allSettled([dependencies.sessionStore.loadRefreshToken()]);
-    return classifyRefreshTokenLoad(result!);
+    try {
+      return {
+        kind: 'loaded',
+        refreshToken: await dependencies.sessionStore.loadRefreshToken(),
+      };
+    } catch (reason) {
+      if (reason instanceof MobileSessionStoreError && reason.code === 'corrupt') {
+        return { kind: 'corrupt' };
+      }
+      return { kind: 'unavailable' };
+    }
   }
 
   async function loadTransactionSettled(): Promise<SettledTransaction> {
@@ -1185,18 +1203,26 @@ export function createMobileAuthCoordinator(
     }
 
     const { refreshToken: returnedRefreshToken, ...bundle } = refreshed;
-    pendingCandidate = {
-      bundle,
-      durableRefreshToken: returnedRefreshToken ?? refreshToken,
-      ...(returnedRefreshToken === undefined ? {} : { returnedRefreshToken }),
-      context,
-      ...(context === 'refresh'
-        ? {
-            refreshOwner: refreshOwner!,
-            refreshGeneration: refreshGeneration!,
-          }
-        : {}),
-    };
+    const durableRefreshToken = returnedRefreshToken ?? refreshToken;
+    const generation = activeBundleGeneration;
+    if (context === 'refresh') {
+      pendingCandidate = {
+        bundle,
+        durableRefreshToken,
+        generation,
+        context,
+        refreshOwner: refreshOwner!,
+        ...(returnedRefreshToken === undefined ? {} : { returnedRefreshToken }),
+      };
+    } else {
+      pendingCandidate = {
+        bundle,
+        durableRefreshToken,
+        generation,
+        context,
+        ...(returnedRefreshToken === undefined ? {} : { returnedRefreshToken }),
+      };
+    }
     pendingSubject = subject;
 
     await persistPendingCandidateUnlocked();
@@ -1339,12 +1365,7 @@ export function createMobileAuthCoordinator(
     }
 
     if (launchUrlResult.status === 'rejected') {
-      await removeListener(appUrlHandle);
-      await removeListener(appStateHandle);
-      await removeListener(browserFinishedHandle);
-      appUrlHandle = undefined;
-      appStateHandle = undefined;
-      browserFinishedHandle = undefined;
+      await removeListenerHandles();
       if (unavailable()) {
         return;
       }
@@ -1427,12 +1448,7 @@ export function createMobileAuthCoordinator(
         void serialize(handleBrowserFinishedUnlocked);
       });
     } catch {
-      await removeListener(appUrlHandle);
-      await removeListener(appStateHandle);
-      await removeListener(browserFinishedHandle);
-      appUrlHandle = undefined;
-      appStateHandle = undefined;
-      browserFinishedHandle = undefined;
+      await removeListenerHandles();
       if (unavailable()) {
         return;
       }
@@ -1441,12 +1457,7 @@ export function createMobileAuthCoordinator(
     }
 
     if (unavailable()) {
-      await removeListener(appUrlHandle);
-      await removeListener(appStateHandle);
-      await removeListener(browserFinishedHandle);
-      appUrlHandle = undefined;
-      appStateHandle = undefined;
-      browserFinishedHandle = undefined;
+      await removeListenerHandles();
       return;
     }
     let installationMarked: boolean;
@@ -1701,12 +1712,7 @@ export function createMobileAuthCoordinator(
     }
     disposed = true;
     cancelActiveSessionTimers();
-    await removeListener(appUrlHandle);
-    await removeListener(appStateHandle);
-    await removeListener(browserFinishedHandle);
-    appUrlHandle = undefined;
-    appStateHandle = undefined;
-    browserFinishedHandle = undefined;
+    await removeListenerHandles();
     clearActiveSession();
     pendingCandidate = undefined;
     pendingSubject = undefined;

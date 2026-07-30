@@ -132,7 +132,6 @@ describe('selectMobileAuthGateView', () => {
         kind: 'blocking_session_failure',
         errorCode: 'session_restore_failed',
         retryAction: 'restore',
-        allowStartOver: true,
       },
     ],
     [
@@ -147,7 +146,6 @@ describe('selectMobileAuthGateView', () => {
         kind: 'blocking_session_failure',
         errorCode: 'session_persistence_failed',
         retryAction: 'persist',
-        allowStartOver: true,
       },
     ],
     [
@@ -162,7 +160,6 @@ describe('selectMobileAuthGateView', () => {
         kind: 'blocking_session_failure',
         errorCode: 'session_verification_failed',
         retryAction: 'verify',
-        allowStartOver: true,
       },
     ],
     [
@@ -178,7 +175,6 @@ describe('selectMobileAuthGateView', () => {
         kind: 'blocking_session_failure',
         errorCode: 'session_refresh_failed',
         retryAction: 'refresh',
-        allowStartOver: true,
       },
     ],
     [
@@ -193,7 +189,6 @@ describe('selectMobileAuthGateView', () => {
         kind: 'blocking_session_failure',
         errorCode: 'session_refresh_failed',
         retryAction: 'refresh',
-        allowStartOver: true,
       },
     ],
     [
@@ -209,7 +204,6 @@ describe('selectMobileAuthGateView', () => {
         kind: 'blocking_session_failure',
         errorCode: 'session_refresh_failed',
         retryAction: 'refresh',
-        allowStartOver: true,
       },
     ],
     [
@@ -224,7 +218,6 @@ describe('selectMobileAuthGateView', () => {
         kind: 'blocking_session_failure',
         errorCode: 'session_persistence_failed',
         retryAction: 'persist',
-        allowStartOver: true,
       },
     ],
     [
@@ -239,10 +232,9 @@ describe('selectMobileAuthGateView', () => {
         kind: 'blocking_session_failure',
         errorCode: 'session_verification_failed',
         retryAction: 'verify',
-        allowStartOver: true,
       },
     ],
-  ])('maps $label to an explicit gate view', (_label, current, landingState, expected) => {
+  ])('maps %s to an explicit gate view', (_label, current, landingState, expected) => {
     expect(selectMobileAuthGateView(current, landingState)).toEqual(expected);
   });
 
@@ -317,34 +309,49 @@ describe('selectMobileAuthGateView', () => {
     },
   );
 
-  it.each([
-    state({ sessionUsable: true }),
-    state({ phase: 'error' }),
-    state({
-      phase: 'error',
-      errorCode: 'session_restore_failed',
-      retryAction: 'refresh',
-    }),
-    state({
-      phase: 'initializing',
-      errorCode: 'session_refresh_failed',
-      retryAction: 'refresh',
-    }),
-    state({
-      operation: 'refreshing',
-      errorCode: 'session_refresh_failed',
-    }),
-    state({
-      phase: 'signedOut',
-      operation: 'signingOut',
-    }),
-    state({
-      phase: 'authenticated',
-      sessionUsable: true,
-      notice: 'session_unusable',
-      user,
-    }),
-  ])('fails closed for an invariant-breaking tuple', (current) => {
+  it.each<[string, MobileAuthState]>([
+    ['usable session outside authenticated phase', state({ sessionUsable: true })],
+    ['error phase without an error code', state({ phase: 'error' })],
+    [
+      'session_restore_failed paired with a refresh retry action',
+      state({
+        phase: 'error',
+        errorCode: 'session_restore_failed',
+        retryAction: 'refresh',
+      }),
+    ],
+    [
+      'session_refresh_failed retryable from the initializing phase',
+      state({
+        phase: 'initializing',
+        errorCode: 'session_refresh_failed',
+        retryAction: 'refresh',
+      }),
+    ],
+    [
+      'refreshing operation carrying a refresh-failure error code',
+      state({
+        operation: 'refreshing',
+        errorCode: 'session_refresh_failed',
+      }),
+    ],
+    [
+      'signingOut operation on the signedOut phase',
+      state({
+        phase: 'signedOut',
+        operation: 'signingOut',
+      }),
+    ],
+    [
+      'authenticated usable session with a terminal session_unusable notice',
+      state({
+        phase: 'authenticated',
+        sessionUsable: true,
+        notice: 'session_unusable',
+        user,
+      }),
+    ],
+  ])('fails closed for an invariant-breaking tuple (%s)', (_label, current) => {
     expect(selectMobileAuthGateView(current, 'ready')).toEqual({ kind: 'invalid_state' });
   });
 });
