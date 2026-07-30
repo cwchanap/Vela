@@ -388,6 +388,7 @@ export function createMobileAuthCoordinator(
   async function observeFeatureRefresh(
     owner: ActiveSession,
     generation: number,
+    recovery: FeatureUnauthorizedRecovery,
   ): Promise<FeatureRefreshObservation> {
     await queueRefresh({ requireDue: false, owner, generation });
 
@@ -400,7 +401,7 @@ export function createMobileAuthCoordinator(
       return { kind: 'promoted', owner: active, generation: activeBundleGeneration };
     }
 
-    if (featureUnauthorizedRecovery?.terminalCleanupStarted === true) {
+    if (recovery.terminalCleanupStarted) {
       return { kind: 'terminal' };
     }
 
@@ -413,18 +414,33 @@ export function createMobileAuthCoordinator(
 
   function getOrCreateFeatureUnauthorizedRecovery(
     snapshot: AuthenticatedFeatureSnapshot,
+    forceTerminalCleanup = false,
   ): Promise<FeatureUnauthorizedRecoveryResult> {
     const existing = featureUnauthorizedRecovery;
     if (existing?.owner === snapshot.owner && existing.generation === snapshot.generation) {
       return existing.promise;
     }
 
-    let record!: FeatureUnauthorizedRecovery;
-    const promise = (async (): Promise<FeatureUnauthorizedRecoveryResult> => {
+    let resolve!: (result: FeatureUnauthorizedRecoveryResult) => void;
+    let reject!: (error: unknown) => void;
+    const promise = new Promise<FeatureUnauthorizedRecoveryResult>(
+      (resolvePromise, rejectPromise) => {
+        resolve = resolvePromise;
+        reject = rejectPromise;
+      },
+    );
+    const record: FeatureUnauthorizedRecovery = {
+      owner: snapshot.owner,
+      generation: snapshot.generation,
+      terminalCleanupStarted: false,
+      promise,
+    };
+    featureUnauthorizedRecovery = record;
+    void (async () => {
       try {
         let observation: FeatureRefreshObservation;
-        if (snapshot.expiresAt <= dependencies.now()) {
-          observation = await observeFeatureRefresh(snapshot.owner, snapshot.generation);
+        if (!forceTerminalCleanup && snapshot.expiresAt <= dependencies.now()) {
+          observation = await observeFeatureRefresh(snapshot.owner, snapshot.generation, record);
         } else {
           let cleanupStarted = false;
           await serialize(async () => {
@@ -443,33 +459,31 @@ export function createMobileAuthCoordinator(
 
         switch (observation.kind) {
           case 'promoted':
-            return { kind: 'refreshed' };
+            resolve({ kind: 'refreshed' });
+            return;
           case 'terminal':
           case 'superseded':
           case 'retryable_failure':
-            return observation;
+            resolve(observation);
+            return;
         }
+      } catch (error) {
+        reject(error);
       } finally {
         if (featureUnauthorizedRecovery === record) {
           featureUnauthorizedRecovery = undefined;
         }
       }
     })();
-    record = {
-      owner: snapshot.owner,
-      generation: snapshot.generation,
-      terminalCleanupStarted: false,
-      promise,
-    };
-    featureUnauthorizedRecovery = record;
     return promise;
   }
 
   async function waitForFeatureRecoveryOrCallerAbort(
     snapshot: AuthenticatedFeatureSnapshot,
     signal: AbortSignal | undefined,
+    forceTerminalCleanup = false,
   ): Promise<FeatureUnauthorizedRecoveryResult> {
-    const recovery = getOrCreateFeatureUnauthorizedRecovery(snapshot);
+    const recovery = getOrCreateFeatureUnauthorizedRecovery(snapshot, forceTerminalCleanup);
     if (!signal) {
       return recovery;
     }
@@ -530,7 +544,11 @@ export function createMobileAuthCoordinator(
     if (active !== snapshot.owner || activeBundleGeneration !== snapshot.generation) {
       throw new MobileAuthenticatedApiRequestError('session_changed');
     }
-    const recovery = await waitForFeatureRecoveryOrCallerAbort(snapshot, request.init?.signal);
+    const recovery = await waitForFeatureRecoveryOrCallerAbort(
+      snapshot,
+      request.init?.signal,
+      !allowRefreshRetry,
+    );
     switch (recovery.kind) {
       case 'refreshed':
         if (!allowRefreshRetry) {

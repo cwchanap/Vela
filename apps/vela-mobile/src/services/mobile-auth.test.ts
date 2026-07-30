@@ -3939,6 +3939,97 @@ describe('authenticated feature transport', () => {
     expect(harness.sessionStore.clearCalls).toBe(0);
   });
 
+  it('treats invalid-grant cleanup owned by expired-token recovery as terminal', async () => {
+    let currentNow = NOW;
+    const harness = makeHarness({ now: () => currentNow });
+    await authenticateWithExpiry(harness, currentNow + 120_000, currentNow);
+    harness.sessionFetch.mockClear();
+    harness.tokenTransport.result = { status: 400, data: { error: 'invalid_grant' } };
+    const featureResponse = deferred<Response>();
+    harness.sessionFetch.mockImplementation(async (target) =>
+      String(target).endsWith('/srs/stats')
+        ? featureResponse.promise
+        : response(200, {
+            authenticated: true,
+            user: { userId: 'user-123', email: 'person@example.com' },
+          }),
+    );
+
+    const request = harness.coordinator.requestAuthenticatedApi({ path: 'srs/stats' });
+    await vi.waitFor(() => expect(harness.sessionFetch).toHaveBeenCalledOnce());
+    currentNow += 121_000;
+    featureResponse.resolve(response(401, {}));
+
+    await expect(request).resolves.toMatchObject({ status: 401 });
+    expect(refreshRequests(harness)).toHaveLength(1);
+    expect(harness.sessionStore.clearCalls).toBe(1);
+  });
+
+  it('joins an already-running proactive refresh after an expired-token 401', async () => {
+    let currentNow = NOW;
+    const harness = makeHarness({ now: () => currentNow });
+    await authenticateWithExpiry(harness, currentNow + 120_000, currentNow);
+    harness.sessionFetch.mockClear();
+    prepareSuccessfulRefresh(harness, {
+      claimExpirySeconds: Math.ceil((currentNow + 3_600_000) / 1_000),
+    });
+    const refreshGate = deferred<{ status: number; data: unknown }>();
+    harness.tokenTransport.gate = refreshGate.promise;
+    const featureResponse = deferred<Response>();
+    let featureCalls = 0;
+    harness.sessionFetch.mockImplementation(async (target) => {
+      if (String(target).endsWith('/srs/stats')) {
+        featureCalls += 1;
+        return featureCalls === 1 ? featureResponse.promise : response(200, {});
+      }
+      return response(200, {
+        authenticated: true,
+        user: { userId: 'user-123', email: 'person@example.com' },
+      });
+    });
+
+    const request = harness.coordinator.requestAuthenticatedApi({ path: 'srs/stats' });
+    await vi.waitFor(() => expect(featureCalls).toBe(1));
+    currentNow += 61_000;
+    harness.app.emitState(true);
+    await vi.waitFor(() => expect(refreshRequests(harness)).toHaveLength(1));
+    currentNow += 60_000;
+    featureResponse.resolve(response(401, {}));
+    refreshGate.resolve(harness.tokenTransport.result);
+
+    await expect(request).resolves.toMatchObject({ status: 200 });
+    expect(refreshRequests(harness)).toHaveLength(1);
+  });
+
+  it('returns session_changed when sign-out supersedes a waiting expired-token recovery', async () => {
+    let currentNow = NOW;
+    const harness = makeHarness({ now: () => currentNow });
+    await authenticateWithExpiry(harness, currentNow + 120_000, currentNow);
+    harness.sessionFetch.mockClear();
+    const refreshGate = deferred<{ status: number; data: unknown }>();
+    harness.tokenTransport.gate = refreshGate.promise;
+    const featureResponse = deferred<Response>();
+    harness.sessionFetch.mockImplementation(async (target) =>
+      String(target).endsWith('/srs/stats')
+        ? featureResponse.promise
+        : response(200, {
+            authenticated: true,
+            user: { userId: 'user-123', email: 'person@example.com' },
+          }),
+    );
+
+    const request = harness.coordinator.requestAuthenticatedApi({ path: 'srs/stats' });
+    await vi.waitFor(() => expect(harness.sessionFetch).toHaveBeenCalledOnce());
+    currentNow += 121_000;
+    featureResponse.resolve(response(401, {}));
+    await vi.waitFor(() => expect(refreshRequests(harness)).toHaveLength(1));
+    const signingOut = harness.coordinator.signOut();
+    refreshGate.resolve(harness.tokenTransport.result);
+
+    await expect(request).rejects.toMatchObject({ code: 'session_changed' });
+    await signingOut;
+  });
+
   it('detaches an aborted caller while its peer completes the shared recovery', async () => {
     let currentNow = NOW;
     const harness = makeHarness({ now: () => currentNow });
@@ -3988,11 +4079,12 @@ describe('authenticated feature transport', () => {
       claimExpirySeconds: Math.ceil((currentNow + 3_600_000) / 1_000),
     });
     const initialResponse = deferred<Response>();
+    const retryResponse = deferred<Response>();
     let featureCalls = 0;
     harness.sessionFetch.mockImplementation(async (target) => {
       if (String(target).endsWith('/srs/stats')) {
         featureCalls += 1;
-        return featureCalls === 1 ? initialResponse.promise : response(401, {});
+        return featureCalls === 1 ? initialResponse.promise : retryResponse.promise;
       }
       return response(200, {
         authenticated: true,
@@ -4004,6 +4096,9 @@ describe('authenticated feature transport', () => {
     await vi.waitFor(() => expect(featureCalls).toBe(1));
     currentNow += 2_000;
     initialResponse.resolve(response(401, {}));
+    await vi.waitFor(() => expect(featureCalls).toBe(2));
+    currentNow += 3_601_000;
+    retryResponse.resolve(response(401, {}));
 
     await expect(request).resolves.toMatchObject({ status: 401 });
     expect(refreshRequests(harness)).toHaveLength(1);
