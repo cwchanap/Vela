@@ -88,83 +88,17 @@ vi.mock('../auth/mobile-installation-store', () => ({
 
 import { MOBILE_AUTH_KEY } from '../services/mobile-auth';
 import { config } from '../config';
+import {
+  captureConsoleCalls,
+  createSecretLeakAssertions,
+  searchable,
+  storageSnapshot,
+} from '../test/secret-leak-helpers';
 import boot from './mobile-auth';
 
-const SECRET_SENTINELS = [
-  'SECRET-access-token',
-  'SECRET-id-token',
-  'SECRET-refresh-token',
-  'SECRET-rotated-refresh-token',
-] as const;
-
-const LOG_AND_DOM_SENTINELS = [
-  ...SECRET_SENTINELS,
-  'SECRET-authorization-url',
-  'SECRET-callback-code',
-  'SECRET-code-verifier',
-  'SECRET-nonce',
-  'SECRET-claim-email',
-] as const;
-
-function searchable(value: unknown): string {
-  try {
-    return JSON.stringify(value);
-  } catch {
-    return String(value);
-  }
-}
-
-function storageSnapshot(storage: Storage): string {
-  return Array.from({ length: storage.length }, (_, index) => {
-    const key = storage.key(index) ?? '';
-    return `${key}=${storage.getItem(key) ?? ''}`;
-  }).join('\n');
-}
-
-function expectNoSecretLeak(input: {
-  consoleCalls: unknown[][];
-  preferenceCalls: unknown[][];
-  renderedText?: string;
-}): void {
-  const logsAndDom = [
-    searchable(input.consoleCalls),
-    input.renderedText ?? document.body.textContent ?? '',
-  ].join('\n');
-  const browserAndPreferenceStorage = [
-    searchable(input.preferenceCalls),
-    storageSnapshot(window.localStorage),
-    storageSnapshot(window.sessionStorage),
-  ].join('\n');
-
-  for (const secret of LOG_AND_DOM_SENTINELS) {
-    expect(logsAndDom).not.toContain(secret);
-  }
-  for (const secret of SECRET_SENTINELS) {
-    expect(browserAndPreferenceStorage).not.toContain(secret);
-  }
-}
-
-function captureConsoleCalls(): {
-  calls: () => unknown[][];
-  restore: () => void;
-} {
-  const spies = (['debug', 'info', 'log', 'warn', 'error'] as const).map((method) =>
-    vi.spyOn(console, method).mockImplementation(() => undefined),
-  );
-  return {
-    calls: () =>
-      spies.flatMap((spy) =>
-        spy.mock.calls.map((call) =>
-          call.map((value) =>
-            value instanceof Error ? { ...value, name: value.name, message: value.message } : value,
-          ),
-        ),
-      ),
-    restore: () => {
-      for (const spy of spies) spy.mockRestore();
-    },
-  };
-}
+const { expectNoSecretLeak } = createSecretLeakAssertions({
+  installationKey: 'vela:installation:boot-test',
+});
 
 describe('mobile auth boot', () => {
   const runBoot = boot as unknown as (params: {

@@ -21,8 +21,10 @@ remain unchanged.
 
 ## Global Constraints
 
+- `$REPO_ROOT` is the repository root (the directory containing `apps/`,
+  `packages/`, `docs/`). All `cd` commands below are relative to it.
 - Work on branch `codex/hpa-206-mobile-session-persistence` in
-  `/Users/chanwaichan/workspace/Vela`.
+  `$REPO_ROOT`.
 - Treat
   `docs/superpowers/specs/2026-07-29-mobile-cognito-session-persistence-design.md`
   as the accepted behavioral contract.
@@ -124,7 +126,7 @@ KeychainAccess.afterFirstUnlockThisDeviceOnly)`, and
 - [ ] Confirm the accepted documents are the only uncommitted files:
 
 ```bash
-cd /Users/chanwaichan/workspace/Vela
+cd $REPO_ROOT
 rtk git status --short
 ```
 
@@ -206,7 +208,7 @@ export function createUnsupportedMobileSessionStore(): MobileSessionStore;
 - [ ] **Step 1: Pin and synchronize the plugin**
 
 ```bash
-cd /Users/chanwaichan/workspace/Vela/apps/vela-mobile/src-capacitor
+cd $REPO_ROOT/apps/vela-mobile/src-capacitor
 rtk bun add --exact @aparajita/capacitor-secure-storage@7.1.6
 rtk bunx cap sync ios
 ```
@@ -304,7 +306,7 @@ make zero plugin calls.
 - [ ] **Step 3: Run the focused test to verify it fails**
 
 ```bash
-cd /Users/chanwaichan/workspace/Vela/apps/vela-mobile
+cd $REPO_ROOT/apps/vela-mobile
 rtk bunx vitest run src/auth/mobile-session-store.test.ts
 ```
 
@@ -376,7 +378,7 @@ Add this alias to both `quasar.config.ts` and `vitest.config.ts`:
 - [ ] **Step 6: Verify the adapter and native metadata**
 
 ```bash
-cd /Users/chanwaichan/workspace/Vela/apps/vela-mobile
+cd $REPO_ROOT/apps/vela-mobile
 rtk bunx vitest run src/auth/mobile-session-store.test.ts
 rtk bun run typecheck
 rtk git diff -- src-capacitor/ios/App/PrivacyInfo.xcprivacy
@@ -387,7 +389,7 @@ Expected: focused tests and typecheck PASS; the privacy-manifest diff is empty.
 - [ ] **Step 7: Commit**
 
 ```bash
-cd /Users/chanwaichan/workspace/Vela
+cd $REPO_ROOT
 rtk git add \
   apps/vela-mobile/src/auth/mobile-session-store.ts \
   apps/vela-mobile/src/auth/mobile-session-store.test.ts \
@@ -481,7 +483,7 @@ rejections.
 - [ ] **Step 2: Run the focused test to verify it fails**
 
 ```bash
-cd /Users/chanwaichan/workspace/Vela/apps/vela-mobile
+cd $REPO_ROOT/apps/vela-mobile
 rtk bunx vitest run src/auth/mobile-installation-store.test.ts
 ```
 
@@ -523,12 +525,12 @@ export function createMobileInstallationStore(
 - [ ] **Step 4: Verify and commit**
 
 ```bash
-cd /Users/chanwaichan/workspace/Vela/apps/vela-mobile
+cd $REPO_ROOT/apps/vela-mobile
 rtk bunx vitest run \
   src/auth/mobile-installation-store.test.ts \
   src/auth/oauth-transaction-store.test.ts
 rtk bun run typecheck
-cd /Users/chanwaichan/workspace/Vela
+cd $REPO_ROOT
 rtk git add \
   apps/vela-mobile/src/auth/mobile-installation-store.ts \
   apps/vela-mobile/src/auth/mobile-installation-store.test.ts
@@ -726,7 +728,7 @@ it.each([
 - [ ] **Step 3: Run the focused test to verify it fails**
 
 ```bash
-cd /Users/chanwaichan/workspace/Vela/apps/vela-mobile
+cd $REPO_ROOT/apps/vela-mobile
 rtk bunx vitest run \
   src/auth/mobile-oauth.test.ts \
   src/services/mobile-auth.test.ts
@@ -816,10 +818,10 @@ Split the callback transport and validation stages so the stable mapping is:
 - [ ] **Step 6: Verify and commit**
 
 ```bash
-cd /Users/chanwaichan/workspace/Vela/apps/vela-mobile
+cd $REPO_ROOT/apps/vela-mobile
 rtk bunx vitest run src/auth/mobile-oauth.test.ts src/services/mobile-auth.test.ts
 rtk bun run typecheck
-cd /Users/chanwaichan/workspace/Vela
+cd $REPO_ROOT
 rtk git add \
   apps/vela-mobile/src/auth/mobile-auth-contract.ts \
   apps/vela-mobile/src/auth/mobile-oauth.ts \
@@ -955,7 +957,7 @@ refresh-failure assertion that proves `phase`, `errorCode`, and
 - [ ] **Step 3: Run the coordinator and component suites to verify failure**
 
 ```bash
-cd /Users/chanwaichan/workspace/Vela/apps/vela-mobile
+cd $REPO_ROOT/apps/vela-mobile
 rtk bunx vitest run \
   src/services/mobile-auth.test.ts \
   src/components/mobile/MobileAuthGate.test.ts \
@@ -1081,13 +1083,13 @@ Add a component test proving `phase: authenticated` with
 - [ ] **Step 6: Verify and commit**
 
 ```bash
-cd /Users/chanwaichan/workspace/Vela/apps/vela-mobile
+cd $REPO_ROOT/apps/vela-mobile
 rtk bunx vitest run \
   src/services/mobile-auth.test.ts \
   src/components/mobile/MobileAuthGate.test.ts \
   src/App.test.ts
 rtk bun run typecheck
-cd /Users/chanwaichan/workspace/Vela
+cd $REPO_ROOT
 rtk git add \
   apps/vela-mobile/src/auth/mobile-auth-contract.ts \
   apps/vela-mobile/src/services/mobile-auth.ts \
@@ -1183,7 +1185,7 @@ it('clears retained Keychain state before writing a missing install marker', asy
   installationStore.isCurrentInstallationMarked.mockResolvedValue(false);
   await coordinator.initialize();
 
-  expect(order).toContainSequence([
+  expectOrderedCalls(order, [
     'installation:isMarked',
     'session:clear',
     'installation:mark',
@@ -1209,7 +1211,7 @@ it('fails closed when first-install cleanup cannot complete', async () => {
 
 it('persists the callback refresh token before API verification', async () => {
   await completeSuccessfulCallback();
-  expect(order).toContainSequence([
+  expectOrderedCalls(order, [
     'session:save:refresh-token',
     'fetch:/auth/session',
     'state:authenticated',
@@ -1224,7 +1226,7 @@ callback refresh token, persistence failure retaining the candidate, API
 - [ ] **Step 3: Run focused tests to verify failure**
 
 ```bash
-cd /Users/chanwaichan/workspace/Vela/apps/vela-mobile
+cd $REPO_ROOT/apps/vela-mobile
 rtk bunx vitest run \
   src/boot/mobile-auth.test.ts \
   src/services/mobile-auth.test.ts
@@ -1345,14 +1347,14 @@ before publishing `session_unusable`; deletion failure publishes
 - [ ] **Step 7: Verify and commit**
 
 ```bash
-cd /Users/chanwaichan/workspace/Vela/apps/vela-mobile
+cd $REPO_ROOT/apps/vela-mobile
 rtk bunx vitest run \
   src/boot/mobile-auth.test.ts \
   src/services/mobile-auth.test.ts \
   src/auth/mobile-session-store.test.ts \
   src/auth/mobile-installation-store.test.ts
 rtk bun run typecheck
-cd /Users/chanwaichan/workspace/Vela
+cd $REPO_ROOT
 rtk git add \
   apps/vela-mobile/src/services/mobile-auth.ts \
   apps/vela-mobile/src/services/mobile-auth.test.ts \
@@ -1457,7 +1459,7 @@ it('restores and verifies before publishing a usable session', async () => {
   sessionStore.loadRefreshToken.mockResolvedValue('durable-token');
   await coordinator.initialize();
 
-  expect(order).toContainSequence([
+  expectOrderedCalls(order, [
     'session:load',
     'token:refresh',
     'candidate:validate',
@@ -1543,7 +1545,7 @@ API request is made.
 - [ ] **Step 4: Run the coordinator suite to verify failure**
 
 ```bash
-cd /Users/chanwaichan/workspace/Vela/apps/vela-mobile
+cd $REPO_ROOT/apps/vela-mobile
 rtk bunx vitest run src/services/mobile-auth.test.ts
 ```
 
@@ -1645,14 +1647,14 @@ total selector.
 - [ ] **Step 8: Verify and commit**
 
 ```bash
-cd /Users/chanwaichan/workspace/Vela/apps/vela-mobile
+cd $REPO_ROOT/apps/vela-mobile
 rtk bunx vitest run \
   src/services/mobile-auth.test.ts \
   src/auth/mobile-oauth.test.ts \
   src/components/mobile/MobileAuthGate.test.ts \
   src/App.test.ts
 rtk bun run typecheck
-cd /Users/chanwaichan/workspace/Vela
+cd $REPO_ROOT
 rtk git add \
   apps/vela-mobile/src/auth/mobile-auth-contract.ts \
   apps/vela-mobile/src/services/mobile-auth.ts \
@@ -1801,7 +1803,7 @@ deadline replacement, and injected-clock-only cases.
 - [ ] **Step 4: Run the coordinator suite to verify failure**
 
 ```bash
-cd /Users/chanwaichan/workspace/Vela/apps/vela-mobile
+cd $REPO_ROOT/apps/vela-mobile
 rtk bunx vitest run src/services/mobile-auth.test.ts
 ```
 
@@ -1862,10 +1864,10 @@ diagnostics-only.
 - [ ] **Step 8: Verify and commit**
 
 ```bash
-cd /Users/chanwaichan/workspace/Vela/apps/vela-mobile
+cd $REPO_ROOT/apps/vela-mobile
 rtk bunx vitest run src/services/mobile-auth.test.ts
 rtk bun run typecheck
-cd /Users/chanwaichan/workspace/Vela
+cd $REPO_ROOT
 rtk git add \
   apps/vela-mobile/src/services/mobile-auth.ts \
   apps/vela-mobile/src/services/mobile-auth.test.ts
@@ -1974,7 +1976,7 @@ Sign out makes no Cognito token/logout request and does not open the browser.
 - [ ] **Step 3: Run the coordinator suite to verify failure**
 
 ```bash
-cd /Users/chanwaichan/workspace/Vela/apps/vela-mobile
+cd $REPO_ROOT/apps/vela-mobile
 rtk bunx vitest run \
   src/services/mobile-auth.test.ts \
   src/components/mobile/MobileAuthGate.test.ts \
@@ -2042,13 +2044,13 @@ out. Terminal-session retry clears Keychain and finishes signed out with
 - [ ] **Step 6: Verify and commit**
 
 ```bash
-cd /Users/chanwaichan/workspace/Vela/apps/vela-mobile
+cd $REPO_ROOT/apps/vela-mobile
 rtk bunx vitest run \
   src/services/mobile-auth.test.ts \
   src/components/mobile/MobileAuthGate.test.ts \
   src/App.test.ts
 rtk bun run typecheck
-cd /Users/chanwaichan/workspace/Vela
+cd $REPO_ROOT
 rtk git add \
   apps/vela-mobile/src/auth/mobile-auth-contract.ts \
   apps/vela-mobile/src/services/mobile-auth.ts \
@@ -2102,7 +2104,6 @@ export type MobileAuthGateView =
       kind: 'blocking_session_failure';
       errorCode: MobileAuthErrorCode;
       retryAction: Exclude<MobileAuthRetryAction, 'cleanup'>;
-      allowStartOver: true;
     }
   | { kind: 'signed_out'; notice: 'session_unusable' | null }
   | { kind: 'cleanup_failure' }
@@ -2137,7 +2138,6 @@ it.each([
       kind: 'blocking_session_failure',
       errorCode: 'session_refresh_failed',
       retryAction: 'refresh',
-      allowStartOver: true,
     },
   ],
   [
@@ -2181,7 +2181,7 @@ errors, and configuration error.
 - [ ] **Step 2: Run the selector test to verify failure**
 
 ```bash
-cd /Users/chanwaichan/workspace/Vela/apps/vela-mobile
+cd $REPO_ROOT/apps/vela-mobile
 rtk bunx vitest run src/components/mobile/mobile-auth-gate-view.test.ts
 ```
 
@@ -2391,14 +2391,14 @@ routing and surface behavior.
 - [ ] **Step 8: Verify and commit**
 
 ```bash
-cd /Users/chanwaichan/workspace/Vela/apps/vela-mobile
+cd $REPO_ROOT/apps/vela-mobile
 rtk bunx vitest run \
   src/components/mobile/mobile-auth-gate-view.test.ts \
   src/components/mobile/MobileAuthGate.test.ts \
   src/pages/MorePage.test.ts \
   src/App.test.ts
 rtk bun run typecheck
-cd /Users/chanwaichan/workspace/Vela
+cd $REPO_ROOT
 rtk git add \
   apps/vela-mobile/src/components/mobile/mobile-auth-gate-view.ts \
   apps/vela-mobile/src/components/mobile/mobile-auth-gate-view.test.ts \
@@ -2595,7 +2595,7 @@ the shared store between coordinator instances.
 - [ ] **Step 3: Run the complete mobile unit suite**
 
 ```bash
-cd /Users/chanwaichan/workspace/Vela/apps/vela-mobile
+cd $REPO_ROOT/apps/vela-mobile
 rtk bun run test:unit
 ```
 
@@ -2604,7 +2604,7 @@ Expected: all mobile unit and component tests PASS.
 - [ ] **Step 4: Run coverage, typecheck, lint, and production build**
 
 ```bash
-cd /Users/chanwaichan/workspace/Vela/apps/vela-mobile
+cd $REPO_ROOT/apps/vela-mobile
 rtk bun run test:coverage
 rtk bun run typecheck
 rtk bun run lint
@@ -2620,9 +2620,9 @@ Expected:
 - [ ] **Step 5: Re-run native synchronization and inspect generated files**
 
 ```bash
-cd /Users/chanwaichan/workspace/Vela/apps/vela-mobile/src-capacitor
+cd $REPO_ROOT/apps/vela-mobile/src-capacitor
 rtk bunx cap sync ios
-cd /Users/chanwaichan/workspace/Vela
+cd $REPO_ROOT
 rtk git diff --check
 rtk git diff -- \
   apps/vela-mobile/src-capacitor/ios/App/Podfile.lock \
@@ -2641,7 +2641,7 @@ Expected:
 - [ ] **Step 6: Run relevant root regressions**
 
 ```bash
-cd /Users/chanwaichan/workspace/Vela
+cd $REPO_ROOT
 rtk bun run test --filter=@vela/mobile
 rtk bun run typecheck --filter=@vela/mobile
 ```
@@ -2651,7 +2651,7 @@ Expected: both filtered Turbo commands PASS.
 - [ ] **Step 7: Commit the verification additions**
 
 ```bash
-cd /Users/chanwaichan/workspace/Vela
+cd $REPO_ROOT
 rtk git add \
   apps/vela-mobile/src/services/mobile-auth.test.ts \
   apps/vela-mobile/src/boot/mobile-auth.test.ts \
@@ -2686,7 +2686,7 @@ closure gate. Do not replace the live-provider result with a mock-only claim.
 - [ ] Run:
 
 ```bash
-cd /Users/chanwaichan/workspace/Vela
+cd $REPO_ROOT
 rtk git diff main...HEAD --check
 rtk git status --short
 ```

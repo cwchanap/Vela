@@ -22,7 +22,6 @@ export type MobileAuthGateView =
       kind: 'blocking_session_failure';
       errorCode: MobileAuthErrorCode;
       retryAction: Exclude<MobileAuthRetryAction, 'cleanup'>;
-      allowStartOver: true;
     }
   | { kind: 'signed_out'; notice: 'session_unusable' | null }
   | { kind: 'cleanup_failure' }
@@ -240,7 +239,6 @@ export function selectMobileAuthGateView(
       kind: 'blocking_session_failure',
       errorCode: state.errorCode,
       retryAction: state.retryAction,
-      allowStartOver: true,
     };
   }
 

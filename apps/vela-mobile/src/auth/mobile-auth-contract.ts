@@ -118,71 +118,90 @@ export function assertMobileAuthState(
   state: MobileAuthState,
   context: MobileAuthStateAssertionContext,
 ): void {
-  const usableSessionIsInvalid =
-    state.sessionUsable &&
-    (state.phase !== 'authenticated' ||
-      state.user === null ||
-      state.notice !== null ||
-      context.activeBundle === null ||
-      context.activeBundle.expiresAt <= context.now);
-  const errorPhaseIsInvalid = state.phase === 'error' && state.errorCode === null;
-  const retryIsInvalid =
-    state.retryAction !== null && (state.operation !== 'idle' || state.errorCode === null);
-  const terminalNoticeIsInvalid =
-    state.notice === 'session_unusable' &&
-    (state.phase !== 'signedOut' ||
-      state.operation !== 'idle' ||
-      state.sessionUsable ||
-      state.errorCode !== null ||
-      state.retryAction !== null ||
-      state.user !== null);
-  const cleanupNoticeIsInvalid =
-    state.notice === 'cleanup_incomplete' &&
-    (state.phase !== 'signedOut' ||
-      state.operation !== 'idle' ||
-      state.sessionUsable ||
-      state.errorCode !== 'session_cleanup_failed' ||
-      state.retryAction !== 'cleanup' ||
-      state.user !== null);
-  const restoreFailurePhaseIsInvalid =
-    state.errorCode === 'session_restore_failed' && state.phase !== 'initializing';
-  const refreshFailurePhaseIsInvalid =
-    state.errorCode === 'session_refresh_failed' &&
-    state.phase !== 'authenticated' &&
-    state.phase !== 'error';
-  const signOutOperationIsInvalid =
-    state.operation === 'signingOut' &&
-    ((state.phase !== 'initializing' && state.phase !== 'authenticated') ||
-      (state.phase === 'initializing' && state.user !== null) ||
-      (state.phase === 'authenticated' && state.user === null) ||
-      state.sessionUsable ||
-      state.errorCode !== null ||
-      state.retryAction !== null ||
-      state.notice !== null);
-  const cleanupOperationIsInvalid =
-    state.operation === 'cleaningUp' &&
-    ((state.phase !== 'initializing' &&
-      state.phase !== 'authenticated' &&
-      state.phase !== 'signedOut') ||
-      (state.phase === 'authenticated' && state.user === null) ||
-      (state.phase !== 'authenticated' && state.user !== null) ||
-      state.sessionUsable ||
-      state.errorCode !== null ||
-      state.retryAction !== null ||
-      state.notice !== null);
+  const invariants: { name: string; violated: boolean }[] = [
+    {
+      name: 'usable_session_requires_authenticated_phase_user_no_notice_live_bundle',
+      violated:
+        state.sessionUsable &&
+        (state.phase !== 'authenticated' ||
+          state.user === null ||
+          state.notice !== null ||
+          context.activeBundle === null ||
+          context.activeBundle.expiresAt <= context.now),
+    },
+    {
+      name: 'error_phase_requires_error_code',
+      violated: state.phase === 'error' && state.errorCode === null,
+    },
+    {
+      name: 'retry_action_requires_idle_operation_and_error_code',
+      violated:
+        state.retryAction !== null && (state.operation !== 'idle' || state.errorCode === null),
+    },
+    {
+      name: 'session_unusable_notice_confined_to_signed_out_idle_clean_state',
+      violated:
+        state.notice === 'session_unusable' &&
+        (state.phase !== 'signedOut' ||
+          state.operation !== 'idle' ||
+          state.sessionUsable ||
+          state.errorCode !== null ||
+          state.retryAction !== null ||
+          state.user !== null),
+    },
+    {
+      name: 'cleanup_incomplete_notice_confined_to_signed_out_cleanup_failure_state',
+      violated:
+        state.notice === 'cleanup_incomplete' &&
+        (state.phase !== 'signedOut' ||
+          state.operation !== 'idle' ||
+          state.sessionUsable ||
+          state.errorCode !== 'session_cleanup_failed' ||
+          state.retryAction !== 'cleanup' ||
+          state.user !== null),
+    },
+    {
+      name: 'session_restore_failed_confined_to_initializing_phase',
+      violated: state.errorCode === 'session_restore_failed' && state.phase !== 'initializing',
+    },
+    {
+      name: 'session_refresh_failed_confined_to_authenticated_or_error_phase',
+      violated:
+        state.errorCode === 'session_refresh_failed' &&
+        state.phase !== 'authenticated' &&
+        state.phase !== 'error',
+    },
+    {
+      name: 'signing_out_operation_shape',
+      violated:
+        state.operation === 'signingOut' &&
+        ((state.phase !== 'initializing' && state.phase !== 'authenticated') ||
+          (state.phase === 'initializing' && state.user !== null) ||
+          (state.phase === 'authenticated' && state.user === null) ||
+          state.sessionUsable ||
+          state.errorCode !== null ||
+          state.retryAction !== null ||
+          state.notice !== null),
+    },
+    {
+      name: 'cleaning_up_operation_shape',
+      violated:
+        state.operation === 'cleaningUp' &&
+        ((state.phase !== 'initializing' &&
+          state.phase !== 'authenticated' &&
+          state.phase !== 'signedOut') ||
+          (state.phase === 'authenticated' && state.user === null) ||
+          (state.phase !== 'authenticated' && state.user !== null) ||
+          state.sessionUsable ||
+          state.errorCode !== null ||
+          state.retryAction !== null ||
+          state.notice !== null),
+    },
+  ];
 
-  if (
-    usableSessionIsInvalid ||
-    errorPhaseIsInvalid ||
-    retryIsInvalid ||
-    terminalNoticeIsInvalid ||
-    cleanupNoticeIsInvalid ||
-    restoreFailurePhaseIsInvalid ||
-    refreshFailurePhaseIsInvalid ||
-    signOutOperationIsInvalid ||
-    cleanupOperationIsInvalid
-  ) {
-    throw new Error('invalid_mobile_auth_state');
+  const failed = invariants.find((invariant) => invariant.violated);
+  if (failed) {
+    throw new Error(`invalid_mobile_auth_state:${failed.name}`);
   }
 }
 

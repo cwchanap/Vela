@@ -24,12 +24,7 @@ export function shouldBypassMobileAuth(
     state.notice === null &&
     state.user === null;
 
-  return (
-    isDevelopment &&
-    hasBypassMetadata &&
-    state.operation === 'idle' &&
-    (ordinarySignedOut || bypassableBootError)
-  );
+  return isDevelopment && hasBypassMetadata && (ordinarySignedOut || bypassableBootError);
 }
 </script>
 
@@ -42,7 +37,11 @@ import type {
   MobileAuthPhase,
 } from '../../auth/mobile-auth-contract';
 import { MOBILE_AUTH_KEY } from '../../services/mobile-auth';
-import { selectMobileAuthGateView, type AuthenticatedLandingState } from './mobile-auth-gate-view';
+import {
+  selectMobileAuthGateView,
+  type AuthenticatedLandingState,
+  type MobileAuthGateView,
+} from './mobile-auth-gate-view';
 
 type ErrorAction = 'restart' | null;
 
@@ -276,27 +275,37 @@ watch(
   { immediate: true },
 );
 
+const ERROR_HEADING_KINDS = new Set<MobileAuthGateView['kind']>([
+  'oauth_error',
+  'blocking_session_failure',
+  'cleanup_failure',
+  'unsupported',
+  'invalid_state',
+]);
+
 watch(
   () => gateView.value.kind,
   async (kind, previousKind) => {
-    if (previousKind !== 'progress') {
+    // The signed-out primary action only claims focus when a prior progress
+    // surface resolves to signed out; reaching signed out from usable content
+    // is not a focus-handoff point. Error headings, by contrast, also need to
+    // claim focus when usable content is replaced by a blocking failure (for
+    // example a soft refresh banner whose session expires), so the user is
+    // moved to the rendered error panel rather than left focused inside the
+    // now-hidden content slot.
+    const focusPrimaryAction = kind === 'signed_out' && previousKind === 'progress';
+    const focusErrorHeading =
+      ERROR_HEADING_KINDS.has(kind) && (previousKind === 'progress' || previousKind === 'content');
+    if (!focusPrimaryAction && !focusErrorHeading) {
       return;
     }
 
     await nextTick();
-    if (kind === 'signed_out') {
+    if (focusPrimaryAction) {
       primaryAction.value?.focus();
       return;
     }
-    if (
-      kind === 'oauth_error' ||
-      kind === 'blocking_session_failure' ||
-      kind === 'cleanup_failure' ||
-      kind === 'unsupported' ||
-      kind === 'invalid_state'
-    ) {
-      errorHeading.value?.focus();
-    }
+    errorHeading.value?.focus();
   },
   { flush: 'post' },
 );

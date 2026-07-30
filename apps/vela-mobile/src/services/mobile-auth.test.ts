@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { toRaw, watch } from 'vue';
+import { watch } from 'vue';
 import {
   MOBILE_OAUTH_CALLBACK_URI,
   MOBILE_OAUTH_TRANSACTION_KEY,
@@ -23,126 +23,13 @@ import {
 } from '../auth/mobile-installation-store';
 import { MobileSessionStoreError, type MobileSessionStore } from '../auth/mobile-session-store';
 import { createMobileAuthCoordinator, MOBILE_AUTH_NETWORK_TIMEOUT_MS } from './mobile-auth';
+import {
+  captureConsoleCalls as createConsoleCapture,
+  createSecretLeakAssertions,
+  searchable,
+} from '../test/secret-leak-helpers';
 
 const NOW = 1_000_000;
-
-const SECRET_SENTINELS = [
-  'SECRET-access-token',
-  'SECRET-id-token',
-  'SECRET-refresh-token',
-  'SECRET-rotated-refresh-token',
-] as const;
-
-const LOG_AND_DOM_SENTINELS = [
-  ...SECRET_SENTINELS,
-  'SECRET-authorization-url',
-  'SECRET-callback-code',
-  'SECRET-code-verifier',
-  'SECRET-nonce',
-  'SECRET-claim-email',
-] as const;
-
-const NON_SCHEMA_STORAGE_SENTINELS = [
-  'SECRET-callback-code',
-  'SECRET-claim-email',
-  'SECRET-raw-request',
-  'SECRET-raw-response',
-  'SECRET-native-exception',
-] as const;
-
-function searchable(value: unknown): string {
-  try {
-    return JSON.stringify(value);
-  } catch {
-    return String(value);
-  }
-}
-
-function storageSnapshot(storage: Storage): string {
-  return Array.from({ length: storage.length }, (_, index) => {
-    const key = storage.key(index) ?? '';
-    return `${key}=${storage.getItem(key) ?? ''}`;
-  }).join('\n');
-}
-
-function expectApprovedPreferenceWrites(preferenceCalls: unknown[][]): void {
-  const installationKey = createMobileInstallationKey(config);
-
-  for (const call of preferenceCalls) {
-    expect(call).toHaveLength(1);
-    const options = call[0];
-    expect(options).toEqual(
-      expect.objectContaining({
-        key: expect.any(String),
-        value: expect.any(String),
-      }),
-    );
-    const { key, value } = options as { key: string; value: string };
-    expect(Object.keys(options as object).sort()).toEqual(['key', 'value']);
-
-    if (key === MOBILE_OAUTH_TRANSACTION_KEY) {
-      let parsed: unknown = null;
-      try {
-        parsed = JSON.parse(value);
-      } catch {
-        expect.fail('OAuth transaction Preferences value must be valid JSON');
-      }
-      expect(parsed).toEqual(
-        expect.objectContaining({
-          state: expect.any(String),
-          codeVerifier: expect.any(String),
-          nonce: expect.any(String),
-          createdAt: expect.any(Number),
-        }),
-      );
-      const transaction = parsed as Record<string, unknown>;
-      expect(Object.keys(transaction).sort()).toEqual([
-        'codeVerifier',
-        'createdAt',
-        'nonce',
-        'state',
-      ]);
-      expect((transaction.state as string).length).toBeGreaterThan(0);
-      expect((transaction.codeVerifier as string).length).toBeGreaterThan(0);
-      expect((transaction.nonce as string).length).toBeGreaterThan(0);
-      expect(Number.isFinite(transaction.createdAt)).toBe(true);
-      continue;
-    }
-
-    expect(key).toBe(installationKey);
-    expect(value).toBe('1');
-  }
-}
-
-function expectNoSecretLeak(input: {
-  consoleCalls: unknown[][];
-  preferenceCalls: unknown[][];
-  renderedText?: string;
-}): void {
-  const logsAndDom = [
-    searchable(input.consoleCalls),
-    input.renderedText ?? document.body.textContent ?? '',
-  ].join('\n');
-  const browserAndPreferenceStorage = [
-    searchable(input.preferenceCalls),
-    storageSnapshot(window.localStorage),
-    storageSnapshot(window.sessionStorage),
-  ].join('\n');
-
-  for (const secret of LOG_AND_DOM_SENTINELS) {
-    expect(logsAndDom).not.toContain(secret);
-  }
-  expect(logsAndDom).not.toContain('SECRET-');
-  for (const secret of SECRET_SENTINELS) {
-    expect(browserAndPreferenceStorage).not.toContain(secret);
-  }
-  for (const secret of NON_SCHEMA_STORAGE_SENTINELS) {
-    expect(browserAndPreferenceStorage).not.toContain(secret);
-  }
-  expectApprovedPreferenceWrites(input.preferenceCalls);
-  expect(storageSnapshot(window.localStorage)).toBe('');
-  expect(storageSnapshot(window.sessionStorage)).toBe('');
-}
 
 const config: MobileOAuthConfig = {
   apiUrl: 'https://vela.example/api/',
@@ -152,6 +39,10 @@ const config: MobileOAuthConfig = {
   region: 'us-east-1',
   callbackUri: MOBILE_OAUTH_CALLBACK_URI,
 };
+
+const { expectNoSecretLeak } = createSecretLeakAssertions({
+  installationKey: createMobileInstallationKey(config),
+});
 
 function deferred<T>() {
   let resolve!: (value: T | PromiseLike<T>) => void;
@@ -719,19 +610,7 @@ const securityTransaction: OAuthTransaction = {
 function captureConsoleCalls(): {
   calls: () => unknown[][];
 } {
-  const spies = (['debug', 'info', 'log', 'warn', 'error'] as const).map((method) =>
-    vi.spyOn(console, method).mockImplementation(() => undefined),
-  );
-  return {
-    calls: () =>
-      spies.flatMap((spy) =>
-        spy.mock.calls.map((call) =>
-          call.map((value) =>
-            value instanceof Error ? { ...value, name: value.name, message: value.message } : value,
-          ),
-        ),
-      ),
-  };
+  return createConsoleCapture();
 }
 
 function prepareSentinelExchange(harness: ReturnType<typeof makeHarness>): void {
@@ -930,7 +809,7 @@ describe('mobile auth initialization', () => {
     harness.sessionFetch.mockResolvedValueOnce(
       response(200, {
         authenticated: true,
-        user: { userId: 'user-1', email: null },
+        user: { userId: 'user-123', email: null },
       }),
     );
     await harness.coordinator.initialize();
@@ -944,7 +823,7 @@ describe('mobile auth initialization', () => {
       errorCode: null,
       retryAction: null,
       notice: null,
-      user: { userId: 'user-1', email: null },
+      user: { userId: 'user-123', email: null },
     });
   });
 
@@ -1725,26 +1604,18 @@ describe('generalized retry dispatch', () => {
   });
 
   it('retries active-session refresh through the candidate pipeline', async () => {
-    const harness = makeHarness();
-    harness.sessionStore.refreshToken = 'SECRET-durable-token';
-    prepareSuccessfulRefresh(harness);
-    await harness.coordinator.initialize();
-    Object.assign(toRaw(harness.coordinator.state) as MobileAuthState, {
-      phase: 'error',
-      operation: 'idle',
-      sessionUsable: false,
-      errorCode: 'session_refresh_failed',
-      retryAction: 'refresh',
-      notice: null,
-      user: null,
-    });
+    const harness = await arrangeBlockingRetry('refresh');
+    harness.tokenTransport.failure = undefined;
     prepareSuccessfulRefresh(harness, {
       rotatedRefreshToken: 'SECRET-refreshed-again-token',
+      claimExpirySeconds: 10_000,
     });
 
     await harness.coordinator.retryCurrentOperation();
 
-    expect(harness.tokenTransport.requests).toHaveLength(2);
+    const refreshes = refreshRequests(harness);
+    expect(refreshes).toHaveLength(2);
+    expect(refreshes[1]?.data).toContain('grant_type=refresh_token');
     expect(harness.sessionStore.refreshToken).toBe('SECRET-refreshed-again-token');
     expect(harness.coordinator.state.phase).toBe('authenticated');
   });
@@ -3304,7 +3175,7 @@ describe('callback completion and cleanup', () => {
     harness.sessionFetch.mockResolvedValueOnce(
       response(200, {
         authenticated: true,
-        user: { userId: 'retry-user', email: null },
+        user: { userId: 'user-123', email: null },
       }),
     );
     await harness.coordinator.retryCurrentOperation();
@@ -3410,7 +3281,7 @@ describe('session verification', () => {
       harness.sessionFetch.mockResolvedValueOnce(
         response(200, {
           authenticated: true,
-          user: { userId: 'retry-user', email: null },
+          user: { userId: 'user-123', email: null },
         }),
       );
       await harness.coordinator.retryCurrentOperation();
@@ -3424,7 +3295,7 @@ describe('session verification', () => {
         errorCode: null,
         retryAction: null,
         notice: null,
-        user: { userId: 'retry-user', email: null },
+        user: { userId: 'user-123', email: null },
       });
     },
   );

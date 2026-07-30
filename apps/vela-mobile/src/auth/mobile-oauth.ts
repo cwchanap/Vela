@@ -191,10 +191,9 @@ export function parseOAuthCallback(rawUrl: string): ParsedOAuthCallback {
   return { kind: 'success', code, state };
 }
 
-export function buildAuthorizationCodeTokenRequest(
+function buildTokenRequest(
   config: MobileOAuthConfig,
-  transaction: OAuthTransaction,
-  code: string,
+  formParameters: Record<string, string>,
   options: { timeoutMs?: number } = {},
 ): MobileTokenRequest {
   const request: MobileTokenRequest = {
@@ -203,13 +202,7 @@ export function buildAuthorizationCodeTokenRequest(
     headers: {
       'Content-Type': 'application/x-www-form-urlencoded',
     },
-    data: new URLSearchParams({
-      grant_type: 'authorization_code',
-      client_id: config.mobileClientId,
-      code,
-      redirect_uri: MOBILE_OAUTH_CALLBACK_URI,
-      code_verifier: transaction.codeVerifier,
-    }).toString(),
+    data: new URLSearchParams(formParameters).toString(),
   };
   if (options.timeoutMs !== undefined) {
     request.timeoutMs = options.timeoutMs;
@@ -217,27 +210,39 @@ export function buildAuthorizationCodeTokenRequest(
   return request;
 }
 
+export function buildAuthorizationCodeTokenRequest(
+  config: MobileOAuthConfig,
+  transaction: OAuthTransaction,
+  code: string,
+  options: { timeoutMs?: number } = {},
+): MobileTokenRequest {
+  return buildTokenRequest(
+    config,
+    {
+      grant_type: 'authorization_code',
+      client_id: config.mobileClientId,
+      code,
+      redirect_uri: MOBILE_OAUTH_CALLBACK_URI,
+      code_verifier: transaction.codeVerifier,
+    },
+    options,
+  );
+}
+
 export function buildRefreshTokenRequest(
   config: MobileOAuthConfig,
   refreshToken: string,
   options: { timeoutMs?: number } = {},
 ): MobileTokenRequest {
-  const request: MobileTokenRequest = {
-    url: `https://${config.oauthDomain}/oauth2/token`,
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/x-www-form-urlencoded',
-    },
-    data: new URLSearchParams({
+  return buildTokenRequest(
+    config,
+    {
       grant_type: 'refresh_token',
       client_id: config.mobileClientId,
       refresh_token: refreshToken,
-    }).toString(),
-  };
-  if (options.timeoutMs !== undefined) {
-    request.timeoutMs = options.timeoutMs;
-  }
-  return request;
+    },
+    options,
+  );
 }
 
 function parseTokenResponseBase(
@@ -339,8 +344,8 @@ function validateIdTokenClaimsBase(
 export function validateAuthorizationCodeIdTokenClaims(
   idToken: string,
   expected: AuthorizationCodeClaimExpectation,
-): void {
-  validateIdTokenClaimsBase(idToken, {
+): string {
+  return validateIdTokenClaimsBase(idToken, {
     config: expected.config,
     now: expected.now,
     expectedNonce: expected.transaction.nonce,
