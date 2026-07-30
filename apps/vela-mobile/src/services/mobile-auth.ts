@@ -417,8 +417,26 @@ export function createMobileAuthCoordinator(
     forceTerminalCleanup = false,
   ): Promise<FeatureUnauthorizedRecoveryResult> {
     const existing = featureUnauthorizedRecovery;
-    if (existing?.owner === snapshot.owner && existing.generation === snapshot.generation) {
+    if (
+      !forceTerminalCleanup &&
+      existing?.owner === snapshot.owner &&
+      existing.generation === snapshot.generation
+    ) {
       return existing.promise;
+    }
+
+    if (forceTerminalCleanup) {
+      return serialize(async (): Promise<FeatureUnauthorizedRecoveryResult> => {
+        if (
+          unavailable() ||
+          active !== snapshot.owner ||
+          activeBundleGeneration !== snapshot.generation
+        ) {
+          return { kind: 'superseded' };
+        }
+        await terminalSessionCleanupUnlocked();
+        return { kind: 'terminal' };
+      });
     }
 
     let resolve!: (result: FeatureUnauthorizedRecoveryResult) => void;
