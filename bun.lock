@@ -112,6 +112,8 @@
       "version": "0.0.1",
       "dependencies": {
         "@quasar/extras": "^1.16.4",
+        "@tanstack/vue-query": "^5.90.5",
+        "@vela/common": "workspace:*",
         "quasar": "^2.16.0",
         "vue": "^3.4.18",
         "vue-router": "^4.3.0",

@@ -4,6 +4,7 @@ export function getMobileBootFiles(flags: {
 }): string[] {
   return [
     'main',
+    'query',
     'mobile-auth',
     ...(flags.isCapacitor ? ['capacitor-lifecycle'] : []),
     ...(flags.isDevelopment ? ['diagnostic-cold-entry'] : []),

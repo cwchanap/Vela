@@ -16,6 +16,7 @@ export default defineConfig((ctx) => {
 
     build: {
       alias: {
+        '@vela/common': resolve(__dirname, '../../packages/common/src/index.ts'),
         '@capacitor/app': resolve(__dirname, 'src-capacitor/node_modules/@capacitor/app'),
         '@capacitor/browser': resolve(__dirname, 'src-capacitor/node_modules/@capacitor/browser'),
         '@capacitor/core': resolve(__dirname, 'src-capacitor/node_modules/@capacitor/core'),
