@@ -40,6 +40,12 @@ function coordinator(overrides: Partial<MobileAuthCoordinator> = {}): MobileAuth
   } as unknown as MobileAuthCoordinator;
 }
 
+function expectCallerCleanup(caller: AbortController, remove: ReturnType<typeof vi.spyOn>): void {
+  expect(vi.getTimerCount()).toBe(0);
+  expect(remove).toHaveBeenCalledWith('abort', expect.any(Function));
+  caller.abort();
+}
+
 describe('mobile API client', () => {
   it('returns a successful JSON response', async () => {
     const auth = coordinator();
@@ -93,6 +99,66 @@ describe('mobile API client', () => {
     await expect(client.getJson('srs/stats')).rejects.toMatchObject({ code: 'network' });
   });
 
+  it('cleans the deadline and caller listener after a coordinator rejection', async () => {
+    vi.useFakeTimers();
+    try {
+      const caller = new AbortController();
+      const remove = vi.spyOn(caller.signal, 'removeEventListener');
+      const client = createMobileApiClient(
+        coordinator({
+          requestAuthenticatedApi: vi
+            .fn()
+            .mockRejectedValue(new MobileAuthenticatedApiRequestError('session_unavailable')),
+        }),
+      );
+
+      await expect(client.getJson('srs/stats', { signal: caller.signal })).rejects.toMatchObject({
+        code: 'session_unavailable',
+      });
+      expectCallerCleanup(caller, remove);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('cleans the deadline and caller listener after an HTTP error', async () => {
+    vi.useFakeTimers();
+    try {
+      const caller = new AbortController();
+      const remove = vi.spyOn(caller.signal, 'removeEventListener');
+      const client = createMobileApiClient(
+        coordinator({ requestAuthenticatedApi: vi.fn().mockResolvedValue(response(500, {})) }),
+      );
+
+      await expect(client.getJson('srs/stats', { signal: caller.signal })).rejects.toMatchObject({
+        code: 'server',
+      });
+      expectCallerCleanup(caller, remove);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('cleans the deadline and caller listener after a body rejection', async () => {
+    vi.useFakeTimers();
+    try {
+      const caller = new AbortController();
+      const remove = vi.spyOn(caller.signal, 'removeEventListener');
+      const malformed = response(200, {});
+      vi.mocked(malformed.json).mockRejectedValue(new SyntaxError('bad JSON'));
+      const client = createMobileApiClient(
+        coordinator({ requestAuthenticatedApi: vi.fn().mockResolvedValue(malformed) }),
+      );
+
+      await expect(client.getJson('srs/stats', { signal: caller.signal })).rejects.toMatchObject({
+        code: 'network',
+      });
+      expectCallerCleanup(caller, remove);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('maps an execution deadline outside recovery to network', async () => {
     vi.useFakeTimers();
     try {
@@ -106,12 +172,15 @@ describe('mobile API client', () => {
             }),
         ),
       });
-      const promise = createMobileApiClient(auth).getJson('srs/stats');
+      const caller = new AbortController();
+      const remove = vi.spyOn(caller.signal, 'removeEventListener');
+      const promise = createMobileApiClient(auth).getJson('srs/stats', { signal: caller.signal });
       const expected = expect(promise).rejects.toMatchObject({ code: 'network' });
 
       await vi.advanceTimersByTimeAsync(MOBILE_DUE_COUNT_EXECUTION_TIMEOUT_MS);
 
       await expected;
+      expectCallerCleanup(caller, remove);
     } finally {
       vi.useRealTimers();
     }
@@ -143,21 +212,29 @@ describe('mobile API client', () => {
   });
 
   it('preserves a caller abort as AbortError', async () => {
-    const caller = new AbortController();
-    const auth = coordinator({
-      requestAuthenticatedApi: vi.fn(
-        ({ init }: AuthenticatedRequest) =>
-          new Promise<Response>((_resolve, reject) => {
-            init?.signal?.addEventListener('abort', () =>
-              reject(new DOMException('aborted', 'AbortError')),
-            );
-          }),
-      ),
-    });
-    const promise = createMobileApiClient(auth).getJson('srs/stats', { signal: caller.signal });
-    caller.abort();
+    vi.useFakeTimers();
+    try {
+      const caller = new AbortController();
+      const remove = vi.spyOn(caller.signal, 'removeEventListener');
+      const auth = coordinator({
+        requestAuthenticatedApi: vi.fn(
+          ({ init }: AuthenticatedRequest) =>
+            new Promise<Response>((_resolve, reject) => {
+              init?.signal?.addEventListener('abort', () =>
+                reject(new DOMException('aborted', 'AbortError')),
+              );
+            }),
+        ),
+      });
+      const promise = createMobileApiClient(auth).getJson('srs/stats', { signal: caller.signal });
+      const expected = expect(promise).rejects.toMatchObject({ name: 'AbortError' });
+      caller.abort();
 
-    await expect(promise).rejects.toMatchObject({ name: 'AbortError' });
+      await expected;
+      expectCallerCleanup(caller, remove);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('maps a stalled response body at the execution deadline to network', async () => {
