@@ -11,7 +11,7 @@
 ## Global Constraints
 
 - `$REPO_ROOT` is the repository root containing `apps/`, `packages/`, and `docs/`.
-- Author this plan on `agent/hpa-207-due-review-count-design-draft`. Implement the runtime work in a fresh worktree/branch based on the latest `main` that contains PR #52, using branch `codex/hpa-207-mobile-due-review-count`.
+- Author this plan on `agent/hpa-207-due-review-count-design-draft`. Implement the runtime work in a fresh worktree/branch based on the latest `main` after PR #52 has merged, using branch `codex/hpa-207-mobile-due-review-count`.
 - Treat `docs/superpowers/specs/2026-07-30-mobile-authenticated-due-review-count-design.md` as the accepted behavioral contract.
 - Keep `apps/vela-mobile/src/services/mobile-auth.ts` as the only owner of active Cognito ID/access/refresh token material. Do not add `getIdToken()` or expose bearer headers outside the coordinator.
 - `requestAuthenticatedApi()` must execute feature transport outside `serialize()` / `operationTail`. Only refresh, verification, and cleanup mutations enter the serialized auth queue.
@@ -105,7 +105,7 @@ git worktree add ../Vela-hpa-207 -b codex/hpa-207-mobile-due-review-count origin
 cd ../Vela-hpa-207
 ```
 
-Expected: the new worktree is on `codex/hpa-207-mobile-due-review-count` with a clean working tree.
+Expected: PR #52 is merged into `origin/main`, and the new worktree is on `codex/hpa-207-mobile-due-review-count` with a clean working tree.
 
 - [ ] **Step 2: Confirm the accepted design is present**
 
