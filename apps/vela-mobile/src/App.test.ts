@@ -1,4 +1,5 @@
 import { flushPromises, mount } from '@vue/test-utils';
+import { srsKeys } from '@vela/common';
 import { defineComponent, nextTick, onMounted, reactive } from 'vue';
 import { createRouter, createMemoryHistory } from 'vue-router';
 import { describe, expect, it, vi } from 'vitest';
@@ -8,6 +9,17 @@ import {
   type MobileAuthState,
 } from './auth/mobile-auth-contract';
 import { MOBILE_AUTH_KEY } from './services/mobile-auth';
+
+vi.mock('./boot/query', async () => {
+  const { QueryClient } = await import('@tanstack/vue-query');
+  return {
+    mobileQueryClient: new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    }),
+  };
+});
+
+import { mobileQueryClient } from './boot/query';
 import App from './App.vue';
 
 function deferred() {
@@ -98,6 +110,8 @@ describe('App', () => {
     expect(wrapper.find('[data-testid="review-route"]').exists()).toBe(false);
     expect(wrapper.get('[data-testid="home-route"]').text()).toBe('home');
 
+    mobileQueryClient.setQueryData(srsKeys.stats('user-1'), { due: 4 });
+
     Object.assign(state, {
       phase: 'authenticated',
       operation: 'signingOut',
@@ -108,8 +122,28 @@ describe('App', () => {
       user: { userId: 'user-1', email: null },
     });
     await nextTick();
+    await flushPromises();
 
     expect(wrapper.find('[data-testid="home-route"]').exists()).toBe(false);
     expect(wrapper.get('[role="status"]').text()).toContain('Signing out…');
+    expect(mobileQueryClient.getQueryData(srsKeys.stats('user-1'))).toBeUndefined();
+
+    Object.assign(state, {
+      phase: 'authenticated',
+      operation: 'idle',
+      sessionUsable: true,
+      user: { userId: 'user-2', email: null },
+    });
+    await flushPromises();
+    await nextTick();
+
+    expect(mountedRoutes).toEqual(['home', 'home']);
+
+    mobileQueryClient.setQueryData(srsKeys.stats('user-2'), { due: 7 });
+    wrapper.unmount();
+    Object.assign(state, { phase: 'signedOut', sessionUsable: false, user: null });
+    await flushPromises();
+
+    expect(mobileQueryClient.getQueryData(srsKeys.stats('user-2'))).toEqual({ due: 7 });
   });
 });

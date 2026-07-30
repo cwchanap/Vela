@@ -1,10 +1,15 @@
 import { App } from '@capacitor/app';
 import type { PluginListenerHandle } from '@capacitor/core';
+import { focusManager } from '@tanstack/vue-query';
 import { defineBoot } from '#q-app/wrappers';
 import { recordAppResume } from 'src/services/mobile-lifecycle';
 
 export type ResumeAppAdapter = {
   addListener(eventName: 'resume', listener: () => void): Promise<PluginListenerHandle>;
+  addListener(
+    eventName: 'appStateChange',
+    listener: (event: { isActive: boolean }) => void,
+  ): Promise<PluginListenerHandle>;
 };
 
 let registered = false;
@@ -13,15 +18,24 @@ let registration: Promise<void> | null = null;
 export async function registerCapacitorLifecycle(adapter: ResumeAppAdapter = App): Promise<void> {
   if (registered) return;
   if (registration !== null) return registration;
-  registration = adapter
-    .addListener('resume', () => recordAppResume())
-    .then(() => {
+
+  registration = (async () => {
+    const handles: PluginListenerHandle[] = [];
+    try {
+      handles.push(await adapter.addListener('resume', () => recordAppResume()));
+      handles.push(
+        await adapter.addListener('appStateChange', (event) => {
+          focusManager.setFocused(event.isActive);
+        }),
+      );
       registered = true;
-    })
-    .catch((error: unknown) => {
+    } catch (error) {
+      await Promise.all(handles.map(async (handle) => handle.remove().catch(() => undefined)));
       registration = null;
       throw error;
-    });
+    }
+  })();
+
   return registration;
 }
 
