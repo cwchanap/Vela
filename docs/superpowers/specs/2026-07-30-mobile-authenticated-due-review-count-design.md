@@ -60,7 +60,7 @@ The mobile app does not yet install TanStack Query, and Home still renders the M
 | Query key | Change `srsKeys.stats()` to include authenticated user ID; mobile is its first production consumer |
 | Token ownership | ID tokens remain private to the mobile auth coordinator |
 | Feature request surface | Add a coordinator-owned authenticated request operation; do not add `getIdToken()` |
-| Coordinator failure contract | Throw a typed coordinator error for invalid paths, unavailable sessions, and stale-session responses; return HTTP responses, including final 401 responses, to the mobile API client |
+| Coordinator failures | Use stable typed failures for invalid path, invalid Authorization header, unavailable session, and stale session |
 | URL safety | Use one trailing-slash-preserving API URL builder for `/auth/session` and feature paths; require relative paths contained beneath the configured API prefix |
 | Header ownership | Reject caller-supplied `Authorization` headers case-insensitively before applying the coordinator-owned bearer token |
 | Unauthorized response | A current-session 401 enters auth recovery or terminal cleanup; Home never renders an unauthorized-data state |
@@ -72,7 +72,7 @@ The mobile app does not yet install TanStack Query, and Home still renders the M
 | Home re-entry | Refetch whenever Home mounts, even if cached data is still fresh |
 | Manual retry | Track manual retry separately from background fetching so `retrying` and `refreshing` are never inferred from the same flag |
 | Cache isolation | Disable immediately when auth is unusable, user-scope keys, and clear mobile query state on sign-out or identity loss |
-| Cached zero | A cached zero remains eligible for the same stale-data warning as any other cached count because time or another client can make reviews due |
+| Cached zero | A cached zero keeps the stale-data warning because time or another client can make reviews due |
 | Review navigation | Do not add a Start Review action in HPA-207 |
 | Platform | Native iOS remains the authenticated runtime for this milestone |
 
@@ -175,6 +175,7 @@ export type MobileAuthenticatedApiRequest = {
 
 export type MobileAuthenticatedApiRequestErrorCode =
   | 'invalid_request_path'
+  | 'invalid_request_headers'
   | 'session_unavailable'
   | 'session_changed';
 
@@ -205,6 +206,7 @@ The request operation has these observable outcomes:
 | Outcome | Coordinator result |
 | --- | --- |
 | Path violates the mobile API containment contract | Throw `MobileAuthenticatedApiRequestError('invalid_request_path')` before network activity |
+| Caller supplies any case variant of `Authorization` | Throw `MobileAuthenticatedApiRequestError('invalid_request_headers')` before network activity |
 | No usable current session before dispatch | Throw `MobileAuthenticatedApiRequestError('session_unavailable')` before network activity |
 | Caller aborts | Preserve the platform `AbortError`; do not mutate auth state |
 | Fetch rejects for another reason | Propagate the transport error; the mobile API client classifies it as `network` |
@@ -248,7 +250,7 @@ https://vela.example/api///  -> https://vela.example/api/
 - a resolved pathname that does not begin with the normalized trailing-slash API pathname; and
 - URL fragments.
 
-The implementation must compare parsed URL origin and pathname boundaries rather than using a base string with its trailing slash removed. With a base pathname of `/api/`, `/api-evil/secret` is outside the boundary and must fail.
+The implementation compares parsed URL origin and pathname boundaries rather than using a base string with its trailing slash removed. With a base pathname of `/api/`, `/api-evil/secret` is outside the boundary and must fail.
 
 The existing `/auth/session` request becomes:
 
@@ -271,14 +273,12 @@ HTTP header names are case-insensitive. The coordinator converts caller headers 
 ```ts
 const headers = new Headers(request.init?.headers);
 if (headers.has('authorization')) {
-  throw new MobileAuthenticatedApiRequestError('invalid_request_path');
+  throw new MobileAuthenticatedApiRequestError('invalid_request_headers');
 }
 headers.set('Authorization', `Bearer ${idToken}`);
 ```
 
-The implementation may use a dedicated `invalid_request_headers` code instead of reusing `invalid_request_path` if that produces a clearer contract during implementation planning. The important design requirement is stable typed rejection before network activity.
-
-Tests must cover `Authorization`, `authorization`, `AUTHORIZATION`, and at least one mixed-case spelling.
+Tests cover `Authorization`, `authorization`, `AUTHORIZATION`, and at least one mixed-case spelling.
 
 ### Auth generation and 401 handling
 
@@ -392,14 +392,14 @@ The client:
 | Coordinator/HTTP outcome | Client classification |
 | --- | --- |
 | Caller abort | Preserve abort semantics; no visible error |
-| `MobileAuthenticatedApiRequestError('session_unavailable')` | `MobileApiError('session_unavailable')` |
-| `MobileAuthenticatedApiRequestError('session_changed')` | `MobileApiError('session_changed')` |
-| Invalid internal request path/header | Treat as `invalid_response`; this is a programmer/configuration defect and must be covered by tests |
-| Final 401 after coordinator recovery | `unauthorized` |
-| 403 | `forbidden` |
-| Fetch rejection without caller abort | `network` |
-| Non-2xx other than 401/403 | `server` |
-| Invalid JSON or stats shape | `invalid_response` |
+| `session_unavailable` coordinator error | `MobileApiError('session_unavailable')` |
+| `session_changed` coordinator error | `MobileApiError('session_changed')` |
+| `invalid_request_path` or `invalid_request_headers` coordinator error | `MobileApiError('invalid_response')`; these are programmer/configuration defects and must be covered by tests |
+| Final 401 after coordinator recovery | `MobileApiError('unauthorized')` |
+| 403 | `MobileApiError('forbidden')` |
+| Fetch rejection without caller abort | `MobileApiError('network')` |
+| Non-2xx other than 401/403 | `MobileApiError('server')` |
+| Invalid JSON or stats shape | `MobileApiError('invalid_response')` |
 
 `unauthorized` exists for tests and control flow, but Home does not render it because the coordinator disables authenticated content.
 
@@ -494,7 +494,7 @@ useQuery({
 
 TanStack Query invokes the retry predicate as `(failureCount, error)`. `failureCount < 2` permits two retries, matching the existing shared numeric default while preventing retries for auth, authorization, validation, cancellation, or stale-session failures.
 
-Tests must verify the predicate directly for every `MobileApiErrorCode`, including that a final 401-derived `unauthorized` error receives zero automatic retries.
+Tests verify the predicate directly for every `MobileApiErrorCode`, including that a final 401-derived `unauthorized` error receives zero automatic retries.
 
 The shared stale and garbage-collection defaults remain. `refetchOnMount: 'always'` and `refetchOnWindowFocus: 'always'` are required because Home activation and foreground resume must refresh even while data is nominally fresh.
 
@@ -551,7 +551,7 @@ refreshing = query.isFetching && query.data !== undefined && !manualRetryPending
 
 While a manual retry is pending, the previous blocking or cached error surface remains rendered with its Retry button disabled/loading. An automatic mount/focus refetch with cached data renders the normal count plus the subtle refreshing status.
 
-The selector must not derive both `retrying` and `refreshing` from `isFetching` alone.
+The selector does not derive both `retrying` and `refreshing` from `isFetching` alone.
 
 ### Home view selector
 
@@ -665,8 +665,7 @@ A later sign-in receives a different user-scoped key and cannot select previous-
 - Reject accuracy outside 0–100.
 - Ignore unknown additional fields.
 - Produce distinct stats keys for distinct users and JLPT filters.
-- Confirm no production web caller is expected to change query behavior.
-- Confirm `packages/common/src/index.ts` package description covers contracts as well as query utilities.
+- Confirm the package header covers contracts as well as query utilities.
 
 ### Auth coordinator
 
@@ -675,8 +674,8 @@ A later sign-in receives a different user-scoped key and cannot select previous-
 - Reject absolute, scheme-relative, root-relative, backslash, traversal, and outside-prefix paths.
 - Reject `/api-evil/secret` when the configured base pathname is `/api/`.
 - Preserve the normalized trailing `/` in containment checks.
-- Reject `Authorization`, `authorization`, `AUTHORIZATION`, and mixed-case variants before network activity.
-- Reject without a usable session using the typed error.
+- Reject `Authorization`, `authorization`, `AUTHORIZATION`, and mixed-case variants with `invalid_request_headers` before network activity.
+- Reject without a usable session using `session_unavailable`.
 - Preserve caller abort behavior.
 - Propagate transport rejection for client classification.
 - Return non-401 responses without auth mutation.
