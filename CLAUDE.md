@@ -181,7 +181,7 @@ Both accept comma-separated lists for dev/QA overrides. **Override URIs must use
 
 The following M2 work is required before the mobile OAuth flow can complete end-to-end (out of scope for HPA-203):
 
-1. Widen the API JWT verifier to accept both web and mobile client audiences (`aws-jwt-verify` `clientId: [webId, mobileId]`).
+1. ~~Widen the API JWT verifier to accept both web and mobile client audiences.~~ **Done.** `initializeAuthVerifier()` already accepts `[webClientId, mobileClientId]` through `aws-jwt-verify` `clientId`.
 2. Wire the mobile client ID into the Capacitor build.
 3. ~~If API calls go through WKWebView, add `capacitor://localhost` to the API CORS allow-list.~~ **Done in M1 (HPA-204).** The CORS allowlist is not a security boundary for native clients — `capacitor://localhost` is shared across all Capacitor apps and the middleware passes requests with no `Origin` header. JWT verification (item #1 above) is the actual auth boundary.
 4. Implement PKCE + `state` + `nonce` in the client-side OAuth flow.

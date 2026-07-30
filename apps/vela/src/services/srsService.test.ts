@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { srsService } from './srsService';
+import { srsService, type SRSStats } from './srsService';
 import type { UserVocabularyProgress, Vocabulary } from 'src/types/database';
 
 // Mock API utility
@@ -63,6 +63,15 @@ describe('srsService', () => {
     first_learned_at: '2024-01-01T00:00:00Z',
     total_reviews: 1,
     correct_count: 1,
+  };
+
+  const statsResponse: SRSStats = {
+    total_items: 1,
+    due_today: 1,
+    mastery_breakdown: { new: 0, learning: 1, reviewing: 0, mastered: 0 },
+    average_ease_factor: 2.5,
+    total_reviews: 2,
+    accuracy_rate: 50,
   };
 
   describe('getDueItems', () => {
@@ -143,23 +152,9 @@ describe('srsService', () => {
 
   describe('getStats', () => {
     it('should fetch SRS statistics', async () => {
-      const mockStats = {
-        total_items: 100,
-        due_today: 15,
-        mastery_breakdown: {
-          new: 50,
-          learning: 30,
-          reviewing: 15,
-          mastered: 5,
-        },
-        average_ease_factor: 2.4,
-        total_reviews: 500,
-        accuracy_rate: 0.85,
-      };
-
       mockFetch.mockResolvedValue({
         ok: true,
-        json: vi.fn().mockResolvedValue(mockStats),
+        json: vi.fn().mockResolvedValue(statsResponse),
       });
 
       const result = await srsService.getStats();
@@ -170,7 +165,7 @@ describe('srsService', () => {
           Authorization: `Bearer ${mockIdToken}`,
         },
       });
-      expect(result).toEqual(mockStats);
+      expect(result).toEqual(statsResponse);
     });
 
     it('should filter stats by JLPT levels', async () => {
