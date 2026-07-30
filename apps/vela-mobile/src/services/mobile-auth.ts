@@ -244,7 +244,7 @@ function resolveMobileApiUrl(base: URL, relativePath: string): URL {
     } catch {
       throw new MobileAuthenticatedApiRequestError('invalid_request_path');
     }
-    if (decoded === '.' || decoded === '..' || decoded.includes('\\')) {
+    if (decoded === '.' || decoded === '..' || decoded.includes('/') || decoded.includes('\\')) {
       throw new MobileAuthenticatedApiRequestError('invalid_request_path');
     }
   }
@@ -334,9 +334,10 @@ export function createMobileAuthCoordinator(
 
     const controller = new AbortController();
     let timeoutExpired = false;
+    const callerSignal = request.init?.signal;
     const onCallerAbort = () => controller.abort();
-    request.init?.signal?.addEventListener('abort', onCallerAbort, { once: true });
-    if (request.init?.signal?.aborted) {
+    callerSignal?.addEventListener('abort', onCallerAbort, { once: true });
+    if (callerSignal?.aborted) {
       controller.abort();
     }
     const timeout = setTimeout(() => {
@@ -351,7 +352,7 @@ export function createMobileAuthCoordinator(
         signal: controller.signal,
       });
     } catch (error) {
-      if (request.init?.signal?.aborted) {
+      if (callerSignal?.aborted) {
         throw new DOMException('The operation was aborted.', 'AbortError');
       }
       if (timeoutExpired) {
@@ -360,7 +361,7 @@ export function createMobileAuthCoordinator(
       throw error;
     } finally {
       clearTimeout(timeout);
-      request.init?.signal?.removeEventListener('abort', onCallerAbort);
+      callerSignal?.removeEventListener('abort', onCallerAbort);
     }
   }
 
@@ -376,7 +377,7 @@ export function createMobileAuthCoordinator(
     }
 
     const owner = active;
-    if (!owner || !activeSessionIsUsable() || !state.sessionUsable) {
+    if (unavailable() || !owner || !activeSessionIsUsable() || !state.sessionUsable) {
       throw new MobileAuthenticatedApiRequestError('session_unavailable');
     }
     const snapshot: AuthenticatedFeatureSnapshot = {
