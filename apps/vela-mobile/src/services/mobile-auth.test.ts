@@ -2610,6 +2610,102 @@ describe('active-session lifecycle refresh', () => {
     expect(harness.sessionStore.clearCalls).toBe(0);
   });
 
+  it('reissues instead of terminal-cleaning when /auth/session 401s an in-flight-expired candidate', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+    const harness = makeHarness({ now: () => Date.now() });
+    await authenticateWithExpiry(harness, NOW + 120_000);
+    // Candidate ID token expires at NOW + 62_000: valid when verification
+    // starts at NOW + 60_000 but expired by the time the response arrives.
+    prepareSuccessfulRefresh(harness, { expiresInSeconds: 2 });
+    const heldVerification = deferred<Response>();
+    harness.sessionFetch.mockImplementationOnce(async () => heldVerification.promise);
+
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(harness.coordinator.state).toMatchObject({
+      operation: 'verifying',
+      sessionUsable: true,
+    });
+
+    // Advance past the candidate expiry while the response is still pending.
+    await vi.advanceTimersByTimeAsync(3_000);
+    expect(harness.coordinator.state.operation).toBe('verifying');
+
+    // The API returns 401 for an expired ID token. Without the post-response
+    // expiry recheck, the coordinator would treat this as a terminal
+    // credential failure and delete the still-valid durable refresh token.
+    prepareSuccessfulRefresh(harness);
+    heldVerification.resolve(response(401, { error: 'Unauthorized: Invalid or expired token' }));
+    await harness.flush();
+
+    expect(refreshRequests(harness)).toHaveLength(2);
+    expect(harness.coordinator.state).toMatchObject({
+      phase: 'authenticated',
+      operation: 'idle',
+      sessionUsable: true,
+    });
+    expect(harness.sessionStore.clearCalls).toBe(0);
+  });
+
+  it('retries a transiently-failed R2 reissue with R2, not the stale active R1', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+    const harness = makeHarness({ now: () => Date.now() });
+    await authenticateWithExpiry(harness, NOW + 120_000);
+    // First refresh returns a rotated R2 with a short-lived candidate so it
+    // expires before the manual retry. R2 is persisted before verification,
+    // while active still holds R1.
+    prepareSuccessfulRefresh(harness, {
+      rotatedRefreshToken: 'SECRET-rotated-refresh-token',
+      expiresInSeconds: 10,
+    });
+    harness.sessionFetch
+      .mockResolvedValueOnce(response(500, { error: 'temporary' }))
+      .mockResolvedValueOnce(response(500, { error: 'temporary' }));
+
+    await vi.advanceTimersByTimeAsync(60_000);
+    await vi.advanceTimersByTimeAsync(5_000);
+    // Candidate expired at NOW + 70_000; advance past it.
+    await vi.advanceTimersByTimeAsync(6_000);
+
+    expect(harness.coordinator.state).toMatchObject({
+      phase: 'authenticated',
+      errorCode: 'session_verification_failed',
+      retryAction: 'verify',
+    });
+    expect(harness.sessionStore.clearCalls).toBe(0);
+    expect(harness.sessionStore.saveAttempts).toContain('SECRET-rotated-refresh-token');
+
+    // The reissue sends R2 but fails transiently (503 is retryable, not
+    // invalid_grant). Without retaining R2 in active.bundle.refreshToken,
+    // the next retry would fall back to active R1 and, once R1's rotation
+    // grace ends, elicit invalid_grant and terminally delete the valid R2.
+    harness.tokenTransport.result = { status: 503, data: {} };
+    await harness.coordinator.retryCurrentOperation();
+
+    expect(harness.coordinator.state).toMatchObject({
+      phase: 'authenticated',
+      errorCode: 'session_refresh_failed',
+      retryAction: 'refresh',
+    });
+    expect(harness.sessionStore.clearCalls).toBe(0);
+    // The reissue attempt sent R2.
+    const grantsAfterReissue = refreshRequests(harness);
+    expect(grantsAfterReissue).toHaveLength(2);
+    expect(grantsAfterReissue[1]?.data).toContain('refresh_token=SECRET-rotated-refresh-token');
+
+    // The next manual retry must still send R2, not R1.
+    prepareSuccessfulRefresh(harness, { rotatedRefreshToken: 'SECRET-rotated-refresh-token' });
+    await harness.coordinator.retryCurrentOperation();
+
+    const grants = refreshRequests(harness);
+    expect(grants).toHaveLength(3);
+    expect(grants[2]?.data).toContain('refresh_token=SECRET-rotated-refresh-token');
+    expect(grants[2]?.data).not.toContain('refresh_token=SECRET-refresh-token');
+    expect(harness.sessionStore.clearCalls).toBe(0);
+    expect(harness.coordinator.state.sessionUsable).toBe(true);
+  });
+
   it('replaces both old deadlines after successful promotion', async () => {
     vi.useFakeTimers();
     vi.setSystemTime(NOW);

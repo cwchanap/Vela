@@ -808,6 +808,23 @@ export function createMobileAuthCoordinator(
   // guards (refreshCandidateUnlocked's refreshIsCurrent enforces them).
   async function reissueExpiredCandidateUnlocked(candidate: PendingCandidate): Promise<void> {
     const durableRefreshToken = candidate.durableRefreshToken;
+    // For a refresh candidate, active still holds the pre-rotation R1 while
+    // R2 is already persisted in the keychain. If this reissue fails
+    // transiently (network error or retryable server response),
+    // enterRefreshFailure('refresh') records retryAction: 'refresh' and the
+    // next retry dispatches to refreshActiveSessionUnlocked(), which reads
+    // active.bundle.refreshToken. Without promoting R2 into active here,
+    // that retry would send the stale R1 — which after its rotation grace
+    // ends returns invalid_grant and triggers terminal cleanup that deletes
+    // the valid persisted R2. Mutate active.bundle.refreshToken in place
+    // (rather than reassigning active) so refreshCandidateUnlocked's
+    // refreshIsCurrent guard (refreshOwner === active) still holds. The
+    // refresh grant's invalid_grant path still terminally cleans up if R2
+    // itself is genuinely unusable; a successful reissue overwrites active
+    // entirely on promotion.
+    if (candidate.context === 'refresh' && active !== undefined) {
+      active.bundle.refreshToken = durableRefreshToken;
+    }
     pendingCandidate = undefined;
     pendingSubject = undefined;
     if (candidate.context === 'refresh') {
@@ -877,6 +894,18 @@ export function createMobileAuthCoordinator(
         return;
       }
       if (response.status === 401 || response.status === 403) {
+        // The API returns 401 for an expired ID token (auth middleware:
+        // "Invalid or expired token"). A candidate that was valid when the
+        // request started can expire during the network round trip and
+        // arrive as 401, even though its durable refresh token is still
+        // usable. Recheck expiry before treating 401/403 as terminal; an
+        // expired candidate must be reissued so the refresh grant determines
+        // whether the durable credential is actually unusable, rather than
+        // deleting it on the ID token's expiry alone.
+        if (candidate.bundle.expiresAt <= dependencies.now()) {
+          await reissueExpiredCandidateUnlocked(candidate);
+          return;
+        }
         await terminalSessionCleanupUnlocked();
         return;
       }
