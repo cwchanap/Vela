@@ -791,26 +791,46 @@ export function createMobileAuthCoordinator(
     }
   }
 
+  // An expired candidate must not be verified or promoted directly. The
+  // expired ID token would either elicit a 401 from /auth/session (which
+  // terminal cleanup treats as proof the durable refresh token is unusable,
+  // destroying a still-valid credential) or trip the live-bundle invariant
+  // in enterAuthenticated() (via applyState → assertMobileAuthState) after
+  // active and recovery state have been mutated. Discard the expired
+  // candidate and reissue the grant through its durable refresh token.
+  //
+  // For a refresh candidate the durable token may be a rotated R2 that was
+  // already persisted while active still holds R1. refreshActiveSessionUnlocked()
+  // would send active.bundle.refreshToken (R1); once R1's rotation grace
+  // ends Cognito returns invalid_grant and terminal cleanup deletes the
+  // valid persisted R2. Rebuild the grant here with the candidate's durable
+  // token while retaining the active owner, generation, and expected-subject
+  // guards (refreshCandidateUnlocked's refreshIsCurrent enforces them).
+  async function reissueExpiredCandidateUnlocked(candidate: PendingCandidate): Promise<void> {
+    const durableRefreshToken = candidate.durableRefreshToken;
+    pendingCandidate = undefined;
+    pendingSubject = undefined;
+    if (candidate.context === 'refresh') {
+      await refreshCandidateUnlocked(
+        durableRefreshToken,
+        'refresh',
+        candidate.refreshOwner.user.userId,
+        candidate.refreshOwner,
+        candidate.generation,
+      );
+    } else {
+      await restoreSessionUnlocked(durableRefreshToken);
+    }
+  }
+
   async function verifyCandidateSessionUnlocked(): Promise<void> {
     const candidate = pendingCandidate;
     if (!candidate || !candidateIsCurrent(candidate)) {
       return;
     }
 
-    // An expired candidate must not be verified directly: the expired ID
-    // token would elicit a 401 from /auth/session, which terminal cleanup
-    // treats as proof the durable refresh token is unusable — destroying a
-    // still-valid credential. Discard the expired candidate and obtain a
-    // fresh one through the refresh grant instead.
     if (candidate.bundle.expiresAt <= dependencies.now()) {
-      const durableRefreshToken = candidate.durableRefreshToken;
-      pendingCandidate = undefined;
-      pendingSubject = undefined;
-      if (candidate.context === 'refresh') {
-        await refreshActiveSessionUnlocked();
-      } else {
-        await restoreSessionUnlocked(durableRefreshToken);
-      }
+      await reissueExpiredCandidateUnlocked(candidate);
       return;
     }
 
@@ -888,6 +908,19 @@ export function createMobileAuthCoordinator(
 
       if (pendingSubject !== undefined && user.userId !== pendingSubject) {
         await terminalSessionCleanupUnlocked();
+        return;
+      }
+
+      // Recheck expiry immediately before promotion, before mutating active
+      // or clearing the pending recovery data. The candidate may have
+      // expired during the /auth/session request or response-body read;
+      // enterAuthenticated() indirectly invokes the live-bundle invariant
+      // (applyState → assertMobileAuthState with now()), so a candidate that
+      // expires mid-flight can throw after active has been replaced and
+      // pendingCandidate cleared. scheduleActiveSessionTimers() runs only
+      // after that call and therefore cannot provide zero-delay recovery.
+      if (candidate.bundle.expiresAt <= dependencies.now()) {
+        await reissueExpiredCandidateUnlocked(candidate);
         return;
       }
 
@@ -1147,7 +1180,10 @@ export function createMobileAuthCoordinator(
 
   // RFC 6749 §5.2 requires token-endpoint errors to use HTTP 400 with an
   // `error` parameter. Only `invalid_grant` establishes that the refresh
-  // token itself is revoked or otherwise unusable; other 400 errors
+  // token itself is unusable for this grant — Cognito returns it for a
+  // revoked token but also for some app-client attribute-permission
+  // failures, so it does not uniquely prove revocation; it does prove the
+  // credential cannot be redeemed and must be discarded. Other 400 errors
   // (`invalid_client`, `invalid_request`, `unauthorized_client`,
   // `unsupported_grant_type`) indicate client/config faults that don't
   // invalidate the credential. A 401/403 from a gateway or WAF in front of
