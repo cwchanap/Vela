@@ -459,8 +459,9 @@ diagnostic-cold-entry (development only)
 
 The wiring mechanisms are intentionally distinct:
 
-- `mobileQueryClient` is a module singleton imported by lifecycle/auth-isolation infrastructure.
+- `mobileQueryClient` is a module singleton imported by auth-isolation infrastructure.
 - `VueQueryPlugin` provides that same instance to TanStack Query composables.
+- `capacitor-lifecycle` imports TanStack Query's `focusManager` directly and does not import the QueryClient singleton.
 - `MobileAuthCoordinator` and `MobileSrsService` use typed Vue application injection.
 - `mobile-auth` boot passes the coordinator directly to `provideMobileServices()`; no boot file tries to recover another boot file's provided value through component injection.
 - `App.vue` injects the coordinator and imports `mobileQueryClient` to install auth/cache isolation once.
@@ -855,7 +856,7 @@ Track `manualRetryPending` independently and retain the preceding error surface 
 
 ### Wiring relies on an unavailable cross-boot injection
 
-Pass the coordinator directly into service provisioning, import the QueryClient singleton only where infrastructure needs it, and reserve Vue injection for component/composable consumers.
+Pass the coordinator directly into service provisioning, import the QueryClient singleton only where auth-isolation needs it, drive native focus through `focusManager`, and reserve Vue injection for component/composable consumers.
 
 ### Native lifecycle does not produce browser focus events
 
