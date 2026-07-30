@@ -72,7 +72,7 @@ The mobile app does not install TanStack Query, does not alias `@vela/common` to
 | Retry | Retry only `network` and `server`, at most twice |
 | Auth abstraction | Feature code consumes a stable session-capability selector, not raw auth operation/error fields |
 | Module resolution | Mobile Quasar and Vitest alias `@vela/common` to source while retaining the workspace dependency |
-| Cache isolation | User-scope keys; disable without usable identity; cancel then clear on sign-out/identity loss |
+| Cache isolation | User-scope keys; disable without a usable session; cancel then clear on sign-out/identity loss |
 | Foreground/Home refresh | Refetch on native foreground and every Home mount |
 | Manual retry | Track manual retry independently from background fetch |
 | Cached zero | Keep stale-data warning because time or another client can make reviews due |
@@ -501,8 +501,8 @@ export function selectMobileFeatureSessionStatus(
 The selector alone understands the auth state machine:
 
 - ordinary verified idle state -> `usable`;
-- refresh/persist/verify operation or retry state for an authenticated user -> `recovering`;
-- restoration, sign-out, cleanup, terminal state, or missing user -> `unavailable` unless the authenticated recovery state explicitly retains a usable prior session.
+- refresh/persist/verify operation or retry state for an authenticated user -> `recovering`, preserving whether the prior verified session remains usable;
+- restoration, sign-out, cleanup, terminal state, or missing user -> `unavailable`.
 
 `useDueReviewCount()` watches this semantic status. A transition from same-user `recovering` to `usable` triggers one refetch. This keeps the dependency one-directional without introducing a feature-specific event API into the coordinator.
 
@@ -521,9 +521,17 @@ export function retryDueCountQuery(failureCount: number, error: unknown): boolea
 ```
 
 ```ts
+const queryEnabled = computed(
+  () =>
+    sessionStatus.value.kind === 'usable' ||
+    (sessionStatus.value.kind === 'recovering' && sessionStatus.value.sessionUsable),
+);
+
 useQuery({
-  queryKey: computed(() => srsKeys.stats(userId.value)),
-  enabled: computed(() => sessionStatus.value.kind !== 'unavailable'),
+  queryKey: computed(() =>
+    srsKeys.stats(sessionStatus.value.kind === 'unavailable' ? null : sessionStatus.value.userId),
+  ),
+  enabled: queryEnabled,
   queryFn: ({ signal }) => fetchStatsWithSessionRaceRecovery(signal),
   refetchOnMount: 'always',
   refetchOnWindowFocus: 'always',
@@ -541,14 +549,14 @@ For `session_changed` or a dispatch-time `session_unavailable` race:
 
 If the silent retry repeats while Home remains usable, show a generic manual-recovery error. Never leave an empty, settled, invisible-error state.
 
-For `session_recovery_pending`:
+For `session_recovery_pending` while the prior session is still usable:
 
 - do not immediately retry;
 - with cache, keep normal zero/positive content and let the auth gate/banner own recovery messaging;
 - without cache, show accessible session-recovery loading;
 - watch only `MobileFeatureSessionStatus`;
 - after same-user `recovering -> usable`, refetch once; and
-- if status becomes unavailable, let the gate replace Home.
+- if the selector becomes unavailable or recovering-but-unusable, disable the query and let the gate replace Home.
 
 ### Native foreground integration and cache isolation
 
@@ -562,11 +570,11 @@ Keep existing resume diagnostics. Add no polling or background task.
 
 Install auth/cache isolation once from `App.vue` using the injected coordinator and imported `mobileQueryClient`:
 
-1. Enable authenticated queries only for a usable/recovering identified user as defined above.
-2. Sign-out, terminal cleanup, or identity change cancels in-flight queries.
-3. Await cancellation before cache removal.
+1. Enable authenticated queries only for `usable` or `recovering` with `sessionUsable: true`.
+2. Sign-out, terminal cleanup, unusable recovery, or identity change cancels in-flight queries.
+3. Await cancellation before cache removal for sign-out, terminal cleanup, or identity change.
 4. Failed durable cleanup still leaves cache cleared.
-5. Soft refresh failure retains cached data while the prior session remains usable.
+5. Soft refresh failure retains cached data only while the prior session remains usable.
 6. Backgrounding does not clear.
 
 A non-401 may return after generation promotion; canceled-query semantics and user-scoped keys prevent repopulation after identity loss.
@@ -592,15 +600,15 @@ type DueReviewView =
 Rules:
 
 - initial no-data fetch -> loading;
-- no data plus pending auth recovery -> recovery loading;
-- pending recovery with cache -> zero/positive, no Home-specific error;
+- no data plus usable pending auth recovery -> recovery loading;
+- usable pending recovery with cache -> zero/positive, no Home-specific error;
 - zero/positive remains during background fetch;
 - retryable failure without/with cache -> blocking/cached error;
 - `invalid_request` -> generic non-retryable defect;
 - `invalid_response` -> generic manually retryable failure;
 - repeated control race while usable -> generic manually retryable failure;
 - caller cancellation -> no visible error; and
-- unauthorized -> gate removes Home.
+- unauthorized/unusable auth -> gate removes Home.
 
 Home copy and semantics:
 
@@ -623,7 +631,7 @@ Home copy and semantics:
 - Parse complete production response and reject invalid fields.
 - Ignore unknown fields.
 - Distinguish users and JLPT filters in the stats key.
-- Assert the identity-warning comment remains adjacent to unscoped sibling SRS keys.
+- Add and review the source warning immediately beside the identity-unscoped sibling SRS keys; do not add a brittle test that asserts comment text.
 - Confirm `@vela/common` source aliases in mobile Quasar and Vitest config.
 - Run mobile tests from `apps/vela-mobile` without a prebuilt `packages/common/dist`.
 - Confirm the common package header covers domain contracts.
@@ -671,15 +679,16 @@ Home copy and semantics:
 
 - QueryClient singleton/plugin identity and boot order.
 - Exact two-retry network/server predicate; all other codes false.
+- Query is disabled for `unavailable` and `recovering` with `sessionUsable: false`.
 - First same-user session race silently retries once.
 - Repeated race produces visible manual recovery, never blank UI.
-- Pending recovery with cache retains count.
-- Pending recovery without cache shows recovery loading.
+- Usable pending recovery with cache retains count.
+- Usable pending recovery without cache shows recovery loading.
 - Same-user `recovering -> usable` refetches once.
 - Composable does not inspect raw auth operation/retry/error fields.
 - Native focus updates and enabled-only refetch.
 - Sign-out/terminal cleanup cancel before clear.
-- Soft refresh failure retains usable cache.
+- Soft refresh failure retains cache only while session remains usable.
 - Identity change cannot select previous data.
 - Manual/background flags are distinct.
 - All loading, zero, positive, error, retry, stale, recovery, and defect states are accessible.
