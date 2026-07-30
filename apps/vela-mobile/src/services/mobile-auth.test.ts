@@ -2521,6 +2521,95 @@ describe('active-session lifecycle refresh', () => {
     expect(harness.coordinator.state.sessionUsable).toBe(true);
   });
 
+  it('reissues an expired rotated refresh candidate with the durable R2, not active R1', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+    const harness = makeHarness({ now: () => Date.now() });
+    await authenticateWithExpiry(harness, NOW + 120_000);
+    // First refresh returns a rotated R2 with a short-lived candidate so it
+    // expires before the manual retry. R2 is persisted before verification,
+    // while active still holds R1.
+    prepareSuccessfulRefresh(harness, {
+      rotatedRefreshToken: 'SECRET-rotated-refresh-token',
+      expiresInSeconds: 10,
+    });
+    harness.sessionFetch
+      .mockResolvedValueOnce(response(500, { error: 'temporary' }))
+      .mockResolvedValueOnce(response(500, { error: 'temporary' }));
+
+    await vi.advanceTimersByTimeAsync(60_000);
+    await vi.advanceTimersByTimeAsync(5_000);
+    // Candidate expired at NOW + 70_000; advance past it.
+    await vi.advanceTimersByTimeAsync(6_000);
+
+    expect(harness.coordinator.state).toMatchObject({
+      phase: 'authenticated',
+      errorCode: 'session_verification_failed',
+      retryAction: 'verify',
+    });
+    expect(harness.sessionStore.clearCalls).toBe(0);
+    expect(harness.sessionStore.saveAttempts).toContain('SECRET-rotated-refresh-token');
+
+    // The retry must reissue the grant with the candidate's durable R2, not
+    // active.bundle.refreshToken (R1). Sending R1 would, once its rotation
+    // grace ends, elicit invalid_grant and terminally delete the valid R2.
+    prepareSuccessfulRefresh(harness, {
+      rotatedRefreshToken: 'SECRET-rotated-refresh-token',
+    });
+    await harness.coordinator.retryCurrentOperation();
+
+    const grants = refreshRequests(harness);
+    expect(grants).toHaveLength(2);
+    expect(grants[1]?.data).toContain('refresh_token=SECRET-rotated-refresh-token');
+    expect(grants[1]?.data).not.toContain('refresh_token=SECRET-refresh-token');
+    expect(harness.sessionStore.clearCalls).toBe(0);
+    expect(harness.coordinator.state.sessionUsable).toBe(true);
+  });
+
+  it('reissues when the candidate expires during the /auth/session round-trip', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+    const harness = makeHarness({ now: () => Date.now() });
+    await authenticateWithExpiry(harness, NOW + 120_000);
+    // Candidate ID token expires at NOW + 62_000: valid when verification
+    // starts at NOW + 60_000 but expired by the time the response arrives.
+    prepareSuccessfulRefresh(harness, { expiresInSeconds: 2 });
+    const heldVerification = deferred<Response>();
+    harness.sessionFetch.mockImplementationOnce(async () => heldVerification.promise);
+
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(harness.coordinator.state).toMatchObject({
+      operation: 'verifying',
+      sessionUsable: true,
+    });
+
+    // Advance past the candidate expiry while the response is still pending.
+    await vi.advanceTimersByTimeAsync(3_000);
+    expect(harness.coordinator.state.operation).toBe('verifying');
+
+    // Prepare the reissue grant, then release the held response. Without the
+    // pre-promotion recheck, enterAuthenticated() would trip the live-bundle
+    // invariant (applyState → assertMobileAuthState) after active had been
+    // replaced with the expired bundle and pendingCandidate cleared, leaving
+    // the coordinator stuck in 'verifying' with no recovery timer.
+    prepareSuccessfulRefresh(harness);
+    heldVerification.resolve(
+      response(200, {
+        authenticated: true,
+        user: { userId: 'user-123', email: 'person@example.com' },
+      }),
+    );
+    await harness.flush();
+
+    expect(refreshRequests(harness)).toHaveLength(2);
+    expect(harness.coordinator.state).toMatchObject({
+      phase: 'authenticated',
+      operation: 'idle',
+      sessionUsable: true,
+    });
+    expect(harness.sessionStore.clearCalls).toBe(0);
+  });
+
   it('replaces both old deadlines after successful promotion', async () => {
     vi.useFakeTimers();
     vi.setSystemTime(NOW);
