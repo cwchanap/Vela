@@ -1,6 +1,7 @@
 import { reactive, readonly, type InjectionKey } from 'vue';
 import {
   MOBILE_OAUTH_CALLBACK_URI,
+  MobileAuthenticatedApiRequestError,
   assertMobileAuthState,
   type AuthorizationCodeTokenBundle,
   type MobileAppAdapter,
@@ -12,6 +13,7 @@ import {
   type MobileAuthRetryAction,
   type MobileAuthState,
   type MobileAuthUser,
+  type MobileAuthenticatedApiRequest,
   type MobileBrowserAdapter,
   type MobileOAuthConfig,
   type MobileTokenTransportAdapter,
@@ -67,6 +69,14 @@ type PendingCandidate =
 type ActiveSession = {
   bundle: OAuthTokenBundleBase & { refreshToken: string };
   user: MobileAuthUser;
+};
+
+type AuthenticatedFeatureSnapshot = {
+  owner: ActiveSession;
+  generation: number;
+  idToken: string;
+  expiresAt: number;
+  userId: string;
 };
 
 type CleanupContext =
@@ -206,8 +216,44 @@ function parseSessionUser(value: unknown): { userId: string; email: string | nul
   return { userId, email };
 }
 
-function sessionUrl(apiUrl: string): string {
-  return `${apiUrl.replace(/\/+$/u, '')}/auth/session`;
+function normalizeMobileApiBaseUrl(apiUrl: string): URL {
+  const base = new URL(apiUrl);
+  base.search = '';
+  base.hash = '';
+  base.pathname = `${base.pathname.replace(/\/+$/u, '')}/`;
+  return base;
+}
+
+function resolveMobileApiUrl(base: URL, relativePath: string): URL {
+  if (
+    relativePath.length === 0 ||
+    relativePath.startsWith('/') ||
+    relativePath.startsWith('\\') ||
+    relativePath.includes('\\') ||
+    relativePath.includes('#') ||
+    /^[a-z][a-z\d+.-]*:/iu.test(relativePath) ||
+    relativePath.startsWith('//')
+  ) {
+    throw new MobileAuthenticatedApiRequestError('invalid_request_path');
+  }
+
+  for (const segment of relativePath.split('/')) {
+    let decoded: string;
+    try {
+      decoded = decodeURIComponent(segment);
+    } catch {
+      throw new MobileAuthenticatedApiRequestError('invalid_request_path');
+    }
+    if (decoded === '.' || decoded === '..' || decoded.includes('\\')) {
+      throw new MobileAuthenticatedApiRequestError('invalid_request_path');
+    }
+  }
+
+  const resolved = new URL(relativePath, base);
+  if (resolved.origin !== base.origin || !resolved.pathname.startsWith(base.pathname)) {
+    throw new MobileAuthenticatedApiRequestError('invalid_request_path');
+  }
+  return resolved;
 }
 
 export function createMobileAuthCoordinator(
@@ -269,6 +315,88 @@ export function createMobileAuthCoordinator(
 
   function unavailable(): boolean {
     return disposed || disposalRequested;
+  }
+
+  async function dispatchAuthenticatedFeatureAttempt(
+    request: MobileAuthenticatedApiRequest,
+    snapshot: AuthenticatedFeatureSnapshot,
+  ): Promise<Response> {
+    const target = resolveMobileApiUrl(
+      normalizeMobileApiBaseUrl(dependencies.config.apiUrl),
+      request.path,
+    );
+    const headers = new Headers(request.init?.headers);
+    if (headers.has('authorization')) {
+      throw new MobileAuthenticatedApiRequestError('invalid_request_headers');
+    }
+    headers.set('Accept', headers.get('Accept') ?? 'application/json');
+    headers.set('Authorization', `Bearer ${snapshot.idToken}`);
+
+    const controller = new AbortController();
+    let timeoutExpired = false;
+    const onCallerAbort = () => controller.abort();
+    request.init?.signal?.addEventListener('abort', onCallerAbort, { once: true });
+    if (request.init?.signal?.aborted) {
+      controller.abort();
+    }
+    const timeout = setTimeout(() => {
+      timeoutExpired = true;
+      controller.abort();
+    }, MOBILE_AUTH_NETWORK_TIMEOUT_MS);
+
+    try {
+      return await dependencies.fetch(target, {
+        ...request.init,
+        headers,
+        signal: controller.signal,
+      });
+    } catch (error) {
+      if (request.init?.signal?.aborted) {
+        throw new DOMException('The operation was aborted.', 'AbortError');
+      }
+      if (timeoutExpired) {
+        throw new MobileAuthenticatedApiRequestError('request_timeout', { cause: error });
+      }
+      throw error;
+    } finally {
+      clearTimeout(timeout);
+      request.init?.signal?.removeEventListener('abort', onCallerAbort);
+    }
+  }
+
+  async function requestAuthenticatedApi(
+    request: MobileAuthenticatedApiRequest,
+  ): Promise<Response> {
+    // Resolve caller-controlled URL and headers before consulting any session
+    // material, so malformed requests can never trigger a bearer fetch.
+    resolveMobileApiUrl(normalizeMobileApiBaseUrl(dependencies.config.apiUrl), request.path);
+    const callerHeaders = new Headers(request.init?.headers);
+    if (callerHeaders.has('authorization')) {
+      throw new MobileAuthenticatedApiRequestError('invalid_request_headers');
+    }
+
+    const owner = active;
+    if (!owner || !activeSessionIsUsable() || !state.sessionUsable) {
+      throw new MobileAuthenticatedApiRequestError('session_unavailable');
+    }
+    const snapshot: AuthenticatedFeatureSnapshot = {
+      owner,
+      generation: activeBundleGeneration,
+      idToken: owner.bundle.idToken,
+      expiresAt: owner.bundle.expiresAt,
+      userId: owner.user.userId,
+    };
+
+    // The physical fetch stays outside serialize(), so it cannot hold up
+    // sign-out, retries, or disposal while it is pending.
+    const response = await dispatchAuthenticatedFeatureAttempt(request, snapshot);
+    if (response.status !== 401) {
+      return response;
+    }
+    if (active !== snapshot.owner || activeBundleGeneration !== snapshot.generation) {
+      throw new MobileAuthenticatedApiRequestError('session_changed');
+    }
+    return response;
   }
 
   const transitions = {
@@ -874,14 +1002,20 @@ export function createMobileAuthCoordinator(
     try {
       let response: Response;
       try {
-        response = await dependencies.fetch(sessionUrl(dependencies.config.apiUrl), {
-          method: 'GET',
-          headers: {
-            Accept: 'application/json',
-            Authorization: `Bearer ${candidate.bundle.idToken}`,
+        response = await dependencies.fetch(
+          resolveMobileApiUrl(
+            normalizeMobileApiBaseUrl(dependencies.config.apiUrl),
+            'auth/session',
+          ).toString(),
+          {
+            method: 'GET',
+            headers: {
+              Accept: 'application/json',
+              Authorization: `Bearer ${candidate.bundle.idToken}`,
+            },
+            signal: controller.signal,
           },
-          signal: controller.signal,
-        });
+        );
       } catch {
         if (!candidateIsCurrent(candidate)) {
           return;
@@ -1842,6 +1976,7 @@ export function createMobileAuthCoordinator(
       unavailable()
         ? Promise.resolve()
         : serialize(() => completeCallbackUnlocked(url).then(() => undefined)),
+    requestAuthenticatedApi,
     retryCurrentOperation,
     signOut,
     dispose,

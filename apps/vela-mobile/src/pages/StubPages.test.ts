@@ -7,7 +7,10 @@ import LearnPage from './LearnPage.vue';
 import ReviewPage from './ReviewPage.vue';
 import WordsPage from './WordsPage.vue';
 import MorePage from './MorePage.vue';
-import type { MobileAuthCoordinator } from '../auth/mobile-auth-contract';
+import {
+  MobileAuthenticatedApiRequestError,
+  type MobileAuthCoordinator,
+} from '../auth/mobile-auth-contract';
 import { MOBILE_AUTH_KEY } from '../services/mobile-auth';
 
 const coordinator: MobileAuthCoordinator = {
@@ -23,6 +26,9 @@ const coordinator: MobileAuthCoordinator = {
   initialize: vi.fn().mockResolvedValue(undefined),
   startSignIn: vi.fn().mockResolvedValue(undefined),
   completeCallback: vi.fn().mockResolvedValue(undefined),
+  requestAuthenticatedApi: vi
+    .fn()
+    .mockRejectedValue(new MobileAuthenticatedApiRequestError('session_unavailable')),
   retryCurrentOperation: vi.fn().mockResolvedValue(undefined),
   signOut: vi.fn().mockResolvedValue(undefined),
   dispose: vi.fn().mockResolvedValue(undefined),

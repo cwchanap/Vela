@@ -22,6 +22,8 @@ export const LOG_AND_DOM_SENTINELS = [
   'SECRET-code-verifier',
   'SECRET-nonce',
   'SECRET-claim-email',
+  'Bearer SECRET-caller-authorization',
+  'https://evil.example/SECRET-rejected-path',
 ] as const;
 
 export const NON_SCHEMA_STORAGE_SENTINELS = [
@@ -30,6 +32,8 @@ export const NON_SCHEMA_STORAGE_SENTINELS = [
   'SECRET-raw-request',
   'SECRET-raw-response',
   'SECRET-native-exception',
+  'Bearer SECRET-caller-authorization',
+  'https://evil.example/SECRET-rejected-path',
 ] as const;
 
 export function searchable(value: unknown): string {
@@ -80,6 +84,8 @@ export function createSecretLeakAssertions(options: { installationKey: string })
   expectNoSecretLeak: (input: {
     consoleCalls: unknown[][];
     preferenceCalls: unknown[][];
+    errorMessages?: string[];
+    jsonSnapshots?: string[];
     renderedText?: string;
   }) => void;
   expectApprovedPreferenceWrites: (preferenceCalls: unknown[][]) => void;
@@ -136,10 +142,14 @@ export function createSecretLeakAssertions(options: { installationKey: string })
   function expectNoSecretLeak(input: {
     consoleCalls: unknown[][];
     preferenceCalls: unknown[][];
+    errorMessages?: string[];
+    jsonSnapshots?: string[];
     renderedText?: string;
   }): void {
     const logsAndDom = [
       searchable(input.consoleCalls),
+      ...(input.errorMessages ?? []),
+      ...(input.jsonSnapshots ?? []),
       input.renderedText ?? document.body.textContent ?? '',
     ].join('\n');
     const browserAndPreferenceStorage = [
