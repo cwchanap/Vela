@@ -3631,6 +3631,8 @@ describe('authenticated feature transport', () => {
       '/api/srs/stats',
       '../secret',
       '%2e%2e/secret',
+      '%2e%2e%2fsecret',
+      'srs%2f..%2fsecret',
       String.raw`..\secret`,
       'srs/stats#fragment',
     ]) {
@@ -3722,6 +3724,26 @@ describe('authenticated feature transport', () => {
     await expect(request).rejects.toMatchObject({ name: 'AbortError' });
   });
 
+  it('preserves the original caller abort when its init signal is replaced in flight', async () => {
+    const harness = makeHarness();
+    await authenticate(harness);
+    const original = new AbortController();
+    const replacement = new AbortController();
+    const init = { signal: original.signal };
+    harness.sessionFetch.mockImplementationOnce(
+      (_url, fetchInit) =>
+        new Promise<Response>((_resolve, reject) => {
+          fetchInit?.signal?.addEventListener('abort', () => reject(new Error('original aborted')));
+        }),
+    );
+
+    const request = harness.coordinator.requestAuthenticatedApi({ path: 'srs/stats', init });
+    init.signal = replacement.signal;
+    original.abort();
+
+    await expect(request).rejects.toMatchObject({ name: 'AbortError' });
+  });
+
   it('maps the bounded feature timeout to request_timeout', async () => {
     const harness = makeHarness();
     await authenticate(harness);
@@ -3742,6 +3764,47 @@ describe('authenticated feature transport', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it('keeps a timeout classified as request_timeout when the caller replaces its signal', async () => {
+    const harness = makeHarness();
+    await authenticate(harness);
+    const original = new AbortController();
+    const replacement = new AbortController();
+    replacement.abort();
+    const init = { signal: original.signal };
+    vi.useFakeTimers();
+    try {
+      harness.sessionFetch.mockImplementationOnce(
+        (_url, fetchInit) =>
+          new Promise<Response>((_resolve, reject) => {
+            fetchInit?.signal?.addEventListener('abort', () => reject(new Error('timeout')));
+          }),
+      );
+
+      const request = harness.coordinator.requestAuthenticatedApi({ path: 'srs/stats', init });
+      const expected = expect(request).rejects.toMatchObject({ code: 'request_timeout' });
+      init.signal = replacement.signal;
+      await vi.advanceTimersByTimeAsync(MOBILE_AUTH_NETWORK_TIMEOUT_MS);
+
+      await expected;
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('rejects feature transport once disposal has been requested', async () => {
+    const harness = makeHarness();
+    await authenticate(harness);
+    const disposing = harness.coordinator.dispose();
+
+    await expect(
+      harness.coordinator.requestAuthenticatedApi({ path: 'srs/stats' }),
+    ).rejects.toMatchObject({
+      code: 'session_unavailable',
+    });
+    await disposing;
+    expect(harness.sessionFetch).toHaveBeenCalledOnce();
   });
 
   it('propagates raw fetch rejection without mutating auth state', async () => {
