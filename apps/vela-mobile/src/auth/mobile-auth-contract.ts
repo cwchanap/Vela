@@ -109,6 +109,30 @@ export type MobileAuthState = {
   user: MobileAuthUser | null;
 };
 
+/* global HeadersInit, RequestInit */
+export type MobileAuthenticatedApiRequest = {
+  path: string;
+  init?: Omit<RequestInit, 'headers'> & { headers?: HeadersInit };
+};
+
+export type MobileAuthenticatedApiRequestErrorCode =
+  | 'invalid_request_path'
+  | 'invalid_request_headers'
+  | 'request_timeout'
+  | 'session_unavailable'
+  | 'session_changed'
+  | 'session_recovery_pending';
+
+export class MobileAuthenticatedApiRequestError extends Error {
+  constructor(
+    readonly code: MobileAuthenticatedApiRequestErrorCode,
+    options?: { cause?: unknown },
+  ) {
+    super(code, options);
+    this.name = 'MobileAuthenticatedApiRequestError';
+  }
+}
+
 export type MobileAuthStateAssertionContext = {
   activeBundle: OAuthTokenBundleBase | null;
   now: number;
