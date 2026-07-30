@@ -2225,3 +2225,10 @@ gh pr create \
 On a configured development iPhone, repeat fresh sign-in, relaunch restoration, positive/zero count, network failure, retry, foreground resume, rejected token, and sign-out. Record device model, iOS version, build SHA, account, timestamp, API/web comparison value, and result on HPA-207.
 
 Do not close HPA-207 until this evidence is attached, even if the implementation PR has merged.
+
+## Execution Handoff
+
+After PR #52 is reviewed and merged, execute this plan using one of these required paths:
+
+1. **Subagent-Driven (recommended):** use `superpowers:subagent-driven-development`, dispatch a fresh implementation subagent per task, and run the required two-stage review between tasks.
+2. **Inline Execution:** use `superpowers:executing-plans`, execute task batches in one session, and stop at the documented review checkpoints.
