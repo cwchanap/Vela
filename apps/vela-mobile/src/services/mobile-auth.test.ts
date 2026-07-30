@@ -4099,7 +4099,11 @@ describe('authenticated feature transport', () => {
   });
 
   it('returns session_changed when identity replacement supersedes waiting recovery', async () => {
+    // Direct active-identity mutation is not a coordinator operation. The
+    // supported replacement boundary is local sign-out followed by a fresh,
+    // distinct-user OAuth session.
     let currentNow = NOW;
+    let replacementActive = false;
     const harness = makeHarness({ now: () => currentNow });
     await authenticateWithExpiry(harness, currentNow + 120_000, currentNow);
     harness.sessionFetch.mockClear();
@@ -4111,7 +4115,10 @@ describe('authenticated feature transport', () => {
         ? featureResponse.promise
         : response(200, {
             authenticated: true,
-            user: { userId: 'user-123', email: 'person@example.com' },
+            user: {
+              userId: replacementActive ? 'user-456' : 'user-123',
+              email: 'person@example.com',
+            },
           }),
     );
 
@@ -4124,13 +4131,30 @@ describe('authenticated feature transport', () => {
     const signingOut = harness.coordinator.signOut();
     refreshGate.resolve(harness.tokenTransport.result);
     await signingOut;
+    // The harness transaction store uses NOW as its persistence clock; reset
+    // the injected coordinator clock before beginning the replacement flow.
+    currentNow = NOW;
     harness.tokenTransport.gate = undefined;
     await harness.coordinator.startSignIn();
     const replacement = harness.preferences.transaction();
-    harness.prepareSuccessfulExchange(replacement);
+    replacementActive = true;
+    harness.tokenTransport.result = {
+      status: 200,
+      data: {
+        access_token: 'SECRET-replacement-access-token',
+        id_token: idToken(replacement, { sub: 'user-456' }),
+        refresh_token: 'SECRET-replacement-refresh-token',
+        expires_in: 3_600,
+      },
+    };
+    await harness.persist(replacement);
     await harness.coordinator.completeCallback(callback(replacement));
 
     await expected;
+    expect(harness.coordinator.state).toMatchObject({
+      phase: 'authenticated',
+      user: { userId: 'user-456', email: 'person@example.com' },
+    });
   });
 
   it('does not wait behind the feature request that initiated recovery', async () => {
