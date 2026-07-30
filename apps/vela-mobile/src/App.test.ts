@@ -2,7 +2,11 @@ import { flushPromises, mount } from '@vue/test-utils';
 import { defineComponent, nextTick, onMounted, reactive } from 'vue';
 import { createRouter, createMemoryHistory } from 'vue-router';
 import { describe, expect, it, vi } from 'vitest';
-import type { MobileAuthCoordinator, MobileAuthState } from './auth/mobile-auth-contract';
+import {
+  MobileAuthenticatedApiRequestError,
+  type MobileAuthCoordinator,
+  type MobileAuthState,
+} from './auth/mobile-auth-contract';
 import { MOBILE_AUTH_KEY } from './services/mobile-auth';
 import App from './App.vue';
 
@@ -42,6 +46,9 @@ describe('App', () => {
       initialize: vi.fn().mockResolvedValue(undefined),
       startSignIn: vi.fn().mockResolvedValue(undefined),
       completeCallback: vi.fn().mockResolvedValue(undefined),
+      requestAuthenticatedApi: vi
+        .fn()
+        .mockRejectedValue(new MobileAuthenticatedApiRequestError('session_unavailable')),
       retryCurrentOperation: vi.fn().mockResolvedValue(undefined),
       signOut: vi.fn().mockResolvedValue(undefined),
       dispose: vi.fn().mockResolvedValue(undefined),

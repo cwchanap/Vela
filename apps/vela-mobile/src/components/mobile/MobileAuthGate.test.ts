@@ -2,7 +2,8 @@ import { defineComponent, nextTick, reactive } from 'vue';
 import { flushPromises, mount } from '@vue/test-utils';
 import { createMemoryHistory, createRouter, type RouteRecordRaw } from 'vue-router';
 import { describe, expect, it, vi } from 'vitest';
-import type {
+import {
+  MobileAuthenticatedApiRequestError,
   MobileAuthCoordinator,
   MobileAuthErrorCode,
   MobileAuthPhase,
@@ -128,6 +129,9 @@ function createFakeCoordinator(
     initialize: vi.fn().mockResolvedValue(undefined),
     startSignIn: vi.fn().mockResolvedValue(undefined),
     completeCallback: vi.fn().mockResolvedValue(undefined),
+    requestAuthenticatedApi: vi
+      .fn()
+      .mockRejectedValue(new MobileAuthenticatedApiRequestError('session_unavailable')),
     retryCurrentOperation: vi.fn().mockResolvedValue(undefined),
     signOut: vi.fn().mockResolvedValue(undefined),
     dispose: vi.fn().mockResolvedValue(undefined),

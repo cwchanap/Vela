@@ -3619,6 +3619,209 @@ describe('session verification', () => {
   });
 });
 
+describe('authenticated feature transport', () => {
+  it('rejects path escapes before network activity', async () => {
+    const harness = makeHarness();
+    await authenticate(harness);
+    const before = harness.sessionFetch.mock.calls.length;
+
+    for (const path of [
+      'https://evil.example/steal',
+      '//evil.example/steal',
+      '/api/srs/stats',
+      '../secret',
+      '%2e%2e/secret',
+      String.raw`..\secret`,
+      'srs/stats#fragment',
+    ]) {
+      await expect(harness.coordinator.requestAuthenticatedApi({ path })).rejects.toMatchObject({
+        code: 'invalid_request_path',
+      });
+    }
+
+    expect(harness.sessionFetch).toHaveBeenCalledTimes(before);
+  });
+
+  it.each(['Authorization', 'authorization', 'AUTHORIZATION', 'AuThOrIzAtIoN'])(
+    'rejects caller-owned %s',
+    async (header) => {
+      const harness = makeHarness();
+      await authenticate(harness);
+
+      await expect(
+        harness.coordinator.requestAuthenticatedApi({
+          path: 'srs/stats',
+          init: { headers: { [header]: 'Bearer attacker' } },
+        }),
+      ).rejects.toMatchObject({ code: 'invalid_request_headers' });
+    },
+  );
+
+  it.each(['https://vela.example/api', 'https://vela.example/api///'])(
+    'normalizes %s before resolving a feature path',
+    async (apiUrl) => {
+      const harness = makeHarness({ authConfig: { ...config, apiUrl } });
+      await authenticate(harness);
+      harness.sessionFetch.mockClear();
+      harness.sessionFetch.mockResolvedValueOnce(response(200, {}));
+
+      await harness.coordinator.requestAuthenticatedApi({ path: 'srs/stats' });
+
+      expect(String(harness.sessionFetch.mock.calls[0]?.[0])).toBe(
+        'https://vela.example/api/srs/stats',
+      );
+    },
+  );
+
+  it('rejects a resolved path outside the API prefix', async () => {
+    const harness = makeHarness();
+    await authenticate(harness);
+    const before = harness.sessionFetch.mock.calls.length;
+
+    await expect(
+      harness.coordinator.requestAuthenticatedApi({ path: '../api-evil/secret' }),
+    ).rejects.toMatchObject({ code: 'invalid_request_path' });
+
+    expect(harness.sessionFetch).toHaveBeenCalledTimes(before);
+  });
+
+  it('owns exactly one current Authorization header', async () => {
+    const harness = makeHarness();
+    await authenticate(harness);
+    harness.sessionFetch.mockClear();
+    harness.sessionFetch.mockResolvedValueOnce(response(200, {}));
+
+    await harness.coordinator.requestAuthenticatedApi({
+      path: 'srs/stats',
+      init: { headers: { 'X-Feature': 'due-reviews' } },
+    });
+
+    expect(harness.sessionFetch).toHaveBeenCalledOnce();
+    const headers = new Headers(harness.sessionFetch.mock.calls[0]?.[1]?.headers);
+    expect(headers.get('Authorization')).toBe(`Bearer ${idToken(activeTransaction)}`);
+    expect(headers.get('X-Feature')).toBe('due-reviews');
+  });
+
+  it('preserves a caller abort as AbortError', async () => {
+    const harness = makeHarness();
+    await authenticate(harness);
+    const caller = new AbortController();
+    harness.sessionFetch.mockImplementationOnce(
+      (_url, init) =>
+        new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener('abort', () => reject(new Error('transport aborted')));
+        }),
+    );
+
+    const request = harness.coordinator.requestAuthenticatedApi({
+      path: 'srs/stats',
+      init: { signal: caller.signal },
+    });
+    caller.abort();
+
+    await expect(request).rejects.toMatchObject({ name: 'AbortError' });
+  });
+
+  it('maps the bounded feature timeout to request_timeout', async () => {
+    const harness = makeHarness();
+    await authenticate(harness);
+    vi.useFakeTimers();
+    try {
+      harness.sessionFetch.mockImplementationOnce(
+        (_url, init) =>
+          new Promise<Response>((_resolve, reject) => {
+            init?.signal?.addEventListener('abort', () => reject(new Error('timeout')));
+          }),
+      );
+
+      const request = harness.coordinator.requestAuthenticatedApi({ path: 'srs/stats' });
+      const expected = expect(request).rejects.toMatchObject({ code: 'request_timeout' });
+      await vi.advanceTimersByTimeAsync(MOBILE_AUTH_NETWORK_TIMEOUT_MS);
+
+      await expected;
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('propagates raw fetch rejection without mutating auth state', async () => {
+    const harness = makeHarness();
+    await authenticate(harness);
+    const before = { ...harness.coordinator.state };
+    const failure = new Error('feature transport failed');
+    harness.sessionFetch.mockRejectedValueOnce(failure);
+
+    await expect(harness.coordinator.requestAuthenticatedApi({ path: 'srs/stats' })).rejects.toBe(
+      failure,
+    );
+
+    expect(harness.coordinator.state).toEqual(before);
+  });
+
+  it.each([200, 500])('returns a non-401 response after refresh promotion (%i)', async (status) => {
+    let currentNow = Date.now();
+    const harness = makeHarness({ now: () => currentNow });
+    await authenticateWithExpiry(harness, currentNow + 30_000, currentNow);
+    harness.tokenTransport.result = {
+      status: 200,
+      data: {
+        access_token: 'SECRET-refreshed-access-token',
+        id_token: refreshedIdToken({ exp: Math.ceil((currentNow + 3_600_000) / 1_000) }),
+        expires_in: 3_600,
+      },
+    };
+    harness.sessionFetch.mockClear();
+    const featureResponse = deferred<Response>();
+    harness.sessionFetch.mockImplementation(async (target) => {
+      if (String(target).endsWith('/srs/stats')) return featureResponse.promise;
+      return response(200, {
+        authenticated: true,
+        user: { userId: 'user-123', email: null },
+      });
+    });
+
+    const request = harness.coordinator.requestAuthenticatedApi({ path: 'srs/stats' });
+    await vi.waitFor(() => expect(harness.sessionFetch).toHaveBeenCalledOnce());
+    harness.app.emitState(true);
+    await vi.waitFor(() => expect(refreshRequests(harness)).toHaveLength(1));
+    await harness.flush();
+    featureResponse.resolve(response(status, {}));
+
+    await expect(request).resolves.toMatchObject({ status });
+  });
+
+  it('rejects a stale-generation 401 without cleanup', async () => {
+    const harness = makeHarness();
+    await authenticate(harness);
+    harness.sessionFetch.mockClear();
+    const featureResponse = deferred<Response>();
+    harness.sessionFetch.mockImplementationOnce(async () => featureResponse.promise);
+
+    const request = harness.coordinator.requestAuthenticatedApi({ path: 'srs/stats' });
+    await vi.waitFor(() => expect(harness.sessionFetch).toHaveBeenCalledOnce());
+    await harness.coordinator.signOut();
+    featureResponse.resolve(response(401, {}));
+
+    await expect(request).rejects.toMatchObject({ code: 'session_changed' });
+    expect(harness.sessionStore.clearCalls).toBe(1);
+  });
+
+  it('does not let a pending feature fetch block sign-out or disposal', async () => {
+    const harness = makeHarness();
+    await authenticate(harness);
+    const featureResponse = deferred<Response>();
+    harness.sessionFetch.mockImplementationOnce(async () => featureResponse.promise);
+
+    const request = harness.coordinator.requestAuthenticatedApi({ path: 'srs/stats' });
+    await vi.waitFor(() => expect(harness.sessionFetch).toHaveBeenCalledTimes(2));
+    await expect(harness.coordinator.retryCurrentOperation()).resolves.toBeUndefined();
+    await expect(harness.coordinator.signOut()).resolves.toBeUndefined();
+    await expect(harness.coordinator.dispose()).resolves.toBeUndefined();
+    featureResponse.resolve(response(200, {}));
+    await expect(request).resolves.toMatchObject({ status: 200 });
+  });
+});
+
 describe('serialization, disposal, and secret handling', () => {
   it('serializes duplicate callback completion so code exchange happens once', async () => {
     const tokenResponse = deferred<{ status: number; data: unknown }>();
@@ -3790,6 +3993,18 @@ describe('cross-boundary secret leakage regressions', () => {
       expectNoSecretLeak({
         consoleCalls: [],
         preferenceCalls: [],
+        renderedText: '',
+      }),
+    ).toThrow();
+  });
+
+  it('rejects feature authorization and rejected-path sentinels from every presentation surface', () => {
+    expect(() =>
+      expectNoSecretLeak({
+        consoleCalls: [],
+        preferenceCalls: [],
+        errorMessages: ['Bearer SECRET-caller-authorization'],
+        jsonSnapshots: [JSON.stringify({ path: 'https://evil.example/SECRET-rejected-path' })],
         renderedText: '',
       }),
     ).toThrow();
