@@ -108,12 +108,16 @@ describe('srsKeys', () => {
     expect(srsKeys.due(20)).toEqual(['srs', 'due', 20, undefined]);
   });
 
-  it('stats returns correct tuple with jlpt', () => {
-    expect(srsKeys.stats([2, 3])).toEqual(['srs', 'stats', [2, 3]]);
+  it('stats scopes the tuple by user and jlpt', () => {
+    expect(srsKeys.stats('user-1', [2, 3])).toEqual(['srs', 'stats', 'user-1', [2, 3]]);
   });
 
-  it('stats handles undefined jlpt', () => {
-    expect(srsKeys.stats()).toEqual(['srs', 'stats', undefined]);
+  it('stats preserves null user and undefined jlpt', () => {
+    expect(srsKeys.stats(null)).toEqual(['srs', 'stats', null, undefined]);
+  });
+
+  it('stats produces distinct keys for distinct users', () => {
+    expect(srsKeys.stats('user-1')).not.toEqual(srsKeys.stats('user-2'));
   });
 
   it('progress returns correct tuple', () => {

@@ -1,23 +1,9 @@
+import type { SRSStats } from '@vela/common';
 import type { UserVocabularyProgress, Vocabulary, JLPTLevel } from 'src/types/database';
 import { getApiUrl } from 'src/utils/api';
 import { httpJsonAuth as httpJson } from 'src/utils/httpClient';
 
-/**
- * SRS statistics returned from the API
- */
-export interface SRSStats {
-  total_items: number;
-  due_today: number;
-  mastery_breakdown: {
-    new: number;
-    learning: number;
-    reviewing: number;
-    mastered: number;
-  };
-  average_ease_factor: number;
-  total_reviews: number;
-  accuracy_rate: number;
-}
+export type { SRSStats } from '@vela/common';
 
 /**
  * Due item with vocabulary data

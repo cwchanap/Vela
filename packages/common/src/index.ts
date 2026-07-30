@@ -1,5 +1,5 @@
 /**
- * @vela/query - Shared TanStack Query configuration and utilities
+ * @vela/common - Shared TanStack Query configuration, utilities, and domain contracts
  *
  * This package provides shared query configuration, cache timing constants,
  * and query key factories for use across Vela apps (web app and extension).
@@ -24,3 +24,6 @@ export {
 
 // Export shared constants
 export { DEFAULT_DAILY_LESSON_GOAL, DEFAULT_LESSON_DURATION_MINUTES } from './constants';
+
+// Export shared domain contracts
+export { parseSrsStats, type SRSStats } from './contracts/srs';
