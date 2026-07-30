@@ -1,17 +1,27 @@
 import type { PluginListenerHandle } from '@capacitor/core';
+import { focusManager } from '@tanstack/vue-query';
 import { describe, expect, it, vi } from 'vitest';
 import { registerCapacitorLifecycle, resetCapacitorLifecycleForTests } from './capacitor-lifecycle';
 
 describe('Capacitor lifecycle', () => {
-  it('registers one native resume listener', async () => {
+  it('registers resume diagnostics and native focus listeners once', async () => {
     resetCapacitorLifecycleForTests();
-    const addListener = vi.fn(async (_name: 'resume', listener: () => void) => {
-      listener();
+    const setFocused = vi.spyOn(focusManager, 'setFocused');
+    const addListener = vi.fn(async (name: 'resume' | 'appStateChange', listener: () => void) => {
+      if (name === 'appStateChange') {
+        (listener as (event: { isActive: boolean }) => void)({ isActive: false });
+        (listener as (event: { isActive: boolean }) => void)({ isActive: true });
+      }
       return { remove: vi.fn(async () => undefined) };
     });
     await registerCapacitorLifecycle({ addListener });
     await registerCapacitorLifecycle({ addListener });
-    expect(addListener).toHaveBeenCalledTimes(1);
+    expect(addListener).toHaveBeenCalledTimes(2);
+    expect(addListener).toHaveBeenCalledWith('resume', expect.any(Function));
+    expect(addListener).toHaveBeenCalledWith('appStateChange', expect.any(Function));
+    expect(setFocused).toHaveBeenNthCalledWith(1, false);
+    expect(setFocused).toHaveBeenNthCalledWith(2, true);
+    setFocused.mockRestore();
   });
 
   it('shares one native listener registration across concurrent callers', async () => {
@@ -20,7 +30,9 @@ describe('Capacitor lifecycle', () => {
     const pendingRegistration = new Promise<PluginListenerHandle>((resolve) => {
       resolveRegistration = resolve;
     });
-    const addListener = vi.fn((_name: 'resume', _listener: () => void) => pendingRegistration);
+    const addListener = vi.fn(
+      (_name: 'resume' | 'appStateChange', _listener: () => void) => pendingRegistration,
+    );
 
     const registrations = Promise.all([
       registerCapacitorLifecycle({ addListener }),
@@ -29,13 +41,15 @@ describe('Capacitor lifecycle', () => {
 
     expect(addListener).toHaveBeenCalledTimes(1);
     resolveRegistration!({ remove: vi.fn(async () => undefined) });
+    await Promise.resolve();
+    expect(addListener).toHaveBeenCalledTimes(2);
     await expect(registrations).resolves.toEqual([undefined, undefined]);
   });
 
   it('allows registration to retry after a failed subscription', async () => {
     resetCapacitorLifecycleForTests();
     let attempts = 0;
-    const addListener = vi.fn(async (_name: 'resume', _listener: () => void) => {
+    const addListener = vi.fn(async (_name: 'resume' | 'appStateChange', _listener: () => void) => {
       attempts += 1;
       if (attempts === 1) throw new Error('registration failed');
       return { remove: vi.fn(async () => undefined) };
@@ -45,6 +59,25 @@ describe('Capacitor lifecycle', () => {
       'registration failed',
     );
     await expect(registerCapacitorLifecycle({ addListener })).resolves.toBeUndefined();
-    expect(addListener).toHaveBeenCalledTimes(2);
+    expect(addListener).toHaveBeenCalledTimes(3);
+  });
+
+  it('removes a partial registration before allowing a retry', async () => {
+    resetCapacitorLifecycleForTests();
+    const remove = vi.fn(async () => undefined);
+    let attempts = 0;
+    const addListener = vi.fn(async (_name: 'resume' | 'appStateChange', _listener: () => void) => {
+      attempts += 1;
+      if (attempts === 2) throw new Error('app state registration failed');
+      return { remove };
+    });
+
+    await expect(registerCapacitorLifecycle({ addListener })).rejects.toThrow(
+      'app state registration failed',
+    );
+    expect(remove).toHaveBeenCalledOnce();
+
+    await expect(registerCapacitorLifecycle({ addListener })).resolves.toBeUndefined();
+    expect(addListener).toHaveBeenCalledTimes(4);
   });
 });
