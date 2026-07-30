@@ -2057,8 +2057,7 @@ git commit -m "feat(mobile): show authenticated due count"
 
 **Files:**
 
-- Modify only if evidence requires it:
-  - `docs/superpowers/plans/2026-07-30-mobile-authenticated-due-review-count.md` — check off completed steps during execution.
+- Modify only external tracking surfaces unless verification exposes a runtime defect:
   - HPA-207 Linear issue — attach or comment the verification matrix.
   - Implementation PR body — summarize automated and Simulator evidence.
 
@@ -2172,17 +2171,16 @@ Sign-out                 Count disappears immediately
 Account isolation        Later account never sees prior count
 ```
 
-- [ ] **Step 8: Commit plan bookkeeping only**
-
-Mark the completed checkboxes in this plan, then commit only the plan file:
+- [ ] **Step 8: Verify the runtime branch is clean and push it**
 
 ```bash
 cd $REPO_ROOT
-git add docs/superpowers/plans/2026-07-30-mobile-authenticated-due-review-count.md
-git commit -m "docs: record HPA-207 verification"
+git status --short
+git log --oneline --decorate -10
+git push -u origin codex/hpa-207-mobile-due-review-count
 ```
 
-Do not stage generated Xcode files, environment files, build output, coverage HTML, or unrelated changes.
+Expected: `git status --short` is empty, the task commits are visible, and the branch pushes successfully.
 
 - [ ] **Step 9: Create the implementation PR body and open the draft PR**
 
@@ -2211,10 +2209,9 @@ Physical-development-iPhone verification remains required before HPA-207 closes.
 ## Tracking
 
 - Linear: HPA-207
-- Design: PR #52
+- Design and plan: PR #52
 EOF
 
-git push -u origin codex/hpa-207-mobile-due-review-count
 gh pr create \
   --draft \
   --base main \
