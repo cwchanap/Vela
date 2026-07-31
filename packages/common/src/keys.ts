@@ -53,12 +53,14 @@ export const dictionaryKeys = {
  */
 export const srsKeys = {
   all: ['srs'] as const,
-  // Identity-unscoped legacy keys. Do not use these for mobile user data until
-  // their identity and cache-isolation contract is redesigned.
+  // No userId scope: responses mix users until the cache-isolation contract is
+  // redesigned. Do not use for mobile user data.
   due: (limit?: number, jlpt?: number[]) => [...srsKeys.all, 'due', limit, jlpt] as const,
   stats: (userId: string | null, jlpt?: number[]) =>
     [...srsKeys.all, 'stats', userId, jlpt] as const,
+  // No userId scope: per-vocabulary progress is not identity-scoped yet.
   progress: (vocabularyId: string) => [...srsKeys.all, 'progress', vocabularyId] as const,
+  // No userId scope: aggregates the active user without a key partition.
   allProgress: () => [...srsKeys.all, 'all'] as const,
 };
 

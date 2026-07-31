@@ -1,12 +1,19 @@
 import type { PluginListenerHandle } from '@capacitor/core';
 import { focusManager } from '@tanstack/vue-query';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { registerCapacitorLifecycle, resetCapacitorLifecycleForTests } from './capacitor-lifecycle';
 
 describe('Capacitor lifecycle', () => {
+  let setFocused: ReturnType<typeof vi.spyOn> | undefined;
+
+  afterEach(() => {
+    setFocused?.mockRestore();
+    setFocused = undefined;
+  });
+
   it('registers resume diagnostics and native focus listeners once', async () => {
     resetCapacitorLifecycleForTests();
-    const setFocused = vi.spyOn(focusManager, 'setFocused');
+    setFocused = vi.spyOn(focusManager, 'setFocused');
     const addListener = vi.fn(async (name: 'resume' | 'appStateChange', listener: () => void) => {
       if (name === 'appStateChange') {
         (listener as (event: { isActive: boolean }) => void)({ isActive: false });
@@ -21,7 +28,6 @@ describe('Capacitor lifecycle', () => {
     expect(addListener).toHaveBeenCalledWith('appStateChange', expect.any(Function));
     expect(setFocused).toHaveBeenNthCalledWith(1, false);
     expect(setFocused).toHaveBeenNthCalledWith(2, true);
-    setFocused.mockRestore();
   });
 
   it('shares one native listener registration across concurrent callers', async () => {

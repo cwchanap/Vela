@@ -1,4 +1,3 @@
-import type { SRSStats } from '@vela/common';
 import { describe, expect, it } from 'vitest';
 import { MobileApiError } from '../../services/mobile-api-client';
 import {
@@ -8,15 +7,7 @@ import {
   selectDueReviewView,
   type DueReviewViewInput,
 } from './due-review-view';
-
-const stats = (dueToday: number): SRSStats => ({
-  total_items: dueToday,
-  due_today: dueToday,
-  mastery_breakdown: { new: 0, learning: 0, reviewing: dueToday, mastered: 0 },
-  average_ease_factor: 2.5,
-  total_reviews: 0,
-  accuracy_rate: 100,
-});
+import { dueReviewStats as stats } from './stats-fixture';
 
 const input = (overrides: Partial<DueReviewViewInput> = {}): DueReviewViewInput => ({
   stats: undefined,
@@ -95,6 +86,16 @@ describe('selectDueReviewView', () => {
       'repeated session control race has generic manual recovery',
       input({ error: new MobileApiError('session_changed') }),
       { kind: 'blocking_error', message: GENERIC_MESSAGE, retrying: false, canRetry: true },
+    ],
+    [
+      'unauthorized without cache routes to session recovery loading',
+      input({ error: new MobileApiError('unauthorized') }),
+      { kind: 'loading', recoveringSession: true },
+    ],
+    [
+      'unauthorized with cache keeps data during session recovery',
+      input({ stats: stats(3), error: new MobileApiError('unauthorized') }),
+      { kind: 'positive', count: 3, refreshing: false },
     ],
   ])('selects %s', (_name, viewInput, expected) => {
     expect(selectDueReviewView(viewInput)).toEqual(expected);

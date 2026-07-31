@@ -355,12 +355,9 @@ export function createMobileAuthCoordinator(
   async function dispatchAuthenticatedFeatureAttempt(
     request: MobileAuthenticatedApiRequest,
     snapshot: AuthenticatedFeatureSnapshot,
+    target: URL,
+    headers: Headers,
   ): Promise<Response> {
-    const target = resolveMobileApiUrl(
-      normalizeMobileApiBaseUrl(dependencies.config.apiUrl),
-      request.path,
-    );
-    const headers = normalizeAuthenticatedRequestHeaders(request.init?.headers);
     headers.set('Accept', headers.get('Accept') ?? 'application/json');
     headers.set('Authorization', `Bearer ${snapshot.idToken}`);
 
@@ -469,7 +466,7 @@ export function createMobileAuthCoordinator(
     void (async () => {
       try {
         let observation: FeatureRefreshObservation;
-        if (!forceTerminalCleanup && snapshot.expiresAt <= dependencies.now()) {
+        if (snapshot.expiresAt <= dependencies.now()) {
           observation = await observeFeatureRefresh(snapshot.owner, snapshot.generation, record);
         } else {
           let cleanupStarted = false;
@@ -547,8 +544,11 @@ export function createMobileAuthCoordinator(
   ): Promise<Response> {
     // Resolve caller-controlled URL and headers before consulting any session
     // material, so malformed requests can never trigger a bearer fetch.
-    resolveMobileApiUrl(normalizeMobileApiBaseUrl(dependencies.config.apiUrl), request.path);
-    normalizeAuthenticatedRequestHeaders(request.init?.headers);
+    const target = resolveMobileApiUrl(
+      normalizeMobileApiBaseUrl(dependencies.config.apiUrl),
+      request.path,
+    );
+    const baseHeaders = normalizeAuthenticatedRequestHeaders(request.init?.headers);
 
     const owner = active;
     if (unavailable() || !owner || !activeSessionIsUsable() || !state.sessionUsable) {
@@ -563,8 +563,14 @@ export function createMobileAuthCoordinator(
     };
 
     // The physical fetch stays outside serialize(), so it cannot hold up
-    // sign-out, retries, or disposal while it is pending.
-    const response = await dispatchAuthenticatedFeatureAttempt(request, snapshot);
+    // sign-out, retries, or disposal while it is pending. A fresh Headers copy
+    // is passed per dispatch because the helper mutates it (Accept/Authorization).
+    const response = await dispatchAuthenticatedFeatureAttempt(
+      request,
+      snapshot,
+      target,
+      new Headers(baseHeaders),
+    );
     if (response.status !== 401) {
       return response;
     }

@@ -30,7 +30,7 @@ describe('mobile boot files', () => {
     ]);
   });
 
-  it('includes auth immediately after main in browser production', () => {
+  it('orders main, query, then mobile-auth in browser production', () => {
     expect(getMobileBootFiles({ isCapacitor: false, isDevelopment: false })).toEqual([
       'main',
       'query',

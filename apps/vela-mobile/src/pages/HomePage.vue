@@ -19,7 +19,7 @@
         <p class="due-review__count" aria-live="polite">
           {{ view.kind === 'zero' ? 0 : view.count }}
         </p>
-        <p>
+        <p aria-live="polite">
           {{
             view.kind === 'zero'
               ? 'You’re caught up for now.'

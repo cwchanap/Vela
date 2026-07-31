@@ -4,7 +4,7 @@ import {
   type MobileAuthCoordinator,
   type MobileAuthState,
 } from '../auth/mobile-auth-contract';
-import { createMobileApiClient, MOBILE_DUE_COUNT_EXECUTION_TIMEOUT_MS } from './mobile-api-client';
+import { createMobileApiClient, MOBILE_API_DEFAULT_TIMEOUT_MS } from './mobile-api-client';
 
 const usableState: MobileAuthState = {
   phase: 'authenticated',
@@ -37,13 +37,12 @@ function coordinator(overrides: Partial<MobileAuthCoordinator> = {}): MobileAuth
     signOut: vi.fn(),
     dispose: vi.fn(),
     ...overrides,
-  } as unknown as MobileAuthCoordinator;
+  };
 }
 
 function expectCallerCleanup(caller: AbortController, remove: ReturnType<typeof vi.spyOn>): void {
   expect(vi.getTimerCount()).toBe(0);
   expect(remove).toHaveBeenCalledWith('abort', expect.any(Function));
-  caller.abort();
 }
 
 describe('mobile API client', () => {
@@ -187,7 +186,7 @@ describe('mobile API client', () => {
       const promise = createMobileApiClient(auth).getJson('srs/stats', { signal: caller.signal });
       const expected = expect(promise).rejects.toMatchObject({ code: 'network' });
 
-      await vi.advanceTimersByTimeAsync(MOBILE_DUE_COUNT_EXECUTION_TIMEOUT_MS);
+      await vi.advanceTimersByTimeAsync(MOBILE_API_DEFAULT_TIMEOUT_MS);
 
       await expected;
       expectCallerCleanup(caller, remove);
@@ -213,7 +212,7 @@ describe('mobile API client', () => {
       const promise = createMobileApiClient(auth).getJson('srs/stats');
       const expected = expect(promise).rejects.toMatchObject({ code: 'session_recovery_pending' });
 
-      await vi.advanceTimersByTimeAsync(MOBILE_DUE_COUNT_EXECUTION_TIMEOUT_MS);
+      await vi.advanceTimersByTimeAsync(MOBILE_API_DEFAULT_TIMEOUT_MS);
 
       await expected;
     } finally {
@@ -268,7 +267,7 @@ describe('mobile API client', () => {
       });
       const promise = createMobileApiClient(auth).getJson('srs/stats');
       const expected = expect(promise).rejects.toMatchObject({ code: 'network' });
-      await vi.advanceTimersByTimeAsync(MOBILE_DUE_COUNT_EXECUTION_TIMEOUT_MS);
+      await vi.advanceTimersByTimeAsync(MOBILE_API_DEFAULT_TIMEOUT_MS);
 
       await expected;
     } finally {

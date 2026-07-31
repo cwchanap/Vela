@@ -115,9 +115,7 @@ export function useDueReviewCount(): UseDueReviewCountResult {
   const visibleError = computed<MobileApiError | null>(() => {
     const error = retainedManualError.value ?? query.error.value;
     if (!(error instanceof MobileApiError)) return null;
-    if (error.code === 'session_recovery_pending' || error.code === 'unauthorized') {
-      return null;
-    }
+    if (error.code === 'session_recovery_pending') return null;
     return error;
   });
 
