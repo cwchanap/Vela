@@ -34,20 +34,22 @@ export function installMobileQueryAuthIsolation(options: {
     (next, previous) => {
       const previousUserId = previous.userId;
       const identityChanged = previousUserId !== next.userId;
-      // A terminal sign-out wipes the whole cache (no successor user to keep).
-      const signOutClear =
+      // A terminal sign-out removes only the previous user's
+      // srsKeys.stats(previousUserId) cache entry; no removal occurs when
+      // there is no prior user.
+      const signOutTransition =
         next.phase === 'signedOut' ||
         next.operation === 'signingOut' ||
         next.operation === 'cleaningUp';
       const cancelOnly =
         next.featureStatus.kind === 'recovering' && !next.featureStatus.sessionUsable;
 
-      if (!identityChanged && !signOutClear && !cancelOnly) return;
+      if (!identityChanged && !signOutTransition && !cancelOnly) return;
 
       cleanupTail = cleanupTail
         .catch(() => undefined)
         .then(async () => {
-          if (signOutClear) {
+          if (signOutTransition) {
             // When a prior user is known, scope the cancellation and
             // removal to that user's key. This avoids globally cancelling
             // a successor's in-flight queries when this stale continuation
