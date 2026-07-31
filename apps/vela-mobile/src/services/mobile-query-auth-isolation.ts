@@ -48,15 +48,21 @@ export function installMobileQueryAuthIsolation(options: {
         .catch(() => undefined)
         .then(async () => {
           if (signOutClear) {
-            await options.queryClient.cancelQueries();
-            // Revalidate the auth snapshot before globally clearing. This
-            // continuation can resume after sign-out has completed and a
-            // successor session has started loading; the captured
-            // signOutClear flag is then stale and clear() would erase the
-            // successor's freshly populated cache. During sign-out itself
-            // the old user may still be in the state — that is not a
-            // successor, so only skip when the state has moved past
-            // sign-out to an authenticated phase with a user.
+            // When a prior user is known, scope the cancellation and
+            // removal to that user's key. This avoids globally cancelling
+            // a successor's in-flight queries when this stale continuation
+            // resumes after sign-out has completed and a successor session
+            // has started. A global cancelQueries()/clear() here would
+            // abort the successor's active requests and erase their cache.
+            if (previousUserId !== null) {
+              const priorUserKey = srsKeys.stats(previousUserId);
+              await options.queryClient.cancelQueries({ queryKey: priorUserKey });
+              options.queryClient.removeQueries({ queryKey: priorUserKey });
+              return;
+            }
+            // No prior user (e.g. cleanup on a fresh signed-out state).
+            // Revalidate before globally clearing — a successor may have
+            // started during the await.
             const current = selectAuthQuerySnapshot(options.state);
             const stillSignedOut =
               current.phase === 'signedOut' ||
@@ -65,6 +71,7 @@ export function installMobileQueryAuthIsolation(options: {
             if (!stillSignedOut && current.userId !== null) {
               return;
             }
+            await options.queryClient.cancelQueries();
             options.queryClient.clear();
             return;
           }
@@ -76,7 +83,15 @@ export function installMobileQueryAuthIsolation(options: {
             options.queryClient.removeQueries({ queryKey: priorUserKey });
             return;
           }
-          await options.queryClient.cancelQueries();
+          if (cancelOnly) {
+            // Unusable session recovery: cancel in-flight queries without
+            // clearing the cache.
+            await options.queryClient.cancelQueries();
+            return;
+          }
+          // identityChanged && previousUserId === null: null → newUser
+          // with no prior user to clean up. Nothing to do — a global
+          // cancellation here would abort the new user's own requests.
         })
         .catch(() => undefined);
     },
