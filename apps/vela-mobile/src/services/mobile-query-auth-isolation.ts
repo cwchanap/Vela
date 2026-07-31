@@ -60,19 +60,16 @@ export function installMobileQueryAuthIsolation(options: {
               options.queryClient.removeQueries({ queryKey: priorUserKey });
               return;
             }
-            // No prior user (e.g. cleanup on a fresh signed-out state).
-            // Revalidate before globally clearing — a successor may have
-            // started during the await.
-            const current = selectAuthQuerySnapshot(options.state);
-            const stillSignedOut =
-              current.phase === 'signedOut' ||
-              current.operation === 'signingOut' ||
-              current.operation === 'cleaningUp';
-            if (!stillSignedOut && current.userId !== null) {
-              return;
-            }
-            await options.queryClient.cancelQueries();
-            options.queryClient.clear();
+            // No prior user (e.g. a cleanup retry on a fresh signed-out
+            // state). With no prior user there is no authenticated user key
+            // to remove, and every mobile query is user-scoped
+            // (srsKeys.stats(userId)), so any cache present belongs to a
+            // successor. A global cancelQueries()/clear() here would race a
+            // successor that authenticates during the await: the revalidation
+            // above ran before the await, but clear() runs after it
+            // unconditionally, erasing the successor's cache and detaching
+            // its observers. Do nothing — there is nothing legitimate to
+            // clean up.
             return;
           }
           if (identityChanged && previousUserId !== null) {
@@ -83,10 +80,14 @@ export function installMobileQueryAuthIsolation(options: {
             options.queryClient.removeQueries({ queryKey: priorUserKey });
             return;
           }
-          if (cancelOnly) {
-            // Unusable session recovery: cancel in-flight queries without
-            // clearing the cache.
-            await options.queryClient.cancelQueries();
+          if (cancelOnly && next.featureStatus.kind === 'recovering') {
+            // Unusable session recovery: cancel the recovering user's
+            // in-flight queries without clearing the cache. Scope to that
+            // user's key so a stale recovery callback queued behind other
+            // cleanup cannot abort a successor's requests after an identity
+            // change during the await.
+            const recoveringUserKey = srsKeys.stats(next.featureStatus.userId);
+            await options.queryClient.cancelQueries({ queryKey: recoveringUserKey });
             return;
           }
           // identityChanged && previousUserId === null: null → newUser
