@@ -159,8 +159,8 @@ describe('mobile query auth isolation', () => {
     const clear = vi.spyOn(queryClient, 'clear');
     vi.spyOn(queryClient, 'cancelQueries').mockReturnValue(cancellation);
 
-    // Sign-out begins: the watcher captures signOutClear = true and starts
-    // awaiting cancelQueries(). Cancellation is delayed.
+    // Sign-out begins: the watcher captures signOutTransition = true and
+    // starts awaiting cancelQueries(). Cancellation is delayed.
     Object.assign(state, { operation: 'signingOut', sessionUsable: false });
     await nextTick();
     expect(clear).not.toHaveBeenCalled();
@@ -183,8 +183,9 @@ describe('mobile query auth isolation', () => {
     queryClient.setQueryData(srsKeys.stats('user-2'), { due: 7 });
     await nextTick();
 
-    // Now the delayed cancellation resolves. The stale signOutClear flag
-    // must NOT cause clear() to erase the successor's freshly seeded cache.
+    // Now the delayed cancellation resolves. The stale signOutTransition
+    // flag must NOT cause clear() to erase the successor's freshly seeded
+    // cache.
     resolveCancellation();
     await settle();
     expect(clear).not.toHaveBeenCalled();
@@ -252,7 +253,7 @@ describe('mobile query auth isolation', () => {
 
   it('does not clear a successor cache when a no-prior-user cleanup retry resumes after successor sign-in', async () => {
     // Begin from a signed-out cleanup state with no prior user, so the
-    // watcher's previousUserId === null fallback is the reachable branch.
+    // watcher's previousUserId === null branch is the reachable one.
     const state = reactive<MobileAuthState>({
       phase: 'signedOut',
       operation: 'cleaningUp',
@@ -268,34 +269,21 @@ describe('mobile query auth isolation', () => {
     const stop = installMobileQueryAuthIsolation({ state, queryClient });
     stops.push(stop);
 
-    const realCancelQueries = queryClient.cancelQueries.bind(queryClient);
-    let resolveCancellation!: () => void;
-    const cancellation = new Promise<void>((resolve) => {
-      resolveCancellation = resolve;
-    });
+    const cancelQueries = vi.spyOn(queryClient, 'cancelQueries');
     const clear = vi.spyOn(queryClient, 'clear');
-    // Delay only unscoped (global) cancelQueries() — the buggy fallback
-    // calls it with no queryKey. Scoped calls pass through so a successor
-    // fetchQuery is not blocked.
-    vi.spyOn(queryClient, 'cancelQueries').mockImplementation((args) => {
-      if (args && typeof args === 'object' && 'queryKey' in args && args.queryKey) {
-        return realCancelQueries(args);
-      }
-      return cancellation;
-    });
 
     // A cleanup retry fires while still signed out with no prior user. The
-    // watcher captures signOutClear = true and previousUserId === null.
+    // guard under test: with previousUserId === null the sign-out branch
+    // must issue no unscoped cancelQueries() and no clear() — there is no
+    // authenticated user key to remove, and any cache present belongs to a
+    // successor.
     Object.assign(state, { operation: 'idle' });
-    // Let the cleanup callback start and suspend at the awaited (mocked)
-    // global cancelQueries(). The hazard requires the callback to be past
-    // its revalidation guard and parked at the await when the successor
-    // authenticates; otherwise the guard itself returns early.
     await settle();
     expect(clear).not.toHaveBeenCalled();
+    expect(cancelQueries).not.toHaveBeenCalled();
 
-    // During the delayed cancellation, a successor authenticates, seeds
-    // their cache, and starts an in-flight request.
+    // A successor authenticates and seeds their cache. The prior cleanup
+    // must not have left any pending global clear that would erase it.
     Object.assign(state, {
       phase: 'authenticated',
       operation: 'idle',
@@ -304,36 +292,11 @@ describe('mobile query auth isolation', () => {
       user: { userId: 'user-2', email: null },
     });
     queryClient.setQueryData(srsKeys.stats('user-2'), { due: 7 });
-    await nextTick();
-
-    let signalAborted = false;
-    let resolveFetcher!: (value: { due: 9 }) => void;
-    const fetcherPromise = new Promise<{ due: 9 }>((resolve) => {
-      resolveFetcher = resolve;
-    });
-    const user2Fetch = queryClient.fetchQuery({
-      queryKey: srsKeys.stats('user-2'),
-      queryFn: ({ signal }) => {
-        signal.addEventListener('abort', () => {
-          signalAborted = true;
-        });
-        return fetcherPromise;
-      },
-    });
-    await settle();
-
-    // The delayed cancellation resolves. The stale no-prior-user fallback
-    // must NOT globally clear() and must NOT cancel the successor's request.
-    resolveCancellation();
     await settle();
 
     expect(clear).not.toHaveBeenCalled();
-    expect(signalAborted).toBe(false);
+    expect(cancelQueries).not.toHaveBeenCalled();
     expect(queryClient.getQueryData(srsKeys.stats('user-2'))).toEqual({ due: 7 });
-
-    resolveFetcher({ due: 9 });
-    await expect(user2Fetch).resolves.toEqual({ due: 9 });
-    expect(queryClient.getQueryData(srsKeys.stats('user-2'))).toEqual({ due: 9 });
   });
 
   it('scopes unusable-recovery cancellation to the recovering user and does not abort a successor in-flight request', async () => {
