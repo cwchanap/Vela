@@ -1,3 +1,4 @@
+/* global HeadersInit */
 import { reactive, readonly, type InjectionKey } from 'vue';
 import {
   MOBILE_OAUTH_CALLBACK_URI,
@@ -275,6 +276,20 @@ function resolveMobileApiUrl(base: URL, relativePath: string): URL {
   return resolved;
 }
 
+function normalizeAuthenticatedRequestHeaders(headersInit?: HeadersInit): Headers {
+  let headers: Headers;
+  try {
+    headers = new Headers(headersInit);
+  } catch (error) {
+    throw new MobileAuthenticatedApiRequestError('invalid_request_headers', { cause: error });
+  }
+
+  if (headers.has('authorization')) {
+    throw new MobileAuthenticatedApiRequestError('invalid_request_headers');
+  }
+  return headers;
+}
+
 export function createMobileAuthCoordinator(
   dependencies: MobileAuthCoordinatorDependencies,
 ): MobileAuthCoordinator {
@@ -345,10 +360,7 @@ export function createMobileAuthCoordinator(
       normalizeMobileApiBaseUrl(dependencies.config.apiUrl),
       request.path,
     );
-    const headers = new Headers(request.init?.headers);
-    if (headers.has('authorization')) {
-      throw new MobileAuthenticatedApiRequestError('invalid_request_headers');
-    }
+    const headers = normalizeAuthenticatedRequestHeaders(request.init?.headers);
     headers.set('Accept', headers.get('Accept') ?? 'application/json');
     headers.set('Authorization', `Bearer ${snapshot.idToken}`);
 
@@ -536,10 +548,7 @@ export function createMobileAuthCoordinator(
     // Resolve caller-controlled URL and headers before consulting any session
     // material, so malformed requests can never trigger a bearer fetch.
     resolveMobileApiUrl(normalizeMobileApiBaseUrl(dependencies.config.apiUrl), request.path);
-    const callerHeaders = new Headers(request.init?.headers);
-    if (callerHeaders.has('authorization')) {
-      throw new MobileAuthenticatedApiRequestError('invalid_request_headers');
-    }
+    normalizeAuthenticatedRequestHeaders(request.init?.headers);
 
     const owner = active;
     if (unavailable() || !owner || !activeSessionIsUsable() || !state.sessionUsable) {

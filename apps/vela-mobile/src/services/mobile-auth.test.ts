@@ -3659,6 +3659,24 @@ describe('authenticated feature transport', () => {
     },
   );
 
+  it.each([
+    ['name', { 'Invalid Header Name': 'value' }],
+    ['value', { 'X-Feature': 'value\nInjected: secret' }],
+  ])('normalizes an invalid header %s before network activity', async (_kind, headers) => {
+    const harness = makeHarness();
+    await authenticate(harness);
+    const before = harness.sessionFetch.mock.calls.length;
+
+    await expect(
+      harness.coordinator.requestAuthenticatedApi({
+        path: 'srs/stats',
+        init: { headers },
+      }),
+    ).rejects.toMatchObject({ code: 'invalid_request_headers' });
+
+    expect(harness.sessionFetch).toHaveBeenCalledTimes(before);
+  });
+
   it.each(['https://vela.example/api', 'https://vela.example/api///'])(
     'normalizes %s before resolving a feature path',
     async (apiUrl) => {
