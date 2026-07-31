@@ -151,4 +151,46 @@ describe('mobile query auth isolation', () => {
     await settle();
     expect(clear).toHaveBeenCalledOnce();
   });
+
+  it('skips the global clear when a successor session starts during delayed cancellation', async () => {
+    const { state, queryClient, stop } = install();
+    stops.push(stop);
+    let resolveCancellation!: () => void;
+    const cancellation = new Promise<void>((resolve) => {
+      resolveCancellation = resolve;
+    });
+    const clear = vi.spyOn(queryClient, 'clear');
+    vi.spyOn(queryClient, 'cancelQueries').mockReturnValue(cancellation);
+
+    // Sign-out begins: the watcher captures signOutClear = true and starts
+    // awaiting cancelQueries(). Cancellation is delayed.
+    Object.assign(state, { operation: 'signingOut', sessionUsable: false });
+    await nextTick();
+    expect(clear).not.toHaveBeenCalled();
+
+    // While cancellation is pending, sign-out completes and a successor
+    // user signs in, populating their own cache entry.
+    Object.assign(state, {
+      phase: 'signedOut',
+      operation: 'idle',
+      sessionUsable: false,
+      user: null,
+    });
+    await nextTick();
+    Object.assign(state, {
+      phase: 'authenticated',
+      operation: 'idle',
+      sessionUsable: true,
+      user: { userId: 'user-2', email: null },
+    });
+    queryClient.setQueryData(srsKeys.stats('user-2'), { due: 7 });
+    await nextTick();
+
+    // Now the delayed cancellation resolves. The stale signOutClear flag
+    // must NOT cause clear() to erase the successor's freshly seeded cache.
+    resolveCancellation();
+    await settle();
+    expect(clear).not.toHaveBeenCalled();
+    expect(queryClient.getQueryData(srsKeys.stats('user-2'))).toEqual({ due: 7 });
+  });
 });

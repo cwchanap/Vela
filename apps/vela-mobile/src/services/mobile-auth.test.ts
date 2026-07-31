@@ -3742,6 +3742,44 @@ describe('authenticated feature transport', () => {
     await expect(request).rejects.toMatchObject({ name: 'AbortError' });
   });
 
+  it('propagates a caller abort to the response body after headers arrive', async () => {
+    const harness = makeHarness();
+    await authenticate(harness);
+    const caller = new AbortController();
+    // fetch() resolves as soon as headers arrive, but response.json() is
+    // consumed by the API client only after the coordinator returns. The
+    // caller abort bridge must stay active through body consumption so a
+    // stalled body can be cancelled by the caller's deadline.
+    harness.sessionFetch.mockImplementationOnce((_url, init) =>
+      Promise.resolve({
+        ok: true,
+        status: 200,
+        json: () =>
+          new Promise((_resolve, reject) => {
+            init?.signal?.addEventListener('abort', () => {
+              reject(new DOMException('The operation was aborted.', 'AbortError'));
+            });
+          }),
+      } as unknown as Response),
+    );
+
+    const request = harness.coordinator.requestAuthenticatedApi({
+      path: 'srs/stats',
+      init: { signal: caller.signal },
+    });
+
+    // The coordinator has returned the Response; headers arrived but the
+    // body has not been consumed yet. Start consuming the body (which
+    // registers an abort listener on the fetch signal), then abort the
+    // caller signal. The bridge must still propagate the abort to the
+    // fetch signal that governs response.json().
+    const body = await request;
+    const jsonPromise = body.json();
+    caller.abort();
+
+    await expect(jsonPromise).rejects.toMatchObject({ name: 'AbortError' });
+  });
+
   it('preserves the original caller abort when its init signal is replaced in flight', async () => {
     const harness = makeHarness();
     await authenticate(harness);
@@ -4017,6 +4055,82 @@ describe('authenticated feature transport', () => {
 
     await expect(request).resolves.toMatchObject({ status: 200 });
     expect(refreshRequests(harness)).toHaveLength(1);
+  });
+
+  it('joins an already-running proactive refresh after a still-valid-token 401', async () => {
+    let currentNow = NOW;
+    const harness = makeHarness({ now: () => currentNow });
+    await authenticateWithExpiry(harness, currentNow + 120_000, currentNow);
+    harness.sessionFetch.mockClear();
+    prepareSuccessfulRefresh(harness, {
+      claimExpirySeconds: Math.ceil((currentNow + 3_600_000) / 1_000),
+    });
+    const refreshGate = deferred<{ status: number; data: unknown }>();
+    harness.tokenTransport.gate = refreshGate.promise;
+    const featureResponse = deferred<Response>();
+    let featureCalls = 0;
+    harness.sessionFetch.mockImplementation(async (target) => {
+      if (String(target).endsWith('/srs/stats')) {
+        featureCalls += 1;
+        return featureCalls === 1 ? featureResponse.promise : response(200, {});
+      }
+      return response(200, {
+        authenticated: true,
+        user: { userId: 'user-123', email: 'person@example.com' },
+      });
+    });
+
+    const request = harness.coordinator.requestAuthenticatedApi({ path: 'srs/stats' });
+    await vi.waitFor(() => expect(featureCalls).toBe(1));
+    // Advance into the proactive-refresh lead window but NOT past expiry —
+    // the captured token is still technically valid when the 401 arrives.
+    currentNow += 61_000;
+    harness.app.emitState(true);
+    await vi.waitFor(() => expect(refreshRequests(harness)).toHaveLength(1));
+    featureResponse.resolve(response(401, {}));
+    refreshGate.resolve(harness.tokenTransport.result);
+
+    // The in-flight refresh is joined (not treated as terminal). A successful
+    // promotion retries the feature request with the new bundle instead of
+    // reporting session_changed.
+    await expect(request).resolves.toMatchObject({ status: 200 });
+    expect(refreshRequests(harness)).toHaveLength(1);
+    expect(harness.sessionStore.clearCalls).toBe(0);
+  });
+
+  it('reports retryable failure when a still-valid-token 401 joins a transiently failing refresh', async () => {
+    let currentNow = NOW;
+    const harness = makeHarness({ now: () => currentNow });
+    await authenticateWithExpiry(harness, currentNow + 120_000, currentNow);
+    harness.sessionFetch.mockClear();
+    // 503 is a transient (non-invalid_grant) refresh failure: the session
+    // stays authenticated with retryAction 'refresh' — the durable
+    // credential must not be deleted.
+    harness.tokenTransport.result = { status: 503, data: {} };
+    const refreshGate = deferred<{ status: number; data: unknown }>();
+    harness.tokenTransport.gate = refreshGate.promise;
+    const featureResponse = deferred<Response>();
+    harness.sessionFetch.mockImplementation(async (target) =>
+      String(target).endsWith('/srs/stats')
+        ? featureResponse.promise
+        : response(200, {
+            authenticated: true,
+            user: { userId: 'user-123', email: 'person@example.com' },
+          }),
+    );
+
+    const request = harness.coordinator.requestAuthenticatedApi({ path: 'srs/stats' });
+    await vi.waitFor(() => expect(harness.sessionFetch).toHaveBeenCalledOnce());
+    currentNow += 61_000;
+    harness.app.emitState(true);
+    await vi.waitFor(() => expect(refreshRequests(harness)).toHaveLength(1));
+    featureResponse.resolve(response(401, {}));
+    refreshGate.resolve(harness.tokenTransport.result);
+
+    // The in-flight refresh is joined. Its transient failure classifies as
+    // retryable_recovery — the durable credential is preserved for retry.
+    await expect(request).rejects.toMatchObject({ code: 'session_recovery_pending' });
+    expect(harness.sessionStore.clearCalls).toBe(0);
   });
 
   it('returns session_changed when sign-out supersedes a waiting expired-token recovery', async () => {

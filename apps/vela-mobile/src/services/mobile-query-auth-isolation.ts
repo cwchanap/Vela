@@ -49,6 +49,22 @@ export function installMobileQueryAuthIsolation(options: {
         .then(async () => {
           if (signOutClear) {
             await options.queryClient.cancelQueries();
+            // Revalidate the auth snapshot before globally clearing. This
+            // continuation can resume after sign-out has completed and a
+            // successor session has started loading; the captured
+            // signOutClear flag is then stale and clear() would erase the
+            // successor's freshly populated cache. During sign-out itself
+            // the old user may still be in the state — that is not a
+            // successor, so only skip when the state has moved past
+            // sign-out to an authenticated phase with a user.
+            const current = selectAuthQuerySnapshot(options.state);
+            const stillSignedOut =
+              current.phase === 'signedOut' ||
+              current.operation === 'signingOut' ||
+              current.operation === 'cleaningUp';
+            if (!stillSignedOut && current.userId !== null) {
+              return;
+            }
             options.queryClient.clear();
             return;
           }
