@@ -1,9 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { MOBILE_OAUTH_CALLBACK_URI } from '../auth/mobile-auth-contract';
-import {
-  createMobileAuthCoordinator,
-  type MobileAuthCoordinatorDependencies,
-} from './mobile-auth';
+import { createMobileAuthCoordinator, type MobileAuthCoordinatorDependencies } from './mobile-auth';
 
 function createDependencies(): MobileAuthCoordinatorDependencies {
   return {

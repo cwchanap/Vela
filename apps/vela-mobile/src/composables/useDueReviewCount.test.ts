@@ -309,6 +309,38 @@ describe('useDueReviewCount', () => {
     expect(result.error.value).toBeNull();
     expect(result.stats.value).toEqual(stats);
   });
+
+  it('bounds persistent network failure within three timed attempts', async () => {
+    vi.useFakeTimers();
+    try {
+      const networkError = new MobileApiError('network');
+      const { getStats, result } = harness({
+        initialState: usableState(),
+        getStats: vi.fn<MobileSrsService['getStats']>(
+          () =>
+            new Promise((_resolve, reject) => {
+              setTimeout(() => reject(networkError), 8_000);
+            }),
+        ),
+      });
+
+      await vi.advanceTimersByTimeAsync(0);
+      expect(getStats).toHaveBeenCalledOnce();
+
+      await vi.advanceTimersByTimeAsync(26_999);
+      expect(getStats).toHaveBeenCalledTimes(3);
+      expect(result.isFetching.value).toBe(true);
+      expect(result.error.value).toBeNull();
+
+      await vi.advanceTimersByTimeAsync(1);
+      await nextTick();
+      expect(getStats).toHaveBeenCalledTimes(3);
+      expect(result.isFetching.value).toBe(false);
+      expect(result.error.value).toBe(networkError);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
 
 describe('retryDueCountQuery', () => {
