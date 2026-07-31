@@ -72,7 +72,7 @@ The mobile app does not install TanStack Query, does not alias `@vela/common` to
 | Retry | Retry only `network` and `server`, at most twice |
 | Auth abstraction | Feature code consumes a stable session-capability selector, not raw auth operation/error fields |
 | Module resolution | Mobile Quasar and Vitest alias `@vela/common` to source while retaining the workspace dependency |
-| Cache isolation | User-scope keys; disable without a usable session; cancel then clear on sign-out/identity loss |
+| Cache isolation | User-scope keys; disable without a usable session; scoped cancel-then-remove of `srsKeys.stats(previousUserId)` on sign-out/identity loss; no cache mutation when there is no prior user |
 | Foreground/Home refresh | Refetch on native foreground and every Home mount |
 | Manual retry | Track manual retry independently from background fetch |
 | Cached zero | Keep stale-data warning because time or another client can make reviews due |
@@ -278,7 +278,7 @@ After transport settles:
 | 401 | No | `session_changed`; no auth mutation |
 | 401 | Yes | Shared recovery decision |
 
-Sign-out and data freshness are enforced by caller cancellation, TanStack cancellation, user-scoped keys, and cancel-then-clear—not by discarding every old-generation response.
+Sign-out and data freshness are enforced by caller cancellation, TanStack cancellation, user-scoped keys, and scoped cancel-then-remove of the previous user's `srsKeys.stats(previousUserId)` entry—not by discarding every old-generation response, and not by a global `queryClient.clear()`.
 
 ### Explicit refresh observation
 
@@ -576,12 +576,14 @@ Install auth/cache isolation once from `App.vue` using the injected coordinator 
 
 1. Enable authenticated queries only for `usable` or `recovering` with `sessionUsable: true`.
 2. Sign-out, terminal cleanup, unusable recovery, or identity change cancels in-flight queries.
-3. Await cancellation before cache removal for sign-out, terminal cleanup, or identity change.
-4. Failed durable cleanup still leaves cache cleared.
-5. Soft refresh failure retains cached data only while the prior session remains usable.
-6. Backgrounding does not clear.
+3. For sign-out, terminal cleanup, or identity change with a known prior user, await `cancelQueries({ queryKey: srsKeys.stats(previousUserId) })` and then `removeQueries({ queryKey: srsKeys.stats(previousUserId) })`—scoped to the previous user only. Never call `queryClient.clear()`.
+4. When sign-out or a cleanup retry occurs with no prior user (`previousUserId === null`), perform no cache mutation: there is no authenticated user key to remove, and any cache present belongs to a successor that may authenticate during the await.
+5. Unusable recovery cancels only the recovering user's `srsKeys.stats(userId)` queries without removing cache.
+6. Failed durable cleanup still leaves the previous user's cache removed (the scoped `removeQueries` ran before the await resolved).
+7. Soft refresh failure retains cached data only while the prior session remains usable.
+8. Backgrounding does not clear.
 
-A non-401 may return after generation promotion; canceled-query semantics and user-scoped keys prevent repopulation after identity loss.
+A non-401 may return after generation promotion; canceled-query semantics and user-scoped keys prevent repopulation after identity loss. The scoped cancel-then-remove (rather than a global `clear()`) is what prevents a stale sign-out or recovery callback, parked at its `await cancelQueries()` when a successor session starts, from aborting the successor's in-flight requests or erasing its freshly seeded cache after the await resolves.
 
 ### Manual retry, view selector, and Home
 
@@ -692,7 +694,10 @@ Home copy and semantics:
 - Same-user `recovering -> usable` refetches once.
 - Composable does not inspect raw auth operation/retry/error fields.
 - Native focus updates and enabled-only refetch.
-- Sign-out/terminal cleanup cancel before clear.
+- Sign-out/terminal cleanup/identity change with a prior user: scoped `cancelQueries` then `removeQueries` on `srsKeys.stats(previousUserId)`; `queryClient.clear()` is never called.
+- Sign-out or cleanup retry with no prior user performs no cache mutation.
+- Unusable recovery cancels only the recovering user's key without removing cache.
+- A stale sign-out/recovery callback parked at its `await` does not abort a successor's in-flight request or erase its cache after the await resolves.
 - Soft refresh failure retains cache only while session remains usable.
 - Identity change cannot select previous data.
 - Manual/background flags are distinct.
@@ -779,9 +784,9 @@ Automated checks and Simulator flow are merge gates. Physical-device evidence is
 | --- | --- |
 | Restored user reaches Home | HPA-206 gate plus enabled query |
 | Home displays stats count | Mobile SRS service plus selector |
-| Rejected/expired token cannot leak another user’s data | 401-only generation guard, explicit recovery outcome, user key, cancellation, cache clear |
+| Rejected/expired token cannot leak another user’s data | 401-only generation guard, explicit recovery outcome, user key, cancellation, scoped cache removal |
 | Accessible loading/empty/failure/retry | Exhaustive view including auth recovery and manual retry |
-| Signing out clears user data | Cancel then clear |
+| Signing out clears user data | Scoped cancel-then-remove of `srsKeys.stats(previousUserId)`; no global `clear()` |
 | Count agrees with web/API | Manual matrix |
 | Tests cover states/isolation | Concurrency, no-op refresh, timeout, service, query, cache, and UI suites |
 | Simulator/device verification | Merge gate plus closure gate |
@@ -797,7 +802,7 @@ Automated checks and Simulator flow are merge gates. Physical-device evidence is
 - **Transient refresh deletes credential:** settle as pending recovery and retain HPA-206 state.
 - **Stale common build in per-app workflow:** alias mobile build/tests to current common source.
 - **Auth state machine leaks into feature code:** expose a stable auth-owned session-capability selector.
-- **Previous-user cache flash:** user key, disable, cancel then clear.
+- **Previous-user cache flash:** user key, disable, scoped cancel-then-remove of `srsKeys.stats(previousUserId)`; no global `clear()` (a global clear would race a successor authenticating during the await).
 - **Token/path leakage:** coordinator-owned bearer, header rejection, parsed path boundaries, secret-leak tests.
 - **Scope expansion:** count and status only; review execution later.
 

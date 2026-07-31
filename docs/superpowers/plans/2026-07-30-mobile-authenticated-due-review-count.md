@@ -47,8 +47,8 @@
 - `apps/vela-mobile/src/services/mobile-srs.test.ts` — exact path/signal/parser tests.
 - `apps/vela-mobile/src/services/mobile-services.ts` — typed injection keys and direct service provisioning.
 - `apps/vela-mobile/src/services/mobile-services.test.ts` — provider construction tests.
-- `apps/vela-mobile/src/services/mobile-query-auth-isolation.ts` — cancel/clear lifecycle tied to auth identity.
-- `apps/vela-mobile/src/services/mobile-query-auth-isolation.test.ts` — cancellation, clear, retention, and identity tests.
+- `apps/vela-mobile/src/services/mobile-query-auth-isolation.ts` — scoped cancel/remove lifecycle tied to auth identity.
+- `apps/vela-mobile/src/services/mobile-query-auth-isolation.test.ts` — scoped cancellation, removal, retention, no-prior-user, and successor-race tests.
 - `apps/vela-mobile/src/composables/useDueReviewCount.ts` — due-count query, control-race retry, recovery refetch, and manual retry state.
 - `apps/vela-mobile/src/composables/useDueReviewCount.test.ts` — query/recovery/retry behavior.
 - `apps/vela-mobile/src/components/home/due-review-view.ts` — pure query/auth-state-to-presentation selector.
@@ -162,12 +162,10 @@ export function parseSrsStats(value: unknown): SRSStats;
 
 export const srsKeys: {
   all: readonly ['srs'];
-  stats(userId: string | null, jlpt?: number[]): readonly [
-    'srs',
-    'stats',
-    string | null,
-    number[] | undefined,
-  ];
+  stats(
+    userId: string | null,
+    jlpt?: number[],
+  ): readonly ['srs', 'stats', string | null, number[] | undefined];
 };
 ```
 
@@ -312,10 +310,7 @@ export function parseSrsStats(value: unknown): SRSStats {
       reviewing: nonNegativeInteger(mastery.reviewing, 'mastery_breakdown.reviewing'),
       mastered: nonNegativeInteger(mastery.mastered, 'mastery_breakdown.mastered'),
     },
-    average_ease_factor: finiteNonNegative(
-      root.average_ease_factor,
-      'average_ease_factor',
-    ),
+    average_ease_factor: finiteNonNegative(root.average_ease_factor, 'average_ease_factor'),
     total_reviews: nonNegativeInteger(root.total_reviews, 'total_reviews'),
     accuracy_rate: accuracyRate,
   };
@@ -694,7 +689,6 @@ export class MobileAuthenticatedApiRequestError extends Error {
 }
 ```
 
-
 - [ ] **Step 4: Implement the auth-owned selector**
 
 Create `apps/vela-mobile/src/auth/mobile-feature-session-status.ts`:
@@ -828,9 +822,9 @@ it('rejects path escapes before network activity', async () => {
     String.raw`..\secret`,
     'srs/stats#fragment',
   ]) {
-    await expect(
-      harness.coordinator.requestAuthenticatedApi({ path }),
-    ).rejects.toMatchObject({ code: 'invalid_request_path' });
+    await expect(harness.coordinator.requestAuthenticatedApi({ path })).rejects.toMatchObject({
+      code: 'invalid_request_path',
+    });
   }
 
   expect(harness.sessionFetch).toHaveBeenCalledTimes(before);
@@ -1141,11 +1135,7 @@ async function observeFeatureRefresh(
     return { kind: 'terminal' };
   }
 
-  if (
-    unavailable() ||
-    active !== owner ||
-    activeBundleGeneration !== generation
-  ) {
+  if (unavailable() || active !== owner || activeBundleGeneration !== generation) {
     return { kind: 'superseded' };
   }
 
@@ -1268,10 +1258,7 @@ export type MobileSrsService = {
 export const MOBILE_API_CLIENT_KEY: InjectionKey<MobileApiClient>;
 export const MOBILE_SRS_SERVICE_KEY: InjectionKey<MobileSrsService>;
 
-export function provideMobileServices(
-  app: App,
-  coordinator: MobileAuthCoordinator,
-): void;
+export function provideMobileServices(app: App, coordinator: MobileAuthCoordinator): void;
 ```
 
 - Consumed by Tasks 8–9.
@@ -1497,12 +1484,14 @@ Mock `focusManager.setFocused` through `vi.spyOn(focusManager, 'setFocused')`.
 Use a real `QueryClient` with a seeded `srsKeys.stats('user-1')` value. Cover:
 
 - soft refresh with `sessionUsable: true` retains cache;
-- recovering with `sessionUsable: false` cancels active queries but does not remove same-user cache;
-- sign-out start cancels, then clears;
-- terminal cleanup and cleanup failure clear;
-- identity change from user-1 to user-2 clears;
+- recovering with `sessionUsable: false` cancels only the recovering user's `srsKeys.stats(userId)` queries without removing same-user cache and without calling `queryClient.clear()`;
+- sign-out start cancels then removes only `srsKeys.stats(previousUserId)`; `queryClient.clear()` is never called;
+- terminal cleanup and cleanup failure remove only the prior user's `srsKeys.stats(previousUserId)` entry;
+- identity change from user-1 to user-2 removes only `srsKeys.stats('user-1')` and leaves user-2's cache intact;
+- sign-out or cleanup retry with no prior user (`previousUserId === null`) performs no cache mutation;
 - ordinary backgrounding causes no cache action;
-- cancellation resolves before `queryClient.clear()` is called.
+- scoped cancellation resolves before `removeQueries({ queryKey: srsKeys.stats(previousUserId) })` is called;
+- a stale sign-out callback parked at its `await cancelQueries()` does not abort a successor's in-flight request or erase its cache after the await resolves.
 
 - [ ] **Step 3: Run focused tests and verify failure**
 
@@ -1526,7 +1515,7 @@ focusManager.setFocused(event.isActive);
 
 Retain the existing single-registration promise and retry-after-registration-failure behavior. If either listener registration fails, remove any handle already created and reject so a later call can retry cleanly.
 
-- [ ] **Step 5: Implement cancel-then-clear isolation**
+- [ ] **Step 5: Implement scoped cancel-then-remove isolation**
 
 In `mobile-query-auth-isolation.ts`, watch a compact snapshot:
 
@@ -1542,19 +1531,23 @@ type AuthQuerySnapshot = {
 Serialize cleanup work through a local promise tail. Compute:
 
 ```ts
-const identityChanged = previous.userId !== next.userId;
-const clearRequired =
-  identityChanged ||
-  next.phase === 'signedOut' ||
-  next.operation === 'signingOut' ||
-  next.operation === 'cleaningUp';
-
-const cancelOnly =
-  next.featureStatus.kind === 'recovering' &&
-  !next.featureStatus.sessionUsable;
+const previousUserId = previous.userId;
+const identityChanged = previousUserId !== next.userId;
+const signOutTransition =
+  next.phase === 'signedOut' || next.operation === 'signingOut' || next.operation === 'cleaningUp';
+const cancelOnly = next.featureStatus.kind === 'recovering' && !next.featureStatus.sessionUsable;
 ```
 
-For `clearRequired`, await `queryClient.cancelQueries()` and then call `queryClient.clear()`. For `cancelOnly`, await cancellation without clearing. Do nothing for usable soft recovery and backgrounding.
+Branch behavior (never call `queryClient.clear()`):
+
+- `signOutTransition` with `previousUserId !== null`: `await queryClient.cancelQueries({ queryKey: srsKeys.stats(previousUserId) })` then `queryClient.removeQueries({ queryKey: srsKeys.stats(previousUserId) })`.
+- `signOutTransition` with `previousUserId === null`: do nothing—there is no authenticated user key to remove, and any cache present belongs to a successor that may authenticate during the await.
+- `identityChanged` with `previousUserId !== null`: same scoped cancel-then-remove of `srsKeys.stats(previousUserId)`.
+- `identityChanged` with `previousUserId === null` (null → new user): do nothing.
+- `cancelOnly` (recovering + `sessionUsable: false`): `await queryClient.cancelQueries({ queryKey: srsKeys.stats(next.featureStatus.userId) })` scoped to the recovering user, without removing cache.
+- Usable soft recovery and backgrounding: do nothing.
+
+The scoped cancel-then-remove (rather than a global `cancelQueries()` / `clear()`) is what prevents a stale sign-out or recovery callback, parked at its `await cancelQueries()` when a successor session starts, from aborting the successor's in-flight requests or erasing its freshly seeded cache after the await resolves.
 
 - [ ] **Step 6: Install isolation once from App**
 
@@ -1693,15 +1686,12 @@ export function retryDueCountQuery(failureCount: number, error: unknown): boolea
 Compute enablement:
 
 ```ts
-const sessionStatus = computed(() =>
-  selectMobileFeatureSessionStatus(coordinator.state),
-);
+const sessionStatus = computed(() => selectMobileFeatureSessionStatus(coordinator.state));
 
 const queryEnabled = computed(
   () =>
     sessionStatus.value.kind === 'usable' ||
-    (sessionStatus.value.kind === 'recovering' &&
-      sessionStatus.value.sessionUsable),
+    (sessionStatus.value.kind === 'recovering' && sessionStatus.value.sessionUsable),
 );
 ```
 
@@ -1710,11 +1700,7 @@ Use:
 ```ts
 useQuery({
   queryKey: computed(() =>
-    srsKeys.stats(
-      sessionStatus.value.kind === 'unavailable'
-        ? null
-        : sessionStatus.value.userId,
-    ),
+    srsKeys.stats(sessionStatus.value.kind === 'unavailable' ? null : sessionStatus.value.userId),
   ),
   enabled: queryEnabled,
   queryFn: ({ signal }) => fetchStatsWithSessionRaceRecovery(signal),
@@ -1889,10 +1875,7 @@ Implement:
 
 ```ts
 export function selectDueReviewView(input: DueReviewViewInput): DueReviewView {
-  const refreshing =
-    input.isFetching &&
-    input.stats !== undefined &&
-    !input.manualRetryPending;
+  const refreshing = input.isFetching && input.stats !== undefined && !input.manualRetryPending;
 
   if (input.sessionRecoveryPending) {
     if (input.stats === undefined) {
@@ -1958,9 +1941,7 @@ Implement a focused surface:
 <template>
   <q-page class="q-pa-lg">
     <section class="due-review" aria-labelledby="due-review-heading">
-      <h1 id="due-review-heading" class="text-h5 text-weight-bold">
-        Today’s review
-      </h1>
+      <h1 id="due-review-heading" class="text-h5 text-weight-bold">Today’s review</h1>
 
       <div
         v-if="view.kind === 'loading'"
@@ -1987,9 +1968,7 @@ Implement a focused surface:
                 : `${view.count} words are due for review.`
           }}
         </p>
-        <p v-if="view.refreshing" role="status" aria-live="polite">
-          Refreshing review count…
-        </p>
+        <p v-if="view.refreshing" role="status" aria-live="polite">Refreshing review count…</p>
       </template>
 
       <div v-else role="alert">
