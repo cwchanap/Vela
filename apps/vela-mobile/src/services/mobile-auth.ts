@@ -389,18 +389,25 @@ export function createMobileAuthCoordinator(
       }
       throw error;
     } finally {
+      // Clear the feature-level timeout but do NOT remove the caller abort
+      // listener. fetch() resolves when response headers arrive, yet the API
+      // client consumes response.json() only after this function returns.
+      // Removing the bridge here would disconnect the caller's deadline (and
+      // TanStack cancellation) from the underlying response body, allowing a
+      // stalled body to outlive the deadline or resolve after cancellation.
+      // The listener stays registered so caller aborts during body
+      // consumption still propagate to the fetch's abort signal; it is
+      // cleaned up when the caller signal is GC'd or the caller removes its
+      // own listeners.
       clearTimeout(timeout);
-      callerSignal?.removeEventListener('abort', onCallerAbort);
     }
   }
 
-  async function observeFeatureRefresh(
+  function classifyFeatureRefreshOutcome(
     owner: ActiveSession,
     generation: number,
     recovery: FeatureUnauthorizedRecovery,
-  ): Promise<FeatureRefreshObservation> {
-    await queueRefresh({ requireDue: false, owner, generation });
-
+  ): FeatureRefreshObservation {
     if (
       active !== undefined &&
       active.user.userId === owner.user.userId &&
@@ -419,6 +426,15 @@ export function createMobileAuthCoordinator(
     }
 
     return { kind: 'retryable_failure' };
+  }
+
+  async function observeFeatureRefresh(
+    owner: ActiveSession,
+    generation: number,
+    recovery: FeatureUnauthorizedRecovery,
+  ): Promise<FeatureRefreshObservation> {
+    await queueRefresh({ requireDue: false, owner, generation });
+    return classifyFeatureRefreshOutcome(owner, generation, recovery);
   }
 
   function getOrCreateFeatureUnauthorizedRecovery(
@@ -469,19 +485,40 @@ export function createMobileAuthCoordinator(
         if (snapshot.expiresAt <= dependencies.now()) {
           observation = await observeFeatureRefresh(snapshot.owner, snapshot.generation, record);
         } else {
-          let cleanupStarted = false;
-          await serialize(async () => {
-            if (
-              unavailable() ||
-              active !== snapshot.owner ||
-              activeBundleGeneration !== snapshot.generation
-            ) {
-              return;
-            }
-            cleanupStarted = true;
-            await terminalSessionCleanupUnlocked();
-          });
-          observation = cleanupStarted ? { kind: 'terminal' } : { kind: 'superseded' };
+          // A 401 can arrive while a proactive/manual refresh is already
+          // running and the captured token is still technically valid. Join
+          // that in-flight refresh before applying the expired-versus-still-
+          // valid decision. Without joining, a successful refresh yields
+          // session_changed (instead of a retry with the promoted bundle)
+          // and a transient refresh failure deletes the durable credential
+          // (converting a retryable failure into a forced sign-out).
+          const inFlightRefresh = refreshPromise;
+          if (
+            inFlightRefresh !== undefined &&
+            active === snapshot.owner &&
+            activeBundleGeneration === snapshot.generation
+          ) {
+            await inFlightRefresh;
+            observation = classifyFeatureRefreshOutcome(
+              snapshot.owner,
+              snapshot.generation,
+              record,
+            );
+          } else {
+            let cleanupStarted = false;
+            await serialize(async () => {
+              if (
+                unavailable() ||
+                active !== snapshot.owner ||
+                activeBundleGeneration !== snapshot.generation
+              ) {
+                return;
+              }
+              cleanupStarted = true;
+              await terminalSessionCleanupUnlocked();
+            });
+            observation = cleanupStarted ? { kind: 'terminal' } : { kind: 'superseded' };
+          }
         }
 
         switch (observation.kind) {
