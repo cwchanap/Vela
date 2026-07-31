@@ -45,6 +45,10 @@ function canRetryControlRace(
   );
 }
 
+function sessionStatusUserId(status: MobileFeatureSessionStatus): string | null {
+  return status.kind === 'unavailable' ? null : status.userId;
+}
+
 export function useDueReviewCount(): UseDueReviewCountResult {
   const coordinator = inject(MOBILE_AUTH_KEY);
   const srsService = inject(MOBILE_SRS_SERVICE_KEY);
@@ -59,6 +63,8 @@ export function useDueReviewCount(): UseDueReviewCountResult {
       sessionStatus.value.kind === 'usable' ||
       (sessionStatus.value.kind === 'recovering' && sessionStatus.value.sessionUsable),
   );
+  const pendingRecoveryUserId = ref<string | null>(null);
+  const recoveryRefetchConsumed = ref(false);
 
   async function fetchStatsWithSessionRaceRecovery(signal: AbortSignal): Promise<SRSStats> {
     const startingStatus = sessionStatus.value;
@@ -67,6 +73,12 @@ export function useDueReviewCount(): UseDueReviewCountResult {
     try {
       return await dueCountSrsService.getStats({ signal });
     } catch (error) {
+      if (error instanceof MobileApiError && error.code === 'session_recovery_pending') {
+        const currentUserId = sessionStatusUserId(sessionStatus.value);
+        if (startingUserId !== null && startingUserId === currentUserId) {
+          pendingRecoveryUserId.value = startingUserId;
+        }
+      }
       const isControlRace =
         error instanceof MobileApiError &&
         (error.code === 'session_changed' || error.code === 'session_unavailable');
@@ -109,16 +121,35 @@ export function useDueReviewCount(): UseDueReviewCountResult {
     return error;
   });
 
-  watch(sessionStatus, (next, previous) => {
+  function refetchAfterPendingRecovery(): void {
+    const status = sessionStatus.value;
     if (
       !sessionRecoveryPending.value ||
-      previous?.kind !== 'recovering' ||
-      next.kind !== 'usable' ||
-      previous.userId !== next.userId
+      recoveryRefetchConsumed.value ||
+      pendingRecoveryUserId.value === null ||
+      status.kind !== 'usable' ||
+      status.userId !== pendingRecoveryUserId.value
     ) {
       return;
     }
+    recoveryRefetchConsumed.value = true;
     void query.refetch();
+  }
+
+  watch(sessionStatus, (next, previous) => {
+    if (previous && sessionStatusUserId(previous) !== sessionStatusUserId(next)) {
+      pendingRecoveryUserId.value = null;
+      recoveryRefetchConsumed.value = false;
+      return;
+    }
+    if (next.kind === 'recovering') {
+      recoveryRefetchConsumed.value = false;
+    }
+    refetchAfterPendingRecovery();
+  });
+
+  watch([sessionRecoveryPending, pendingRecoveryUserId], () => {
+    refetchAfterPendingRecovery();
   });
 
   async function retry(): Promise<void> {
