@@ -67,23 +67,19 @@ describe('mobile query auth isolation', () => {
     expect(queryClient.getQueryData(srsKeys.stats('user-1'))).toEqual({ due: 4 });
   });
 
-  it('cancels then clears when sign-out starts', async () => {
+  it('cancels then removes prior user cache when sign-out starts', async () => {
     const { state, queryClient, stop } = install();
     stops.push(stop);
-    const events: string[] = [];
-    vi.spyOn(queryClient, 'cancelQueries').mockImplementation(async () => {
-      events.push('cancel');
-    });
-    const queryClientClear = queryClient.clear.bind(queryClient);
-    vi.spyOn(queryClient, 'clear').mockImplementation(() => {
-      events.push('clear');
-      queryClientClear();
-    });
+    const cancelQueries = vi.spyOn(queryClient, 'cancelQueries');
+    const removeQueries = vi.spyOn(queryClient, 'removeQueries');
+    const clear = vi.spyOn(queryClient, 'clear');
 
     Object.assign(state, { operation: 'signingOut', sessionUsable: false });
     await settle();
 
-    expect(events).toEqual(['cancel', 'clear']);
+    expect(cancelQueries).toHaveBeenCalledWith({ queryKey: srsKeys.stats('user-1') });
+    expect(removeQueries).toHaveBeenCalledWith({ queryKey: srsKeys.stats('user-1') });
+    expect(clear).not.toHaveBeenCalled();
     expect(queryClient.getQueryData(srsKeys.stats('user-1'))).toBeUndefined();
   });
 
@@ -133,23 +129,24 @@ describe('mobile query auth isolation', () => {
     expect(queryClient.getQueryData(srsKeys.stats('user-1'))).toEqual({ due: 4 });
   });
 
-  it('waits for cancellation before clearing cache', async () => {
+  it('waits for scoped cancellation before removing prior user cache', async () => {
     const { state, queryClient, stop } = install();
     stops.push(stop);
     let resolveCancellation!: () => void;
     const cancellation = new Promise<void>((resolve) => {
       resolveCancellation = resolve;
     });
-    const clear = vi.spyOn(queryClient, 'clear');
+    const removeQueries = vi.spyOn(queryClient, 'removeQueries');
     vi.spyOn(queryClient, 'cancelQueries').mockReturnValue(cancellation);
 
     Object.assign(state, { operation: 'signingOut', sessionUsable: false });
     await nextTick();
-    expect(clear).not.toHaveBeenCalled();
+    expect(removeQueries).not.toHaveBeenCalled();
 
     resolveCancellation();
     await settle();
-    expect(clear).toHaveBeenCalledOnce();
+    expect(removeQueries).toHaveBeenCalledWith({ queryKey: srsKeys.stats('user-1') });
+    expect(queryClient.getQueryData(srsKeys.stats('user-1'))).toBeUndefined();
   });
 
   it('skips the global clear when a successor session starts during delayed cancellation', async () => {
@@ -192,5 +189,64 @@ describe('mobile query auth isolation', () => {
     await settle();
     expect(clear).not.toHaveBeenCalled();
     expect(queryClient.getQueryData(srsKeys.stats('user-2'))).toEqual({ due: 7 });
+  });
+
+  it('does not abort successor in-flight query and removes prior user cache on delayed sign-out', async () => {
+    const { state, queryClient, stop } = install();
+    stops.push(stop);
+    const clear = vi.spyOn(queryClient, 'clear');
+
+    // Sign-out begins and completes — scoped cleanup removes only User 1's
+    // cache entry, without global cancelQueries()/clear().
+    Object.assign(state, { operation: 'signingOut', sessionUsable: false });
+    await settle();
+
+    // Sign-out completes and a successor signs in.
+    Object.assign(state, {
+      phase: 'signedOut',
+      operation: 'idle',
+      sessionUsable: false,
+      user: null,
+    });
+    await settle();
+    Object.assign(state, {
+      phase: 'authenticated',
+      operation: 'idle',
+      sessionUsable: true,
+      user: { userId: 'user-2', email: null },
+    });
+    await settle();
+
+    // Start an in-flight Home stats request for User 2.
+    let signalAborted = false;
+    let resolveFetcher!: (value: { due: 9 }) => void;
+    const fetcherPromise = new Promise<{ due: 9 }>((resolve) => {
+      resolveFetcher = resolve;
+    });
+    const user2Fetch = queryClient.fetchQuery({
+      queryKey: srsKeys.stats('user-2'),
+      queryFn: ({ signal }) => {
+        signal.addEventListener('abort', () => {
+          signalAborted = true;
+        });
+        return fetcherPromise;
+      },
+    });
+    await settle();
+
+    // User 2's in-flight request must not have been aborted by the
+    // sign-out cleanup callbacks.
+    expect(signalAborted).toBe(false);
+
+    // User 2's request resolves normally.
+    resolveFetcher({ due: 9 });
+    await expect(user2Fetch).resolves.toEqual({ due: 9 });
+
+    // User 1's cached data must be removed (no cross-user leak).
+    expect(queryClient.getQueryData(srsKeys.stats('user-1'))).toBeUndefined();
+    // User 2's resolved data must survive.
+    expect(queryClient.getQueryData(srsKeys.stats('user-2'))).toEqual({ due: 9 });
+    // Global clear must not have erased the successor's cache.
+    expect(clear).not.toHaveBeenCalled();
   });
 });
