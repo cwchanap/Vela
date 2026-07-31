@@ -237,6 +237,26 @@ describe('useDueReviewCount', () => {
     expect(result.stats.value).toEqual(stats);
   });
 
+  it('refetches once when auth becomes usable before pending recovery commits', async () => {
+    const firstRequest = deferred<SRSStats>();
+    const { state, getStats, result } = harness({
+      initialState: recoveringState(),
+      getStats: vi
+        .fn<MobileSrsService['getStats']>()
+        .mockImplementationOnce(() => firstRequest.promise)
+        .mockResolvedValueOnce(stats),
+    });
+    await vi.waitFor(() => expect(getStats).toHaveBeenCalledOnce());
+
+    firstRequest.reject(new MobileApiError('session_recovery_pending'));
+    Object.assign(state, usableState());
+
+    await vi.waitFor(() => expect(getStats).toHaveBeenCalledTimes(2));
+    expect(result.stats.value).toEqual(stats);
+    await settle();
+    expect(getStats).toHaveBeenCalledTimes(2);
+  });
+
   it('disables the query while recovery has no usable session', async () => {
     const { getStats, result } = harness({ initialState: recoveringState('user-1', false) });
     await settle();
