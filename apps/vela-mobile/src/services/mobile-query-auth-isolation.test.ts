@@ -62,7 +62,7 @@ describe('mobile query auth isolation', () => {
     Object.assign(state, { operation: 'refreshing', sessionUsable: false });
     await settle();
 
-    expect(cancelQueries).toHaveBeenCalledOnce();
+    expect(cancelQueries).toHaveBeenCalledWith({ queryKey: srsKeys.stats('user-1') });
     expect(clear).not.toHaveBeenCalled();
     expect(queryClient.getQueryData(srsKeys.stats('user-1'))).toEqual({ due: 4 });
   });
@@ -248,5 +248,174 @@ describe('mobile query auth isolation', () => {
     expect(queryClient.getQueryData(srsKeys.stats('user-2'))).toEqual({ due: 9 });
     // Global clear must not have erased the successor's cache.
     expect(clear).not.toHaveBeenCalled();
+  });
+
+  it('does not clear a successor cache when a no-prior-user cleanup retry resumes after successor sign-in', async () => {
+    // Begin from a signed-out cleanup state with no prior user, so the
+    // watcher's previousUserId === null fallback is the reachable branch.
+    const state = reactive<MobileAuthState>({
+      phase: 'signedOut',
+      operation: 'cleaningUp',
+      sessionUsable: false,
+      errorCode: 'session_cleanup_failed',
+      retryAction: null,
+      notice: null,
+      user: null,
+    });
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    const stop = installMobileQueryAuthIsolation({ state, queryClient });
+    stops.push(stop);
+
+    const realCancelQueries = queryClient.cancelQueries.bind(queryClient);
+    let resolveCancellation!: () => void;
+    const cancellation = new Promise<void>((resolve) => {
+      resolveCancellation = resolve;
+    });
+    const clear = vi.spyOn(queryClient, 'clear');
+    // Delay only unscoped (global) cancelQueries() — the buggy fallback
+    // calls it with no queryKey. Scoped calls pass through so a successor
+    // fetchQuery is not blocked.
+    vi.spyOn(queryClient, 'cancelQueries').mockImplementation((args) => {
+      if (args && typeof args === 'object' && 'queryKey' in args && args.queryKey) {
+        return realCancelQueries(args);
+      }
+      return cancellation;
+    });
+
+    // A cleanup retry fires while still signed out with no prior user. The
+    // watcher captures signOutClear = true and previousUserId === null.
+    Object.assign(state, { operation: 'idle' });
+    // Let the cleanup callback start and suspend at the awaited (mocked)
+    // global cancelQueries(). The hazard requires the callback to be past
+    // its revalidation guard and parked at the await when the successor
+    // authenticates; otherwise the guard itself returns early.
+    await settle();
+    expect(clear).not.toHaveBeenCalled();
+
+    // During the delayed cancellation, a successor authenticates, seeds
+    // their cache, and starts an in-flight request.
+    Object.assign(state, {
+      phase: 'authenticated',
+      operation: 'idle',
+      sessionUsable: true,
+      errorCode: null,
+      user: { userId: 'user-2', email: null },
+    });
+    queryClient.setQueryData(srsKeys.stats('user-2'), { due: 7 });
+    await nextTick();
+
+    let signalAborted = false;
+    let resolveFetcher!: (value: { due: 9 }) => void;
+    const fetcherPromise = new Promise<{ due: 9 }>((resolve) => {
+      resolveFetcher = resolve;
+    });
+    const user2Fetch = queryClient.fetchQuery({
+      queryKey: srsKeys.stats('user-2'),
+      queryFn: ({ signal }) => {
+        signal.addEventListener('abort', () => {
+          signalAborted = true;
+        });
+        return fetcherPromise;
+      },
+    });
+    await settle();
+
+    // The delayed cancellation resolves. The stale no-prior-user fallback
+    // must NOT globally clear() and must NOT cancel the successor's request.
+    resolveCancellation();
+    await settle();
+
+    expect(clear).not.toHaveBeenCalled();
+    expect(signalAborted).toBe(false);
+    expect(queryClient.getQueryData(srsKeys.stats('user-2'))).toEqual({ due: 7 });
+
+    resolveFetcher({ due: 9 });
+    await expect(user2Fetch).resolves.toEqual({ due: 9 });
+    expect(queryClient.getQueryData(srsKeys.stats('user-2'))).toEqual({ due: 9 });
+  });
+
+  it('scopes unusable-recovery cancellation to the recovering user and does not abort a successor in-flight request', async () => {
+    const state = reactive<MobileAuthState>({
+      phase: 'authenticated',
+      operation: 'idle',
+      sessionUsable: true,
+      errorCode: null,
+      retryAction: null,
+      notice: null,
+      user: { userId: 'user-1', email: null },
+    });
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    queryClient.setQueryData(srsKeys.stats('user-1'), { due: 4 });
+    const stop = installMobileQueryAuthIsolation({ state, queryClient });
+    stops.push(stop);
+
+    const realCancelQueries = queryClient.cancelQueries.bind(queryClient);
+    let resolveCancellation!: () => void;
+    const cancellation = new Promise<void>((resolve) => {
+      resolveCancellation = resolve;
+    });
+    const clear = vi.spyOn(queryClient, 'clear');
+    // Delay only user-1's scoped cancellation; let other scoped calls and
+    // any successor fetchQuery pass through.
+    vi.spyOn(queryClient, 'cancelQueries').mockImplementation((args) => {
+      if (args && typeof args === 'object' && 'queryKey' in args && args.queryKey) {
+        const key = (args as { queryKey: unknown }).queryKey;
+        if (Array.isArray(key) && key.includes('user-1')) {
+          return cancellation;
+        }
+        return realCancelQueries(args);
+      }
+      // Unscoped cancelQueries() should not occur with the scoped fix.
+      return cancellation;
+    });
+
+    // User 1's session becomes recovering + unusable → cancelOnly fires,
+    // scoped to user-1, and awaits the delayed cancellation.
+    Object.assign(state, { operation: 'refreshing', sessionUsable: false });
+    // Let the cancelOnly callback start and suspend at the awaited (mocked)
+    // scoped cancelQueries(). The hazard requires the callback to be parked
+    // at the await when the identity changes; otherwise a later queued
+    // callback would see the new state and take a different branch.
+    await settle();
+
+    // During the delayed cancellation, identity changes to user-2 and
+    // user-2 starts an in-flight request.
+    Object.assign(state, {
+      operation: 'idle',
+      sessionUsable: true,
+      user: { userId: 'user-2', email: null },
+    });
+    await nextTick();
+
+    let signalAborted = false;
+    let resolveFetcher!: (value: { due: 9 }) => void;
+    const fetcherPromise = new Promise<{ due: 9 }>((resolve) => {
+      resolveFetcher = resolve;
+    });
+    const user2Fetch = queryClient.fetchQuery({
+      queryKey: srsKeys.stats('user-2'),
+      queryFn: ({ signal }) => {
+        signal.addEventListener('abort', () => {
+          signalAborted = true;
+        });
+        return fetcherPromise;
+      },
+    });
+    await settle();
+
+    // Resolve user-1's delayed cancellation. The stale cancelOnly callback
+    // must NOT abort user-2's in-flight request (scoped to user-1 only).
+    resolveCancellation();
+    await settle();
+
+    expect(clear).not.toHaveBeenCalled();
+    expect(signalAborted).toBe(false);
+
+    resolveFetcher({ due: 9 });
+    await expect(user2Fetch).resolves.toEqual({ due: 9 });
   });
 });
