@@ -139,7 +139,7 @@ describe('mobile API client', () => {
     }
   });
 
-  it('cleans the deadline and caller listener after a body rejection', async () => {
+  it('maps malformed JSON to invalid_response and cleans request resources', async () => {
     vi.useFakeTimers();
     try {
       const caller = new AbortController();
@@ -151,12 +151,22 @@ describe('mobile API client', () => {
       );
 
       await expect(client.getJson('srs/stats', { signal: caller.signal })).rejects.toMatchObject({
-        code: 'network',
+        code: 'invalid_response',
       });
       expectCallerCleanup(caller, remove);
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it('maps a body transport rejection to network', async () => {
+    const unreadable = response(200, {});
+    vi.mocked(unreadable.json).mockRejectedValue(new TypeError('body stream failed'));
+    const client = createMobileApiClient(
+      coordinator({ requestAuthenticatedApi: vi.fn().mockResolvedValue(unreadable) }),
+    );
+
+    await expect(client.getJson('srs/stats')).rejects.toMatchObject({ code: 'network' });
   });
 
   it('maps an execution deadline outside recovery to network', async () => {

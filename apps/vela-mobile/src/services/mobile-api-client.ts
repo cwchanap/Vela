@@ -65,6 +65,21 @@ function mapCoordinatorError(
   throw new MobileApiError('network', { cause: error });
 }
 
+function mapResponseBodyError(
+  error: unknown,
+  context: {
+    callerAborted: boolean;
+    deadlineExpired: boolean;
+    coordinator: MobileAuthCoordinator;
+  },
+): never {
+  if (error instanceof SyntaxError && !context.callerAborted && !context.deadlineExpired) {
+    throw new MobileApiError('invalid_response', { cause: error });
+  }
+
+  return mapCoordinatorError(error, context);
+}
+
 export function createMobileApiClient(
   coordinator: MobileAuthCoordinator,
   timeoutMs = MOBILE_DUE_COUNT_EXECUTION_TIMEOUT_MS,
@@ -107,7 +122,7 @@ export function createMobileApiClient(
         try {
           return await response.json();
         } catch (error) {
-          return mapCoordinatorError(error, { callerAborted, deadlineExpired, coordinator });
+          return mapResponseBodyError(error, { callerAborted, deadlineExpired, coordinator });
         }
       } finally {
         clearTimeout(deadline);
