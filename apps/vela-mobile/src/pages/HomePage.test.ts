@@ -1,12 +1,35 @@
-import { describe, it, expect, vi, afterEach } from 'vitest';
+import type { SRSStats } from '@vela/common';
 import { mount } from '@vue/test-utils';
+import { defineComponent, ref } from 'vue';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Quasar, QLayout, QPageContainer } from 'quasar';
-import { defineComponent } from 'vue';
+import { MobileApiError } from 'src/services/mobile-api-client';
+import { NETWORK_MESSAGE, STALE_MESSAGE } from 'src/components/home/due-review-view';
 import HomePage from './HomePage.vue';
-import { config } from 'src/config';
 
-// q-page must be a deep child of q-layout; wrap HomePage so Quasar renders its
-// content under jsdom instead of silently emitting nothing.
+const dueReview = {
+  stats: ref<SRSStats | undefined>(),
+  error: ref<MobileApiError | null>(null),
+  isInitialPending: ref(false),
+  isFetching: ref(false),
+  sessionRecoveryPending: ref(false),
+  manualRetryPending: ref(false),
+  retry: vi.fn<() => Promise<void>>().mockResolvedValue(),
+};
+
+vi.mock('src/composables/useDueReviewCount', () => ({
+  useDueReviewCount: () => dueReview,
+}));
+
+const stats = (dueToday: number): SRSStats => ({
+  total_items: dueToday,
+  due_today: dueToday,
+  mastery_breakdown: { new: 0, learning: 0, reviewing: dueToday, mastered: 0 },
+  average_ease_factor: 2.5,
+  total_reviews: 0,
+  accuracy_rate: 100,
+});
+
 const Host = defineComponent({
   components: { QLayout, QPageContainer, HomePage },
   template:
@@ -15,48 +38,110 @@ const Host = defineComponent({
 
 const mountPage = () => mount(Host, { global: { plugins: [Quasar] } });
 
+function setDueReview(overrides: Partial<typeof dueReview> = {}) {
+  dueReview.stats.value = undefined;
+  dueReview.error.value = null;
+  dueReview.isInitialPending.value = false;
+  dueReview.isFetching.value = false;
+  dueReview.sessionRecoveryPending.value = false;
+  dueReview.manualRetryPending.value = false;
+  Object.assign(dueReview, overrides);
+}
+
 describe('HomePage', () => {
   afterEach(() => {
-    vi.doUnmock('src/config');
-    vi.resetModules();
+    setDueReview();
+    dueReview.retry.mockClear();
   });
 
-  it('renders the app name', () => {
+  it('announces loading accessibly', () => {
+    dueReview.isInitialPending.value = true;
     const wrapper = mountPage();
-    expect(wrapper.text()).toContain(config.app.name);
+
+    expect(wrapper.get('h1').text()).toBe('Today’s review');
+    expect(wrapper.get('[role="status"]').text()).toContain('Loading your review count…');
+    expect(wrapper.get('[role="status"]').attributes('aria-live')).toBe('polite');
   });
 
-  it('renders the app version', () => {
+  it('announces session recovery loading accessibly', () => {
+    dueReview.sessionRecoveryPending.value = true;
     const wrapper = mountPage();
-    expect(wrapper.text()).toContain(config.app.version);
+
+    expect(wrapper.get('[role="status"]').text()).toContain('Refreshing your session…');
   });
 
-  it('renders the M1 scaffold label', () => {
+  it('shows a caught-up zero count', () => {
+    dueReview.stats.value = stats(0);
     const wrapper = mountPage();
-    expect(wrapper.text()).toContain('M1');
+
+    expect(wrapper.get('.due-review__count').text()).toBe('0');
+    expect(wrapper.text()).toContain('You’re caught up for now.');
   });
 
-  it('shows the Development chip in dev mode', () => {
+  it.each([
+    [1, '1 word is due for review.'],
+    [3, '3 words are due for review.'],
+  ])('uses the correct due-count copy for %i word(s)', (count, copy) => {
+    dueReview.stats.value = stats(count);
     const wrapper = mountPage();
-    expect(wrapper.text()).toContain('Development');
-    expect(wrapper.find('.q-chip').text()).toContain('Development');
+
+    expect(wrapper.get('.due-review__count').text()).toBe(String(count));
+    expect(wrapper.text()).toContain(copy);
   });
 
-  it('shows the Production chip when config.app.isDev is false', async () => {
-    vi.doMock('src/config', () => ({
-      config: {
-        app: { name: 'Vela', version: '0.0.1', isDev: false, isProd: true },
-      },
-    }));
-    vi.resetModules();
-    const { default: HomePageProd } = await import('./HomePage.vue');
-    const ProdHost = defineComponent({
-      components: { QLayout, QPageContainer, HomePageProd },
-      template:
-        '<q-layout view="hHh Lpr fFf"><q-page-container><home-page-prod/></q-page-container></q-layout>',
-    });
-    const wrapper = mount(ProdHost, { global: { plugins: [Quasar] } });
-    expect(wrapper.text()).toContain('Production');
-    expect(wrapper.text()).not.toContain('Development');
+  it('retains the count while it refreshes in the background', () => {
+    dueReview.stats.value = stats(3);
+    dueReview.isFetching.value = true;
+    const wrapper = mountPage();
+
+    expect(wrapper.get('.due-review__count').text()).toBe('3');
+    expect(wrapper.get('[role="status"]').text()).toContain('Refreshing review count…');
+  });
+
+  it('shows a blocking network error and retries', async () => {
+    dueReview.error.value = new MobileApiError('network');
+    const wrapper = mountPage();
+
+    expect(wrapper.get('[role="alert"]').text()).toContain(NETWORK_MESSAGE);
+    await wrapper.get('button').trigger('click');
+    expect(dueReview.retry).toHaveBeenCalledOnce();
+  });
+
+  it.each([0, 3])('keeps the cached %i count with a stale-error warning', (count) => {
+    dueReview.stats.value = stats(count);
+    dueReview.error.value = new MobileApiError('server');
+    const wrapper = mountPage();
+
+    expect(wrapper.get('[role="alert"] .due-review__count').text()).toBe(String(count));
+    expect(wrapper.get('[role="alert"]').text()).toContain(STALE_MESSAGE);
+  });
+
+  it('disables and relabels retry while a manual retry is pending', () => {
+    dueReview.error.value = new MobileApiError('network');
+    dueReview.manualRetryPending.value = true;
+    const wrapper = mountPage();
+    const retry = wrapper.get('button');
+
+    expect(retry.attributes('aria-label')).toBe('Retrying review count');
+    expect(retry.attributes('disabled')).toBeDefined();
+  });
+
+  it('does not offer retry for an invalid request', () => {
+    dueReview.error.value = new MobileApiError('invalid_request');
+    const wrapper = mountPage();
+
+    expect(wrapper.get('[role="alert"]').text()).toContain('Please try again.');
+    expect(wrapper.find('button').exists()).toBe(false);
+  });
+
+  it('does not render the scaffold, environment, version, or Start Review copy', () => {
+    dueReview.stats.value = stats(3);
+    const text = mountPage().text();
+
+    expect(text).not.toContain('M1 Scaffold');
+    expect(text).not.toContain('Development');
+    expect(text).not.toContain('Production');
+    expect(text).not.toContain('Version');
+    expect(text).not.toContain('Start Review');
   });
 });
