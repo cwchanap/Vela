@@ -25,7 +25,7 @@ export class MobileApiError extends Error {
   }
 }
 
-export const MOBILE_DUE_COUNT_EXECUTION_TIMEOUT_MS = 8_000;
+export const MOBILE_API_DEFAULT_TIMEOUT_MS = 8_000;
 
 export type MobileApiClient = {
   getJson(path: string, options?: { signal?: AbortSignal }): Promise<unknown>;
@@ -53,6 +53,10 @@ function mapCoordinatorError(
 
   if (error instanceof DOMException && error.name === 'AbortError') {
     if (callerAborted) throw error;
+    // A deadline abort during coordinator session recovery is expected: the
+    // token refresh in flight has not finished within the request budget, so
+    // surface it as session-recovery-pending (the UI waits for recovery)
+    // instead of a hard network failure that would prompt a pointless retry.
     if (
       deadlineExpired &&
       selectMobileFeatureSessionStatus(coordinator.state).kind === 'recovering'
@@ -82,7 +86,7 @@ function mapResponseBodyError(
 
 export function createMobileApiClient(
   coordinator: MobileAuthCoordinator,
-  timeoutMs = MOBILE_DUE_COUNT_EXECUTION_TIMEOUT_MS,
+  timeoutMs = MOBILE_API_DEFAULT_TIMEOUT_MS,
 ): MobileApiClient {
   return {
     async getJson(path, options = {}) {

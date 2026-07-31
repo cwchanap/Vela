@@ -22,10 +22,14 @@ export const NETWORK_MESSAGE =
 export const GENERIC_MESSAGE = 'Vela couldn’t load your review count. Please try again.';
 export const STALE_MESSAGE = 'This count may be out of date.';
 
+function canRetryError(error: MobileApiError): boolean {
+  return error.code !== 'invalid_request';
+}
+
 export function selectDueReviewView(input: DueReviewViewInput): DueReviewView {
   const refreshing = input.isFetching && input.stats !== undefined && !input.manualRetryPending;
 
-  if (input.sessionRecoveryPending) {
+  if (input.sessionRecoveryPending || input.error?.code === 'unauthorized') {
     if (input.stats === undefined) return { kind: 'loading', recoveringSession: true };
     if (input.stats.due_today === 0) return { kind: 'zero', refreshing: false };
     return { kind: 'positive', count: input.stats.due_today, refreshing: false };
@@ -37,7 +41,7 @@ export function selectDueReviewView(input: DueReviewViewInput): DueReviewView {
       count: input.stats.due_today,
       message: STALE_MESSAGE,
       retrying: input.manualRetryPending,
-      canRetry: input.error.code !== 'invalid_request',
+      canRetry: canRetryError(input.error),
     };
   }
 
@@ -46,7 +50,7 @@ export function selectDueReviewView(input: DueReviewViewInput): DueReviewView {
       kind: 'blocking_error',
       message: input.error.code === 'network' ? NETWORK_MESSAGE : GENERIC_MESSAGE,
       retrying: input.manualRetryPending,
-      canRetry: input.error.code !== 'invalid_request',
+      canRetry: canRetryError(input.error),
     };
   }
 

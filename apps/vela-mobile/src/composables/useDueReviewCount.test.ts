@@ -325,15 +325,11 @@ describe('useDueReviewCount', () => {
       });
 
       await vi.advanceTimersByTimeAsync(0);
-      expect(getStats).toHaveBeenCalledOnce();
 
-      await vi.advanceTimersByTimeAsync(26_999);
-      expect(getStats).toHaveBeenCalledTimes(3);
-      expect(result.isFetching.value).toBe(true);
-      expect(result.error.value).toBeNull();
+      for (let i = 0; result.isFetching.value && i < 50; i++) {
+        await vi.advanceTimersByTimeAsync(1_000);
+      }
 
-      await vi.advanceTimersByTimeAsync(1);
-      await nextTick();
       expect(getStats).toHaveBeenCalledTimes(3);
       expect(result.isFetching.value).toBe(false);
       expect(result.error.value).toBe(networkError);

@@ -1,4 +1,5 @@
 import type { QueryClient } from '@tanstack/vue-query';
+import { srsKeys } from '@vela/common';
 import { watch, type WatchStopHandle } from 'vue';
 import type { MobileAuthState } from '../auth/mobile-auth-contract';
 import {
@@ -31,22 +32,35 @@ export function installMobileQueryAuthIsolation(options: {
   return watch(
     () => selectAuthQuerySnapshot(options.state),
     (next, previous) => {
-      const identityChanged = previous.userId !== next.userId;
-      const clearRequired =
-        identityChanged ||
+      const previousUserId = previous.userId;
+      const identityChanged = previousUserId !== next.userId;
+      // A terminal sign-out wipes the whole cache (no successor user to keep).
+      const signOutClear =
         next.phase === 'signedOut' ||
         next.operation === 'signingOut' ||
         next.operation === 'cleaningUp';
       const cancelOnly =
         next.featureStatus.kind === 'recovering' && !next.featureStatus.sessionUsable;
 
-      if (!clearRequired && !cancelOnly) return;
+      if (!identityChanged && !signOutClear && !cancelOnly) return;
 
       cleanupTail = cleanupTail
         .catch(() => undefined)
         .then(async () => {
+          if (signOutClear) {
+            await options.queryClient.cancelQueries();
+            options.queryClient.clear();
+            return;
+          }
+          if (identityChanged && previousUserId !== null) {
+            // Scope removal to the prior user's key so an in-flight or freshly
+            // resolved request for the new user survives the identity handoff.
+            const priorUserKey = srsKeys.stats(previousUserId);
+            await options.queryClient.cancelQueries({ queryKey: priorUserKey });
+            options.queryClient.removeQueries({ queryKey: priorUserKey });
+            return;
+          }
           await options.queryClient.cancelQueries();
-          if (clearRequired) options.queryClient.clear();
         })
         .catch(() => undefined);
     },

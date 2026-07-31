@@ -128,18 +128,24 @@ describe('App', () => {
     expect(wrapper.get('[role="status"]').text()).toContain('Signing out…');
     expect(mobileQueryClient.getQueryData(srsKeys.stats('user-1'))).toBeUndefined();
 
+    // Reseed the prior user's data immediately before the identity changes and
+    // seed the new user's data in the same transition window, proving the
+    // isolation watcher drops only the prior user and preserves the new one.
+    mobileQueryClient.setQueryData(srsKeys.stats('user-1'), { due: 4 });
     Object.assign(state, {
       phase: 'authenticated',
       operation: 'idle',
       sessionUsable: true,
       user: { userId: 'user-2', email: null },
     });
+    mobileQueryClient.setQueryData(srsKeys.stats('user-2'), { due: 7 });
     await flushPromises();
     await nextTick();
 
     expect(mountedRoutes).toEqual(['home', 'home']);
+    expect(mobileQueryClient.getQueryData(srsKeys.stats('user-1'))).toBeUndefined();
+    expect(mobileQueryClient.getQueryData(srsKeys.stats('user-2'))).toEqual({ due: 7 });
 
-    mobileQueryClient.setQueryData(srsKeys.stats('user-2'), { due: 7 });
     wrapper.unmount();
     Object.assign(state, { phase: 'signedOut', sessionUsable: false, user: null });
     await flushPromises();

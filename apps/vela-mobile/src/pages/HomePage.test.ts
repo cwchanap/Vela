@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Quasar, QLayout, QPageContainer } from 'quasar';
 import { MobileApiError } from 'src/services/mobile-api-client';
 import { NETWORK_MESSAGE, STALE_MESSAGE } from 'src/components/home/due-review-view';
+import { dueReviewStats as stats } from 'src/components/home/stats-fixture';
 import HomePage from './HomePage.vue';
 
 const dueReview = {
@@ -20,15 +21,6 @@ const dueReview = {
 vi.mock('src/composables/useDueReviewCount', () => ({
   useDueReviewCount: () => dueReview,
 }));
-
-const stats = (dueToday: number): SRSStats => ({
-  total_items: dueToday,
-  due_today: dueToday,
-  mastery_breakdown: { new: 0, learning: 0, reviewing: dueToday, mastered: 0 },
-  average_ease_factor: 2.5,
-  total_reviews: 0,
-  accuracy_rate: 100,
-});
 
 const Host = defineComponent({
   components: { QLayout, QPageContainer, HomePage },
