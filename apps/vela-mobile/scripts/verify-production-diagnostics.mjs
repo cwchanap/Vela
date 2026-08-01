@@ -1,7 +1,18 @@
 import { readdir, readFile } from 'node:fs/promises';
 import { relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { IOS_INTERACTION_PRODUCTION_FORBIDDEN_TOKENS } from '../src/diagnostics/ios-interaction-contract.ts';
+
+const PRODUCTION_FORBIDDEN_TOKENS = [
+  'ios-interaction-diagnostics',
+  'ios-interaction-entry',
+  'iOS Interaction Diagnostics',
+  '/diagnostics/ios-interactions',
+  'vela:dev:ios-interaction-cold-entry',
+  'tts-pronunciation-diagnostics',
+  'tts-pronunciation-entry',
+  '/diagnostics/tts-pronunciation',
+  'Pronunciation diagnostics',
+];
 
 const defaultRoot = fileURLToPath(new URL('../src-capacitor/www/', import.meta.url));
 
@@ -41,7 +52,7 @@ export async function findDiagnosticTokens(root, tokens) {
 }
 
 export function findProductionDiagnosticTokens(root) {
-  return findDiagnosticTokens(root, IOS_INTERACTION_PRODUCTION_FORBIDDEN_TOKENS);
+  return findDiagnosticTokens(root, PRODUCTION_FORBIDDEN_TOKENS);
 }
 
 if (import.meta.main) {
