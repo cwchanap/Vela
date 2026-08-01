@@ -112,12 +112,14 @@ export type MobileAuthState = {
 /* global HeadersInit, RequestInit */
 export type MobileAuthenticatedApiRequest = {
   path: string;
+  transportTimeoutMs?: number;
   init?: Omit<RequestInit, 'headers'> & { headers?: HeadersInit };
 };
 
 export type MobileAuthenticatedApiRequestErrorCode =
   | 'invalid_request_path'
   | 'invalid_request_headers'
+  | 'invalid_request_timeout'
   | 'request_timeout'
   | 'session_unavailable'
   | 'session_changed'

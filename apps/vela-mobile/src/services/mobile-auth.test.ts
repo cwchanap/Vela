@@ -3620,6 +3620,24 @@ describe('session verification', () => {
 });
 
 describe('authenticated feature transport', () => {
+  it.each([0, -1, 1.5, Number.NaN, 50_001])(
+    'rejects invalid transport timeout %s',
+    async (transportTimeoutMs) => {
+      const harness = makeHarness();
+      await authenticate(harness);
+      const before = harness.sessionFetch.mock.calls.length;
+
+      await expect(
+        harness.coordinator.requestAuthenticatedApi({
+          path: 'tts/generate',
+          transportTimeoutMs,
+        }),
+      ).rejects.toMatchObject({ code: 'invalid_request_timeout' });
+
+      expect(harness.sessionFetch).toHaveBeenCalledTimes(before);
+    },
+  );
+
   it('rejects path escapes before network activity', async () => {
     const harness = makeHarness();
     await authenticate(harness);
@@ -3800,21 +3818,54 @@ describe('authenticated feature transport', () => {
     await expect(request).rejects.toMatchObject({ name: 'AbortError' });
   });
 
-  it('maps the bounded feature timeout to request_timeout', async () => {
+  it('aborts an omitted feature transport timeout after 15 seconds', async () => {
     const harness = makeHarness();
     await authenticate(harness);
     vi.useFakeTimers();
     try {
+      let featureSignal: AbortSignal | undefined;
       harness.sessionFetch.mockImplementationOnce(
         (_url, init) =>
           new Promise<Response>((_resolve, reject) => {
+            featureSignal = init?.signal ?? undefined;
             init?.signal?.addEventListener('abort', () => reject(new Error('timeout')));
           }),
       );
 
       const request = harness.coordinator.requestAuthenticatedApi({ path: 'srs/stats' });
       const expected = expect(request).rejects.toMatchObject({ code: 'request_timeout' });
-      await vi.advanceTimersByTimeAsync(MOBILE_AUTH_NETWORK_TIMEOUT_MS);
+      await vi.advanceTimersByTimeAsync(MOBILE_AUTH_NETWORK_TIMEOUT_MS - 1);
+      expect(featureSignal?.aborted).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
+
+      await expected;
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('keeps a 45-second feature transport timeout active beyond 15 seconds', async () => {
+    const harness = makeHarness();
+    await authenticate(harness);
+    vi.useFakeTimers();
+    try {
+      let featureSignal: AbortSignal | undefined;
+      harness.sessionFetch.mockImplementationOnce(
+        (_url, init) =>
+          new Promise<Response>((_resolve, reject) => {
+            featureSignal = init?.signal ?? undefined;
+            init?.signal?.addEventListener('abort', () => reject(new Error('timeout')));
+          }),
+      );
+
+      const request = harness.coordinator.requestAuthenticatedApi({
+        path: 'tts/generate',
+        transportTimeoutMs: 45_000,
+      });
+      const expected = expect(request).rejects.toMatchObject({ code: 'request_timeout' });
+      await vi.advanceTimersByTimeAsync(15_000);
+      expect(featureSignal?.aborted).toBe(false);
+      await vi.advanceTimersByTimeAsync(30_000);
 
       await expected;
     } finally {
@@ -3942,6 +3993,51 @@ describe('authenticated feature transport', () => {
     ]);
     expect(refreshRequests(harness)).toHaveLength(1);
     expect(featureCalls).toBe(4);
+  });
+
+  it('replays a JSON POST once with the identical body after refresh', async () => {
+    let currentNow = NOW;
+    const harness = makeHarness({ now: () => currentNow });
+    await authenticateWithExpiry(harness, currentNow + 1_000, currentNow);
+    prepareSuccessfulRefresh(harness, {
+      claimExpirySeconds: Math.ceil((currentNow + 3_600_000) / 1_000),
+    });
+    harness.sessionFetch.mockClear();
+    const initialResponse = deferred<Response>();
+    let featureCalls = 0;
+    harness.sessionFetch.mockImplementation(async (target) => {
+      if (String(target).endsWith('/tts/generate')) {
+        featureCalls += 1;
+        return featureCalls === 1 ? initialResponse.promise : response(200, { cached: true });
+      }
+      return response(200, {
+        authenticated: true,
+        user: { userId: 'user-123', email: 'person@example.com' },
+      });
+    });
+    const body = JSON.stringify({ vocabularyId: '水:ミズ', text: '水' });
+
+    const request = harness.coordinator.requestAuthenticatedApi({
+      path: 'tts/generate',
+      transportTimeoutMs: 45_000,
+      init: {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body,
+      },
+    });
+    await vi.waitFor(() => expect(featureCalls).toBe(1));
+    currentNow += 2_000;
+    initialResponse.resolve(response(401, {}));
+
+    await expect(request).resolves.toMatchObject({ status: 200 });
+    const attempts = harness.sessionFetch.mock.calls.filter(([url]) =>
+      String(url).includes('tts/generate'),
+    );
+    expect(attempts).toHaveLength(2);
+    expect(attempts[0]?.[1]?.body).toBe(body);
+    expect(attempts[1]?.[1]?.body).toBe(body);
+    expect(attempts[1]?.[1]?.method).toBe('POST');
   });
 
   it('queues one terminal cleanup for concurrent still-valid-token 401s', async () => {
