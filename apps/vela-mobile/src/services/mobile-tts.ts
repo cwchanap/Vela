@@ -259,6 +259,7 @@ export function createMobileTtsService(apiClient: MobileApiClient): MobileTtsSer
   const pending = new Map<string, PendingEntry>();
   const userGenerations = new Map<string, number>();
   const vocabularyGenerations = new Map<string, number>();
+  const activeVocabularyPreparations = new Map<string, number>();
   let clearGeneration = 0;
   let lastExpiredSweepAt = Date.now();
 
@@ -270,9 +271,29 @@ export function createMobileTtsService(apiClient: MobileApiClient): MobileTtsSer
 
   function vocabularyGeneration(userId: string, vocabularyId: string): number {
     const key = vocabularyGenerationKey(userId, vocabularyId);
-    const generation = vocabularyGenerations.get(key) ?? 0;
-    if (!vocabularyGenerations.has(key)) vocabularyGenerations.set(key, generation);
-    return generation;
+    return vocabularyGenerations.get(key) ?? 0;
+  }
+
+  function beginVocabularyPreparation(userId: string, vocabularyId: string) {
+    const key = vocabularyGenerationKey(userId, vocabularyId);
+    activeVocabularyPreparations.set(key, (activeVocabularyPreparations.get(key) ?? 0) + 1);
+    let released = false;
+
+    return {
+      generation: vocabularyGenerations.get(key) ?? 0,
+      release() {
+        if (released) return;
+        released = true;
+        const remaining = (activeVocabularyPreparations.get(key) ?? 1) - 1;
+        if (remaining > 0) {
+          activeVocabularyPreparations.set(key, remaining);
+          return;
+        }
+
+        activeVocabularyPreparations.delete(key);
+        vocabularyGenerations.delete(key);
+      },
+    };
   }
 
   function sweepExpired(now: number): void {
@@ -443,12 +464,16 @@ export function createMobileTtsService(apiClient: MobileApiClient): MobileTtsSer
         return Promise.reject(error);
       }
 
+      const vocabularyPreparation = beginVocabularyPreparation(
+        normalized.userId,
+        normalized.vocabularyId,
+      );
       const work = prepare(
         normalized,
         userGeneration(normalized.userId),
-        vocabularyGeneration(normalized.userId, normalized.vocabularyId),
+        vocabularyPreparation.generation,
         clearGeneration,
-      );
+      ).finally(vocabularyPreparation.release);
       return detachOnAbort(work, options.signal);
     },
 
@@ -467,6 +492,9 @@ export function createMobileTtsService(apiClient: MobileApiClient): MobileTtsSer
         if (entry.userId === normalizedUserId && entry.vocabularyId === normalizedVocabularyId) {
           pending.delete(key);
         }
+      }
+      if (!activeVocabularyPreparations.has(generationKey)) {
+        vocabularyGenerations.delete(generationKey);
       }
     },
 
