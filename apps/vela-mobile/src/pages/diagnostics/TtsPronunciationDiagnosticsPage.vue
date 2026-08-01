@@ -230,13 +230,11 @@ function messageForState(current: PronunciationDiagnosticState): string {
       if (current.notice === 'audio_refreshed') {
         return 'The audio link was refreshed. Tap to play the refreshed pronunciation.';
       }
-      return controller.counters.completedPlays.value > 0
-        ? 'Playback completed. Ready to play again.'
-        : 'Pronunciation is prepared and ready to play.';
+      return 'Pronunciation is prepared and ready to play.';
     case 'interrupted':
       return current.reason === 'background'
-        ? 'Playback was interrupted when the app moved to the background. Tap to resume.'
-        : 'Playback was interrupted by another audio source. Tap to resume.';
+        ? 'Playback was interrupted when the app moved to the background. Tap to replay from the beginning.'
+        : 'Playback was interrupted by another audio source. Tap to replay from the beginning.';
     case 'error':
       return errorMessages[current.error];
   }
@@ -281,11 +279,9 @@ const playButtonAriaLabel = computed(() => {
     case 'ready':
       if (state.value.notice === 'gesture_required') return 'Tap to play pronunciation';
       if (state.value.notice === 'audio_refreshed') return 'Play refreshed pronunciation';
-      return controller.counters.completedPlays.value > 0
-        ? 'Play pronunciation again'
-        : 'Play pronunciation';
+      return 'Play pronunciation';
     case 'interrupted':
-      return 'Resume pronunciation';
+      return 'Replay pronunciation';
     case 'error':
       return state.value.pronunciation ? 'Retry playback' : 'Retry pronunciation';
   }
@@ -302,7 +298,7 @@ const playButtonLabel = computed(() => {
     case 'ready':
       return state.value.notice === 'gesture_required' ? 'Tap to play' : 'Play';
     case 'interrupted':
-      return 'Resume';
+      return 'Replay';
     case 'error':
       return state.value.pronunciation ? 'Retry playback' : 'Retry';
   }

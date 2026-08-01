@@ -201,12 +201,8 @@ describe('TtsPronunciationDiagnosticsPage', () => {
     }
   });
 
-  it('renders playing and completed states with restart and replay labels', async () => {
-    const counters = counterFixture();
-    const controller = controllerFixture(
-      { kind: 'playing', pronunciation: PREPARED },
-      { counters },
-    );
+  it('renders playing and prepared states with accurate restart and play labels', async () => {
+    const controller = controllerFixture({ kind: 'playing', pronunciation: PREPARED });
     const wrapper = mountPageWithController(controller);
 
     expect(statusRegion(wrapper).text()).toContain('Playing pronunciation');
@@ -214,12 +210,55 @@ describe('TtsPronunciationDiagnosticsPage', () => {
       'Restart pronunciation',
     );
 
-    counters.completedPlays.value = 1;
     controller.state.value = { kind: 'ready', pronunciation: PREPARED, notice: null };
     await nextTick();
-    expect(statusRegion(wrapper).text()).toContain('Playback completed');
+    expect(statusRegion(wrapper).text()).toContain('prepared and ready to play');
     expect(wrapper.get('[data-testid="tts-play-button"]').attributes('aria-label')).toBe(
-      'Play pronunciation again',
+      'Play pronunciation',
+    );
+  });
+
+  it('keeps ready-state wording neutral when cumulative counters are cleared', async () => {
+    const counters = counterFixture({ completedPlays: 4 });
+    const controller = controllerFixture(
+      { kind: 'ready', pronunciation: PREPARED, notice: null },
+      { counters },
+    );
+    const wrapper = mountPageWithController(controller);
+
+    expect(statusRegion(wrapper).text()).toContain('prepared and ready to play');
+    expect(statusRegion(wrapper).text()).not.toContain('completed');
+    expect(wrapper.get('[data-testid="tts-play-button"]').attributes('aria-label')).toBe(
+      'Play pronunciation',
+    );
+
+    counters.completedPlays.value = 0;
+    await nextTick();
+
+    expect(statusRegion(wrapper).text()).toContain('prepared and ready to play');
+    expect(statusRegion(wrapper).text()).not.toContain('completed');
+    expect(wrapper.get('[data-testid="tts-play-button"]').attributes('aria-label')).toBe(
+      'Play pronunciation',
+    );
+  });
+
+  it('does not claim completion after a previous completion is followed by prepare without play', async () => {
+    const counters = counterFixture({ completedPlays: 1 });
+    const controller = controllerFixture(
+      { kind: 'ready', pronunciation: PREPARED, notice: null },
+      { counters },
+    );
+    const wrapper = mountPageWithController(controller);
+
+    controller.state.value = { kind: 'preparing', attempt: 2, recoveringSession: false };
+    await nextTick();
+    controller.state.value = { kind: 'ready', pronunciation: PREPARED, notice: null };
+    await nextTick();
+
+    expect(statusRegion(wrapper).text()).toContain('prepared and ready to play');
+    expect(statusRegion(wrapper).text()).not.toContain('completed');
+    expect(wrapper.get('[data-testid="tts-play-button"]').attributes('aria-label')).toBe(
+      'Play pronunciation',
     );
   });
 
@@ -243,9 +282,12 @@ describe('TtsPronunciationDiagnosticsPage', () => {
     };
     await nextTick();
     expect(statusRegion(wrapper).text()).toContain('app moved to the background');
+    expect(statusRegion(wrapper).text()).toContain('replay from the beginning');
+    expect(statusRegion(wrapper).text().toLowerCase()).not.toContain('resume');
     expect(wrapper.get('[data-testid="tts-play-button"]').attributes('aria-label')).toBe(
-      'Resume pronunciation',
+      'Replay pronunciation',
     );
+    expect(wrapper.get('[data-testid="tts-play-button"]').text()).toContain('Replay');
 
     controller.state.value = {
       kind: 'interrupted',
@@ -254,6 +296,8 @@ describe('TtsPronunciationDiagnosticsPage', () => {
     };
     await nextTick();
     expect(statusRegion(wrapper).text()).toContain('another audio source');
+    expect(statusRegion(wrapper).text()).toContain('replay from the beginning');
+    expect(statusRegion(wrapper).text().toLowerCase()).not.toContain('resume');
 
     controller.state.value = {
       kind: 'ready',
