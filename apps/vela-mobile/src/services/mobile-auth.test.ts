@@ -4037,6 +4037,8 @@ describe('authenticated feature transport', () => {
     expect(attempts).toHaveLength(2);
     expect(attempts[0]?.[1]?.body).toBe(body);
     expect(attempts[1]?.[1]?.body).toBe(body);
+    expect(new Headers(attempts[0]?.[1]?.headers).get('Content-Type')).toBe('application/json');
+    expect(new Headers(attempts[1]?.[1]?.headers).get('Content-Type')).toBe('application/json');
     expect(attempts[1]?.[1]?.method).toBe('POST');
   });
 

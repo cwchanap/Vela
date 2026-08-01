@@ -142,8 +142,10 @@ describe('mobile API client', () => {
     [400, 'client'],
     [401, 'unauthorized'],
     [403, 'forbidden'],
-    [404, 'server'],
-    [409, 'server'],
+    [404, 'client'],
+    [409, 'client'],
+    [422, 'client'],
+    [429, 'client'],
     [500, 'server'],
   ] as const)('maps HTTP %i to %s', async (status, code) => {
     const client = createMobileApiClient(

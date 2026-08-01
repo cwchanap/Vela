@@ -178,7 +178,7 @@ const sourceLabels: Record<PreparedPronunciation['source'], string> = {
 
 const errorMessages: Record<PronunciationDiagnosticError, string> = {
   invalid_input: 'The fixed pronunciation request is invalid.',
-  not_configured: 'Text-to-speech is not configured.',
+  not_configured: 'Text-to-speech is not configured. Configure TTS in Vela web settings.',
   session_unavailable: 'Your session is unavailable. Sign in again before retrying.',
   session_changed: 'Your session changed. Try the pronunciation again.',
   session_recovery_pending: 'Your session is still recovering. Try again shortly.',
@@ -313,7 +313,12 @@ const safeAudioLocation = computed(() => {
   try {
     const parsed = new URL(pronunciation.value.audioUrl);
     if (parsed.protocol !== 'https:' || !parsed.host) return null;
-    return `${parsed.host}${parsed.pathname}`;
+    const pathSegments = parsed.pathname.split('/').filter(Boolean);
+    if (pathSegments.length !== 4 || pathSegments[0] !== 'tts') return parsed.host;
+
+    const settingsHash = pathSegments.at(-1);
+    if (!settingsHash || !/^[0-9a-f]{16}$/i.test(settingsHash)) return parsed.host;
+    return `${parsed.host}/…/${settingsHash.slice(-8)}`;
   } catch {
     return null;
   }

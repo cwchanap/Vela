@@ -473,6 +473,10 @@ export function createMobileTtsService(apiClient: MobileApiClient): MobileTtsSer
     clearUser(userId) {
       const normalizedUserId = userId.trim();
       userGenerations.set(normalizedUserId, userGeneration(normalizedUserId) + 1);
+      const vocabularyGenerationPrefix = `${encodeURIComponent(normalizedUserId)}|`;
+      for (const key of vocabularyGenerations.keys()) {
+        if (key.startsWith(vocabularyGenerationPrefix)) vocabularyGenerations.delete(key);
+      }
 
       for (const [key, entry] of cache) {
         if (entry.userId === normalizedUserId) cache.delete(key);
@@ -484,6 +488,8 @@ export function createMobileTtsService(apiClient: MobileApiClient): MobileTtsSer
 
     clearAll() {
       clearGeneration += 1;
+      userGenerations.clear();
+      vocabularyGenerations.clear();
       cache.clear();
       pending.clear();
       lastExpiredSweepAt = Date.now();

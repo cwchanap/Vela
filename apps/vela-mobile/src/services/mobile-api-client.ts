@@ -175,7 +175,9 @@ async function responseError(response: Response): Promise<MobileApiError> {
   const details = await errorDetails(response);
   if (response.status === 401) return new MobileApiError('unauthorized', details);
   if (response.status === 403) return new MobileApiError('forbidden', details);
-  if (response.status === 400) return new MobileApiError('client', details);
+  if (response.status >= 400 && response.status < 500) {
+    return new MobileApiError('client', details);
+  }
   return new MobileApiError('server', details);
 }
 
