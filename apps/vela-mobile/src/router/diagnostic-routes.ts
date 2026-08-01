@@ -4,6 +4,10 @@ import {
   IOS_DIAGNOSTIC_ROOT_PATH,
   IOS_INTERACTION_DIAGNOSTICS_LABEL,
 } from 'src/diagnostics/ios-interaction-contract';
+import {
+  TTS_PRONUNCIATION_DIAGNOSTIC_LABEL,
+  TTS_PRONUNCIATION_DIAGNOSTIC_PATH,
+} from 'src/diagnostics/tts-pronunciation-contract';
 
 const coreRoutes: RouteRecordRaw[] = [
   { path: '', name: 'home', component: () => import('pages/HomePage.vue') },
@@ -13,7 +17,10 @@ const coreRoutes: RouteRecordRaw[] = [
   { path: 'more', name: 'more', component: () => import('pages/MorePage.vue') },
 ];
 
-export const developmentDiagnosticRoutes: RouteRecordRaw[] = import.meta.env.DEV
+const TTS_PRONUNCIATION_DIAGNOSTICS_PAGE =
+  '/src/pages/diagnostics/TtsPronunciationDiagnosticsPage.vue';
+
+export const bypassDevelopmentDiagnosticRoutes: RouteRecordRaw[] = import.meta.env.DEV
   ? [
       {
         path: IOS_DIAGNOSTIC_ROOT_PATH.slice(1),
@@ -41,6 +48,27 @@ export const developmentDiagnosticRoutes: RouteRecordRaw[] = import.meta.env.DEV
       },
     ]
   : [];
+
+export const authenticatedDevelopmentDiagnosticRoutes: RouteRecordRaw[] = import.meta.env.DEV
+  ? [
+      {
+        path: TTS_PRONUNCIATION_DIAGNOSTIC_PATH.slice(1),
+        name: 'ttsPronunciationDiagnostics',
+        component: () => import(/* @vite-ignore */ TTS_PRONUNCIATION_DIAGNOSTICS_PAGE),
+        meta: {
+          mobileHeader: {
+            title: TTS_PRONUNCIATION_DIAGNOSTIC_LABEL,
+            fallback: '/more',
+          },
+        },
+      },
+    ]
+  : [];
+
+export const developmentDiagnosticRoutes: RouteRecordRaw[] = [
+  ...bypassDevelopmentDiagnosticRoutes,
+  ...authenticatedDevelopmentDiagnosticRoutes,
+];
 
 export function buildMobileChildRoutes(
   diagnosticRoutes: RouteRecordRaw[] = developmentDiagnosticRoutes,
