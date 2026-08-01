@@ -10,6 +10,12 @@ import {
 import { IOS_INTERACTION_PRODUCTION_FORBIDDEN_TOKENS } from '../src/diagnostics/ios-interaction-contract.ts';
 
 const forbiddenTokens = [...IOS_INTERACTION_PRODUCTION_FORBIDDEN_TOKENS];
+const ttsForbiddenTokens = [
+  '/diagnostics/tts-pronunciation',
+  'Pronunciation diagnostics',
+  'tts-pronunciation-diagnostics',
+  'tts-pronunciation-entry',
+];
 
 describe('verify-production-diagnostics', () => {
   it('returns no matches when emitted JavaScript excludes every forbidden token', async () => {
@@ -28,6 +34,19 @@ describe('verify-production-diagnostics', () => {
         path: artifact,
         token,
       },
+    ]);
+  });
+
+  it('finds every TTS diagnostic token in emitted JavaScript', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'vela-prod-scan-'));
+    const artifact = join(root, 'app.js');
+    await writeFile(artifact, `const leaked=${JSON.stringify(ttsForbiddenTokens.join(' '))}`);
+
+    expect(await findProductionDiagnosticTokens(root)).toEqual([
+      { path: artifact, token: '/diagnostics/tts-pronunciation' },
+      { path: artifact, token: 'Pronunciation diagnostics' },
+      { path: artifact, token: 'tts-pronunciation-diagnostics' },
+      { path: artifact, token: 'tts-pronunciation-entry' },
     ]);
   });
 
