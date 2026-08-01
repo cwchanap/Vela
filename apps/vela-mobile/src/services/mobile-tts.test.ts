@@ -58,6 +58,23 @@ function generated(audioUrl = HTTPS_AUDIO, cached = false) {
   return { audioUrl, cached };
 }
 
+function captureVocabularyGenerationMap(
+  service: ReturnType<typeof createMobileTtsService>,
+): Map<string, number> {
+  const setSpy = vi.spyOn(Map.prototype, 'set');
+  try {
+    service.invalidatePronunciation('metadata-probe-user', 'metadata-probe-vocabulary');
+    const callIndex = setSpy.mock.calls.findIndex(
+      ([key]) => key === 'metadata-probe-user|metadata-probe-vocabulary',
+    );
+    const generationMap = setSpy.mock.contexts[callIndex];
+    expect(generationMap).toBeInstanceOf(Map);
+    return generationMap as Map<string, number>;
+  } finally {
+    setSpy.mockRestore();
+  }
+}
+
 describe('MobileTtsService', () => {
   let api: MockApiClient;
 
@@ -423,6 +440,17 @@ describe('MobileTtsService', () => {
     expect(api.postJson).toHaveBeenCalledTimes(302);
   });
 
+  it('releases vocabulary generation metadata after more completed vocabularies than the cache cap', async () => {
+    const service = createMobileTtsService(api);
+    const generationMap = captureVocabularyGenerationMap(service);
+
+    for (let index = 0; index < 301; index += 1) {
+      await service.preparePronunciation({ ...INPUT, vocabularyId: `metadata-${index}` });
+    }
+
+    expect(generationMap.size).toBe(0);
+  });
+
   it('sweeps expired entries at five-minute activity boundaries before LRU eviction', async () => {
     vi.useFakeTimers();
     vi.setSystemTime(0);
@@ -520,6 +548,38 @@ describe('MobileTtsService', () => {
     });
     await expect(newCaller).resolves.toMatchObject({
       audioUrl: 'https://audio.example.test/new.mp3',
+    });
+  });
+
+  it('releases invalidation metadata only after stale and fresh work finish', async () => {
+    const oldGeneration = deferred<unknown>();
+    const freshGeneration = deferred<unknown>();
+    api.postJson
+      .mockReturnValueOnce(oldGeneration.promise)
+      .mockReturnValueOnce(freshGeneration.promise);
+    const service = createMobileTtsService(api);
+    const generationMap = captureVocabularyGenerationMap(service);
+
+    const staleCaller = service.preparePronunciation(INPUT);
+    await vi.waitFor(() => expect(api.postJson).toHaveBeenCalledTimes(1));
+    service.invalidatePronunciation(INPUT.userId, INPUT.vocabularyId);
+    const freshCaller = service.preparePronunciation(INPUT);
+    await vi.waitFor(() => expect(api.postJson).toHaveBeenCalledTimes(2));
+
+    freshGeneration.resolve(generated('https://audio.example.test/fresh.mp3'));
+    await expect(freshCaller).resolves.toMatchObject({
+      audioUrl: 'https://audio.example.test/fresh.mp3',
+    });
+    expect(generationMap.size).toBe(1);
+
+    oldGeneration.resolve(generated('https://audio.example.test/stale.mp3'));
+    await expect(staleCaller).resolves.toMatchObject({
+      audioUrl: 'https://audio.example.test/stale.mp3',
+    });
+    expect(generationMap.size).toBe(0);
+    await expect(service.preparePronunciation(INPUT)).resolves.toMatchObject({
+      audioUrl: 'https://audio.example.test/fresh.mp3',
+      source: 'memory-cache',
     });
   });
 
