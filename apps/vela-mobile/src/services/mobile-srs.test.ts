@@ -14,14 +14,20 @@ const stats = {
 describe('mobile SRS service', () => {
   it('loads stats through the exact authenticated SRS path and caller signal', async () => {
     const signal = new AbortController().signal;
-    const apiClient: MobileApiClient = { getJson: vi.fn().mockResolvedValue(stats) };
+    const apiClient: MobileApiClient = {
+      getJson: vi.fn().mockResolvedValue(stats),
+      postJson: vi.fn(),
+    };
 
     await expect(createMobileSrsService(apiClient).getStats({ signal })).resolves.toEqual(stats);
     expect(apiClient.getJson).toHaveBeenCalledWith('srs/stats', { signal });
   });
 
   it('maps malformed stats to invalid_response', async () => {
-    const apiClient: MobileApiClient = { getJson: vi.fn().mockResolvedValue({ due_today: -1 }) };
+    const apiClient: MobileApiClient = {
+      getJson: vi.fn().mockResolvedValue({ due_today: -1 }),
+      postJson: vi.fn(),
+    };
 
     await expect(createMobileSrsService(apiClient).getStats()).rejects.toMatchObject({
       code: 'invalid_response',
