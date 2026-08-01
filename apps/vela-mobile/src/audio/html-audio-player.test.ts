@@ -5,6 +5,17 @@ import { HtmlAudioPlayer } from './html-audio-player';
 type AudioEvent = 'ended' | 'error' | 'pause';
 type AudioListener = () => void;
 
+function deferredPlayRejection(): {
+  promise: Promise<void>;
+  reject: (error: unknown) => void;
+} {
+  let rejectPromise!: (error: unknown) => void;
+  const promise = new Promise<void>((_resolve, reject) => {
+    rejectPromise = reject;
+  });
+  return { promise, reject: rejectPromise };
+}
+
 class FakeAudioElement {
   private readonly listeners = new Map<AudioEvent, Set<AudioListener>>();
   private source: string;
@@ -19,6 +30,7 @@ class FakeAudioElement {
   constructor(
     url: string,
     private readonly playError: unknown,
+    private readonly playPromise: Promise<void> | undefined,
   ) {
     this.source = url;
   }
@@ -59,6 +71,9 @@ class FakeAudioElement {
 
   play(): Promise<void> {
     this.playCalls += 1;
+    if (this.playPromise) {
+      return this.playPromise;
+    }
     if (this.playError !== undefined) {
       return Promise.reject(this.playError);
     }
@@ -84,11 +99,13 @@ class FakeAudioElement {
 
 class FakeAudioFactory {
   nextPlayError: unknown;
+  nextPlayPromise: Promise<void> | undefined;
   readonly elements: FakeAudioElement[] = [];
 
   readonly create = (url: string): FakeAudioElement => {
-    const element = new FakeAudioElement(url, this.nextPlayError);
+    const element = new FakeAudioElement(url, this.nextPlayError, this.nextPlayPromise);
     this.nextPlayError = undefined;
+    this.nextPlayPromise = undefined;
     this.elements.push(element);
     return element;
   };
@@ -123,6 +140,30 @@ describe('HtmlAudioPlayer', () => {
     expect(factory.activeElements()).toHaveLength(1);
 
     factory.elementFor('https://audio.example.test/two.mp3').dispatch('ended');
+    await expect(second.finished).resolves.toEqual({ kind: 'ended' });
+  });
+
+  it('ignores a deferred play rejection after restart releases the original playback', async () => {
+    const deferredPlay = deferredPlayRejection();
+    factory.nextPlayPromise = deferredPlay.promise;
+    const first = player.play('https://audio.example.test/deferred-one.mp3');
+    const firstElement = factory.elementFor('https://audio.example.test/deferred-one.mp3');
+
+    const second = player.play('https://audio.example.test/deferred-two.mp3');
+    const secondElement = factory.elementFor('https://audio.example.test/deferred-two.mp3');
+
+    await expect(first.finished).resolves.toEqual({ kind: 'stopped', reason: 'restart' });
+    expect(firstElement.listenerCount()).toBe(0);
+    expect(firstElement.src).toBe('');
+
+    deferredPlay.reject(new Error('late play rejection'));
+    await Promise.resolve();
+
+    await expect(first.finished).resolves.toEqual({ kind: 'stopped', reason: 'restart' });
+    expect(firstElement.listenerCount()).toBe(0);
+    expect(factory.activeElements()).toEqual([secondElement]);
+
+    secondElement.dispatch('ended');
     await expect(second.finished).resolves.toEqual({ kind: 'ended' });
   });
 
