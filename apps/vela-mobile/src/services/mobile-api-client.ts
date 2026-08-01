@@ -134,7 +134,7 @@ async function readBoundedErrorText(response: Response): Promise<string | undefi
       chunks.push(retained);
       retainedBytes += retained.byteLength;
 
-      if (retained.byteLength < value.byteLength) {
+      if (retainedBytes === MOBILE_API_MAX_ERROR_BODY_BYTES) {
         await reader.cancel();
         break;
       }
@@ -208,6 +208,10 @@ export function createMobileApiClient(
     }, selectedTimeoutMs);
 
     try {
+      if (callerAborted) {
+        throw new DOMException('The operation was aborted.', 'AbortError');
+      }
+
       let response: Response;
       try {
         response = await coordinator.requestAuthenticatedApi({

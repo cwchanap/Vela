@@ -125,6 +125,19 @@ describe('mobile API client', () => {
     expect(auth.requestAuthenticatedApi).not.toHaveBeenCalled();
   });
 
+  it('short-circuits a pre-aborted caller without coordinator dispatch', async () => {
+    const caller = new AbortController();
+    caller.abort();
+    const auth = coordinator();
+
+    await expect(
+      createMobileApiClient(auth).getJson('srs/stats', { signal: caller.signal }),
+    ).rejects.toMatchObject({
+      name: 'AbortError',
+    });
+    expect(auth.requestAuthenticatedApi).not.toHaveBeenCalled();
+  });
+
   it.each([
     [400, 'client'],
     [401, 'unauthorized'],
@@ -218,6 +231,33 @@ describe('mobile API client', () => {
       MOBILE_API_MAX_ERROR_BODY_BYTES,
     );
     expect(JSON.stringify(error)).toBe(JSON.stringify({ code: 'server' }));
+  });
+
+  it('cancels an error stream when a non-final chunk exactly fills the retention cap', async () => {
+    const cancel = vi.fn().mockResolvedValue(undefined);
+    const releaseLock = vi.fn();
+    const reader = {
+      read: vi.fn().mockResolvedValue({
+        done: false,
+        value: new Uint8Array(MOBILE_API_MAX_ERROR_BODY_BYTES),
+      }),
+      cancel,
+      releaseLock,
+    };
+    const boundedResponse = {
+      status: 500,
+      ok: false,
+      body: { getReader: vi.fn().mockReturnValue(reader) },
+      headers: new Headers({ 'Content-Type': 'text/plain' }),
+    } as unknown as Response;
+    const client = createMobileApiClient(
+      coordinator({ requestAuthenticatedApi: vi.fn().mockResolvedValue(boundedResponse) }),
+    );
+
+    const error = await captureError(client.getJson('unavailable'));
+    expect((error.details.serverBody as string).length).toBe(MOBILE_API_MAX_ERROR_BODY_BYTES);
+    expect(cancel).toHaveBeenCalledOnce();
+    expect(releaseLock).toHaveBeenCalledOnce();
   });
 
   it('preserves absence of cause when none is provided', () => {
