@@ -88,14 +88,18 @@ describe('ttsService', () => {
     vi.restoreAllMocks();
   });
 
+  function mockSuccessfulTtsResponse(responseBody: unknown): void {
+    mockFetch.mockImplementation((url: string) =>
+      Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve(url === '/api/tts/settings' ? mockTTSSettings : responseBody),
+      }),
+    );
+  }
+
   describe('getAuthHeader', () => {
     it('should return auth header with JWT token', async () => {
-      mockFetch.mockResolvedValue({
-        ok: true,
-        json: vi
-          .fn()
-          .mockResolvedValue({ audioUrl: 'https://example.com/audio.mp3', cached: false }),
-      });
+      mockSuccessfulTtsResponse({ audioUrl: 'https://example.com/audio.mp3', cached: false });
 
       await generatePronunciation('vocab-1', '猫', 'user-123');
 
@@ -142,16 +146,14 @@ describe('ttsService', () => {
   });
 
   describe('generatePronunciation', () => {
+    const HTTPS_AUDIO = 'https://audio.example.test/mizu.mp3';
     const mockTTSResponse: TTSResponse = {
       audioUrl: 'https://example.com/audio/neko.mp3',
       cached: false,
     };
 
     it('should generate pronunciation successfully', async () => {
-      mockFetch.mockResolvedValue({
-        ok: true,
-        json: vi.fn().mockResolvedValue(mockTTSResponse),
-      });
+      mockSuccessfulTtsResponse(mockTTSResponse);
 
       const result = await generatePronunciation('vocab-1', '猫', 'user-123');
 
@@ -168,6 +170,36 @@ describe('ttsService', () => {
         }),
       });
       expect(result).toEqual(mockTTSResponse);
+    });
+
+    it('keeps a valid generated response unchanged', async () => {
+      mockFetch.mockImplementation((url: string) => {
+        if (url === '/api/tts/settings') {
+          return Promise.resolve({ ok: true, json: () => Promise.resolve(mockTTSSettings) });
+        }
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ audioUrl: HTTPS_AUDIO, cached: false }),
+        });
+      });
+
+      await expect(generatePronunciation('水:ミズ', '水', 'user-1')).resolves.toEqual({
+        audioUrl: HTTPS_AUDIO,
+        cached: false,
+      });
+    });
+
+    it('rejects a malformed successful generate response', async () => {
+      mockFetch.mockImplementation((url: string) => {
+        if (url === '/api/tts/settings') {
+          return Promise.resolve({ ok: true, json: () => Promise.resolve(mockTTSSettings) });
+        }
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ cached: false }) });
+      });
+
+      await expect(generatePronunciation('水:ミズ', '水', 'user-1')).rejects.toThrow(
+        'invalid_tts_generate_response:audioUrl',
+      );
     });
 
     it('should return cached audio URL when available', async () => {
@@ -254,10 +286,7 @@ describe('ttsService', () => {
     });
 
     it('should accept deprecated userId parameter without using it', async () => {
-      mockFetch.mockResolvedValue({
-        ok: true,
-        json: vi.fn().mockResolvedValue(mockTTSResponse),
-      });
+      mockSuccessfulTtsResponse(mockTTSResponse);
 
       const result = await generatePronunciation('vocab-1', '猫', 'user-123');
 
@@ -329,10 +358,7 @@ describe('ttsService', () => {
     });
 
     it('should use POST method', async () => {
-      mockFetch.mockResolvedValue({
-        ok: true,
-        json: vi.fn().mockResolvedValue(mockTTSResponse),
-      });
+      mockSuccessfulTtsResponse(mockTTSResponse);
 
       await generatePronunciation('vocab-1', '猫', 'user-123');
 
@@ -345,10 +371,7 @@ describe('ttsService', () => {
     });
 
     it('should handle Japanese characters correctly', async () => {
-      mockFetch.mockResolvedValue({
-        ok: true,
-        json: vi.fn().mockResolvedValue(mockTTSResponse),
-      });
+      mockSuccessfulTtsResponse(mockTTSResponse);
 
       await generatePronunciation('vocab-3', 'こんにちは', 'user-123');
 
@@ -384,10 +407,7 @@ describe('ttsService', () => {
 
   describe('getAudioUrl', () => {
     it('should fetch audio URL successfully', async () => {
-      mockFetch.mockResolvedValue({
-        ok: true,
-        json: vi.fn().mockResolvedValue({ audioUrl: 'https://example.com/audio/word.mp3' }),
-      });
+      mockSuccessfulTtsResponse({ audioUrl: 'https://example.com/audio/word.mp3' });
 
       const result = await getAudioUrl('vocab-1', 'user-123');
 
@@ -463,10 +483,7 @@ describe('ttsService', () => {
     });
 
     it('should URL encode vocabulary IDs with special characters', async () => {
-      mockFetch.mockResolvedValue({
-        ok: true,
-        json: vi.fn().mockResolvedValue({ audioUrl: 'https://example.com/audio.mp3' }),
-      });
+      mockSuccessfulTtsResponse({ audioUrl: 'https://example.com/audio.mp3' });
 
       await getAudioUrl('vocab/1', 'user-123');
 
@@ -474,10 +491,7 @@ describe('ttsService', () => {
     });
 
     it('should use GET method (default)', async () => {
-      mockFetch.mockResolvedValue({
-        ok: true,
-        json: vi.fn().mockResolvedValue({ audioUrl: 'https://example.com/audio.mp3' }),
-      });
+      mockSuccessfulTtsResponse({ audioUrl: 'https://example.com/audio.mp3' });
 
       await getAudioUrl('vocab-1', 'user-123');
 
@@ -1031,10 +1045,7 @@ describe('ttsService', () => {
         cached: false,
       };
 
-      mockFetch.mockResolvedValue({
-        ok: true,
-        json: vi.fn().mockResolvedValue(mockTTSResponse),
-      });
+      mockSuccessfulTtsResponse(mockTTSResponse);
 
       const CustomMockAudio = class extends MockAudio {
         override play() {
@@ -1055,12 +1066,9 @@ describe('ttsService', () => {
         created_at: '2024-01-01T00:00:00Z',
       };
 
-      mockFetch.mockResolvedValue({
-        ok: true,
-        json: vi.fn().mockResolvedValue({
-          audioUrl: 'https://example.com/audio/hello.mp3',
-          cached: false,
-        }),
+      mockSuccessfulTtsResponse({
+        audioUrl: 'https://example.com/audio/hello.mp3',
+        cached: false,
       });
 
       const CustomMockAudio = class extends MockAudio {
