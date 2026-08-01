@@ -31,9 +31,9 @@ describe('routes', () => {
     expect(await loadDefault(root?.component)).toBeDefined();
   });
 
-  it('has five core routes plus two development routes under the root layout', () => {
+  it('has five core routes plus three development routes under the root layout', () => {
     const root = routes.find((r) => r.path === '/');
-    expect(root?.children).toHaveLength(7);
+    expect(root?.children).toHaveLength(8);
   });
 
   it('constructs production routes with only the five core children', () => {
@@ -50,6 +50,7 @@ describe('routes', () => {
     expect(paths).toContain('more');
     expect(paths).toContain(IOS_DIAGNOSTIC_ROOT_PATH.slice(1));
     expect(paths).toContain(IOS_DIAGNOSTIC_DETAIL_PATH.slice(1));
+    expect(paths).toContain('diagnostics/tts-pronunciation');
     // Await every child component so a deleted page fails here, not at runtime.
     await Promise.all(
       (root?.children ?? []).map(async (c) => {
