@@ -523,6 +523,49 @@ describe('MobileTtsService', () => {
     });
   });
 
+  it.each(['invalidatePronunciation', 'clearUser', 'clearAll'] as const)(
+    'does not publish pre-boundary settings work into the current join index after %s',
+    async (boundary) => {
+      const oldSettings = deferred<unknown>();
+      const freshSettings = deferred<unknown>();
+      const oldGeneration = deferred<unknown>();
+      const freshGeneration = deferred<unknown>();
+      api.getJson
+        .mockReturnValueOnce(oldSettings.promise)
+        .mockReturnValueOnce(freshSettings.promise);
+      api.postJson
+        .mockReturnValueOnce(oldGeneration.promise)
+        .mockReturnValueOnce(freshGeneration.promise);
+      const service = createMobileTtsService(api);
+
+      const oldCaller = service.preparePronunciation(INPUT);
+      await vi.waitFor(() => expect(api.getJson).toHaveBeenCalledTimes(1));
+      if (boundary === 'invalidatePronunciation') {
+        service.invalidatePronunciation(INPUT.userId, INPUT.vocabularyId);
+      } else if (boundary === 'clearUser') {
+        service.clearUser(INPUT.userId);
+      } else {
+        service.clearAll();
+      }
+
+      const freshCaller = service.preparePronunciation(INPUT);
+      await vi.waitFor(() => expect(api.getJson).toHaveBeenCalledTimes(2));
+      oldSettings.resolve(CONFIGURED_SETTINGS);
+      await vi.waitFor(() => expect(api.postJson).toHaveBeenCalledTimes(1));
+      freshSettings.resolve(CONFIGURED_SETTINGS);
+      await vi.waitFor(() => expect(api.postJson).toHaveBeenCalledTimes(2));
+
+      oldGeneration.resolve(generated('https://audio.example.test/pre-boundary.mp3'));
+      freshGeneration.resolve(generated('https://audio.example.test/post-boundary.mp3'));
+      await expect(oldCaller).resolves.toMatchObject({
+        audioUrl: 'https://audio.example.test/pre-boundary.mp3',
+      });
+      await expect(freshCaller).resolves.toMatchObject({
+        audioUrl: 'https://audio.example.test/post-boundary.mp3',
+      });
+    },
+  );
+
   it('does not cache a stale completion after clearUser', async () => {
     const generation = deferred<unknown>();
     api.postJson.mockReturnValueOnce(generation.promise);
