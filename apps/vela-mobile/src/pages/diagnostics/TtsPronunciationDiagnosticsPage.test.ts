@@ -31,7 +31,7 @@ const PageHost = defineComponent({
 });
 
 const SIGNED_URL =
-  'https://audio.example.test/pronunciations/mizu.mp3?X-Amz-Credential=provider-secret&X-Amz-Signature=signed-secret';
+  'https://audio.example.test/tts/sentinel-user-id/sentinel-vocabulary-id/01234567abcdef89?X-Amz-Credential=provider-secret&X-Amz-Signature=signed-secret';
 
 const PREPARED: PreparedPronunciation = {
   audioUrl: SIGNED_URL,
@@ -333,7 +333,7 @@ describe('TtsPronunciationDiagnosticsPage', () => {
     );
   });
 
-  it('renders safe counters, source, timings, and only a redacted audio host and path', () => {
+  it('renders safe counters, source, timings, and only a redacted audio host and hash suffix', () => {
     const controller = controllerFixture(
       { kind: 'ready', pronunciation: PREPARED, notice: 'audio_refreshed' },
       {
@@ -355,7 +355,7 @@ describe('TtsPronunciationDiagnosticsPage', () => {
     expect(wrapper.get('[data-testid="tts-settings-timing"]').text()).toContain('12 ms');
     expect(wrapper.get('[data-testid="tts-generation-timing"]').text()).toContain('345 ms');
     expect(wrapper.get('[data-testid="tts-audio-location"]').text()).toContain(
-      'audio.example.test/pronunciations/mizu.mp3',
+      'audio.example.test/…/abcdef89',
     );
     expect(wrapper.get('[data-testid="tts-tap-timing"]').text()).toContain('48 ms');
     expect(wrapper.get('[data-testid="tts-last-error"]').text()).toContain(
@@ -372,6 +372,8 @@ describe('TtsPronunciationDiagnosticsPage', () => {
     expect(wrapper.text()).not.toContain('X-Amz-Signature');
     expect(wrapper.text()).not.toContain('provider-secret');
     expect(wrapper.text()).not.toContain('signed-secret');
+    expect(wrapper.text()).not.toContain('sentinel-user-id');
+    expect(wrapper.text()).not.toContain('sentinel-vocabulary-id');
   });
 
   it('never renders raw failure details, credentials, tokens, payloads, or signed query strings', () => {
@@ -387,7 +389,7 @@ describe('TtsPronunciationDiagnosticsPage', () => {
     const controller = controllerFixture(unsafeState);
     const wrapper = mountPageWithController(controller);
 
-    expect(wrapper.text()).toContain('audio.example.test/pronunciations/mizu.mp3');
+    expect(wrapper.text()).toContain('audio.example.test/…/abcdef89');
     for (const forbidden of [
       'provider credential rejected',
       'provider-key-secret',
@@ -397,10 +399,23 @@ describe('TtsPronunciationDiagnosticsPage', () => {
       'X-Amz-Signature',
       'provider-secret',
       'signed-secret',
+      'sentinel-user-id',
+      'sentinel-vocabulary-id',
     ]) {
       expect(wrapper.text()).not.toContain(forbidden);
       expect(wrapper.html()).not.toContain(forbidden);
     }
+  });
+
+  it('directs not-configured users to Vela web settings', () => {
+    const controller = controllerFixture({
+      kind: 'error',
+      error: 'not_configured',
+      pronunciation: null,
+    });
+    const wrapper = mountPageWithController(controller);
+
+    expect(statusRegion(wrapper).text()).toContain('Configure TTS in Vela web settings');
   });
 
   it('wires replay and development actions to the controller with mobile touch targets', async () => {

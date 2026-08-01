@@ -597,4 +597,38 @@ describe('MobileTtsService', () => {
     await service.preparePronunciation(INPUT);
     expect(api.postJson).toHaveBeenCalledTimes(2);
   });
+
+  it('keeps a user-generation guard after purging that user vocabulary generations', async () => {
+    const generation = deferred<unknown>();
+    api.postJson.mockReturnValueOnce(generation.promise);
+    const service = createMobileTtsService(api);
+
+    service.invalidatePronunciation(INPUT.userId, 'populated-generation-key');
+    const first = service.preparePronunciation(INPUT);
+    await vi.waitFor(() => expect(api.postJson).toHaveBeenCalledTimes(1));
+    service.clearUser(INPUT.userId);
+    generation.resolve(generated());
+    await first;
+
+    api.postJson.mockResolvedValueOnce(generated());
+    await service.preparePronunciation(INPUT);
+    expect(api.postJson).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps the global-generation guard after clearing generation metadata', async () => {
+    const generation = deferred<unknown>();
+    api.postJson.mockReturnValueOnce(generation.promise);
+    const service = createMobileTtsService(api);
+
+    service.invalidatePronunciation(INPUT.userId, 'populated-generation-key');
+    const first = service.preparePronunciation(INPUT);
+    await vi.waitFor(() => expect(api.postJson).toHaveBeenCalledTimes(1));
+    service.clearAll();
+    generation.resolve(generated());
+    await first;
+
+    api.postJson.mockResolvedValueOnce(generated());
+    await service.preparePronunciation(INPUT);
+    expect(api.postJson).toHaveBeenCalledTimes(2);
+  });
 });
