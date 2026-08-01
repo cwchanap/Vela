@@ -75,6 +75,22 @@ function captureVocabularyGenerationMap(
   }
 }
 
+function captureUserGenerationMap(
+  service: ReturnType<typeof createMobileTtsService>,
+): Map<string, number> {
+  const setSpy = vi.spyOn(Map.prototype, 'set');
+  try {
+    service.clearUser('metadata-probe-user');
+    const callIndex = setSpy.mock.calls.findIndex(([key]) => key === 'metadata-probe-user');
+    const generationMap = setSpy.mock.contexts[callIndex];
+    expect(generationMap).toBeInstanceOf(Map);
+    service.clearAll();
+    return generationMap as Map<string, number>;
+  } finally {
+    setSpy.mockRestore();
+  }
+}
+
 describe('MobileTtsService', () => {
   let api: MockApiClient;
 
@@ -451,6 +467,17 @@ describe('MobileTtsService', () => {
     expect(generationMap.size).toBe(0);
   });
 
+  it('releases user generation metadata after more completed users than the cache cap', async () => {
+    const service = createMobileTtsService(api);
+    const generationMap = captureUserGenerationMap(service);
+
+    for (let index = 0; index < 301; index += 1) {
+      await service.preparePronunciation({ ...INPUT, userId: `metadata-user-${index}` });
+    }
+
+    expect(generationMap.size).toBe(0);
+  });
+
   it('sweeps expired entries at five-minute activity boundaries before LRU eviction', async () => {
     vi.useFakeTimers();
     vi.setSystemTime(0);
@@ -642,6 +669,26 @@ describe('MobileTtsService', () => {
     expect(api.postJson).toHaveBeenCalledTimes(2);
   });
 
+  it('reclaims a user generation only after clearUser stale work settles', async () => {
+    const generation = deferred<unknown>();
+    api.postJson.mockReturnValueOnce(generation.promise);
+    const service = createMobileTtsService(api);
+    const generationMap = captureUserGenerationMap(service);
+
+    const staleCaller = service.preparePronunciation(INPUT);
+    await vi.waitFor(() => expect(api.postJson).toHaveBeenCalledTimes(1));
+    service.clearUser(INPUT.userId);
+    expect(generationMap.get(INPUT.userId)).toBe(1);
+
+    generation.resolve(generated('https://audio.example.test/stale-user.mp3'));
+    await staleCaller;
+    expect(generationMap.size).toBe(0);
+
+    api.postJson.mockResolvedValueOnce(generated());
+    await service.preparePronunciation(INPUT);
+    expect(api.postJson).toHaveBeenCalledTimes(2);
+  });
+
   it('does not cache a stale completion after clearAll', async () => {
     const generation = deferred<unknown>();
     api.postJson.mockReturnValueOnce(generation.promise);
@@ -652,6 +699,26 @@ describe('MobileTtsService', () => {
     service.clearAll();
     generation.resolve(generated());
     await first;
+
+    api.postJson.mockResolvedValueOnce(generated());
+    await service.preparePronunciation(INPUT);
+    expect(api.postJson).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not recreate user generation metadata when clearAll stale work settles', async () => {
+    const generation = deferred<unknown>();
+    api.postJson.mockReturnValueOnce(generation.promise);
+    const service = createMobileTtsService(api);
+    const generationMap = captureUserGenerationMap(service);
+
+    const staleCaller = service.preparePronunciation(INPUT);
+    await vi.waitFor(() => expect(api.postJson).toHaveBeenCalledTimes(1));
+    service.clearAll();
+    expect(generationMap.size).toBe(0);
+
+    generation.resolve(generated('https://audio.example.test/stale-global.mp3'));
+    await staleCaller;
+    expect(generationMap.size).toBe(0);
 
     api.postJson.mockResolvedValueOnce(generated());
     await service.preparePronunciation(INPUT);

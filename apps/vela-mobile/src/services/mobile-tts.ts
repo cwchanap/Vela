@@ -259,14 +259,34 @@ export function createMobileTtsService(apiClient: MobileApiClient): MobileTtsSer
   const pending = new Map<string, PendingEntry>();
   const userGenerations = new Map<string, number>();
   const vocabularyGenerations = new Map<string, number>();
+  const activeUserPreparations = new Map<string, number>();
   const activeVocabularyPreparations = new Map<string, number>();
   let clearGeneration = 0;
   let lastExpiredSweepAt = Date.now();
 
   function userGeneration(userId: string): number {
-    const generation = userGenerations.get(userId) ?? 0;
-    if (!userGenerations.has(userId)) userGenerations.set(userId, generation);
-    return generation;
+    return userGenerations.get(userId) ?? 0;
+  }
+
+  function beginUserPreparation(userId: string) {
+    activeUserPreparations.set(userId, (activeUserPreparations.get(userId) ?? 0) + 1);
+    let released = false;
+
+    return {
+      generation: userGenerations.get(userId) ?? 0,
+      release() {
+        if (released) return;
+        released = true;
+        const remaining = (activeUserPreparations.get(userId) ?? 1) - 1;
+        if (remaining > 0) {
+          activeUserPreparations.set(userId, remaining);
+          return;
+        }
+
+        activeUserPreparations.delete(userId);
+        userGenerations.delete(userId);
+      },
+    };
   }
 
   function vocabularyGeneration(userId: string, vocabularyId: string): number {
@@ -464,16 +484,20 @@ export function createMobileTtsService(apiClient: MobileApiClient): MobileTtsSer
         return Promise.reject(error);
       }
 
+      const userPreparation = beginUserPreparation(normalized.userId);
       const vocabularyPreparation = beginVocabularyPreparation(
         normalized.userId,
         normalized.vocabularyId,
       );
       const work = prepare(
         normalized,
-        userGeneration(normalized.userId),
+        userPreparation.generation,
         vocabularyPreparation.generation,
         clearGeneration,
-      ).finally(vocabularyPreparation.release);
+      ).finally(() => {
+        vocabularyPreparation.release();
+        userPreparation.release();
+      });
       return detachOnAbort(work, options.signal);
     },
 
@@ -511,6 +535,9 @@ export function createMobileTtsService(apiClient: MobileApiClient): MobileTtsSer
       }
       for (const [key, entry] of pending) {
         if (entry.userId === normalizedUserId) pending.delete(key);
+      }
+      if (!activeUserPreparations.has(normalizedUserId)) {
+        userGenerations.delete(normalizedUserId);
       }
     },
 
