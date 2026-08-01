@@ -8,13 +8,19 @@ import {
   findProductionDiagnosticTokens,
 } from './verify-production-diagnostics.mjs';
 import { IOS_INTERACTION_PRODUCTION_FORBIDDEN_TOKENS } from '../src/diagnostics/ios-interaction-contract.ts';
+import {
+  TTS_PRONUNCIATION_DIAGNOSTIC_LABEL,
+  TTS_PRONUNCIATION_DIAGNOSTIC_PATH,
+  TTS_PRONUNCIATION_DIAGNOSTICS_MARKER,
+  TTS_PRONUNCIATION_ENTRY_TEST_ID,
+} from '../src/diagnostics/tts-pronunciation-contract.ts';
 
 const forbiddenTokens = [...IOS_INTERACTION_PRODUCTION_FORBIDDEN_TOKENS];
 const ttsForbiddenTokens = [
-  '/diagnostics/tts-pronunciation',
-  'Pronunciation diagnostics',
-  'tts-pronunciation-diagnostics',
-  'tts-pronunciation-entry',
+  TTS_PRONUNCIATION_DIAGNOSTIC_PATH,
+  TTS_PRONUNCIATION_DIAGNOSTIC_LABEL,
+  TTS_PRONUNCIATION_DIAGNOSTICS_MARKER,
+  TTS_PRONUNCIATION_ENTRY_TEST_ID,
 ];
 
 describe('verify-production-diagnostics', () => {
@@ -43,10 +49,10 @@ describe('verify-production-diagnostics', () => {
     await writeFile(artifact, `const leaked=${JSON.stringify(ttsForbiddenTokens.join(' '))}`);
 
     expect(await findProductionDiagnosticTokens(root)).toEqual([
-      { path: artifact, token: '/diagnostics/tts-pronunciation' },
-      { path: artifact, token: 'Pronunciation diagnostics' },
-      { path: artifact, token: 'tts-pronunciation-diagnostics' },
-      { path: artifact, token: 'tts-pronunciation-entry' },
+      { path: artifact, token: TTS_PRONUNCIATION_DIAGNOSTIC_PATH },
+      { path: artifact, token: TTS_PRONUNCIATION_DIAGNOSTIC_LABEL },
+      { path: artifact, token: TTS_PRONUNCIATION_DIAGNOSTICS_MARKER },
+      { path: artifact, token: TTS_PRONUNCIATION_ENTRY_TEST_ID },
     ]);
   });
 
