@@ -2,7 +2,7 @@ import { App } from '@capacitor/app';
 import type { PluginListenerHandle } from '@capacitor/core';
 import { focusManager } from '@tanstack/vue-query';
 import { defineBoot } from '#q-app/wrappers';
-import { recordAppResume } from 'src/services/mobile-lifecycle';
+import { recordAppResume, recordAppStateChange } from 'src/services/mobile-lifecycle';
 
 export type ResumeAppAdapter = {
   addListener(eventName: 'resume', listener: () => void): Promise<PluginListenerHandle>;
@@ -25,6 +25,7 @@ export async function registerCapacitorLifecycle(adapter: ResumeAppAdapter = App
       handles.push(await adapter.addListener('resume', () => recordAppResume()));
       handles.push(
         await adapter.addListener('appStateChange', (event) => {
+          recordAppStateChange(event.isActive);
           focusManager.setFocused(event.isActive);
         }),
       );
