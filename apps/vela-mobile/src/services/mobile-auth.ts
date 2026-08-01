@@ -138,6 +138,7 @@ export const MOBILE_AUTH_KEY: InjectionKey<MobileAuthCoordinator> = Symbol('mobi
  * back through their existing failure paths so the user can retry.
  */
 export const MOBILE_AUTH_NETWORK_TIMEOUT_MS = 15_000;
+export const MOBILE_AUTH_MAX_FEATURE_NETWORK_TIMEOUT_MS = 50_000;
 export const MOBILE_AUTH_REFRESH_LEAD_MS = 60_000;
 export const MOBILE_AUTH_SOFT_RETRY_DELAY_MS = 5_000;
 
@@ -290,6 +291,19 @@ function normalizeAuthenticatedRequestHeaders(headersInit?: HeadersInit): Header
   return headers;
 }
 
+function featureTransportTimeout(request: MobileAuthenticatedApiRequest): number {
+  const value = request.transportTimeoutMs;
+  if (value === undefined) return MOBILE_AUTH_NETWORK_TIMEOUT_MS;
+  if (
+    !Number.isInteger(value) ||
+    value <= 0 ||
+    value > MOBILE_AUTH_MAX_FEATURE_NETWORK_TIMEOUT_MS
+  ) {
+    throw new MobileAuthenticatedApiRequestError('invalid_request_timeout');
+  }
+  return value;
+}
+
 export function createMobileAuthCoordinator(
   dependencies: MobileAuthCoordinatorDependencies,
 ): MobileAuthCoordinator {
@@ -357,6 +371,7 @@ export function createMobileAuthCoordinator(
     snapshot: AuthenticatedFeatureSnapshot,
     target: URL,
     headers: Headers,
+    transportTimeoutMs: number,
   ): Promise<Response> {
     headers.set('Accept', headers.get('Accept') ?? 'application/json');
     headers.set('Authorization', `Bearer ${snapshot.idToken}`);
@@ -372,7 +387,7 @@ export function createMobileAuthCoordinator(
     const timeout = setTimeout(() => {
       timeoutExpired = true;
       controller.abort();
-    }, MOBILE_AUTH_NETWORK_TIMEOUT_MS);
+    }, transportTimeoutMs);
 
     try {
       return await dependencies.fetch(target, {
@@ -586,6 +601,7 @@ export function createMobileAuthCoordinator(
       request.path,
     );
     const baseHeaders = normalizeAuthenticatedRequestHeaders(request.init?.headers);
+    const transportTimeoutMs = featureTransportTimeout(request);
 
     const owner = active;
     if (unavailable() || !owner || !activeSessionIsUsable() || !state.sessionUsable) {
@@ -607,6 +623,7 @@ export function createMobileAuthCoordinator(
       snapshot,
       target,
       new Headers(baseHeaders),
+      transportTimeoutMs,
     );
     if (response.status !== 401) {
       return response;
