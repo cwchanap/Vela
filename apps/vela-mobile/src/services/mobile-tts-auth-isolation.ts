@@ -57,7 +57,8 @@ export function installMobileTtsAuthIsolation(options: {
           if (unusableRecovery && next.featureStatus.kind === 'recovering') {
             options.ttsService.clearUser(next.featureStatus.userId);
           }
-        });
+        })
+        .catch(() => undefined);
     },
   );
 }

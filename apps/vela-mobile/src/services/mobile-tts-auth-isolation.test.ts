@@ -147,4 +147,27 @@ describe('mobile TTS auth isolation', () => {
     expect(clearUser).toHaveBeenNthCalledWith(2, 'user-b');
     expect(clearUser).not.toHaveBeenCalledWith('user-c');
   });
+
+  it('consumes a terminal clear failure without surfacing an unhandled rejection', async () => {
+    const state = reactive(authenticatedState('user-a'));
+    const clearUser = vi.fn(() => {
+      throw new Error('cache unavailable');
+    });
+    const tts = { clearUser } as unknown as MobileTtsService;
+    const unhandledRejections: unknown[] = [];
+    const captureUnhandledRejection = (reason: unknown) => unhandledRejections.push(reason);
+    process.on('unhandledRejection', captureUnhandledRejection);
+    stops.push(installMobileTtsAuthIsolation({ state, ttsService: tts }));
+
+    try {
+      Object.assign(state, authenticatedState('user-b'));
+      await settle();
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+
+      expect(clearUser).toHaveBeenCalledWith('user-a');
+      expect(unhandledRejections).toEqual([]);
+    } finally {
+      process.off('unhandledRejection', captureUnhandledRejection);
+    }
+  });
 });
