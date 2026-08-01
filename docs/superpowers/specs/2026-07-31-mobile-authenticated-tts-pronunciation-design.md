@@ -405,7 +405,7 @@ The coordinator:
 - applies the timeout independently to each physical fetch attempt; and
 - remains subject to the API client's outer abort signal, so auth recovery and retries cannot exceed the overall deadline.
 
-`MobileApiClient` passes the effective request timeout as `transportTimeoutMs`. If an auth recovery consumes part of the overall budget, the outer signal still aborts any later attempt at the original deadline.
+`MobileApiClient` passes the effective request timeout as `transportTimeoutMs`. If auth recovery consumes part of the overall budget, the outer signal still aborts any later attempt at the original deadline.
 
 `postJson()` sets `Content-Type: application/json` and serializes the supplied body. Authorization remains exclusively owned by `MobileAuthCoordinator`; callers cannot supply or override it.
 
