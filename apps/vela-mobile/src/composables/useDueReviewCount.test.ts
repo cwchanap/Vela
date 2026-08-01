@@ -341,8 +341,9 @@ describe('useDueReviewCount', () => {
 
 describe('retryDueCountQuery', () => {
   it.each([
+    [0, new MobileApiError('client', { status: 400 }), false],
     [0, new MobileApiError('network'), true],
-    [1, new MobileApiError('server'), true],
+    [0, new MobileApiError('server', { status: 500 }), true],
     [2, new MobileApiError('network'), false],
     [0, new MobileApiError('unauthorized'), false],
     [0, new Error('network'), false],

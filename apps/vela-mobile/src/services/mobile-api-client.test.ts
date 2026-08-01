@@ -4,7 +4,14 @@ import {
   type MobileAuthCoordinator,
   type MobileAuthState,
 } from '../auth/mobile-auth-contract';
-import { createMobileApiClient, MOBILE_API_DEFAULT_TIMEOUT_MS } from './mobile-api-client';
+import {
+  createMobileApiClient,
+  MobileApiError,
+  MOBILE_API_DEFAULT_TIMEOUT_MS,
+  MOBILE_API_MAX_ERROR_BODY_BYTES,
+} from './mobile-api-client';
+
+/* global BodyInit, HeadersInit */
 
 const usableState: MobileAuthState = {
   phase: 'authenticated',
@@ -16,7 +23,15 @@ const usableState: MobileAuthState = {
   user: { userId: 'user-1', email: null },
 };
 
-type AuthenticatedRequest = { init?: { signal?: AbortSignal | null } };
+type AuthenticatedRequest = {
+  transportTimeoutMs?: number;
+  init?: {
+    body?: BodyInit | null;
+    headers?: HeadersInit;
+    method?: string;
+    signal?: AbortSignal | null;
+  };
+};
 
 function response(status: number, value: unknown): Response {
   return {
@@ -45,6 +60,16 @@ function expectCallerCleanup(caller: AbortController, remove: ReturnType<typeof 
   expect(remove).toHaveBeenCalledWith('abort', expect.any(Function));
 }
 
+async function captureError(promise: Promise<unknown>): Promise<MobileApiError> {
+  try {
+    await promise;
+  } catch (error) {
+    expect(error).toBeInstanceOf(MobileApiError);
+    return error as MobileApiError;
+  }
+  throw new Error('expected_mobile_api_error');
+}
+
 describe('mobile API client', () => {
   it('returns a successful JSON response', async () => {
     const auth = coordinator();
@@ -53,11 +78,55 @@ describe('mobile API client', () => {
     await expect(client.getJson('srs/stats')).resolves.toEqual({ due_today: 4 });
     expect(auth.requestAuthenticatedApi).toHaveBeenCalledWith({
       path: 'srs/stats',
+      transportTimeoutMs: MOBILE_API_DEFAULT_TIMEOUT_MS,
       init: { signal: expect.any(AbortSignal) },
     });
   });
 
+  it('serializes JSON before coordinator dispatch', async () => {
+    const auth = coordinator({
+      requestAuthenticatedApi: vi
+        .fn()
+        .mockResolvedValue(
+          new Response(
+            JSON.stringify({ audioUrl: 'https://audio.example.test/mizu.mp3', cached: false }),
+          ),
+        ),
+    });
+    const client = createMobileApiClient(auth);
+
+    await client.postJson(
+      'tts/generate',
+      { vocabularyId: '水:ミズ', text: '水' },
+      { timeoutMs: 45_000 },
+    );
+
+    const request = vi.mocked(auth.requestAuthenticatedApi).mock.calls[0]?.[0];
+    expect(request).toMatchObject({
+      path: 'tts/generate',
+      transportTimeoutMs: 45_000,
+      init: {
+        method: 'POST',
+        body: JSON.stringify({ vocabularyId: '水:ミズ', text: '水' }),
+      },
+    });
+    expect(new Headers(request?.init?.headers).get('Content-Type')).toBe('application/json');
+  });
+
+  it('rejects circular JSON before coordinator dispatch', async () => {
+    const body: Record<string, unknown> = {};
+    body.self = body;
+    const auth = coordinator();
+    const client = createMobileApiClient(auth);
+
+    await expect(client.postJson('tts/generate', body)).rejects.toMatchObject({
+      code: 'invalid_request',
+    });
+    expect(auth.requestAuthenticatedApi).not.toHaveBeenCalled();
+  });
+
   it.each([
+    [400, 'client'],
     [401, 'unauthorized'],
     [403, 'forbidden'],
     [404, 'server'],
@@ -74,6 +143,7 @@ describe('mobile API client', () => {
   it.each([
     ['invalid_request_path', 'invalid_request'],
     ['invalid_request_headers', 'invalid_request'],
+    ['invalid_request_timeout', 'invalid_request'],
     ['session_unavailable', 'session_unavailable'],
     ['session_changed', 'session_changed'],
     ['session_recovery_pending', 'session_recovery_pending'],
@@ -88,6 +158,70 @@ describe('mobile API client', () => {
     );
 
     await expect(client.getJson('srs/stats')).rejects.toMatchObject({ code });
+  });
+
+  it('classifies 400 as a non-enumerable client error', async () => {
+    const client = createMobileApiClient(
+      coordinator({
+        requestAuthenticatedApi: vi.fn().mockResolvedValue(
+          new Response(JSON.stringify({ success: false, error: { issues: [] } }), {
+            status: 400,
+            headers: { 'Content-Type': 'application/json' },
+          }),
+        ),
+      }),
+    );
+
+    const error = await captureError(client.getJson('invalid'));
+    expect(error).toMatchObject({ code: 'client' });
+    expect(error.details.status).toBe(400);
+    expect(Object.keys(error)).not.toContain('details');
+  });
+
+  it('retains no more than 16 KiB of JSON error body details', async () => {
+    const client = createMobileApiClient(
+      coordinator({
+        requestAuthenticatedApi: vi.fn().mockResolvedValue(
+          new Response(JSON.stringify({ issue: 'x'.repeat(MOBILE_API_MAX_ERROR_BODY_BYTES * 2) }), {
+            status: 400,
+            headers: { 'Content-Type': 'application/json' },
+          }),
+        ),
+      }),
+    );
+
+    const error = await captureError(client.getJson('invalid'));
+    expect(error.details.status).toBe(400);
+    expect(typeof error.details.serverBody).toBe('string');
+    expect((error.details.serverBody as string).length).toBeLessThanOrEqual(
+      MOBILE_API_MAX_ERROR_BODY_BYTES,
+    );
+    expect(JSON.stringify(error)).toBe(JSON.stringify({ code: 'client' }));
+  });
+
+  it('retains no more than 16 KiB of text error body details', async () => {
+    const client = createMobileApiClient(
+      coordinator({
+        requestAuthenticatedApi: vi.fn().mockResolvedValue(
+          new Response('x'.repeat(MOBILE_API_MAX_ERROR_BODY_BYTES * 2), {
+            status: 500,
+            headers: { 'Content-Type': 'text/plain' },
+          }),
+        ),
+      }),
+    );
+
+    const error = await captureError(client.getJson('unavailable'));
+    expect(error.details.status).toBe(500);
+    expect(typeof error.details.serverBody).toBe('string');
+    expect((error.details.serverBody as string).length).toBeLessThanOrEqual(
+      MOBILE_API_MAX_ERROR_BODY_BYTES,
+    );
+    expect(JSON.stringify(error)).toBe(JSON.stringify({ code: 'server' }));
+  });
+
+  it('preserves absence of cause when none is provided', () => {
+    expect('cause' in new MobileApiError('network')).toBe(false);
   });
 
   it('maps a raw transport TypeError to network', async () => {
