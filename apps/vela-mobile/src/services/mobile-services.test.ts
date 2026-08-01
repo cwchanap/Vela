@@ -4,11 +4,12 @@ import type { MobileAuthCoordinator } from '../auth/mobile-auth-contract';
 import {
   MOBILE_API_CLIENT_KEY,
   MOBILE_SRS_SERVICE_KEY,
+  MOBILE_TTS_SERVICE_KEY,
   provideMobileServices,
 } from './mobile-services';
 
 describe('mobile service provisioning', () => {
-  it('directly provides SRS services that delegate through the supplied coordinator', async () => {
+  it('provides SRS and TTS services from one API client', async () => {
     const coordinator = {
       state: {},
       requestAuthenticatedApi: vi.fn().mockResolvedValue({
@@ -34,8 +35,12 @@ describe('mobile service provisioning', () => {
     const srsService = (app.provide as ReturnType<typeof vi.fn>).mock.calls.find(
       ([key]) => key === MOBILE_SRS_SERVICE_KEY,
     )?.[1];
+    const ttsService = (app.provide as ReturnType<typeof vi.fn>).mock.calls.find(
+      ([key]) => key === MOBILE_TTS_SERVICE_KEY,
+    )?.[1];
     await expect(srsService.getStats()).resolves.toMatchObject({ due_today: 0 });
     expect(apiClient).toBeDefined();
+    expect(ttsService).toBeDefined();
     expect(coordinator.requestAuthenticatedApi).toHaveBeenCalledOnce();
   });
 });

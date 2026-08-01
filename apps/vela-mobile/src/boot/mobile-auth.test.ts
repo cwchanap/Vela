@@ -3,6 +3,7 @@ import type { MobileAuthCoordinatorDependencies } from '../services/mobile-auth'
 
 const mocks = vi.hoisted(() => {
   const coordinator = {
+    state: {},
     initialize: vi.fn(() => new Promise<void>(() => {})),
   };
   return {
@@ -51,7 +52,9 @@ const mocks = vi.hoisted(() => {
     },
     coordinator,
     createCoordinator: vi.fn((_dependencies: unknown) => coordinator),
+    ttsService: { clearUser: vi.fn() },
     provideMobileServices: vi.fn(),
+    installMobileTtsAuthIsolation: vi.fn(),
     createTransactionStore: vi.fn(),
     createIosStore: vi.fn(),
     createUnsupportedStore: vi.fn(),
@@ -78,6 +81,9 @@ vi.mock('../services/mobile-auth', async (importOriginal) => {
 });
 vi.mock('../services/mobile-services', () => ({
   provideMobileServices: mocks.provideMobileServices,
+}));
+vi.mock('../services/mobile-tts-auth-isolation', () => ({
+  installMobileTtsAuthIsolation: mocks.installMobileTtsAuthIsolation,
 }));
 vi.mock('../auth/oauth-transaction-store', () => ({
   createOAuthTransactionStore: mocks.createTransactionStore,
@@ -117,6 +123,7 @@ describe('mobile auth boot', () => {
     mocks.createIosStore.mockReturnValue(mocks.sessionStore);
     mocks.createUnsupportedStore.mockReturnValue(mocks.unsupportedSessionStore);
     mocks.createInstallationStore.mockReturnValue(mocks.installationStore);
+    mocks.provideMobileServices.mockReturnValue({ ttsService: mocks.ttsService });
   });
 
   it('injects Keychain storage only on native iOS', () => {
@@ -160,7 +167,7 @@ describe('mobile auth boot', () => {
     expect(mocks.secureStorage.remove).not.toHaveBeenCalled();
   });
 
-  it('provides services with the coordinator before starting initialization without blocking mount', () => {
+  it('provides services, installs TTS isolation, then starts initialization without blocking mount', () => {
     const app = { provide: vi.fn() };
 
     const result = runBoot({ app });
@@ -168,8 +175,15 @@ describe('mobile auth boot', () => {
     expect(result).toBeUndefined();
     expect(app.provide).toHaveBeenCalledWith(MOBILE_AUTH_KEY, mocks.coordinator);
     expect(mocks.provideMobileServices).toHaveBeenCalledWith(app, mocks.coordinator);
+    expect(mocks.installMobileTtsAuthIsolation).toHaveBeenCalledWith({
+      state: mocks.coordinator.state,
+      ttsService: mocks.ttsService,
+    });
     expect(mocks.coordinator.initialize).toHaveBeenCalledOnce();
     expect(mocks.provideMobileServices.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.coordinator.initialize.mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY,
+    );
+    expect(mocks.installMobileTtsAuthIsolation.mock.invocationCallOrder[0]).toBeLessThan(
       mocks.coordinator.initialize.mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY,
     );
   });
