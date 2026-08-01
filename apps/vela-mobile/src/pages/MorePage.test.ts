@@ -1,7 +1,8 @@
 import { flushPromises, mount } from '@vue/test-utils';
 import { Quasar, QLayout, QPageContainer } from 'quasar';
 import { defineComponent } from 'vue';
-import { describe, expect, it, vi } from 'vitest';
+import { createMemoryHistory, createRouter } from 'vue-router';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   MobileAuthenticatedApiRequestError,
   type MobileAuthCoordinator,
@@ -70,6 +71,38 @@ function mountMorePage(coordinator: MobileAuthCoordinator) {
   });
 }
 
+async function mountMorePageForEnvironment(
+  coordinator: MobileAuthCoordinator,
+  isDevelopment: boolean,
+) {
+  vi.stubEnv('DEV', isDevelopment);
+  vi.resetModules();
+  const [{ default: EnvironmentMorePage }, { MOBILE_AUTH_KEY: environmentMobileAuthKey }] =
+    await Promise.all([import('./MorePage.vue'), import('../services/mobile-auth')]);
+  const router = createRouter({
+    history: createMemoryHistory(),
+    routes: [{ path: '/', component: { template: '<div />' } }],
+  });
+  const Host = defineComponent({
+    components: { QLayout, QPageContainer, EnvironmentMorePage },
+    template:
+      '<q-layout view="hHh Lpr fFf"><q-page-container><environment-more-page /></q-page-container></q-layout>',
+  });
+  return mount(Host, {
+    global: {
+      plugins: [Quasar, router],
+      provide: {
+        [environmentMobileAuthKey as symbol]: coordinator,
+      },
+    },
+  });
+}
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+  vi.resetModules();
+});
+
 describe('MorePage sign out', () => {
   it('calls the mobile coordinator once and exposes progress', async () => {
     const signOut = deferred<void>();
@@ -108,5 +141,21 @@ describe('MorePage sign out', () => {
       warn.mockRestore();
       error.mockRestore();
     }
+  });
+
+  it('includes the TTS diagnostics entry in development', async () => {
+    const wrapper = await mountMorePageForEnvironment(createCoordinatorStub(), true);
+
+    await vi.waitFor(() => {
+      expect(wrapper.find('[data-testid="tts-pronunciation-entry"]').exists()).toBe(true);
+    });
+  });
+
+  it('omits the TTS diagnostics entry in production', async () => {
+    const wrapper = await mountMorePageForEnvironment(createCoordinatorStub(), false);
+
+    await flushPromises();
+
+    expect(wrapper.find('[data-testid="tts-pronunciation-entry"]').exists()).toBe(false);
   });
 });

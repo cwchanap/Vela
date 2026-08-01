@@ -4,13 +4,19 @@ import {
   IOS_DIAGNOSTIC_ROOT_PATH,
   IOS_INTERACTION_DIAGNOSTICS_LABEL,
 } from 'src/diagnostics/ios-interaction-contract';
-import { buildMobileChildRoutes, developmentDiagnosticRoutes } from './diagnostic-routes';
+import {
+  authenticatedDevelopmentDiagnosticRoutes,
+  buildMobileChildRoutes,
+  bypassDevelopmentDiagnosticRoutes,
+  developmentDiagnosticRoutes,
+} from './diagnostic-routes';
 
 describe('diagnostic route construction', () => {
-  it('adds the two diagnostic routes in development', () => {
+  it('adds the diagnostic routes in development', () => {
     const paths = buildMobileChildRoutes(developmentDiagnosticRoutes).map((route) => route.path);
     expect(paths).toContain(IOS_DIAGNOSTIC_ROOT_PATH.slice(1));
     expect(paths).toContain(IOS_DIAGNOSTIC_DETAIL_PATH.slice(1));
+    expect(paths).toContain('diagnostics/tts-pronunciation');
   });
 
   it('keeps production construction at the five shell routes', () => {
@@ -26,21 +32,32 @@ describe('diagnostic route construction', () => {
   });
 
   it('declares exact header metadata and fallbacks', () => {
-    expect(developmentDiagnosticRoutes[0]?.meta?.mobileHeader).toEqual({
+    expect(bypassDevelopmentDiagnosticRoutes[0]?.meta?.mobileHeader).toEqual({
       title: IOS_INTERACTION_DIAGNOSTICS_LABEL,
       fallback: '/more',
     });
-    expect(developmentDiagnosticRoutes[1]?.meta?.mobileHeader).toEqual({
+    expect(bypassDevelopmentDiagnosticRoutes[1]?.meta?.mobileHeader).toEqual({
       title: 'Navigation Detail',
       fallback: IOS_DIAGNOSTIC_ROOT_PATH,
     });
+    expect(authenticatedDevelopmentDiagnosticRoutes[0]?.meta?.mobileHeader).toEqual({
+      title: 'Pronunciation diagnostics',
+      fallback: '/more',
+    });
   });
 
-  it('marks every development diagnostic route as an explicit mobile auth bypass', () => {
-    expect(developmentDiagnosticRoutes.length).toBeGreaterThan(0);
+  it('partitions bypassed and authenticated development diagnostics', () => {
+    expect(bypassDevelopmentDiagnosticRoutes.length).toBeGreaterThan(0);
     expect(
-      developmentDiagnosticRoutes.every((route) => route.meta?.bypassMobileAuth === true),
+      bypassDevelopmentDiagnosticRoutes.every((route) => route.meta?.bypassMobileAuth === true),
     ).toBe(true);
+    expect(authenticatedDevelopmentDiagnosticRoutes).toHaveLength(1);
+    expect(authenticatedDevelopmentDiagnosticRoutes[0]?.path).toBe('diagnostics/tts-pronunciation');
+    expect(authenticatedDevelopmentDiagnosticRoutes[0]?.meta?.bypassMobileAuth).not.toBe(true);
+    expect(developmentDiagnosticRoutes).toEqual([
+      ...bypassDevelopmentDiagnosticRoutes,
+      ...authenticatedDevelopmentDiagnosticRoutes,
+    ]);
   });
 
   it('never marks core shell routes as mobile auth bypasses', () => {

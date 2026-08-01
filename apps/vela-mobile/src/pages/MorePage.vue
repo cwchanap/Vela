@@ -14,6 +14,7 @@
         @click="handleSignOut"
       />
       <development-diagnostics-entry v-if="DevelopmentDiagnosticsEntry" />
+      <tts-pronunciation-diagnostics-entry v-if="TtsPronunciationDiagnosticsEntry" />
     </div>
   </q-page>
 </template>
@@ -41,5 +42,9 @@ async function handleSignOut(): Promise<void> {
 
 const DevelopmentDiagnosticsEntry = import.meta.env.DEV
   ? defineAsyncComponent(() => import('src/components/mobile/IosInteractionDiagnosticsEntry.vue'))
+  : null;
+
+const TtsPronunciationDiagnosticsEntry = import.meta.env.DEV
+  ? defineAsyncComponent(() => import('src/components/mobile/TtsPronunciationDiagnosticsEntry.vue'))
   : null;
 </script>
