@@ -1439,18 +1439,18 @@ Link the implementation PR, tested commit, verification document, completed matr
 
 ## Plan Self-Review Checklist
 
-- [ ] Every design requirement maps to a task.
-- [ ] No `TBD`, `TODO`, incomplete evidence template, or omitted example body remains.
-- [ ] Shared parser names and mobile service types match across tasks.
-- [ ] Timeout values remain 8 seconds, 45 seconds, 15 seconds, and 50 seconds in the correct layers.
-- [ ] POST replay uses one serialized string and one post-refresh attempt.
-- [ ] Uncoded validator 400 maps to `invalid_input`.
-- [ ] Error details are bounded, non-enumerable, and excluded from UI/logging.
-- [ ] Due-count 400/500/network retry behavior is pinned.
-- [ ] Cache TTL, bound, sweep, key identity, and invalidation generations are covered.
-- [ ] Service auth isolation clears prior-user cache; controller owns active audio stop/dispose.
-- [ ] Audio cleanup ordering prevents self-generated pause interruptions.
-- [ ] Existing boot lifecycle listener is the only shared-state listener.
-- [ ] Existing bypass-route assertion remains meaningful after route splitting.
-- [ ] Production scanner covers every TTS diagnostic token.
-- [ ] Physical-device matrix requires human speaker evidence and an explicit architecture conclusion.
+- [x] Every design requirement maps to a task.
+- [x] The plan contains no unresolved implementation-value placeholders or incomplete evidence template.
+- [x] Shared parser names and mobile service types match across tasks.
+- [x] Timeout values remain 8 seconds, 45 seconds, 15 seconds, and 50 seconds in the correct layers.
+- [x] POST replay uses one serialized string and one post-refresh attempt.
+- [x] Uncoded validator 400 maps to `invalid_input`.
+- [x] Error details are bounded, non-enumerable, and excluded from UI/logging.
+- [x] Due-count 400/500/network retry behavior is pinned.
+- [x] Cache TTL, bound, sweep, key identity, and invalidation generations are covered.
+- [x] Service auth isolation clears prior-user cache; controller owns active audio stop/dispose.
+- [x] Audio cleanup ordering prevents self-generated pause interruptions.
+- [x] Existing boot lifecycle listener is the only shared-state listener.
+- [x] Existing bypass-route assertion remains meaningful after route splitting.
+- [x] Production scanner covers every TTS diagnostic token.
+- [x] Physical-device matrix requires human speaker evidence and an explicit architecture conclusion.
