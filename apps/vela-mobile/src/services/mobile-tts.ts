@@ -94,6 +94,9 @@ type PendingResult = {
 type PendingEntry = {
   userId: string;
   vocabularyId: string;
+  userGeneration: number;
+  vocabularyGeneration: number;
+  clearGeneration: number;
   promise: Promise<PendingResult>;
 };
 
@@ -256,6 +259,7 @@ export function createMobileTtsService(apiClient: MobileApiClient): MobileTtsSer
   const pending = new Map<string, PendingEntry>();
   const userGenerations = new Map<string, number>();
   const vocabularyGenerations = new Map<string, number>();
+  let clearGeneration = 0;
   let lastExpiredSweepAt = Date.now();
 
   function userGeneration(userId: string): number {
@@ -314,6 +318,7 @@ export function createMobileTtsService(apiClient: MobileApiClient): MobileTtsSer
     input: NormalizedInput,
     capturedUserGeneration: number,
     capturedVocabularyGeneration: number,
+    capturedClearGeneration: number,
   ): Promise<PreparedPronunciation> {
     const requestController = new AbortController();
     const settingsStartedAt = Date.now();
@@ -346,7 +351,17 @@ export function createMobileTtsService(apiClient: MobileApiClient): MobileTtsSer
       };
     }
 
-    let pendingEntry = pending.get(key);
+    const generationsAreCurrent =
+      userGeneration(input.userId) === capturedUserGeneration &&
+      vocabularyGeneration(input.userId, input.vocabularyId) === capturedVocabularyGeneration &&
+      clearGeneration === capturedClearGeneration;
+    const indexedPending = generationsAreCurrent ? pending.get(key) : undefined;
+    let pendingEntry =
+      indexedPending?.userGeneration === capturedUserGeneration &&
+      indexedPending.vocabularyGeneration === capturedVocabularyGeneration &&
+      indexedPending.clearGeneration === capturedClearGeneration
+        ? indexedPending
+        : undefined;
     if (!pendingEntry) {
       const generateStartedAt = Date.now();
       const generationPromise = (async (): Promise<PendingResult> => {
@@ -372,7 +387,8 @@ export function createMobileTtsService(apiClient: MobileApiClient): MobileTtsSer
         const expiresAt = completedAt + MOBILE_TTS_CACHE_TTL_MS;
         if (
           userGeneration(input.userId) === capturedUserGeneration &&
-          vocabularyGeneration(input.userId, input.vocabularyId) === capturedVocabularyGeneration
+          vocabularyGeneration(input.userId, input.vocabularyId) === capturedVocabularyGeneration &&
+          clearGeneration === capturedClearGeneration
         ) {
           setCached(key, {
             userId: input.userId,
@@ -392,14 +408,19 @@ export function createMobileTtsService(apiClient: MobileApiClient): MobileTtsSer
       pendingEntry = {
         userId: input.userId,
         vocabularyId: input.vocabularyId,
+        userGeneration: capturedUserGeneration,
+        vocabularyGeneration: capturedVocabularyGeneration,
+        clearGeneration: capturedClearGeneration,
         promise: generationPromise,
       };
-      pending.set(key, pendingEntry);
+      if (generationsAreCurrent) {
+        pending.set(key, pendingEntry);
 
-      const removeOwnedPending = () => {
-        if (pending.get(key) === pendingEntry) pending.delete(key);
-      };
-      void generationPromise.then(removeOwnedPending, removeOwnedPending);
+        const removeOwnedPending = () => {
+          if (pending.get(key) === pendingEntry) pending.delete(key);
+        };
+        void generationPromise.then(removeOwnedPending, removeOwnedPending);
+      }
     }
 
     const result = await pendingEntry.promise;
@@ -426,6 +447,7 @@ export function createMobileTtsService(apiClient: MobileApiClient): MobileTtsSer
         normalized,
         userGeneration(normalized.userId),
         vocabularyGeneration(normalized.userId, normalized.vocabularyId),
+        clearGeneration,
       );
       return detachOnAbort(work, options.signal);
     },
@@ -461,9 +483,7 @@ export function createMobileTtsService(apiClient: MobileApiClient): MobileTtsSer
     },
 
     clearAll() {
-      for (const userId of userGenerations.keys()) {
-        userGenerations.set(userId, userGeneration(userId) + 1);
-      }
+      clearGeneration += 1;
       cache.clear();
       pending.clear();
       lastExpiredSweepAt = Date.now();
