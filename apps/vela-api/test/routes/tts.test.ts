@@ -326,7 +326,7 @@ describe('TTS Route', () => {
       expect(mockTTSProvider.generate).toHaveBeenCalledTimes(1);
     });
 
-    test('returns 400 when no TTS settings configured', async () => {
+    test('returns a stable code when TTS is not configured', async () => {
       mockTtsSettingsDB.get.mockResolvedValueOnce(null);
 
       const app = createTestApp();
@@ -337,8 +337,10 @@ describe('TTS Route', () => {
       });
 
       expect(res.status).toBe(400);
-      const body = (await res.json()) as { error: string };
-      expect(body.error).toContain('TTS API key not configured');
+      expect(await res.json()).toEqual({
+        error: 'TTS API key not configured. Please configure in Settings.',
+        code: 'tts_not_configured',
+      });
     });
 
     test('returns 500 when TTS_AUDIO_BUCKET_NAME is not configured', async () => {
@@ -377,6 +379,10 @@ describe('TTS Route', () => {
       });
 
       expect(res.status).toBe(400);
+      expect(await res.json()).toEqual({
+        error: 'Invalid TTS provider configuration',
+        code: 'tts_invalid_provider_configuration',
+      });
     });
 
     test('returns 400 when vocabularyId is missing', async () => {
@@ -401,6 +407,20 @@ describe('TTS Route', () => {
       expect(res.status).toBe(400);
     });
 
+    test('leaves request-validator failures uncoded', async () => {
+      const app = createTestApp();
+      const res = await app.request('/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ vocabularyId: '', text: '' }),
+      });
+
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as { success: boolean; code?: string };
+      expect(body).toMatchObject({ success: false });
+      expect(body).not.toHaveProperty('code');
+    });
+
     test('returns 503 when S3 cache check fails with unexpected error', async () => {
       mockTtsSettingsDB.get.mockResolvedValueOnce({
         user_id: 'test-user-id',
@@ -421,6 +441,10 @@ describe('TTS Route', () => {
       });
 
       expect(res.status).toBe(503);
+      expect(await res.json()).toEqual({
+        error: 'Audio service temporarily unavailable. Please try again.',
+        code: 'tts_audio_service_unavailable',
+      });
     });
 
     test('returns 504 when TTS provider times out', async () => {
@@ -445,6 +469,10 @@ describe('TTS Route', () => {
       });
 
       expect(res.status).toBe(504);
+      expect(await res.json()).toEqual({
+        error: 'TTS generation timed out',
+        code: 'tts_generation_timeout',
+      });
     });
 
     test('returns 500 when TTS provider fails', async () => {
@@ -468,6 +496,10 @@ describe('TTS Route', () => {
       });
 
       expect(res.status).toBe(500);
+      expect(await res.json()).toEqual({
+        error: 'Failed to generate TTS audio',
+        code: 'tts_generation_failed',
+      });
     });
 
     test('returns 500 when S3 upload fails', async () => {
@@ -495,6 +527,10 @@ describe('TTS Route', () => {
       });
 
       expect(res.status).toBe(500);
+      expect(await res.json()).toEqual({
+        error: 'Audio was generated but could not be saved. Please try again.',
+        code: 'tts_audio_storage_failed',
+      });
     });
   });
 
@@ -587,8 +623,10 @@ describe('TTS Route', () => {
       });
 
       expect(res.status).toBe(500);
-      const body = (await res.json()) as { error: string };
-      expect(body.error).toContain('could not be accessed');
+      expect(await res.json()).toEqual({
+        error: 'Audio was saved but could not be accessed. Please try again.',
+        code: 'tts_audio_access_failed',
+      });
     });
 
     test('returns 500 when settings lookup fails during generate', async () => {
