@@ -13,6 +13,7 @@ import { createOAuthTransactionStore } from '../auth/oauth-transaction-store';
 import { config } from '../config';
 import { createMobileAuthCoordinator, MOBILE_AUTH_KEY } from '../services/mobile-auth';
 import { provideMobileServices } from '../services/mobile-services';
+import { installMobileTtsAuthIsolation } from '../services/mobile-tts-auth-isolation';
 
 export default defineBoot(({ app }) => {
   const isNativeIos = Capacitor.isNativePlatform() && Capacitor.getPlatform() === 'ios';
@@ -62,6 +63,7 @@ export default defineBoot(({ app }) => {
   });
 
   app.provide(MOBILE_AUTH_KEY, coordinator);
-  provideMobileServices(app, coordinator);
+  const services = provideMobileServices(app, coordinator);
+  installMobileTtsAuthIsolation({ state: coordinator.state, ttsService: services.ttsService });
   void coordinator.initialize();
 });
