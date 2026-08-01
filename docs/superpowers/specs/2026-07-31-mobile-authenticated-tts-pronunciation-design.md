@@ -53,11 +53,13 @@ The backend already provides:
 
 All three server-side providers enforce a 30-second provider-request timeout. After provider success, the route may still need to consume the audio body, upload it to S3, and create the signed URL. The API Lambda timeout is 60 seconds.
 
-The mobile API client's current eight-second overall feature deadline and the coordinator's independent 15-second physical-fetch timeout are both too short for a cold TTS generation request. HPA-208 must add a bounded per-request timeout override rather than changing the existing defaults globally.
+The mobile API client's current eight-second overall feature deadline and the coordinator's independent 15-second physical-fetch timeout are both too short for a cold TTS generation request. HPA-208 therefore adds bounded per-request timeout overrides without changing the existing defaults globally.
 
 The Capacitor application does not currently install a native audio plugin or configure `AVAudioSession`.
 
-Apple documents that an iOS app's default audio session is silenced by the Ring/Silent switch, while the `.playback` category continues playing with the switch set to silent. `HTMLAudioElement` cannot configure that native category itself. Device evidence therefore must treat silent-switch behavior as a product gate, not merely an observation. See [AVAudioSession](https://developer.apple.com/documentation/avfaudio/avaudiosession) and [AVAudioSession.Category.playback](https://developer.apple.com/documentation/avfaudio/avaudiosession/category-swift.struct/playback).
+Apple documents that an iOS app's default audio session is silenced by the Ring/Silent switch, while the `.playback` category continues playing with the switch set to silent. `HTMLAudioElement` cannot configure that native category itself. Device evidence therefore treats silent-switch behavior as a product gate, not merely an observation.
+
+The existing development diagnostic route collection contains only authentication-bypass pages, and its tests assert that every route in that collection has `meta.bypassMobileAuth === true`. HPA-208 adds an authenticated diagnostic and must preserve that guard by separating bypass and authenticated diagnostic route collections rather than deleting the assertion.
 
 ## Approved decisions
 
@@ -66,36 +68,43 @@ Apple documents that an iOS app's default audio session is silenced by the Ring/
 | Product scope | One authenticated known-word pronunciation diagnostic |
 | Test word | Fixed diagnostic word `水` / `みず` / `water`, using identifier `水:ミズ` |
 | Vocabulary dependency | The backend treats `vocabularyId` as an opaque TTS cache partition; the diagnostic does not require a vocabulary-table lookup or seeded database row |
+| Text/cache convention | The backend cache key omits `text`; HPA-208 uses one fixed canonical pair as an explicit client precondition, not an enforced backend invariant |
 | API flow | Check settings, then call `POST tts/generate`; do not require `GET tts/audio/:id` first |
 | Shared code | Share validated request/response/settings/error contracts, not the web service or page |
 | Web adoption | Web uses shared parsers for settings and generate success bodies; valid-response and existing error behavior remain unchanged, while malformed success responses intentionally fail validation |
 | Auth ownership | All TTS requests use the existing coordinator-owned mobile API client |
-| API client | Add authenticated JSON POST, structured HTTP errors, and a bounded per-request timeout option |
+| API client | Add authenticated JSON POST, structured bounded HTTP errors, and a bounded per-request timeout option |
 | Default deadline | Keep eight seconds for due-count, settings, and other ordinary mobile JSON requests |
 | TTS generation deadline | Use a 45-second overall deadline for `POST tts/generate` |
 | Coordinator timeout | Add a validated per-request transport timeout so TTS can exceed the current 15-second default without weakening other requests |
+| POST replay | `postJson()` serializes once to an immutable string so a coordinator 401 recovery can replay the identical body exactly once |
 | Due-count migration | Keep its retry rule (`network`/`server` only), while intentionally stopping retries for 4xx responses that previously collapsed to `server` |
-| Prepare retry | Do not automatically retry network, provider, or server failures; expose an explicit Retry control |
-| Auth control-race retry | Permit one same-user recovery attempt for the narrow session handoff/recovery cases established by HPA-207 |
+| Validator errors | An uncoded generate HTTP 400, including the Zod validator response shape, maps to `invalid_input` and is not retried |
+| Prepare retry | Do not automatically retry network, provider, client, or server failures; expose an explicit Retry control |
+| Auth control-race retry | Permit one same-user recovery attempt for narrow session handoff/recovery cases established by HPA-207 |
 | Playback seam | `MobileAudioPlayer` interface with an initial `HtmlAudioPlayer` implementation |
-| Silent-switch product rule | A prepared, direct pronunciation tap must be audible while foregrounded when Ring/Silent is on and media volume is nonzero |
+| Silent-switch product rule | A prepared direct pronunciation tap must be audible while foregrounded when Ring/Silent is on and media volume is nonzero |
 | Native integration | Do not preselect a plugin; if HTML-only playback fails silent-mode or session-control gates, create a native audio-session follow-up before considering full player replacement |
 | Concurrency | One preparation operation and one active playback per controller; service generation deduplication uses the full settings-derived cache key |
 | URL cache | User/settings/vocabulary-scoped in-memory cache, 14-minute TTL, bounded size |
 | Invalidation | Invalidating one user/vocabulary pair affects every provider/voice/model partition and prevents stale pending work from being rejoined or cached |
-| Replay | Reuse a still-live prepared URL and restart from the beginning; never overlap playback |
-| Settings reads | Every new preparation reads current settings; replay from `ready` with a live URL performs no settings request |
+| Settings reads | Every new preparation reads server-authoritative settings; no settings cache is introduced in HPA-208 |
+| Latency evidence | Record settings, generation, and tap-to-play-attempt latency separately so user-activation findings are attributable |
+| Replay | Reuse a still-live prepared URL and restart from the beginning; ready replay performs no settings request and never overlaps playback |
 | First-tap gesture | Attempt playback after asynchronous preparation and record whether iOS permits it |
 | Gesture fallback | If rejected, retain the prepared URL and require a second direct tap |
-| Audibility gate | Acceptance may use prepare -> Ready -> direct second tap; silent-switch acceptance is measured on the prepared direct-tap path, not necessarily one-gesture generation-and-play |
+| Audibility gate | Acceptance may use prepare → Ready → direct second tap; silent-switch acceptance is measured on the prepared direct-tap path, not necessarily one-gesture generation-and-play |
 | Proactive expiry | A ready tap checks `expiresAt` before playback; an expired item refreshes instead of intentionally attempting a stale URL |
 | Media failure | Still refresh once because sleep, revocation, clock changes, or transport behavior can invalidate a nominally live URL |
 | Background behavior | Stop active audio and classify it as interrupted; background audio remains unsupported |
 | Diagnostic route | Use `/diagnostics/tts-pronunciation`, following the existing diagnostic route convention |
+| Route collections | Preserve the all-bypass invariant on existing routes by separating bypass and authenticated development diagnostic arrays |
 | Diagnostic exposure | Development-only entry under More, but the route remains behind `MobileAuthGate` and has no auth-bypass metadata |
 | Provider configuration | Test account is configured on the web; mobile only reports configuration status |
 | Device evidence | Simulator checks are merge gates; a physical iPhone is the closure and architecture-decision gate |
 | Audibility evidence | Human-observed audio on a physical device speaker; audibility is not claimed from unit tests or media events alone |
+| Error details | Bounded server details are internal-only, non-enumerable, never rendered, never logged, and never included in diagnostic serialization |
+| Lifecycle source | The existing `boot/capacitor-lifecycle.ts` `appStateChange` listener feeds shared lifecycle state; no third listener is added |
 | Infrastructure | Do not broaden S3 CORS preemptively; change it only if device evidence proves it necessary |
 | Web behavior | Preserve valid web TTS request/cache/playback/settings behavior and existing user-facing errors |
 
@@ -106,17 +115,19 @@ HPA-208 includes:
 - shared runtime-validated TTS contracts;
 - stable TTS backend error codes while preserving existing `error` messages and statuses;
 - shared parser adoption for web settings and generation success responses;
-- authenticated JSON POST support in the mobile API client;
+- authenticated JSON POST support with replayable serialized bodies;
 - bounded per-request overall and coordinator transport timeout overrides;
-- structured HTTP status and server-detail preservation for feature services;
+- bounded, redacted HTTP status and server-detail preservation for feature services;
 - the intentional mobile 4xx classification migration and pinned due-count retry behavior;
-- a complete ordered API-to-TTS error mapping;
+- a complete ordered API-to-TTS error mapping, including uncoded validator 400s;
 - a mobile TTS service with settings validation, URL caching, full-key single-flight generation, and all-partition invalidation;
+- separate settings/generation/user-activation timing evidence;
 - a replaceable mobile audio interface;
 - an `HTMLAudioElement` implementation owning one active playback;
 - a pronunciation controller with explicit state transitions, manual retry policy, auth-race recovery, proactive expiry, and concurrency rules;
-- a named active/inactive lifecycle API;
-- an authenticated development-only diagnostic page for one known word;
+- a named active/inactive lifecycle API fed by the existing Capacitor lifecycle boot listener;
+- separate bypass and authenticated development diagnostic route collections;
+- an authenticated development-only diagnostic page for one fixed word;
 - lifecycle, interruption, silent-switch, decode, and audibility observation;
 - unit/component/backend/infrastructure coverage;
 - Simulator and physical-iPhone verification; and
@@ -127,17 +138,19 @@ HPA-208 includes:
 - final Review, Learn, Words, or settings integration;
 - allowing provider keys to be entered on mobile;
 - changing provider selection, voice selection, or model selection;
+- a persistent or long-lived mobile TTS settings cache;
 - speech-to-text or microphone capture;
 - AI buddy conversation audio;
 - free-form TTS text entry;
+- alternate pronunciation text for an existing vocabulary ID;
+- redesigning the backend TTS cache key to include text or enforcing a canonical vocabulary/text mapping server-side;
 - offline audio downloads or persistent audio storage;
 - background playback;
 - lock-screen controls, Now Playing integration, or remote transport controls;
 - Bluetooth route selection, recording policy, or advanced `AVAudioSession` routing/mixing policy;
 - implementing native audio-session or player integration before device evidence identifies which layer is necessary;
-- Android validation;
-- proactively adopting a native audio plugin; and
-- redesigning the backend's invariant that one vocabulary ID represents one canonical pronunciation text.
+- Android validation; and
+- proactively adopting a native audio plugin.
 
 ## Architecture
 
@@ -163,8 +176,9 @@ Settings-derived cache/pending key
 MobileApiClient POST tts/generate (45s overall)
         |
         v
-MobileAuthCoordinator adds current Cognito ID token
-and applies bounded per-request transport timeout
+MobileAuthCoordinator adds current Cognito ID token,
+applies bounded transport timeout, and may replay the
+same serialized request once after successful 401 recovery
         |
         v
 Backend checks user TTS settings and S3 object cache
@@ -198,13 +212,35 @@ HtmlAudioPlayer owns exactly one HTMLAudioElement
 
 `MobileAuthCoordinator` remains the only owner of Cognito token material and physical authenticated fetch attempts. It accepts a validated optional transport timeout for a feature request while retaining its existing 15-second default and auth-recovery rules.
 
+It may retry an authenticated request once after successful 401 recovery. This retry reuses the original request object, so feature request bodies must be replayable. HPA-208 satisfies that constraint by permitting only an already-serialized JSON string body through `postJson()`.
+
 #### Mobile API client
 
-`apps/vela-mobile/src/services/mobile-api-client.ts` owns authenticated JSON transport, the caller's overall deadline across auth recovery, transport, and body consumption, JSON syntax/body consumption, and stable transport/HTTP error normalization. It does not understand TTS domain states.
+`apps/vela-mobile/src/services/mobile-api-client.ts` owns:
+
+- authenticated JSON transport;
+- the caller's overall deadline across auth recovery, transport, replay, and body consumption;
+- replayable JSON body construction;
+- bounded response-body consumption;
+- JSON syntax handling; and
+- stable transport/HTTP error normalization.
+
+It does not understand TTS domain states.
 
 #### Mobile TTS service
 
-`apps/vela-mobile/src/services/mobile-tts.ts` owns TTS settings interpretation, generate-request construction, structural response validation, URL-cache semantics, full-key pending-work identity, all-partition invalidation, and TTS-specific error normalization. It does not create or control audio elements.
+`apps/vela-mobile/src/services/mobile-tts.ts` owns:
+
+- TTS settings interpretation;
+- settings and generation timing measurement;
+- generate-request construction;
+- structural response validation;
+- URL-cache semantics;
+- full-key pending-work identity;
+- all-partition invalidation; and
+- TTS-specific error normalization.
+
+It does not create or control audio elements.
 
 #### Mobile audio player
 
@@ -214,7 +250,7 @@ Native app-level audio-session configuration, if required, remains outside `Mobi
 
 #### Pronunciation controller
 
-`apps/vela-mobile/src/composables/usePronunciationDiagnostic.ts` or an equivalent focused controller owns user intent, preparation/playback sequencing, local expiry checks, manual retry, same-user auth-race recovery, state transitions, lifecycle reactions, and teardown. It does not parse HTTP responses or own Cognito state.
+`apps/vela-mobile/src/composables/usePronunciationDiagnostic.ts` or an equivalent focused controller owns user intent, preparation/playback sequencing, local expiry checks, manual retry, same-user auth-race recovery, state transitions, tap-to-play timing, lifecycle reactions, and teardown. It does not parse HTTP responses or own Cognito state.
 
 #### Diagnostic view
 
@@ -222,7 +258,7 @@ The Vue page renders controller state and exposes accessible controls. It contai
 
 ## Shared TTS contracts
 
-Create and export the following from `@vela/common`:
+Create and export:
 
 ```ts
 export type TtsProvider = 'elevenlabs' | 'openai' | 'gemini';
@@ -288,7 +324,7 @@ The web service imports and re-exports the shared types. It also uses:
 
 This preserves valid backend responses, request construction, cache behavior, and existing error-body handling. It intentionally changes only malformed 2xx success payloads from loosely accepted data into explicit validation failures. Existing web tests remain, and new parser-regression tests prove valid response behavior is unchanged.
 
-`GET tts/audio/:id` is not used by this mobile slice and remains outside parser migration unless a dedicated shared response parser is added deliberately in implementation.
+`GET tts/audio/:id` is not used by this mobile slice and remains outside parser migration unless a dedicated shared response parser is added deliberately.
 
 ## Backend error compatibility
 
@@ -296,7 +332,7 @@ TTS routes add stable `code` fields to their existing JSON error responses. Exis
 
 Mobile uses one ordered normalization algorithm:
 
-1. Parse the server body as `TtsApiErrorResponse` when available.
+1. Parse the bounded server body as `TtsApiErrorResponse` when available.
 2. Prefer a recognized stable `code`.
 3. If no code is present, apply the exact legacy 400-message compatibility table.
 4. Preserve API-client auth/session/network classifications.
@@ -332,14 +368,16 @@ Mobile uses one ordered normalization algorithm:
 | `unauthorized` | `unauthorized` |
 | `forbidden` | `forbidden` |
 | `network` | `network` |
+| `client` with status 400 and no recognized TTS code/message | `invalid_input` |
+| Other `client` result | `generation_failed` |
 | `server` with status 503 | `service_unavailable` |
 | `server` with status 504 | `generation_timeout` |
-| Other `client` or `server` result | `generation_failed` |
+| Other `server` result | `generation_failed` |
 | Structurally invalid successful TTS body | `invalid_response` |
 
 Status is sufficient for uncoded 503 and 504 responses; implementation must not require their human-readable strings. Existing uncoded 500 messages, including generation, upload, signing, or missing-bucket failures, map to `generation_failed`.
 
-Provider names and non-secret settings may be shown in the development diagnostic. Provider keys, tokens, signed URL query parameters, and raw server bodies are not logged.
+An uncoded Zod-validator 400 body is intentionally mapped by status to `invalid_input`, even though it is not shaped as `{ error: string }`. Because the mobile service validates the fixed request before dispatch, this state indicates a client/backend contract defect rather than a recoverable provider failure.
 
 ## Mobile request deadlines
 
@@ -376,7 +414,7 @@ Both methods use one private `requestJson()` implementation. `timeoutMs` is an o
 
 - current-session selection;
 - shared 401 recovery;
-- the permitted authenticated retry;
+- the permitted authenticated replay;
 - physical fetch;
 - error-body consumption; and
 - success-body consumption.
@@ -384,6 +422,18 @@ Both methods use one private `requestJson()` implementation. `timeoutMs` is an o
 Omitting `timeoutMs` retains the existing eight-second default.
 
 `GET tts/settings` uses the default. `POST tts/generate` passes `MOBILE_TTS_GENERATE_TIMEOUT_MS`.
+
+### Replayable `postJson()` invariant
+
+`postJson()` must:
+
+1. Validate and serialize the supplied value with `JSON.stringify()` before dispatch.
+2. Store the resulting immutable string in `RequestInit.body`.
+3. Use the same serialized string for the initial authenticated attempt and the one permitted post-refresh replay.
+4. Set `Content-Type: application/json` identically on both attempts.
+5. Reject serialization failure as `invalid_request` before contacting the coordinator.
+
+This client does not expose streaming bodies, `ReadableStream`, `Blob`, or `FormData`. A future API for non-replayable bodies must define its own 401/retry policy rather than silently reusing this contract.
 
 ### Coordinator request contract
 
@@ -402,12 +452,13 @@ The coordinator:
 - defaults to `MOBILE_AUTH_NETWORK_TIMEOUT_MS` for callers without an override;
 - accepts only a finite positive integer no greater than `MOBILE_AUTH_MAX_FEATURE_NETWORK_TIMEOUT_MS`;
 - rejects invalid values as `invalid_request_timeout`, mapped by `MobileApiClient` to `invalid_request`;
-- applies the timeout independently to each physical fetch attempt; and
+- applies the timeout independently to each physical fetch attempt;
+- replays the same string body once after successful 401 recovery; and
 - remains subject to the API client's outer abort signal, so auth recovery and retries cannot exceed the overall deadline.
 
 `MobileApiClient` passes the effective request timeout as `transportTimeoutMs`. If auth recovery consumes part of the overall budget, the outer signal still aborts any later attempt at the original deadline.
 
-`postJson()` sets `Content-Type: application/json` and serializes the supplied body. Authorization remains exclusively owned by `MobileAuthCoordinator`; callers cannot supply or override it.
+Authorization remains exclusively owned by `MobileAuthCoordinator`; callers cannot supply or override it.
 
 ### Deadline outcomes
 
@@ -418,9 +469,9 @@ The coordinator:
 
 ## Mobile API error contract
 
-Extend `MobileApiError` with optional HTTP detail while preserving existing construction with `{ cause }`:
-
 ```ts
+export const MOBILE_API_MAX_ERROR_BODY_BYTES = 16_384;
+
 export type MobileApiErrorCode =
   | 'invalid_request'
   | 'session_unavailable'
@@ -433,34 +484,62 @@ export type MobileApiErrorCode =
   | 'server'
   | 'invalid_response';
 
+export type MobileApiErrorDetails = {
+  status?: number;
+  serverBody?: unknown;
+  serverMessage?: string;
+  cause?: unknown;
+};
+
 export class MobileApiError extends Error {
-  constructor(
-    readonly code: MobileApiErrorCode,
-    readonly details: {
-      status?: number;
-      serverBody?: unknown;
-      serverMessage?: string;
-      cause?: unknown;
-    } = {},
-  ) {
-    super(code, { cause: details.cause });
+  readonly details: MobileApiErrorDetails;
+
+  constructor(code: MobileApiErrorCode, details: MobileApiErrorDetails = {}) {
+    super(code, details.cause === undefined ? undefined : { cause: details.cause });
     this.name = 'MobileApiError';
+    Object.defineProperty(this, 'details', {
+      value: details,
+      enumerable: false,
+      configurable: false,
+      writable: false,
+    });
   }
 }
 ```
 
-Existing call sites passing `{ cause }` remain valid, and the resulting `Error.cause` chain must be preserved and tested.
+The conditional `ErrorOptions` preserves today's behavior: an error created without a cause does not gain an own `cause` property, while existing call sites passing `{ cause }` preserve the chain.
 
-Response mapping:
+### Error-body bounds and redaction
+
+Every non-2xx body is consumed through one bounded reader before JSON parsing:
+
+- read no more than `MOBILE_API_MAX_ERROR_BODY_BYTES` of UTF-8 payload;
+- apply the same byte limit to JSON and text responses;
+- parse JSON only from the bounded payload;
+- retain a bounded/truncated `serverMessage` when JSON parsing is unavailable;
+- preserve HTTP classification even when the body is malformed or exceeds the limit; and
+- never retain the unread remainder.
+
+`details.serverBody` and `details.serverMessage` are domain-internal inspection data. They must never be:
+
+- rendered in a component;
+- included in telemetry or diagnostics;
+- logged directly or through `console.error(error)`;
+- spread into another object; or
+- serialized as part of the verification record.
+
+Callers log only an explicit safe summary containing the stable error code and HTTP status. Tests prove details are non-enumerable, bounded, and absent from safe diagnostics.
+
+### Response mapping
 
 | Result | Mobile API result |
 | --- | --- |
 | 2xx with valid JSON | Return parsed value |
 | 2xx with invalid/empty required JSON | `invalid_response` |
-| 400–499 except 401/403 | `client`, retaining status and parsed body/text |
+| 400–499 except 401/403 | `client`, retaining bounded internal detail |
 | 401 | Existing `unauthorized` behavior after coordinator recovery rules |
 | 403 | Existing `forbidden` behavior |
-| 500–599 | `server`, retaining status and parsed body/text |
+| 500–599 | `server`, retaining bounded internal detail |
 | Transport rejection/deadline | Existing `network` or session-recovery behavior |
 | Caller abort | Preserve `AbortError` |
 
@@ -468,13 +547,11 @@ Response mapping:
 
 Today, every non-2xx response other than 401/403 collapses to `server`, so an unexpected SRS 400 is eligible for the due-count query's existing `network`/`server` retry rule. After this change, the same response becomes deterministic `client` and is not retried.
 
-This is intentional. The retry predicate itself remains unchanged, but its input classification becomes more precise. Tests pin all three cases:
+This is intentional. The retry predicate itself remains unchanged, but its input classification becomes more precise. Tests pin:
 
-- due-count `400` -> `client` -> no retry;
-- due-count `500` -> `server` -> retry under the existing limit; and
-- network failure -> `network` -> retry under the existing limit.
-
-Error-body consumption is bounded by the selected overall request deadline. JSON is preferred when the response content type or body supports it; otherwise retain a bounded text message. Malformed error bodies do not replace the correct HTTP classification.
+- due-count `400` → `client` → no retry;
+- due-count `500` → `server` → retry under the existing limit; and
+- network failure → `network` → retry under the existing limit.
 
 ## Mobile TTS service
 
@@ -487,10 +564,16 @@ export type MobilePronunciationInput = {
   text: string;
 };
 
+export type PreparationTimings = {
+  settingsMs: number;
+  generateMs: number;
+};
+
 export type PreparedPronunciation = {
   audioUrl: string;
   source: 'memory-cache' | 'server-cache' | 'generated';
   expiresAt: number;
+  timings: PreparationTimings;
 };
 
 export type MobileTtsErrorCode =
@@ -528,27 +611,54 @@ export type MobileTtsService = {
 };
 ```
 
-`PreparedPronunciation.source` is diagnostic metadata only. It must not become final learner-facing product copy without UX review.
+`PreparedPronunciation.source` and `timings` are diagnostic metadata only. They must not become final learner-facing product copy or telemetry without UX/privacy review.
+
+### Settings-read decision
+
+Every new logical preparation reads `GET tts/settings` before selecting a settings-partitioned URL or pending generation. HPA-208 deliberately does not add a settings cache because settings are server-authoritative and may change through the web app. A stale settings cache could label or retain generated audio under an obsolete client partition while the backend has already switched provider, voice, or model.
+
+This extra round trip can consume user-activation time. The diagnostic therefore records separately:
+
+- settings request latency;
+- generation/cache response latency;
+- total tap-to-`audioPlayer.play()` invocation latency; and
+- whether WebKit accepted that asynchronous play attempt.
+
+The prepared direct-tap path remains the audibility and HTML-player acceptance gate, so a slow settings request cannot falsely reject the playback adapter itself. HPA-210 can still use the separate timing evidence to decide whether later product screens should prefetch or version TTS settings.
 
 ### Preparation algorithm
 
 For one logical preparation:
 
 1. Validate non-empty `userId`, `vocabularyId`, and `text`.
-2. Fetch and validate `GET tts/settings` through `MobileApiClient` using the default eight-second deadline.
-3. If `hasApiKey` is false, throw `MobileTtsError('not_configured')` without calling generation.
-4. Construct the full key from user ID, vocabulary ID, provider, voice, and model.
-5. Return a live URL from the in-memory cache when present.
-6. Join an existing pending generation for that full settings-derived key when present.
-7. Call `POST tts/generate` with exactly `{ vocabularyId, text }` and the 45-second deadline.
-8. Validate the response.
-9. Cache the URL for 14 minutes from receipt when invalidation generations still match.
-10. Return source `server-cache` when the backend says `cached: true`; otherwise return `generated`.
-11. Remove the pending record in `finally` if it still owns the key.
+2. Start settings timing.
+3. Fetch and validate `GET tts/settings` through `MobileApiClient` using the default eight-second deadline.
+4. Record settings timing.
+5. If `hasApiKey` is false, throw `MobileTtsError('not_configured')` without calling generation.
+6. Construct the full key from user ID, vocabulary ID, provider, voice, and model.
+7. Return a live URL from the in-memory cache when present, with `generateMs: 0`.
+8. Join an existing pending generation for that full settings-derived key when present.
+9. Start generation timing for the owning caller.
+10. Call `POST tts/generate` with exactly `{ vocabularyId, text }` and the 45-second deadline.
+11. Validate the response and record generation timing.
+12. Cache the URL for 14 minutes from receipt when invalidation generations still match.
+13. Return source `server-cache` when the backend says `cached: true`; otherwise return `generated`.
+14. Remove the pending record in `finally` if it still owns the key.
 
-This ordering intentionally matches the web service's concurrency identity. Concurrent callers may each read settings, but generation is shared only after the provider/voice/model partition is known. A settings change cannot cause a caller to join work for the previous settings key.
+Concurrent callers may each read settings, but generation is shared only after the provider/voice/model partition is known. A settings change cannot cause a caller to join work for the previous settings key.
 
-The backend does not verify that `vocabularyId` exists in the vocabulary table. The fixed `水:ミズ` identifier follows the seed convention for recognizability but does not require seed data to be present. HPA-208 does not support sending alternate text for the same vocabulary ID, so text is validated but is not an additional cache-key component.
+### Backend text/cache precondition
+
+The backend does not verify that `vocabularyId` exists in the vocabulary table, and its S3 key includes user, vocabulary ID, and settings hash—but not `text`. Consequently, two requests using the same user/vocabulary/settings tuple with different text can return silently incorrect cached audio.
+
+HPA-208 does not call this a backend invariant. It establishes an explicit client precondition:
+
+- the diagnostic always sends the fixed pair `水:ミズ` → `水`;
+- the mobile service's client cache identity mirrors the backend identity and therefore also excludes text;
+- no HPA-208 surface accepts arbitrary or alternate text; and
+- any future feature that may vary text for one vocabulary ID must first redesign or validate the backend cache identity.
+
+Including text only in the client key would not fix the server collision, so HPA-208 keeps both identities aligned and documents the limitation.
 
 ### URL cache
 
@@ -557,7 +667,7 @@ Use the established web semantics:
 - TTL: 14 minutes, one minute shorter than the backend presigned URL;
 - maximum entries: 300;
 - LRU-style refresh on access;
-- periodic expired-entry sweep plus per-key expiration check;
+- periodic five-minute expired-entry sweep plus per-key expiration check;
 - key components encoded before joining;
 - user and TTS-setting isolation; and
 - no persistent storage.
@@ -591,15 +701,13 @@ Pending work captures both generations. A result may populate the cache only if 
 4. Not forcibly abort underlying work still needed by existing callers.
 5. Prevent any detached stale completion from repopulating the cache.
 
-This guarantees that failure-driven URL recovery obtains a new signed URL even if settings changed or multiple historical settings partitions exist.
-
 `clearUser(userId)` increments the user generation, removes all of that user's cache entries, and removes their pending records from the join index. `clearAll()` is reserved for application disposal and tests. Normal auth cleanup is user-scoped.
 
 ## Pronunciation preparation retry policy
 
-Network, provider, 4xx, 5xx, and client deadline failures are manual-only. The controller shows an enabled Retry control after the current attempt settles. There is no exponential backoff and no automatic repeat of a potentially expensive or ambiguously completed generation request.
+Network, provider, uncoded validator, other 4xx, 5xx, and client deadline failures are manual-only. The controller shows an enabled Retry control after the current attempt settles. There is no exponential backoff and no automatic repeat of a potentially expensive or ambiguously completed generation request.
 
-The following auth-control cases are exceptions because they represent coordinator state transitions rather than product transport retries:
+The following auth-control cases are exceptions because they represent coordinator state transitions rather than product transport retries.
 
 ### Same-user control race
 
@@ -689,7 +797,7 @@ Required ordering invariant for restart, explicit stop, and dispose:
 2. Remove or disable the `pause` listener and clear active ownership.
 3. Only then call `audio.pause()`, reset `currentTime`, or clear `src`.
 
-The synchronous `pause` event caused by the adapter's own cleanup must never be reclassified as an external interruption. Tests must exercise synchronous pause dispatch and prove restart/stop/dispose retain their intended outcome.
+The synchronous `pause` event caused by the adapter's own cleanup must never be reclassified as an external interruption. Tests exercise synchronous pause dispatch and prove restart/stop/dispose retain their intended outcome.
 
 The adapter must not set `crossOrigin` unless device evidence demonstrates a need and the bucket policy is changed accordingly.
 
@@ -719,11 +827,12 @@ The controller keeps the prepared URL while it is locally live, including after 
 
 ### Tap from `idle`
 
-1. Transition to `preparing`.
-2. Prepare pronunciation under the retry policy above.
-3. Save the returned pronunciation.
-4. Immediately call `audioPlayer.play()` in the continuation of the original tap.
-5. Record whether iOS accepts or rejects playback after the asynchronous request chain.
+1. Capture the tap timestamp.
+2. Transition to `preparing`.
+3. Prepare pronunciation under the retry policy above.
+4. Save the returned pronunciation.
+5. Immediately call `audioPlayer.play()` in the continuation of the original tap.
+6. Record tap-to-play-attempt latency and whether iOS accepts or rejects playback after the asynchronous request chain.
 
 Failure of this asynchronous first-tap play is not by itself an HTML-audio rejection. The diagnostic may enter `ready` and complete acceptance through a direct second tap.
 
@@ -734,7 +843,7 @@ Failure of this asynchronous first-tap play is not by itself an HTML-audio rejec
 3. If the URL is expired, invalidate all settings partitions for the user/vocabulary pair and prepare a fresh URL instead of intentionally attempting stale playback.
 4. After asynchronous refresh, attempt playback once and retain the normal gesture-required second-tap fallback.
 
-Proactive expiry avoids a predictable media failure after long idle periods. Failure-driven refresh remains necessary because device sleep, clock changes, server revocation, network intermediaries, or media-layer behavior can invalidate a URL before local `expiresAt`.
+Ready replay with a live URL performs no settings or generate request.
 
 ### Tap during `preparing`
 
@@ -758,7 +867,7 @@ Stop the active handle with reason `restart`, seek to the beginning through the 
 
 ### Expired or invalid URL recovery
 
-`HTMLMediaElement` does not reliably expose the HTTP status causing a load failure. A media failure is therefore treated as a possibly expired or invalid URL:
+`HTMLMediaElement` does not reliably expose the HTTP status causing a load failure. A media failure is treated as a possibly expired or invalid URL:
 
 1. Stop and discard the failed element.
 2. Invalidate all user/vocabulary URL-cache partitions.
@@ -786,9 +895,11 @@ export function recordAppStateChange(isActive: boolean, at = Date.now()): void;
 export function recordAppResume(at = Date.now()): void;
 ```
 
-The Capacitor `appStateChange` listener calls `recordAppStateChange(event.isActive)` and then updates TanStack's `focusManager`. The existing `resume` listener continues calling `recordAppResume()`; state changes do not increment the resume counter, avoiding double counting.
+The existing `appStateChange` listener in `apps/vela-mobile/src/boot/capacitor-lifecycle.ts` calls `recordAppStateChange(event.isActive)` and then updates TanStack's `focusManager`. The existing `resume` listener in the same boot file continues calling `recordAppResume()`; state changes do not increment the resume counter, avoiding double counting.
 
-The pronunciation controller observes `mobileLifecycleState.isActive`; it does not register a competing native lifecycle listener.
+`apps/vela-mobile/src/services/mobile-auth.ts` already owns a separate auth-private `appStateChange` listener for refresh/session behavior. It remains auth-private and does not also write shared lifecycle state. HPA-208 adds no third native lifecycle listener.
+
+The pronunciation controller observes `mobileLifecycleState.isActive`.
 
 When the app becomes inactive:
 
@@ -810,8 +921,6 @@ Pronunciation is core learning content, not incidental UI feedback. The MVP prod
 
 > While the app is foregrounded, a prepared direct pronunciation tap must produce audible output when media volume is nonzero, even when the iPhone Ring/Silent switch is set to silent.
 
-Background playback remains out of scope. This requirement concerns only foreground user-initiated pronunciation.
-
 The asynchronous initial tap may prepare audio without producing sound when WebKit no longer considers the continuation user-activated. That is acceptable when the diagnostic reaches `ready` and a direct second tap plays audibly. Silent-switch and normal-audibility gates are measured on that prepared direct-tap path.
 
 The physical-device matrix determines one of three outcomes:
@@ -824,21 +933,40 @@ Silent-mode inaudibility automatically rejects the HTML-only outcome. It does no
 
 ## Diagnostic surface
 
-### Route placement
+### Route construction and authentication invariants
 
-Add a development-only child route:
+Use the existing path convention:
 
 ```text
 /diagnostics/tts-pronunciation
 ```
 
-This follows the existing `/diagnostics/ios-interactions` convention. The More page provides the entry, but the URL is not nested under `/more`. The route must **not** set `meta.bypassMobileAuth`; it is rendered only inside the authenticated mobile shell.
+The More page provides the entry, but the URL is not nested under `/more`. The route is rendered inside the authenticated mobile shell and must not set `meta.bypassMobileAuth`.
 
-Production builds must contain neither the route nor the entry. Extend the production-diagnostics verification script and route tests to prove their absence.
+Preserve the current bypass-route safety test by splitting route declarations:
+
+```ts
+export const bypassDevelopmentDiagnosticRoutes: RouteRecordRaw[] = [
+  // Existing iOS interaction root and detail routes.
+  // Every entry explicitly sets meta.bypassMobileAuth = true.
+];
+
+export const authenticatedDevelopmentDiagnosticRoutes: RouteRecordRaw[] = [
+  // TTS pronunciation route.
+  // No entry may set meta.bypassMobileAuth = true.
+];
+
+export const developmentDiagnosticRoutes: RouteRecordRaw[] = [
+  ...bypassDevelopmentDiagnosticRoutes,
+  ...authenticatedDevelopmentDiagnosticRoutes,
+];
+```
+
+`buildMobileChildRoutes()` still accepts the combined collection. Tests retain a meaningful `every(... === true)` assertion on `bypassDevelopmentDiagnosticRoutes`, add the inverse assertion on `authenticatedDevelopmentDiagnosticRoutes`, and verify the combined development route list contains both groups. The implementation must not simply delete the existing bypass guard.
+
+Production builds contain neither the route nor the More entry. Extend the production-diagnostics scanner and route tests to prove their absence.
 
 ### Known word
-
-Use:
 
 ```ts
 const DIAGNOSTIC_WORD = {
@@ -849,7 +977,7 @@ const DIAGNOSTIC_WORD = {
 } as const;
 ```
 
-The identifier follows the standard seed convention, but the TTS backend does not query the vocabulary table. The page does not query vocabulary APIs and does not allow arbitrary text, keeping the spike deterministic and free of unrelated dependencies.
+The identifier follows the standard seed convention, but the TTS backend does not query the vocabulary table. The page does not query vocabulary APIs and does not allow arbitrary text.
 
 ### Presentation
 
@@ -865,11 +993,14 @@ Pronunciation diagnostics
 
 State: Ready
 Source: memory cache / server cache / generated
+Settings latency: …
+Generation latency: …
+Tap-to-play attempt: …
 Playback adapter: HTML audio
 Last outcome: Completed
 ```
 
-`Source` is diagnostic-only metadata and is not approved learner-facing product copy.
+`Source` and latency fields are diagnostic-only metadata and are not approved learner-facing product copy.
 
 Expose accessible states through `role="status"`, `aria-live="polite"`, and `role="alert"` where appropriate. The control label reflects state:
 
@@ -886,13 +1017,13 @@ A collapsed development section may provide:
 - invalidate the current user/vocabulary across all settings partitions;
 - simulate one invalid URL by replacing only the current diagnostic copy with a known-unreachable HTTPS URL;
 - clear diagnostic counters;
-- show preparation count, backend source, playback attempts, completed plays, gesture rejections, interruptions, URL refreshes, and last classified error;
+- show preparation count, backend source, settings latency, generation latency, tap-to-play latency, playback attempts, completed plays, gesture rejections, interruptions, URL refreshes, and last classified error;
 - show current app active state; and
 - show the observed native audio-session category when safely available, without making that observation a player dependency.
 
 Never render the complete presigned URL because its query string contains temporary credentials. Display only the URL host and a redacted path suffix when needed for debugging.
 
-The invalid-URL control provides deterministic expired-URL recovery evidence without waiting 15 minutes or mutating server storage.
+Never display or log `MobileApiError.details.serverBody` or `serverMessage`.
 
 ## User-facing states
 
@@ -907,14 +1038,13 @@ The invalid-URL control provides deterministic expired-URL recovery evidence wit
 | Locally expired | “Refreshing expired audio…” then normal play or second-tap fallback |
 | Interrupted | “Playback was interrupted. Tap to replay.” |
 | TTS not configured | “Pronunciation is not configured for this account. Configure TTS in Vela web settings.” |
+| Invalid request contract | “Vela couldn’t prepare this pronunciation.” No automatic retry |
 | Network/deadline failure | “Vela couldn’t load pronunciation. Check your connection and try again.” Manual Retry |
 | Provider timeout response | “Pronunciation generation timed out. Try again.” Manual Retry |
 | Service unavailable | “Pronunciation is temporarily unavailable. Try again.” Manual Retry |
 | URL refreshed | “Audio was refreshed. Tap to play again.” |
 | Playback failure | “Vela couldn’t play this pronunciation. Try again.” |
 | Silent-mode failure | Diagnostic records native audio-session integration as required; do not misreport completion as audible success |
-
-The diagnostic may mention that configuration is managed on the web. It does not deep-link to or embed the web settings page in this milestone.
 
 ## Authentication and user isolation
 
@@ -924,8 +1054,8 @@ The controller passes the current authenticated user ID to `MobileTtsService` so
 
 Install a focused TTS auth-isolation watcher or equivalent service hook:
 
-- identity replacement clears only the previous user’s TTS cache/pending index and stops current audio;
-- sign-out clears only the previous user’s TTS cache/pending index and stops current audio;
+- identity replacement clears only the previous user's TTS cache/pending index and stops current audio;
+- sign-out clears only the previous user's TTS cache/pending index and stops current audio;
 - unusable session recovery detaches/aborts the current diagnostic operation without globally clearing successor state;
 - stale pending completion cannot cache after targeted or user invalidation; and
 - a null-to-user transition performs no cleanup.
@@ -947,7 +1077,7 @@ Therefore:
 5. Preserve current web origins and infrastructure tests.
 6. Never use `*` as the allowed origin.
 
-A required bucket-policy correction remains within HPA-208 because it is necessary for the existing presigned-audio architecture to function. A native plugin adopted solely to bypass a correctable bucket CORS policy is not the preferred outcome.
+A required bucket-policy correction remains within HPA-208. A native plugin adopted solely to bypass a correctable bucket CORS policy is not the preferred outcome.
 
 ## Testing
 
@@ -973,22 +1103,29 @@ Cover:
 Cover:
 
 - POST method and JSON body;
+- JSON serialization failure before dispatch;
 - coordinator-owned Authorization;
 - rejection of caller Authorization remains intact;
-- caller abort;
 - default eight-second overall deadline;
 - accepted 45-second request override;
 - invalid, zero, non-integer, and over-maximum timeout rejection;
 - coordinator default 15-second physical timeout retained;
 - coordinator per-request transport override;
 - outer deadline still caps auth recovery plus retried transport;
+- caller abort;
 - total deadline across transport and body consumption;
+- initial POST returns 401, refresh succeeds, and one replay uses the identical method, content type, and serialized body;
+- no empty, consumed, or reserialized body on replay;
+- no second replay after the retried request;
 - session recovery mappings;
 - 2xx JSON success;
-- 4xx `client` classification with parsed JSON and text detail;
-- 5xx `server` classification with detail;
+- 4xx `client` classification with bounded JSON and text detail;
+- 5xx `server` classification with bounded detail;
+- JSON and text payloads exceeding the error-body byte limit are truncated/discarded safely;
+- details are non-enumerable and absent from safe diagnostic serialization;
 - malformed success JSON;
 - existing `{ cause }` call sites preserve `Error.cause` and `MobileApiError.name`;
+- no own `cause` property when cause is omitted;
 - due-count 400 is classified `client` and is not retried;
 - due-count 500 remains `server` and is retried under the existing limit; and
 - due-count network failure remains retryable under the existing limit.
@@ -1007,10 +1144,13 @@ Cover:
 - user ID absent from the request body;
 - not-configured settings short-circuit;
 - ordered stable-code, legacy-message, API-code, and status mapping;
+- uncoded Zod-validator-shaped 400 maps to `invalid_input`;
 - status-only 503 and 504 mapping without message matching;
 - uncoded 500 generation/upload/signing messages map to `generation_failed`;
 - JSON-syntax versus structural-response error attribution;
-- 14-minute cache TTL;
+- no raw server detail is rendered or logged;
+- settings and generation timings are recorded separately;
+- 14-minute cache TTL and five-minute sweep;
 - per-user, provider, voice, model, and vocabulary isolation;
 - settings fetched before full-key pending lookup;
 - same-full-key pending generation sharing;
@@ -1022,6 +1162,7 @@ Cover:
 - targeted invalidation removes all settings partitions;
 - targeted invalidation prevents new callers joining stale pending work;
 - stale pending completion cannot repopulate after invalidation;
+- fixed diagnostic pair is used consistently;
 - sign-out generation guard; and
 - redaction/no-secret logging.
 
@@ -1050,13 +1191,14 @@ Cover:
 
 - idle to preparing to playing to ready;
 - asynchronous first-tap playback attempt;
+- separate settings, generate, and tap-to-play timing recording;
 - gesture fallback retaining URL;
 - direct second-tap playback;
 - same-user `session_changed`/`session_unavailable` control race retries once;
 - second control race remains visible;
 - `session_recovery_pending` retries once when the same user becomes usable;
 - identity change cancels pending recovery continuation;
-- network/provider/server failure has no automatic retry;
+- network/provider/server/invalid-input failure has no automatic retry;
 - explicit Retry starts one new preparation;
 - ready direct tap with live URL;
 - ready replay does not fetch settings;
@@ -1073,8 +1215,9 @@ Cover:
 - identity change and sign-out;
 - component teardown;
 - stale asynchronous completion unable to overwrite successor state;
-- `recordAppStateChange()` updates active state and timestamps without incrementing resume count; and
-- Capacitor lifecycle boot uses the canonical lifecycle API.
+- `recordAppStateChange()` updates active state and timestamps without incrementing resume count;
+- `boot/capacitor-lifecycle.ts` feeds shared lifecycle state exactly once per event; and
+- the auth-private listener does not duplicate shared lifecycle updates.
 
 ### Component and route tests
 
@@ -1084,7 +1227,10 @@ Cover:
 - accessible control labels and live regions;
 - counters and redaction;
 - authenticated `/diagnostics/tts-pronunciation` behavior;
-- no auth bypass metadata;
+- no auth bypass metadata on authenticated diagnostic routes;
+- all existing bypass routes remain explicitly marked;
+- the all-bypass `every(...)` assertion remains on `bypassDevelopmentDiagnosticRoutes`;
+- combined development route construction includes both route groups;
 - development-only More entry;
 - development-only route registration; and
 - production build exclusion.
@@ -1107,13 +1253,13 @@ Run the applicable matrix on at least one current iOS Simulator and one physical
 | --- | --- | --- | --- |
 | Restored authenticated session | Required | Required | User reaches diagnostic without sign-in prompt while session valid |
 | Account has configured TTS | Required | Required | Settings reports configured; no key shown |
-| First server-cache request | Required | Required | Source and timing recorded |
-| First uncached generation | Required | Required | Completes inside 45-second client budget or produces classified failure |
-| One-tap async prepare-and-play | Required | Required | Accepted or gesture-rejected result recorded; not itself the silent-mode gate |
+| First server-cache request | Required | Required | Settings latency, generate/cache latency, and source recorded |
+| First uncached generation | Required | Required | Separate settings and generation timing; completes inside 45-second budget or produces classified failure |
+| One-tap async prepare-and-play | Required | Required | Tap-to-play-attempt latency and accepted/gesture-rejected result recorded; not itself the silent-mode gate |
 | Prepared direct-tap playback | Required | Required | Audible expected Japanese pronunciation |
 | Normal media volume, Ring/Silent off | Required | Required | `水` decodes and is audibly pronounced as expected without media error |
 | Ring/Silent on, media volume nonzero | Not applicable | Required | Prepared direct tap is human-observed as audible/inaudible on device speaker; native-integration conclusion recorded |
-| Ten consecutive prepared replays | Required | Required | Success/failure count |
+| Ten consecutive prepared replays | Required | Required | Success/failure count; no settings requests during live replay |
 | Rapid taps while preparing | Required | Required | One settings-derived generation request |
 | Rapid taps while playing | Required | Required | No overlap; deterministic restart |
 | Locally expired ready item | Required | Required | Refresh occurs before stale audio element creation |
@@ -1130,7 +1276,7 @@ Run the applicable matrix on at least one current iOS Simulator and one physical
 
 Audibility is a manual physical observation. Media `play`, `playing`, and `ended` events demonstrate element state but do not prove that a person heard sound. Record whether evidence used the built-in speaker; optional headphone or Bluetooth observations are separate and do not replace the speaker silent-switch test.
 
-Use a test account already configured through the web application. Record provider and non-secret voice/model identifiers, but never record the provider key, bearer token, or complete signed URL.
+Use a test account already configured through the web application. Record provider and non-secret voice/model identifiers, but never record the provider key, bearer token, complete signed URL, or bounded internal server body.
 
 ## HTML and native-audio acceptance gates
 
@@ -1148,7 +1294,7 @@ HTML-only playback is acceptable for the MVP only when physical-device evidence 
 8. Backgrounding and foregrounding leave the controller in a recoverable state.
 9. A normal external interruption leaves the controller replayable.
 10. Sign-out and teardown stop playback and clear user-scoped cached URLs.
-11. No provider key or Cognito token is present in the bundle, logs, or diagnostic UI.
+11. No provider key, Cognito token, signed URL, or raw server error detail is present in the bundle, logs, or diagnostic UI.
 12. Any asynchronous first-tap gesture limitation is acceptable through a documented prepare-then-direct-play interaction.
 
 ### Native audio-session integration required
@@ -1188,14 +1334,17 @@ The record contains:
 - Xcode, iOS, Quasar, Capacitor, and device versions;
 - test account configuration status without secrets;
 - the completed matrix;
-- first server-cache and uncached-generation timing;
+- settings latency;
+- server-cache/generation latency;
+- total tap-to-play-attempt latency;
+- first uncached-generation timing;
 - first-tap gesture result;
 - prepared direct-tap normal-volume audibility result;
 - Ring/Silent-switch prepared direct-tap result;
 - human-observation output route;
 - URL-expiration and interruption observations;
 - any required CORS correction;
-- known limitations;
+- known limitations, including the unenforced vocabulary ID/text cache convention;
 - final `HTML-only accepted`, `native audio-session integration required`, or `native player adapter required` decision; and
 - links to any follow-up Linear issues.
 
@@ -1207,7 +1356,7 @@ HPA-210 consumes this record during the Milestone 1 architecture review.
 | --- | --- |
 | Signed-in user hears one Japanese pronunciation on physical iPhone | Authenticated diagnostic, fixed `水` item, prepared direct-tap human audibility matrix |
 | Repeated playback has no duplicate request or accidental overlap | Settings-derived service single-flight, controller tap rules, one-active-element adapter |
-| Auth, generation, expiration, and playback failures are actionable | Structured API/TTS/audio errors, bounded deadlines, manual retry, and explicit view states |
+| Auth, generation, expiration, and playback failures are actionable | Structured API/TTS/audio errors, bounded deadlines/details, manual retry, and explicit view states |
 | No provider key bundled | Server-side settings only; secret scan and redacted diagnostics |
 | Web TTS remains compatible | Shared parser adoption with valid-response regression tests and unchanged non-2xx messages/statuses |
 | HTML versus native conclusion recorded | Physical silent-switch/session/player gates and verification record |
@@ -1222,13 +1371,33 @@ All providers may run for 30 seconds before the backend returns 504, and S3 work
 
 A backend 504 proves the provider timed out and maps to `generation_timeout`. A client-side abort before an HTTP response cannot prove provider outcome and maps to `network`; no automatic repeat risks duplicating expensive or ambiguously completed work.
 
+### Replayable POST dependency
+
+The coordinator may replay an authenticated request after 401 recovery. `postJson()` serializes to a stable string before dispatch, making the body replayable. HPA-208 does not generalize this behavior to streams or multipart bodies.
+
+### Validator response shape
+
+Hono/Zod validation failures do not necessarily use the TTS `{ error }` contract. An uncoded generate 400 therefore maps by status to `invalid_input`, and tests use the validator-shaped body rather than assuming a TTS error message.
+
+### Settings latency and user activation
+
+A settings request before generation increases the asynchronous gap after the first tap. HPA-208 keeps settings server-authoritative, records settings and generation latency separately, and uses the prepared direct-tap path to judge playback reliability. A later product slice may add prefetch or versioned settings caching using this evidence.
+
+### Unenforced vocabulary ID/text convention
+
+The backend cache key omits text. HPA-208 is safe only because it sends one fixed identifier/text pair. Future alternate-text use requires a backend cache-contract change; adding text only to the mobile key is insufficient.
+
+### Error-detail leakage
+
+The API client retains only a bounded internal server payload, marks details non-enumerable, and forbids rendering or wholesale error logging. Safe diagnostics contain stable code and status only.
+
 ### Silent switch and default audio session
 
-The default iOS audio session is silenced by Ring/Silent. Silent-mode audibility is an explicit product requirement, so HTML-only acceptance is impossible if prepared direct-tap evidence confirms the default behavior. The design distinguishes minimal native session configuration from full native player replacement rather than conflating them.
+The default iOS audio session is silenced by Ring/Silent. Silent-mode audibility is an explicit product requirement, so HTML-only acceptance is impossible if prepared direct-tap evidence confirms the default behavior. The design distinguishes minimal native session configuration from full native player replacement.
 
 ### Asynchronous user activation
 
-A network request may consume the original tap's user-activation window. The controller attempts one-tap playback, records the result, and supports a prepared second tap without repeating generation. Audibility and silent-switch gates use the prepared direct-tap path.
+A network request may consume the original tap's user-activation window. The controller attempts one-tap playback, records attributable timing, and supports a prepared second tap without repeating generation. Audibility and silent-switch gates use the prepared direct-tap path.
 
 ### Presigned URL expiry
 
@@ -1241,6 +1410,14 @@ HTML media errors do not reliably identify HTTP status. Recovery treats the firs
 ### Self-generated pause events
 
 `pause()` may dispatch synchronously. The adapter settles and detaches interruption listeners before invoking cleanup methods, preventing its own restart/stop/dispose path from being misclassified as an external interruption.
+
+### Diagnostic authentication regression
+
+Existing route tests assert that every route in the bypass collection is explicitly bypassed. HPA-208 preserves that assertion by adding a separate authenticated diagnostic collection and testing both collections independently.
+
+### Lifecycle listener duplication
+
+The existing Capacitor lifecycle boot listener feeds shared state; the auth coordinator keeps its auth-private listener. The pronunciation controller observes shared state and adds no third native listener.
 
 ### Mobile API classification migration
 
@@ -1262,15 +1439,15 @@ The route is development-only and uses a fixed word. Final product integration r
 
 The implementation plan should sequence work approximately as follows:
 
-1. Shared TTS contracts, web parser adoption, and additive backend error codes.
-2. Mobile API POST, structured HTTP errors, per-request overall/coordinator timeout APIs, and due-count 4xx regression pinning.
-3. Mobile TTS service, ordered error mapping, settings-derived cache/concurrency, all-partition invalidation, and auth isolation.
+1. Shared TTS contracts, web parser adoption, additive backend error codes, and validator-400 coverage.
+2. Mobile API POST with replayable string bodies, structured bounded HTTP errors, per-request overall/coordinator timeout APIs, and due-count 4xx regression pinning.
+3. Mobile TTS service with ordered error mapping, attributable timings, settings-derived cache/concurrency, all-partition invalidation, canonical-text precondition, and auth isolation.
 4. Audio contract and HTML adapter with pause-ordering invariants.
-5. Controller state machine, manual retry, same-user auth recovery, proactive expiry, and lifecycle integration through `recordAppStateChange()`.
-6. Authenticated `/diagnostics/tts-pronunciation` page and production exclusion checks.
-7. Automated verification, including cold-generation timeout behavior.
+5. Controller state machine, manual retry, same-user auth recovery, proactive expiry, attributable tap timing, and lifecycle integration through the existing `boot/capacitor-lifecycle.ts` listener and `recordAppStateChange()`.
+6. Split bypass/authenticated diagnostic route collections, add authenticated `/diagnostics/tts-pronunciation`, and extend production exclusion checks.
+7. Automated verification, including cold-generation timeout, validator 400, POST 401 replay, body bounds, redaction, route guards, and lifecycle-listener ownership.
 8. Simulator matrix.
-9. Physical-iPhone normal-volume, prepared direct-tap silent-switch, interruption, and replay matrix with human audibility evidence.
+9. Physical-iPhone normal-volume, prepared direct-tap silent-switch, interruption, and replay matrix with human audibility evidence and separate latency records.
 10. CORS correction, native audio-session follow-up, or native-player follow-up only when evidence requires it.
 
 No implementation begins until this revised design is reviewed and approved.
