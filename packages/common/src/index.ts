@@ -27,3 +27,17 @@ export { DEFAULT_DAILY_LESSON_GOAL, DEFAULT_LESSON_DURATION_MINUTES } from './co
 
 // Export shared domain contracts
 export { parseSrsStats, type SRSStats } from './contracts/srs';
+
+// Export shared TTS contracts
+export {
+  parseGeneratePronunciationRequest,
+  parseGeneratePronunciationResponse,
+  parseTtsApiErrorResponse,
+  parseTtsSettings,
+  type GeneratePronunciationRequest,
+  type GeneratePronunciationResponse,
+  type TtsApiErrorCode,
+  type TtsApiErrorResponse,
+  type TtsProvider,
+  type TtsSettings,
+} from './contracts/tts';

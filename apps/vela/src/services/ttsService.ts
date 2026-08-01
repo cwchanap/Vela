@@ -1,18 +1,15 @@
 import type { Vocabulary } from '../types/database';
 import { getApiUrl } from '../utils/api';
 import { fetchAuthSession } from 'aws-amplify/auth';
+import {
+  parseGeneratePronunciationResponse,
+  parseTtsSettings,
+  type GeneratePronunciationResponse,
+  type TtsSettings,
+} from '@vela/common';
 
-export interface TTSResponse {
-  audioUrl: string;
-  cached: boolean;
-}
-
-export interface TTSSettings {
-  provider: string;
-  voiceId: string | null;
-  model: string | null;
-  hasApiKey: boolean;
-}
+export type TTSResponse = GeneratePronunciationResponse;
+export type TTSSettings = TtsSettings;
 
 // In-session audio URL cache keyed by user + settings + vocabularyId.
 // Presigned S3 URLs expire in 15 minutes; cache for 14 minutes to avoid serving expired URLs.
@@ -192,7 +189,7 @@ export async function generatePronunciation(
       throw new Error(errorMessage);
     }
 
-    const result: TTSResponse = await response.json();
+    const result = parseGeneratePronunciationResponse(await response.json());
     setCachedAudioUrl(cacheKey, result.audioUrl);
     return result;
   })();
@@ -317,7 +314,7 @@ export async function getTTSSettings(_userId?: string): Promise<TTSSettings> {
     throw new Error(errorMessage);
   }
 
-  return response.json();
+  return parseTtsSettings(await response.json());
 }
 
 /**
