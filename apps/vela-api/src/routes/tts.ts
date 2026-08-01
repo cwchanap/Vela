@@ -12,7 +12,12 @@ import {
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { requireAuth, type AuthContext } from '../middleware/auth';
 import { createHash } from 'crypto';
+import type { TtsApiErrorCode } from '@vela/common';
 import { createTTSProvider } from '../tts/factory';
+
+function ttsError(error: string, code: TtsApiErrorCode) {
+  return { error, code };
+}
 
 /**
  * Generate a cache key that includes userId, provider, and TTS settings
@@ -74,7 +79,13 @@ const createTTSRoute = (env: Env) => {
       const settings = await ttsSettingsDB.get(userId);
 
       if (!settings || !settings.api_key) {
-        return c.json({ error: 'TTS API key not configured. Please configure in Settings.' }, 400);
+        return c.json(
+          ttsError(
+            'TTS API key not configured. Please configure in Settings.',
+            'tts_not_configured',
+          ),
+          400,
+        );
       }
 
       const bucketName = env.TTS_AUDIO_BUCKET_NAME || process.env.TTS_AUDIO_BUCKET_NAME;
@@ -85,7 +96,10 @@ const createTTSRoute = (env: Env) => {
       const providerValue = settings.provider || 'elevenlabs';
       const providerParse = TTSProviderSchema.safeParse(providerValue);
       if (!providerParse.success) {
-        return c.json({ error: 'Invalid TTS provider configuration' }, 400);
+        return c.json(
+          ttsError('Invalid TTS provider configuration', 'tts_invalid_provider_configuration'),
+          400,
+        );
       }
       const provider = providerParse.data;
       const ttsProvider = createTTSProvider(provider);
@@ -115,7 +129,13 @@ const createTTSRoute = (env: Env) => {
             s3Key,
             bucket: bucketName,
           });
-          return c.json({ error: 'Audio service temporarily unavailable. Please try again.' }, 503);
+          return c.json(
+            ttsError(
+              'Audio service temporarily unavailable. Please try again.',
+              'tts_audio_service_unavailable',
+            ),
+            503,
+          );
         }
       }
 
@@ -136,14 +156,14 @@ const createTTSRoute = (env: Env) => {
             userId,
             error,
           });
-          return c.json({ error: 'TTS generation timed out' }, 504);
+          return c.json(ttsError('TTS generation timed out', 'tts_generation_timeout'), 504);
         }
         console.error('TTS provider error', {
           provider,
           userId,
           error,
         });
-        return c.json({ error: 'Failed to generate TTS audio' }, 500);
+        return c.json(ttsError('Failed to generate TTS audio', 'tts_generation_failed'), 500);
       }
 
       // Upload to S3
@@ -165,7 +185,10 @@ const createTTSRoute = (env: Env) => {
           s3Key,
         });
         return c.json(
-          { error: 'Audio was generated but could not be saved. Please try again.' },
+          ttsError(
+            'Audio was generated but could not be saved. Please try again.',
+            'tts_audio_storage_failed',
+          ),
           500,
         );
       }
@@ -185,7 +208,10 @@ const createTTSRoute = (env: Env) => {
           s3Key,
         });
         return c.json(
-          { error: 'Audio was saved but could not be accessed. Please try again.' },
+          ttsError(
+            'Audio was saved but could not be accessed. Please try again.',
+            'tts_audio_access_failed',
+          ),
           500,
         );
       }
