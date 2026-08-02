@@ -203,6 +203,7 @@ describe('M1 foundation manifest contract', () => {
 
   it('enforces manual manifest fields against untyped runtime input', () => {
     const hostileInput = {
+      schemaVersion: 2,
       testedBehaviorCommit: 'd'.repeat(40),
       matrixClass: 'production-smoke',
       runId: '20260803T021500Z-production-smoke',
