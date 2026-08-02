@@ -55,7 +55,15 @@ async function captureError(promise: Promise<unknown>): Promise<MobileTtsError> 
 }
 
 function generated(audioUrl = HTTPS_AUDIO, cached = false) {
-  return { audioUrl, cached };
+  return {
+    audioUrl,
+    cached,
+    effectiveSettings: {
+      provider: CONFIGURED_SETTINGS.provider,
+      voiceId: CONFIGURED_SETTINGS.voiceId,
+      model: CONFIGURED_SETTINGS.model,
+    },
+  };
 }
 
 describe('MobileTtsService', () => {
@@ -364,16 +372,22 @@ describe('MobileTtsService', () => {
     expect(api.postJson).toHaveBeenCalledTimes(1);
   });
 
-  it('caches normally when the backend omits effective settings (older deployment)', async () => {
-    api.postJson.mockResolvedValueOnce(generated(HTTPS_AUDIO, false));
+  it('does not cache when the backend omits effective settings (older deployment)', async () => {
+    // An older backend that omits effectiveSettings cannot confirm the
+    // settings identity, so the client must not cache under the GET-derived
+    // key. Playback still succeeds, but the second request re-generates
+    // rather than returning a potentially stale memory-cache entry.
+    const responseWithoutEffective = { audioUrl: HTTPS_AUDIO, cached: false };
+    api.postJson.mockResolvedValueOnce(responseWithoutEffective);
+    api.postJson.mockResolvedValueOnce(responseWithoutEffective);
     const service = createMobileTtsService(api);
 
     const first = await service.preparePronunciation(INPUT);
     expect(first).toMatchObject({ source: 'generated' });
 
     const second = await service.preparePronunciation(INPUT);
-    expect(second).toMatchObject({ source: 'memory-cache' });
-    expect(api.postJson).toHaveBeenCalledTimes(1);
+    expect(second).toMatchObject({ source: 'generated' });
+    expect(api.postJson).toHaveBeenCalledTimes(2);
   });
 
   it('uses distinct keys when user, vocabulary, provider, voice, or model changes', async () => {

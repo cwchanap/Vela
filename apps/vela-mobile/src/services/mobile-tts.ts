@@ -268,14 +268,14 @@ function cacheKey(input: NormalizedInput, settings: TtsSettings): string {
  * the old snapshot, so the entry must not be cached under that stale key.
  *
  * When the backend omits `effectiveSettings` (older deployment), this returns
- * true to preserve the pre-guard caching behavior rather than penalizing
- * up-to-date clients talking to a not-yet-updated backend.
+ * false to avoid caching under a settings identity the backend did not
+ * confirm. Playback still succeeds; only the memory cache is skipped.
  */
 function effectiveSettingsMatch(
   snapshot: TtsSettings,
   effective: TtsEffectiveSettings | undefined,
 ): boolean {
-  if (!effective) return true;
+  if (!effective) return false;
   return (
     effective.provider === snapshot.provider &&
     effective.voiceId === snapshot.voiceId &&

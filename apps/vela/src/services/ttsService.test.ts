@@ -193,6 +193,11 @@ describe('ttsService', () => {
       const cachedResponse: TTSResponse = {
         audioUrl: 'https://example.com/audio/cached.mp3',
         cached: true,
+        effectiveSettings: {
+          provider: mockTTSSettings.provider,
+          voiceId: mockTTSSettings.voiceId,
+          model: mockTTSSettings.model,
+        },
       };
 
       mockFetch.mockImplementation((url: string) => {
@@ -217,6 +222,99 @@ describe('ttsService', () => {
       expect(secondResult.audioUrl).toBe('https://example.com/audio/cached.mp3');
       // Called for settings + generate on first call, settings only on second (cached)
       expect(mockFetch).toHaveBeenCalledTimes(3);
+    });
+
+    it('does not cache under the stale settings key when backend effective settings changed between GET and POST', async () => {
+      // Reproduces the race: the client reads settings A (elevenlabs/voice-123),
+      // derives the cache key from A, then the backend re-reads settings during
+      // POST and generates with B (elevenlabs/voice-999). The response is still
+      // usable, but it must not be cached under the A-derived key, otherwise a
+      // later A-identity request would hit the cache and play voice-999 audio
+      // as if it were voice-123. A second call with the same A settings must
+      // therefore miss the memory cache and re-generate.
+      const mismatchedResponse = {
+        audioUrl: 'https://example.com/audio/race.mp3',
+        cached: false,
+        effectiveSettings: {
+          provider: 'elevenlabs',
+          voiceId: 'voice-999',
+          model: 'model-456',
+        },
+      };
+      const matchingResponse = {
+        audioUrl: 'https://example.com/audio/race.mp3',
+        cached: false,
+        effectiveSettings: {
+          provider: 'elevenlabs',
+          voiceId: 'voice-123',
+          model: 'model-456',
+        },
+      };
+
+      let generateCallCount = 0;
+      mockFetch.mockImplementation((url: string) => {
+        if (url === '/api/tts/settings') {
+          return Promise.resolve({
+            ok: true,
+            json: () => Promise.resolve(mockTTSSettings),
+          });
+        }
+        if (url === '/api/tts/generate') {
+          generateCallCount += 1;
+          return Promise.resolve({
+            ok: true,
+            json: () =>
+              Promise.resolve(generateCallCount === 1 ? mismatchedResponse : matchingResponse),
+          });
+        }
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({}),
+        });
+      });
+
+      const firstResult = await generatePronunciation('vocab-race', '語', 'user-123');
+      expect(firstResult.audioUrl).toBe('https://example.com/audio/race.mp3');
+
+      const secondResult = await generatePronunciation('vocab-race', '語', 'user-123');
+      expect(secondResult.audioUrl).toBe('https://example.com/audio/race.mp3');
+
+      // The second call must re-generate (not served from memory cache) because
+      // the first response's effective settings did not match the GET snapshot.
+      const generateCalls = mockFetch.mock.calls.filter((call) => call[0] === '/api/tts/generate');
+      expect(generateCalls).toHaveLength(2);
+    });
+
+    it('does not cache when the backend omits effective settings (older deployment)', async () => {
+      // An older backend that omits effectiveSettings cannot confirm the
+      // settings identity, so the client must not cache under the GET-derived
+      // key. Playback still succeeds, but the second request re-generates.
+      const responseWithoutEffective = {
+        audioUrl: 'https://example.com/audio/legacy.mp3',
+        cached: false,
+      };
+
+      mockFetch.mockImplementation((url: string) => {
+        if (url === '/api/tts/settings') {
+          return Promise.resolve({
+            ok: true,
+            json: () => Promise.resolve(mockTTSSettings),
+          });
+        }
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve(responseWithoutEffective),
+        });
+      });
+
+      const firstResult = await generatePronunciation('vocab-legacy', '語', 'user-123');
+      expect(firstResult.audioUrl).toBe('https://example.com/audio/legacy.mp3');
+
+      const secondResult = await generatePronunciation('vocab-legacy', '語', 'user-123');
+      expect(secondResult.audioUrl).toBe('https://example.com/audio/legacy.mp3');
+
+      const generateCalls = mockFetch.mock.calls.filter((call) => call[0] === '/api/tts/generate');
+      expect(generateCalls).toHaveLength(2);
     });
 
     it('should reuse the same in-flight generate request for concurrent callers', async () => {

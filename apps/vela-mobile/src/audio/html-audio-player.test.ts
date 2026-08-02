@@ -217,9 +217,11 @@ describe('HtmlAudioPlayer', () => {
 
   it('treats an unexplained active pause as an external interruption', async () => {
     const handle = player.play('https://audio.example.test/paused.mp3');
-    factory.elementFor('https://audio.example.test/paused.mp3').dispatch('pause');
+    const element = factory.elementFor('https://audio.example.test/paused.mp3');
+    element.dispatch('pause');
 
     await expect(handle.finished).resolves.toEqual({ kind: 'interrupted', reason: 'external' });
+    expect(element.src).toBe('');
   });
 
   it('stops explicitly as user intent and cleans up in safe order', async () => {
@@ -282,6 +284,7 @@ describe('HtmlAudioPlayer', () => {
 
     await expect(handle.finished).resolves.toEqual({ kind: 'ended' });
     expect(element.listenerCount()).toBe(0);
+    expect(element.src).toBe('');
   });
 
   it('reports natural completion as ended when the browser fires pause before ended', async () => {
@@ -298,6 +301,7 @@ describe('HtmlAudioPlayer', () => {
 
     await expect(handle.finished).resolves.toEqual({ kind: 'ended' });
     expect(element.listenerCount()).toBe(0);
+    expect(element.src).toBe('');
   });
 
   it('settles each handle exactly once when later events and stop race with completion', async () => {
@@ -310,7 +314,11 @@ describe('HtmlAudioPlayer', () => {
     handle.stop('restart');
 
     await expect(handle.finished).resolves.toEqual({ kind: 'ended' });
-    expect(element.pauseCalls).toBe(0);
+    // `ended` settles via resolveAndRelease, which calls pause() once during
+    // resource release. The subsequent error/pause/stop events are no-ops
+    // because the playback is already settled.
+    expect(element.pauseCalls).toBe(1);
+    expect(element.src).toBe('');
   });
 
   it('preloads automatically, starts immediately, and leaves cross-origin unset', () => {

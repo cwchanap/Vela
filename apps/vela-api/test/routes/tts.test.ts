@@ -685,6 +685,31 @@ describe('TTS Route', () => {
       expect(serializeLogArgs(errorSpy.mock.calls[0])).not.toContain('DynamoDB connection lost');
       errorSpy.mockRestore();
     });
+
+    test('sanitizeError maps an unknown error name to UnknownError and does not leak the raw name', async () => {
+      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      const SECRET_MARKER = 'sk-leaked-name-secret-XYZ';
+      // error.name is writable; a hostile or third-party error can place
+      // arbitrary content (secrets, response bodies, object keys) in it.
+      // The sanitizer must normalize it through the allowlist and never emit
+      // the raw value.
+      const hostileError = new Error('upstream body');
+      hostileError.name = `HostileError:${SECRET_MARKER}`;
+      mockTtsSettingsDB.get.mockRejectedValueOnce(hostileError);
+
+      const app = createTestApp();
+      await app.request('/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ vocabularyId: 'vocab-1', text: '日本語' }),
+      });
+
+      const loggedArg = errorSpy.mock.calls[0][1] as Record<string, unknown>;
+      expect(loggedArg).toHaveProperty('errorName', 'UnknownError');
+      expect(loggedArg).not.toHaveProperty('errorMessage');
+      expect(serializeLogArgs(errorSpy.mock.calls[0])).not.toContain(SECRET_MARKER);
+      errorSpy.mockRestore();
+    });
   });
 
   describe('GET /audio/:vocabularyId - Get cached audio URL', () => {

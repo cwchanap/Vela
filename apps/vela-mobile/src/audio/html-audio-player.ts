@@ -62,7 +62,7 @@ export class HtmlAudioPlayer implements MobileAudioPlayer {
       resolve: resolveFinished,
       reject: rejectFinished,
       listeners: {
-        ended: () => this.resolve(playback, { kind: 'ended' }),
+        ended: () => this.resolveAndRelease(playback, { kind: 'ended' }),
         error: () => this.reject(playback, new MobileAudioError('media_unavailable')),
         pause: () => {
           // Browsers fire `pause` before `ended` at natural completion. The
@@ -70,7 +70,10 @@ export class HtmlAudioPlayer implements MobileAudioPlayer {
           // ended listener instead of misreporting a natural end as an
           // external interruption.
           if (playback.audio?.ended) return;
-          this.resolve(playback, { kind: 'interrupted', reason: 'external' });
+          this.resolveAndRelease(playback, {
+            kind: 'interrupted',
+            reason: 'external',
+          });
         },
       },
     };
