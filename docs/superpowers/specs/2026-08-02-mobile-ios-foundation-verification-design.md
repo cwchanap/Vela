@@ -34,7 +34,7 @@ HPA-210 is the single milestone acceptance owner. The source issues are related 
 
 - An implementation pull request may merge before native acceptance when its issue explicitly separates merge and closure gates.
 - An M1 source issue may be `Done` only after its required evidence exists or HPA-210 links a consolidated evidence row that satisfies it.
-- HPA-210 may be `Done` only after the final `GO` or `NO-GO` record is complete, every deferred risk has a Linear issue, and HPA-194 receives the milestone summary.
+- HPA-210 records both `GO` and `NO-GO` runs. It may transition to `Done` only after a complete `GO`, every deferred risk has a Linear issue, and HPA-194 receives the milestone summary. A complete `NO-GO` is preserved as evidence, but HPA-210 remains open for the corrective work and rerun.
 
 ## 3. Design Principles
 
@@ -147,12 +147,14 @@ The scan covers:
 - evidence files staged for HPA-210;
 - captured logs selected for attachment.
 
-The scanner looks for both structural and sentinel evidence:
+Source and configuration scanning looks for embedded credential values, forbidden persistence targets, unsafe logging/rendering paths, and known leakage sentinels. Legitimate source identifiers such as `codeVerifier`, `authorizationCode`, or token type names do not fail merely because the code defines or handles those fields.
 
-- OAuth authorization codes and PKCE verifier field names in runtime output;
+Runtime output, generated artifacts, and evidence are checked for:
+
+- OAuth authorization-code or PKCE-verifier values;
 - `Authorization: Bearer` values;
-- JWT-shaped values;
-- Cognito refresh/access/ID token storage outside the approved secure-storage path;
+- JWT-shaped values outside documented mock/sentinel fixtures;
+- Cognito refresh/access/ID token material outside the approved secure-storage boundary;
 - provider API-key names paired with non-placeholder values;
 - AWS secret values or private keys;
 - full presigned TTS URLs containing query credentials;
@@ -431,7 +433,7 @@ All of the following must be true on the final tested commit:
 
 Report `NO-GO` when any required row is unrun, blocked without an accepted pre-M2 gate, failed, or invalidated by a later code change; when a secret scan fails; or when the audio architecture conclusion is not selected.
 
-`NO-GO` is a useful milestone result. It names the minimum issues that must close before rerunning the decision. HPA-210 remains open until a later run produces a complete decision record.
+`NO-GO` is a useful milestone result. It names the minimum issues that must close before rerunning the decision. HPA-210 remains open until a later run produces a complete `GO`.
 
 ## 10. Source-Issue and Parent Updates
 
@@ -482,7 +484,7 @@ Selected because it automates repeatable source/build/launch evidence while pres
 - No unresolved implementation decision is required to write the implementation plan.
 - No required evidence row is pre-declared as passing.
 - Automated and manual evidence have distinct ownership.
-- Secret-handling rules cover source, artifacts, logs, and screenshots.
+- Secret-handling rules cover source, artifacts, logs, and screenshots without rejecting legitimate source field names.
 - Source-ticket state semantics and HPA-210 ownership are explicit.
 - GO/NO-GO conditions are deterministic.
 - Deferred risks require Linear issues.
