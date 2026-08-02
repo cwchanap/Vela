@@ -728,8 +728,44 @@ describe('TTS Route', () => {
       const res = await app.request('/audio/vocab-1');
 
       expect(res.status).toBe(200);
-      const body = (await res.json()) as { audioUrl: string };
+      const body = (await res.json()) as {
+        audioUrl: string;
+        effectiveSettings?: { provider: string; voiceId: string | null; model: string | null };
+      };
       expect(body.audioUrl).toBe('https://s3.example.com/cached-audio.mp3');
+      // The audio lookup response echoes the effective settings used to derive
+      // the S3 key so clients can detect a GET settings / GET audio race.
+      expect(body.effectiveSettings).toEqual({
+        provider: 'elevenlabs',
+        voiceId: null,
+        model: null,
+      });
+    });
+
+    test('echoes effective settings with non-null voice and model', async () => {
+      mockTtsSettingsDB.get.mockResolvedValueOnce({
+        user_id: 'test-user-id',
+        provider: 'openai',
+        api_key: 'test-api-key',
+        voice_id: 'alloy',
+        model: 'tts-1',
+      });
+      mockS3Client.send.mockResolvedValueOnce({}); // HeadObject succeeds
+      mockGetSignedUrl.mockResolvedValueOnce('https://s3.example.com/cached-audio.mp3');
+
+      const app = createTestApp();
+      const res = await app.request('/audio/vocab-1');
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as {
+        audioUrl: string;
+        effectiveSettings?: { provider: string; voiceId: string | null; model: string | null };
+      };
+      expect(body.effectiveSettings).toEqual({
+        provider: 'openai',
+        voiceId: 'alloy',
+        model: 'tts-1',
+      });
     });
 
     test('returns 404 when audio is not cached', async () => {

@@ -603,7 +603,15 @@ describe('ttsService', () => {
         }
         return Promise.resolve({
           ok: true,
-          json: () => Promise.resolve({ audioUrl: 'https://example.com/audio/cached-get.mp3' }),
+          json: () =>
+            Promise.resolve({
+              audioUrl: 'https://example.com/audio/cached-get.mp3',
+              effectiveSettings: {
+                provider: mockTTSSettings.provider,
+                voiceId: mockTTSSettings.voiceId,
+                model: mockTTSSettings.model,
+              },
+            }),
         });
       });
 
@@ -616,6 +624,101 @@ describe('ttsService', () => {
         (c) => typeof c[0] === 'string' && (c[0] as string).includes('tts/audio/'),
       );
       expect(audioCalls).toHaveLength(1);
+    });
+
+    it('does not cache under the stale settings key when backend effective settings changed between GET and audio lookup', async () => {
+      // Reproduces the race: the client reads settings A (elevenlabs/voice-123),
+      // derives the cache key from A, then the backend re-reads settings during
+      // GET /tts/audio and resolves the S3 key under B (elevenlabs/voice-999).
+      // The URL is still returned for immediate playback, but it must not be
+      // cached under the A-derived key, otherwise a later A-identity request
+      // would hit the cache and serve voice-999 audio as if it were voice-123.
+      // A second call with the same A settings must therefore miss the memory
+      // cache and re-fetch the audio endpoint.
+      const mismatchedResponse = {
+        audioUrl: 'https://example.com/audio/race.mp3',
+        effectiveSettings: {
+          provider: 'elevenlabs',
+          voiceId: 'voice-999',
+          model: 'model-456',
+        },
+      };
+      const matchingResponse = {
+        audioUrl: 'https://example.com/audio/race.mp3',
+        effectiveSettings: {
+          provider: 'elevenlabs',
+          voiceId: 'voice-123',
+          model: 'model-456',
+        },
+      };
+
+      let audioCallCount = 0;
+      mockFetch.mockImplementation((url: string) => {
+        if (url === '/api/tts/settings') {
+          return Promise.resolve({
+            ok: true,
+            json: () => Promise.resolve(mockTTSSettings),
+          });
+        }
+        if (typeof url === 'string' && url.includes('tts/audio/')) {
+          audioCallCount += 1;
+          return Promise.resolve({
+            ok: true,
+            json: () =>
+              Promise.resolve(audioCallCount === 1 ? mismatchedResponse : matchingResponse),
+          });
+        }
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({}),
+        });
+      });
+
+      const firstResult = await getAudioUrl('vocab-race', 'user-123');
+      expect(firstResult).toBe('https://example.com/audio/race.mp3');
+
+      const secondResult = await getAudioUrl('vocab-race', 'user-123');
+      expect(secondResult).toBe('https://example.com/audio/race.mp3');
+
+      // The second call must re-fetch (not served from memory cache) because
+      // the first response's effective settings did not match the GET snapshot.
+      const audioCalls = mockFetch.mock.calls.filter(
+        (c) => typeof c[0] === 'string' && (c[0] as string).includes('tts/audio/'),
+      );
+      expect(audioCalls).toHaveLength(2);
+    });
+
+    it('does not cache when the audio endpoint omits effective settings (older deployment)', async () => {
+      // An older backend that omits effectiveSettings cannot confirm the
+      // settings identity, so the client must not cache under the GET-derived
+      // key. The URL is still returned, but the second request re-fetches.
+      const responseWithoutEffective = {
+        audioUrl: 'https://example.com/audio/legacy.mp3',
+      };
+
+      mockFetch.mockImplementation((url: string) => {
+        if (url === '/api/tts/settings') {
+          return Promise.resolve({
+            ok: true,
+            json: () => Promise.resolve(mockTTSSettings),
+          });
+        }
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve(responseWithoutEffective),
+        });
+      });
+
+      const firstResult = await getAudioUrl('vocab-legacy', 'user-123');
+      expect(firstResult).toBe('https://example.com/audio/legacy.mp3');
+
+      const secondResult = await getAudioUrl('vocab-legacy', 'user-123');
+      expect(secondResult).toBe('https://example.com/audio/legacy.mp3');
+
+      const audioCalls = mockFetch.mock.calls.filter(
+        (c) => typeof c[0] === 'string' && (c[0] as string).includes('tts/audio/'),
+      );
+      expect(audioCalls).toHaveLength(2);
     });
   });
 
@@ -779,7 +882,15 @@ describe('ttsService', () => {
         }
         return Promise.resolve({
           ok: true,
-          json: () => Promise.resolve({ audioUrl: 'https://example.com/audio/item.mp3' }),
+          json: () =>
+            Promise.resolve({
+              audioUrl: 'https://example.com/audio/item.mp3',
+              effectiveSettings: {
+                provider: mockTTSSettings.provider,
+                voiceId: mockTTSSettings.voiceId,
+                model: mockTTSSettings.model,
+              },
+            }),
         });
       });
     });

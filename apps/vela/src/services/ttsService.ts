@@ -275,9 +275,15 @@ export async function getAudioUrl(vocabularyId: string, userId: string): Promise
   }
 
   const data = await response.json();
-  const audioUrl = parseTtsAudioUrlResponse(data).audioUrl;
-  setCachedAudioUrl(cacheKey, audioUrl);
-  return audioUrl;
+  const parsed = parseTtsAudioUrlResponse(data);
+  // Skip caching when the backend's effective settings differ from the GET
+  // snapshot used to derive `cacheKey`: the audio lives under a settings
+  // partition the client did not request, so it must not be served from a
+  // stale-settings cache entry. The URL is still returned for immediate use.
+  if (effectiveSettingsMatch(settings, parsed.effectiveSettings)) {
+    setCachedAudioUrl(cacheKey, parsed.audioUrl);
+  }
+  return parsed.audioUrl;
 }
 
 /**

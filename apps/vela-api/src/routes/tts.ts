@@ -320,6 +320,16 @@ const createTTSRoute = (env: Env) => {
           settings.model || '',
         );
 
+        // The effective settings the backend used to derive the cache key. The
+        // client compares these against its GET /tts/settings snapshot to detect
+        // a settings change between the two requests and avoid caching under a
+        // stale identity. Uses the same null/empty convention as GET settings.
+        const effectiveSettings = {
+          provider,
+          voiceId: settings.voice_id || null,
+          model: settings.model || null,
+        };
+
         try {
           await s3Client.send(new HeadObjectCommand({ Bucket: bucketName, Key: s3Key }));
 
@@ -329,7 +339,7 @@ const createTTSRoute = (env: Env) => {
             { expiresIn: 900 },
           );
 
-          return c.json({ audioUrl });
+          return c.json({ audioUrl, effectiveSettings });
         } catch (error: any) {
           if (error.name === 'NotFound' || error.name === 'NoSuchKey') {
             return c.json({ error: 'Audio not found. Please generate it first.' }, 404);
