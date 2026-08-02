@@ -2,11 +2,11 @@ import type { Vocabulary } from '../types/database';
 import { getApiUrl } from '../utils/api';
 import { fetchAuthSession } from 'aws-amplify/auth';
 import {
+  effectiveSettingsMatch,
   parseGeneratePronunciationResponse,
   parseTtsAudioUrlResponse,
   parseTtsSettings,
   type GeneratePronunciationResponse,
-  type TtsEffectiveSettings,
   type TtsSettings,
 } from '@vela/common';
 
@@ -84,29 +84,6 @@ function setCachedAudioUrl(cacheKey: string, url: string): void {
   audioUrlCache.delete(cacheKey);
   audioUrlCache.set(cacheKey, { url, expiresAt: now + CACHE_TTL_MS });
   enforceCacheSizeLimit();
-}
-
-/**
- * Compare the GET /tts/settings snapshot (used to derive the client cache key)
- * against the effective settings the backend reports it actually used for the
- * generation. When they differ, the audio was produced under new settings but
- * the client key was derived from the old snapshot, so the entry must not be
- * cached under that stale key.
- *
- * When the backend omits `effectiveSettings` (older deployment), this returns
- * false to avoid caching under a settings identity the backend did not
- * confirm. Playback still succeeds; only the memory cache is skipped.
- */
-function effectiveSettingsMatch(
-  snapshot: TtsSettings,
-  effective: TtsEffectiveSettings | undefined,
-): boolean {
-  if (!effective) return false;
-  return (
-    effective.provider === snapshot.provider &&
-    effective.voiceId === snapshot.voiceId &&
-    effective.model === snapshot.model
-  );
 }
 
 /**

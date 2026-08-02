@@ -45,6 +45,31 @@ export type TtsAudioUrlResponse = {
   effectiveSettings?: TtsEffectiveSettings;
 };
 
+/**
+ * Compare the GET /tts/settings snapshot (used to derive the client cache key)
+ * against the effective settings the backend reports it actually used for the
+ * generation or audio lookup. The backend re-reads settings during
+ * `POST /tts/generate` and `GET /tts/audio/:vocabularyId`, so a concurrent
+ * settings change can make these differ. When they differ, the audio was
+ * produced under new settings but the client key was derived from the old
+ * snapshot, so the entry must not be cached under that stale key.
+ *
+ * When the backend omits `effectiveSettings` (older deployment), this returns
+ * false to avoid caching under a settings identity the backend did not
+ * confirm. Playback still succeeds; only the memory cache is skipped.
+ */
+export function effectiveSettingsMatch(
+  snapshot: TtsSettings,
+  effective: TtsEffectiveSettings | undefined,
+): boolean {
+  if (!effective) return false;
+  return (
+    effective.provider === snapshot.provider &&
+    effective.voiceId === snapshot.voiceId &&
+    effective.model === snapshot.model
+  );
+}
+
 const TTS_API_ERROR_CODES = [
   'tts_not_configured',
   'tts_invalid_provider_configuration',
@@ -54,6 +79,7 @@ const TTS_API_ERROR_CODES = [
   'tts_audio_storage_failed',
   'tts_audio_access_failed',
   'tts_audio_bucket_not_configured',
+  'tts_audio_not_found',
   'tts_unexpected_error',
 ] as const;
 export type TtsApiErrorCode = (typeof TTS_API_ERROR_CODES)[number];

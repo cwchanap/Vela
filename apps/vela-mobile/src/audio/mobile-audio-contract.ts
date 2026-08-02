@@ -14,7 +14,12 @@ export class MobileAudioError extends Error {
     options?: { cause?: unknown },
   ) {
     super(code, options);
-    this.name = 'MobileAudioError';
+    Object.defineProperty(this, 'name', {
+      value: 'MobileAudioError',
+      enumerable: false,
+      configurable: true,
+      writable: true,
+    });
   }
 }
 

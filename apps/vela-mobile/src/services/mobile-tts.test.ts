@@ -7,6 +7,7 @@ import {
   createMobileTtsService,
   type MobilePronunciationInput,
   type MobileTtsErrorCode,
+  type MobileTtsServiceTestAccess,
 } from './mobile-tts';
 
 const HTTPS_AUDIO = 'https://audio.example.test/mizu.mp3?signature=temporary';
@@ -52,6 +53,15 @@ async function captureError(promise: Promise<unknown>): Promise<MobileTtsError> 
     return error as MobileTtsError;
   }
   throw new Error('Expected promise to reject');
+}
+
+// The test-only generation-metadata accessor is intentionally excluded from
+// the public MobileTtsService type. Cast through MobileTtsServiceTestAccess to
+// reach it without leaking it into the public contract.
+function generationMetadata(
+  service: ReturnType<typeof createMobileTtsService>,
+): ReturnType<MobileTtsServiceTestAccess['_testGetGenerationMetadata']> {
+  return (service as unknown as MobileTtsServiceTestAccess)._testGetGenerationMetadata();
 }
 
 function generated(audioUrl = HTTPS_AUDIO, cached = false) {
@@ -502,7 +512,7 @@ describe('MobileTtsService', () => {
       await service.preparePronunciation({ ...INPUT, vocabularyId: `metadata-${index}` });
     }
 
-    expect(service._testGetGenerationMetadata!().vocabularyGenerationCount).toBe(0);
+    expect(generationMetadata(service).vocabularyGenerationCount).toBe(0);
   });
 
   it('releases user generation metadata after more completed users than the cache cap', async () => {
@@ -512,7 +522,7 @@ describe('MobileTtsService', () => {
       await service.preparePronunciation({ ...INPUT, userId: `metadata-user-${index}` });
     }
 
-    expect(service._testGetGenerationMetadata!().userGenerationCount).toBe(0);
+    expect(generationMetadata(service).userGenerationCount).toBe(0);
   });
 
   it('sweeps expired entries at five-minute activity boundaries before LRU eviction', async () => {
@@ -636,13 +646,13 @@ describe('MobileTtsService', () => {
     await expect(freshCaller).resolves.toMatchObject({
       audioUrl: 'https://audio.example.test/fresh.mp3',
     });
-    expect(service._testGetGenerationMetadata!().vocabularyGenerationCount).toBe(1);
+    expect(generationMetadata(service).vocabularyGenerationCount).toBe(1);
 
     oldGeneration.resolve(generated('https://audio.example.test/stale.mp3'));
     await expect(staleCaller).resolves.toMatchObject({
       audioUrl: 'https://audio.example.test/stale.mp3',
     });
-    expect(service._testGetGenerationMetadata!().vocabularyGenerationCount).toBe(0);
+    expect(generationMetadata(service).vocabularyGenerationCount).toBe(0);
     await expect(service.preparePronunciation(INPUT)).resolves.toMatchObject({
       audioUrl: 'https://audio.example.test/fresh.mp3',
       source: 'memory-cache',
@@ -716,11 +726,11 @@ describe('MobileTtsService', () => {
     const staleCaller = service.preparePronunciation(INPUT);
     await vi.waitFor(() => expect(api.postJson).toHaveBeenCalledTimes(1));
     service.clearUser(INPUT.userId);
-    expect(service._testGetGenerationMetadata!().userGenerationFor(INPUT.userId)).toBe(1);
+    expect(generationMetadata(service).userGenerationFor(INPUT.userId)).toBe(1);
 
     generation.resolve(generated('https://audio.example.test/stale-user.mp3'));
     await staleCaller;
-    expect(service._testGetGenerationMetadata!().userGenerationCount).toBe(0);
+    expect(generationMetadata(service).userGenerationCount).toBe(0);
 
     api.postJson.mockResolvedValueOnce(generated());
     await service.preparePronunciation(INPUT);
@@ -751,11 +761,11 @@ describe('MobileTtsService', () => {
     const staleCaller = service.preparePronunciation(INPUT);
     await vi.waitFor(() => expect(api.postJson).toHaveBeenCalledTimes(1));
     service.clearAll();
-    expect(service._testGetGenerationMetadata!().userGenerationCount).toBe(0);
+    expect(generationMetadata(service).userGenerationCount).toBe(0);
 
     generation.resolve(generated('https://audio.example.test/stale-global.mp3'));
     await staleCaller;
-    expect(service._testGetGenerationMetadata!().userGenerationCount).toBe(0);
+    expect(generationMetadata(service).userGenerationCount).toBe(0);
 
     api.postJson.mockResolvedValueOnce(generated());
     await service.preparePronunciation(INPUT);

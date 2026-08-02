@@ -1,10 +1,10 @@
 import {
+  effectiveSettingsMatch,
   parseGeneratePronunciationRequest,
   parseGeneratePronunciationResponse,
   parseTtsApiErrorResponse,
   parseTtsSettings,
   type TtsApiErrorCode,
-  type TtsEffectiveSettings,
   type TtsSettings,
 } from '@vela/common';
 import { MobileApiError, type MobileApiClient } from './mobile-api-client';
@@ -70,8 +70,16 @@ export type MobileTtsService = {
   invalidatePronunciation(userId: string, vocabularyId: string): void;
   clearUser(userId: string): void;
   clearAll(): void;
-  // Test-only inspection accessor: not part of the public contract.
-  _testGetGenerationMetadata?: () => {
+};
+
+/**
+ * Test-only inspection accessor exposed by the service implementation but
+ * intentionally excluded from the public {@link MobileTtsService} contract.
+ * Tests cast the service to this type to reach the accessor without leaking
+ * it into the public API surface.
+ */
+export type MobileTtsServiceTestAccess = {
+  _testGetGenerationMetadata: () => {
     vocabularyGenerationCount: number;
     userGenerationCount: number;
     userGenerationFor(userId: string): number;
@@ -116,6 +124,7 @@ const STABLE_ERROR_CODE_MAP: Record<TtsApiErrorCode, MobileTtsErrorCode> = {
   tts_audio_storage_failed: 'generation_failed',
   tts_audio_access_failed: 'generation_failed',
   tts_audio_bucket_not_configured: 'service_unavailable',
+  tts_audio_not_found: 'generation_failed',
   tts_unexpected_error: 'generation_failed',
 };
 
@@ -257,30 +266,6 @@ function cacheKey(input: NormalizedInput, settings: TtsSettings): string {
   ]
     .map(encodeURIComponent)
     .join('|');
-}
-
-/**
- * Compare the GET /tts/settings snapshot (used to derive the client cache key)
- * against the effective settings the backend reports it actually used for the
- * generation. The backend re-reads settings during POST /tts/generate, so a
- * concurrent settings change can make these differ. When they differ, the
- * audio was produced under new settings but the client key was derived from
- * the old snapshot, so the entry must not be cached under that stale key.
- *
- * When the backend omits `effectiveSettings` (older deployment), this returns
- * false to avoid caching under a settings identity the backend did not
- * confirm. Playback still succeeds; only the memory cache is skipped.
- */
-function effectiveSettingsMatch(
-  snapshot: TtsSettings,
-  effective: TtsEffectiveSettings | undefined,
-): boolean {
-  if (!effective) return false;
-  return (
-    effective.provider === snapshot.provider &&
-    effective.voiceId === snapshot.voiceId &&
-    effective.model === snapshot.model
-  );
 }
 
 function vocabularyGenerationKey(userId: string, vocabularyId: string): string {
@@ -587,7 +572,8 @@ export function createMobileTtsService(apiClient: MobileApiClient): MobileTtsSer
 
     // Test-only inspection accessor: reports generation metadata counts so tests
     // can assert cleanup behavior without spying on Map internals or depending
-    // on private key encoding. Not part of the public MobileTtsService contract.
+    // on private key encoding. Not part of the public MobileTtsService contract;
+    // reach it via `MobileTtsServiceTestAccess` in tests.
     _testGetGenerationMetadata() {
       return {
         vocabularyGenerationCount: vocabularyGenerations.size,
@@ -597,5 +583,5 @@ export function createMobileTtsService(apiClient: MobileApiClient): MobileTtsSer
         },
       };
     },
-  };
+  } as MobileTtsService;
 }
