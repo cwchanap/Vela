@@ -110,6 +110,8 @@ describe('TTS contracts', () => {
     'tts_generation_failed',
     'tts_audio_storage_failed',
     'tts_audio_access_failed',
+    'tts_audio_bucket_not_configured',
+    'tts_unexpected_error',
   ])('parses the supported coded error %s', (code) => {
     expect(parseTtsApiErrorResponse({ error: 'TTS failed', code })).toEqual({
       error: 'TTS failed',

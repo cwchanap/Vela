@@ -7,6 +7,7 @@ import type { MobileAuthState } from '../auth/mobile-auth-contract';
 import {
   MobileAudioError,
   type MobileAudioErrorCode,
+  type MobileAudioInterruptionReason,
   type MobileAudioPlaybackHandle,
   type MobileAudioPlayer,
 } from '../audio/mobile-audio-contract';
@@ -34,7 +35,7 @@ export type PronunciationDiagnosticState =
   | {
       kind: 'interrupted';
       pronunciation: PreparedPronunciation;
-      reason: 'background' | 'external';
+      reason: MobileAudioInterruptionReason;
     }
   | {
       kind: 'error';

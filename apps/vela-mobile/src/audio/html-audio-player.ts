@@ -1,8 +1,10 @@
 import {
   MobileAudioError,
+  type MobileAudioInterruptionReason,
   type MobileAudioPlaybackHandle,
   type MobileAudioPlaybackOutcome,
   type MobileAudioPlayer,
+  type MobileAudioStopReason,
 } from './mobile-audio-contract';
 
 type AudioEvent = 'ended' | 'error' | 'pause';
@@ -77,7 +79,7 @@ export class HtmlAudioPlayer implements MobileAudioPlayer {
     };
   }
 
-  interruptActive(reason: 'background' | 'external'): void {
+  interruptActive(reason: MobileAudioInterruptionReason): void {
     const playback = this.active;
     if (!playback) {
       return;
@@ -90,14 +92,14 @@ export class HtmlAudioPlayer implements MobileAudioPlayer {
     this.stopActive('dispose');
   }
 
-  private stopActive(reason: 'restart' | 'user' | 'dispose'): void {
+  private stopActive(reason: MobileAudioStopReason): void {
     const playback = this.active;
     if (playback) {
       this.stop(playback, reason);
     }
   }
 
-  private stop(playback: ActivePlayback, reason: 'restart' | 'user' | 'dispose'): void {
+  private stop(playback: ActivePlayback, reason: MobileAudioStopReason): void {
     this.resolveAndRelease(playback, { kind: 'stopped', reason });
   }
 

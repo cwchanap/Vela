@@ -367,7 +367,7 @@ describe('TtsPronunciationDiagnosticsPage', () => {
     expect(wrapper.text()).toContain('Gesture rejections 1');
     expect(wrapper.text()).toContain('Interruptions 2');
     expect(wrapper.text()).toContain('URL refreshes 1');
-    expect(wrapper.text()).not.toContain('?');
+    expect(wrapper.get('[data-testid="tts-audio-location"]').text()).not.toContain('?');
     expect(wrapper.text()).not.toContain('X-Amz-Credential');
     expect(wrapper.text()).not.toContain('X-Amz-Signature');
     expect(wrapper.text()).not.toContain('provider-secret');

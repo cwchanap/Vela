@@ -7,6 +7,7 @@ import {
   type MobileAudioPlaybackHandle,
   type MobileAudioPlaybackOutcome,
   type MobileAudioPlayer,
+  type MobileAudioStopReason,
 } from '../audio/mobile-audio-contract';
 import {
   MobileTtsError,
@@ -51,7 +52,7 @@ function deferred<T>(): Deferred<T> {
 
 function controllablePlaybackHandle() {
   const result = deferred<MobileAudioPlaybackOutcome>();
-  const stop = vi.fn((reason: 'restart' | 'user' | 'dispose' = 'user') => {
+  const stop = vi.fn((reason: MobileAudioStopReason = 'user') => {
     result.resolve({ kind: 'stopped', reason });
   });
   const publicHandle: MobileAudioPlaybackHandle = { finished: result.promise, stop };
@@ -595,6 +596,75 @@ describe('usePronunciationDiagnostic', () => {
     });
     expect(PREPARED.audioUrl).toBe('https://audio.example.test/mizu.mp3');
     expect(tts.invalidatePronunciation).not.toHaveBeenCalled();
+  });
+
+  it('retains a live pronunciation after a playback_failed error', async () => {
+    tts.preparePronunciation.mockResolvedValue(PREPARED);
+    audio.play.mockReturnValue(rejectedPlaybackHandle(new MobileAudioError('playback_failed')));
+    const controller = createController();
+    await controller.playOrRetry();
+
+    expect(controller.state.value).toEqual({
+      kind: 'error',
+      error: 'playback_failed',
+      pronunciation: PREPARED,
+    });
+    expect(controller.counters.lastError.value).toBe('playback_failed');
+  });
+
+  it('clears an expired pronunciation after a playback_failed error', async () => {
+    tts.preparePronunciation.mockResolvedValue(PREPARED);
+    audio.play.mockReturnValue(rejectedPlaybackHandle(new MobileAudioError('playback_failed')));
+    const controller = createController();
+    now = PREPARED.expiresAt;
+    await controller.playOrRetry();
+
+    expect(controller.state.value).toEqual({
+      kind: 'error',
+      error: 'playback_failed',
+      pronunciation: null,
+    });
+  });
+
+  it('replaces the diagnostic URL copy when simulating invalid media from interrupted', async () => {
+    tts.preparePronunciation.mockResolvedValue(PREPARED);
+    const handle = controllablePlaybackHandle();
+    audio.play.mockReturnValue(handle.publicHandle);
+    audio.interruptActive.mockImplementation(() => {
+      handle.resolve({ kind: 'interrupted', reason: 'background' });
+    });
+    const controller = createController();
+    const action = controller.playOrRetry();
+    await flushPromises();
+
+    isActive.value = false;
+    await nextTick();
+    await action;
+
+    expect(controller.state.value.kind).toBe('interrupted');
+    controller.simulateInvalidUrl();
+
+    expect(controller.state.value).toMatchObject({
+      kind: 'interrupted',
+      pronunciation: { ...PREPARED, audioUrl: INVALID_PRONUNCIATION_DIAGNOSTIC_URL },
+      reason: 'background',
+    });
+  });
+
+  it('replaces the diagnostic URL copy when simulating invalid media from error with a retained pronunciation', async () => {
+    tts.preparePronunciation.mockResolvedValue(PREPARED);
+    audio.play.mockReturnValue(rejectedPlaybackHandle(new MobileAudioError('playback_failed')));
+    const controller = createController();
+    await controller.playOrRetry();
+
+    expect(controller.state.value.kind).toBe('error');
+    controller.simulateInvalidUrl();
+
+    expect(controller.state.value).toMatchObject({
+      kind: 'error',
+      error: 'playback_failed',
+      pronunciation: { ...PREPARED, audioUrl: INVALID_PRONUNCIATION_DIAGNOSTIC_URL },
+    });
   });
 
   it('clears diagnostic counters without changing prepared state', async () => {

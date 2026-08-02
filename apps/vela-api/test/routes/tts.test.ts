@@ -360,6 +360,10 @@ describe('TTS Route', () => {
       });
 
       expect(res.status).toBe(500);
+      expect(await res.json()).toEqual({
+        error: 'TTS audio bucket not configured',
+        code: 'tts_audio_bucket_not_configured',
+      });
     });
 
     test('returns 400 for invalid provider in settings', async () => {
@@ -531,6 +535,84 @@ describe('TTS Route', () => {
         error: 'Audio was generated but could not be saved. Please try again.',
         code: 'tts_audio_storage_failed',
       });
+    });
+
+    test('S3 cache check failure logs sanitized error without s3Key or userId', async () => {
+      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      mockTtsSettingsDB.get.mockResolvedValueOnce({
+        user_id: 'test-user-id',
+        provider: 'elevenlabs',
+        api_key: 'test-api-key',
+        voice_id: null,
+        model: null,
+      });
+      mockS3Client.send.mockRejectedValueOnce(new Error('S3 connection reset'));
+
+      const app = createTestApp();
+      await app.request('/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ vocabularyId: 'vocab-1', text: '日本語' }),
+      });
+
+      const loggedArg = errorSpy.mock.calls[0][1] as Record<string, unknown>;
+      expect(loggedArg).not.toHaveProperty('s3Key');
+      expect(loggedArg).not.toHaveProperty('userId');
+      expect(loggedArg).not.toHaveProperty('error');
+      expect(loggedArg).toHaveProperty('errorName', 'Error');
+      expect(loggedArg).toHaveProperty('errorMessage', 'S3 connection reset');
+      errorSpy.mockRestore();
+    });
+
+    test('provider error logs sanitized error without userId or raw error', async () => {
+      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      mockTtsSettingsDB.get.mockResolvedValueOnce({
+        user_id: 'test-user-id',
+        provider: 'elevenlabs',
+        api_key: 'test-api-key',
+        voice_id: null,
+        model: null,
+      });
+      const notFoundError = new Error('Not found');
+      (notFoundError as any).name = 'NotFound';
+      mockS3Client.send.mockRejectedValueOnce(notFoundError);
+      mockTTSProvider.generate.mockRejectedValueOnce(new Error('Provider API key invalid'));
+
+      const app = createTestApp();
+      await app.request('/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ vocabularyId: 'vocab-1', text: '日本語' }),
+      });
+
+      const loggedArg = errorSpy.mock.calls[0][1] as Record<string, unknown>;
+      expect(loggedArg).not.toHaveProperty('userId');
+      expect(loggedArg).not.toHaveProperty('error');
+      expect(loggedArg).toHaveProperty('errorName', 'Error');
+      expect(loggedArg).toHaveProperty('errorMessage', 'Provider API key invalid');
+      errorSpy.mockRestore();
+    });
+
+    test('outer catch logs sanitized error and returns unexpected-error code', async () => {
+      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      mockTtsSettingsDB.get.mockRejectedValueOnce(new Error('DynamoDB connection lost'));
+
+      const app = createTestApp();
+      const res = await app.request('/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ vocabularyId: 'vocab-1', text: '日本語' }),
+      });
+
+      expect(res.status).toBe(500);
+      expect(await res.json()).toEqual({
+        error: 'Failed to generate TTS audio',
+        code: 'tts_unexpected_error',
+      });
+      const loggedArg = errorSpy.mock.calls[0][1] as Record<string, unknown>;
+      expect(loggedArg).toHaveProperty('errorName', 'Error');
+      expect(loggedArg).toHaveProperty('errorMessage', 'DynamoDB connection lost');
+      errorSpy.mockRestore();
     });
   });
 

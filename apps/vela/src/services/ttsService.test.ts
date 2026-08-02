@@ -173,15 +173,7 @@ describe('ttsService', () => {
     });
 
     it('keeps a valid generated response unchanged', async () => {
-      mockFetch.mockImplementation((url: string) => {
-        if (url === '/api/tts/settings') {
-          return Promise.resolve({ ok: true, json: () => Promise.resolve(mockTTSSettings) });
-        }
-        return Promise.resolve({
-          ok: true,
-          json: () => Promise.resolve({ audioUrl: HTTPS_AUDIO, cached: false }),
-        });
-      });
+      mockSuccessfulTtsResponse({ audioUrl: HTTPS_AUDIO, cached: false });
 
       await expect(generatePronunciation('水:ミズ', '水', 'user-1')).resolves.toEqual({
         audioUrl: HTTPS_AUDIO,
@@ -190,12 +182,7 @@ describe('ttsService', () => {
     });
 
     it('rejects a malformed successful generate response', async () => {
-      mockFetch.mockImplementation((url: string) => {
-        if (url === '/api/tts/settings') {
-          return Promise.resolve({ ok: true, json: () => Promise.resolve(mockTTSSettings) });
-        }
-        return Promise.resolve({ ok: true, json: () => Promise.resolve({ cached: false }) });
-      });
+      mockSuccessfulTtsResponse({ cached: false });
 
       await expect(generatePronunciation('水:ミズ', '水', 'user-1')).rejects.toThrow(
         'invalid_tts_generate_response:audioUrl',

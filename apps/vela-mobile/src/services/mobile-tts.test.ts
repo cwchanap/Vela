@@ -58,39 +58,6 @@ function generated(audioUrl = HTTPS_AUDIO, cached = false) {
   return { audioUrl, cached };
 }
 
-function captureVocabularyGenerationMap(
-  service: ReturnType<typeof createMobileTtsService>,
-): Map<string, number> {
-  const setSpy = vi.spyOn(Map.prototype, 'set');
-  try {
-    service.invalidatePronunciation('metadata-probe-user', 'metadata-probe-vocabulary');
-    const callIndex = setSpy.mock.calls.findIndex(
-      ([key]) => key === 'metadata-probe-user|metadata-probe-vocabulary',
-    );
-    const generationMap = setSpy.mock.contexts[callIndex];
-    expect(generationMap).toBeInstanceOf(Map);
-    return generationMap as Map<string, number>;
-  } finally {
-    setSpy.mockRestore();
-  }
-}
-
-function captureUserGenerationMap(
-  service: ReturnType<typeof createMobileTtsService>,
-): Map<string, number> {
-  const setSpy = vi.spyOn(Map.prototype, 'set');
-  try {
-    service.clearUser('metadata-probe-user');
-    const callIndex = setSpy.mock.calls.findIndex(([key]) => key === 'metadata-probe-user');
-    const generationMap = setSpy.mock.contexts[callIndex];
-    expect(generationMap).toBeInstanceOf(Map);
-    service.clearAll();
-    return generationMap as Map<string, number>;
-  } finally {
-    setSpy.mockRestore();
-  }
-}
-
 describe('MobileTtsService', () => {
   let api: MockApiClient;
 
@@ -440,6 +407,8 @@ describe('MobileTtsService', () => {
     await service.preparePronunciation({ ...INPUT, vocabularyId: 'vocab-0' });
     await service.preparePronunciation({ ...INPUT, vocabularyId: 'vocab-1' });
 
+    // 300 initial misses + vocab-new evicts vocab-1 (miss) + vocab-0 still live
+    // (hit) + vocab-1 was evicted so it misses again = 302 calls.
     expect(api.postJson).toHaveBeenCalledTimes(302);
   });
 
@@ -451,29 +420,29 @@ describe('MobileTtsService', () => {
     }
     await service.preparePronunciation({ ...INPUT, vocabularyId: 'vocab-0' });
 
+    // 301 initial misses fill the cache and evict vocab-0; re-reading vocab-0
+    // is a miss because it was evicted as the least recently used entry = 302.
     expect(api.postJson).toHaveBeenCalledTimes(302);
   });
 
   it('releases vocabulary generation metadata after more completed vocabularies than the cache cap', async () => {
     const service = createMobileTtsService(api);
-    const generationMap = captureVocabularyGenerationMap(service);
 
     for (let index = 0; index < 301; index += 1) {
       await service.preparePronunciation({ ...INPUT, vocabularyId: `metadata-${index}` });
     }
 
-    expect(generationMap.size).toBe(0);
+    expect(service._testGetGenerationMetadata!().vocabularyGenerationCount).toBe(0);
   });
 
   it('releases user generation metadata after more completed users than the cache cap', async () => {
     const service = createMobileTtsService(api);
-    const generationMap = captureUserGenerationMap(service);
 
     for (let index = 0; index < 301; index += 1) {
       await service.preparePronunciation({ ...INPUT, userId: `metadata-user-${index}` });
     }
 
-    expect(generationMap.size).toBe(0);
+    expect(service._testGetGenerationMetadata!().userGenerationCount).toBe(0);
   });
 
   it('sweeps expired entries at five-minute activity boundaries before LRU eviction', async () => {
@@ -492,6 +461,9 @@ describe('MobileTtsService', () => {
     await service.preparePronunciation({ ...INPUT, vocabularyId: 'new-after-sweep' });
     await service.preparePronunciation({ ...INPUT, vocabularyId: 'live-0' });
 
+    // 300 initial misses; at 14 min the sweep deletes the expired entry, so
+    // new-after-sweep is a miss (301) while expired-but-recent (re-read before
+    // expiry) and live-0 (still live) are cache hits = 301 calls.
     expect(api.postJson).toHaveBeenCalledTimes(301);
   });
 
@@ -583,7 +555,6 @@ describe('MobileTtsService', () => {
       .mockReturnValueOnce(oldGeneration.promise)
       .mockReturnValueOnce(freshGeneration.promise);
     const service = createMobileTtsService(api);
-    const generationMap = captureVocabularyGenerationMap(service);
 
     const staleCaller = service.preparePronunciation(INPUT);
     await vi.waitFor(() => expect(api.postJson).toHaveBeenCalledTimes(1));
@@ -595,13 +566,13 @@ describe('MobileTtsService', () => {
     await expect(freshCaller).resolves.toMatchObject({
       audioUrl: 'https://audio.example.test/fresh.mp3',
     });
-    expect(generationMap.size).toBe(1);
+    expect(service._testGetGenerationMetadata!().vocabularyGenerationCount).toBe(1);
 
     oldGeneration.resolve(generated('https://audio.example.test/stale.mp3'));
     await expect(staleCaller).resolves.toMatchObject({
       audioUrl: 'https://audio.example.test/stale.mp3',
     });
-    expect(generationMap.size).toBe(0);
+    expect(service._testGetGenerationMetadata!().vocabularyGenerationCount).toBe(0);
     await expect(service.preparePronunciation(INPUT)).resolves.toMatchObject({
       audioUrl: 'https://audio.example.test/fresh.mp3',
       source: 'memory-cache',
@@ -671,16 +642,15 @@ describe('MobileTtsService', () => {
     const generation = deferred<unknown>();
     api.postJson.mockReturnValueOnce(generation.promise);
     const service = createMobileTtsService(api);
-    const generationMap = captureUserGenerationMap(service);
 
     const staleCaller = service.preparePronunciation(INPUT);
     await vi.waitFor(() => expect(api.postJson).toHaveBeenCalledTimes(1));
     service.clearUser(INPUT.userId);
-    expect(generationMap.get(INPUT.userId)).toBe(1);
+    expect(service._testGetGenerationMetadata!().userGenerationFor(INPUT.userId)).toBe(1);
 
     generation.resolve(generated('https://audio.example.test/stale-user.mp3'));
     await staleCaller;
-    expect(generationMap.size).toBe(0);
+    expect(service._testGetGenerationMetadata!().userGenerationCount).toBe(0);
 
     api.postJson.mockResolvedValueOnce(generated());
     await service.preparePronunciation(INPUT);
@@ -707,16 +677,15 @@ describe('MobileTtsService', () => {
     const generation = deferred<unknown>();
     api.postJson.mockReturnValueOnce(generation.promise);
     const service = createMobileTtsService(api);
-    const generationMap = captureUserGenerationMap(service);
 
     const staleCaller = service.preparePronunciation(INPUT);
     await vi.waitFor(() => expect(api.postJson).toHaveBeenCalledTimes(1));
     service.clearAll();
-    expect(generationMap.size).toBe(0);
+    expect(service._testGetGenerationMetadata!().userGenerationCount).toBe(0);
 
     generation.resolve(generated('https://audio.example.test/stale-global.mp3'));
     await staleCaller;
-    expect(generationMap.size).toBe(0);
+    expect(service._testGetGenerationMetadata!().userGenerationCount).toBe(0);
 
     api.postJson.mockResolvedValueOnce(generated());
     await service.preparePronunciation(INPUT);
