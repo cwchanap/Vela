@@ -11,6 +11,7 @@
   ],
   "scripts": {
     "build": "turbo build",
+    "compile": "turbo compile",
     "dev": "turbo dev --parallel",
     "dev:extension-test": "turbo run dev:extension-test --parallel --filter=./apps/vela --filter=./apps/vela-api --filter=./apps/vela-ext",
     "dev:vela-ext": "turbo run dev --filter=./apps/vela-ext",
