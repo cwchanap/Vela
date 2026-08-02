@@ -3,7 +3,7 @@
 **Linear:** HPA-210  
 **Parent:** HPA-194  
 **Milestone:** Mobile MVP — M1 iOS foundation spike  
-**Status:** Approved design
+**Status:** Approved in project discussion; draft PR pending repository review
 
 ## 1. Purpose
 
@@ -45,6 +45,7 @@ HPA-210 is the single milestone acceptance owner. The source issues are related 
 5. **Preserve subsystem ownership.** HPA-210 consumes existing auth, API, query, audio, lifecycle, and navigation interfaces. It does not bypass them with a milestone-only implementation.
 6. **Failures produce tracked work.** A failed or deferred criterion has reproduction evidence, severity, owner, target milestone, and a Linear issue.
 7. **No milestone pass by partial aggregation.** Strong automated coverage does not compensate for a missing physical exit criterion.
+8. **One canonical source per fact class.** Historical measurement records, the stable architecture record, and the final milestone verification record link to one another instead of copying the same policy or evidence into competing documents.
 
 ## 4. Repository Artifacts
 
@@ -68,6 +69,8 @@ This document records stable decisions that later mobile features must follow:
 
 It is not a timestamped test report. Subsequent implementation changes must update it when they change a recorded boundary.
 
+The existing `apps/vela-mobile/docs/ios-interaction-baseline.md` is not superseded or folded into this file. It remains the canonical detailed HPA-209 measurement and historical evidence record for the safe-area candidates, Simulator environments, navigation observations, and pending physical checks. The architecture record references that baseline as the measured rationale and extracts only the stable selected policy and reusable rules. It does not duplicate the baseline's numeric tables, screenshots, hashes, or environment rows.
+
 ### 4.2 Verification record
 
 Create `apps/vela-mobile/docs/m1-ios-foundation-verification.md`.
@@ -90,6 +93,10 @@ Use these top-level sections:
 ```
 
 The file is initially a complete schema and instruction set, not a pre-filled claim. A result row is added only after that environment and scenario has been run.
+
+The `Architecture Decisions` section is a concise tested-revision summary and pointer to `ios-foundation-architecture.md`, not a second copy of the decisions. It records the architecture document path and commit, the final HPA-208 audio conclusion, and any decision changed by the verification run.
+
+Existing HPA-209 Simulator rows and screenshots remain in `ios-interaction-baseline.md` and `docs/evidence/hpa-209/`; they are cross-referenced as historical evidence rather than migrated or copied. Because HPA-210 requires one final tested commit, those historical rows cannot by themselves satisfy a `GO`. The final HPA-210 record contains fresh closure rows for the load-bearing behavior on the final tested commit, while linking the earlier detailed measurements for rationale and comparison.
 
 ### 4.3 Evidence directory
 
@@ -117,24 +124,43 @@ The harness exposes explicit phases rather than silently skipping unsupported ch
 
 CI may run `--phase automated` on Linux. The milestone closure record must include a successful macOS `--phase ios-simulator` or `--phase all` run against the final tested commit.
 
-The harness returns nonzero on any failed command, missing expected artifact, detected sensitive marker, native launch failure, or incomplete generated manifest. It never converts an unsupported native phase into a passing result.
+The harness uses stable process exits and matching manifest outcomes:
+
+- exit `0`, outcome `passed` — every requested gate passed;
+- exit `2`, outcome `usage_error` — invalid CLI arguments or unsupported phase selection;
+- exit `3`, outcome `prerequisite_missing` — required host capability, tool, Simulator, signing/configuration input, or production mobile environment is unavailable;
+- exit `4`, outcome `gate_failed` — a test, build, scan, install, launch, or expected-artifact assertion failed;
+- exit `1`, outcome `harness_error` — an unexpected harness implementation or manifest-write failure.
+
+A missing prerequisite is never reported as a passing or failed product check. The manifest records the failed preflight without dumping command environments or sensitive values.
+
+### 4.5 Guidance synchronization
+
+HPA-210 also updates `CLAUDE.md` as a closeout artifact:
+
+- replace the stale statement that mobile PKCE, `state`, `nonce`, client-ID wiring, and `identity_provider=Google` are future M2 work with the implemented HPA-205 architecture and the remaining live acceptance gates;
+- keep the HPA-209 physical-device note while evidence is pending, but point it to HPA-210 as the consolidated closure owner;
+- after physical verification, replace the pending note with a concise result and links to the final architecture and verification records rather than silently deleting the historical context.
+
+`CLAUDE.md` remains developer guidance. It links to the canonical architecture and evidence documents instead of reproducing their full matrices.
 
 ## 5. Automated Verification Design
 
 ### 5.1 Cross-platform phase
 
-The automated phase runs from a clean checkout with a frozen lockfile and executes the established repository gates:
+The automated phase runs from a clean checkout with a frozen lockfile and invokes the established repository/package entry points:
 
-1. dependency installation;
-2. repository lint;
-3. repository type-checking;
-4. repository unit tests and configured coverage thresholds;
-5. mobile production asset build through the normal environment-validation path;
-6. production diagnostic exclusion scan;
-7. secret/token scan over committed mobile files and generated production assets;
-8. generation of a non-secret command/result manifest.
+1. `bun install --frozen-lockfile`;
+2. `bun run lint`;
+3. `bun run typecheck`;
+4. `bun run test`;
+5. `bun run --cwd apps/vela-mobile verify:production-diagnostics`;
+6. the HPA-210 secret/token scan over committed mobile files, generated production assets, selected native resources, and staged evidence;
+7. generation of a non-secret command/result manifest.
 
-The harness reuses existing scripts rather than reimplementing their assertions. It captures command name, exit status, start/end timestamps, tested commit, and relevant artifact paths. It does not capture command environments wholesale.
+`verify:production-diagnostics` is the authoritative production mobile asset and diagnostic-exclusion gate. It invokes the existing `build:ios:assets` package script and then `apps/vela-mobile/scripts/verify-production-diagnostics.mjs`. The HPA-210 harness calls this package script and does not copy, reinterpret, or maintain a second forbidden-token list.
+
+The harness captures command name, exit status, start/end timestamps, tested commit, and relevant artifact paths. It does not capture command environments wholesale.
 
 ### 5.2 Secret and token scan
 
@@ -165,23 +191,59 @@ Configuration identifiers that are intentionally public—Cognito pool IDs, publ
 
 A finding fails the phase until it is removed or explicitly classified as a verified false positive in the verification record with the matching bounded value class. Raw credential-like values are never copied into that explanation.
 
-### 5.3 Native Simulator launch phase
+### 5.3 Production mobile configuration prerequisite
+
+Every phase that produces production WebView assets preflights the complete build-time mobile configuration before invoking Quasar. The required variables are:
+
+- `VITE_MOBILE_API_URL`;
+- `VITE_COGNITO_USER_POOL_ID`;
+- `VITE_COGNITO_MOBILE_USER_POOL_CLIENT_ID`;
+- `VITE_COGNITO_OAUTH_DOMAIN`;
+- `VITE_AWS_REGION`.
+
+The values may come from `apps/vela-mobile/.env.production`, normally generated by `packages/cdk/scripts/inject-env.ts` after deployment outputs exist, or from explicit process environment values. The harness must use the same precedence and validation contract as `apps/vela-mobile/build/validate-mobile-api-url.ts`.
+
+The harness reports a missing or malformed contract as `prerequisite_missing` before the production build begins. It does not rely on the later Vite exception as the user-facing diagnosis.
+
+For the final HPA-210 Simulator and physical-device closure run:
+
+- the normal `validate-mobile-api-url` path must execute;
+- `MOBILE_SKIP_ENV_VALIDATION=true` is forbidden;
+- values must identify the deployed environment under test;
+- CI/example placeholders such as `example.invalid` cannot satisfy a `GO`.
+
+Compile-only CI may provide documented non-secret placeholders while still exercising the normal validation path. Such a run is marked `placeholder` and may support automated build confidence, but it is not closure evidence for authenticated or native behavior.
+
+The non-secret manifest records:
+
+- `mobileConfigSource`: `.env.production` or `process_env`;
+- `mobileConfigClass`: `deployed` or `placeholder`;
+- API origin;
+- AWS region;
+- OAuth domain;
+- whether public pool/client identifiers were present and internally consistent.
+
+It does not dump the complete environment or any credentials.
+
+### 5.4 Native Simulator launch phase
 
 The macOS phase:
 
-1. records `git rev-parse HEAD`, `xcodebuild -version`, `bun --version`, resolved Quasar/Capacitor/plugin versions, selected Simulator model, and Simulator iOS runtime;
-2. builds production WebView assets and synchronizes Capacitor;
-3. builds the `App` scheme from `App.xcworkspace` for an explicit Simulator destination;
-4. boots the selected Simulator when required;
-5. installs the built application bundle;
-6. launches the application by bundle identifier;
-7. asserts that launch succeeds and the process remains alive for the bounded smoke interval;
-8. captures bounded launch output and writes the environment/result manifest;
-9. terminates only the test-launched application process.
+1. preflights the complete production mobile configuration from §5.3;
+2. records `git rev-parse HEAD`, `xcodebuild -version`, `bun --version`, resolved Quasar/Capacitor/plugin versions, selected Simulator model, and Simulator iOS runtime;
+3. ensures the authoritative `verify:production-diagnostics` gate has passed for the same commit and production configuration;
+4. synchronizes Capacitor without replacing the verified WebView assets;
+5. builds the `App` scheme from `App.xcworkspace` for an explicit Simulator destination;
+6. boots the selected Simulator when required;
+7. installs the built application bundle;
+8. launches the application by bundle identifier;
+9. asserts that launch succeeds and the process remains alive for the bounded smoke interval;
+10. captures bounded launch output and writes the environment/result manifest;
+11. terminates only the test-launched application process.
 
 The native launch check proves project integrity, installation, and startup. It does not claim authenticated OAuth, TTS audibility, Japanese input, or navigation behavior.
 
-### 5.4 CI boundary
+### 5.5 CI boundary
 
 M1 does not add a permanent macOS native-test job solely to close HPA-210. The existing Linux mobile test job continues to run automated source and asset checks. A permanent macOS CI lane, native UI automation, signing automation, and TestFlight automation remain release-readiness work under HPA-194 Milestone 5.
 
@@ -198,6 +260,7 @@ Every environment table includes:
 - Xcode version;
 - app version/build number;
 - non-secret account alias;
+- production mobile configuration source and class;
 - scenario precondition;
 - observed result;
 - `PASS`, `FAIL`, or `BLOCKED` status;
@@ -304,7 +367,7 @@ Verify on a physical iPhone:
 15. saved scroll restoration on back and forward;
 16. portrait functionality and the documented landscape policy.
 
-The expected baseline remains native `ios.contentInset: "never"` with app CSS owning the headerless top safe area, fixed surfaces owning their appropriate insets, and app-owned chronological mobile navigation depth.
+The expected baseline remains native `ios.contentInset: "never"` with app CSS owning the headerless top safe area, fixed surfaces owning their appropriate insets, and app-owned chronological mobile navigation depth. `ios-interaction-baseline.md` remains the canonical detailed measurement record; the final HPA-210 rows verify the load-bearing behavior on the final tested commit and link back to that baseline.
 
 ### 6.5 Failure-state recovery
 
@@ -369,6 +432,7 @@ The final architecture document records these established boundaries.
 - CSS owns the headerless top safe area; fixed toolbar/footer and page content each own their defined edges exactly once.
 - App-owned chronological route depth drives visible back and native swipe history.
 - A fresh cold entry replaces at depth zero; a validated in-session entry participates in ordinary history.
+- `apps/vela-mobile/docs/ios-interaction-baseline.md` remains the detailed evidence source for why this policy was selected; `ios-foundation-architecture.md` is the canonical stable policy reference for future feature work.
 
 ### 7.6 Audio
 
@@ -381,6 +445,7 @@ The final architecture document records these established boundaries.
 
 - Native-only validation may use authenticated development diagnostic routes and pages.
 - Production builds compile out diagnostic entries, labels, routes, test IDs, and markers.
+- `apps/vela-mobile/scripts/verify-production-diagnostics.mjs`, invoked through `verify:production-diagnostics`, remains the single authoritative forbidden-token implementation.
 - Production artifact scanning is a merge and milestone gate.
 
 ## 8. Findings, Severity, and Follow-up Issues
@@ -416,6 +481,7 @@ The final decision is exactly `GO` or `NO-GO`.
 All of the following must be true on the final tested commit:
 
 - automated repository, production asset, diagnostics-exclusion, and secret-scan gates pass;
+- the production mobile configuration is classified as `deployed`, passes the normal build validator, and matches the environment exercised by the native matrices;
 - native Simulator build, install, and launch pass;
 - physical iPhone install and launch pass;
 - fresh Google sign-in and warm/cold callback return pass;
@@ -427,11 +493,12 @@ All of the following must be true on the final tested commit:
 - expected auth, network, and playback failures recover to a stable state;
 - no Critical finding remains;
 - every deferred Medium or Low risk has a Linear issue and target milestone;
-- the architecture record has no unresolved decision required to begin M2.
+- the architecture record has no unresolved decision required to begin M2;
+- `CLAUDE.md` no longer describes implemented M1 OAuth work as future M2 work and links the final closeout records.
 
 ### 9.2 NO-GO conditions
 
-Report `NO-GO` when any required row is unrun, blocked without an accepted pre-M2 gate, failed, or invalidated by a later code change; when a secret scan fails; or when the audio architecture conclusion is not selected.
+Report `NO-GO` when any required row is unrun, blocked without an accepted pre-M2 gate, failed, or invalidated by a later code change; when a secret scan fails; when the production mobile configuration is missing, placeholder-only, or mismatched with the tested deployment; or when the audio architecture conclusion is not selected.
 
 `NO-GO` is a useful milestone result. It names the minimum issues that must close before rerunning the decision. HPA-210 remains open until a later run produces a complete `GO`.
 
@@ -448,6 +515,8 @@ After final verification:
    - concise M1 evidence summary;
    - accepted architecture limitations;
    - recommended first M2 issues.
+5. Synchronize `CLAUDE.md` as defined in §4.5 and link it to the final records.
+6. Keep `ios-interaction-baseline.md` as the historical HPA-209 evidence record; add only a concise closeout link/result if needed rather than copying the HPA-210 matrix into it.
 
 For a `GO`, the recommended M2 start is the smallest end-to-end core review path: mobile Home/Review navigation, a real ten-card SRS session, rating and pronunciation behavior, then durable outbox and backend idempotency. Exact issue order is confirmed from current M2 ticket readiness at closeout time.
 
@@ -484,8 +553,13 @@ Selected because it automates repeatable source/build/launch evidence while pres
 - No unresolved implementation decision is required to write the implementation plan.
 - No required evidence row is pre-declared as passing.
 - Automated and manual evidence have distinct ownership.
+- Existing HPA-209 detailed measurements remain canonical historical evidence; the architecture and final verification records do not duplicate them.
+- Production mobile environment prerequisites, live-versus-placeholder classification, and normal validator execution are explicit.
+- Existing package scripts and the authoritative production diagnostic scanner are named and reused.
+- Harness prerequisite failures and product-gate failures have distinct exit/manifest semantics.
 - Secret-handling rules cover source, artifacts, logs, and screenshots without rejecting legitimate source field names.
 - Source-ticket state semantics and HPA-210 ownership are explicit.
 - GO/NO-GO conditions are deterministic.
 - Deferred risks require Linear issues.
+- `CLAUDE.md` synchronization is an explicit closeout requirement.
 - Scope remains limited to M1 verification and architecture closeout.
