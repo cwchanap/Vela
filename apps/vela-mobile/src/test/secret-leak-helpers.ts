@@ -1,40 +1,16 @@
 import { expect, vi } from 'vitest';
+import {
+  LOG_AND_DOM_SENTINELS,
+  NON_SCHEMA_STORAGE_SENTINELS,
+  SECRET_SENTINELS,
+} from '../../build/mobile-secret-policy';
 import { MOBILE_OAUTH_TRANSACTION_KEY } from '../auth/mobile-auth-contract';
 
 /**
- * Shared secret-leak regression helpers. The sentinel lists and assertions
- * live here so a single source of truth governs every mobile auth secret-leak
- * test (coordinator, gate, and boot). Add a new secret surface here once,
- * rather than duplicating it across three test files.
+ * Shared secret-leak regression helpers. The policy-owned sentinel lists are
+ * re-exported here so existing mobile auth tests share one source of truth.
  */
-
-export const SECRET_SENTINELS = [
-  'SECRET-access-token',
-  'SECRET-id-token',
-  'SECRET-refresh-token',
-  'SECRET-rotated-refresh-token',
-] as const;
-
-export const LOG_AND_DOM_SENTINELS = [
-  ...SECRET_SENTINELS,
-  'SECRET-authorization-url',
-  'SECRET-callback-code',
-  'SECRET-code-verifier',
-  'SECRET-nonce',
-  'SECRET-claim-email',
-  'Bearer SECRET-caller-authorization',
-  'https://evil.example/SECRET-rejected-path',
-] as const;
-
-export const NON_SCHEMA_STORAGE_SENTINELS = [
-  'SECRET-callback-code',
-  'SECRET-claim-email',
-  'SECRET-raw-request',
-  'SECRET-raw-response',
-  'SECRET-native-exception',
-  'Bearer SECRET-caller-authorization',
-  'https://evil.example/SECRET-rejected-path',
-] as const;
+export { LOG_AND_DOM_SENTINELS, NON_SCHEMA_STORAGE_SENTINELS, SECRET_SENTINELS };
 
 export function searchable(value: unknown): string {
   try {
