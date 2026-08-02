@@ -19,7 +19,7 @@ An implementation PR may merge before native acceptance when its ticket explicit
 
 ## 2. Design principles
 
-1. **One tested commit.** Every final row refers to one exact repository commit. A behavior-affecting fix invalidates and reruns the affected rows.
+1. **One tested behavior commit.** Every executable matrix row and machine-generated manifest pins one exact `testedBehaviorCommit`: the commit containing the app, native project, configuration, dependencies, and verification tooling that produced the observed behavior. A later commit containing only documentation, manifests, or evidence references does not invalidate those rows. Any change to executable source, build/native configuration, dependency locks, generated assets, or verification tooling creates a new behavior commit and reruns affected gates. The resulting documentation/evidence commit is linked from HPA-210 and HPA-194 through normal Git history; it is not self-embedded as a second manifest SHA.
 2. **Observation, not inference.** Unit tests, media events, or Simulator behavior cannot be reported as physical speaker audibility, Japanese IME correctness, or native gesture success.
 3. **No pass by partial aggregation.** Strong automated coverage does not compensate for a missing physical exit criterion.
 4. **Two native build classes.** Production product behavior and development-only diagnostic behavior are verified separately on the same commit and deployed backend.
@@ -83,11 +83,13 @@ apps/vela-mobile/docs/evidence/hpa-210/<full-commit-sha>/<run-id>/
 
 `<run-id>` is `<UTC timestamp>-<phase-or-matrix-class>`, such as `20260803T021500Z-production-smoke`. Runs never overwrite one another, and no mutable `latest` symlink is used. The verification record identifies the selected final run IDs while preserving earlier `NO-GO` runs.
 
-Each run directory contains `manifest.json` and may contain sanitized screenshots, bounded logs, command output, and hashes for larger local-only artifacts.
+Each run directory commits `manifest.json` and small bounded text evidence only. Screenshots, videos, raw logs, archives, and other growth-prone artifacts remain local or are attached to the relevant PR/Linear issue; the manifest records their storage reference, byte size, media type, and SHA-256 hash. A binary artifact is committed only when it is both small and load-bearing for future review. This keeps repeated `NO-GO` runs auditable without unbounded repository growth.
+
+The existing flat `docs/evidence/hpa-209/*.png` layout is preserved as historical HPA-209 evidence and is not reorganized into the HPA-210 run structure.
 
 The manifest records:
 
-- schema version, run ID, commit, phase, matrix class, timestamps, outcome, and exit code;
+- schema version, run ID, `testedBehaviorCommit`, phase, matrix class, timestamps, outcome, and exit code;
 - non-secret host, Xcode, iOS, Bun, Quasar, Capacitor, and plugin versions;
 - configuration source/class and public origins;
 - non-secret device or Simulator alias/model;
@@ -134,27 +136,29 @@ Missing tools, configuration, Simulator, device, trust, Developer Mode, signing 
 
 ### 5.1 Final monorepo freeze gates
 
-The final automated phase runs:
+The implementation adds a root `compile` script (`turbo compile`) and a matching Turbo task so workspaces that expose `compile` participate in the freeze gate. The final automated phase runs:
 
 1. `bun install --frozen-lockfile`
 2. `bun run lint`
 3. `bun run typecheck`
-4. `bun run test`
-5. `bun run --cwd apps/vela-mobile verify:production-diagnostics`
-6. HPA-210 secret scanning
-7. manifest generation
+4. `bun run compile`
+5. `bun run build`
+6. `bun run test`
+7. `bun run --cwd apps/vela-mobile verify:production-diagnostics`
+8. HPA-210 secret scanning
+9. manifest generation
 
-The root gates are intentional: HPA-210 must not declare the shared frozen commit ready while another workspace is red. Focused mobile/common/API/CDK commands are encouraged during implementation, but do not replace fresh root gates. Because Turbo skips packages without a requested script, the manifest records actual tasks executed rather than implying every package has its own typecheck target.
+The root gates are intentional: HPA-210 must not declare the shared frozen commit ready while another workspace is red under its applicable repository contract. `typecheck` covers workspaces that define that task, `compile` covers API/extension-style explicit compiler tasks, and `build` covers build-time checkers and package compilation. `lint` still applies only where a workspace defines lint; the manifest records every actual Turbo task and skipped workspace rather than claiming nonexistent lint coverage. Focused mobile/common/API/CDK commands are encouraged during implementation, but do not replace these fresh freeze gates.
 
-`verify:production-diagnostics` is authoritative for production mobile assets and diagnostic exclusion. It invokes `build:ios:assets` and `apps/vela-mobile/scripts/verify-production-diagnostics.mjs`. The HPA-210 harness calls that package script and never forks its forbidden-token list.
+`verify:production-diagnostics` is authoritative for production mobile assets and diagnostic exclusion. It invokes `build:ios:assets` and `apps/vela-mobile/scripts/verify-production-diagnostics.mjs`. The HPA-210 harness calls that package script and never forks its forbidden-token list. HPA-210 widens the existing scanner from JavaScript-only traversal to an explicit text-artifact allowlist covering `.js`, `.mjs`, `.cjs`, `.html`, `.css`, `.json`, `.map`, `.txt`, `.svg`, and `.xml`; binary files remain skipped. Scanner tests place forbidden tokens in each supported artifact class and prove that source maps and top-level HTML are not blind spots.
 
 ### 5.2 Secret scan ownership
 
 Create one pure policy module:
 
-`apps/vela-mobile/src/security/mobile-secret-policy.ts`
+`apps/vela-mobile/build/mobile-secret-policy.ts`
 
-It contains sentinel classes, credential-like patterns, public-identifier allowlists, and bounded false-positive classifications without DOM or Vitest dependencies.
+It contains sentinel classes, credential-like patterns, public-identifier allowlists, and bounded false-positive classifications without DOM or Vitest dependencies. `build/` is used because the module is build/verification infrastructure shared by Bun scripts and tests rather than browser application code.
 
 Create the executable scanner:
 
@@ -164,6 +168,8 @@ It exports its scan function for tests and is invoked by `verify-m1-foundation.m
 
 - `secret-leak-helpers.ts` remains the runtime log/DOM/storage assertion adapter.
 - `scan-mobile-secrets.mjs` owns tracked-source, generated-artifact, native-resource, captured-log, and evidence-file inspection.
+- the mobile lint script is extended to include `scripts/**/*.{mjs,js,ts}` so both GO-gating scripts are linted; the ESLint configuration supplies the required Node globals.
+- tests import the same pure policy and cover positive findings, public-identifier allowlists, bounded false positives, and scanner path/type handling.
 
 The scan checks for embedded credentials, unsafe logging/rendering, bearer values, JWT-shaped values outside mock fixtures, provider/AWS keys, private keys, token material outside the approved storage boundary, full presigned URLs, and known leakage sentinels. Public pool/client IDs, regions, callback schemes, API origins, and non-secret provider/model identifiers remain allowed.
 
@@ -210,7 +216,7 @@ The team may come from an explicit local input, untracked xcconfig, or Xcode use
 
 ### 5.5 Verified WebView asset immutability
 
-After `verify:production-diagnostics` produces and scans `src-capacitor/www`, no Quasar build may run before the corresponding production smoke.
+After `verify:production-diagnostics` produces and scans `src-capacitor/www`, no Quasar build may run before the corresponding production smoke. In particular, `bun run build:ios`, `bun run build:ios:ide`, `bun run build:ios:assets`, and a second `verify:production-diagnostics` invocation are forbidden after the selected artifact hash is recorded because they rebuild or replace `www`.
 
 When an explicit sync is needed, use:
 
@@ -326,7 +332,8 @@ Milestone failures include indefinite loading, protected-content flash, cross-us
 ## 8. Architecture boundaries to record from the tested commit
 
 - Dedicated public mobile Cognito client; authorization code plus PKCE; system browser; app-owned warm/cold/late/malformed/duplicate callback handling.
-- Only the refresh token needed for restoration in device-bound non-synchronizing Keychain; access/ID tokens memory-only; installation marker prevents stale reinstall restoration.
+- Only the refresh token needed for restoration is stored in device-bound, non-synchronizing Keychain; access and ID tokens remain memory-only; the installation marker prevents stale reinstall restoration.
+- The transient OAuth transaction (`state`, `codeVerifier`, `nonce`, `createdAt`) is stored as one JSON value in `@capacitor/preferences` backed by iOS UserDefaults, not Keychain. It contains no access, ID, or refresh token. The store removes the prior value before replacement, enforces the 10-minute TTL, deletes corrupt/expired records, and the coordinator clears it after consumption, cancellation, or terminal cleanup. Plaintext UserDefaults is accepted for this short-lived single-use correlation/verifier material because compromise does not expose a reusable authenticated session; the architecture record names the backup/plaintext limitation and verification confirms bounded cleanup.
 - Auth initialization gates protected rendering; sign-out and terminal recovery clear retained credentials and scoped feature state.
 - Absolute validated native API origin; exact Capacitor CORS, no wildcard; auth coordinator owns bearer injection and bounded single-flight unauthorized recovery.
 - User-scoped query keys; cancel/remove prior-user data without global cache clearing.
@@ -355,7 +362,7 @@ Prose-only deferral is forbidden.
 
 ### 10.1 GO requires
 
-- fresh root monorepo lint, typecheck, tests, production assets, diagnostic exclusion, and secret scan;
+- fresh root monorepo lint, typecheck, compile, build, tests, production assets, diagnostic exclusion, and secret scan;
 - deployed production config through the normal validator;
 - production-smoke and diagnostic-observation classes on the same commit/backend;
 - Simulator build/install/launch;
@@ -387,9 +394,10 @@ After verification:
 4. Update HPA-194 with `GO`/`NO-GO`, commit/device summary, M1 evidence, limitations, and recommended first M2 issues.
 5. Synchronize `CLAUDE.md`.
 6. Preserve `ios-interaction-baseline.md` as historical evidence and add only a closeout link/result if useful.
-7. Preserve earlier evidence run directories.
-8. Finalize the architecture record from the tested commit and selected audio result.
-9. Update this design status to reflect completed repository review before merge.
+7. Preserve earlier evidence run directories and external artifact hashes.
+8. Finalize the architecture record from `testedBehaviorCommit` and the selected audio result.
+9. Commit the verification/architecture/`CLAUDE.md` closeout as documentation-only changes, link the resulting Git commit from HPA-210 and HPA-194, and state explicitly that it does not invalidate executable rows pinned to `testedBehaviorCommit`.
+10. As the final pre-merge checklist action, update this design status to reflect completed repository review.
 
 For `GO`, begin M2 with the smallest end-to-end review path: Home/Review navigation, ten-card SRS, rating/pronunciation, then durable outbox and backend idempotency.
 
@@ -411,13 +419,17 @@ For `GO`, begin M2 with the smallest end-to-end review path: Home/Review navigat
 - two build classes are required on one commit/backend;
 - Simulator evidence cannot replace physical acceptance;
 - signing/device readiness has explicit exit-3 preflight;
-- final root monorepo gates are intentional;
-- secret policy has one source of truth;
-- evidence/manifests are append-only and versioned;
+- final root lint, typecheck, compile, build, and test gates are intentional and their actual workspace coverage is recorded;
+- production diagnostic scanning covers all emitted text-artifact classes rather than JavaScript only;
+- OAuth transaction storage, TTL, plaintext/UserDefaults rationale, and cleanup ownership are explicit;
+- secret policy has one source of truth and GO-gating scripts are linted;
+- manifests are append-only and versioned while growth-prone binary evidence is externalized by hash;
+- manifests pin `testedBehaviorCommit`, and later documentation/evidence-only commits are explicitly non-invalidating;
 - verified `www` assets are hashed across `cap sync ios`;
 - HPA-209 measurements remain canonical history;
 - production config and placeholder classification are explicit;
 - existing production diagnostic scripts are reused;
 - High reclassification is limited to the silent-mode audio fork;
-- architecture and `CLAUDE.md` are finalized from the tested commit;
-- scope remains M1 verification and architecture closeout.
+- architecture and `CLAUDE.md` are finalized from `testedBehaviorCommit`, and their resulting documentation commit is linked externally;
+- scope remains M1 verification and architecture closeout;
+- updating the design status from repository review to approved is the final pre-merge checklist item.
