@@ -38,6 +38,10 @@
         ".env.local.prod.capacitor"
       ]
     },
+    "compile": {
+      "dependsOn": ["^build"],
+      "outputs": []
+    },
     "zip": {
       "dependsOn": ["^build"],
       "outputs": [".output/*.zip"]
