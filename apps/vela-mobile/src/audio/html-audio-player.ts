@@ -14,6 +14,12 @@ type HtmlAudioElement = {
   src: string;
   preload: string;
   currentTime: number;
+  // The HTMLMediaElement `ended` IDL attribute is true once playback has
+  // reached the end of the resource. Browsers fire `pause` before `ended` at
+  // natural completion (HTML spec: timeupdate -> pause -> ended), and `ended`
+  // is already true when the `pause` event fires, so the pause listener uses
+  // this to distinguish a natural-end pause from an external interruption.
+  ended: boolean;
   play(): Promise<void> | void;
   pause(): void;
   addEventListener(type: AudioEvent, listener: AudioListener): void;
@@ -58,7 +64,14 @@ export class HtmlAudioPlayer implements MobileAudioPlayer {
       listeners: {
         ended: () => this.resolve(playback, { kind: 'ended' }),
         error: () => this.reject(playback, new MobileAudioError('media_unavailable')),
-        pause: () => this.resolve(playback, { kind: 'interrupted', reason: 'external' }),
+        pause: () => {
+          // Browsers fire `pause` before `ended` at natural completion. The
+          // `ended` IDL attribute is already true by then, so defer to the
+          // ended listener instead of misreporting a natural end as an
+          // external interruption.
+          if (playback.audio?.ended) return;
+          this.resolve(playback, { kind: 'interrupted', reason: 'external' });
+        },
       },
     };
 

@@ -320,6 +320,62 @@ describe('MobileTtsService', () => {
     expect(api.postJson).toHaveBeenCalledTimes(1);
   });
 
+  it('does not cache under the stale settings key when backend effective settings changed between GET and POST', async () => {
+    // Reproduces the race: the client reads settings A (openai/alloy), derives
+    // the cache key from A, then the backend re-reads settings during POST and
+    // generates with B (openai/echo). The response is still usable, but it must
+    // not be cached under the A-derived key, otherwise a later A-identity
+    // request would hit the cache and play echo-voiced audio as if it were
+    // alloy. A second call with the same A settings must therefore miss the
+    // memory cache and re-generate instead of returning source 'memory-cache'.
+    api.postJson.mockResolvedValueOnce({
+      audioUrl: HTTPS_AUDIO,
+      cached: false,
+      effectiveSettings: { provider: 'openai', voiceId: 'echo', model: 'tts-1' },
+    });
+    api.postJson.mockResolvedValueOnce(generated(HTTPS_AUDIO, false));
+    const service = createMobileTtsService(api);
+
+    const first = await service.preparePronunciation(INPUT);
+    expect(first).toMatchObject({ audioUrl: HTTPS_AUDIO, source: 'generated' });
+
+    const second = await service.preparePronunciation(INPUT);
+    expect(second).toMatchObject({ source: 'generated' });
+    expect(api.postJson).toHaveBeenCalledTimes(2);
+  });
+
+  it('caches normally when backend effective settings match the GET snapshot', async () => {
+    api.postJson.mockResolvedValueOnce({
+      audioUrl: HTTPS_AUDIO,
+      cached: false,
+      effectiveSettings: {
+        provider: CONFIGURED_SETTINGS.provider,
+        voiceId: CONFIGURED_SETTINGS.voiceId,
+        model: CONFIGURED_SETTINGS.model,
+      },
+    });
+    const service = createMobileTtsService(api);
+
+    const first = await service.preparePronunciation(INPUT);
+    expect(first).toMatchObject({ source: 'generated' });
+
+    const second = await service.preparePronunciation(INPUT);
+    expect(second).toMatchObject({ source: 'memory-cache' });
+    expect(api.postJson).toHaveBeenCalledTimes(1);
+  });
+
+  it('caches normally when the backend omits effective settings (older deployment)', async () => {
+    api.postJson.mockResolvedValueOnce(generated(HTTPS_AUDIO, false));
+    const service = createMobileTtsService(api);
+
+    const first = await service.preparePronunciation(INPUT);
+    expect(first).toMatchObject({ source: 'generated' });
+
+    const second = await service.preparePronunciation(INPUT);
+    expect(second).toMatchObject({ source: 'memory-cache' });
+    expect(api.postJson).toHaveBeenCalledTimes(1);
+  });
+
   it('uses distinct keys when user, vocabulary, provider, voice, or model changes', async () => {
     const service = createMobileTtsService(api);
     const settings = [

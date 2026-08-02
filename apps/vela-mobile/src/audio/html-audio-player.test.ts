@@ -25,6 +25,10 @@ class FakeAudioElement {
   pauseCalls = 0;
   playCalls = 0;
   crossOriginAssignments = 0;
+  // Mirrors HTMLMediaElement.ended: tests set this true to reproduce the
+  // browser's natural-completion state, where `pause` fires before `ended`
+  // while `ended` is already true.
+  ended = false;
   readonly operations: string[] = [];
 
   constructor(
@@ -274,6 +278,22 @@ describe('HtmlAudioPlayer', () => {
     const handle = player.play('https://audio.example.test/ended.mp3');
     const element = factory.elementFor('https://audio.example.test/ended.mp3');
 
+    element.dispatch('ended');
+
+    await expect(handle.finished).resolves.toEqual({ kind: 'ended' });
+    expect(element.listenerCount()).toBe(0);
+  });
+
+  it('reports natural completion as ended when the browser fires pause before ended', async () => {
+    // Reproduces the real HTML media event order at natural completion:
+    // `ended` is already true when `pause` fires, then `ended` fires. Without
+    // the `ended` guard the pause listener would settle as an external
+    // interruption before `ended` could report successful completion.
+    const handle = player.play('https://audio.example.test/natural-end.mp3');
+    const element = factory.elementFor('https://audio.example.test/natural-end.mp3');
+
+    element.ended = true;
+    element.dispatch('pause');
     element.dispatch('ended');
 
     await expect(handle.finished).resolves.toEqual({ kind: 'ended' });
