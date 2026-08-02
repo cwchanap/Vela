@@ -32,7 +32,34 @@ type TtsLogCategory =
  * `error.message` (providers embed the full upstream response body in it), the
  * user ID, user-scoped S3 object keys (which embed the userId), or bucket
  * names. Only the error class name and an operation category are emitted.
+ *
+ * `error.name` is writable and not trusted: third-party or deliberately
+ * constructed errors can place arbitrary content (response bodies, secrets,
+ * object keys) in it. Normalize through a finite allowlist and map anything
+ * unknown to a fixed value.
  */
+const SAFE_ERROR_NAMES = new Set([
+  'Error',
+  'TypeError',
+  'AbortError',
+  'TimeoutError',
+  'NotFound',
+  'NoSuchKey',
+]);
+
+function extractErrorName(error: unknown): string {
+  if (error instanceof Error) return error.name;
+  if (
+    typeof error === 'object' &&
+    error !== null &&
+    'name' in error &&
+    typeof (error as { name: unknown }).name === 'string'
+  ) {
+    return (error as { name: string }).name;
+  }
+  return 'UnknownError';
+}
+
 function sanitizeError(
   error: unknown,
   category: TtsLogCategory,
@@ -41,15 +68,8 @@ function sanitizeError(
   errorName: string;
   category: TtsLogCategory;
 } {
-  const errorName =
-    error instanceof Error
-      ? error.name
-      : typeof error === 'object' &&
-          error !== null &&
-          'name' in error &&
-          typeof (error as { name: unknown }).name === 'string'
-        ? (error as { name: string }).name
-        : 'UnknownError';
+  const rawName = extractErrorName(error);
+  const errorName = SAFE_ERROR_NAMES.has(rawName) ? rawName : 'UnknownError';
   return { operation: category, errorName, category };
 }
 
