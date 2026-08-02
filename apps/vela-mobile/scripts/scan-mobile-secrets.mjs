@@ -1,10 +1,15 @@
 import { mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises';
-import { dirname, extname, relative, resolve } from 'node:path';
+import { dirname, extname, isAbsolute, relative, resolve, sep } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { TextDecoder } from 'node:util';
 import { scanMobileSecretText } from '../build/mobile-secret-policy.ts';
 import { PRODUCTION_TEXT_ARTIFACT_EXTENSIONS } from './verify-production-diagnostics.mjs';
 
 const DEFAULT_EXCLUSIONS = ['node_modules', 'DerivedData', 'coverage', '.git'];
 const MAX_SKIPPED_RECORDS = 1_000;
+const MOBILE_SECRET_POLICY_SOURCE_PATH = fileURLToPath(
+  new URL('../build/mobile-secret-policy.ts', import.meta.url),
+);
 
 export const MOBILE_SECRET_TEXT_ARTIFACT_EXTENSIONS = new Set([
   ...PRODUCTION_TEXT_ARTIFACT_EXTENSIONS,
@@ -20,6 +25,45 @@ export const MOBILE_SECRET_TEXT_ARTIFACT_EXTENSIONS = new Set([
 
 function relativePath(root, path) {
   return relative(root, path).replaceAll('\\', '/');
+}
+
+function isAncestorPath(ancestor, path) {
+  const difference = relative(ancestor, path);
+  return (
+    difference === '' ||
+    (difference !== '..' && !difference.startsWith(`..${sep}`) && !isAbsolute(difference))
+  );
+}
+
+function commonAncestor(paths) {
+  let ancestor = paths[0];
+  for (const path of paths.slice(1)) {
+    while (!isAncestorPath(ancestor, path)) {
+      const parent = dirname(ancestor);
+      if (parent === ancestor) return ancestor;
+      ancestor = parent;
+    }
+  }
+  return ancestor;
+}
+
+function isBinaryContent(bytes) {
+  if (bytes.includes(0)) return true;
+
+  let controlBytes = 0;
+  for (const byte of bytes) {
+    if ((byte >= 1 && byte <= 8) || (byte >= 14 && byte <= 31) || byte === 127) {
+      controlBytes += 1;
+    }
+  }
+  if (bytes.length > 0 && controlBytes / bytes.length > 0.01) return true;
+
+  try {
+    new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+    return false;
+  } catch {
+    return true;
+  }
 }
 
 function addSkipped(skipped, record) {
@@ -63,8 +107,10 @@ export async function scanMobileSecretRoots({
   const exclusionNames = new Set(exclusions);
   const findings = [];
   const skipped = [];
+  const absoluteRoots = [...new Set(roots.map((candidate) => resolve(candidate)))];
+  const repositoryBase = commonAncestor(absoluteRoots);
 
-  for (const root of [...new Set(roots.map((candidate) => resolve(candidate)))]) {
+  for (const root of absoluteRoots) {
     const rootStat = await stat(root);
     if (!rootStat.isDirectory()) {
       throw new Error(`Mobile secret scan root is not a directory: ${root}`);
@@ -76,11 +122,11 @@ export async function scanMobileSecretRoots({
 
       for (const entry of entries) {
         const path = resolve(directory, entry.name);
-        const pathFromRoot = relativePath(root, path);
+        const pathFromRepository = relativePath(repositoryBase, path);
 
         if (entry.isDirectory()) {
           if (exclusionNames.has(entry.name)) {
-            addSkipped(skipped, { path: pathFromRoot, reason: 'excluded_directory' });
+            addSkipped(skipped, { path: pathFromRepository, reason: 'excluded_directory' });
             continue;
           }
           await scanDirectory(path);
@@ -90,18 +136,30 @@ export async function scanMobileSecretRoots({
         if (!entry.isFile()) continue;
 
         if (!MOBILE_SECRET_TEXT_ARTIFACT_EXTENSIONS.has(extname(entry.name).toLowerCase())) {
-          addSkipped(skipped, { path: pathFromRoot, reason: 'unsupported_extension' });
+          addSkipped(skipped, { path: pathFromRepository, reason: 'unsupported_extension' });
           continue;
         }
 
         const fileStat = await stat(path);
         if (fileStat.size > maxTextBytes) {
-          addSkipped(skipped, { path: pathFromRoot, reason: 'max_text_bytes' });
+          addSkipped(skipped, { path: pathFromRepository, reason: 'max_text_bytes' });
           continue;
         }
 
-        const text = await readFile(path, 'utf8');
-        findings.push(...scanMobileSecretText({ path: pathFromRoot, text }));
+        const bytes = await readFile(path);
+        if (isBinaryContent(bytes)) {
+          addSkipped(skipped, { path: pathFromRepository, reason: 'binary_content' });
+          continue;
+        }
+
+        const text = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+        findings.push(
+          ...scanMobileSecretText({
+            path: pathFromRepository,
+            text,
+            allowPolicySentinelLiterals: path === MOBILE_SECRET_POLICY_SOURCE_PATH,
+          }),
+        );
       }
     }
 

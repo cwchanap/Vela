@@ -183,4 +183,59 @@ describe('scanMobileSecretText', () => {
       }),
     ).toEqual([]);
   });
+
+  it('keeps opaque credential values that merely contain a fixture host fragment', () => {
+    const bearer = 'live-example.invalid-token-123456';
+    const providerKey = 'sk-live-example.invalid-abcdefghijklmno';
+    const findings = scanMobileSecretText({
+      path: 'credential.test.mjs',
+      text: [`Authorization: Bearer ${bearer}`, `OPENAI_API_KEY=${providerKey}`].join('\n'),
+    });
+
+    expect(findings.map(({ ruleId }) => ruleId)).toEqual(['bearer_value', 'provider_key']);
+    expect(JSON.stringify(findings)).not.toContain(bearer);
+    expect(JSON.stringify(findings)).not.toContain(providerKey);
+  });
+
+  it('does not let an allowed presigned fixture hide overlapping credential findings', () => {
+    const jwt = [
+      'eyJhbGciOiJIUzI1NiJ9',
+      'eyJzdWIiOiIxMjM0NTY3ODkwIn0',
+      'signature123456',
+    ].join('.');
+    const providerKey = ['sk', 'live', 'abcdefghijklmno'].join('-');
+    const findings = scanMobileSecretText({
+      path: 'fixture.test.mjs',
+      text:
+        `https://bucket.example.invalid/audio.mp3?X-Amz-Credential=${jwt}` +
+        `&X-Amz-Signature=fixture&OPENAI_API_KEY=${providerKey}`,
+    });
+
+    expect(findings.map(({ ruleId }) => ruleId)).toEqual(['jwt_value', 'provider_key']);
+    expect(JSON.stringify(findings)).not.toContain(jwt);
+    expect(JSON.stringify(findings)).not.toContain(providerKey);
+  });
+
+  it('requires an explicit policy-literal exemption instead of trusting a matching basename', () => {
+    const text = 'The callback contained SECRET-callback-code.';
+
+    expect(
+      scanMobileSecretText({
+        path: 'fixtures/mobile-secret-policy.ts',
+        text,
+      }),
+    ).toEqual([
+      expect.objectContaining({
+        ruleId: 'secret_sentinel',
+        valueClass: 'known_secret_sentinel',
+      }),
+    ]);
+    expect(
+      scanMobileSecretText({
+        path: 'apps/vela-mobile/build/mobile-secret-policy.ts',
+        text,
+        allowPolicySentinelLiterals: true,
+      }),
+    ).toEqual([]);
+  });
 });

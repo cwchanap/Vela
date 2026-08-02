@@ -17,6 +17,12 @@ export type MobileSecretFinding = {
   fingerprint: string;
 };
 
+export type MobileSecretScanInput = {
+  path: string;
+  text: string;
+  allowPolicySentinelLiterals?: boolean;
+};
+
 export const SECRET_SENTINELS = [
   'SECRET-access-token',
   'SECRET-id-token',
@@ -119,7 +125,7 @@ function candidate(
 
 function addPatternCandidates(
   candidates: Candidate[],
-  input: { path: string; text: string },
+  input: MobileSecretScanInput,
   pattern: RegExp,
   ruleId: MobileSecretRuleId,
   valueClass: string,
@@ -146,22 +152,35 @@ function isTestFixturePath(path: string): boolean {
   return /(?:^|[/\\])[^/\\]+\.(?:test|spec)\.[^/\\]+$/u.test(path);
 }
 
-function isPolicyModulePath(path: string): boolean {
-  return /(?:^|[/\\])mobile-secret-policy\.ts$/u.test(path);
-}
-
 function isJavaScriptTemplatePlaceholder(rawValue: string): boolean {
   return /^\$\{[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*\}?$/u.test(rawValue);
 }
 
-export function isMobileSecretFixtureValue(rawValue: string): boolean {
-  return (
-    TEST_FIXTURE_SECRET_VALUES.has(rawValue) ||
-    TEST_FIXTURE_VALUE_SUFFIXES.some((suffix) => rawValue.includes(suffix))
-  );
+function isTestFixtureUrl(rawValue: string): boolean {
+  try {
+    const url = new URL(rawValue);
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') return false;
+
+    const hostname = url.hostname.toLowerCase();
+    return TEST_FIXTURE_VALUE_SUFFIXES.some((suffix) => {
+      const fixtureHost = suffix.replace(/^\./u, '').toLowerCase();
+      return hostname === fixtureHost || hostname.endsWith(`.${fixtureHost}`);
+    });
+  } catch {
+    return false;
+  }
 }
 
-export function scanMobileSecretText(input: { path: string; text: string }): MobileSecretFinding[] {
+export function isMobileSecretFixtureValue(rawValue: string): boolean {
+  return TEST_FIXTURE_SECRET_VALUES.has(rawValue) || isTestFixtureUrl(rawValue);
+}
+
+function isAllowedTestFixtureCandidate(candidate: Candidate): boolean {
+  if (TEST_FIXTURE_SECRET_VALUES.has(candidate.rawValue)) return true;
+  return candidate.finding.ruleId === 'presigned_url' && isTestFixtureUrl(candidate.rawValue);
+}
+
+export function scanMobileSecretText(input: MobileSecretScanInput): MobileSecretFinding[] {
   const candidates: Candidate[] = [];
 
   addPatternCandidates(
@@ -230,13 +249,14 @@ export function scanMobileSecretText(input: { path: string; text: string }): Mob
   }
 
   const findings = candidates
-    .sort((left, right) => left.start - right.start || left.priority - right.priority)
-    .filter((current, index, sorted) => !sorted.slice(0, index).some((prior) => overlaps(prior, current)))
     .filter((current) => !isJavaScriptTemplatePlaceholder(current.rawValue))
-    .filter((current) => {
-      if (isPolicyModulePath(input.path) && current.finding.ruleId === 'secret_sentinel') return false;
-      return !isTestFixturePath(input.path) || !isMobileSecretFixtureValue(current.rawValue);
-    });
+    .filter(
+      (current) =>
+        !(input.allowPolicySentinelLiterals && current.finding.ruleId === 'secret_sentinel'),
+    )
+    .filter((current) => !isTestFixturePath(input.path) || !isAllowedTestFixtureCandidate(current))
+    .sort((left, right) => left.start - right.start || left.priority - right.priority)
+    .filter((current, index, sorted) => !sorted.slice(0, index).some((prior) => overlaps(prior, current)));
 
   return findings.map(({ finding: result }) => result);
 }

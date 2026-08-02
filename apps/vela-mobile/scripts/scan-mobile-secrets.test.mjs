@@ -108,6 +108,55 @@ describe('scanMobileSecretRoots', () => {
     expect(JSON.stringify(result)).not.toContain(skippedSecret);
   });
 
+  it('skips binary content even when the extension is supported text', async () => {
+    const root = await createTemporaryRoot();
+    await writeFile(
+      join(root, 'capture.log'),
+      Buffer.concat([
+        Buffer.from([0, 255, 16]),
+        Buffer.from('Authorization: Bearer SECRET-access-token'),
+      ]),
+    );
+
+    const result = await scanMobileSecretRoots({ roots: [root], exclusions: [] });
+
+    expect(result.findings).toEqual([]);
+    expect(result.skipped).toEqual([
+      expect.objectContaining({ path: 'capture.log', reason: 'binary_content' }),
+    ]);
+    expect(JSON.stringify(result)).not.toContain('SECRET-access-token');
+  });
+
+  it('uses a shared base path to distinguish equivalent files across repeatable roots', async () => {
+    const root = await createTemporaryRoot();
+    const sourceRoot = join(root, 'source');
+    const artifactRoot = join(root, 'artifacts');
+    await Promise.all([
+      mkdir(join(sourceRoot, 'nested'), { recursive: true }),
+      mkdir(join(artifactRoot, 'nested'), { recursive: true }),
+    ]);
+    await Promise.all([
+      writeFile(join(sourceRoot, 'nested', 'captured.log'), 'Authorization: Bearer SECRET-access-token'),
+      writeFile(join(artifactRoot, 'nested', 'captured.log'), 'Authorization: Bearer SECRET-access-token'),
+      writeFile(join(sourceRoot, 'nested', 'image.png'), Buffer.from([0])),
+      writeFile(join(artifactRoot, 'nested', 'image.png'), Buffer.from([0])),
+    ]);
+
+    const result = await scanMobileSecretRoots({
+      roots: [sourceRoot, artifactRoot],
+      exclusions: [],
+    });
+
+    expect(result.findings.map(({ path }) => path)).toEqual([
+      'artifacts/nested/captured.log',
+      'source/nested/captured.log',
+    ]);
+    expect(result.skipped.map(({ path }) => path)).toEqual([
+      'artifacts/nested/image.png',
+      'source/nested/image.png',
+    ]);
+  });
+
   it('allows only explicit fixture values in test files', async () => {
     const root = await createTemporaryRoot();
     const realBearer = ['live', 'access', 'token1234567890'].join('-');
