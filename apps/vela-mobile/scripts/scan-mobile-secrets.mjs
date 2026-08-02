@@ -1,3 +1,4 @@
+import { existsSync } from 'node:fs';
 import { mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { dirname, extname, isAbsolute, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -10,6 +11,7 @@ const MAX_SKIPPED_RECORDS = 1_000;
 const MOBILE_SECRET_POLICY_SOURCE_PATH = fileURLToPath(
   new URL('../build/mobile-secret-policy.ts', import.meta.url),
 );
+const REPOSITORY_ROOT = fileURLToPath(new URL('../../..', import.meta.url));
 
 export const MOBILE_SECRET_TEXT_ARTIFACT_EXTENSIONS = new Set([
   ...PRODUCTION_TEXT_ARTIFACT_EXTENSIONS,
@@ -22,6 +24,28 @@ export const MOBILE_SECRET_TEXT_ARTIFACT_EXTENSIONS = new Set([
   '.yaml',
   '.yml',
 ]);
+
+/**
+ * Bun runs a package script with that package as its current directory. The
+ * M1 harness deliberately passes repository-relative roots, so preserve a
+ * direct CWD-relative path when it exists and otherwise resolve the same
+ * relative path from this script's repository root. Invalid paths retain the
+ * original CWD-relative error target instead of silently scanning elsewhere.
+ */
+export function resolveMobileSecretRoot(
+  candidate,
+  { cwd = process.cwd(), repositoryRoot = REPOSITORY_ROOT } = {},
+) {
+  if (isAbsolute(candidate)) return resolve(candidate);
+
+  const fromCwd = resolve(cwd, candidate);
+  if (existsSync(fromCwd)) return fromCwd;
+
+  const fromRepositoryRoot = resolve(repositoryRoot, candidate);
+  if (existsSync(fromRepositoryRoot)) return fromRepositoryRoot;
+
+  return fromCwd;
+}
 
 function relativePath(root, path) {
   return relative(root, path).replaceAll('\\', '/');
@@ -86,7 +110,10 @@ function sortByPath(left, right) {
 }
 
 function validateOptions({ roots, exclusions, maxTextBytes }) {
-  if (!Array.isArray(roots) || roots.some((root) => typeof root !== 'string' || root.length === 0)) {
+  if (
+    !Array.isArray(roots) ||
+    roots.some((root) => typeof root !== 'string' || root.length === 0)
+  ) {
     throw new TypeError('roots must be an array of non-empty paths');
   }
   if (!Array.isArray(exclusions) || exclusions.some((exclusion) => typeof exclusion !== 'string')) {
@@ -107,7 +134,7 @@ export async function scanMobileSecretRoots({
   const exclusionNames = new Set(exclusions);
   const findings = [];
   const skipped = [];
-  const absoluteRoots = [...new Set(roots.map((candidate) => resolve(candidate)))];
+  const absoluteRoots = [...new Set(roots.map((candidate) => resolveMobileSecretRoot(candidate)))];
   const repositoryBase = commonAncestor(absoluteRoots);
 
   for (const root of absoluteRoots) {
