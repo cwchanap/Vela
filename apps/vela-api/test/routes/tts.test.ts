@@ -71,6 +71,13 @@ function createTestApp(env: Env = TEST_ENV) {
   return app;
 }
 
+// Serialize every argument of a console call to a single string so a test can
+// assert that a secret or identity-bearing value does not appear anywhere in
+// the logged payload (not just as a top-level property).
+function serializeLogArgs(args: unknown[]): string {
+  return args.map((arg) => (typeof arg === 'string' ? arg : JSON.stringify(arg))).join('\n');
+}
+
 describe('TTS Route', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -139,6 +146,27 @@ describe('TTS Route', () => {
       expect(res.status).toBe(200);
       const body = (await res.json()) as { provider: string };
       expect(body.provider).toBe('elevenlabs');
+    });
+
+    test('invalid provider value warns with the stored value but without the userId', async () => {
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      mockTtsSettingsDB.get.mockResolvedValueOnce({
+        user_id: 'test-user-id',
+        provider: 'invalid-provider',
+        api_key: 'key',
+        voice_id: null,
+        model: null,
+      });
+
+      const app = createTestApp();
+      await app.request('/settings');
+
+      expect(warnSpy).toHaveBeenCalled();
+      const loggedArg = warnSpy.mock.calls[0][1] as Record<string, unknown>;
+      expect(loggedArg).toHaveProperty('storedValue', 'invalid-provider');
+      expect(loggedArg).not.toHaveProperty('userId');
+      expect(serializeLogArgs(warnSpy.mock.calls[0])).not.toContain('test-user-id');
+      warnSpy.mockRestore();
     });
 
     test('returns 500 on database error', async () => {
@@ -284,9 +312,20 @@ describe('TTS Route', () => {
       });
 
       expect(res.status).toBe(200);
-      const body = (await res.json()) as { audioUrl: string; cached: boolean };
+      const body = (await res.json()) as {
+        audioUrl: string;
+        cached: boolean;
+        effectiveSettings?: { provider: string; voiceId: string | null; model: string | null };
+      };
       expect(body.audioUrl).toBe('https://s3.example.com/audio.mp3');
       expect(body.cached).toBe(true);
+      // The cache-hit response echoes the effective settings used to derive the
+      // S3 key so clients can detect a GET/POST settings race.
+      expect(body.effectiveSettings).toEqual({
+        provider: 'elevenlabs',
+        voiceId: null,
+        model: null,
+      });
       expect(mockTTSProvider.generate).not.toHaveBeenCalled();
     });
 
@@ -320,9 +359,20 @@ describe('TTS Route', () => {
       });
 
       expect(res.status).toBe(200);
-      const body = (await res.json()) as { audioUrl: string; cached: boolean };
+      const body = (await res.json()) as {
+        audioUrl: string;
+        cached: boolean;
+        effectiveSettings?: { provider: string; voiceId: string | null; model: string | null };
+      };
       expect(body.audioUrl).toBe('https://s3.example.com/new-audio.mp3');
       expect(body.cached).toBe(false);
+      // The generation response reports the effective settings the backend
+      // used, so the mobile client can skip caching on a GET/POST race.
+      expect(body.effectiveSettings).toEqual({
+        provider: 'elevenlabs',
+        voiceId: null,
+        model: null,
+      });
       expect(mockTTSProvider.generate).toHaveBeenCalledTimes(1);
     });
 
@@ -537,7 +587,7 @@ describe('TTS Route', () => {
       });
     });
 
-    test('S3 cache check failure logs sanitized error without s3Key or userId', async () => {
+    test('S3 cache check failure logs sanitized error without s3Key, userId, bucket, or error message', async () => {
       const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
       mockTtsSettingsDB.get.mockResolvedValueOnce({
         user_id: 'test-user-id',
@@ -558,13 +608,19 @@ describe('TTS Route', () => {
       const loggedArg = errorSpy.mock.calls[0][1] as Record<string, unknown>;
       expect(loggedArg).not.toHaveProperty('s3Key');
       expect(loggedArg).not.toHaveProperty('userId');
+      expect(loggedArg).not.toHaveProperty('bucket');
       expect(loggedArg).not.toHaveProperty('error');
+      expect(loggedArg).not.toHaveProperty('errorMessage');
       expect(loggedArg).toHaveProperty('errorName', 'Error');
-      expect(loggedArg).toHaveProperty('errorMessage', 'S3 connection reset');
+      expect(loggedArg).toHaveProperty('category', 's3_cache_lookup');
+      // The raw error message must not leak into any serialized log argument.
+      expect(serializeLogArgs(errorSpy.mock.calls[0])).not.toContain('S3 connection reset');
+      expect(serializeLogArgs(errorSpy.mock.calls[0])).not.toContain('test-user-id');
+      expect(serializeLogArgs(errorSpy.mock.calls[0])).not.toContain('test-bucket');
       errorSpy.mockRestore();
     });
 
-    test('provider error logs sanitized error without userId or raw error', async () => {
+    test('provider error logs no upstream body, userId, bucket, or s3 key', async () => {
       const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
       mockTtsSettingsDB.get.mockResolvedValueOnce({
         user_id: 'test-user-id',
@@ -576,7 +632,13 @@ describe('TTS Route', () => {
       const notFoundError = new Error('Not found');
       (notFoundError as any).name = 'NotFound';
       mockS3Client.send.mockRejectedValueOnce(notFoundError);
-      mockTTSProvider.generate.mockRejectedValueOnce(new Error('Provider API key invalid'));
+      // Mirrors OpenAIProvider/ElevenLabsProvider/GeminiProvider, which embed the
+      // full upstream response body in error.message. The secret and user id
+      // embedded here must not reach application logs.
+      const SECRET_MARKER = 'sk-leaked-upstream-secret-XYZ';
+      mockTTSProvider.generate.mockRejectedValueOnce(
+        new Error(`OpenAI TTS API error 401: {"secret":"${SECRET_MARKER}","user":"test-user-id"}`),
+      );
 
       const app = createTestApp();
       await app.request('/generate', {
@@ -587,9 +649,16 @@ describe('TTS Route', () => {
 
       const loggedArg = errorSpy.mock.calls[0][1] as Record<string, unknown>;
       expect(loggedArg).not.toHaveProperty('userId');
+      expect(loggedArg).not.toHaveProperty('bucket');
+      expect(loggedArg).not.toHaveProperty('s3Key');
       expect(loggedArg).not.toHaveProperty('error');
+      expect(loggedArg).not.toHaveProperty('errorMessage');
       expect(loggedArg).toHaveProperty('errorName', 'Error');
-      expect(loggedArg).toHaveProperty('errorMessage', 'Provider API key invalid');
+      expect(loggedArg).toHaveProperty('category', 'provider_generate');
+      const serialized = serializeLogArgs(errorSpy.mock.calls[0]);
+      expect(serialized).not.toContain(SECRET_MARKER);
+      expect(serialized).not.toContain('test-user-id');
+      expect(serialized).not.toContain('test-bucket');
       errorSpy.mockRestore();
     });
 
@@ -611,7 +680,9 @@ describe('TTS Route', () => {
       });
       const loggedArg = errorSpy.mock.calls[0][1] as Record<string, unknown>;
       expect(loggedArg).toHaveProperty('errorName', 'Error');
-      expect(loggedArg).toHaveProperty('errorMessage', 'DynamoDB connection lost');
+      expect(loggedArg).toHaveProperty('category', 'unexpected');
+      expect(loggedArg).not.toHaveProperty('errorMessage');
+      expect(serializeLogArgs(errorSpy.mock.calls[0])).not.toContain('DynamoDB connection lost');
       errorSpy.mockRestore();
     });
   });

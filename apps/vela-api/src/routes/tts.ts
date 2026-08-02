@@ -19,16 +19,38 @@ function ttsError(error: string, code: TtsApiErrorCode) {
   return { error, code };
 }
 
+type TtsLogCategory =
+  | 's3_cache_lookup'
+  | 'provider_timeout'
+  | 'provider_generate'
+  | 's3_upload'
+  | 's3_signing'
+  | 'unexpected';
+
 /**
- * Normalize an error to an allowlisted log shape. Never log raw error values
- * (which may carry stack traces or server-internal detail) or user-scoped
- * S3 object keys (which embed the userId).
+ * Normalize an error to an allowlisted log shape. Never log raw error values,
+ * `error.message` (providers embed the full upstream response body in it), the
+ * user ID, user-scoped S3 object keys (which embed the userId), or bucket
+ * names. Only the error class name and an operation category are emitted.
  */
-function sanitizeError(error: unknown): { errorName: string; errorMessage: string } {
-  if (error instanceof Error) {
-    return { errorName: error.name, errorMessage: error.message };
-  }
-  return { errorName: 'UnknownError', errorMessage: String(error) };
+function sanitizeError(
+  error: unknown,
+  category: TtsLogCategory,
+): {
+  operation: TtsLogCategory;
+  errorName: string;
+  category: TtsLogCategory;
+} {
+  const errorName =
+    error instanceof Error
+      ? error.name
+      : typeof error === 'object' &&
+          error !== null &&
+          'name' in error &&
+          typeof (error as { name: unknown }).name === 'string'
+        ? (error as { name: string }).name
+        : 'UnknownError';
+  return { operation: category, errorName, category };
 }
 
 /**
@@ -122,6 +144,16 @@ const createTTSRoute = (env: Env) => {
       const model = settings.model || '';
       const s3Key = generateCacheKey(userId, vocabularyId, provider, voiceId, model);
 
+      // The effective settings the backend used to derive the cache key. The
+      // client compares these against its GET /tts/settings snapshot to detect
+      // a settings change between the two requests and avoid caching under a
+      // stale identity. Uses the same null/empty convention as GET settings.
+      const effectiveSettings = {
+        provider,
+        voiceId: settings.voice_id || null,
+        model: settings.model || null,
+      };
+
       // Check S3 cache first
       try {
         await s3Client.send(new HeadObjectCommand({ Bucket: bucketName, Key: s3Key }));
@@ -132,15 +164,14 @@ const createTTSRoute = (env: Env) => {
           { expiresIn: 900 },
         );
 
-        return c.json({ audioUrl, cached: true });
+        return c.json({ audioUrl, cached: true, effectiveSettings });
       } catch (error: any) {
         if (error.name === 'NotFound' || error.name === 'NoSuchKey') {
           // Cache miss — fall through to generate
         } else {
           console.error('S3 cache check failed', {
-            ...sanitizeError(error),
+            ...sanitizeError(error, 's3_cache_lookup'),
             provider,
-            bucket: bucketName,
           });
           return c.json(
             ttsError(
@@ -165,13 +196,13 @@ const createTTSRoute = (env: Env) => {
         const errorMessage = error instanceof Error ? error.message : String(error);
         if (errorMessage.toLowerCase().includes('timeout')) {
           console.error('TTS provider timeout', {
-            ...sanitizeError(error),
+            ...sanitizeError(error, 'provider_timeout'),
             provider,
           });
           return c.json(ttsError('TTS generation timed out', 'tts_generation_timeout'), 504);
         }
         console.error('TTS provider error', {
-          ...sanitizeError(error),
+          ...sanitizeError(error, 'provider_generate'),
           provider,
         });
         return c.json(ttsError('Failed to generate TTS audio', 'tts_generation_failed'), 500);
@@ -189,9 +220,8 @@ const createTTSRoute = (env: Env) => {
         );
       } catch (uploadError: any) {
         console.error('S3 upload failed after successful TTS generation', {
-          ...sanitizeError(uploadError),
+          ...sanitizeError(uploadError, 's3_upload'),
           provider,
-          bucket: bucketName,
         });
         return c.json(
           ttsError(
@@ -211,8 +241,7 @@ const createTTSRoute = (env: Env) => {
         );
       } catch (signingError: any) {
         console.error('Failed to generate presigned URL after S3 upload', {
-          ...sanitizeError(signingError),
-          bucket: bucketName,
+          ...sanitizeError(signingError, 's3_signing'),
         });
         return c.json(
           ttsError(
@@ -223,9 +252,9 @@ const createTTSRoute = (env: Env) => {
         );
       }
 
-      return c.json({ audioUrl, cached: false });
+      return c.json({ audioUrl, cached: false, effectiveSettings });
     } catch (error) {
-      console.error('TTS generation error', sanitizeError(error));
+      console.error('TTS generation error', sanitizeError(error, 'unexpected'));
       return c.json(ttsError('Failed to generate TTS audio', 'tts_unexpected_error'), 500);
     }
   });
@@ -285,11 +314,11 @@ const createTTSRoute = (env: Env) => {
           if (error.name === 'NotFound' || error.name === 'NoSuchKey') {
             return c.json({ error: 'Audio not found. Please generate it first.' }, 404);
           }
-          console.error('S3 error', sanitizeError(error));
+          console.error('S3 error', sanitizeError(error, 's3_cache_lookup'));
           return c.json({ error: 'Failed to retrieve audio' }, 500);
         }
       } catch (error) {
-        console.error('Get audio error', sanitizeError(error));
+        console.error('Get audio error', sanitizeError(error, 'unexpected'));
         return c.json({ error: 'Failed to get audio URL' }, 500);
       }
     },
@@ -318,7 +347,7 @@ const createTTSRoute = (env: Env) => {
 
       return c.json({ success: true, message: 'TTS settings saved successfully' });
     } catch (error) {
-      console.error('Save TTS settings error', sanitizeError(error));
+      console.error('Save TTS settings error', sanitizeError(error, 'unexpected'));
       return c.json(
         { error: error instanceof Error ? error.message : 'Failed to save TTS settings' },
         500,
@@ -352,9 +381,10 @@ const createTTSRoute = (env: Env) => {
       const providerValue = settings.provider || 'elevenlabs';
       const providerParse = TTSProviderSchema.safeParse(providerValue);
       if (!providerParse.success) {
+        // `storedValue` is a malformed provider enum, not identity-bearing or
+        // secret. The userId is intentionally omitted from logs.
         console.warn('Invalid provider value in TTS settings, falling back to elevenlabs', {
           storedValue: providerValue,
-          userId,
         });
       }
       const provider = providerParse.success ? providerParse.data : 'elevenlabs';
@@ -366,7 +396,7 @@ const createTTSRoute = (env: Env) => {
         model: settings.model || null,
       });
     } catch (error) {
-      console.error('Get TTS settings error', sanitizeError(error));
+      console.error('Get TTS settings error', sanitizeError(error, 'unexpected'));
       return c.json({ error: 'Failed to get TTS settings' }, 500);
     }
   });

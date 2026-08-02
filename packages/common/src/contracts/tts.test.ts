@@ -50,6 +50,56 @@ describe('TTS contracts', () => {
     });
   });
 
+  it('parses effective settings when the backend includes them', () => {
+    expect(
+      parseGeneratePronunciationResponse({
+        audioUrl: HTTPS_AUDIO,
+        cached: false,
+        effectiveSettings: { provider: 'openai', voiceId: 'alloy', model: 'tts-1' },
+      }),
+    ).toEqual({
+      audioUrl: HTTPS_AUDIO,
+      cached: false,
+      effectiveSettings: { provider: 'openai', voiceId: 'alloy', model: 'tts-1' },
+    });
+  });
+
+  it('parses effective settings with null voice/model', () => {
+    expect(
+      parseGeneratePronunciationResponse({
+        audioUrl: HTTPS_AUDIO,
+        cached: true,
+        effectiveSettings: { provider: 'elevenlabs', voiceId: null, model: null },
+      }),
+    ).toEqual({
+      audioUrl: HTTPS_AUDIO,
+      cached: true,
+      effectiveSettings: { provider: 'elevenlabs', voiceId: null, model: null },
+    });
+  });
+
+  it.each([
+    [
+      'unsupported provider',
+      { provider: 'other', voiceId: null, model: null },
+      'effectiveSettings:provider',
+    ],
+    ['non-record effectiveSettings', 'openai', 'effectiveSettings'],
+    [
+      'non-string voiceId',
+      { provider: 'openai', voiceId: 1, model: null },
+      'effectiveSettings:voiceId',
+    ],
+  ])('rejects effective settings with %s', (_caseName, effectiveSettings, field) => {
+    expect(() =>
+      parseGeneratePronunciationResponse({
+        audioUrl: HTTPS_AUDIO,
+        cached: false,
+        effectiveSettings,
+      }),
+    ).toThrow(`invalid_tts_generate_response:${field}`);
+  });
+
   it('rejects non-HTTPS audio URLs', () => {
     expect(() =>
       parseGeneratePronunciationResponse({

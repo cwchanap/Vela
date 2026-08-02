@@ -4,6 +4,7 @@ import {
   parseTtsApiErrorResponse,
   parseTtsSettings,
   type TtsApiErrorCode,
+  type TtsEffectiveSettings,
   type TtsSettings,
 } from '@vela/common';
 import { MobileApiError, type MobileApiClient } from './mobile-api-client';
@@ -258,6 +259,30 @@ function cacheKey(input: NormalizedInput, settings: TtsSettings): string {
     .join('|');
 }
 
+/**
+ * Compare the GET /tts/settings snapshot (used to derive the client cache key)
+ * against the effective settings the backend reports it actually used for the
+ * generation. The backend re-reads settings during POST /tts/generate, so a
+ * concurrent settings change can make these differ. When they differ, the
+ * audio was produced under new settings but the client key was derived from
+ * the old snapshot, so the entry must not be cached under that stale key.
+ *
+ * When the backend omits `effectiveSettings` (older deployment), this returns
+ * true to preserve the pre-guard caching behavior rather than penalizing
+ * up-to-date clients talking to a not-yet-updated backend.
+ */
+function effectiveSettingsMatch(
+  snapshot: TtsSettings,
+  effective: TtsEffectiveSettings | undefined,
+): boolean {
+  if (!effective) return true;
+  return (
+    effective.provider === snapshot.provider &&
+    effective.voiceId === snapshot.voiceId &&
+    effective.model === snapshot.model
+  );
+}
+
 function vocabularyGenerationKey(userId: string, vocabularyId: string): string {
   return [userId, vocabularyId].map(encodeURIComponent).join('|');
 }
@@ -431,7 +456,12 @@ export function createMobileTtsService(apiClient: MobileApiClient): MobileTtsSer
 
         const completedAt = Date.now();
         const expiresAt = completedAt + MOBILE_TTS_CACHE_TTL_MS;
+        // Skip caching when the backend's effective settings differ from the
+        // GET snapshot used to derive `key`: the audio was produced under new
+        // settings and must not be served from a stale-settings cache entry.
+        const settingsAreConsistent = effectiveSettingsMatch(settings, response.effectiveSettings);
         if (
+          settingsAreConsistent &&
           userGeneration(input.userId) === capturedUserGeneration &&
           vocabularyGeneration(input.userId, input.vocabularyId) === capturedVocabularyGeneration &&
           clearGeneration === capturedClearGeneration

@@ -13,9 +13,23 @@ export type GeneratePronunciationRequest = {
   text: string;
 };
 
+/**
+ * The provider/voice/model the backend actually used to produce (or look up)
+ * the audio for a generate request. The backend re-reads TTS settings during
+ * `POST /tts/generate`, so these can differ from the settings a client read
+ * via `GET /tts/settings` if settings changed between the two requests.
+ * Clients use this to avoid caching audio under a stale settings identity.
+ */
+export type TtsEffectiveSettings = {
+  provider: TtsProvider;
+  voiceId: string | null;
+  model: string | null;
+};
+
 export type GeneratePronunciationResponse = {
   audioUrl: string;
   cached: boolean;
+  effectiveSettings?: TtsEffectiveSettings;
 };
 
 export type TtsAudioUrlResponse = {
@@ -124,7 +138,37 @@ export function parseGeneratePronunciationRequest(value: unknown): GeneratePronu
 export function parseGeneratePronunciationResponse(value: unknown): GeneratePronunciationResponse {
   const root = requireRecord(value, 'generate_response:root');
   const audioUrl = requireHttpsAudioUrl(root.audioUrl, 'generate_response:audioUrl');
-  return { audioUrl, cached: requireBoolean(root.cached, 'generate_response:cached') };
+  const response: GeneratePronunciationResponse = {
+    audioUrl,
+    cached: requireBoolean(root.cached, 'generate_response:cached'),
+  };
+
+  if (root.effectiveSettings !== undefined) {
+    const settingsRecord = requireRecord(
+      root.effectiveSettings,
+      'generate_response:effectiveSettings',
+    );
+    const provider = requireString(
+      settingsRecord.provider,
+      'generate_response:effectiveSettings:provider',
+    );
+    if (!isTtsProvider(provider)) {
+      throw new TypeError('invalid_tts_generate_response:effectiveSettings:provider');
+    }
+    response.effectiveSettings = {
+      provider,
+      voiceId: requireNullableString(
+        settingsRecord.voiceId,
+        'generate_response:effectiveSettings:voiceId',
+      ),
+      model: requireNullableString(
+        settingsRecord.model,
+        'generate_response:effectiveSettings:model',
+      ),
+    };
+  }
+
+  return response;
 }
 
 export function parseTtsAudioUrlResponse(value: unknown): TtsAudioUrlResponse {

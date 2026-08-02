@@ -40,6 +40,7 @@ export {
   type TtsApiErrorCode,
   type TtsApiErrorResponse,
   type TtsAudioUrlResponse,
+  type TtsEffectiveSettings,
   type TtsProvider,
   type TtsSettings,
 } from './contracts/tts';
