@@ -226,12 +226,13 @@ export function createMobileApiClient(
       }
 
       if (!response.ok) {
+        let responseApiError: MobileApiError;
         try {
-          throw await responseError(response);
+          responseApiError = await responseError(response);
         } catch (error) {
-          if (error instanceof MobileApiError) throw error;
           return mapResponseBodyError(error, { callerAborted, deadlineExpired, coordinator });
         }
+        throw responseApiError;
       }
 
       try {

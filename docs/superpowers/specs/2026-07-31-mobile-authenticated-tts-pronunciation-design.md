@@ -428,10 +428,11 @@ Omitting `timeoutMs` retains the existing eight-second default.
 `postJson()` must:
 
 1. Validate and serialize the supplied value with `JSON.stringify()` before dispatch.
-2. Store the resulting immutable string in `RequestInit.body`.
-3. Use the same serialized string for the initial authenticated attempt and the one permitted post-refresh replay.
-4. Set `Content-Type: application/json` identically on both attempts.
-5. Reject serialization failure as `invalid_request` before contacting the coordinator.
+2. Require `typeof serialized === 'string'` after `JSON.stringify()` and before coordinator dispatch, rejecting `undefined` and other non-string results (functions, symbols) as `invalid_request`.
+3. Store the resulting immutable string in `RequestInit.body`.
+4. Use the same serialized string for the initial authenticated attempt and the one permitted post-refresh replay.
+5. Set `Content-Type: application/json` identically on both attempts.
+6. Reject serialization failure as `invalid_request` before contacting the coordinator.
 
 This client does not expose streaming bodies, `ReadableStream`, `Blob`, or `FormData`. A future API for non-replayable bodies must define its own 401/retry policy rather than silently reusing this contract.
 
@@ -831,10 +832,11 @@ The controller keeps the prepared URL while it is locally live, including after 
 2. Transition to `preparing`.
 3. Prepare pronunciation under the retry policy above.
 4. Save the returned pronunciation.
-5. Immediately call `audioPlayer.play()` in the continuation of the original tap.
-6. Record tap-to-play-attempt latency and whether iOS accepts or rejects playback after the asynchronous request chain.
+5. Before calling `audioPlayer.play()`, check `lifecycle.isActive.value`. If the app became inactive during the asynchronous preparation, skip autoplay and transition to `ready` with the prepared pronunciation instead of playing.
+6. When still active, immediately call `audioPlayer.play()` in the continuation of the original tap.
+7. Record tap-to-play-attempt latency and whether iOS accepts or rejects playback after the asynchronous request chain.
 
-Failure of this asynchronous first-tap play is not by itself an HTML-audio rejection. The diagnostic may enter `ready` and complete acceptance through a direct second tap.
+Failure of this asynchronous first-tap play is not by itself an HTML-audio rejection. The diagnostic may enter `ready` and complete acceptance through a direct second tap. Deactivation during preparation produces the same `ready` state with no autoplay attempt, so a backgrounded first tap never starts playback.
 
 ### Tap from `ready` or `interrupted`
 
@@ -906,6 +908,8 @@ When the app becomes inactive:
 - call `audioPlayer.interruptActive('background')`;
 - do not attempt background playback; and
 - preserve the prepared URL only while it remains within its local TTL.
+
+When the app becomes inactive during an asynchronous first-tap preparation (before `audioPlayer.play()` is called), the preparation completes but the controller checks `lifecycle.isActive.value` before invoking playback. If inactive, it transitions to `ready` with the prepared pronunciation and skips autoplay entirely. The resulting state is `ready`, not `playing`, so no background playback is attempted.
 
 When the app becomes active:
 

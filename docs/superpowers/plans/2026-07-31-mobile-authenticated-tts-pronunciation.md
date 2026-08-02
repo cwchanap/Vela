@@ -17,6 +17,7 @@
 - Keep Cognito tokens and `Authorization` ownership inside `MobileAuthCoordinator`.
 - Never render, log, or persist provider keys, Cognito tokens, complete presigned URLs, or raw server error bodies.
 - Limit both JSON and text error bodies to 16 KiB before parsing or retention.
+- In backend TTS handlers, log only an allowlisted, sanitized shape: the operation name, normalized error metadata (`errorName`, `errorMessage`), provider, and bucket. Never log raw error values, the user-scoped `s3Key` (which embeds the userId), or the `userId` itself.
 - Make network, provider, validator, 4xx, 5xx, and deadline failures manual-only retries.
 - Permit one same-user continuation for auth-control races or completed session recovery.
 - Keep URL/media refresh separate from transport retry; allow at most one automatic URL refresh per tap.
@@ -95,6 +96,7 @@
 ### Task 1: Add Shared TTS Contracts and Web Success Validation
 
 **Files:**
+
 - Create: `packages/common/src/contracts/tts.ts`
 - Create: `packages/common/src/contracts/tts.test.ts`
 - Modify: `packages/common/src/index.ts`
@@ -102,6 +104,7 @@
 - Modify: `apps/vela/src/services/ttsService.test.ts`
 
 **Interfaces:**
+
 - Produces: `TtsProvider`, `TtsSettings`, `GeneratePronunciationRequest`, `GeneratePronunciationResponse`, `TtsApiErrorCode`, `TtsApiErrorResponse`, `parseTtsSettings()`, `parseGeneratePronunciationRequest()`, `parseGeneratePronunciationResponse()`, `parseTtsApiErrorResponse()`.
 - Consumers: backend tests and `MobileTtsService`.
 
@@ -138,7 +141,10 @@ it('parses a valid generate response', () => {
 
 it('rejects non-HTTPS audio URLs', () => {
   expect(() =>
-    parseGeneratePronunciationResponse({ audioUrl: 'http://audio.example.test/mizu.mp3', cached: false }),
+    parseGeneratePronunciationResponse({
+      audioUrl: 'http://audio.example.test/mizu.mp3',
+      cached: false,
+    }),
   ).toThrow('invalid_tts_generate_response:audioUrl');
 });
 
@@ -189,10 +195,8 @@ export type GeneratePronunciationResponse = {
 };
 
 export function parseGeneratePronunciationResponse(value: unknown): GeneratePronunciationResponse {
-  const root = requireRecord(value, 'generate_response');
-  const audioUrl = requireString(root.audioUrl, 'generate_response:audioUrl');
-  const parsed = new URL(audioUrl);
-  if (parsed.protocol !== 'https:') throw new TypeError('invalid_tts_generate_response:audioUrl');
+  const root = requireRecord(value, 'generate_response:root');
+  const audioUrl = requireHttpsAudioUrl(root.audioUrl, 'generate_response:audioUrl');
   return { audioUrl, cached: requireBoolean(root.cached, 'generate_response:cached') };
 }
 ```
@@ -264,10 +268,12 @@ git commit -m "feat: share validated TTS contracts"
 ### Task 2: Add Stable Backend Error Codes Without Changing Legacy Responses
 
 **Files:**
+
 - Modify: `apps/vela-api/src/routes/tts.ts`
 - Modify: `apps/vela-api/test/routes/tts.test.ts`
 
 **Interfaces:**
+
 - Produces: route-owned errors with stable `code` plus unchanged `error` and HTTP status.
 - Preserves: Hono/Zod validator-generated 400 shape.
 
@@ -276,10 +282,13 @@ git commit -m "feat: share validated TTS contracts"
 ```ts
 it('returns a stable code when TTS is not configured', async () => {
   ttsSettingsGet.mockResolvedValue(null);
-  const response = await app.request('/api/tts/generate', authenticatedPost({
-    vocabularyId: '水:ミズ',
-    text: '水',
-  }));
+  const response = await app.request(
+    '/api/tts/generate',
+    authenticatedPost({
+      vocabularyId: '水:ミズ',
+      text: '水',
+    }),
+  );
 
   expect(response.status).toBe(400);
   expect(await response.json()).toEqual({
@@ -289,10 +298,13 @@ it('returns a stable code when TTS is not configured', async () => {
 });
 
 it('leaves request-validator failures uncoded', async () => {
-  const response = await app.request('/api/tts/generate', authenticatedPost({
-    vocabularyId: '',
-    text: '',
-  }));
+  const response = await app.request(
+    '/api/tts/generate',
+    authenticatedPost({
+      vocabularyId: '',
+      text: '',
+    }),
+  );
 
   expect(response.status).toBe(400);
   const body = await response.json();
@@ -342,11 +354,13 @@ git commit -m "feat(api): add stable TTS error codes"
 ### Task 3: Add Coordinator Transport Overrides and Identical POST Replay
 
 **Files:**
+
 - Modify: `apps/vela-mobile/src/auth/mobile-auth-contract.ts`
 - Modify: `apps/vela-mobile/src/services/mobile-auth.ts`
 - Modify: `apps/vela-mobile/src/services/mobile-auth.test.ts`
 
 **Interfaces:**
+
 - Produces: `transportTimeoutMs?: number`, `MOBILE_AUTH_MAX_FEATURE_NETWORK_TIMEOUT_MS`, and `invalid_request_timeout`.
 - Preserves: one authenticated replay after successful 401 recovery.
 
@@ -412,7 +426,11 @@ export const MOBILE_AUTH_MAX_FEATURE_NETWORK_TIMEOUT_MS = 50_000;
 function featureTransportTimeout(request: MobileAuthenticatedApiRequest): number {
   const value = request.transportTimeoutMs;
   if (value === undefined) return MOBILE_AUTH_NETWORK_TIMEOUT_MS;
-  if (!Number.isInteger(value) || value <= 0 || value > MOBILE_AUTH_MAX_FEATURE_NETWORK_TIMEOUT_MS) {
+  if (
+    !Number.isInteger(value) ||
+    value <= 0 ||
+    value > MOBILE_AUTH_MAX_FEATURE_NETWORK_TIMEOUT_MS
+  ) {
     throw new MobileAuthenticatedApiRequestError('invalid_request_timeout');
   }
   return value;
@@ -438,11 +456,13 @@ git commit -m "feat(mobile): support bounded feature transport timeouts"
 ### Task 4: Extend MobileApiClient with Replayable JSON POST and Safe Structured Errors
 
 **Files:**
+
 - Modify: `apps/vela-mobile/src/services/mobile-api-client.ts`
 - Modify: `apps/vela-mobile/src/services/mobile-api-client.test.ts`
 - Modify: `apps/vela-mobile/src/composables/useDueReviewCount.test.ts`
 
 **Interfaces:**
+
 - Produces: `postJson()`, `MobileApiRequestOptions.timeoutMs`, `MOBILE_API_MAX_ERROR_BODY_BYTES`, `MobileApiError.details`, and `client` classification.
 - Consumes: coordinator timeout override from Task 3.
 
@@ -471,7 +491,9 @@ it('serializes JSON before coordinator dispatch', async () => {
 it('rejects circular JSON before coordinator dispatch', async () => {
   const body: Record<string, unknown> = {};
   body.self = body;
-  await expect(client.postJson('tts/generate', body)).rejects.toMatchObject({ code: 'invalid_request' });
+  await expect(client.postJson('tts/generate', body)).rejects.toMatchObject({
+    code: 'invalid_request',
+  });
   expect(coordinator.requestAuthenticatedApi).not.toHaveBeenCalled();
 });
 ```
@@ -570,10 +592,12 @@ git commit -m "feat(mobile): add replayable JSON requests and safe API errors"
 ### Task 5: Implement MobileTtsService, Cache, Error Mapping, and Timings
 
 **Files:**
+
 - Create: `apps/vela-mobile/src/services/mobile-tts.ts`
 - Create: `apps/vela-mobile/src/services/mobile-tts.test.ts`
 
 **Interfaces:**
+
 - Consumes: shared contracts and `MobileApiClient`.
 - Produces: `MobileTtsService`, `PreparedPronunciation`, `PreparationTimings`, `MobileTtsError`, `MOBILE_TTS_GENERATE_TIMEOUT_MS`.
 
@@ -597,10 +621,15 @@ it('uses default settings timeout and 45-second generate timeout', async () => {
 it('maps an uncoded validator 400 to invalid_input', async () => {
   api.getJson.mockResolvedValue(CONFIGURED_SETTINGS);
   api.postJson.mockRejectedValue(
-    new MobileApiError('client', { status: 400, serverBody: { success: false, error: { issues: [] } } }),
+    new MobileApiError('client', {
+      status: 400,
+      serverBody: { success: false, error: { issues: [] } },
+    }),
   );
 
-  await expect(service.preparePronunciation(INPUT)).rejects.toMatchObject({ code: 'invalid_input' });
+  await expect(service.preparePronunciation(INPUT)).rejects.toMatchObject({
+    code: 'invalid_input',
+  });
 });
 ```
 
@@ -729,6 +758,7 @@ git commit -m "feat(mobile): add authenticated TTS service"
 ### Task 6: Register MobileTtsService and Clear Prior-User Cache on Auth Transitions
 
 **Files:**
+
 - Modify: `apps/vela-mobile/src/services/mobile-services.ts`
 - Modify: `apps/vela-mobile/src/services/mobile-services.test.ts`
 - Create: `apps/vela-mobile/src/services/mobile-tts-auth-isolation.ts`
@@ -737,6 +767,7 @@ git commit -m "feat(mobile): add authenticated TTS service"
 - Modify: `apps/vela-mobile/src/boot/mobile-auth.test.ts`
 
 **Interfaces:**
+
 - Produces: `MOBILE_TTS_SERVICE_KEY` and `installMobileTtsAuthIsolation()`.
 - Responsibility boundary: this watcher clears app-wide TTS cache/pending indexes only; the mounted controller owns active audio stop/dispose.
 
@@ -827,11 +858,13 @@ git commit -m "feat(mobile): register and isolate TTS service"
 ### Task 7: Add Browser-Free Audio Contract and HTML Adapter
 
 **Files:**
+
 - Create: `apps/vela-mobile/src/audio/mobile-audio-contract.ts`
 - Create: `apps/vela-mobile/src/audio/html-audio-player.ts`
 - Create: `apps/vela-mobile/src/audio/html-audio-player.test.ts`
 
 **Interfaces:**
+
 - Produces: `MobileAudioPlayer`, `MobileAudioPlaybackHandle`, `MobileAudioPlaybackOutcome`, `MobileAudioError`.
 
 - [ ] **Step 1: Write a deterministic fake audio element and failing tests**
@@ -902,12 +935,14 @@ git commit -m "feat(mobile): add replaceable HTML audio adapter"
 ### Task 8: Extend Shared Lifecycle State Through the Existing Listener
 
 **Files:**
+
 - Modify: `apps/vela-mobile/src/services/mobile-lifecycle.ts`
 - Modify: `apps/vela-mobile/src/services/mobile-lifecycle.test.ts`
 - Modify: `apps/vela-mobile/src/boot/capacitor-lifecycle.ts`
 - Create or modify: `apps/vela-mobile/src/boot/capacitor-lifecycle.test.ts`
 
 **Interfaces:**
+
 - Produces: `mobileLifecycleState.isActive`, transition timestamps, and `recordAppStateChange()`.
 
 - [ ] **Step 1: Write failing lifecycle tests**
@@ -944,10 +979,13 @@ Expected: active state and recorder are absent.
 
 ```ts
 export function recordAppStateChange(next: boolean, at = Date.now()): void {
+  const previous = isActive.value;
   isActive.value = next;
   lastStateChangeAt.value = at;
-  if (next) lastBecameActiveAt.value = at;
-  else lastBecameInactiveAt.value = at;
+  if (next !== previous) {
+    if (next) lastBecameActiveAt.value = at;
+    else lastBecameInactiveAt.value = at;
+  }
 }
 ```
 
@@ -983,10 +1021,12 @@ git commit -m "feat(mobile): expose shared app activity state"
 ### Task 9: Implement Pronunciation Controller State Machine
 
 **Files:**
+
 - Create: `apps/vela-mobile/src/composables/usePronunciationDiagnostic.ts`
 - Create: `apps/vela-mobile/src/composables/usePronunciationDiagnostic.test.ts`
 
 **Interfaces:**
+
 - Consumes: `MobileTtsService`, `MobileAudioPlayer`, feature-session selector, and shared lifecycle state.
 - Produces: controller state, `playOrRetry()`, diagnostic invalidation actions, counters, and `dispose()`.
 
@@ -1052,7 +1092,11 @@ export type PronunciationDiagnosticState =
   | { kind: 'ready'; pronunciation: PreparedPronunciation; notice: ReadyNotice | null }
   | { kind: 'playing'; pronunciation: PreparedPronunciation }
   | { kind: 'interrupted'; pronunciation: PreparedPronunciation; reason: 'background' | 'external' }
-  | { kind: 'error'; error: PronunciationDiagnosticError; pronunciation: PreparedPronunciation | null };
+  | {
+      kind: 'error';
+      error: PronunciationDiagnosticError;
+      pronunciation: PreparedPronunciation | null;
+    };
 ```
 
 Use an operation generation counter to prevent old promises from writing successor state.
@@ -1077,6 +1121,7 @@ git commit -m "feat(mobile): add pronunciation diagnostic controller"
 ### Task 10: Add Authenticated Development Route and More Entry
 
 **Files:**
+
 - Create: `apps/vela-mobile/src/diagnostics/tts-pronunciation-contract.ts`
 - Modify: `apps/vela-mobile/src/router/diagnostic-routes.ts`
 - Modify: `apps/vela-mobile/src/router/diagnostic-routes.test.ts`
@@ -1086,12 +1131,15 @@ git commit -m "feat(mobile): add pronunciation diagnostic controller"
 - Modify: `apps/vela-mobile/src/pages/MorePage.test.ts`
 
 **Interfaces:**
+
 - Produces: route path, fixed word, labels, markers, test IDs, and split route collections.
 
 - [ ] **Step 1: Write failing route-partition tests**
 
 ```ts
-expect(bypassDevelopmentDiagnosticRoutes.every((route) => route.meta?.bypassMobileAuth === true)).toBe(true);
+expect(
+  bypassDevelopmentDiagnosticRoutes.every((route) => route.meta?.bypassMobileAuth === true),
+).toBe(true);
 expect(authenticatedDevelopmentDiagnosticRoutes).toHaveLength(1);
 expect(authenticatedDevelopmentDiagnosticRoutes[0]?.path).toBe('diagnostics/tts-pronunciation');
 expect(authenticatedDevelopmentDiagnosticRoutes[0]?.meta?.bypassMobileAuth).not.toBe(true);
@@ -1167,10 +1215,12 @@ git commit -m "feat(mobile): register authenticated TTS diagnostics"
 ### Task 11: Build Accessible Diagnostic Page
 
 **Files:**
+
 - Create: `apps/vela-mobile/src/pages/diagnostics/TtsPronunciationDiagnosticsPage.vue`
 - Create: `apps/vela-mobile/src/pages/diagnostics/TtsPronunciationDiagnosticsPage.test.ts`
 
 **Interfaces:**
+
 - Consumes: controller, fixed word, injected TTS service/coordinator, and HTML audio player factory.
 - Produces: accessible controls, safe counters, timings, and development actions.
 
@@ -1239,17 +1289,21 @@ git commit -m "feat(mobile): add pronunciation diagnostic page"
 ### Task 12: Prove Production Exclusion and Run Automated Merge Gates
 
 **Files:**
+
 - Modify: `apps/vela-mobile/scripts/verify-production-diagnostics.mjs`
 - Modify: `apps/vela-mobile/scripts/verify-production-diagnostics.test.mjs`
 
 **Interfaces:**
+
 - Produces: production-bundle leak detection for every TTS diagnostic token.
 
 - [ ] **Step 1: Write failing scanner tests**
 
 ```js
 it('rejects a production bundle containing TTS diagnostic tokens', async () => {
-  await writeBundle('Pronunciation diagnostics /diagnostics/tts-pronunciation tts-pronunciation-entry');
+  await writeBundle(
+    'Pronunciation diagnostics /diagnostics/tts-pronunciation tts-pronunciation-entry',
+  );
   await expect(verifyProductionDiagnostics()).rejects.toThrow('tts-pronunciation');
 });
 ```
@@ -1327,11 +1381,13 @@ git commit -m "test(mobile): verify TTS diagnostic exclusion"
 ### Task 13: Collect Simulator and Physical-iPhone Evidence
 
 **Files:**
+
 - Create: `apps/vela-mobile/docs/tts-pronunciation-ios.md`
 - Modify only after evidence: `packages/cdk/lib/storage-stack.ts`
 - Create or modify only after evidence: `packages/cdk/test/storage-stack.test.ts`
 
 **Interfaces:**
+
 - Produces: HPA-208 closure record consumed by HPA-210.
 
 - [ ] **Step 1: Capture exact software and commit versions**
@@ -1389,13 +1445,21 @@ Use these section headings:
 # iOS TTS Pronunciation Verification
 
 ## Tested Build and Environment
+
 ## Non-Secret TTS Configuration
+
 ## Timing Results
+
 ## Simulator Matrix
+
 ## Physical iPhone Matrix
+
 ## CORS Findings
+
 ## Known Limitations
+
 ## Architecture Decision
+
 ## Follow-up Issues
 ```
 

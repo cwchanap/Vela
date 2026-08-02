@@ -69,6 +69,12 @@ export type MobileTtsService = {
   invalidatePronunciation(userId: string, vocabularyId: string): void;
   clearUser(userId: string): void;
   clearAll(): void;
+  // Test-only inspection accessor: not part of the public contract.
+  _testGetGenerationMetadata?: () => {
+    vocabularyGenerationCount: number;
+    userGenerationCount: number;
+    userGenerationFor(userId: string): number;
+  };
 };
 
 type NormalizedInput = {
@@ -108,6 +114,8 @@ const STABLE_ERROR_CODE_MAP: Record<TtsApiErrorCode, MobileTtsErrorCode> = {
   tts_generation_failed: 'generation_failed',
   tts_audio_storage_failed: 'generation_failed',
   tts_audio_access_failed: 'generation_failed',
+  tts_audio_bucket_not_configured: 'service_unavailable',
+  tts_unexpected_error: 'generation_failed',
 };
 
 const LEGACY_NOT_CONFIGURED_MESSAGE = 'TTS API key not configured. Please configure in Settings.';
@@ -545,6 +553,19 @@ export function createMobileTtsService(apiClient: MobileApiClient): MobileTtsSer
       cache.clear();
       pending.clear();
       lastExpiredSweepAt = Date.now();
+    },
+
+    // Test-only inspection accessor: reports generation metadata counts so tests
+    // can assert cleanup behavior without spying on Map internals or depending
+    // on private key encoding. Not part of the public MobileTtsService contract.
+    _testGetGenerationMetadata() {
+      return {
+        vocabularyGenerationCount: vocabularyGenerations.size,
+        userGenerationCount: userGenerations.size,
+        userGenerationFor(userId: string): number {
+          return userGeneration(userId);
+        },
+      };
     },
   };
 }

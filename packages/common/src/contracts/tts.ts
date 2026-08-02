@@ -1,4 +1,5 @@
-export type TtsProvider = 'elevenlabs' | 'openai' | 'gemini';
+const TTS_PROVIDERS = ['elevenlabs', 'openai', 'gemini'] as const;
+export type TtsProvider = (typeof TTS_PROVIDERS)[number];
 
 export type TtsSettings = {
   provider: TtsProvider;
@@ -21,22 +22,7 @@ export type TtsAudioUrlResponse = {
   audioUrl: string;
 };
 
-export type TtsApiErrorCode =
-  | 'tts_not_configured'
-  | 'tts_invalid_provider_configuration'
-  | 'tts_audio_service_unavailable'
-  | 'tts_generation_timeout'
-  | 'tts_generation_failed'
-  | 'tts_audio_storage_failed'
-  | 'tts_audio_access_failed';
-
-export type TtsApiErrorResponse = {
-  error: string;
-  code?: TtsApiErrorCode;
-};
-
-const TTS_PROVIDERS = new Set<TtsProvider>(['elevenlabs', 'openai', 'gemini']);
-const TTS_API_ERROR_CODES = new Set<TtsApiErrorCode>([
+const TTS_API_ERROR_CODES = [
   'tts_not_configured',
   'tts_invalid_provider_configuration',
   'tts_audio_service_unavailable',
@@ -44,7 +30,26 @@ const TTS_API_ERROR_CODES = new Set<TtsApiErrorCode>([
   'tts_generation_failed',
   'tts_audio_storage_failed',
   'tts_audio_access_failed',
-]);
+  'tts_audio_bucket_not_configured',
+  'tts_unexpected_error',
+] as const;
+export type TtsApiErrorCode = (typeof TTS_API_ERROR_CODES)[number];
+
+export type TtsApiErrorResponse = {
+  error: string;
+  code?: TtsApiErrorCode;
+};
+
+const TTS_PROVIDER_VALUES: ReadonlySet<string> = new Set(TTS_PROVIDERS);
+const TTS_API_ERROR_CODE_VALUES: ReadonlySet<string> = new Set(TTS_API_ERROR_CODES);
+
+function isTtsProvider(value: string): value is TtsProvider {
+  return TTS_PROVIDER_VALUES.has(value);
+}
+
+function isTtsApiErrorCode(value: string): value is TtsApiErrorCode {
+  return TTS_API_ERROR_CODE_VALUES.has(value);
+}
 
 function requireRecord(value: unknown, field: string): Record<string, unknown> {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
@@ -89,12 +94,12 @@ function requireHttpsAudioUrl(value: unknown, field: string): string {
 export function parseTtsSettings(value: unknown): TtsSettings {
   const root = requireRecord(value, 'settings:root');
   const provider = requireString(root.provider, 'settings:provider');
-  if (!TTS_PROVIDERS.has(provider as TtsProvider)) {
+  if (!isTtsProvider(provider)) {
     throw new TypeError('invalid_tts_settings:provider');
   }
 
   return {
-    provider: provider as TtsProvider,
+    provider,
     voiceId: requireNullableString(root.voiceId, 'settings:voiceId'),
     model: requireNullableString(root.model, 'settings:model'),
     hasApiKey: requireBoolean(root.hasApiKey, 'settings:hasApiKey'),
@@ -136,8 +141,8 @@ export function parseTtsApiErrorResponse(value: unknown): TtsApiErrorResponse {
   if (code === undefined) {
     return { error };
   }
-  if (typeof code !== 'string' || !TTS_API_ERROR_CODES.has(code as TtsApiErrorCode)) {
+  if (typeof code !== 'string' || !isTtsApiErrorCode(code)) {
     throw new TypeError('invalid_tts_api_error:code');
   }
-  return { error, code: code as TtsApiErrorCode };
+  return { error, code };
 }

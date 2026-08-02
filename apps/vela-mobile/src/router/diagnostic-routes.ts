@@ -17,9 +17,6 @@ const coreRoutes: RouteRecordRaw[] = [
   { path: 'more', name: 'more', component: () => import('pages/MorePage.vue') },
 ];
 
-const TTS_PRONUNCIATION_DIAGNOSTICS_PAGE =
-  '/src/pages/diagnostics/TtsPronunciationDiagnosticsPage.vue';
-
 export const bypassDevelopmentDiagnosticRoutes: RouteRecordRaw[] = import.meta.env.DEV
   ? [
       {
@@ -54,7 +51,7 @@ export const authenticatedDevelopmentDiagnosticRoutes: RouteRecordRaw[] = import
       {
         path: TTS_PRONUNCIATION_DIAGNOSTIC_PATH.slice(1),
         name: 'ttsPronunciationDiagnostics',
-        component: () => import(/* @vite-ignore */ TTS_PRONUNCIATION_DIAGNOSTICS_PAGE),
+        component: () => import('pages/diagnostics/TtsPronunciationDiagnosticsPage.vue'),
         meta: {
           mobileHeader: {
             title: TTS_PRONUNCIATION_DIAGNOSTIC_LABEL,
