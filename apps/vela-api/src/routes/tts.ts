@@ -45,6 +45,13 @@ const SAFE_ERROR_NAMES = new Set([
   'TimeoutError',
   'NotFound',
   'NoSuchKey',
+  // AWS SDK storage error names — stable, non-secret strings emitted by S3.
+  // Preserved so ops can distinguish throttling, permission, timeout, and
+  // outage conditions instead of collapsing them to UnknownError.
+  'ServiceUnavailable',
+  'AccessDenied',
+  'ThrottlingException',
+  'SlowDown',
 ]);
 
 function extractErrorName(error: unknown): string {
@@ -298,18 +305,27 @@ const createTTSRoute = (env: Env) => {
 
         const settings = await ttsSettingsDB.get(userId);
         if (!settings) {
-          return c.json({ error: 'TTS settings not found. Please configure in Settings.' }, 400);
+          return c.json(
+            ttsError('TTS settings not found. Please configure in Settings.', 'tts_not_configured'),
+            400,
+          );
         }
 
         const bucketName = env.TTS_AUDIO_BUCKET_NAME || process.env.TTS_AUDIO_BUCKET_NAME;
         if (!bucketName) {
-          return c.json({ error: 'TTS audio bucket not configured' }, 500);
+          return c.json(
+            ttsError('TTS audio bucket not configured', 'tts_audio_bucket_not_configured'),
+            500,
+          );
         }
 
         const providerValue = settings.provider || 'elevenlabs';
         const providerParse = TTSProviderSchema.safeParse(providerValue);
         if (!providerParse.success) {
-          return c.json({ error: 'Invalid TTS provider configuration' }, 400);
+          return c.json(
+            ttsError('Invalid TTS provider configuration', 'tts_invalid_provider_configuration'),
+            400,
+          );
         }
         const provider = providerParse.data;
         const s3Key = generateCacheKey(
@@ -342,14 +358,17 @@ const createTTSRoute = (env: Env) => {
           return c.json({ audioUrl, effectiveSettings });
         } catch (error: any) {
           if (error.name === 'NotFound' || error.name === 'NoSuchKey') {
-            return c.json({ error: 'Audio not found. Please generate it first.' }, 404);
+            return c.json(
+              ttsError('Audio not found. Please generate it first.', 'tts_audio_not_found'),
+              404,
+            );
           }
           console.error('S3 error', sanitizeError(error, 's3_cache_lookup'));
-          return c.json({ error: 'Failed to retrieve audio' }, 500);
+          return c.json(ttsError('Failed to retrieve audio', 'tts_audio_access_failed'), 500);
         }
       } catch (error) {
         console.error('Get audio error', sanitizeError(error, 'unexpected'));
-        return c.json({ error: 'Failed to get audio URL' }, 500);
+        return c.json(ttsError('Failed to get audio URL', 'tts_unexpected_error'), 500);
       }
     },
   );
@@ -378,10 +397,7 @@ const createTTSRoute = (env: Env) => {
       return c.json({ success: true, message: 'TTS settings saved successfully' });
     } catch (error) {
       console.error('Save TTS settings error', sanitizeError(error, 'unexpected'));
-      return c.json(
-        { error: error instanceof Error ? error.message : 'Failed to save TTS settings' },
-        500,
-      );
+      return c.json(ttsError('Failed to save TTS settings', 'tts_unexpected_error'), 500);
     }
   });
 

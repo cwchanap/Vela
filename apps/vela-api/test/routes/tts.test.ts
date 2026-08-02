@@ -74,8 +74,24 @@ function createTestApp(env: Env = TEST_ENV) {
 // Serialize every argument of a console call to a single string so a test can
 // assert that a secret or identity-bearing value does not appear anywhere in
 // the logged payload (not just as a top-level property).
+//
+// Error objects have non-enumerable `name`/`message`/`stack`, so
+// JSON.stringify(new Error('secret')) returns '{}' and would hide any secret
+// embedded in those properties from the leak assertions. Serialize Error
+// arguments via their own properties first, then fall back to JSON.stringify
+// for everything else.
+function serializeError(error: Error): string {
+  return [error.name, error.message, error.stack].filter(Boolean).join('\n');
+}
+
 function serializeLogArgs(args: unknown[]): string {
-  return args.map((arg) => (typeof arg === 'string' ? arg : JSON.stringify(arg))).join('\n');
+  return args
+    .map((arg) => {
+      if (typeof arg === 'string') return arg;
+      if (arg instanceof Error) return serializeError(arg);
+      return JSON.stringify(arg);
+    })
+    .join('\n');
 }
 
 describe('TTS Route', () => {

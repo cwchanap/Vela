@@ -30,6 +30,7 @@ export { parseSrsStats, type SRSStats } from './contracts/srs';
 
 // Export shared TTS contracts
 export {
+  effectiveSettingsMatch,
   parseGeneratePronunciationRequest,
   parseGeneratePronunciationResponse,
   parseTtsApiErrorResponse,
