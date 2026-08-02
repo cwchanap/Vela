@@ -22,6 +22,18 @@ const ttsForbiddenTokens = [
   TTS_PRONUNCIATION_DIAGNOSTICS_MARKER,
   TTS_PRONUNCIATION_ENTRY_TEST_ID,
 ];
+const emittedTextExtensions = [
+  '.js',
+  '.mjs',
+  '.cjs',
+  '.html',
+  '.css',
+  '.json',
+  '.map',
+  '.txt',
+  '.svg',
+  '.xml',
+];
 
 describe('verify-production-diagnostics', () => {
   it('returns no matches when emitted JavaScript excludes every forbidden token', async () => {
@@ -56,9 +68,21 @@ describe('verify-production-diagnostics', () => {
     ]);
   });
 
-  it('ignores non-JavaScript assets', async () => {
+  it.each(emittedTextExtensions)('finds diagnostic tokens in emitted %s artifacts', async (extension) => {
     const root = await mkdtemp(join(tmpdir(), 'vela-prod-scan-'));
-    await writeFile(join(root, 'notes.txt'), forbiddenTokens.join('\n'));
-    expect(await findDiagnosticTokens(root, forbiddenTokens)).toEqual([]);
+    const artifact = join(root, `artifact${extension}`);
+    const token = forbiddenTokens[0];
+    await writeFile(artifact, `prefix ${token} suffix`);
+
+    expect(await findDiagnosticTokens(root, [token])).toEqual([{ path: artifact, token }]);
+  });
+
+  it('ignores unsupported and binary artifacts', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'vela-prod-scan-'));
+    const token = forbiddenTokens[0];
+    await writeFile(join(root, 'image.png'), Buffer.from(token));
+    await writeFile(join(root, 'archive.zip'), Buffer.from(token));
+
+    expect(await findDiagnosticTokens(root, [token])).toEqual([]);
   });
 });
