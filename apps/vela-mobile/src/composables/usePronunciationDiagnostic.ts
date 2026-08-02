@@ -373,6 +373,9 @@ export function usePronunciationDiagnostic(
     };
 
     if (previousState.kind === 'playing') {
+      if (now() >= previousState.pronunciation.expiresAt) {
+        return refreshExpiredAndPlay(context);
+      }
       return playPrepared(previousState.pronunciation, context);
     }
 

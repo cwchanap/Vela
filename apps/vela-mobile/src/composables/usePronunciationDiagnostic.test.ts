@@ -236,6 +236,32 @@ describe('usePronunciationDiagnostic', () => {
     expect(controller.counters.completedPlays.value).toBe(1);
   });
 
+  it('refreshes an expired URL when retrying from the playing state', async () => {
+    tts.preparePronunciation.mockResolvedValueOnce(PREPARED).mockResolvedValueOnce(REFRESHED);
+    const firstHandle = controllablePlaybackHandle();
+    audio.play
+      .mockReturnValueOnce(firstHandle.publicHandle)
+      .mockReturnValueOnce(resolvedPlaybackHandle());
+    const controller = createController();
+
+    const firstAction = controller.playOrRetry();
+    await flushPromises();
+    expect(controller.state.value.kind).toBe('playing');
+
+    now = PREPARED.expiresAt;
+    const secondAction = controller.playOrRetry();
+    await flushPromises();
+    await secondAction;
+
+    expect(tts.invalidatePronunciation).toHaveBeenCalledWith('user-1', '水:ミズ');
+    expect(tts.preparePronunciation).toHaveBeenCalledTimes(2);
+    expect(audio.play).toHaveBeenLastCalledWith(REFRESHED.audioUrl);
+    expect(controller.counters.urlRefreshes.value).toBe(1);
+
+    firstHandle.resolve({ kind: 'stopped', reason: 'restart' });
+    await firstAction;
+  });
+
   it('replays a live ready URL directly without preparing again', async () => {
     tts.preparePronunciation.mockResolvedValue(PREPARED);
     audio.play.mockReturnValue(resolvedPlaybackHandle());

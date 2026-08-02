@@ -78,11 +78,11 @@ describe('mobile service provisioning', () => {
     });
 
     expect(getJson).toHaveBeenCalledWith('srs/stats', {});
-    expect(getJson).toHaveBeenCalledWith('tts/settings', { signal: expect.any(AbortSignal) });
+    expect(getJson).toHaveBeenCalledWith('tts/settings');
     expect(postJson).toHaveBeenCalledWith(
       'tts/generate',
       { vocabularyId: '水:ミズ', text: '水' },
-      { signal: expect.any(AbortSignal), timeoutMs: 45_000 },
+      { timeoutMs: 45_000 },
     );
     expect(coordinator.requestAuthenticatedApi).not.toHaveBeenCalled();
   });

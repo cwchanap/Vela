@@ -90,7 +90,10 @@ const createTTSRoute = (env: Env) => {
 
       const bucketName = env.TTS_AUDIO_BUCKET_NAME || process.env.TTS_AUDIO_BUCKET_NAME;
       if (!bucketName) {
-        return c.json({ error: 'TTS audio bucket not configured' }, 500);
+        return c.json(
+          ttsError('TTS audio bucket not configured', 'tts_audio_service_unavailable'),
+          500,
+        );
       }
 
       const providerValue = settings.provider || 'elevenlabs';
@@ -219,7 +222,7 @@ const createTTSRoute = (env: Env) => {
       return c.json({ audioUrl, cached: false });
     } catch (error) {
       console.error('TTS generation error:', error);
-      return c.json({ error: 'Failed to generate TTS audio' }, 500);
+      return c.json(ttsError('Failed to generate TTS audio', 'tts_generation_failed'), 500);
     }
   });
 

@@ -123,6 +123,7 @@ export class HtmlAudioPlayer implements MobileAudioPlayer {
     const audio = this.settle(playback);
     if (audio) {
       playback.reject(error);
+      this.resetAndRelease(audio);
     }
   }
 

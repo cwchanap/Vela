@@ -22,10 +22,13 @@ export function recordAppResume(at = Date.now()): void {
 }
 
 export function recordAppStateChange(next: boolean, at = Date.now()): void {
+  const previous = isActive.value;
   isActive.value = next;
   lastStateChangeAt.value = at;
-  if (next) lastBecameActiveAt.value = at;
-  else lastBecameInactiveAt.value = at;
+  if (next !== previous) {
+    if (next) lastBecameActiveAt.value = at;
+    else lastBecameInactiveAt.value = at;
+  }
 }
 
 export function resetMobileLifecycleForTests(): void {

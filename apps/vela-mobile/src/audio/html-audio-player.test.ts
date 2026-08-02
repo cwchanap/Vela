@@ -188,6 +188,20 @@ describe('HtmlAudioPlayer', () => {
     });
   });
 
+  it('releases the media element after a playback rejection', async () => {
+    const handle = player.play('https://audio.example.test/rejected.mp3');
+    const element = factory.elementFor('https://audio.example.test/rejected.mp3');
+
+    element.dispatch('error');
+
+    await expect(handle.finished).rejects.toMatchObject({
+      name: 'MobileAudioError',
+      code: 'media_unavailable',
+    });
+    expect(element.listenerCount()).toBe(0);
+    expect(element.src).toBe('');
+  });
+
   it('maps any other play rejection to playback_failed and preserves the cause', async () => {
     const cause = new Error('decoder rejected playback');
     factory.nextPlayError = cause;

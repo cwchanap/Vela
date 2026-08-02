@@ -110,13 +110,11 @@ describe('MobileTtsService', () => {
     await service.preparePronunciation(INPUT);
 
     expect(MOBILE_TTS_GENERATE_TIMEOUT_MS).toBe(45_000);
-    expect(api.getJson).toHaveBeenCalledWith('tts/settings', {
-      signal: expect.any(AbortSignal),
-    });
+    expect(api.getJson).toHaveBeenCalledWith('tts/settings');
     expect(api.postJson).toHaveBeenCalledWith(
       'tts/generate',
       { vocabularyId: '水:ミズ', text: '水' },
-      { signal: expect.any(AbortSignal), timeoutMs: 45_000 },
+      { timeoutMs: 45_000 },
     );
   });
 

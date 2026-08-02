@@ -3,6 +3,7 @@ import { getApiUrl } from '../utils/api';
 import { fetchAuthSession } from 'aws-amplify/auth';
 import {
   parseGeneratePronunciationResponse,
+  parseTtsAudioUrlResponse,
   parseTtsSettings,
   type GeneratePronunciationResponse,
   type TtsSettings,
@@ -245,8 +246,9 @@ export async function getAudioUrl(vocabularyId: string, userId: string): Promise
   }
 
   const data = await response.json();
-  setCachedAudioUrl(cacheKey, data.audioUrl);
-  return data.audioUrl;
+  const audioUrl = parseTtsAudioUrlResponse(data).audioUrl;
+  setCachedAudioUrl(cacheKey, audioUrl);
+  return audioUrl;
 }
 
 /**

@@ -17,6 +17,10 @@ export type GeneratePronunciationResponse = {
   cached: boolean;
 };
 
+export type TtsAudioUrlResponse = {
+  audioUrl: string;
+};
+
 export type TtsApiErrorCode =
   | 'tts_not_configured'
   | 'tts_invalid_provider_configuration'
@@ -70,6 +74,18 @@ function requireNullableString(value: unknown, field: string): string | null {
   return value;
 }
 
+function requireHttpsAudioUrl(value: unknown, field: string): string {
+  const audioUrl = requireString(value, field);
+  let parsed: URL;
+  try {
+    parsed = new URL(audioUrl);
+  } catch {
+    throw new TypeError(`invalid_tts_${field}`);
+  }
+  if (parsed.protocol !== 'https:') throw new TypeError(`invalid_tts_${field}`);
+  return audioUrl;
+}
+
 export function parseTtsSettings(value: unknown): TtsSettings {
   const root = requireRecord(value, 'settings:root');
   const provider = requireString(root.provider, 'settings:provider');
@@ -102,10 +118,14 @@ export function parseGeneratePronunciationRequest(value: unknown): GeneratePronu
 
 export function parseGeneratePronunciationResponse(value: unknown): GeneratePronunciationResponse {
   const root = requireRecord(value, 'generate_response:root');
-  const audioUrl = requireString(root.audioUrl, 'generate_response:audioUrl');
-  const parsed = new URL(audioUrl);
-  if (parsed.protocol !== 'https:') throw new TypeError('invalid_tts_generate_response:audioUrl');
+  const audioUrl = requireHttpsAudioUrl(root.audioUrl, 'generate_response:audioUrl');
   return { audioUrl, cached: requireBoolean(root.cached, 'generate_response:cached') };
+}
+
+export function parseTtsAudioUrlResponse(value: unknown): TtsAudioUrlResponse {
+  const root = requireRecord(value, 'audio_response:root');
+  const audioUrl = requireHttpsAudioUrl(root.audioUrl, 'audio_response:audioUrl');
+  return { audioUrl };
 }
 
 export function parseTtsApiErrorResponse(value: unknown): TtsApiErrorResponse {
