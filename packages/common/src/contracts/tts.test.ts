@@ -121,6 +121,51 @@ describe('TTS contracts', () => {
     });
   });
 
+  it('parses effective settings in a GET audio URL response', () => {
+    expect(
+      parseTtsAudioUrlResponse({
+        audioUrl: HTTPS_AUDIO,
+        effectiveSettings: { provider: 'openai', voiceId: 'alloy', model: 'tts-1' },
+      }),
+    ).toEqual({
+      audioUrl: HTTPS_AUDIO,
+      effectiveSettings: { provider: 'openai', voiceId: 'alloy', model: 'tts-1' },
+    });
+  });
+
+  it('parses effective settings with null voice/model in a GET audio URL response', () => {
+    expect(
+      parseTtsAudioUrlResponse({
+        audioUrl: HTTPS_AUDIO,
+        effectiveSettings: { provider: 'elevenlabs', voiceId: null, model: null },
+      }),
+    ).toEqual({
+      audioUrl: HTTPS_AUDIO,
+      effectiveSettings: { provider: 'elevenlabs', voiceId: null, model: null },
+    });
+  });
+
+  it.each([
+    [
+      'unsupported provider',
+      { provider: 'other', voiceId: null, model: null },
+      'effectiveSettings:provider',
+    ],
+    ['non-record effectiveSettings', 'openai', 'effectiveSettings'],
+    [
+      'non-string voiceId',
+      { provider: 'openai', voiceId: 1, model: null },
+      'effectiveSettings:voiceId',
+    ],
+  ])(
+    'rejects a GET audio response effectiveSettings with %s',
+    (_caseName, effectiveSettings, field) => {
+      expect(() => parseTtsAudioUrlResponse({ audioUrl: HTTPS_AUDIO, effectiveSettings })).toThrow(
+        `invalid_tts_audio_response:${field}`,
+      );
+    },
+  );
+
   it.each([
     ['non-HTTPS audio URL', { audioUrl: 'http://audio.example.test/mizu.mp3' }],
     ['unparseable audio URL', { audioUrl: 'not-a-url' }],

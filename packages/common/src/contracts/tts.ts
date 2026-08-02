@@ -34,6 +34,15 @@ export type GeneratePronunciationResponse = {
 
 export type TtsAudioUrlResponse = {
   audioUrl: string;
+  /**
+   * The provider/voice/model the backend used to derive the S3 cache key for
+   * the looked-up audio. The backend re-reads TTS settings during
+   * `GET /tts/audio/:vocabularyId`, so these can differ from the settings a
+   * client read via `GET /tts/settings` if settings changed between the two
+   * requests. Clients use this to avoid caching audio under a stale settings
+   * identity. Optional for backward compatibility with older deployments.
+   */
+  effectiveSettings?: TtsEffectiveSettings;
 };
 
 const TTS_API_ERROR_CODES = [
@@ -135,6 +144,35 @@ export function parseGeneratePronunciationRequest(value: unknown): GeneratePronu
   return { vocabularyId, text };
 }
 
+/**
+ * Parse the optional `effectiveSettings` object shared by the generate and
+ * audio URL responses. `fieldPrefix` scopes the TypeError field path so each
+ * response type reports its own origin (e.g. `generate_response:...` vs
+ * `audio_response:...`).
+ */
+function parseEffectiveSettings(
+  value: unknown,
+  fieldPrefix: string,
+): TtsEffectiveSettings | undefined {
+  if (value === undefined) return undefined;
+  const settingsRecord = requireRecord(value, `${fieldPrefix}:effectiveSettings`);
+  const provider = requireString(
+    settingsRecord.provider,
+    `${fieldPrefix}:effectiveSettings:provider`,
+  );
+  if (!isTtsProvider(provider)) {
+    throw new TypeError(`invalid_tts_${fieldPrefix}:effectiveSettings:provider`);
+  }
+  return {
+    provider,
+    voiceId: requireNullableString(
+      settingsRecord.voiceId,
+      `${fieldPrefix}:effectiveSettings:voiceId`,
+    ),
+    model: requireNullableString(settingsRecord.model, `${fieldPrefix}:effectiveSettings:model`),
+  };
+}
+
 export function parseGeneratePronunciationResponse(value: unknown): GeneratePronunciationResponse {
   const root = requireRecord(value, 'generate_response:root');
   const audioUrl = requireHttpsAudioUrl(root.audioUrl, 'generate_response:audioUrl');
@@ -143,30 +181,8 @@ export function parseGeneratePronunciationResponse(value: unknown): GeneratePron
     cached: requireBoolean(root.cached, 'generate_response:cached'),
   };
 
-  if (root.effectiveSettings !== undefined) {
-    const settingsRecord = requireRecord(
-      root.effectiveSettings,
-      'generate_response:effectiveSettings',
-    );
-    const provider = requireString(
-      settingsRecord.provider,
-      'generate_response:effectiveSettings:provider',
-    );
-    if (!isTtsProvider(provider)) {
-      throw new TypeError('invalid_tts_generate_response:effectiveSettings:provider');
-    }
-    response.effectiveSettings = {
-      provider,
-      voiceId: requireNullableString(
-        settingsRecord.voiceId,
-        'generate_response:effectiveSettings:voiceId',
-      ),
-      model: requireNullableString(
-        settingsRecord.model,
-        'generate_response:effectiveSettings:model',
-      ),
-    };
-  }
+  const effectiveSettings = parseEffectiveSettings(root.effectiveSettings, 'generate_response');
+  if (effectiveSettings) response.effectiveSettings = effectiveSettings;
 
   return response;
 }
@@ -174,7 +190,12 @@ export function parseGeneratePronunciationResponse(value: unknown): GeneratePron
 export function parseTtsAudioUrlResponse(value: unknown): TtsAudioUrlResponse {
   const root = requireRecord(value, 'audio_response:root');
   const audioUrl = requireHttpsAudioUrl(root.audioUrl, 'audio_response:audioUrl');
-  return { audioUrl };
+  const response: TtsAudioUrlResponse = { audioUrl };
+
+  const effectiveSettings = parseEffectiveSettings(root.effectiveSettings, 'audio_response');
+  if (effectiveSettings) response.effectiveSettings = effectiveSettings;
+
+  return response;
 }
 
 export function parseTtsApiErrorResponse(value: unknown): TtsApiErrorResponse {
