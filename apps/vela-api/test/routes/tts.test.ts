@@ -80,6 +80,12 @@ function createTestApp(env: Env = TEST_ENV) {
 // embedded in those properties from the leak assertions. Serialize Error
 // arguments via their own properties first, then fall back to JSON.stringify
 // for everything else.
+//
+// The JSON.stringify fallback uses a replacer so a nested Error (e.g.
+// `{ provider, userId, error: new Error('secret') }`) is also expanded —
+// without the replacer JSON.stringify renders a nested Error as `{}` and the
+// secret leaks past the assertion. This guards against a regression that
+// restores the raw error object inside a logged payload.
 function serializeError(error: Error): string {
   return [error.name, error.message, error.stack].filter(Boolean).join('\n');
 }
@@ -89,10 +95,36 @@ function serializeLogArgs(args: unknown[]): string {
     .map((arg) => {
       if (typeof arg === 'string') return arg;
       if (arg instanceof Error) return serializeError(arg);
-      return JSON.stringify(arg);
+      return JSON.stringify(arg, (_key, value) =>
+        value instanceof Error
+          ? { name: value.name, message: value.message, stack: value.stack }
+          : value,
+      );
     })
     .join('\n');
 }
+
+describe('serializeLogArgs', () => {
+  // The unsafe logging pattern these tests guard against used objects such as
+  // `{ provider, userId, error }`. A nested Error's own properties are
+  // non-enumerable, so plain JSON.stringify renders it as `{}` and a secret
+  // embedded in the error would slip past the leak assertions. The replacer
+  // must expand nested Errors so a regression that restores a raw nested
+  // error is caught.
+  test('expands a nested Error and exposes its message', () => {
+    const SECRET_MARKER = 'sk-leaked-nested-secret-XYZ';
+    const serialized = serializeLogArgs([
+      'TTS provider error',
+      { provider: 'elevenlabs', userId: 'test-user-id', error: new Error(SECRET_MARKER) },
+    ]);
+    expect(serialized).toContain(SECRET_MARKER);
+  });
+
+  test('expands a top-level Error argument', () => {
+    const serialized = serializeLogArgs([new Error('top-level secret')]);
+    expect(serialized).toContain('top-level secret');
+  });
+});
 
 describe('TTS Route', () => {
   beforeEach(() => {
