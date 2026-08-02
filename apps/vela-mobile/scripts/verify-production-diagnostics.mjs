@@ -1,5 +1,5 @@
 import { readdir, readFile } from 'node:fs/promises';
-import { relative, resolve } from 'node:path';
+import { extname, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const PRODUCTION_FORBIDDEN_TOKENS = [
@@ -13,6 +13,19 @@ const PRODUCTION_FORBIDDEN_TOKENS = [
   '/diagnostics/tts-pronunciation',
   'Pronunciation diagnostics',
 ];
+
+export const PRODUCTION_TEXT_ARTIFACT_EXTENSIONS = new Set([
+  '.js',
+  '.mjs',
+  '.cjs',
+  '.html',
+  '.css',
+  '.json',
+  '.map',
+  '.txt',
+  '.svg',
+  '.xml',
+]);
 
 const defaultRoot = fileURLToPath(new URL('../src-capacitor/www/', import.meta.url));
 
@@ -35,7 +48,10 @@ export async function findDiagnosticTokens(root, tokens) {
       const path = resolve(directory, entry.name);
       if (entry.isDirectory()) {
         await scan(path);
-      } else if (entry.isFile() && entry.name.endsWith('.js')) {
+      } else if (
+        entry.isFile() &&
+        PRODUCTION_TEXT_ARTIFACT_EXTENSIONS.has(extname(entry.name).toLowerCase())
+      ) {
         const contents = await readFile(path, 'utf8');
         for (const token of tokens) {
           if (contents.includes(token)) matches.push({ path, token });
