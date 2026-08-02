@@ -200,4 +200,40 @@ describe('M1 foundation manifest contract', () => {
       findings: [{ severity: 'info', summary: 'Physical observation recorded' }],
     });
   });
+
+  it('enforces manual manifest fields against untyped runtime input', () => {
+    const hostileInput = {
+      testedBehaviorCommit: 'd'.repeat(40),
+      matrixClass: 'production-smoke',
+      runId: '20260803T021500Z-production-smoke',
+      startedAt: '2026-08-03T02:15:00.000Z',
+      endedAt: '2026-08-03T02:17:00.000Z',
+      config: validManifest().config,
+      host: { deviceAlias: 'test iPhone' },
+      evidence: [],
+      findings: [{ severity: 'info', summary: 'Physical observation recorded' }],
+      outcome: 'gate_failed',
+      phase: 'ios-simulator',
+      exitCode: 0,
+      commands: [
+        {
+          label: 'injected-command',
+          command: 'false',
+          cwd: '/tmp',
+          startedAt: '2026-08-03T02:15:00.000Z',
+          endedAt: '2026-08-03T02:15:00.000Z',
+          elapsedMs: 0,
+          exitCode: 0,
+          status: 'passed',
+        },
+      ],
+    } as unknown as Parameters<typeof createManualM1Manifest>[0];
+
+    const manifest = createManualM1Manifest(hostileInput);
+
+    expect(manifest.schemaVersion).toBe(1);
+    expect(manifest.phase).toBe('manual');
+    expect(manifest.exitCode).toBe(4);
+    expect(manifest.commands).toEqual([]);
+  });
 });

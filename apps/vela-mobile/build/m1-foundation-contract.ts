@@ -439,10 +439,10 @@ export function createManualM1Manifest(input: {
   outcome: 'passed' | 'gate_failed' | 'prerequisite_missing';
 }): M1Manifest {
   return validateM1Manifest({
+    ...input,
     schemaVersion: 1,
     phase: 'manual',
     exitCode: M1_EXIT_CODE[input.outcome],
     commands: [],
-    ...input,
   });
 }
