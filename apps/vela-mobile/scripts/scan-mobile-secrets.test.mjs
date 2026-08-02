@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
-import { scanMobileSecretRoots } from './scan-mobile-secrets.mjs';
+import { resolveMobileSecretRoot, scanMobileSecretRoots } from './scan-mobile-secrets.mjs';
 
 const temporaryRoots = [];
 const scannerPath = fileURLToPath(new URL('./scan-mobile-secrets.mjs', import.meta.url));
@@ -17,10 +17,39 @@ async function createTemporaryRoot() {
 }
 
 afterEach(async () => {
-  await Promise.all(temporaryRoots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
+  await Promise.all(
+    temporaryRoots.splice(0).map((root) => rm(root, { recursive: true, force: true })),
+  );
 });
 
 describe('scanMobileSecretRoots', () => {
+  it('resolves the Task 5 repository-relative mobile root from a Bun package CWD', async () => {
+    const repositoryRoot = await createTemporaryRoot();
+    const mobilePackageRoot = join(repositoryRoot, 'apps', 'vela-mobile');
+    const directCwdRoot = join(mobilePackageRoot, 'direct-cwd-root');
+    await mkdir(directCwdRoot, { recursive: true });
+
+    expect(
+      resolveMobileSecretRoot('apps/vela-mobile', {
+        cwd: mobilePackageRoot,
+        repositoryRoot,
+      }),
+    ).toBe(mobilePackageRoot);
+    expect(
+      resolveMobileSecretRoot('direct-cwd-root', {
+        cwd: mobilePackageRoot,
+        repositoryRoot,
+      }),
+    ).toBe(directCwdRoot);
+
+    const missingRoot = resolveMobileSecretRoot('does-not-exist', {
+      cwd: mobilePackageRoot,
+      repositoryRoot,
+    });
+    expect(missingRoot).toBe(join(mobilePackageRoot, 'does-not-exist'));
+    await expect(scanMobileSecretRoots({ roots: [missingRoot] })).rejects.toThrow(/ENOENT/u);
+  });
+
   it('scans supported files and returns redacted findings', async () => {
     const root = await createTemporaryRoot();
     await mkdir(join(root, 'nested'));
@@ -86,9 +115,18 @@ describe('scanMobileSecretRoots', () => {
     const skippedSecret = 'SECRET-should-not-be-reported';
     await mkdir(join(root, 'node_modules'));
     await mkdir(join(root, 'DerivedData'));
-    await writeFile(join(root, 'node_modules', 'dependency.log'), `Authorization: Bearer ${skippedSecret}`);
-    await writeFile(join(root, 'DerivedData', 'build.log'), `Authorization: Bearer ${skippedSecret}`);
-    await writeFile(join(root, 'archive.zip'), Buffer.from(`Authorization: Bearer ${skippedSecret}`));
+    await writeFile(
+      join(root, 'node_modules', 'dependency.log'),
+      `Authorization: Bearer ${skippedSecret}`,
+    );
+    await writeFile(
+      join(root, 'DerivedData', 'build.log'),
+      `Authorization: Bearer ${skippedSecret}`,
+    );
+    await writeFile(
+      join(root, 'archive.zip'),
+      Buffer.from(`Authorization: Bearer ${skippedSecret}`),
+    );
     await writeFile(join(root, 'image.png'), Buffer.from(`Authorization: Bearer ${skippedSecret}`));
     await writeFile(join(root, 'large.log'), `Authorization: Bearer ${skippedSecret}`.repeat(8));
 
@@ -136,8 +174,14 @@ describe('scanMobileSecretRoots', () => {
       mkdir(join(artifactRoot, 'nested'), { recursive: true }),
     ]);
     await Promise.all([
-      writeFile(join(sourceRoot, 'nested', 'captured.log'), 'Authorization: Bearer SECRET-access-token'),
-      writeFile(join(artifactRoot, 'nested', 'captured.log'), 'Authorization: Bearer SECRET-access-token'),
+      writeFile(
+        join(sourceRoot, 'nested', 'captured.log'),
+        'Authorization: Bearer SECRET-access-token',
+      ),
+      writeFile(
+        join(artifactRoot, 'nested', 'captured.log'),
+        'Authorization: Bearer SECRET-access-token',
+      ),
       writeFile(join(sourceRoot, 'nested', 'image.png'), Buffer.from([0])),
       writeFile(join(artifactRoot, 'nested', 'image.png'), Buffer.from([0])),
     ]);
@@ -160,11 +204,9 @@ describe('scanMobileSecretRoots', () => {
   it('allows only explicit fixture values in test files', async () => {
     const root = await createTemporaryRoot();
     const realBearer = ['live', 'access', 'token1234567890'].join('-');
-    const jwt = [
-      'eyJhbGciOiJIUzI1NiJ9',
-      'eyJzdWIiOiIxMjM0NTY3ODkwIn0',
-      'signature123456',
-    ].join('.');
+    const jwt = ['eyJhbGciOiJIUzI1NiJ9', 'eyJzdWIiOiIxMjM0NTY3ODkwIn0', 'signature123456'].join(
+      '.',
+    );
     const privateKeyHeader = ['-----BEGIN ', 'PRIVATE KEY-----'].join('');
     const awsSecret = 'A'.repeat(40);
     const providerKey = ['sk', 'live', 'abcdefghijklmno'].join('-');
