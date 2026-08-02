@@ -361,13 +361,10 @@ export function createMobileTtsService(apiClient: MobileApiClient): MobileTtsSer
     capturedVocabularyGeneration: number,
     capturedClearGeneration: number,
   ): Promise<PreparedPronunciation> {
-    const requestController = new AbortController();
     const settingsStartedAt = Date.now();
     let settingsValue: unknown;
     try {
-      settingsValue = await apiClient.getJson('tts/settings', {
-        signal: requestController.signal,
-      });
+      settingsValue = await apiClient.getJson('tts/settings');
     } catch (error) {
       throw mapApiError(error);
     }
@@ -411,7 +408,7 @@ export function createMobileTtsService(apiClient: MobileApiClient): MobileTtsSer
           responseValue = await apiClient.postJson(
             'tts/generate',
             { vocabularyId: input.vocabularyId, text: input.text },
-            { signal: requestController.signal, timeoutMs: MOBILE_TTS_GENERATE_TIMEOUT_MS },
+            { timeoutMs: MOBILE_TTS_GENERATE_TIMEOUT_MS },
           );
         } catch (error) {
           throw mapApiError(error);

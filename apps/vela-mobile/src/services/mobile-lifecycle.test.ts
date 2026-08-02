@@ -27,4 +27,31 @@ describe('mobile lifecycle', () => {
     expect(mobileLifecycleState.lastBecameActiveAt.value).toBe(200);
     expect(mobileLifecycleState.resumeCount.value).toBe(0);
   });
+
+  it('only updates became-timestamps on an actual transition', () => {
+    resetMobileLifecycleForTests();
+    // reset leaves isActive=true; transition to inactive first.
+    recordAppStateChange(false, 100);
+    expect(mobileLifecycleState.lastBecameInactiveAt.value).toBe(100);
+    expect(mobileLifecycleState.lastBecameActiveAt.value).toBe(null);
+
+    recordAppStateChange(true, 200);
+    expect(mobileLifecycleState.lastBecameActiveAt.value).toBe(200);
+
+    // Repeated active notification: not a transition, became-timestamp unchanged.
+    recordAppStateChange(true, 300);
+    expect(mobileLifecycleState.isActive.value).toBe(true);
+    expect(mobileLifecycleState.lastStateChangeAt.value).toBe(300);
+    expect(mobileLifecycleState.lastBecameActiveAt.value).toBe(200);
+    expect(mobileLifecycleState.lastBecameInactiveAt.value).toBe(100);
+
+    // Transition back to inactive, then a repeated inactive notification.
+    recordAppStateChange(false, 400);
+    expect(mobileLifecycleState.lastBecameInactiveAt.value).toBe(400);
+
+    recordAppStateChange(false, 500);
+    expect(mobileLifecycleState.lastStateChangeAt.value).toBe(500);
+    expect(mobileLifecycleState.lastBecameInactiveAt.value).toBe(400);
+    expect(mobileLifecycleState.lastBecameActiveAt.value).toBe(200);
+  });
 });

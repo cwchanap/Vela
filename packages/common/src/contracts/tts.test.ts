@@ -3,6 +3,7 @@ import {
   parseGeneratePronunciationRequest,
   parseGeneratePronunciationResponse,
   parseTtsApiErrorResponse,
+  parseTtsAudioUrlResponse,
   parseTtsSettings,
 } from './tts';
 
@@ -56,6 +57,27 @@ describe('TTS contracts', () => {
         cached: false,
       }),
     ).toThrow('invalid_tts_generate_response:audioUrl');
+  });
+
+  it('rejects an unparseable audio URL with the stable generate-response code', () => {
+    expect(() =>
+      parseGeneratePronunciationResponse({ audioUrl: 'not-a-url', cached: false }),
+    ).toThrow('invalid_tts_generate_response:audioUrl');
+  });
+
+  it('parses a valid GET audio URL response', () => {
+    expect(parseTtsAudioUrlResponse({ audioUrl: HTTPS_AUDIO })).toEqual({
+      audioUrl: HTTPS_AUDIO,
+    });
+  });
+
+  it.each([
+    ['non-HTTPS audio URL', { audioUrl: 'http://audio.example.test/mizu.mp3' }],
+    ['unparseable audio URL', { audioUrl: 'not-a-url' }],
+    ['missing audio URL', {}],
+    ['non-string audio URL', { audioUrl: 1 }],
+  ])('rejects a GET audio response with %s', (_caseName, value) => {
+    expect(() => parseTtsAudioUrlResponse(value)).toThrow('invalid_tts_audio_response:audioUrl');
   });
 
   it('trims generation input', () => {

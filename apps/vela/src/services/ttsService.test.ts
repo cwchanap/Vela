@@ -421,6 +421,14 @@ describe('ttsService', () => {
       expect(result).toBe('https://example.com/audio/word.mp3');
     });
 
+    it('rejects a non-HTTPS audio URL from the GET audio endpoint', async () => {
+      mockSuccessfulTtsResponse({ audioUrl: 'http://insecure.example.test/audio.mp3' });
+
+      await expect(getAudioUrl('vocab-1', 'user-123')).rejects.toThrow(
+        'invalid_tts_audio_response:audioUrl',
+      );
+    });
+
     it('should return null when audio does not exist (404)', async () => {
       mockFetch.mockImplementation((url: string) => {
         if (url === '/api/tts/settings') {

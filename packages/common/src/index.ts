@@ -33,11 +33,13 @@ export {
   parseGeneratePronunciationRequest,
   parseGeneratePronunciationResponse,
   parseTtsApiErrorResponse,
+  parseTtsAudioUrlResponse,
   parseTtsSettings,
   type GeneratePronunciationRequest,
   type GeneratePronunciationResponse,
   type TtsApiErrorCode,
   type TtsApiErrorResponse,
+  type TtsAudioUrlResponse,
   type TtsProvider,
   type TtsSettings,
 } from './contracts/tts';
