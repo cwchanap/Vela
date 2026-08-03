@@ -1,6 +1,7 @@
 import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { dirname, join, relative } from 'node:path';
 import { TextDecoder } from 'node:util';
 import {
@@ -8,7 +9,6 @@ import {
   createM1RunDirectory,
   createM1RunId,
   createManualM1Manifest,
-  hashFile,
   validateM1Manifest,
   type M1CommandResult,
   type M1EvidenceReference,
@@ -23,6 +23,7 @@ const MAX_CAPTURED_OUTPUT_BYTES = 64 * 1024;
 const MAX_MANUAL_INPUT_BYTES = 256 * 1024;
 const MAX_RUN_DIRECTORY_ATTEMPTS = 1_000;
 const MAX_GIT_STATUS_BYTES = 1024 * 1024;
+const EXECUTION_WORKSPACE_PREFIX = 'vela-m1-foundation-';
 const MANUAL_INPUT_DECODER = new TextDecoder('utf-8', { fatal: true });
 const MOBILE_CONFIG_KEYS = [
   'VITE_MOBILE_API_URL',
@@ -38,6 +39,34 @@ const DEPLOYED_IDENTITY_OUTPUT_KEYS = {
   cognitoOAuthDomain: 'CognitoOAuthDomain',
   cognitoRegion: 'CognitoRegion',
 } as const;
+const SAFE_EXECUTION_ENVIRONMENT_KEYS = [
+  'APPDATA',
+  'BUN_INSTALL',
+  'CI',
+  'COMSPEC',
+  'HOME',
+  'LANG',
+  'LC_ALL',
+  'LC_CTYPE',
+  'LOCALAPPDATA',
+  'LOGNAME',
+  'PATH',
+  'PATHEXT',
+  'SHELL',
+  'SystemRoot',
+  'TEMP',
+  'TERM',
+  'TMP',
+  'TMPDIR',
+  'USER',
+  'USERPROFILE',
+  'WINDIR',
+  'XDG_CACHE_HOME',
+  'XDG_CONFIG_HOME',
+  'XDG_DATA_HOME',
+] as const;
+const FIELD_VALUE_ASSIGNMENT_PATTERN =
+  /(?:^|[{\s,;])(?:\\?["'])?([A-Za-z][A-Za-z0-9_-]*)(?:\\?["'])?\s*[:=]\s*(?=(?:\\?["'])?[^\s,}\]])/giu;
 
 export type CommandSpec = {
   label: string;
@@ -62,6 +91,11 @@ export type DeployedIdentityProof = {
   cognitoMobileUserPoolClientId: string;
   cognitoOAuthDomain: string;
   cognitoRegion: string;
+};
+
+export type ExecutionWorkspace = {
+  root: string;
+  dispose: () => Promise<void>;
 };
 
 export type HarnessDependencies = {
@@ -90,6 +124,19 @@ export type HarnessDependencies = {
    * identifiers from packages/cdk/cdk-outputs.json.
    */
   loadDeployedIdentityProof?: (repoRoot: string) => Promise<DeployedIdentityProof | null>;
+  /**
+   * Test-only injection point. Production callers create a detached Git
+   * worktree at the exact tested behavior commit.
+   */
+  createExecutionWorkspace?: (input: {
+    repoRoot: string;
+    testedBehaviorCommit: string;
+  }) => Promise<ExecutionWorkspace>;
+  /**
+   * Test-only injection point for the minimal non-secret process state that
+   * gates need in addition to the five public mobile VITE values.
+   */
+  executionProcessEnvironment?: ProcessEnvironment;
 };
 
 export type M1VerifyArguments = {
@@ -301,7 +348,10 @@ export const spawnCommand: CommandRunner = async (spec) =>
     try {
       child = spawn(spec.command, spec.args, {
         cwd: spec.cwd,
-        env: { ...process.env, ...spec.env },
+        // Automated gate specs carry a deliberately whitelisted environment.
+        // Do not merge it with this process: that would leak unrelated local
+        // secrets into a supposedly fresh execution checkout.
+        env: (spec.env ?? process.env) as typeof process.env,
         shell: false,
         stdio: ['ignore', 'pipe', 'pipe'],
       });
@@ -454,6 +504,46 @@ async function resolveDirtyPathsDirectly(repoRoot: string): Promise<string[]> {
     throw new M1HarnessError('Unable to inspect the Git working tree state safely');
   }
   return parseGitStatusPaths(result.stdout);
+}
+
+async function createDetachedExecutionWorkspace(input: {
+  repoRoot: string;
+  testedBehaviorCommit: string;
+}): Promise<ExecutionWorkspace> {
+  const temporaryParent = await mkdtemp(join(tmpdir(), EXECUTION_WORKSPACE_PREFIX));
+  const root = join(temporaryParent, 'checkout');
+
+  try {
+    const result = await runGitDirectly({
+      repoRoot: input.repoRoot,
+      args: ['worktree', 'add', '--detach', root, input.testedBehaviorCommit],
+      maxOutputBytes: 4 * 1024,
+      failureMessage: 'Unable to create the clean detached Git execution workspace',
+    });
+    if (result.exitCode !== 0) {
+      throw new M1HarnessError('Unable to create the clean detached Git execution workspace');
+    }
+  } catch (error) {
+    await rm(temporaryParent, { force: true, recursive: true }).catch(() => undefined);
+    if (error instanceof M1HarnessError) throw error;
+    throw new M1HarnessError('Unable to create the clean detached Git execution workspace');
+  }
+
+  return {
+    root,
+    dispose: async () => {
+      const result = await runGitDirectly({
+        repoRoot: input.repoRoot,
+        args: ['worktree', 'remove', '--force', root],
+        maxOutputBytes: 4 * 1024,
+        failureMessage: 'Unable to remove the clean detached Git execution workspace',
+      });
+      if (result.exitCode !== 0) {
+        throw new M1HarnessError('Unable to remove the clean detached Git execution workspace');
+      }
+      await rm(temporaryParent, { force: true, recursive: true });
+    },
+  };
 }
 
 async function resolveTestedBehaviorCommit(dependencies: HarnessDependencies): Promise<string> {
@@ -716,21 +806,36 @@ async function deployedIdentityMatchesLoadedConfiguration(
   }
 }
 
-function commandEnvironment(env: ProcessEnvironment): Record<string, string> {
+function commandEnvironment(
+  loaded: ReturnType<typeof loadMobileBuildEnv>,
+  executionProcessEnvironment: ProcessEnvironment,
+): Record<string, string> {
   const result: Record<string, string> = {};
-  for (const key of MOBILE_CONFIG_KEYS) {
-    const value = env[key];
+
+  for (const key of SAFE_EXECUTION_ENVIRONMENT_KEYS) {
+    const value = executionProcessEnvironment[key];
     if (typeof value === 'string') result[key] = value;
   }
-  if (env.MOBILE_SKIP_ENV_VALIDATION !== undefined) {
-    result.MOBILE_SKIP_ENV_VALIDATION = env.MOBILE_SKIP_ENV_VALIDATION;
+  for (const key of MOBILE_CONFIG_KEYS) {
+    const value = loaded[key];
+    if (typeof value !== 'string') {
+      throw new M1HarnessError('Validated mobile build configuration is unexpectedly incomplete');
+    }
+    result[key] = value;
   }
   return result;
 }
 
-function automatedCommands(dependencies: HarnessDependencies): CommandSpec[] {
-  const env = commandEnvironment(dependencies.env);
-  const cwd = dependencies.repoRoot;
+function automatedCommands(input: {
+  dependencies: HarnessDependencies;
+  executionRoot: string;
+  loaded: ReturnType<typeof loadMobileBuildEnv>;
+}): CommandSpec[] {
+  const env = commandEnvironment(
+    input.loaded,
+    input.dependencies.executionProcessEnvironment ?? process.env,
+  );
+  const cwd = input.executionRoot;
   return [
     { label: 'install', command: 'bun', args: ['install', '--frozen-lockfile'], cwd, env },
     { label: 'lint', command: 'bun', args: ['run', 'lint'], cwd, env },
@@ -840,15 +945,38 @@ function createCommandResult(input: {
   };
 }
 
-function truncateText(value: string): string {
-  const bytes = Buffer.from(value, 'utf8');
-  if (bytes.length <= MAX_CAPTURED_OUTPUT_BYTES) return value;
+function isSensitiveOAuthFieldName(rawFieldName: string): boolean {
+  const fieldName = rawFieldName.replaceAll(/[_-]/gu, '').toLowerCase();
+  if (fieldName === 'oauthdomain') return false;
 
-  const suffix = '\n[output truncated at 64 KiB]\n';
-  return Buffer.concat([
-    bytes.subarray(0, MAX_CAPTURED_OUTPUT_BYTES - Buffer.byteLength(suffix)),
-    Buffer.from(suffix),
-  ]).toString('utf8');
+  const isOauthScoped =
+    fieldName.startsWith('oauth') ||
+    fieldName.startsWith('auth') ||
+    fieldName.includes('authorization');
+  return (
+    fieldName === 'authorization' ||
+    fieldName === 'code' ||
+    fieldName === 'token' ||
+    fieldName === 'state' ||
+    fieldName === 'nonce' ||
+    fieldName.includes('token') ||
+    (fieldName.includes('code') && (isOauthScoped || fieldName.includes('verifier'))) ||
+    (isOauthScoped &&
+      (fieldName.includes('verifier') ||
+        fieldName.includes('secret') ||
+        fieldName.includes('state') ||
+        fieldName.includes('nonce')))
+  );
+}
+
+function containsSensitiveOAuthFieldValue(text: string): boolean {
+  FIELD_VALUE_ASSIGNMENT_PATTERN.lastIndex = 0;
+  let match = FIELD_VALUE_ASSIGNMENT_PATTERN.exec(text);
+  while (match) {
+    if (isSensitiveOAuthFieldName(match[1]!)) return true;
+    match = FIELD_VALUE_ASSIGNMENT_PATTERN.exec(text);
+  }
+  return false;
 }
 
 function containsUnsafeEvidenceText(text: string): boolean {
@@ -857,48 +985,10 @@ function containsUnsafeEvidenceText(text: string): boolean {
   return [
     /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/iu,
     /(?:[?&](?:code|state|nonce|code_verifier|access_token|id_token|refresh_token)=)/iu,
-    // Match raw OAuth assignments even when a JSON payload was quoted inside
-    // a manual summary. The assignment must carry a value; field names in
-    // ordinary prose alone remain safe to record.
-    /\b(?:authorization(?:[_ -]?code)?|code(?:[_-]?verifier)?|access[_-]?token|id[_-]?token|refresh[_-]?token|token)\b(?:\\?["'])?\s*[:=]\s*(?:\\?["'])?[^\s,}\]]+/iu,
     /\bdata:[^\s,]+;base64,/iu,
     /\/oauth\/callback(?:[/?#]|$)/iu,
     /\b(?:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|[0-9a-f]{8}-[0-9a-f]{16,}|[0-9a-f]{40})\b/iu,
-  ].some((pattern) => pattern.test(text));
-}
-
-async function persistFailureOutput(input: {
-  result: Awaited<ReturnType<CommandRunner>>;
-  spec: CommandSpec;
-  runDirectory: string;
-  repoRoot: string;
-  commandIndex: number;
-}): Promise<{
-  evidence?: M1EvidenceReference;
-  withheld: boolean;
-}> {
-  const stdout = truncateText(typeof input.result.stdout === 'string' ? input.result.stdout : '');
-  const stderr = truncateText(typeof input.result.stderr === 'string' ? input.result.stderr : '');
-  if (stdout === '' && stderr === '') return { withheld: false };
-
-  const output = `stdout:\n${stdout}\nstderr:\n${stderr}`;
-  if (containsUnsafeEvidenceText(output)) return { withheld: true };
-
-  const filename = `command-${(input.commandIndex + 1).toString().padStart(2, '0')}-${input.spec.label}.txt`;
-  const outputPath = join(input.runDirectory, filename);
-  await writeFile(outputPath, output, { flag: 'wx' });
-  const byteSize = Buffer.byteLength(output);
-
-  return {
-    withheld: false,
-    evidence: {
-      kind: 'local-hash',
-      location: relativePath(input.repoRoot, outputPath),
-      mediaType: 'text/plain; charset=utf-8',
-      byteSize,
-      sha256: await hashFile(outputPath),
-    },
-  };
+  ].some((pattern) => pattern.test(text)) || containsSensitiveOAuthFieldValue(text);
 }
 
 async function createAutomaticRunContext(input: {
@@ -963,6 +1053,43 @@ async function writeManifest(directory: string, manifest: M1Manifest): Promise<v
   await writeFile(join(directory, 'manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`, {
     flag: 'wx',
   });
+}
+
+/**
+ * Stages only harness-generated metadata inside the clean checkout so the
+ * eighth gate scans the current run's material before anything is persisted
+ * back to the original repository. It deliberately contains no stdout/stderr
+ * payload and is deleted with the detached worktree after the run.
+ */
+async function stageCleanScannerInput(input: {
+  executionRoot: string;
+  testedBehaviorCommit: string;
+  runId: string;
+  config: M1Manifest['config'];
+  commands: M1CommandResult[];
+}): Promise<void> {
+  const directory = createM1RunDirectory({
+    evidenceRoot: join(input.executionRoot, 'apps/vela-mobile/docs/evidence/hpa-210'),
+    testedBehaviorCommit: input.testedBehaviorCommit,
+    runId: input.runId,
+  });
+  await mkdir(directory, { recursive: true });
+
+  const scanInput = JSON.stringify(
+    {
+      schemaVersion: 1,
+      runId: input.runId,
+      phase: 'automated',
+      config: input.config,
+      commands: input.commands,
+    },
+    null,
+    2,
+  );
+  if (containsUnsafeEvidenceText(scanInput)) {
+    throw new M1HarnessError('Unable to stage clean scanner input safely');
+  }
+  await writeFile(join(directory, 'scan-input.json'), `${scanInput}\n`, { flag: 'wx' });
 }
 
 async function runAutomatedPhase(
@@ -1048,8 +1175,37 @@ async function runAutomatedPhase(
   });
 
   if (outcome === 'passed') {
+    let workspace: ExecutionWorkspace | undefined;
     try {
-      for (const [commandIndex, spec] of automatedCommands(dependencies).entries()) {
+      if (!configuration.loaded) {
+        throw new M1HarnessError('Validated mobile build configuration is unexpectedly unavailable');
+      }
+      workspace = dependencies.createExecutionWorkspace
+        ? await dependencies.createExecutionWorkspace({
+            repoRoot: dependencies.repoRoot,
+            testedBehaviorCommit,
+          })
+        : await createDetachedExecutionWorkspace({
+            repoRoot: dependencies.repoRoot,
+            testedBehaviorCommit,
+          });
+
+      const gateCommands = automatedCommands({
+        dependencies,
+        executionRoot: workspace.root,
+        loaded: configuration.loaded,
+      });
+      for (const [commandIndex, spec] of gateCommands.entries()) {
+        if (commandIndex === gateCommands.length - 1) {
+          await stageCleanScannerInput({
+            executionRoot: workspace.root,
+            testedBehaviorCommit,
+            runId: context.runId,
+            config: configuration.config,
+            commands,
+          });
+        }
+
         const commandStartedAt = safeDate(dependencies.now);
         const result = await dependencies.runCommand(spec);
         const commandEndedAt = safeDate(dependencies.now);
@@ -1059,7 +1215,7 @@ async function runAutomatedPhase(
         commands.push(
           createCommandResult({
             spec,
-            repoRoot: dependencies.repoRoot,
+            repoRoot: workspace.root,
             startedAt: commandStartedAt,
             endedAt: commandEndedAt,
             exitCode: result.exitCode,
@@ -1067,20 +1223,9 @@ async function runAutomatedPhase(
         );
         if (result.exitCode === 0) continue;
 
-        const persistedOutput = await persistFailureOutput({
-          result,
-          spec,
-          runDirectory: context.directory,
-          repoRoot: dependencies.repoRoot,
-          commandIndex,
-        });
-        if (persistedOutput.evidence) evidence.push(persistedOutput.evidence);
-        if (persistedOutput.withheld) {
-          findings.push({
-            severity: 'warning',
-            summary: `Command output for ${spec.label} was withheld because it may contain sensitive data`,
-          });
-        }
+        // A failed gate never reaches the clean scanner. Retain only the
+        // generic failed-gate finding; raw stdout/stderr must not cross from
+        // the execution checkout into the original evidence tree unscreened.
         findings.push({ severity: 'error', summary: `Automated gate failed: ${spec.label}` });
         outcome = 'gate_failed';
         break;
@@ -1091,6 +1236,18 @@ async function runAutomatedPhase(
         severity: 'error',
         summary: 'The automated verification harness could not execute a gate safely',
       });
+    } finally {
+      if (workspace) {
+        try {
+          await workspace.dispose();
+        } catch {
+          outcome = 'harness_error';
+          findings.push({
+            severity: 'error',
+            summary: 'The clean execution workspace could not be removed safely',
+          });
+        }
+      }
     }
   }
 
