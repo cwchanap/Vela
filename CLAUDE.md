@@ -157,7 +157,20 @@ Vela uses **Google-only OAuth** via Cognito Hosted UI. There is no password-base
 
 ### Mobile client (iOS)
 
-Vela Mobile authenticates against the same Cognito user pool as the web app, through a dedicated **public** app client (`vela-mobile-client`). The client is configured for authorization-code grant with no client secret bundled in the app binary. PKCE, `state`, and `nonce` validation are implemented client-side in M2 (see below) before mobile sign-in is enabled; the M1 client is PKCE-_compatible_ (public, auth-code grant) but does not yet perform the PKCE flow.
+Vela Mobile authenticates against the same Cognito user pool as the web app,
+through a dedicated **public** app client (`vela-mobile-client`). The client is
+configured for authorization-code grant with no client secret bundled in the
+app binary. M1 implements PKCE S256, `state`, `nonce`, mobile-client
+configuration wiring, and `identity_provider=Google` in the native mobile-auth
+coordinator; it opens the system browser through `@capacitor/browser` and
+handles callback/app state through `@capacitor/app`.
+
+The current implementation boundaries, including OAuth transaction storage,
+Keychain session storage, authenticated transport, query isolation, lifecycle,
+and layout policy, are recorded in
+[iOS Foundation Architecture](apps/vela-mobile/docs/ios-foundation-architecture.md).
+The selected machine evidence and `NO-GO` decision are in
+[M1 iOS Foundation Verification](apps/vela-mobile/docs/m1-ios-foundation-verification.md).
 
 The iOS callback uses a custom URL scheme registered in `apps/vela-mobile/src-capacitor/ios/App/App/Info.plist`:
 
@@ -168,7 +181,10 @@ The iOS callback uses a custom URL scheme registered in `apps/vela-mobile/src-ca
 
 The scheme is the reverse-DNS of the project-controlled `vela.cwchanap.dev` domain with an `.oauth` suffix (i.e. `dev.cwchanap.vela.oauth`), rather than the bundle id, because `vela.app` is not a controlled namespace and custom URL schemes are an unowned namespace on iOS. The URIs use the RFC 8252 §7.1 private-use URI form (single slash, no authority component) — `scheme:/path`, not `scheme://host/path` — because there is no naming authority for custom URL schemes.
 
-`AppDelegate.application(_:open:options:)` already forwards opens to Capacitor's `ApplicationDelegateProxy`. This is only relevant if the M2 client-side flow uses `@capacitor/browser` + `@capacitor/app` — if M2 uses `ASWebAuthenticationSession` instead, the callback arrives through the session's completion handler and `AppDelegate` is bypassed entirely.
+`AppDelegate.application(_:open:options:)` forwards opens to Capacitor's
+`ApplicationDelegateProxy`, allowing the implemented `@capacitor/app` callback
+path to reach the coordinator. The coordinator also processes launch URLs and
+browser-finished events.
 
 CDK env vars (defaults shown):
 
@@ -179,13 +195,12 @@ COGNITO_MOBILE_LOGOUT_URLS=dev.cwchanap.vela.oauth:/oauth/logout
 
 Both accept comma-separated lists for dev/QA overrides. **Override URIs must use the `dev.cwchanap.vela.oauth:/` scheme** (RFC 8252 §7.1 private-use form, single slash) and an allowed path (`/oauth/callback` or `/oauth/staging-callback` for callbacks; `/oauth/logout` or `/oauth/staging-logout` for logouts) — CDK validates both at synth time and throws otherwise, because iOS only registers that one scheme and the app's router only handles known paths. Vary the path within the allowlist, not the scheme or URI form. The mobile client ID is published as the `CognitoMobileUserPoolClientId` CloudFormation output.
 
-The following M2 work is required before the mobile OAuth flow can complete end-to-end (out of scope for HPA-203):
-
-1. ~~Widen the API JWT verifier to accept both web and mobile client audiences.~~ **Done.** `initializeAuthVerifier()` already accepts `[webClientId, mobileClientId]` through `aws-jwt-verify` `clientId`.
-2. Wire the mobile client ID into the Capacitor build.
-3. ~~If API calls go through WKWebView, add `capacitor://localhost` to the API CORS allow-list.~~ **Done in M1 (HPA-204).** The CORS allowlist is not a security boundary for native clients — `capacitor://localhost` is shared across all Capacitor apps and the middleware passes requests with no `Origin` header. JWT verification (item #1 above) is the actual auth boundary.
-4. Implement PKCE + `state` + `nonce` in the client-side OAuth flow.
-5. Route the authorization request with `identity_provider=Google` (the web app's established pattern via `signInWithRedirect({ provider: 'Google' })`) so the Cognito `/oauth2/authorize` endpoint redirects straight to Google and never renders the Cognito login selection page. Neither the web nor the mobile app pool client has a `CfnManagedLoginBranding` or `CfnUserPoolUICustomizationAttachment` resource — the Cognito Hosted UI / managed-login page is intentionally unused. If M2 instead opens the interactive Cognito page (e.g. without the `identity_provider` parameter), add a branding resource for the mobile client first, or add an authorization-endpoint smoke test that proves the direct-provider redirect.
+The current live/native limitation is physical acceptance, not missing M1 OAuth
+implementation. HPA-210 is `NO-GO`: physical preflight is
+`prerequisite_missing`, and the user deferred the physical callback,
+restoration, due-count, audio, IME, keyboard/layout, and navigation runs.
+Those observations, including the audio adapter conclusion, must remain
+unclaimed until physical HPA-210 evidence exists.
 
 ## Testing
 
@@ -195,14 +210,17 @@ The following M2 work is required before the mobile OAuth flow can complete end-
 - **API tests** use Bun's built-in test runner (no Vitest)
 - **Composable testing**: use `withQueryClient` from `src/test-utils/withQueryClient.ts` to mount composables inside a Vue component with a fresh isolated QueryClient (retry and gcTime set to 0)
 
-### iOS interaction diagnostics — pending physical-device validation (HPA-209)
+### iOS interaction diagnostics — physical HPA-210 closure gate
 
 The iOS interaction diagnostics page (`apps/vela-mobile/src/pages/diagnostics/IosInteractionDiagnosticsPage.vue`) and the `JapaneseInputProbe` were validated only on the iOS Simulator. Two behaviors are **not** confirmed on a physical iPhone and must be verified before HPA-209 closes:
 
 1. **IME composition flow** — `compositionstart` / `compositionend` / `input` listeners on the native `<input>` (see `JapaneseInputProbe.vue`) and the `isComposing` guard against premature Enter submission. The simulator's software keyboard does not exercise the real iOS Kana IME candidate-selection path.
 2. **Native edge-swipe back gesture** — `mobile-navigation.ts` depth tracking and the back-navigation outcome surfacing. The simulator's swipe was a no-op, so the depth-decrement path was not exercised on-device.
 
-Code is merge-safe (unit tests cover the logic); the device run is a closure gate, not a merge gate. Remove this section once a physical-device run confirms both behaviors.
+The selected HPA-210 automated and Simulator manifests do not replace those
+physical observations; use its deferred Physical iPhone Matrix rows as the
+current closure record. The device run is a closure gate, not a merge gate.
+Remove this section once a physical-device run confirms both behaviors.
 
 ## Environment Variables
 
