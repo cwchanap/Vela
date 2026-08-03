@@ -4,20 +4,26 @@
 
 **Decision:** NO-GO
 
-HPA-210 remains open. The selected automated and iOS Simulator machine
-evidence passed on
-`de276f372c7973e2fb49c81e9a78e50df95266c0`, including the Simulator's
-sanitized Xcode, Bun, Quasar, and Capacitor provenance. The physical-device
-preflight on `f0c6fe9d5282c3f5f34e6e5453ed3c23c0808f65` is historical only:
-because physical work remains deferred, it is not evidence for the current
-behavior revision. No manual production-smoke, diagnostic-observation, or
-physical-acceptance evidence was created.
+HPA-210 remains open. The selected automated machine evidence passed on
+`5a479635ab3e8eb44566b05422e3cc105cf4264f`, the current behavior revision
+containing the verification-tooling fixes for manual manifest semantic
+validation and physical signing preflight strengthening. The iOS Simulator
+manifest on `de276f372c7973e2fb49c81e9a78e50df95266c0` is stale: it predates
+verification-tooling changes that create a new behavior commit under the
+design's rerun policy, so it is retained as historical evidence only and must
+be regenerated on the final PR head before it can be selected. The
+physical-device preflight on `f0c6fe9d5282c3f5f34e6e5453ed3c23c0808f65` is
+historical only: because physical work remains deferred, it is not evidence
+for the current behavior revision. No manual production-smoke,
+diagnostic-observation, or physical-acceptance evidence was created.
 
 Minimum corrective issues:
 
+- Rerun the iOS Simulator machine phase on the final PR head and select that
+  new manifest. The current `de276f3` Simulator manifest is historical only.
 - Establish a tester-controlled physical iPhone that satisfies the harness's
   safe availability, trust, and non-identifying alias requirements, then rerun
-  physical preflight for `de276f372c7973e2fb49c81e9a78e50df95266c0`.
+  physical preflight for `5a479635ab3e8eb44566b05422e3cc105cf4264f`.
 - After physical preflight passes, record both deferred physical matrix classes
   on that frozen behavior revision and the same deployed backend:
   - Production-smoke rows: Release/production asset install and launch; fresh
@@ -35,13 +41,17 @@ Minimum corrective issues:
 ## Tested Behavior Commit
 
 `testedBehaviorCommit`:
-`de276f372c7973e2fb49c81e9a78e50df95266c0`
+`5a479635ab3e8eb44566b05422e3cc105cf4264f`
 
-This is the frozen behavior revision for the selected automated and Simulator
-machine evidence. The physical-device preflight remains historical evidence
-under `f0c6fe9d5282c3f5f34e6e5453ed3c23c0808f65`; it is not a physical
-verification result for this behavior revision because the user deferred
-physical work.
+This is the frozen behavior revision for the selected automated machine
+evidence. The iOS Simulator manifest on
+`de276f372c7973e2fb49c81e9a78e50df95266c0` is stale: it predates
+verification-tooling changes (manual manifest semantic validation and physical
+signing preflight strengthening) that create a new behavior commit under the
+design's rerun policy. It is retained as historical evidence but is not
+selected. The physical-device preflight remains historical evidence under
+`f0c6fe9d5282c3f5f34e6e5453ed3c23c0808f65`; it is not a physical verification
+result for this behavior revision because the user deferred physical work.
 
 ## Selected Run Manifests
 
@@ -49,14 +59,19 @@ All selected manifests are committed under
 `docs/evidence/hpa-210/<testedBehaviorCommit>/<run-id>/manifest.json` and use
 the manifest-recorded deployed configuration.
 
-| Run ID                                     | Tested behavior commit                     | Phase and outcome                                      | Manifest                                                                                                                          |
-| ------------------------------------------ | ------------------------------------------ | ------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------- |
-| `20260803T071503Z-automated`               | `de276f372c7973e2fb49c81e9a78e50df95266c0` | Automated machine phase — `passed`                     | [manifest.json](evidence/hpa-210/de276f372c7973e2fb49c81e9a78e50df95266c0/20260803T071503Z-automated/manifest.json)               |
-| `20260803T071701Z-automated-ios-simulator` | `de276f372c7973e2fb49c81e9a78e50df95266c0` | iOS Simulator machine phase — `passed`                 | [manifest.json](evidence/hpa-210/de276f372c7973e2fb49c81e9a78e50df95266c0/20260803T071701Z-automated-ios-simulator/manifest.json) |
-| `20260803T042801Z-physical-preflight`      | `f0c6fe9d5282c3f5f34e6e5453ed3c23c0808f65` | Historical physical preflight — `prerequisite_missing` | [manifest.json](evidence/hpa-210/f0c6fe9d5282c3f5f34e6e5453ed3c23c0808f65/20260803T042801Z-physical-preflight/manifest.json)      |
+| Run ID                                | Tested behavior commit                     | Phase and outcome                                      | Manifest                                                                                                                     |
+| ------------------------------------- | ------------------------------------------ | ------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------- |
+| `20260803T220725Z-automated`          | `5a479635ab3e8eb44566b05422e3cc105cf4264f` | Automated machine phase — `passed`                     | [manifest.json](evidence/hpa-210/5a479635ab3e8eb44566b05422e3cc105cf4264f/20260803T220725Z-automated/manifest.json)          |
+| `20260803T042801Z-physical-preflight` | `f0c6fe9d5282c3f5f34e6e5453ed3c23c0808f65` | Historical physical preflight — `prerequisite_missing` | [manifest.json](evidence/hpa-210/f0c6fe9d5282c3f5f34e6e5453ed3c23c0808f65/20260803T042801Z-physical-preflight/manifest.json) |
+
+The stale iOS Simulator manifest on
+`de276f372c7973e2fb49c81e9a78e50df95266c0` (`20260803T071701Z-automated-ios-simulator`)
+is retained as historical evidence but is not selected: it predates the
+verification-tooling changes on the current PR head. It must be regenerated on
+the final PR head before it can be selected.
 
 The historical physical-preflight manifest is retained for auditability, but
-is not selected evidence for `de276f372c7973e2fb49c81e9a78e50df95266c0`.
+is not selected evidence for `5a479635ab3e8eb44566b05422e3cc105cf4264f`.
 
 HPA-209 retains its historical flat evidence layout under
 `docs/evidence/hpa-209/`; do not migrate or reinterpret those files as
@@ -84,15 +99,15 @@ The recorded physical preflight below is historical only. Physical testing was
 deferred after the current behavior revision was frozen, so it cannot establish
 physical readiness or acceptance for that revision.
 
-| ID                          | Commit                                     | Run ID                                | Matrix class         | Build/config                             | Environment                          | Precondition                                                     | Observation                                                                                              | Status                 | Evidence                                                                                                                     | Follow-up                           |
-| --------------------------- | ------------------------------------------ | ------------------------------------- | -------------------- | ---------------------------------------- | ------------------------------------ | ---------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- | ---------------------- | ---------------------------------------------------------------------------------------------------------------------------- | ----------------------------------- |
-| HPA-210-PHYSICAL-PREFLIGHT  | `f0c6fe9d5282c3f5f34e6e5453ed3c23c0808f65` | `20260803T042801Z-physical-preflight` | Historical preflight | Manifest-recorded deployed configuration | Physical iPhone, not safely eligible | Safe availability, trust, and generic alias were not established | No signing or interaction step ran                                                                       | `prerequisite_missing` | [manifest.json](evidence/hpa-210/f0c6fe9d5282c3f5f34e6e5453ed3c23c0808f65/20260803T042801Z-physical-preflight/manifest.json) | Rerun for current behavior revision |
-| HPA-210-PHYSICAL-ACCEPTANCE | —                                          | —                                     | Physical acceptance  | Not run                                  | Physical iPhone                      | Explicitly deferred by the user                                  | OAuth, restoration, due count, audio, Japanese IME, keyboard/safe-area, and navigation were not observed | `deferred`             | No manifest; unrun                                                                                                           | Resume HPA-210 physical validation  |
+| ID                          | Commit                                     | Run ID                                | Matrix class         | Build/config                             | Environment                          | Precondition                                                     | Observation                                                                                              | Status                 | Evidence                                                                                                                     | Follow-up                          |
+| --------------------------- | ------------------------------------------ | ------------------------------------- | -------------------- | ---------------------------------------- | ------------------------------------ | ---------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- | ---------------------- | ---------------------------------------------------------------------------------------------------------------------------- | ---------------------------------- |
+| HPA-210-PHYSICAL-PREFLIGHT  | `f0c6fe9d5282c3f5f34e6e5453ed3c23c0808f65` | `20260803T042801Z-physical-preflight` | Historical preflight | Manifest-recorded deployed configuration | Physical iPhone, not safely eligible | Safe availability, trust, and generic alias were not established | No signing or interaction step ran                                                                       | `prerequisite_missing` | [manifest.json](evidence/hpa-210/f0c6fe9d5282c3f5f34e6e5453ed3c23c0808f65/20260803T042801Z-physical-preflight/manifest.json) | Rerun for `5a47963`                |
+| HPA-210-PHYSICAL-ACCEPTANCE | —                                          | —                                     | Physical acceptance  | Not run                                  | Physical iPhone                      | Explicitly deferred by the user                                  | OAuth, restoration, due count, audio, Japanese IME, keyboard/safe-area, and navigation were not observed | `deferred`             | No manifest; unrun                                                                                                           | Resume HPA-210 physical validation |
 
 ## Security and Secret Scan
 
 The selected automated manifest records a passing `mobile-secret-scan` command
-on `de276f372c7973e2fb49c81e9a78e50df95266c0`. The exact new-SHA evidence
+on `5a479635ab3e8eb44566b05422e3cc105cf4264f`. The exact new-SHA evidence
 directory was also scanned before it was committed. Machine evidence does not
 substitute a source inspection or a physical acceptance observation.
 
