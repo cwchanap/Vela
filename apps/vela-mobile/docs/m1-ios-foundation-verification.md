@@ -16,9 +16,17 @@ Minimum corrective issues:
 - Establish a tester-controlled physical iPhone that satisfies the harness's
   safe availability, trust, and non-identifying alias requirements, then rerun
   physical preflight.
-- Run and record the deferred physical acceptance observations: OAuth callback
-  and restoration, authenticated due count, pronunciation playback,
-  Japanese IME, keyboard and safe areas, and navigation.
+- After physical preflight passes, record both deferred physical matrix classes
+  on this frozen behavior revision and the same deployed backend:
+  - Production-smoke rows: Release/production asset install and launch; fresh
+    direct-Google sign-in with warm and cold callbacks; relaunch restoration;
+    authenticated Home due-count states and refresh/sign-out isolation; and
+    product-security recovery without protected-content or credential exposure.
+  - Diagnostic-observation rows: TTS preparation, playback, replay, audible
+    pronunciation, silent-mode, and interruption observations; Japanese IME
+    composition; keyboard and safe-area layout; and visible back, native-swipe,
+    tab, deep-entry, cold-entry, resume, scroll-restoration, and no-trap
+    navigation observations.
 - Keep the audio adapter decision pending until those physical HPA-210
   observations exist.
 
