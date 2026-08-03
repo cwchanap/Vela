@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
-import { resolveMobileSecretRoot, scanMobileSecretRoots } from './scan-mobile-secrets.mjs';
+import { resolveMobileSecretRoot, scanMobileSecretRoots, isMobileSecretEnvFile } from './scan-mobile-secrets.mjs';
 
 const temporaryRoots = [];
 const scannerPath = fileURLToPath(new URL('./scan-mobile-secrets.mjs', import.meta.url));
@@ -395,5 +395,67 @@ describe('scanMobileSecretRoots', () => {
     expect(result.status).toBe(3);
     expect(result.stderr).toContain('could not scan');
     expect(result.stderr).toContain('1 supported text artifact(s)');
+  });
+
+  it('classifies .env and .env.* basenames as supported env files', () => {
+    expect(isMobileSecretEnvFile('.env')).toBe(true);
+    expect(isMobileSecretEnvFile('.env.production')).toBe(true);
+    expect(isMobileSecretEnvFile('.env.local')).toBe(true);
+    expect(isMobileSecretEnvFile('.env.development')).toBe(true);
+    // Names that merely contain .env as a substring are not env files.
+    expect(isMobileSecretEnvFile('dotenv.config.ts')).toBe(false);
+    expect(isMobileSecretEnvFile('env.config.ts')).toBe(false);
+    expect(isMobileSecretEnvFile('.environment')).toBe(false);
+    expect(isMobileSecretEnvFile('.env.')).toBe(false);
+  });
+
+  it('scans AWS and provider secrets in .env, .env.production, and .env.local', async () => {
+    const root = await createTemporaryRoot();
+    const awsSecret = 'A'.repeat(40);
+    const providerKey = ['sk', 'live', 'abcdefghijklmno'].join('-');
+    await writeFile(join(root, '.env'), `AWS_SECRET_ACCESS_KEY=${awsSecret}`);
+    await writeFile(join(root, '.env.production'), `OPENAI_API_KEY=${providerKey}`);
+    await writeFile(join(root, '.env.local'), `AWS_SECRET_ACCESS_KEY=${awsSecret}`);
+
+    const result = await scanMobileSecretRoots({ roots: [root], exclusions: [] });
+
+    expect(result.findings.map(({ path, ruleId }) => ({ path, ruleId }))).toEqual([
+      { path: '.env', ruleId: 'aws_secret' },
+      { path: '.env.local', ruleId: 'aws_secret' },
+      { path: '.env.production', ruleId: 'provider_key' },
+    ]);
+    expect(result.skipped.some(({ reason }) => reason === 'unsupported_extension')).toBe(false);
+    expect(JSON.stringify(result)).not.toContain(awsSecret);
+    expect(JSON.stringify(result)).not.toContain(providerKey);
+  });
+
+  it('exits 4 when the CLI finds an AWS secret in a .env file', async () => {
+    const root = await createTemporaryRoot();
+    const report = join(root, 'reports', 'secrets.json');
+    const awsSecret = 'A'.repeat(40);
+    await writeFile(join(root, '.env'), `AWS_SECRET_ACCESS_KEY=${awsSecret}`);
+
+    const result = spawnSync('bun', [scannerPath, '--root', root, '--json', report], {
+      encoding: 'utf8',
+    });
+
+    expect(result.status).toBe(4);
+    const reportText = await readFile(report, 'utf8');
+    expect(JSON.parse(reportText).findings).toEqual([
+      expect.objectContaining({ ruleId: 'aws_secret', path: '.env' }),
+    ]);
+    expect(reportText).not.toContain(awsSecret);
+  });
+
+  it('exits 4 when the CLI finds a provider key in .env.production', async () => {
+    const root = await createTemporaryRoot();
+    const providerKey = ['sk', 'live', 'abcdefghijklmno'].join('-');
+    await writeFile(join(root, '.env.production'), `OPENAI_API_KEY=${providerKey}`);
+
+    const result = spawnSync('bun', [scannerPath, '--root', root], { encoding: 'utf8' });
+
+    expect(result.status).toBe(4);
+    expect(result.stderr).toContain('.env.production');
+    expect(result.stderr).not.toContain(providerKey);
   });
 });

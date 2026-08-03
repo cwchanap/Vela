@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { tmpdir, homedir } from 'node:os';
 import { basename, dirname, join, relative, resolve } from 'node:path';
 import { TextDecoder } from 'node:util';
 import {
@@ -150,6 +150,14 @@ export type HarnessDependencies = {
    * callers omit it and wait the five seconds required by the Simulator gate.
    */
   sleep?: (milliseconds: number) => Promise<void>;
+  /**
+   * Test-only injection point for the provisioning profile directory.
+   * Production callers omit this and profiles are resolved from
+   * `~/Library/MobileDevice/Provisioning Profiles`. Tests point this at a
+   * temp directory so a mock profile file can be staged without touching the
+   * user's system.
+   */
+  provisioningProfileDirectory?: string | undefined;
 };
 
 export type M1VerifyArguments = {
@@ -849,6 +857,51 @@ async function deployedIdentityMatchesLoadedConfiguration(
       ? await dependencies.loadDeployedIdentityProof(dependencies.repoRoot)
       : await loadCdkDeployedIdentityProof(dependencies.repoRoot);
     return hasMatchingDeployedIdentity(loaded, proof);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Compares a manual manifest's recorded `apiOrigin`, `region`, and
+ * `oauthDomain` against the CDK deployed identity proof. The manual config
+ * records only the three public identifiers the contract requires; this
+ * function normalizes both sides with the same logic used for machine-phase
+ * identity matching so a human cannot record a structurally valid but
+ * incorrect backend (e.g. `https://api.example.invalid/api/`) and claim
+ * `publicIdentifiersConsistent: true`.
+ *
+ * Returns `true` only when all three normalized values match the deployed
+ * proof. Returns `false` when the proof is unavailable or any value differs.
+ */
+function manualConfigMatchesDeployedProof(
+  config: M1Manifest['config'],
+  proof: DeployedIdentityProof | null,
+): boolean {
+  const normalizedProof = normalizeDeployedIdentityProof(proof);
+  if (!normalizedProof) return false;
+
+  const apiOrigin = normalizeMobileApiIdentifier(config.apiOrigin);
+  const region = normalizeRegion(config.region);
+  const oauthDomain = normalizeOauthDomain(config.oauthDomain);
+  if (!apiOrigin || !region || !oauthDomain) return false;
+
+  return (
+    apiOrigin === normalizedProof.mobileApiUrl &&
+    region === normalizedProof.cognitoRegion &&
+    oauthDomain === normalizedProof.cognitoOAuthDomain
+  );
+}
+
+async function verifyManualConfigAgainstDeployedProof(
+  dependencies: HarnessDependencies,
+  config: M1Manifest['config'],
+): Promise<boolean> {
+  try {
+    const proof = dependencies.loadDeployedIdentityProof
+      ? await dependencies.loadDeployedIdentityProof(dependencies.repoRoot)
+      : await loadCdkDeployedIdentityProof(dependencies.repoRoot);
+    return manualConfigMatchesDeployedProof(config, proof);
   } catch {
     return false;
   }
@@ -2714,6 +2767,165 @@ function hasMatchingCodesigningIdentity(
   return false;
 }
 
+type ProvisioningProfileInfo = {
+  developmentTeam: string;
+  bundleIdentifier: string;
+  provisioningProfileUuid: string;
+};
+
+type ParsedProvisioningProfile = {
+  teamIdentifiers: string[];
+  applicationIdentifier: string | undefined;
+  expirationDate: Date | undefined;
+  provisionedDevices: string[] | undefined;
+  hasDeveloperCertificates: boolean;
+};
+
+/**
+ * Extracts the `PROVISIONING_PROFILE` UUID, `DEVELOPMENT_TEAM`, and
+ * `PRODUCT_BUNDLE_IDENTIFIER` from `-showBuildSettings -json` output so the
+ * provisioning profile can be located, decoded, and verified against the
+ * project's resolved signing configuration. Returns empty strings when the
+ * settings cannot be parsed.
+ */
+function extractPhysicalProvisioningInfo(output: string): ProvisioningProfileInfo {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(boundedOutput(output));
+  } catch {
+    return { developmentTeam: '', bundleIdentifier: '', provisioningProfileUuid: '' };
+  }
+  if (!Array.isArray(parsed)) return { developmentTeam: '', bundleIdentifier: '', provisioningProfileUuid: '' };
+
+  const settings = parsed
+    .map((item) => asUnknownRecord(item))
+    .map((item) => (item ? nestedRecord(item, 'buildSettings') : undefined))
+    .filter((item): item is UnknownRecord => item !== undefined);
+  if (settings.length !== 1) return { developmentTeam: '', bundleIdentifier: '', provisioningProfileUuid: '' };
+
+  const buildSettings = settings[0]!;
+  const developmentTeam = buildSettings.DEVELOPMENT_TEAM;
+  const bundleIdentifier = buildSettings.PRODUCT_BUNDLE_IDENTIFIER;
+  const provisioningProfile = buildSettings.PROVISIONING_PROFILE;
+  return {
+    developmentTeam: typeof developmentTeam === 'string' ? developmentTeam.trim() : '',
+    bundleIdentifier: typeof bundleIdentifier === 'string' ? bundleIdentifier.trim() : '',
+    provisioningProfileUuid: typeof provisioningProfile === 'string' ? provisioningProfile.trim() : '',
+  };
+}
+
+/**
+ * Parses the XML plist embedded in a decoded mobileprovision file. The plist
+ * is a well-structured Apple property list; this parser extracts only the
+ * fields needed for preflight verification using targeted regexes rather than
+ * a full XML parser, because the plist schema is stable and the harness must
+ * not pull in a dependency for this one step.
+ *
+ * Returns `undefined` when the plist cannot be parsed or is missing required
+ * fields, so the caller can treat a malformed profile as a prerequisite
+ * failure rather than passing an unverified profile.
+ */
+function parseProvisioningProfilePlist(xml: string): ParsedProvisioningProfile | undefined {
+  const text = boundedOutput(xml);
+
+  const teamMatch = text.match(/<key>TeamIdentifier<\/key>\s*<array>([\s\S]*?)<\/array>/u);
+  const teamIdentifiers = teamMatch
+    ? [...teamMatch[1]!.matchAll(/<string>([^<]+)<\/string>/gu)].map((m) => m[1]!)
+    : [];
+
+  const appIdMatch = text.match(/<key>application-identifier<\/key>\s*<string>([^<]+)<\/string>/u);
+  const applicationIdentifier = appIdMatch?.[1];
+
+  const expirationMatch = text.match(/<key>ExpirationDate<\/key>\s*<date>([^<]+)<\/date>/u);
+  const expirationDate = expirationMatch ? new Date(expirationMatch[1]!) : undefined;
+
+  const devicesMatch = text.match(/<key>ProvisionedDevices<\/key>\s*<array>([\s\S]*?)<\/array>/u);
+  const provisionedDevices = devicesMatch
+    ? [...devicesMatch[1]!.matchAll(/<string>([^<]+)<\/string>/gu)].map((m) => m[1]!)
+    : undefined;
+
+  const certMatch = text.match(/<key>DeveloperCertificates<\/key>\s*<array>([\s\S]*?)<\/array>/u);
+  const hasDeveloperCertificates = certMatch ? /<data>/.test(certMatch[1]!) : false;
+
+  if (teamIdentifiers.length === 0 || !applicationIdentifier || !expirationDate) return undefined;
+
+  return {
+    teamIdentifiers,
+    applicationIdentifier,
+    expirationDate,
+    provisionedDevices,
+    hasDeveloperCertificates,
+  };
+}
+
+/**
+ * Verifies a parsed provisioning profile against the project's resolved
+ * signing configuration and the selected physical device. A profile that
+ * passes `hasReadyPhysicalSigning` (non-empty profile name) can still be
+ * stale, for another bundle, or exclude the selected device. This function
+ * inspects the profile content so those cases fail the preflight.
+ *
+ * Checks:
+ * 1. **Team**: at least one `TeamIdentifier` matches `DEVELOPMENT_TEAM`.
+ * 2. **Application identifier**: the profile's `application-identifier`
+ *    (`<TEAM>.<bundleId>`) matches the resolved team and bundle, or the
+ *    profile uses a wildcard (`<TEAM>.*`).
+ * 3. **Expiration**: `ExpirationDate` is in the future.
+ * 4. **Developer certificates**: the profile contains at least one
+ *    developer certificate (the keychain identity check already correlates
+ *    the certificate with the team).
+ * 5. **Device eligibility**: if `ProvisionedDevices` is present (non-wildcard
+ *    profiles), the selected device UDID must be in the list. Wildcard and
+ *    enterprise profiles omit `ProvisionedDevices` and are not device-bound.
+ */
+function verifyProvisioningProfile(
+  profile: ParsedProvisioningProfile,
+  info: ProvisioningProfileInfo,
+  deviceId: string,
+  now: Date,
+): { valid: boolean; reason: string } {
+  if (!info.developmentTeam || !info.bundleIdentifier || !info.provisioningProfileUuid) {
+    return { valid: false, reason: 'Provisioning profile UUID, team, or bundle identifier is missing' };
+  }
+  if (!profile.teamIdentifiers.includes(info.developmentTeam)) {
+    return { valid: false, reason: 'Provisioning profile team does not match the resolved development team' };
+  }
+
+  const expectedAppIdPrefix = `${info.developmentTeam}.`;
+  if (!profile.applicationIdentifier!.startsWith(expectedAppIdPrefix)) {
+    return { valid: false, reason: 'Provisioning profile application identifier does not match the resolved team' };
+  }
+  const profileBundleId = profile.applicationIdentifier!.slice(expectedAppIdPrefix.length);
+  if (profileBundleId !== '*' && profileBundleId !== info.bundleIdentifier) {
+    return { valid: false, reason: 'Provisioning profile application identifier does not match the bundle identifier' };
+  }
+
+  if (profile.expirationDate!.getTime() <= now.getTime()) {
+    return { valid: false, reason: 'Provisioning profile has expired' };
+  }
+
+  if (!profile.hasDeveloperCertificates) {
+    return { valid: false, reason: 'Provisioning profile contains no developer certificates' };
+  }
+
+  if (profile.provisionedDevices !== undefined && !profile.provisionedDevices.includes(deviceId)) {
+    return { valid: false, reason: 'The selected physical device is not in the provisioning profile' };
+  }
+
+  return { valid: true, reason: '' };
+}
+
+/**
+ * Returns the expected file system path for a provisioning profile with the
+ * given UUID. Xcode installs profiles to
+ * `~/Library/MobileDevice/Provisioning Profiles/<UUID>.mobileprovision`.
+ * The directory can be overridden for test injection.
+ */
+function provisioningProfilePath(uuid: string, directory?: string): string {
+  const root = directory ?? join(homedir(), 'Library', 'MobileDevice', 'Provisioning Profiles');
+  return join(root, `${uuid}.mobileprovision`);
+}
+
 function createPhysicalManifest(input: PhysicalManifestInput): M1Manifest {
   return validateM1Manifest({
     schemaVersion: 1,
@@ -2828,6 +3040,7 @@ async function runIosPhysicalPreflightPhase(
       developmentTeam: '',
       codeSignIdentity: '',
     };
+    let provisioningInfo: ProvisioningProfileInfo | undefined;
     try {
       if (!configuration.loaded || !args.deviceId) {
         throw new M1HarnessError('Validated physical preflight inputs are unexpectedly unavailable');
@@ -2931,6 +3144,7 @@ async function runIosPhysicalPreflightPhase(
         host.signingReady = signingResult ? hasReadyPhysicalSigning(signingResult.stdout) : false;
         if (signingResult && host.signingReady) {
           signingSettings = extractPhysicalSigningSettings(signingResult.stdout);
+          provisioningInfo = extractPhysicalProvisioningInfo(signingResult.stdout);
         }
         if (signingResult && !host.signingReady) {
           outcome = 'prerequisite_missing';
@@ -2967,6 +3181,65 @@ async function runIosPhysicalPreflightPhase(
             summary:
               'No usable iOS codesigning identity matching the selected team and identity was found in the keychain',
           });
+        }
+      }
+
+      // Provisioning profile content verification. `hasReadyPhysicalSigning`
+      // only checks that a profile UUID/specifier is non-empty; a stale,
+      // expired, mismatched, or device-excluding profile would pass that
+      // check. This step decodes the resolved mobileprovision and verifies
+      // its team, application identifier, expiration, developer certificates,
+      // and device eligibility so a non-functional profile fails the
+      // preflight rather than passing as "signing ready".
+      if (outcome === 'passed' && provisioningInfo && args.deviceId) {
+        const profilePath = provisioningProfilePath(
+          provisioningInfo.provisioningProfileUuid,
+          dependencies.provisioningProfileDirectory,
+        );
+        if (!existsSync(profilePath)) {
+          host.signingReady = false;
+          outcome = 'prerequisite_missing';
+          findings.push({
+            severity: 'error',
+            summary:
+              'The resolved provisioning profile is not installed in ~/Library/MobileDevice/Provisioning Profiles',
+          });
+        } else {
+          const profileResult = await runStep({
+            spec: {
+              label: 'physical-provisioning-profile',
+              command: 'security',
+              args: ['cms', '-D', '-i', profilePath],
+              cwd: executionRoot,
+              env: commandEnv,
+            },
+            summary: 'The provisioning profile could not be decoded',
+          });
+          if (profileResult) {
+            const parsedProfile = parseProvisioningProfilePlist(profileResult.stdout);
+            if (!parsedProfile) {
+              host.signingReady = false;
+              outcome = 'prerequisite_missing';
+              findings.push({
+                severity: 'error',
+                summary: 'The provisioning profile is malformed or missing required fields',
+              });
+            } else {
+              const verification = verifyProvisioningProfile(
+                parsedProfile,
+                provisioningInfo,
+                args.deviceId,
+                safeDate(dependencies.now),
+              );
+              if (!verification.valid) {
+                host.signingReady = false;
+                outcome = 'prerequisite_missing';
+                findings.push({ severity: 'error', summary: verification.reason });
+              }
+            }
+          } else {
+            host.signingReady = false;
+          }
         }
       }
     } catch {
@@ -3202,6 +3475,23 @@ async function runManualPhase(
     });
   } catch {
     throw new M1UsageError('Manual input has an invalid manifest shape');
+  }
+
+  // A passed manual manifest claims deployed configuration with consistent
+  // public identifiers. The contract layer validates structure; this harness
+  // layer verifies the claim against CDK deployed identity proof so
+  // `publicIdentifiersConsistent: true` is a verified assertion, not a
+  // self-attested boolean. Without this, a human could record a structurally
+  // valid but incorrect backend and claim closure.
+  if (manifest.outcome === 'passed' && manifest.config.class === 'deployed') {
+    const matches = await verifyManualConfigAgainstDeployedProof(dependencies, manifest.config);
+    if (!matches) {
+      throw new M1UsageError(
+        'Manual manifest config does not match the CDK deployed identity proof; ' +
+          'a passed manual manifest must record the same apiOrigin, region, and oauthDomain ' +
+          'as the deployed backend in packages/cdk/cdk-outputs.json',
+      );
+    }
   }
 
   await writeManualManifest({ repoRoot: dependencies.repoRoot, manifest });

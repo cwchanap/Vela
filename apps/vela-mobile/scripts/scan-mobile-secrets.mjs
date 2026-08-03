@@ -34,6 +34,27 @@ export const MOBILE_SECRET_TEXT_ARTIFACT_EXTENSIONS = new Set([
 ]);
 
 /**
+ * Node's `extname` returns `''` for `.env` and `.production`/`.local` for
+ * `.env.production`/`.env.local`, so the extension allowlist alone never
+ * selects these files. Environment files are the primary location for
+ * AWS/provider credential assignments, so they must reach the policy layer.
+ * Matches `.env` exactly and any `.env.*` variant (`.env.production`,
+ * `.env.local`, `.env.development`, etc.) but not names that merely contain
+ * `.env` as a substring (e.g. `dotenv.config.ts`).
+ */
+export function isMobileSecretEnvFile(name) {
+  return name === '.env' || (name.startsWith('.env.') && name.length > '.env.'.length);
+}
+
+function isSupportedTextArtifact(name) {
+  const lower = name.toLowerCase();
+  return (
+    MOBILE_SECRET_TEXT_ARTIFACT_EXTENSIONS.has(extname(lower).toLowerCase()) ||
+    isMobileSecretEnvFile(lower)
+  );
+}
+
+/**
  * Bun runs a package script with that package as its current directory. The
  * M1 harness deliberately passes repository-relative roots, so preserve a
  * direct CWD-relative path when it exists and otherwise resolve the same
@@ -177,7 +198,7 @@ export async function scanMobileSecretRoots({
 
         if (!entry.isFile()) continue;
 
-        if (!MOBILE_SECRET_TEXT_ARTIFACT_EXTENSIONS.has(extname(entry.name).toLowerCase())) {
+        if (!isSupportedTextArtifact(entry.name)) {
           addSkipped(skipped, { path: pathFromRepository, reason: 'unsupported_extension' });
           continue;
         }

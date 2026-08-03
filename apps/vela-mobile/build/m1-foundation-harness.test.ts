@@ -91,6 +91,16 @@ function createTemporaryExecutionWorkspace(): string {
   return workspace;
 }
 
+function createTemporaryProvisioningProfileDirectory(
+  uuid: string = physicalProfileUuid,
+  content: string = physicalProvisioningProfilePlist(),
+): string {
+  const directory = mkdtempSync(join(tmpdir(), 'vela-m1-profiles-'));
+  temporaryDirectories.push(directory);
+  writeFileSync(join(directory, `${uuid}.mobileprovision`), content);
+  return directory;
+}
+
 function attachCleanExecutionWorkspace(
   dependencies: HarnessDependencies,
   workspace: string,
@@ -259,6 +269,39 @@ const codesigningIdentityOutput = [
   '     1 valid identity found',
 ].join('\n');
 
+const physicalProfileUuid = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
+
+function physicalProvisioningProfilePlist(overrides: {
+  teamIdentifier?: string;
+  applicationIdentifier?: string;
+  expirationDate?: string;
+  provisionedDevices?: string[] | null;
+  hasCertificates?: boolean;
+} = {}) {
+  const team = overrides.teamIdentifier ?? physicalSigningTeam;
+  const appId = overrides.applicationIdentifier ?? `${physicalSigningTeam}.com.vela.app`;
+  const expiration = overrides.expirationDate ?? '2027-01-01T00:00:00Z';
+  const devices = overrides.provisionedDevices ?? [physicalDeviceId];
+  const devicesXml =
+    devices === null
+      ? ''
+      : `<key>ProvisionedDevices</key><array>${devices.map((d) => `<string>${d}</string>`).join('')}</array>`;
+  const certsXml = overrides.hasCertificates === false ? '' : '<key>DeveloperCertificates</key><array><data>MIIB...</data></array>';
+  return [
+    '<?xml version="1.0" encoding="UTF-8"?>',
+    '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">',
+    '<plist version="1.0"><dict>',
+    `<key>TeamIdentifier</key><array><string>${team}</string></array>`,
+    `<key>Entitlements</key><dict><key>application-identifier</key><string>${appId}</string></dict>`,
+    `<key>ExpirationDate</key><date>${expiration}</date>`,
+    devicesXml,
+    certsXml,
+    '</dict></plist>',
+  ]
+    .filter(Boolean)
+    .join('\n');
+}
+
 function createPhysicalPreflightRunner(input: {
   deviceList?: unknown;
   buildSettings?: unknown;
@@ -266,6 +309,8 @@ function createPhysicalPreflightRunner(input: {
   buildSettingsExitCode?: number;
   codesigningIdentityOutput?: string;
   codesigningIdentityExitCode?: number;
+  provisioningProfilePlist?: string;
+  provisioningProfileExitCode?: number;
 } = {}) {
   const calls: CommandSpec[] = [];
   const rawJsonPaths: string[] = [];
@@ -298,6 +343,20 @@ function createPhysicalPreflightRunner(input: {
         stderr: '',
       };
     }
+    if (spec.command === 'security' && spec.args[0] === 'cms' && spec.args[1] === '-D') {
+      const inputIndex = spec.args.indexOf('-i');
+      const profilePath = inputIndex >= 0 ? spec.args[inputIndex + 1] : undefined;
+      let stdout = input.provisioningProfilePlist;
+      if (stdout === undefined && typeof profilePath === 'string' && existsSync(profilePath)) {
+        stdout = readFileSync(profilePath, 'utf8');
+      }
+      if (stdout === undefined) stdout = physicalProvisioningProfilePlist();
+      return {
+        exitCode: input.provisioningProfileExitCode ?? 0,
+        stdout,
+        stderr: '',
+      };
+    }
 
     return { exitCode: 0, stdout: '', stderr: '' };
   };
@@ -314,6 +373,7 @@ function createDependencies(input: {
   loadDeployedIdentityProof?: HarnessDependencies['loadDeployedIdentityProof'];
   createExecutionWorkspace?: HarnessDependencies['createExecutionWorkspace'];
   executionProcessEnvironment?: HarnessDependencies['executionProcessEnvironment'];
+  provisioningProfileDirectory?: string;
 }): HarnessDependencies {
   const environment = input.env ?? deployedEnvironment;
   const workspace = createTemporaryExecutionWorkspace();
@@ -331,6 +391,7 @@ function createDependencies(input: {
     createExecutionWorkspace:
       input.createExecutionWorkspace ?? (async () => ({ root: workspace, dispose: async () => undefined })),
     executionProcessEnvironment: input.executionProcessEnvironment ?? {},
+    provisioningProfileDirectory: input.provisioningProfileDirectory,
   };
 }
 
@@ -357,7 +418,7 @@ function validManualInput() {
     config: {
       source: 'process_env',
       class: 'deployed',
-      apiOrigin: 'https://api.vela.example',
+      apiOrigin: 'https://api.vela.example/api/',
       region: 'us-east-1',
       oauthDomain: 'vela.auth.us-east-1.amazoncognito.com',
       publicIdentifiersConsistent: true,
@@ -1837,8 +1898,13 @@ describe('iOS physical-device M1 foundation preflight', () => {
   it('runs the pinned physical discovery and Debug signing checks without persisting raw device data', async () => {
     const repository = createTemporaryRepository();
     const workspace = createTemporaryExecutionWorkspace();
+    const profileDirectory = createTemporaryProvisioningProfileDirectory();
     const runner = createPhysicalPreflightRunner();
-    const dependencies = createDependencies({ repoRoot: repository, runCommand: runner.runCommand });
+    const dependencies = createDependencies({
+      repoRoot: repository,
+      runCommand: runner.runCommand,
+      provisioningProfileDirectory: profileDirectory,
+    });
     const { createExecutionWorkspace, dispose } = attachCleanExecutionWorkspace(
       dependencies,
       workspace,
@@ -1866,7 +1932,7 @@ describe('iOS physical-device M1 foundation preflight', () => {
     const rawJsonPath = runner.rawJsonPaths[0]!;
     const xcodeWorkspace = join(workspace, 'apps/vela-mobile/src-capacitor/ios/App/App.xcworkspace');
 
-    expect(runner.calls).toHaveLength(3);
+    expect(runner.calls).toHaveLength(4);
     expect(runner.calls[0]).toMatchObject({
       command: 'xcrun',
       args: ['devicectl', 'list', 'devices', '--json-output', rawJsonPath],
@@ -1893,7 +1959,13 @@ describe('iOS physical-device M1 foundation preflight', () => {
       args: ['find-identity', '-v', '-p', 'codesigning'],
       cwd: workspace,
     });
+    expect(runner.calls[3]).toMatchObject({
+      command: 'security',
+      args: ['cms', '-D', '-i', join(profileDirectory, `${physicalProfileUuid}.mobileprovision`)],
+      cwd: workspace,
+    });
     expect(runner.calls.map(({ env }) => Object.keys(env ?? {}).sort())).toEqual([
+      PUBLIC_MOBILE_ENV_KEYS,
       PUBLIC_MOBILE_ENV_KEYS,
       PUBLIC_MOBILE_ENV_KEYS,
       PUBLIC_MOBILE_ENV_KEYS,
@@ -2116,6 +2188,7 @@ describe('iOS physical-device M1 foundation preflight', () => {
 
   it('accepts the semantic string forms of CoreDevice state aliases', async () => {
     const repository = createTemporaryRepository();
+    const profileDirectory = createTemporaryProvisioningProfileDirectory();
     const runner = createPhysicalPreflightRunner({
       deviceList: physicalDeviceList({
         authenticationState: 'trusted',
@@ -2126,7 +2199,11 @@ describe('iOS physical-device M1 foundation preflight', () => {
     const manifest = onlyManifest(
       await runM1FoundationVerification(
         parseM1Arguments(['--phase', 'ios-physical-preflight', '--device-id', physicalDeviceId]),
-        createDependencies({ repoRoot: repository, runCommand: runner.runCommand }),
+        createDependencies({
+          repoRoot: repository,
+          runCommand: runner.runCommand,
+          provisioningProfileDirectory: profileDirectory,
+        }),
       ),
     );
 
@@ -2233,6 +2310,217 @@ describe('iOS physical-device M1 foundation preflight', () => {
     expect(serializedManifest).not.toContain(physicalSigningTeam);
     expect(serializedManifest).not.toContain(JSON.stringify(deviceList));
     expect(serializedManifest).not.toContain(JSON.stringify(signingOutput));
+  });
+
+  it('fails the preflight when the provisioning profile is not installed', async () => {
+    const repository = createTemporaryRepository();
+    const workspace = createTemporaryExecutionWorkspace();
+    const emptyProfileDirectory = mkdtempSync(join(tmpdir(), 'vela-m1-empty-profiles-'));
+    temporaryDirectories.push(emptyProfileDirectory);
+    const runner = createPhysicalPreflightRunner();
+    const dependencies = createDependencies({
+      repoRoot: repository,
+      runCommand: runner.runCommand,
+      provisioningProfileDirectory: emptyProfileDirectory,
+    });
+    attachCleanExecutionWorkspace(dependencies, workspace);
+
+    const manifest = onlyManifest(
+      await runM1FoundationVerification(
+        parseM1Arguments(['--phase', 'ios-physical-preflight', '--device-id', physicalDeviceId]),
+        dependencies,
+      ),
+    );
+
+    expect(manifest.outcome).toBe('prerequisite_missing');
+    expect(manifest.host.signingReady).toBe(false);
+    expect(manifest.findings).toContainEqual({
+      severity: 'error',
+      summary:
+        'The resolved provisioning profile is not installed in ~/Library/MobileDevice/Provisioning Profiles',
+    });
+  });
+
+  it('fails the preflight when the provisioning profile team does not match', async () => {
+    const repository = createTemporaryRepository();
+    const workspace = createTemporaryExecutionWorkspace();
+    const profileDirectory = createTemporaryProvisioningProfileDirectory(
+      physicalProfileUuid,
+      physicalProvisioningProfilePlist({ teamIdentifier: 'DIFFERENT-TEAM' }),
+    );
+    const runner = createPhysicalPreflightRunner();
+    const dependencies = createDependencies({
+      repoRoot: repository,
+      runCommand: runner.runCommand,
+      provisioningProfileDirectory: profileDirectory,
+    });
+    attachCleanExecutionWorkspace(dependencies, workspace);
+
+    const manifest = onlyManifest(
+      await runM1FoundationVerification(
+        parseM1Arguments(['--phase', 'ios-physical-preflight', '--device-id', physicalDeviceId]),
+        dependencies,
+      ),
+    );
+
+    expect(manifest.outcome).toBe('prerequisite_missing');
+    expect(manifest.host.signingReady).toBe(false);
+    expect(manifest.findings).toContainEqual({
+      severity: 'error',
+      summary: 'Provisioning profile team does not match the resolved development team',
+    });
+  });
+
+  it('fails the preflight when the provisioning profile has expired', async () => {
+    const repository = createTemporaryRepository();
+    const workspace = createTemporaryExecutionWorkspace();
+    const profileDirectory = createTemporaryProvisioningProfileDirectory(
+      physicalProfileUuid,
+      physicalProvisioningProfilePlist({ expirationDate: '2020-01-01T00:00:00Z' }),
+    );
+    const runner = createPhysicalPreflightRunner();
+    const dependencies = createDependencies({
+      repoRoot: repository,
+      runCommand: runner.runCommand,
+      provisioningProfileDirectory: profileDirectory,
+    });
+    attachCleanExecutionWorkspace(dependencies, workspace);
+
+    const manifest = onlyManifest(
+      await runM1FoundationVerification(
+        parseM1Arguments(['--phase', 'ios-physical-preflight', '--device-id', physicalDeviceId]),
+        dependencies,
+      ),
+    );
+
+    expect(manifest.outcome).toBe('prerequisite_missing');
+    expect(manifest.host.signingReady).toBe(false);
+    expect(manifest.findings).toContainEqual({
+      severity: 'error',
+      summary: 'Provisioning profile has expired',
+    });
+  });
+
+  it('fails the preflight when the selected device is not in the provisioning profile', async () => {
+    const repository = createTemporaryRepository();
+    const workspace = createTemporaryExecutionWorkspace();
+    const profileDirectory = createTemporaryProvisioningProfileDirectory(
+      physicalProfileUuid,
+      physicalProvisioningProfilePlist({ provisionedDevices: ['00000000-0000000000000000'] }),
+    );
+    const runner = createPhysicalPreflightRunner();
+    const dependencies = createDependencies({
+      repoRoot: repository,
+      runCommand: runner.runCommand,
+      provisioningProfileDirectory: profileDirectory,
+    });
+    attachCleanExecutionWorkspace(dependencies, workspace);
+
+    const manifest = onlyManifest(
+      await runM1FoundationVerification(
+        parseM1Arguments(['--phase', 'ios-physical-preflight', '--device-id', physicalDeviceId]),
+        dependencies,
+      ),
+    );
+
+    expect(manifest.outcome).toBe('prerequisite_missing');
+    expect(manifest.host.signingReady).toBe(false);
+    expect(manifest.findings).toContainEqual({
+      severity: 'error',
+      summary: 'The selected physical device is not in the provisioning profile',
+    });
+  });
+
+  it('fails the preflight when the provisioning profile bundle identifier does not match', async () => {
+    const repository = createTemporaryRepository();
+    const workspace = createTemporaryExecutionWorkspace();
+    const profileDirectory = createTemporaryProvisioningProfileDirectory(
+      physicalProfileUuid,
+      physicalProvisioningProfilePlist({
+        applicationIdentifier: `${physicalSigningTeam}.com.different.app`,
+      }),
+    );
+    const runner = createPhysicalPreflightRunner();
+    const dependencies = createDependencies({
+      repoRoot: repository,
+      runCommand: runner.runCommand,
+      provisioningProfileDirectory: profileDirectory,
+    });
+    attachCleanExecutionWorkspace(dependencies, workspace);
+
+    const manifest = onlyManifest(
+      await runM1FoundationVerification(
+        parseM1Arguments(['--phase', 'ios-physical-preflight', '--device-id', physicalDeviceId]),
+        dependencies,
+      ),
+    );
+
+    expect(manifest.outcome).toBe('prerequisite_missing');
+    expect(manifest.host.signingReady).toBe(false);
+    expect(manifest.findings).toContainEqual({
+      severity: 'error',
+      summary:
+        'Provisioning profile application identifier does not match the bundle identifier',
+    });
+  });
+
+  it('accepts a wildcard provisioning profile without ProvisionedDevices', async () => {
+    const repository = createTemporaryRepository();
+    const workspace = createTemporaryExecutionWorkspace();
+    const profileDirectory = createTemporaryProvisioningProfileDirectory(
+      physicalProfileUuid,
+      physicalProvisioningProfilePlist({
+        applicationIdentifier: `${physicalSigningTeam}.*`,
+        provisionedDevices: null,
+      }),
+    );
+    const runner = createPhysicalPreflightRunner();
+    const dependencies = createDependencies({
+      repoRoot: repository,
+      runCommand: runner.runCommand,
+      provisioningProfileDirectory: profileDirectory,
+    });
+    attachCleanExecutionWorkspace(dependencies, workspace);
+
+    const manifest = onlyManifest(
+      await runM1FoundationVerification(
+        parseM1Arguments(['--phase', 'ios-physical-preflight', '--device-id', physicalDeviceId]),
+        dependencies,
+      ),
+    );
+
+    expect(manifest.outcome).toBe('passed');
+    expect(manifest.host.signingReady).toBe(true);
+  });
+
+  it('fails the preflight when the provisioning profile plist is malformed', async () => {
+    const repository = createTemporaryRepository();
+    const workspace = createTemporaryExecutionWorkspace();
+    const profileDirectory = createTemporaryProvisioningProfileDirectory(
+      physicalProfileUuid,
+      '<?xml version="1.0"?><plist version="1.0"><dict></dict></plist>',
+    );
+    const runner = createPhysicalPreflightRunner();
+    const dependencies = createDependencies({
+      repoRoot: repository,
+      runCommand: runner.runCommand,
+      provisioningProfileDirectory: profileDirectory,
+    });
+    attachCleanExecutionWorkspace(dependencies, workspace);
+
+    const manifest = onlyManifest(
+      await runM1FoundationVerification(
+        parseM1Arguments(['--phase', 'ios-physical-preflight', '--device-id', physicalDeviceId]),
+        dependencies,
+      ),
+    );
+
+    expect(manifest.outcome).toBe('prerequisite_missing');
+    expect(manifest.host.signingReady).toBe(false);
+    expect(manifest.findings).toContainEqual({
+      severity: 'error',
+      summary: 'The provisioning profile is malformed or missing required fields',
+    });
   });
 });
 
@@ -2460,5 +2748,125 @@ describe('manual M1 foundation recording', () => {
         createDependencies({ repoRoot: repository, runCommand: createRunner().runCommand }),
       ),
     ).rejects.toThrow(M1UsageError);
+  });
+
+  it('rejects a passed manual manifest whose apiOrigin does not match the CDK deployed proof', async () => {
+    const repository = createTemporaryRepository();
+    const inputPath = join(repository, 'mismatched-backend.json');
+    writeFileSync(
+      inputPath,
+      JSON.stringify({
+        ...validManualInput(),
+        config: {
+          ...validManualInput().config,
+          apiOrigin: 'https://api.different.example/api/',
+        },
+      }),
+    );
+
+    await expect(
+      runM1FoundationVerification(
+        parseM1Arguments([
+          '--record-manual',
+          'production-smoke',
+          '--tested-behavior-commit',
+          testedBehaviorCommit,
+          '--input',
+          inputPath,
+        ]),
+        createDependencies({ repoRoot: repository, runCommand: createRunner().runCommand }),
+      ),
+    ).rejects.toThrow(/does not match the CDK deployed identity proof/u);
+
+    expect(
+      existsSync(join(repository, 'apps/vela-mobile/docs/evidence/hpa-210')),
+    ).toBe(false);
+  });
+
+  it('rejects a passed manual manifest whose region does not match the CDK deployed proof', async () => {
+    const repository = createTemporaryRepository();
+    const inputPath = join(repository, 'mismatched-region.json');
+    writeFileSync(
+      inputPath,
+      JSON.stringify({
+        ...validManualInput(),
+        config: {
+          ...validManualInput().config,
+          region: 'us-west-2',
+        },
+      }),
+    );
+
+    await expect(
+      runM1FoundationVerification(
+        parseM1Arguments([
+          '--record-manual',
+          'production-smoke',
+          '--tested-behavior-commit',
+          testedBehaviorCommit,
+          '--input',
+          inputPath,
+        ]),
+        createDependencies({ repoRoot: repository, runCommand: createRunner().runCommand }),
+      ),
+    ).rejects.toThrow(/does not match the CDK deployed identity proof/u);
+  });
+
+  it('rejects a passed manual manifest when CDK deployed identity proof is unavailable', async () => {
+    const repository = createTemporaryRepository();
+    const inputPath = join(repository, 'no-proof.json');
+    writeFileSync(inputPath, JSON.stringify(validManualInput()));
+
+    await expect(
+      runM1FoundationVerification(
+        parseM1Arguments([
+          '--record-manual',
+          'production-smoke',
+          '--tested-behavior-commit',
+          testedBehaviorCommit,
+          '--input',
+          inputPath,
+        ]),
+        createDependencies({
+          repoRoot: repository,
+          runCommand: createRunner().runCommand,
+          loadDeployedIdentityProof: async () => null,
+        }),
+      ),
+    ).rejects.toThrow(/does not match the CDK deployed identity proof/u);
+  });
+
+  it('does not verify CDK proof for a non-passed manual manifest', async () => {
+    const repository = createTemporaryRepository();
+    const inputPath = join(repository, 'gate-failed.json');
+    writeFileSync(
+      inputPath,
+      JSON.stringify({
+        ...validManualInput(),
+        config: {
+          ...validManualInput().config,
+          apiOrigin: 'https://api.different.example/api/',
+          region: 'us-west-2',
+        },
+        outcome: 'gate_failed',
+        evidence: [],
+      }),
+    );
+
+    const manifest = onlyManifest(
+      await runM1FoundationVerification(
+        parseM1Arguments([
+          '--record-manual',
+          'production-smoke',
+          '--tested-behavior-commit',
+          testedBehaviorCommit,
+          '--input',
+          inputPath,
+        ]),
+        createDependencies({ repoRoot: repository, runCommand: createRunner().runCommand }),
+      ),
+    );
+
+    expect(manifest.outcome).toBe('gate_failed');
   });
 });

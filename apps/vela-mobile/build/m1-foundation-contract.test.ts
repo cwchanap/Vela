@@ -316,7 +316,124 @@ describe('M1 foundation manifest contract', () => {
         findings: [],
         outcome: 'passed',
       }),
-    ).toThrow(/non-empty apiOrigin, region, and oauthDomain/u);
+    ).toThrow(/must be a non-empty string/u);
+  });
+
+  it('rejects a passed manual manifest with a non-URL apiOrigin', () => {
+    const config = { ...validManifest().config, apiOrigin: 'not-even-a-url' };
+
+    expect(() =>
+      createManualM1Manifest({
+        testedBehaviorCommit: 'c'.repeat(40),
+        matrixClass: 'production-smoke',
+        runId: '20260803T021500Z-production-smoke',
+        startedAt: '2026-08-03T02:15:00.000Z',
+        endedAt: '2026-08-03T02:17:00.000Z',
+        config,
+        host: { deviceAlias: 'test iPhone' },
+        evidence: validManifest().evidence,
+        findings: [],
+        outcome: 'passed',
+      }),
+    ).toThrow(/valid HTTP or HTTPS URL/u);
+  });
+
+  it('rejects a passed manual manifest with a non-HTTP apiOrigin', () => {
+    const config = { ...validManifest().config, apiOrigin: 'ftp://api.vela.example/api/' };
+
+    expect(() =>
+      createManualM1Manifest({
+        testedBehaviorCommit: 'c'.repeat(40),
+        matrixClass: 'production-smoke',
+        runId: '20260803T021500Z-production-smoke',
+        startedAt: '2026-08-03T02:15:00.000Z',
+        endedAt: '2026-08-03T02:17:00.000Z',
+        config,
+        host: { deviceAlias: 'test iPhone' },
+        evidence: validManifest().evidence,
+        findings: [],
+        outcome: 'passed',
+      }),
+    ).toThrow(/http: or https: protocol/u);
+  });
+
+  it('rejects a passed manual manifest with credentials in apiOrigin', () => {
+    const config = {
+      ...validManifest().config,
+      apiOrigin: 'https://user:pass@api.vela.example/api/',
+    };
+
+    expect(() =>
+      createManualM1Manifest({
+        testedBehaviorCommit: 'c'.repeat(40),
+        matrixClass: 'production-smoke',
+        runId: '20260803T021500Z-production-smoke',
+        startedAt: '2026-08-03T02:15:00.000Z',
+        endedAt: '2026-08-03T02:17:00.000Z',
+        config,
+        host: { deviceAlias: 'test iPhone' },
+        evidence: validManifest().evidence,
+        findings: [],
+        outcome: 'passed',
+      }),
+    ).toThrow(/credentials/u);
+  });
+
+  it('rejects a passed manual manifest with a malformed region', () => {
+    const config = { ...validManifest().config, region: 'wrong-region' };
+
+    expect(() =>
+      createManualM1Manifest({
+        testedBehaviorCommit: 'c'.repeat(40),
+        matrixClass: 'production-smoke',
+        runId: '20260803T021500Z-production-smoke',
+        startedAt: '2026-08-03T02:15:00.000Z',
+        endedAt: '2026-08-03T02:17:00.000Z',
+        config,
+        host: { deviceAlias: 'test iPhone' },
+        evidence: validManifest().evidence,
+        findings: [],
+        outcome: 'passed',
+      }),
+    ).toThrow(/AWS region format/u);
+  });
+
+  it('rejects a passed manual manifest with a non-hostname oauthDomain', () => {
+    const config = { ...validManifest().config, oauthDomain: 'unrelated.example/path' };
+
+    expect(() =>
+      createManualM1Manifest({
+        testedBehaviorCommit: 'c'.repeat(40),
+        matrixClass: 'production-smoke',
+        runId: '20260803T021500Z-production-smoke',
+        startedAt: '2026-08-03T02:15:00.000Z',
+        endedAt: '2026-08-03T02:17:00.000Z',
+        config,
+        host: { deviceAlias: 'test iPhone' },
+        evidence: validManifest().evidence,
+        findings: [],
+        outcome: 'passed',
+      }),
+    ).toThrow(/bare hostname/u);
+  });
+
+  it('accepts a passed manual manifest with a loopback HTTP apiOrigin', () => {
+    const config = { ...validManifest().config, apiOrigin: 'http://127.0.0.1:9000/api/' };
+
+    const manifest = createManualM1Manifest({
+      testedBehaviorCommit: 'c'.repeat(40),
+      matrixClass: 'production-smoke',
+      runId: '20260803T021500Z-production-smoke',
+      startedAt: '2026-08-03T02:15:00.000Z',
+      endedAt: '2026-08-03T02:17:00.000Z',
+      config,
+      host: { deviceAlias: 'test iPhone' },
+      evidence: validManifest().evidence,
+      findings: [],
+      outcome: 'passed',
+    });
+
+    expect(manifest.outcome).toBe('passed');
   });
 
   it('rejects a manual manifest whose run-ID suffix disagrees with the matrix class', () => {
