@@ -3,20 +3,20 @@
 ## Tested Revision and Evidence Linkage
 
 `testedBehaviorCommit`:
-`f0c6fe9d5282c3f5f34e6e5453ed3c23c0808f65`
+`de276f372c7973e2fb49c81e9a78e50df95266c0`
 
-The selected [automated](evidence/hpa-210/f0c6fe9d5282c3f5f34e6e5453ed3c23c0808f65/20260803T042451Z-automated/manifest.json)
-and [iOS Simulator](evidence/hpa-210/f0c6fe9d5282c3f5f34e6e5453ed3c23c0808f65/20260803T042601Z-automated-ios-simulator/manifest.json)
-machine manifests passed on that revision. The selected
-[physical preflight](evidence/hpa-210/f0c6fe9d5282c3f5f34e6e5453ed3c23c0808f65/20260803T042801Z-physical-preflight/manifest.json)
-is `prerequisite_missing`. Physical-device testing was explicitly deferred, so
-these machine results establish neither physical readiness nor any
-human-observed native outcome.
+The selected [automated](evidence/hpa-210/de276f372c7973e2fb49c81e9a78e50df95266c0/20260803T071503Z-automated/manifest.json)
+and [iOS Simulator](evidence/hpa-210/de276f372c7973e2fb49c81e9a78e50df95266c0/20260803T071701Z-automated-ios-simulator/manifest.json)
+machine manifests passed on that revision. The Simulator manifest records
+sanitized Xcode, Bun, Quasar, and key Capacitor dependency versions without
+retaining raw command output or a device identifier.
 
-The manifest-only evidence revision
-`c8f0e6db627f12cd92467fed7761fea4add53a05` and the documentation-only
-decision record do not change or invalidate executable evidence pinned to
-`testedBehaviorCommit`. See [M1 iOS Foundation Verification](m1-ios-foundation-verification.md)
+The [physical preflight](evidence/hpa-210/f0c6fe9d5282c3f5f34e6e5453ed3c23c0808f65/20260803T042801Z-physical-preflight/manifest.json)
+under `f0c6fe9d5282c3f5f34e6e5453ed3c23c0808f65` remains historical
+`prerequisite_missing` evidence. Physical-device testing was explicitly
+deferred, so it is not evidence for `de276f372c7973e2fb49c81e9a78e50df95266c0`
+and these machine results establish neither physical readiness nor any
+human-observed native outcome. See [M1 iOS Foundation Verification](m1-ios-foundation-verification.md)
 for the `NO-GO` decision and deferred physical rows.
 
 ## Authentication and OAuth Callback
@@ -127,10 +127,12 @@ record must not rely on a development-only route.
 M1 accepts UserDefaults only for the short-lived, single-use OAuth transaction
 described above; it does not accept it as a session store. Local signing is
 tester-controlled: the iOS project intentionally has no committed development
-team. Automated and Simulator machine evidence passed on the selected revision,
-but physical preflight is `prerequisite_missing` and physical testing is
-deferred. Physical behavior, signing readiness, and the audio decision remain
-evidence-gated and must be recorded by actual physical runs.
+team. Automated and Simulator machine evidence passed on the current selected
+revision, while the `f0c6fe9d5282c3f5f34e6e5453ed3c23c0808f65` physical
+preflight is historical and cannot establish physical status for that revision.
+Physical testing remains deferred. Physical behavior, signing readiness, and
+the audio decision remain evidence-gated and must be recorded by actual
+physical runs.
 
 ## Change Policy
 
