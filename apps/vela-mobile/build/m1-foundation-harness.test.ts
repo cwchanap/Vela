@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -82,14 +82,32 @@ function createDependencies(input: {
   repoRoot: string;
   env?: TestEnvironment;
   runCommand: CommandRunner;
+  verifyGitCommitExists?: HarnessDependencies['verifyGitCommitExists'];
+  resolveDirtyPaths?: HarnessDependencies['resolveDirtyPaths'];
+  loadDeployedIdentityProof?: HarnessDependencies['loadDeployedIdentityProof'];
 }): HarnessDependencies {
+  const environment = input.env ?? deployedEnvironment;
   return {
     repoRoot: input.repoRoot,
     now: () => new Date('2026-08-03T02:15:00.000Z'),
     platform: 'darwin',
-    env: input.env ?? deployedEnvironment,
+    env: environment,
     runCommand: input.runCommand,
     resolveTestedBehaviorCommit: async () => testedBehaviorCommit,
+    verifyGitCommitExists: input.verifyGitCommitExists ?? (async () => true),
+    resolveDirtyPaths: input.resolveDirtyPaths ?? (async () => []),
+    loadDeployedIdentityProof:
+      input.loadDeployedIdentityProof ?? (async () => deployedIdentityProofFrom(environment)),
+  };
+}
+
+function deployedIdentityProofFrom(environment: TestEnvironment) {
+  return {
+    mobileApiUrl: environment.VITE_MOBILE_API_URL!,
+    cognitoUserPoolId: environment.VITE_COGNITO_USER_POOL_ID!,
+    cognitoMobileUserPoolClientId: environment.VITE_COGNITO_MOBILE_USER_POOL_CLIENT_ID!,
+    cognitoOAuthDomain: environment.VITE_COGNITO_OAUTH_DOMAIN!,
+    cognitoRegion: environment.VITE_AWS_REGION!,
   };
 }
 
@@ -242,6 +260,7 @@ describe('automated M1 foundation verification', () => {
     expect(manifest.outcome).toBe('passed');
     expect(manifest.exitCode).toBe(0);
     expect(manifest.config.class).toBe('placeholder');
+    expect(manifest.config.publicIdentifiersConsistent).toBe(false);
   });
 
   it('stops at the fourth failed automated gate with the gate-failed exit', async () => {
@@ -353,6 +372,171 @@ describe('automated M1 foundation verification', () => {
     expect(manifest.exitCode).toBe(3);
     expect(runner.calls).toEqual([]);
   });
+
+  it('rejects dirty executable paths before it starts a machine gate', async () => {
+    const repository = createTemporaryRepository();
+    const runner = createRunner();
+    const resolveDirtyPaths = vi.fn(async () => ['apps/vela-mobile/src/config/index.ts']);
+    const dependencies = createDependencies({
+      repoRoot: repository,
+      runCommand: runner.runCommand,
+      resolveDirtyPaths,
+    });
+
+    const manifest = onlyManifest(
+      await runM1FoundationVerification(
+        parseM1Arguments(['--phase', 'automated']),
+        dependencies,
+      ),
+    );
+
+    expect(resolveDirtyPaths).toHaveBeenCalledWith(repository);
+    expect(manifest.outcome).toBe('prerequisite_missing');
+    expect(manifest.evidence).toEqual([]);
+    expect(runner.calls).toEqual([]);
+  });
+
+  it('allows documentation and generated HPA-210 evidence changes to accompany an automated run', async () => {
+    const repository = createTemporaryRepository();
+    const runner = createRunner();
+    const dependencies = createDependencies({
+      repoRoot: repository,
+      runCommand: runner.runCommand,
+      resolveDirtyPaths: async () => [
+        'CLAUDE.md',
+        'docs/mobile/verification-notes.txt',
+        'architecture/mobile/identity-diagram.json',
+        '.superpowers/sdd/ledger.json',
+        'apps/vela-mobile/docs/evidence/hpa-210/previous-run/manifest.json',
+      ],
+    });
+
+    const manifest = onlyManifest(
+      await runM1FoundationVerification(
+        parseM1Arguments(['--phase', 'automated']),
+        dependencies,
+      ),
+    );
+
+    expect(manifest.outcome).toBe('passed');
+    expect(runner.calls).toHaveLength(expectedCommands.length);
+  });
+
+  it('requires complete deployed identity proof before closure commands run', async () => {
+    const repository = createTemporaryRepository();
+    const runner = createRunner();
+    const dependencies = createDependencies({
+      repoRoot: repository,
+      runCommand: runner.runCommand,
+      loadDeployedIdentityProof: async () => null,
+    });
+
+    const manifest = onlyManifest(
+      await runM1FoundationVerification(
+        parseM1Arguments(['--phase', 'automated', '--require-deployed-config']),
+        dependencies,
+      ),
+    );
+
+    expect(manifest.outcome).toBe('prerequisite_missing');
+    expect(manifest.config.publicIdentifiersConsistent).toBe(false);
+    expect(runner.calls).toEqual([]);
+  });
+
+  it('rejects a deployed identity proof that disagrees with the loaded mobile configuration', async () => {
+    const repository = createTemporaryRepository();
+    const runner = createRunner();
+    const dependencies = createDependencies({
+      repoRoot: repository,
+      runCommand: runner.runCommand,
+      loadDeployedIdentityProof: async () => ({
+        ...deployedIdentityProofFrom(deployedEnvironment),
+        cognitoMobileUserPoolClientId: 'different-mobile-client-id',
+      }),
+    });
+
+    const manifest = onlyManifest(
+      await runM1FoundationVerification(
+        parseM1Arguments(['--phase', 'automated', '--require-deployed-config']),
+        dependencies,
+      ),
+    );
+
+    expect(manifest.outcome).toBe('prerequisite_missing');
+    expect(manifest.config.publicIdentifiersConsistent).toBe(false);
+    expect(JSON.stringify(manifest.findings)).not.toContain('different-mobile-client-id');
+    expect(runner.calls).toEqual([]);
+  });
+
+  it('marks deployed identity as consistent only after a complete matching proof', async () => {
+    const repository = createTemporaryRepository();
+    const runner = createRunner();
+    const dependencies = createDependencies({
+      repoRoot: repository,
+      runCommand: runner.runCommand,
+      loadDeployedIdentityProof: async () => ({
+        ...deployedIdentityProofFrom(deployedEnvironment),
+        mobileApiUrl: 'https://API.VELA.example/api',
+        cognitoUserPoolId: ` ${deployedEnvironment.VITE_COGNITO_USER_POOL_ID!} `,
+        cognitoMobileUserPoolClientId: ` ${
+          deployedEnvironment.VITE_COGNITO_MOBILE_USER_POOL_CLIENT_ID!
+        } `,
+        cognitoOAuthDomain: `${deployedEnvironment.VITE_COGNITO_OAUTH_DOMAIN!.toUpperCase()}.`,
+        cognitoRegion: deployedEnvironment.VITE_AWS_REGION!.toUpperCase(),
+      }),
+    });
+
+    const manifest = onlyManifest(
+      await runM1FoundationVerification(
+        parseM1Arguments(['--phase', 'automated', '--require-deployed-config']),
+        dependencies,
+      ),
+    );
+
+    expect(manifest.outcome).toBe('passed');
+    expect(manifest.config.publicIdentifiersConsistent).toBe(true);
+    expect(runner.calls).toHaveLength(expectedCommands.length);
+  });
+
+  it('loads a complete deployed identity proof from the CDK output file', async () => {
+    const repository = createTemporaryRepository();
+    const runner = createRunner();
+    const outputsDirectory = join(repository, 'packages/cdk');
+    mkdirSync(outputsDirectory, { recursive: true });
+    writeFileSync(
+      join(outputsDirectory, 'cdk-outputs.json'),
+      JSON.stringify(
+        Object.entries({
+          MobileApiURL: deployedEnvironment.VITE_MOBILE_API_URL,
+          CognitoUserPoolId: deployedEnvironment.VITE_COGNITO_USER_POOL_ID,
+          CognitoMobileUserPoolClientId:
+            deployedEnvironment.VITE_COGNITO_MOBILE_USER_POOL_CLIENT_ID,
+          CognitoOAuthDomain: deployedEnvironment.VITE_COGNITO_OAUTH_DOMAIN,
+          CognitoRegion: deployedEnvironment.VITE_AWS_REGION,
+        }).map(([OutputKey, OutputValue]) => ({ OutputKey, OutputValue })),
+      ),
+    );
+    const dependencies: HarnessDependencies = {
+      repoRoot: repository,
+      now: () => new Date('2026-08-03T02:15:00.000Z'),
+      platform: 'darwin',
+      env: deployedEnvironment,
+      runCommand: runner.runCommand,
+      resolveTestedBehaviorCommit: async () => testedBehaviorCommit,
+      resolveDirtyPaths: async () => [],
+    };
+
+    const manifest = onlyManifest(
+      await runM1FoundationVerification(
+        parseM1Arguments(['--phase', 'automated', '--require-deployed-config']),
+        dependencies,
+      ),
+    );
+
+    expect(manifest.outcome).toBe('passed');
+    expect(manifest.config.publicIdentifiersConsistent).toBe(true);
+    expect(runner.calls).toHaveLength(expectedCommands.length);
+  });
 });
 
 describe('M1 foundation CLI', () => {
@@ -368,13 +552,25 @@ describe('M1 foundation CLI', () => {
 });
 
 describe('manual M1 foundation recording', () => {
-  it('writes a forced manual manifest below the supplied full behavior commit', async () => {
+  it('rejects raw OAuth code material in quoted manual finding text before it writes evidence', async () => {
     const repository = createTemporaryRepository();
-    const inputPath = join(repository, 'production-smoke.json');
-    writeFileSync(inputPath, JSON.stringify(validManualInput()));
+    const inputPath = join(repository, 'oauth-code.json');
+    const syntheticCode = ['synthetic', 'oauth', 'authorization', 'code', 'material'].join('-');
+    writeFileSync(
+      inputPath,
+      JSON.stringify({
+        ...validManualInput(),
+        findings: [
+          {
+            severity: 'info',
+            summary: `Observed redirect payload: ${JSON.stringify({ code: syntheticCode })}`,
+          },
+        ],
+      }),
+    );
 
-    const manifest = onlyManifest(
-      await runM1FoundationVerification(
+    await expect(
+      runM1FoundationVerification(
         parseM1Arguments([
           '--record-manual',
           'production-smoke',
@@ -385,18 +581,74 @@ describe('manual M1 foundation recording', () => {
         ]),
         createDependencies({ repoRoot: repository, runCommand: createRunner().runCommand }),
       ),
+    ).rejects.toThrow(M1UsageError);
+
+    expect(existsSync(join(repository, 'apps/vela-mobile/docs/evidence/hpa-210'))).toBe(false);
+  });
+
+  it('rejects a full-looking behavior SHA that does not name a Git commit before it writes evidence', async () => {
+    const repository = createTemporaryRepository();
+    const inputPath = join(repository, 'nonexistent-commit.json');
+    writeFileSync(inputPath, JSON.stringify(validManualInput()));
+
+    await expect(
+      runM1FoundationVerification(
+        parseM1Arguments([
+          '--record-manual',
+          'production-smoke',
+          '--tested-behavior-commit',
+          testedBehaviorCommit,
+          '--input',
+          inputPath,
+        ]),
+        createDependencies({
+          repoRoot: repository,
+          runCommand: createRunner().runCommand,
+          verifyGitCommitExists: async () => false,
+        }),
+      ),
+    ).rejects.toThrow(M1UsageError);
+
+    expect(existsSync(join(repository, 'apps/vela-mobile/docs/evidence/hpa-210'))).toBe(false);
+  });
+
+  it('writes a forced manual manifest below the supplied full behavior commit', async () => {
+    const repository = createTemporaryRepository();
+    const inputPath = join(repository, 'production-smoke.json');
+    const olderBehaviorCommit = 'c'.repeat(40);
+    const verifyGitCommitExists = vi.fn(async (commit: string) => commit === olderBehaviorCommit);
+    writeFileSync(inputPath, JSON.stringify(validManualInput()));
+
+    const manifest = onlyManifest(
+      await runM1FoundationVerification(
+        parseM1Arguments([
+          '--record-manual',
+          'production-smoke',
+          '--tested-behavior-commit',
+          olderBehaviorCommit,
+          '--input',
+          inputPath,
+        ]),
+        createDependencies({
+          repoRoot: repository,
+          runCommand: createRunner().runCommand,
+          verifyGitCommitExists,
+        }),
+      ),
     );
 
     const manifestPath = join(
       repository,
       'apps/vela-mobile/docs/evidence/hpa-210',
-      testedBehaviorCommit,
+      olderBehaviorCommit,
       '20260803T021500Z-production-smoke',
       'manifest.json',
     );
     expect(manifest.phase).toBe('manual');
     expect(manifest.matrixClass).toBe('production-smoke');
     expect(manifest.exitCode).toBe(0);
+    expect(manifest.testedBehaviorCommit).toBe(olderBehaviorCommit);
+    expect(verifyGitCommitExists).toHaveBeenCalledWith(olderBehaviorCommit, repository);
     expect(existsSync(manifestPath)).toBe(true);
     expect(JSON.parse(readFileSync(manifestPath, 'utf8'))).toEqual(manifest);
   });
