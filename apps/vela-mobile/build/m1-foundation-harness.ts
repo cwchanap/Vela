@@ -22,6 +22,7 @@ const FULL_COMMIT_PATTERN = /^[a-f0-9]{40}$/u;
 const MAX_CAPTURED_OUTPUT_BYTES = 64 * 1024;
 const MAX_MANUAL_INPUT_BYTES = 256 * 1024;
 const MAX_RUN_DIRECTORY_ATTEMPTS = 1_000;
+const MAX_GIT_STATUS_BYTES = 1024 * 1024;
 const MANUAL_INPUT_DECODER = new TextDecoder('utf-8', { fatal: true });
 const MOBILE_CONFIG_KEYS = [
   'VITE_MOBILE_API_URL',
@@ -30,6 +31,13 @@ const MOBILE_CONFIG_KEYS = [
   'VITE_COGNITO_OAUTH_DOMAIN',
   'VITE_AWS_REGION',
 ] as const;
+const DEPLOYED_IDENTITY_OUTPUT_KEYS = {
+  mobileApiUrl: 'MobileApiURL',
+  cognitoUserPoolId: 'CognitoUserPoolId',
+  cognitoMobileUserPoolClientId: 'CognitoMobileUserPoolClientId',
+  cognitoOAuthDomain: 'CognitoOAuthDomain',
+  cognitoRegion: 'CognitoRegion',
+} as const;
 
 export type CommandSpec = {
   label: string;
@@ -48,6 +56,14 @@ export type CommandRunner = (spec: CommandSpec) => Promise<{
 type ProcessEnvironment = Record<string, string | undefined>;
 type RuntimePlatform = typeof process.platform;
 
+export type DeployedIdentityProof = {
+  mobileApiUrl: string;
+  cognitoUserPoolId: string;
+  cognitoMobileUserPoolClientId: string;
+  cognitoOAuthDomain: string;
+  cognitoRegion: string;
+};
+
 export type HarnessDependencies = {
   repoRoot: string;
   now: () => Date;
@@ -59,6 +75,21 @@ export type HarnessDependencies = {
    * exact current Git HEAD directly, outside the eight automated gate calls.
    */
   resolveTestedBehaviorCommit?: () => Promise<string>;
+  /**
+   * Test-only injection point. Production callers verify the supplied manual
+   * behavior commit with `git cat-file` without invoking a shell.
+   */
+  verifyGitCommitExists?: (commit: string, repoRoot: string) => Promise<boolean>;
+  /**
+   * Test-only injection point. Production callers inspect `git status` with
+   * no shell before automated gates can produce verification evidence.
+   */
+  resolveDirtyPaths?: (repoRoot: string) => Promise<string[]>;
+  /**
+   * Test-only injection point. Production callers load the five public
+   * identifiers from packages/cdk/cdk-outputs.json.
+   */
+  loadDeployedIdentityProof?: (repoRoot: string) => Promise<DeployedIdentityProof | null>;
 };
 
 export type M1VerifyArguments = {
@@ -95,6 +126,7 @@ export class M1HarnessError extends Error {
 type ConfigurationEvaluation = {
   config: M1Manifest['config'];
   isValid: boolean;
+  loaded?: ReturnType<typeof loadMobileBuildEnv>;
 };
 
 type AutomaticRunContext = {
@@ -300,47 +332,128 @@ export const spawnCommand: CommandRunner = async (spec) =>
     });
   });
 
-async function resolveGitHeadDirectly(repoRoot: string): Promise<string> {
-  const output = await new Promise<Buffer>((resolve, reject) => {
+type DirectGitResult = {
+  exitCode: number;
+  stdout: Buffer;
+};
+
+async function runGitDirectly(input: {
+  repoRoot: string;
+  args: string[];
+  maxOutputBytes: number;
+  failureMessage: string;
+}): Promise<DirectGitResult> {
+  return new Promise((resolve, reject) => {
     let stdout = Buffer.alloc(0);
+    let outputTruncated = false;
     let settled = false;
     let child;
 
     try {
-      child = spawn('git', ['rev-parse', 'HEAD'], {
-        cwd: repoRoot,
+      child = spawn('git', input.args, {
+        cwd: input.repoRoot,
         shell: false,
         stdio: ['ignore', 'pipe', 'ignore'],
       });
     } catch {
-      reject(new M1HarnessError('Unable to resolve the current Git HEAD'));
+      reject(new M1HarnessError(input.failureMessage));
       return;
     }
 
     child.stdout?.on('data', (chunk: Buffer) => {
-      stdout = Buffer.concat([stdout, chunk.subarray(0, 256 - stdout.length)]);
+      const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+      if (stdout.length + bytes.length > input.maxOutputBytes) outputTruncated = true;
+      stdout = Buffer.concat([
+        stdout,
+        bytes.subarray(0, Math.max(0, input.maxOutputBytes - stdout.length)),
+      ]);
     });
     child.once('error', () => {
       if (settled) return;
       settled = true;
-      reject(new M1HarnessError('Unable to resolve the current Git HEAD'));
+      reject(new M1HarnessError(input.failureMessage));
     });
     child.once('close', (exitCode) => {
       if (settled) return;
       settled = true;
-      if (exitCode !== 0) {
-        reject(new M1HarnessError('Unable to resolve the current Git HEAD'));
+      if (outputTruncated) {
+        reject(new M1HarnessError(input.failureMessage));
         return;
       }
-      resolve(stdout);
+      resolve({ exitCode: exitCode ?? 1, stdout });
     });
   });
+}
 
-  const commit = output.toString('utf8').trim();
+async function resolveGitHeadDirectly(repoRoot: string): Promise<string> {
+  const result = await runGitDirectly({
+    repoRoot,
+    args: ['rev-parse', 'HEAD'],
+    maxOutputBytes: 256,
+    failureMessage: 'Unable to resolve the current Git HEAD',
+  });
+  if (result.exitCode !== 0) {
+    throw new M1HarnessError('Unable to resolve the current Git HEAD');
+  }
+
+  const commit = result.stdout.toString('utf8').trim();
   if (!FULL_COMMIT_PATTERN.test(commit)) {
     throw new M1HarnessError('Git HEAD must resolve to a full lowercase 40-character SHA');
   }
   return commit;
+}
+
+async function verifyGitCommitExistsDirectly(commit: string, repoRoot: string): Promise<boolean> {
+  const result = await runGitDirectly({
+    repoRoot,
+    args: ['cat-file', '-e', `${commit}^{commit}`],
+    maxOutputBytes: 0,
+    failureMessage: 'Unable to verify the supplied Git behavior commit',
+  });
+  return result.exitCode === 0;
+}
+
+function parseGitStatusPaths(output: Buffer): string[] {
+  const records = output.toString('utf8').split('\0');
+  const paths: string[] = [];
+
+  for (let index = 0; index < records.length - 1; index += 1) {
+    const record = records[index]!;
+    if (record.length < 4 || record[2] !== ' ') {
+      throw new M1HarnessError('Unable to inspect the Git working tree state safely');
+    }
+
+    const status = record.slice(0, 2);
+    const path = record.slice(3);
+    if (path === '') {
+      throw new M1HarnessError('Unable to inspect the Git working tree state safely');
+    }
+    paths.push(path);
+
+    if (status.includes('R') || status.includes('C')) {
+      const originalPath = records[index + 1];
+      if (!originalPath) {
+        throw new M1HarnessError('Unable to inspect the Git working tree state safely');
+      }
+      paths.push(originalPath);
+      index += 1;
+    }
+  }
+
+  return paths;
+}
+
+async function resolveDirtyPathsDirectly(repoRoot: string): Promise<string[]> {
+  const result = await runGitDirectly({
+    repoRoot,
+    args: ['status', '--porcelain=v1', '-z', '--untracked-files=all'],
+    maxOutputBytes: MAX_GIT_STATUS_BYTES,
+    failureMessage: 'Unable to inspect the Git working tree state safely',
+  });
+  if (result.exitCode !== 0) {
+    throw new M1HarnessError('Unable to inspect the Git working tree state safely');
+  }
+  return parseGitStatusPaths(result.stdout);
 }
 
 async function resolveTestedBehaviorCommit(dependencies: HarnessDependencies): Promise<string> {
@@ -398,13 +511,16 @@ function evaluateMobileConfiguration(dependencies: HarnessDependencies): Configu
 
     return {
       isValid: true,
+      loaded,
       config: {
         source,
         class: classifyMobileConfig(loaded),
         apiOrigin: publicApiOrigin(loaded.VITE_MOBILE_API_URL!),
         region: loaded.VITE_AWS_REGION!,
         oauthDomain: loaded.VITE_COGNITO_OAUTH_DOMAIN!,
-        publicIdentifiersConsistent: true,
+        // This is deliberately false until --require-deployed-config matches
+        // every loaded public identifier to the deployed CDK output proof.
+        publicIdentifiersConsistent: false,
       },
     };
   } catch {
@@ -416,6 +532,187 @@ function evaluateMobileConfiguration(dependencies: HarnessDependencies): Configu
         publicIdentifiersConsistent: false,
       },
     };
+  }
+}
+
+type NormalizedDeployedIdentityProof = {
+  mobileApiUrl: string;
+  cognitoUserPoolId: string;
+  cognitoMobileUserPoolClientId: string;
+  cognitoOAuthDomain: string;
+  cognitoRegion: string;
+};
+
+function normalizeRequiredIdentifier(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined;
+  const normalized = value.trim();
+  return normalized === '' ? undefined : normalized;
+}
+
+function normalizeMobileApiIdentifier(value: unknown): string | undefined {
+  const candidate = normalizeRequiredIdentifier(value);
+  if (!candidate) return undefined;
+
+  try {
+    const url = new URL(candidate);
+    if (
+      (url.protocol !== 'http:' && url.protocol !== 'https:') ||
+      !url.hostname ||
+      url.username ||
+      url.password ||
+      url.search ||
+      url.hash
+    ) {
+      return undefined;
+    }
+    const pathname = url.pathname.replace(/\/+$/u, '') || '/';
+    return `${url.protocol}//${url.host}${pathname}`;
+  } catch {
+    return undefined;
+  }
+}
+
+function normalizeOauthDomain(value: unknown): string | undefined {
+  const candidate = normalizeRequiredIdentifier(value);
+  return candidate ? candidate.replace(/\.$/u, '').toLowerCase() : undefined;
+}
+
+function normalizeRegion(value: unknown): string | undefined {
+  const candidate = normalizeRequiredIdentifier(value);
+  return candidate?.toLowerCase();
+}
+
+function normalizeDeployedIdentityProof(
+  proof: DeployedIdentityProof | null | undefined,
+): NormalizedDeployedIdentityProof | undefined {
+  if (!proof) return undefined;
+
+  const mobileApiUrl = normalizeMobileApiIdentifier(proof.mobileApiUrl);
+  const cognitoUserPoolId = normalizeRequiredIdentifier(proof.cognitoUserPoolId);
+  const cognitoMobileUserPoolClientId = normalizeRequiredIdentifier(
+    proof.cognitoMobileUserPoolClientId,
+  );
+  const cognitoOAuthDomain = normalizeOauthDomain(proof.cognitoOAuthDomain);
+  const cognitoRegion = normalizeRegion(proof.cognitoRegion);
+  if (
+    !mobileApiUrl ||
+    !cognitoUserPoolId ||
+    !cognitoMobileUserPoolClientId ||
+    !cognitoOAuthDomain ||
+    !cognitoRegion
+  ) {
+    return undefined;
+  }
+
+  return {
+    mobileApiUrl,
+    cognitoUserPoolId,
+    cognitoMobileUserPoolClientId,
+    cognitoOAuthDomain,
+    cognitoRegion,
+  };
+}
+
+function normalizeLoadedMobileIdentity(
+  loaded: ReturnType<typeof loadMobileBuildEnv>,
+): NormalizedDeployedIdentityProof | undefined {
+  return normalizeDeployedIdentityProof({
+    mobileApiUrl: loaded.VITE_MOBILE_API_URL ?? '',
+    cognitoUserPoolId: loaded.VITE_COGNITO_USER_POOL_ID ?? '',
+    cognitoMobileUserPoolClientId: loaded.VITE_COGNITO_MOBILE_USER_POOL_CLIENT_ID ?? '',
+    cognitoOAuthDomain: loaded.VITE_COGNITO_OAUTH_DOMAIN ?? '',
+    cognitoRegion: loaded.VITE_AWS_REGION ?? '',
+  });
+}
+
+function hasMatchingDeployedIdentity(
+  loaded: ReturnType<typeof loadMobileBuildEnv>,
+  proof: DeployedIdentityProof | null,
+): boolean {
+  const normalizedLoaded = normalizeLoadedMobileIdentity(loaded);
+  const normalizedProof = normalizeDeployedIdentityProof(proof);
+  if (!normalizedLoaded || !normalizedProof) return false;
+
+  return (
+    normalizedLoaded.mobileApiUrl === normalizedProof.mobileApiUrl &&
+    normalizedLoaded.cognitoUserPoolId === normalizedProof.cognitoUserPoolId &&
+    normalizedLoaded.cognitoMobileUserPoolClientId ===
+      normalizedProof.cognitoMobileUserPoolClientId &&
+    normalizedLoaded.cognitoOAuthDomain === normalizedProof.cognitoOAuthDomain &&
+    normalizedLoaded.cognitoRegion === normalizedProof.cognitoRegion
+  );
+}
+
+/**
+ * Loads the exact five public mobile identity values emitted by CDK. It is
+ * intentionally strict: incomplete, malformed, or ambiguous output never
+ * becomes closure proof, and no raw values are surfaced to callers' findings.
+ */
+export async function loadCdkDeployedIdentityProof(
+  repoRoot: string,
+): Promise<DeployedIdentityProof | null> {
+  try {
+    const parsed: unknown = JSON.parse(
+      await readFile(join(repoRoot, 'packages/cdk/cdk-outputs.json'), 'utf8'),
+    );
+    if (!Array.isArray(parsed)) return null;
+
+    const outputValues = new Map<string, string>();
+    const expectedOutputKeys = new Set<string>(Object.values(DEPLOYED_IDENTITY_OUTPUT_KEYS));
+    for (const item of parsed) {
+      if (typeof item !== 'object' || item === null || Array.isArray(item)) continue;
+      const record = item as UnknownRecord;
+      const outputKey = record.OutputKey;
+      if (typeof outputKey !== 'string' || !expectedOutputKeys.has(outputKey)) continue;
+      if (outputValues.has(outputKey)) return null;
+      const outputValue = normalizeRequiredIdentifier(record.OutputValue);
+      if (!outputValue) return null;
+      outputValues.set(outputKey, outputValue);
+    }
+
+    const mobileApiUrl = outputValues.get(DEPLOYED_IDENTITY_OUTPUT_KEYS.mobileApiUrl);
+    const cognitoUserPoolId = outputValues.get(DEPLOYED_IDENTITY_OUTPUT_KEYS.cognitoUserPoolId);
+    const cognitoMobileUserPoolClientId = outputValues.get(
+      DEPLOYED_IDENTITY_OUTPUT_KEYS.cognitoMobileUserPoolClientId,
+    );
+    const cognitoOAuthDomain = outputValues.get(
+      DEPLOYED_IDENTITY_OUTPUT_KEYS.cognitoOAuthDomain,
+    );
+    const cognitoRegion = outputValues.get(DEPLOYED_IDENTITY_OUTPUT_KEYS.cognitoRegion);
+    if (
+      !mobileApiUrl ||
+      !cognitoUserPoolId ||
+      !cognitoMobileUserPoolClientId ||
+      !cognitoOAuthDomain ||
+      !cognitoRegion
+    ) {
+      return null;
+    }
+
+    const proof = {
+      mobileApiUrl,
+      cognitoUserPoolId,
+      cognitoMobileUserPoolClientId,
+      cognitoOAuthDomain,
+      cognitoRegion,
+    };
+    return normalizeDeployedIdentityProof(proof) ? proof : null;
+  } catch {
+    return null;
+  }
+}
+
+async function deployedIdentityMatchesLoadedConfiguration(
+  dependencies: HarnessDependencies,
+  loaded: ReturnType<typeof loadMobileBuildEnv>,
+): Promise<boolean> {
+  try {
+    const proof = dependencies.loadDeployedIdentityProof
+      ? await dependencies.loadDeployedIdentityProof(dependencies.repoRoot)
+      : await loadCdkDeployedIdentityProof(dependencies.repoRoot);
+    return hasMatchingDeployedIdentity(loaded, proof);
+  } catch {
+    return false;
   }
 }
 
@@ -464,6 +761,50 @@ function automatedCommands(dependencies: HarnessDependencies): CommandSpec[] {
       env,
     },
   ];
+}
+
+function normalizeRepositoryRelativePath(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined;
+  const path = value.replaceAll('\\', '/');
+  if (
+    path === '' ||
+    path.includes('\0') ||
+    path.startsWith('/') ||
+    /^[A-Za-z]:\//u.test(path) ||
+    path.split('/').some((segment) => segment === '' || segment === '.' || segment === '..')
+  ) {
+    return undefined;
+  }
+  return path;
+}
+
+/**
+ * Documentation-only changes do not alter the executable build under test.
+ * Everything else, including source, native, dependency, and tool changes,
+ * blocks automated evidence until it is committed and retested. The returned
+ * decision is deliberately path-free so generated manifests never disclose a
+ * local checkout layout.
+ */
+function isAllowedNonExecutableDirtyPath(value: unknown): boolean {
+  const path = normalizeRepositoryRelativePath(value);
+  if (!path) return false;
+
+  return (
+    path === 'CLAUDE.md' ||
+    path.endsWith('.md') ||
+    path.startsWith('docs/') ||
+    path.startsWith('architecture/') ||
+    path.startsWith('.superpowers/') ||
+    path.startsWith('apps/vela-mobile/docs/') ||
+    path.startsWith('apps/vela-mobile/docs/evidence/hpa-210/')
+  );
+}
+
+async function hasBlockingDirtyExecutableState(dependencies: HarnessDependencies): Promise<boolean> {
+  const paths = dependencies.resolveDirtyPaths
+    ? await dependencies.resolveDirtyPaths(dependencies.repoRoot)
+    : await resolveDirtyPathsDirectly(dependencies.repoRoot);
+  return paths.some((path) => !isAllowedNonExecutableDirtyPath(path));
 }
 
 function safeDate(now: () => Date): Date {
@@ -516,7 +857,10 @@ function containsUnsafeEvidenceText(text: string): boolean {
   return [
     /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/iu,
     /(?:[?&](?:code|state|nonce|code_verifier|access_token|id_token|refresh_token)=)/iu,
-    /\b(?:access_token|id_token|refresh_token|code_verifier|authorization)\s*[:=]/iu,
+    // Match raw OAuth assignments even when a JSON payload was quoted inside
+    // a manual summary. The assignment must carry a value; field names in
+    // ordinary prose alone remain safe to record.
+    /\b(?:authorization(?:[_ -]?code)?|code(?:[_-]?verifier)?|access[_-]?token|id[_-]?token|refresh[_-]?token|token)\b(?:\\?["'])?\s*[:=]\s*(?:\\?["'])?[^\s,}\]]+/iu,
     /\bdata:[^\s,]+;base64,/iu,
     /\/oauth\/callback(?:[/?#]|$)/iu,
     /\b(?:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|[0-9a-f]{8}-[0-9a-f]{16,}|[0-9a-f]{40})\b/iu,
@@ -627,16 +971,27 @@ async function runAutomatedPhase(
 ): Promise<M1Manifest> {
   const startedAt = safeDate(dependencies.now);
   const testedBehaviorCommit = await resolveTestedBehaviorCommit(dependencies);
-  const context = await createAutomaticRunContext({
-    repoRoot: dependencies.repoRoot,
-    testedBehaviorCommit,
-    startedAt,
-  });
   const commands: M1CommandResult[] = [];
   const evidence: M1EvidenceReference[] = [];
   const findings: M1Manifest['findings'] = [];
   let configuration = evaluateMobileConfiguration(dependencies);
   let outcome: M1Outcome = 'passed';
+
+  try {
+    if (await hasBlockingDirtyExecutableState(dependencies)) {
+      outcome = 'prerequisite_missing';
+      findings.push({
+        severity: 'error',
+        summary: 'Executable workspace changes are present; run from a clean executable state',
+      });
+    }
+  } catch {
+    outcome = 'prerequisite_missing';
+    findings.push({
+      severity: 'error',
+      summary: 'Git working tree state could not be verified before automated evidence',
+    });
+  }
 
   if (!configuration.isValid) {
     outcome = 'prerequisite_missing';
@@ -644,19 +999,53 @@ async function runAutomatedPhase(
       severity: 'error',
       summary: 'Mobile production configuration is missing or invalid',
     });
-  } else if (args.requireDeployedConfig && dependencies.env.MOBILE_SKIP_ENV_VALIDATION === 'true') {
+  } else if (
+    outcome === 'passed' &&
+    args.requireDeployedConfig &&
+    dependencies.env.MOBILE_SKIP_ENV_VALIDATION === 'true'
+  ) {
     outcome = 'prerequisite_missing';
     findings.push({
       severity: 'error',
       summary: 'MOBILE_SKIP_ENV_VALIDATION=true is not allowed for deployed closure runs',
     });
-  } else if (args.requireDeployedConfig && configuration.config.class !== 'deployed') {
+  } else if (
+    outcome === 'passed' &&
+    args.requireDeployedConfig &&
+    configuration.config.class !== 'deployed'
+  ) {
     outcome = 'prerequisite_missing';
     findings.push({
       severity: 'error',
       summary: 'A deployed mobile configuration is required for closure evidence',
     });
   }
+
+  if (outcome === 'passed' && args.requireDeployedConfig && configuration.loaded) {
+    const publicIdentifiersConsistent = await deployedIdentityMatchesLoadedConfiguration(
+      dependencies,
+      configuration.loaded,
+    );
+    configuration = {
+      ...configuration,
+      config: { ...configuration.config, publicIdentifiersConsistent },
+    };
+    if (!publicIdentifiersConsistent) {
+      outcome = 'prerequisite_missing';
+      findings.push({
+        severity: 'error',
+        summary: 'Deployed mobile identity proof is missing or does not match the loaded configuration',
+      });
+    }
+  }
+
+  // A prerequisite manifest is diagnostic only: it has no gate output or
+  // evidence references and cannot be treated as passing verification.
+  const context = await createAutomaticRunContext({
+    repoRoot: dependencies.repoRoot,
+    testedBehaviorCommit,
+    startedAt,
+  });
 
   if (outcome === 'passed') {
     try {
@@ -856,10 +1245,32 @@ async function writeManualManifest(input: {
   await writeManifest(directory, input.manifest);
 }
 
+async function assertManualBehaviorCommitExists(
+  args: M1ManualArguments,
+  dependencies: HarnessDependencies,
+): Promise<void> {
+  if (!FULL_COMMIT_PATTERN.test(args.testedBehaviorCommit)) {
+    throw new M1UsageError('--tested-behavior-commit must be a full lowercase 40-character SHA');
+  }
+
+  try {
+    const exists = dependencies.verifyGitCommitExists
+      ? await dependencies.verifyGitCommitExists(args.testedBehaviorCommit, dependencies.repoRoot)
+      : await verifyGitCommitExistsDirectly(args.testedBehaviorCommit, dependencies.repoRoot);
+    if (!exists) {
+      throw new M1UsageError('--tested-behavior-commit must name an accessible Git commit');
+    }
+  } catch (error) {
+    if (error instanceof M1UsageError) throw error;
+    throw new M1UsageError('--tested-behavior-commit must name an accessible Git commit');
+  }
+}
+
 async function runManualPhase(
   args: M1ManualArguments,
   dependencies: HarnessDependencies,
 ): Promise<M1Manifest> {
+  await assertManualBehaviorCommitExists(args, dependencies);
   const input = await readManualInput(args.inputPath);
   let manifest: M1Manifest;
   try {
