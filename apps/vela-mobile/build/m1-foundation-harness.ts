@@ -2096,7 +2096,7 @@ async function runIosSimulatorPhase(
           spec: {
             label: 'simulator-process-list',
             command: 'xcrun',
-            args: ['simctl', 'spawn', args.simulatorUdid, 'ps', '-A', '-o', 'comm='],
+            args: ['simctl', 'spawn', args.simulatorUdid, '/bin/ps', '-A', '-o', 'comm='],
             cwd: executionRoot,
             env: commandEnv,
           },
