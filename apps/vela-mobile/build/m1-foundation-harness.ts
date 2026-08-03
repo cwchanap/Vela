@@ -1981,7 +1981,7 @@ async function runIosSimulatorPhase(
           spec: {
             label: 'quasar-dependency-version',
             command: 'bun',
-            args: ['pm', 'ls', 'quasar'],
+            args: ['pm', 'ls', '--all', 'quasar'],
             cwd: mobileRoot,
             env: commandEnv,
           },

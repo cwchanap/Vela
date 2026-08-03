@@ -1222,6 +1222,7 @@ describe('iOS Simulator M1 foundation verification', () => {
     expect(runner.calls[3]!.args).toEqual([
       'pm',
       'ls',
+      '--all',
       'quasar',
     ]);
     expect(runner.calls[3]!.cwd).toBe(join(workspace, 'apps/vela-mobile'));
