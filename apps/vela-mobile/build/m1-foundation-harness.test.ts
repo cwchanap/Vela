@@ -114,6 +114,9 @@ function createRunner(exitCodes: number[] = []) {
 
 function createSimulatorRunner(input: {
   wwwRoot: string;
+  bunVersion?: string;
+  capacitorDependencyOutput?: string;
+  mobileDependencyOutput?: string;
   mutateWebViewAssets?: boolean;
   simulatorDevices?: unknown;
   processList?: string;
@@ -139,10 +142,35 @@ function createSimulatorRunner(input: {
       return { exitCode: 0, stdout: 'Xcode 16.2\nBuild version 16C5032a\n', stderr: '' };
     }
     if (spec.command === 'bun' && spec.args.join(' ') === '--version') {
-      return { exitCode: 0, stdout: '1.3.1\n', stderr: '' };
+      return { exitCode: 0, stdout: input.bunVersion ?? '1.3.1\n', stderr: '' };
     }
     if (spec.command === 'bun' && spec.args[0] === 'pm' && spec.args[1] === 'ls') {
-      return { exitCode: 0, stdout: 'quasar@2.18.1\n@capacitor/core@7.4.0\n', stderr: '' };
+      if (spec.cwd.endsWith('/src-capacitor')) {
+        return {
+          exitCode: 0,
+          stdout:
+            input.capacitorDependencyOutput ??
+            [
+              '├── @capacitor/app@7.1.2',
+              '├── @capacitor/core@7.6.8',
+              '├── @capacitor/ios@7.6.8',
+              '├── @capacitor/keyboard@7.0.6',
+              '└── unrelated-capacitor-dependency@9.9.9',
+            ].join('\n'),
+          stderr: '',
+        };
+      }
+      return {
+        exitCode: 0,
+        stdout:
+          input.mobileDependencyOutput ??
+          [
+            '/private/tmp/clean-mobile-workspace/node_modules (99)',
+            '├── quasar@2.18.6',
+            '└── unrelated-mobile-dependency@9.9.9',
+          ].join('\n'),
+        stderr: '',
+      };
     }
     if (
       spec.command === 'xcrun' &&
@@ -1178,6 +1206,7 @@ describe('iOS Simulator M1 foundation verification', () => {
       ['bun', '--version', undefined],
       ['bun', 'install', '--frozen-lockfile'],
       ['bun', 'pm', 'ls'],
+      ['bun', 'pm', 'ls'],
       ['xcrun', 'simctl', 'list'],
       ['bun', 'run', '--cwd'],
       ['bunx', 'cap', 'sync'],
@@ -1194,12 +1223,18 @@ describe('iOS Simulator M1 foundation verification', () => {
       'pm',
       'ls',
       'quasar',
+    ]);
+    expect(runner.calls[3]!.cwd).toBe(join(workspace, 'apps/vela-mobile'));
+    expect(runner.calls[4]!.args).toEqual([
+      'pm',
+      'ls',
       '@capacitor/core',
       '@capacitor/ios',
       '@capacitor/app',
       '@capacitor/keyboard',
     ]);
-    expect(runner.calls[8]!.args).toEqual(
+    expect(runner.calls[4]!.cwd).toBe(join(workspace, 'apps/vela-mobile/src-capacitor'));
+    expect(runner.calls[9]!.args).toEqual(
       expect.arrayContaining([
         '-scheme',
         'App',
@@ -1213,9 +1248,9 @@ describe('iOS Simulator M1 foundation verification', () => {
         'build',
       ]),
     );
-    expect(runner.calls[11]!.args).toEqual(['simctl', 'install', simulatorUdid, expect.any(String)]);
-    expect(runner.calls[12]!.args).toEqual(['simctl', 'launch', simulatorUdid, 'com.vela.app']);
-    expect(runner.calls[13]!.args).toEqual([
+    expect(runner.calls[12]!.args).toEqual(['simctl', 'install', simulatorUdid, expect.any(String)]);
+    expect(runner.calls[13]!.args).toEqual(['simctl', 'launch', simulatorUdid, 'com.vela.app']);
+    expect(runner.calls[14]!.args).toEqual([
       'simctl',
       'spawn',
       simulatorUdid,
@@ -1224,8 +1259,8 @@ describe('iOS Simulator M1 foundation verification', () => {
       '-o',
       'comm=',
     ]);
-    const derivedDataPath = runner.calls[7]!.args[runner.calls[7]!.args.indexOf('-derivedDataPath') + 1]!;
-    expect(runner.calls[9]!.args).toEqual([
+    const derivedDataPath = runner.calls[8]!.args[runner.calls[8]!.args.indexOf('-derivedDataPath') + 1]!;
+    expect(runner.calls[10]!.args).toEqual([
       '-extract',
       'CFBundleExecutable',
       'raw',
@@ -1250,6 +1285,12 @@ describe('iOS Simulator M1 foundation verification', () => {
         simulatorAlias: 'iPhone 16 Pro Simulator',
         simulatorRuntime,
         xcodeVersion: '16.2',
+        bunVersion: '1.3.1',
+        quasarVersion: '2.18.6',
+        capacitorCoreVersion: '7.6.8',
+        capacitorIosVersion: '7.6.8',
+        capacitorAppVersion: '7.1.2',
+        capacitorKeyboardVersion: '7.0.6',
       },
     });
     expect(manifest.host).toMatchObject({
@@ -1260,6 +1301,12 @@ describe('iOS Simulator M1 foundation verification', () => {
     expect(manifest.host.wwwHashAfter).toBe(manifest.host.wwwHashBefore);
     expect(Object.keys(manifest.host).sort()).toEqual([
       'appBundlePath',
+      'bunVersion',
+      'capacitorAppVersion',
+      'capacitorCoreVersion',
+      'capacitorIosVersion',
+      'capacitorKeyboardVersion',
+      'quasarVersion',
       'simulatorAlias',
       'simulatorRuntime',
       'wwwHashAfter',
@@ -1271,6 +1318,77 @@ describe('iOS Simulator M1 foundation verification', () => {
     expect(serializedManifest).not.toContain('LOCAL-TEAM-MUST-NOT-PERSIST');
     expect(serializedManifest).not.toContain('Build version 16C5032a');
     expect(serializedManifest).not.toContain('/Applications/Vela');
+    expect(serializedManifest).not.toContain('/private/tmp/clean-mobile-workspace');
+    expect(serializedManifest).not.toContain('unrelated-mobile-dependency@9.9.9');
+    expect(serializedManifest).not.toContain('unrelated-capacitor-dependency@9.9.9');
+  });
+
+  it('rejects Bun releases below the mobile minimum before dependency installation', async () => {
+    const repository = createTemporaryRepository();
+    const workspace = createTemporaryExecutionWorkspace();
+    const wwwRoot = join(workspace, 'apps/vela-mobile/src-capacitor/www');
+    mkdirSync(wwwRoot, { recursive: true });
+    writeFileSync(join(wwwRoot, 'index.html'), 'verified production WebView asset');
+    const runner = createSimulatorRunner({ wwwRoot, bunVersion: '1.3.0\n' });
+    const dependencies = createDependencies({ repoRoot: repository, runCommand: runner.runCommand });
+    attachCleanExecutionWorkspace(dependencies, workspace);
+    (dependencies as HarnessDependencies & { sleep?: (milliseconds: number) => Promise<void> }).sleep =
+      async () => undefined;
+
+    const manifest = onlyManifest(
+      await runM1FoundationVerification(
+        parseM1Arguments([
+          '--phase',
+          'ios-simulator',
+          '--simulator-udid',
+          simulatorUdid,
+          '--require-deployed-config',
+        ]),
+        dependencies,
+      ),
+    );
+
+    expect(manifest.outcome).toBe('prerequisite_missing');
+    expect(manifest.exitCode).toBe(3);
+    expect(manifest.host).toEqual({ xcodeVersion: '16.2' });
+    expect(runner.calls.map(({ command, args }) => [command, args[0]])).toEqual([
+      ['xcodebuild', '-version'],
+      ['bun', '--version'],
+    ]);
+  });
+
+  it('rejects an unsafe semver-shaped Bun output before persisting provenance', async () => {
+    const repository = createTemporaryRepository();
+    const workspace = createTemporaryExecutionWorkspace();
+    const wwwRoot = join(workspace, 'apps/vela-mobile/src-capacitor/www');
+    mkdirSync(wwwRoot, { recursive: true });
+    writeFileSync(join(wwwRoot, 'index.html'), 'verified production WebView asset');
+    const unsafeBunVersion = '999999999999999999999.3.1';
+    const runner = createSimulatorRunner({ wwwRoot, bunVersion: `${unsafeBunVersion}\n` });
+    const dependencies = createDependencies({ repoRoot: repository, runCommand: runner.runCommand });
+    attachCleanExecutionWorkspace(dependencies, workspace);
+    (dependencies as HarnessDependencies & { sleep?: (milliseconds: number) => Promise<void> }).sleep =
+      async () => undefined;
+
+    const manifest = onlyManifest(
+      await runM1FoundationVerification(
+        parseM1Arguments([
+          '--phase',
+          'ios-simulator',
+          '--simulator-udid',
+          simulatorUdid,
+          '--require-deployed-config',
+        ]),
+        dependencies,
+      ),
+    );
+
+    expect(manifest.outcome).toBe('prerequisite_missing');
+    expect(manifest.host).toEqual({ xcodeVersion: '16.2' });
+    expect(runner.calls.map(({ command, args }) => [command, args[0]])).toEqual([
+      ['xcodebuild', '-version'],
+      ['bun', '--version'],
+    ]);
   });
 
   it('returns prerequisite_missing before native commands without macOS or an explicit Simulator identifier', async () => {
@@ -1342,6 +1460,7 @@ describe('iOS Simulator M1 foundation verification', () => {
       ['bun', '--version'],
       ['bun', 'install'],
       ['bun', 'pm'],
+      ['bun', 'pm'],
       ['xcrun', 'simctl'],
       ['bun', 'run'],
       ['bunx', 'cap'],
@@ -1404,6 +1523,7 @@ describe('iOS Simulator M1 foundation verification', () => {
       ['xcodebuild', '-version'],
       ['bun', '--version'],
       ['bun', 'install'],
+      ['bun', 'pm'],
       ['bun', 'pm'],
       ['xcrun', 'simctl'],
     ]);
@@ -1570,7 +1690,7 @@ describe('iOS Simulator M1 foundation verification', () => {
       'utf8',
     );
 
-    expect(runner.calls).toHaveLength(14);
+    expect(runner.calls).toHaveLength(15);
     expect(dispose).toHaveBeenCalledTimes(1);
     expect(manifest.outcome).toBe('harness_error');
     expect(manifest.config).toEqual({

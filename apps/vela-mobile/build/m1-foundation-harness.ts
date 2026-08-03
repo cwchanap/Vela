@@ -1556,8 +1556,111 @@ function parseXcodeVersion(output: string): string | undefined {
   return match?.[1];
 }
 
-function hasSafeBunVersion(output: string): boolean {
-  return /^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/u.test(boundedOutput(output).trim());
+type SafeSemver = {
+  version: string;
+  major: number;
+  minor: number;
+  patch: number;
+  prerelease: string | undefined;
+};
+
+const SAFE_SEMVER_SOURCE =
+  '(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(?:-([0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*))?(?:\\+([0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*))?';
+const SAFE_SEMVER_PATTERN = new RegExp(`^${SAFE_SEMVER_SOURCE}$`, 'u');
+const MINIMUM_BUN_VERSION: Pick<SafeSemver, 'major' | 'minor' | 'patch'> = {
+  major: 1,
+  minor: 3,
+  patch: 1,
+};
+
+const MOBILE_DEPENDENCY_PROVENANCE = [
+  { packageName: 'quasar', hostField: 'quasarVersion' },
+  { packageName: '@capacitor/core', hostField: 'capacitorCoreVersion' },
+  { packageName: '@capacitor/ios', hostField: 'capacitorIosVersion' },
+  { packageName: '@capacitor/app', hostField: 'capacitorAppVersion' },
+  { packageName: '@capacitor/keyboard', hostField: 'capacitorKeyboardVersion' },
+] as const;
+
+function parseSafeSemver(value: string): SafeSemver | undefined {
+  const match = value.match(SAFE_SEMVER_PATTERN);
+  if (!match) return undefined;
+
+  const [, major, minor, patch, prerelease] = match;
+  const numericVersion = [Number(major), Number(minor), Number(patch)];
+  if (numericVersion.some((part) => !Number.isSafeInteger(part))) return undefined;
+
+  return {
+    version: value,
+    major: numericVersion[0]!,
+    minor: numericVersion[1]!,
+    patch: numericVersion[2]!,
+    prerelease,
+  };
+}
+
+function isAtLeastMinimumBunVersion(version: SafeSemver): boolean {
+  if (version.major !== MINIMUM_BUN_VERSION.major) {
+    return version.major > MINIMUM_BUN_VERSION.major;
+  }
+  if (version.minor !== MINIMUM_BUN_VERSION.minor) {
+    return version.minor > MINIMUM_BUN_VERSION.minor;
+  }
+  if (version.patch !== MINIMUM_BUN_VERSION.patch) {
+    return version.patch > MINIMUM_BUN_VERSION.patch;
+  }
+  return version.prerelease === undefined;
+}
+
+function parseSafeBunVersion(output: string): string | undefined {
+  const version = parseSafeSemver(boundedOutput(output).trim());
+  return version && isAtLeastMinimumBunVersion(version) ? version.version : undefined;
+}
+
+function escapeRegularExpression(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&');
+}
+
+function parseSafeDependencyVersion(output: string, packageName: string): string | undefined {
+  const dependencyPattern = new RegExp(
+    `(?:^|[^A-Za-z0-9@/._-])${escapeRegularExpression(packageName)}@(${SAFE_SEMVER_SOURCE})(?=$|\\s)`,
+    'gmu',
+  );
+  const versions = new Set<string>();
+  for (const match of boundedOutput(output).matchAll(dependencyPattern)) {
+    const version = parseSafeSemver(match[1] ?? '');
+    if (version) versions.add(version.version);
+  }
+
+  return versions.size === 1 ? Array.from(versions)[0] : undefined;
+}
+
+function parseMobileDependencyProvenance(input: {
+  quasarOutput: string;
+  capacitorOutput: string;
+}): Pick<
+  M1Manifest['host'],
+  | 'quasarVersion'
+  | 'capacitorCoreVersion'
+  | 'capacitorIosVersion'
+  | 'capacitorAppVersion'
+  | 'capacitorKeyboardVersion'
+> | undefined {
+  const quasarVersion = parseSafeDependencyVersion(input.quasarOutput, 'quasar');
+  const capacitorVersions = MOBILE_DEPENDENCY_PROVENANCE.slice(1).map(
+    ({ packageName, hostField }) => [
+      hostField,
+      parseSafeDependencyVersion(input.capacitorOutput, packageName),
+    ] as const,
+  );
+  if (!quasarVersion || capacitorVersions.some(([, version]) => !version)) return undefined;
+
+  return {
+    quasarVersion,
+    capacitorCoreVersion: capacitorVersions[0]![1]!,
+    capacitorIosVersion: capacitorVersions[1]![1]!,
+    capacitorAppVersion: capacitorVersions[2]![1]!,
+    capacitorKeyboardVersion: capacitorVersions[3]![1]!,
+  };
 }
 
 function isPathInside(root: string, candidate: string): boolean {
@@ -1845,9 +1948,17 @@ async function runIosSimulatorPhase(
           failureOutcome: 'prerequisite_missing',
           summary: 'Bun is unavailable for iOS Simulator verification',
         });
-        if (bunVersionResult && !hasSafeBunVersion(bunVersionResult.stdout)) {
-          outcome = 'prerequisite_missing';
-          findings.push({ severity: 'error', summary: 'Bun version output could not be verified safely' });
+        if (bunVersionResult) {
+          const bunVersion = parseSafeBunVersion(bunVersionResult.stdout);
+          if (!bunVersion) {
+            outcome = 'prerequisite_missing';
+            findings.push({
+              severity: 'error',
+              summary: 'Bun version must satisfy the required minimum of 1.3.1',
+            });
+          } else {
+            host.bunVersion = bunVersion;
+          }
         }
       }
 
@@ -1866,25 +1977,52 @@ async function runIosSimulatorPhase(
       }
 
       if (outcome === 'passed') {
-        await runStep({
+        const quasarDependencyResult = await runStep({
           spec: {
-            label: 'mobile-dependency-versions',
+            label: 'quasar-dependency-version',
             command: 'bun',
-            args: [
-              'pm',
-              'ls',
-              'quasar',
-              '@capacitor/core',
-              '@capacitor/ios',
-              '@capacitor/app',
-              '@capacitor/keyboard',
-            ],
+            args: ['pm', 'ls', 'quasar'],
             cwd: mobileRoot,
             env: commandEnv,
           },
           failureOutcome: 'prerequisite_missing',
-          summary: 'Mobile dependency versions could not be verified',
+          summary: 'Quasar version could not be verified',
         });
+        if (quasarDependencyResult) {
+          const capacitorDependencyResult = await runStep({
+            spec: {
+              label: 'capacitor-dependency-versions',
+              command: 'bun',
+              args: [
+                'pm',
+                'ls',
+                '@capacitor/core',
+                '@capacitor/ios',
+                '@capacitor/app',
+                '@capacitor/keyboard',
+              ],
+              cwd: capacitorRoot,
+              env: commandEnv,
+            },
+            failureOutcome: 'prerequisite_missing',
+            summary: 'Capacitor dependency versions could not be verified',
+          });
+          if (capacitorDependencyResult) {
+            const dependencyProvenance = parseMobileDependencyProvenance({
+              quasarOutput: quasarDependencyResult.stdout,
+              capacitorOutput: capacitorDependencyResult.stdout,
+            });
+            if (!dependencyProvenance) {
+              outcome = 'prerequisite_missing';
+              findings.push({
+                severity: 'error',
+                summary: 'Key mobile dependency versions could not be verified safely',
+              });
+            } else {
+              Object.assign(host, dependencyProvenance);
+            }
+          }
+        }
       }
 
       if (outcome === 'passed') {
