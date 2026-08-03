@@ -1582,6 +1582,8 @@ const MOBILE_DEPENDENCY_PROVENANCE = [
 ] as const;
 
 function parseSafeSemver(value: string): SafeSemver | undefined {
+  if (value.length > MAX_SIMULATOR_HOST_VALUE_LENGTH) return undefined;
+
   const match = value.match(SAFE_SEMVER_PATTERN);
   if (!match) return undefined;
 

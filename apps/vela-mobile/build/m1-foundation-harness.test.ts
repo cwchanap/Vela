@@ -1392,6 +1392,40 @@ describe('iOS Simulator M1 foundation verification', () => {
     ]);
   });
 
+  it('rejects oversized Bun prerelease metadata before persisting provenance', async () => {
+    const repository = createTemporaryRepository();
+    const workspace = createTemporaryExecutionWorkspace();
+    const wwwRoot = join(workspace, 'apps/vela-mobile/src-capacitor/www');
+    mkdirSync(wwwRoot, { recursive: true });
+    writeFileSync(join(wwwRoot, 'index.html'), 'verified production WebView asset');
+    const oversizedPrerelease = `1.3.2-${'g'.repeat(512)}`;
+    const runner = createSimulatorRunner({ wwwRoot, bunVersion: `${oversizedPrerelease}\n` });
+    const dependencies = createDependencies({ repoRoot: repository, runCommand: runner.runCommand });
+    attachCleanExecutionWorkspace(dependencies, workspace);
+    (dependencies as HarnessDependencies & { sleep?: (milliseconds: number) => Promise<void> }).sleep =
+      async () => undefined;
+
+    const manifest = onlyManifest(
+      await runM1FoundationVerification(
+        parseM1Arguments([
+          '--phase',
+          'ios-simulator',
+          '--simulator-udid',
+          simulatorUdid,
+          '--require-deployed-config',
+        ]),
+        dependencies,
+      ),
+    );
+
+    expect(manifest.outcome).toBe('prerequisite_missing');
+    expect(manifest.host).toEqual({ xcodeVersion: '16.2' });
+    expect(runner.calls.map(({ command, args }) => [command, args[0]])).toEqual([
+      ['xcodebuild', '-version'],
+      ['bun', '--version'],
+    ]);
+  });
+
   it('returns prerequisite_missing before native commands without macOS or an explicit Simulator identifier', async () => {
     const repository = createTemporaryRepository();
     const runner = createRunner();
