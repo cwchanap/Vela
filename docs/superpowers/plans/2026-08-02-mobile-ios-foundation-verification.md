@@ -182,14 +182,17 @@ const emittedTextExtensions = [
   '.xml',
 ];
 
-it.each(emittedTextExtensions)('finds diagnostic tokens in emitted %s artifacts', async (extension) => {
-  const root = await mkdtemp(join(tmpdir(), 'vela-prod-scan-'));
-  const artifact = join(root, `artifact${extension}`);
-  const token = forbiddenTokens[0];
-  await writeFile(artifact, `prefix ${token} suffix`);
+it.each(emittedTextExtensions)(
+  'finds diagnostic tokens in emitted %s artifacts',
+  async (extension) => {
+    const root = await mkdtemp(join(tmpdir(), 'vela-prod-scan-'));
+    const artifact = join(root, `artifact${extension}`);
+    const token = forbiddenTokens[0];
+    await writeFile(artifact, `prefix ${token} suffix`);
 
-  expect(await findDiagnosticTokens(root, [token])).toEqual([{ path: artifact, token }]);
-});
+    expect(await findDiagnosticTokens(root, [token])).toEqual([{ path: artifact, token }]);
+  },
+);
 
 it('ignores unsupported and binary artifacts', async () => {
   const root = await mkdtemp(join(tmpdir(), 'vela-prod-scan-'));
@@ -315,10 +318,7 @@ export const SECRET_SENTINELS: readonly string[];
 export const LOG_AND_DOM_SENTINELS: readonly string[];
 export const NON_SCHEMA_STORAGE_SENTINELS: readonly string[];
 export const PUBLIC_CONFIGURATION_KEYS: ReadonlySet<string>;
-export function scanMobileSecretText(input: {
-  path: string;
-  text: string;
-}): MobileSecretFinding[];
+export function scanMobileSecretText(input: { path: string; text: string }): MobileSecretFinding[];
 ```
 
 - Produces executable: `bun run --cwd apps/vela-mobile scan:secrets -- --root <path>`.
@@ -329,10 +329,7 @@ export function scanMobileSecretText(input: {
 Create `mobile-secret-policy.test.ts` with these cases:
 
 ```ts
-import {
-  PUBLIC_CONFIGURATION_KEYS,
-  scanMobileSecretText,
-} from './mobile-secret-policy';
+import { PUBLIC_CONFIGURATION_KEYS, scanMobileSecretText } from './mobile-secret-policy';
 
 it('finds a bearer credential without retaining its raw value', () => {
   const findings = scanMobileSecretText({
@@ -447,11 +444,7 @@ import {
   SECRET_SENTINELS,
 } from '../../build/mobile-secret-policy';
 
-export {
-  LOG_AND_DOM_SENTINELS,
-  NON_SCHEMA_STORAGE_SENTINELS,
-  SECRET_SENTINELS,
-};
+export { LOG_AND_DOM_SENTINELS, NON_SCHEMA_STORAGE_SENTINELS, SECRET_SENTINELS };
 ```
 
 Keep `createSecretLeakAssertions()` behavior unchanged.
@@ -577,11 +570,7 @@ git commit -m "feat(mobile): add shared secret scanning policy"
 - Produces:
 
 ```ts
-export type M1Phase =
-  | 'automated'
-  | 'ios-simulator'
-  | 'ios-physical-preflight'
-  | 'manual';
+export type M1Phase = 'automated' | 'ios-simulator' | 'ios-physical-preflight' | 'manual';
 export type M1MatrixClass =
   | 'automated'
   | 'production-smoke'
@@ -664,9 +653,9 @@ it('maps every outcome to the stable exit code', () => {
 });
 
 it('creates UTC run IDs', () => {
-  expect(
-    createM1RunId(new Date('2026-08-03T02:15:00.000Z'), 'production-smoke'),
-  ).toBe('20260803T021500Z-production-smoke');
+  expect(createM1RunId(new Date('2026-08-03T02:15:00.000Z'), 'production-smoke')).toBe(
+    '20260803T021500Z-production-smoke',
+  );
 });
 
 it('creates the versioned evidence path', () => {
@@ -694,15 +683,25 @@ Expected: FAIL because the contract module does not exist.
 
 - [ ] **Step 3: Implement the contract**
 
-Use sorted relative paths when hashing directories:
+Use normalized slash-separated relative paths when hashing directories so
+digests are platform-independent:
 
 ```ts
 export async function hashDirectory(root: string): Promise<string> {
   const files = await listFilesRecursively(root);
+  const relativeFiles = files
+    .map((file) => ({
+      file,
+      relativePath: relative(root, file).split(sep).join('/'),
+    }))
+    .sort((left, right) => {
+      if (left.relativePath < right.relativePath) return -1;
+      if (left.relativePath > right.relativePath) return 1;
+      return 0;
+    });
   const hash = createHash('sha256');
 
-  for (const file of files.sort()) {
-    const relativePath = relative(root, file);
+  for (const { file, relativePath } of relativeFiles) {
     hash.update(relativePath);
     hash.update('\0');
     hash.update(await readFile(file));
@@ -715,7 +714,9 @@ export async function hashDirectory(root: string): Promise<string> {
 
 Reject non-40-character behavior commits and matrix classes containing path separators.
 
-Implement manual manifest construction:
+Implement manual manifest construction. Spread the caller input before the
+forced fields so caller values cannot override the schema version, phase, exit
+code, or empty commands array:
 
 ```ts
 export function createManualM1Manifest(input: {
@@ -731,11 +732,11 @@ export function createManualM1Manifest(input: {
   outcome: 'passed' | 'gate_failed' | 'prerequisite_missing';
 }): M1Manifest {
   return validateM1Manifest({
+    ...input,
     schemaVersion: 1,
     phase: 'manual',
     exitCode: M1_EXIT_CODE[input.outcome],
     commands: [],
-    ...input,
   });
 }
 ```
@@ -893,19 +894,14 @@ Never copy complete environments into manifests.
 Import:
 
 ```ts
-import {
-  loadMobileBuildEnv,
-  validateMobileBuildEnv,
-} from './validate-mobile-api-url';
+import { loadMobileBuildEnv, validateMobileBuildEnv } from './validate-mobile-api-url';
 ```
 
 Classify:
 
 ```ts
 function classifyMobileConfig(env: ReturnType<typeof loadMobileBuildEnv>) {
-  const values = Object.values(env).filter(
-    (value): value is string => typeof value === 'string',
-  );
+  const values = Object.values(env).filter((value): value is string => typeof value === 'string');
   const placeholder = values.some((value) =>
     /(?:example\.invalid|localhost|ciPlaceholder|ci-placeholder|placeholder)/iu.test(value),
   );
@@ -1254,16 +1250,27 @@ Use these exact headings:
 # iOS Foundation Architecture
 
 ## Tested Revision
+
 ## Authentication and OAuth Callback
+
 ## OAuth Transaction Storage
+
 ## Session Storage and Restoration
+
 ## API Origin and Authenticated Transport
+
 ## User-Scoped Query Isolation
+
 ## Shared App Lifecycle
+
 ## Safe Areas, Keyboard, and Navigation
+
 ## Audio Adapter Decision
+
 ## Development Diagnostics and Production Exclusion
+
 ## Accepted Constraints
+
 ## Change Policy
 ```
 
@@ -1290,23 +1297,33 @@ Use these sections:
 # M1 iOS Foundation Verification
 
 ## Final Decision
+
 ## Tested Behavior Commit
+
 ## Selected Run Manifests
+
 ## Production Smoke Matrix
+
 ## Diagnostic Observation Matrix
+
 ## Physical iPhone Matrix
+
 ## Security and Secret Scan
+
 ## Architecture Decision Summary
+
 ## Findings and Follow-up Issues
+
 ## Source-Issue Closure Mapping
+
 ## Milestone 2 Recommendation
 ```
 
 Use this row schema for every matrix:
 
 ```markdown
-| ID | Commit | Run ID | Matrix class | Build/config | Environment | Precondition | Observation | Status | Evidence | Follow-up |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| ID  | Commit | Run ID | Matrix class | Build/config | Environment | Precondition | Observation | Status | Evidence | Follow-up |
+| --- | ------ | ------ | ------------ | ------------ | ----------- | ------------ | ----------- | ------ | -------- | --------- |
 ```
 
 Leave result rows absent rather than adding predeclared `PASS` or `unrun` rows.

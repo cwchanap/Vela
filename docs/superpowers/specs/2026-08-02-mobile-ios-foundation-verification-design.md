@@ -118,7 +118,7 @@ Add `apps/vela-mobile/scripts/verify-m1-foundation.mjs` and package script `veri
 - `--phase automated` — clean-install, root repository gates, production assets, diagnostic exclusion, secret scan, and manifest.
 - `--phase ios-simulator` — macOS Simulator build, install, launch, and process-alive smoke.
 - `--phase ios-physical-preflight` — connected-device, trust, Developer Mode, signing, and build-setting readiness; it does not replace human observation.
-- `--phase all` — all machine-checkable phases; it requires the configured physical device.
+- `--phase all` — reserved; currently rejected by `runM1FoundationVerification`. It will remain unavailable until all machine-checkable phases can run atomically without leaving a misleading partial run behind.
 
 Linux CI may run `automated`. Final closure requires successful `automated`, `ios-simulator`, and `ios-physical-preflight` manifests on the same commit, plus both manual native matrix classes.
 

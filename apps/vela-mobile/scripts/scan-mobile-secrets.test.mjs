@@ -101,6 +101,12 @@ describe('scanMobileSecretRoots', () => {
       '.txt',
       '.svg',
       '.xml',
+      '.ts',
+      '.tsx',
+      '.mts',
+      '.swift',
+      '.m',
+      '.h',
       '.log',
       '.md',
       '.plist',
@@ -261,7 +267,7 @@ describe('scanMobileSecretRoots', () => {
     const report = join(root, 'reports', 'secrets.json');
     await writeFile(join(root, 'captured.log'), 'Authorization: Bearer SECRET-access-token');
 
-    const result = spawnSync(process.execPath, [scannerPath, '--root', root, '--json', report], {
+    const result = spawnSync('bun', [scannerPath, '--root', root, '--json', report], {
       encoding: 'utf8',
     });
 
@@ -279,11 +285,11 @@ describe('scanMobileSecretRoots', () => {
 
   it('exits 2 for invalid CLI arguments and 1 for scanner failures', async () => {
     const root = await createTemporaryRoot();
-    const invalidArguments = spawnSync(process.execPath, [scannerPath, '--max-bytes', 'nope'], {
+    const invalidArguments = spawnSync('bun', [scannerPath, '--max-bytes', 'nope'], {
       encoding: 'utf8',
     });
     const missingRoot = join(root, 'missing-root');
-    const scannerFailure = spawnSync(process.execPath, [scannerPath, '--root', missingRoot], {
+    const scannerFailure = spawnSync('bun', [scannerPath, '--root', missingRoot], {
       encoding: 'utf8',
     });
 

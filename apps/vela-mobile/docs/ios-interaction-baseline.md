@@ -140,9 +140,11 @@ Selected-mode replacement hashes after the page-control fix:
 ## HPA-210 linkage
 
 HPA-210 selected passing automated and Simulator machine manifests for
-`f0c6fe9d5282c3f5f34e6e5453ed3c23c0808f65`, but its physical preflight is
-`prerequisite_missing`. Physical-device testing was deferred, so this baseline
-remains historical evidence and has no HPA-210 physical acceptance result. See
+`de276f372c7973e2fb49c81e9a78e50df95266c0`. The earlier physical preflight on
+`f0c6fe9d5282c3f5f34e6e5453ed3c23c0808f65` is historical only: its physical
+preflight is `prerequisite_missing`, physical-device testing was deferred, and
+it has no physical acceptance result. This baseline therefore remains
+historical evidence with no HPA-210 physical acceptance result. See
 [M1 iOS Foundation Verification](m1-ios-foundation-verification.md).
 
 ## Environment matrix
