@@ -201,6 +201,96 @@ describe('M1 foundation manifest contract', () => {
     });
   });
 
+  it('accepts a passed manual manifest backed by deployed configuration and evidence', () => {
+    const manifest = createManualM1Manifest({
+      testedBehaviorCommit: 'c'.repeat(40),
+      matrixClass: 'production-smoke',
+      runId: '20260803T021500Z-production-smoke',
+      startedAt: '2026-08-03T02:15:00.000Z',
+      endedAt: '2026-08-03T02:17:00.000Z',
+      config: validManifest().config,
+      host: { deviceAlias: 'test iPhone' },
+      evidence: validManifest().evidence,
+      findings: [{ severity: 'info', summary: 'Physical observation recorded' }],
+      outcome: 'passed',
+    });
+
+    expect(manifest.outcome).toBe('passed');
+    expect(manifest.exitCode).toBe(0);
+  });
+
+  it('rejects a passed manual manifest with placeholder configuration', () => {
+    const config = { ...validManifest().config, class: 'placeholder' as const };
+
+    expect(() =>
+      createManualM1Manifest({
+        testedBehaviorCommit: 'c'.repeat(40),
+        matrixClass: 'production-smoke',
+        runId: '20260803T021500Z-production-smoke',
+        startedAt: '2026-08-03T02:15:00.000Z',
+        endedAt: '2026-08-03T02:17:00.000Z',
+        config,
+        host: { deviceAlias: 'test iPhone' },
+        evidence: validManifest().evidence,
+        findings: [],
+        outcome: 'passed',
+      }),
+    ).toThrow(/deployed configuration/u);
+  });
+
+  it('rejects a passed manual manifest with inconsistent public identifiers', () => {
+    const config = { ...validManifest().config, publicIdentifiersConsistent: false };
+
+    expect(() =>
+      createManualM1Manifest({
+        testedBehaviorCommit: 'c'.repeat(40),
+        matrixClass: 'production-smoke',
+        runId: '20260803T021500Z-production-smoke',
+        startedAt: '2026-08-03T02:15:00.000Z',
+        endedAt: '2026-08-03T02:17:00.000Z',
+        config,
+        host: { deviceAlias: 'test iPhone' },
+        evidence: validManifest().evidence,
+        findings: [],
+        outcome: 'passed',
+      }),
+    ).toThrow(/consistent public identifiers/u);
+  });
+
+  it('rejects a passed manual manifest with empty evidence', () => {
+    expect(() =>
+      createManualM1Manifest({
+        testedBehaviorCommit: 'c'.repeat(40),
+        matrixClass: 'production-smoke',
+        runId: '20260803T021500Z-production-smoke',
+        startedAt: '2026-08-03T02:15:00.000Z',
+        endedAt: '2026-08-03T02:17:00.000Z',
+        config: validManifest().config,
+        host: { deviceAlias: 'test iPhone' },
+        evidence: [],
+        findings: [],
+        outcome: 'passed',
+      }),
+    ).toThrow(/non-empty evidence/u);
+  });
+
+  it('rejects a manual manifest whose run-ID suffix disagrees with the matrix class', () => {
+    expect(() =>
+      createManualM1Manifest({
+        testedBehaviorCommit: 'c'.repeat(40),
+        matrixClass: 'production-smoke',
+        runId: '20260803T021500Z-diagnostic-observation',
+        startedAt: '2026-08-03T02:15:00.000Z',
+        endedAt: '2026-08-03T02:17:00.000Z',
+        config: validManifest().config,
+        host: { deviceAlias: 'test iPhone' },
+        evidence: [],
+        findings: [],
+        outcome: 'gate_failed',
+      }),
+    ).toThrow(/runId suffix must agree with matrixClass/u);
+  });
+
   it('enforces manual manifest fields against untyped runtime input', () => {
     const hostileInput = {
       schemaVersion: 2,

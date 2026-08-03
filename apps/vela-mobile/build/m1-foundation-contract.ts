@@ -426,6 +426,46 @@ export function validateM1Manifest(manifest: M1Manifest): M1Manifest {
   return manifest;
 }
 
+/**
+ * Extracts the matrix-class suffix from a run ID. Run IDs follow
+ * `YYYYMMDDTHHMMSSZ-<matrixClass>`, so the segment after the first `Z-` is the
+ * recorded matrix class. Returns the empty string when the separator is absent.
+ */
+function runIdMatrixClassSuffix(runId: string): string {
+  const separator = runId.indexOf('Z-');
+  return separator >= 0 ? runId.slice(separator + 2) : '';
+}
+
+/**
+ * Enforces the semantic closure rules that schema validation alone cannot
+ * express. A manually recorded manifest is closure evidence, not a machine
+ * observation, so a `passed` outcome must be backed by deployed configuration,
+ * consistent public identifiers, and non-empty evidence. The run-ID suffix
+ * must also agree with the recorded matrix class for every manual manifest,
+ * regardless of outcome, so a mislabelled run cannot be persisted as closure
+ * proof. Machine phases are intentionally exempt: a non-closure automated or
+ * Simulator run may legitimately pass against placeholder configuration when
+ * `--require-deployed-config` is not supplied.
+ */
+export function validateManualM1ManifestSemantics(manifest: M1Manifest): void {
+  if (runIdMatrixClassSuffix(manifest.runId) !== manifest.matrixClass) {
+    throw new Error(
+      `manual manifest runId suffix must agree with matrixClass "${manifest.matrixClass}"`,
+    );
+  }
+  if (manifest.outcome !== 'passed') return;
+
+  if (manifest.config.class !== 'deployed') {
+    throw new Error('a passed manual manifest must record deployed configuration');
+  }
+  if (!manifest.config.publicIdentifiersConsistent) {
+    throw new Error('a passed manual manifest must record consistent public identifiers');
+  }
+  if (manifest.evidence.length === 0) {
+    throw new Error('a passed manual manifest must reference non-empty evidence');
+  }
+}
+
 export function createManualM1Manifest(input: {
   testedBehaviorCommit: string;
   matrixClass: 'production-smoke' | 'diagnostic-observation';
@@ -438,11 +478,13 @@ export function createManualM1Manifest(input: {
   findings: M1Manifest['findings'];
   outcome: 'passed' | 'gate_failed' | 'prerequisite_missing';
 }): M1Manifest {
-  return validateM1Manifest({
+  const manifest = validateM1Manifest({
     ...input,
     schemaVersion: 1,
     phase: 'manual',
     exitCode: M1_EXIT_CODE[input.outcome],
     commands: [],
   });
+  validateManualM1ManifestSemantics(manifest);
+  return manifest;
 }
