@@ -176,6 +176,19 @@ type ConfigurationEvaluation = {
   loaded?: ReturnType<typeof loadMobileBuildEnv>;
 };
 
+type AutomatedManifestInput = {
+  context: AutomaticRunContext;
+  testedBehaviorCommit: string;
+  startedAt: Date;
+  endedAt: Date;
+  outcome: M1Outcome;
+  config: M1Manifest['config'];
+  platform: RuntimePlatform | 'redacted';
+  commands: M1CommandResult[];
+  evidence: M1EvidenceReference[];
+  findings: M1Manifest['findings'];
+};
+
 type AutomaticRunContext = {
   directory: string;
   runId: string;
@@ -625,6 +638,23 @@ function evaluateMobileConfiguration(dependencies: HarnessDependencies): Configu
   }
 }
 
+function redactedMissingConfiguration(
+  source: M1Manifest['config']['source'] = 'none',
+): M1Manifest['config'] {
+  return {
+    source,
+    class: 'missing',
+    publicIdentifiersConsistent: false,
+  };
+}
+
+function containsUnsafePublicConfiguration(configuration: ConfigurationEvaluation): boolean {
+  if (!configuration.loaded) return false;
+  return containsUnsafeEvidenceText(
+    JSON.stringify({ loaded: configuration.loaded, config: configuration.config }),
+  );
+}
+
 type NormalizedDeployedIdentityProof = {
   mobileApiUrl: string;
   cognitoUserPoolId: string;
@@ -1019,18 +1049,7 @@ async function createAutomaticRunContext(input: {
   throw new M1HarnessError('Unable to allocate an append-only M1 run directory');
 }
 
-function createAutomatedManifest(input: {
-  context: AutomaticRunContext;
-  testedBehaviorCommit: string;
-  startedAt: Date;
-  endedAt: Date;
-  outcome: M1Outcome;
-  config: M1Manifest['config'];
-  platform: RuntimePlatform;
-  commands: M1CommandResult[];
-  evidence: M1EvidenceReference[];
-  findings: M1Manifest['findings'];
-}): M1Manifest {
+function createAutomatedManifest(input: AutomatedManifestInput): M1Manifest {
   return validateM1Manifest({
     schemaVersion: 1,
     runId: input.context.runId,
@@ -1046,6 +1065,37 @@ function createAutomatedManifest(input: {
     commands: input.commands,
     evidence: input.evidence,
     findings: input.findings,
+  });
+}
+
+function containsUnsafeAutomatedManifestContent(manifest: M1Manifest): boolean {
+  // The validated behavior commit is an expected full SHA, which the generic
+  // text scanner intentionally treats as sensitive-looking material. Scan
+  // every other serialized field before the original evidence writer runs.
+  const { testedBehaviorCommit: _testedBehaviorCommit, ...content } = manifest;
+  return containsUnsafeEvidenceText(JSON.stringify(content));
+}
+
+function createSafeAutomatedManifest(input: AutomatedManifestInput): M1Manifest {
+  const manifest = createAutomatedManifest(input);
+  if (!containsUnsafeAutomatedManifestContent(manifest)) return manifest;
+
+  // This fallback deliberately omits every value that could have crossed an
+  // unanticipated failure boundary. It is constructed before writing, so no
+  // unsafe manifest is ever persisted to the original checkout.
+  return createAutomatedManifest({
+    ...input,
+    outcome: 'harness_error',
+    config: redactedMissingConfiguration(),
+    platform: 'redacted',
+    commands: [],
+    evidence: [],
+    findings: [
+      {
+        severity: 'error',
+        summary: 'The automated verification manifest contained prohibited sensitive content',
+      },
+    ],
   });
 }
 
@@ -1120,7 +1170,17 @@ async function runAutomatedPhase(
     });
   }
 
-  if (!configuration.isValid) {
+  if (containsUnsafePublicConfiguration(configuration)) {
+    configuration = {
+      isValid: false,
+      config: redactedMissingConfiguration(configuration.config.source),
+    };
+    outcome = 'prerequisite_missing';
+    findings.push({
+      severity: 'error',
+      summary: 'Mobile production configuration contains prohibited sensitive content',
+    });
+  } else if (!configuration.isValid) {
     outcome = 'prerequisite_missing';
     findings.push({
       severity: 'error',
@@ -1251,7 +1311,7 @@ async function runAutomatedPhase(
     }
   }
 
-  const manifest = createAutomatedManifest({
+  const manifest = createSafeAutomatedManifest({
     context,
     testedBehaviorCommit,
     startedAt,

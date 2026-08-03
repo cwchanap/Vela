@@ -271,6 +271,85 @@ describe('M1 foundation CLI arguments', () => {
 });
 
 describe('automated M1 foundation verification', () => {
+  it('redacts an unsafe public configuration before it can create a workspace or persist a manifest', async () => {
+    const repository = createTemporaryRepository();
+    const workspace = createTemporaryExecutionWorkspace();
+    const runner = createRunner();
+    const unsafeOAuthDomain = 'SECRET-id-token.example';
+    const dependencies = createDependencies({
+      repoRoot: repository,
+      env: { ...deployedEnvironment, VITE_COGNITO_OAUTH_DOMAIN: unsafeOAuthDomain },
+      runCommand: runner.runCommand,
+    });
+    const { createExecutionWorkspace } = attachCleanExecutionWorkspace(dependencies, workspace);
+
+    const manifest = onlyManifest(
+      await runM1FoundationVerification(
+        parseM1Arguments(['--phase', 'automated']),
+        dependencies,
+      ),
+    );
+    const manifestPath = join(
+      repository,
+      'apps/vela-mobile/docs/evidence/hpa-210',
+      testedBehaviorCommit,
+      manifest.runId,
+      'manifest.json',
+    );
+    const serializedManifest = readFileSync(manifestPath, 'utf8');
+
+    expect(manifest.outcome).toBe('prerequisite_missing');
+    expect(manifest.config).toEqual({
+      source: 'process_env',
+      class: 'missing',
+      publicIdentifiersConsistent: false,
+    });
+    expect(manifest.commands).toEqual([]);
+    expect(manifest.evidence).toEqual([]);
+    expect(manifest.findings).toContainEqual({
+      severity: 'error',
+      summary: 'Mobile production configuration contains prohibited sensitive content',
+    });
+    expect(runner.calls).toEqual([]);
+    expect(createExecutionWorkspace).not.toHaveBeenCalled();
+    expect(JSON.stringify(manifest)).not.toContain(unsafeOAuthDomain);
+    expect(serializedManifest).not.toContain(unsafeOAuthDomain);
+  });
+
+  it('writes a redacted error manifest when unexpected final manifest content is unsafe', async () => {
+    const repository = createTemporaryRepository();
+    const runner = createRunner();
+    const unsafePlatform = 'SECRET-id-token';
+    const dependencies = createDependencies({ repoRoot: repository, runCommand: runner.runCommand });
+    dependencies.platform = unsafePlatform as typeof process.platform;
+
+    const manifest = onlyManifest(
+      await runM1FoundationVerification(
+        parseM1Arguments(['--phase', 'automated']),
+        dependencies,
+      ),
+    );
+    const manifestPath = join(
+      repository,
+      'apps/vela-mobile/docs/evidence/hpa-210',
+      testedBehaviorCommit,
+      manifest.runId,
+      'manifest.json',
+    );
+
+    expect(manifest.outcome).toBe('harness_error');
+    expect(manifest.config).toEqual({
+      source: 'none',
+      class: 'missing',
+      publicIdentifiersConsistent: false,
+    });
+    expect(manifest.host).toEqual({ platform: 'redacted' });
+    expect(manifest.commands).toEqual([]);
+    expect(manifest.evidence).toEqual([]);
+    expect(JSON.stringify(manifest)).not.toContain(unsafePlatform);
+    expect(readFileSync(manifestPath, 'utf8')).not.toContain(unsafePlatform);
+  });
+
   it('runs the eight gates from a clean pinned checkout while writing the manifest in the original repository', async () => {
     const repository = createTemporaryRepository();
     const workspace = createTemporaryExecutionWorkspace();
