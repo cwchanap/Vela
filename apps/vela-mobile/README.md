@@ -136,8 +136,9 @@ bun run verify:m1-foundation -- --phase ios-physical-preflight --device-id <id>
 
 The record distinguishes two build classes. A **diagnostic observation** uses
 a Debug development build and development-only diagnostic routes for an
-interactive observation. A **production smoke** uses packaged production
-Capacitor assets, where the diagnostics are excluded and scanned from
+interactive observation. A **production smoke** uses both packaged production
+Capacitor assets and a Release/production native configuration, where the
+diagnostics are excluded and scanned from
 `src-capacitor/www/`. Do not treat a diagnostic observation as production
 smoke evidence or vice versa.
 
