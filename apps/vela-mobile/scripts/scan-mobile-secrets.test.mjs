@@ -104,6 +104,8 @@ describe('scanMobileSecretRoots', () => {
       '.ts',
       '.tsx',
       '.mts',
+      '.vue',
+      '.scss',
       '.swift',
       '.m',
       '.h',
@@ -129,6 +131,31 @@ describe('scanMobileSecretRoots', () => {
       new Set(extensions.map((extension) => `artifact${extension}`)),
     );
     expect(result.findings.every(({ ruleId }) => ruleId === 'secret_sentinel')).toBe(true);
+  });
+
+  it('scans secrets embedded in Quasar single-file components and SCSS', async () => {
+    const root = await createTemporaryRoot();
+    await mkdir(join(root, 'src', 'components'), { recursive: true });
+    await mkdir(join(root, 'src', 'css'), { recursive: true });
+    await writeFile(
+      join(root, 'src', 'components', 'MobileAuthGate.vue'),
+      [
+        '<script setup lang="ts">',
+        '// fixture: SECRET-callback-code',
+        '</script>',
+        '<template><div>auth gate</div></template>',
+      ].join('\n'),
+    );
+    await writeFile(join(root, 'src', 'css', 'app.scss'), '/* SECRET-callback-code */');
+
+    const result = await scanMobileSecretRoots({ roots: [root], exclusions: [] });
+
+    expect(result.findings.map(({ path }) => path)).toEqual([
+      'src/components/MobileAuthGate.vue',
+      'src/css/app.scss',
+    ]);
+    expect(result.findings.every(({ ruleId }) => ruleId === 'secret_sentinel')).toBe(true);
+    expect(result.skipped.some(({ reason }) => reason === 'unsupported_extension')).toBe(false);
   });
 
   it('skips excluded directories, binary artifacts, and over-limit files with bounded records', async () => {
@@ -295,5 +322,51 @@ describe('scanMobileSecretRoots', () => {
 
     expect(invalidArguments.status).toBe(2);
     expect(scannerFailure.status).toBe(1);
+  });
+
+  it('fails closed (exit 3) when an oversized .js or .map cannot be scanned', async () => {
+    const root = await createTemporaryRoot();
+    const report = join(root, 'reports', 'secrets.json');
+    // A bundled JS artifact and its source map, both over the 64-byte cap and
+    // both embedding a credential. The scanner cannot load them, so the gate
+    // must not claim "No mobile secrets found".
+    const oversizedJs = 'SECRET-callback-code'.repeat(8);
+    const oversizedMap = `{"version":3,"sources":["app"],"sourcesContent":"${'SECRET-callback-code'.repeat(8)}"}`;
+    await writeFile(join(root, 'bundle.js'), oversizedJs);
+    await writeFile(join(root, 'bundle.js.map'), oversizedMap);
+
+    const result = spawnSync(
+      'bun',
+      [scannerPath, '--root', root, '--max-bytes', '64', '--json', report],
+      { encoding: 'utf8' },
+    );
+
+    expect(result.status).toBe(3);
+    expect(result.stderr).toContain('bundle.js');
+    expect(result.stderr).toContain('bundle.js.map');
+    expect(result.stderr).toContain('could not scan');
+    const reportText = await readFile(report, 'utf8');
+    const parsed = JSON.parse(reportText);
+    expect(parsed.findings).toEqual([]);
+    expect(parsed.skipped).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ path: 'bundle.js', reason: 'max_text_bytes' }),
+        expect.objectContaining({ path: 'bundle.js.map', reason: 'max_text_bytes' }),
+      ]),
+    );
+    // The credential was never loaded, so it must not leak into the report.
+    expect(reportText).not.toContain('SECRET-callback-code');
+  });
+
+  it('passes when supported text artifacts fit under --max-bytes', async () => {
+    const root = await createTemporaryRoot();
+    await writeFile(join(root, 'small.js'), 'const x = 1;\n');
+
+    const result = spawnSync('bun', [scannerPath, '--root', root, '--max-bytes', '1024'], {
+      encoding: 'utf8',
+    });
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain('No mobile secrets found');
   });
 });

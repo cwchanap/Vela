@@ -18,6 +18,8 @@ export const MOBILE_SECRET_TEXT_ARTIFACT_EXTENSIONS = new Set([
   '.ts',
   '.tsx',
   '.mts',
+  '.vue',
+  '.scss',
   '.swift',
   '.m',
   '.h',
@@ -278,6 +280,21 @@ export async function runMobileSecretScannerCli(argv = process.argv.slice(2)) {
           .join('\n')}`,
       );
       return 4;
+    }
+
+    // Fail closed: a supported text artifact that exceeds --max-bytes cannot be
+    // scanned, so "No mobile secrets found" would be an unverified claim. The
+    // gate must fail rather than silently pass an oversized bundle or source
+    // map that may embed a credential. Raise --max-bytes only when the
+    // oversized file is understood and trusted.
+    const oversized = report.skipped.filter((record) => record.reason === 'max_text_bytes');
+    if (oversized.length > 0) {
+      console.error(
+        `Mobile secret scanner could not scan ${oversized.length} supported text artifact(s) larger than ${maxTextBytes} bytes:\n${oversized
+          .map(({ path }) => path)
+          .join('\n')}\nRaise --max-bytes only after confirming these files are safe to load.`,
+      );
+      return 3;
     }
 
     console.log(`No mobile secrets found under ${roots.join(', ')}`);

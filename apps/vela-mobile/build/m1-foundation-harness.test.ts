@@ -1737,6 +1737,65 @@ describe('iOS Simulator M1 foundation verification', () => {
     expect(serializedManifest).not.toContain(deployedEnvironment.VITE_COGNITO_OAUTH_DOMAIN!);
   });
 
+  it('runs Simulator cleanup before disposing the workspace and never uses a removed cwd', async () => {
+    const repository = createTemporaryRepository();
+    const workspace = createTemporaryExecutionWorkspace();
+    const wwwRoot = join(workspace, 'apps/vela-mobile/src-capacitor/www');
+    mkdirSync(wwwRoot, { recursive: true });
+    writeFileSync(join(wwwRoot, 'index.html'), 'verified production WebView asset');
+    const simulator = createSimulatorRunner({ wwwRoot });
+
+    // Order log shared between the wrapped runCommand and dispose so the test
+    // can prove cleanup ran before the worktree was removed.
+    const orderLog: string[] = [];
+    let cleanupCwdExisted = true;
+    let disposeRanBeforeCleanup = false;
+    const wrappedRunCommand: CommandRunner = async (spec) => {
+      if (spec.label === 'simulator-cleanup-uninstall' || spec.label === 'simulator-cleanup-shutdown') {
+        if (!existsSync(spec.cwd)) cleanupCwdExisted = false;
+        orderLog.push(spec.label);
+      }
+      return simulator.runCommand(spec);
+    };
+
+    const dispose = async () => {
+      if (orderLog.length === 0) disposeRanBeforeCleanup = true;
+      orderLog.push('workspace-dispose');
+      rmSync(workspace, { force: true, recursive: true });
+    };
+
+    const dependencies = createDependencies({ repoRoot: repository, runCommand: wrappedRunCommand });
+    dependencies.createExecutionWorkspace = async () => ({ root: workspace, dispose });
+    dependencies.sleep = async () => undefined;
+
+    const manifest = onlyManifest(
+      await runM1FoundationVerification(
+        parseM1Arguments([
+          '--phase',
+          'ios-simulator',
+          '--simulator-udid',
+          simulatorUdid,
+          '--require-deployed-config',
+        ]),
+        dependencies,
+      ),
+    );
+
+    expect(manifest.outcome).toBe('passed');
+    expect(disposeRanBeforeCleanup).toBe(false);
+    expect(cleanupCwdExisted).toBe(true);
+    expect(orderLog).toEqual([
+      'simulator-cleanup-uninstall',
+      'simulator-cleanup-shutdown',
+      'workspace-dispose',
+    ]);
+    // The cleanup commands used the worktree root as cwd, and it existed.
+    const uninstallCall = simulator.calls.find(({ label }) => label === 'simulator-cleanup-uninstall');
+    const shutdownCall = simulator.calls.find(({ label }) => label === 'simulator-cleanup-shutdown');
+    expect(uninstallCall?.cwd).toBe(workspace);
+    expect(shutdownCall?.cwd).toBe(workspace);
+  });
+
   it('keeps --phase all explicitly unimplemented until the physical preflight can join it atomically', async () => {
     const repository = createTemporaryRepository();
     const runner = createRunner();

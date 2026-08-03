@@ -2261,14 +2261,6 @@ async function runIosSimulatorPhase(
       forceRedactedFallback = true;
       outcome = 'harness_error';
     } finally {
-      if (workspace) {
-        try {
-          await workspace.dispose();
-        } catch {
-          forceRedactedFallback = true;
-          outcome = 'harness_error';
-        }
-      }
       if (simulatorWorkStarted && args.simulatorUdid) {
         const cleanupRoot = simulatorExecutionRoot ?? dependencies.repoRoot;
         const cleanupEnv = simulatorCommandEnv;
@@ -2297,6 +2289,14 @@ async function runIosSimulatorPhase(
           );
         } catch {
           // Best-effort cleanup: shutdown failures must not change outcome or findings.
+        }
+      }
+      if (workspace) {
+        try {
+          await workspace.dispose();
+        } catch {
+          forceRedactedFallback = true;
+          outcome = 'harness_error';
         }
       }
     }
