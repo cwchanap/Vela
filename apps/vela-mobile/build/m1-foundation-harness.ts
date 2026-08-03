@@ -2174,6 +2174,65 @@ type TrustedPhysicalManifestInput = Pick<
   'context' | 'testedBehaviorCommit' | 'startedAt' | 'endedAt'
 >;
 
+type PhysicalStateField = {
+  key: string;
+  acceptsBoolean: boolean;
+  trueValues?: ReadonlySet<string>;
+  falseValues?: ReadonlySet<string>;
+};
+
+const PHYSICAL_AVAILABILITY_FIELDS: readonly PhysicalStateField[] = [
+  { key: 'available', acceptsBoolean: true },
+  { key: 'isAvailable', acceptsBoolean: true },
+  {
+    key: 'availability',
+    acceptsBoolean: false,
+    trueValues: new Set(['available']),
+    falseValues: new Set(['unavailable']),
+  },
+  { key: 'isConnected', acceptsBoolean: true },
+  {
+    key: 'connectionState',
+    acceptsBoolean: false,
+    trueValues: new Set(['connected', 'online']),
+    falseValues: new Set(['disconnected', 'offline']),
+  },
+  {
+    key: 'bootState',
+    acceptsBoolean: false,
+    trueValues: new Set(['booted']),
+    falseValues: new Set(['shutdown']),
+  },
+];
+
+const PHYSICAL_TRUST_FIELDS: readonly PhysicalStateField[] = [
+  { key: 'trusted', acceptsBoolean: true },
+  { key: 'isTrusted', acceptsBoolean: true },
+  {
+    key: 'trustState',
+    acceptsBoolean: false,
+    trueValues: new Set(['trusted']),
+    falseValues: new Set(['untrusted']),
+  },
+  {
+    key: 'authenticationState',
+    acceptsBoolean: false,
+    trueValues: new Set(['trusted']),
+    falseValues: new Set(['untrusted']),
+  },
+];
+
+const PHYSICAL_DEVELOPER_MODE_FIELDS: readonly PhysicalStateField[] = [
+  { key: 'developerMode', acceptsBoolean: true },
+  { key: 'developerModeEnabled', acceptsBoolean: true },
+  {
+    key: 'developerModeStatus',
+    acceptsBoolean: false,
+    trueValues: new Set(['enabled']),
+    falseValues: new Set(['disabled']),
+  },
+];
+
 function asUnknownRecord(value: unknown): UnknownRecord | undefined {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
     ? (value as UnknownRecord)
@@ -2194,31 +2253,29 @@ function firstStringValue(records: readonly UnknownRecord[], keys: readonly stri
   return undefined;
 }
 
-function normalizedBooleanValue(
+function normalizedPhysicalStateValue(
   value: unknown,
-  trueValues: ReadonlySet<string>,
-  falseValues: ReadonlySet<string>,
+  field: PhysicalStateField,
 ): boolean | undefined {
-  if (typeof value === 'boolean') return value;
+  if (typeof value === 'boolean') return field.acceptsBoolean ? value : undefined;
   if (typeof value !== 'string') return undefined;
 
   const normalized = value.trim().toLowerCase();
-  if (trueValues.has(normalized)) return true;
-  if (falseValues.has(normalized)) return false;
+  if (field.trueValues?.has(normalized)) return true;
+  if (field.falseValues?.has(normalized)) return false;
   return undefined;
 }
 
-function consistentBooleanValue(input: {
+function consistentPhysicalStateValue(input: {
   records: readonly UnknownRecord[];
-  keys: readonly string[];
-  trueValues: ReadonlySet<string>;
-  falseValues: ReadonlySet<string>;
+  fields: readonly PhysicalStateField[];
 }): boolean | undefined {
   let resolved: boolean | undefined;
   for (const record of input.records) {
-    for (const key of input.keys) {
-      const value = normalizedBooleanValue(record[key], input.trueValues, input.falseValues);
-      if (value === undefined) continue;
+    for (const field of input.fields) {
+      if (!Object.prototype.hasOwnProperty.call(record, field.key)) continue;
+      const value = normalizedPhysicalStateValue(record[field.key], field);
+      if (value === undefined) return undefined;
       if (resolved !== undefined && resolved !== value) return undefined;
       resolved = value;
     }
@@ -2301,23 +2358,17 @@ function discoverPhysicalDevice(
   const deviceProperties = nestedRecord(candidate, 'deviceProperties');
   const connectionProperties = nestedRecord(candidate, 'connectionProperties');
   const hardwareProperties = nestedRecord(candidate, 'hardwareProperties');
-  const available = consistentBooleanValue({
+  const available = consistentPhysicalStateValue({
     records: [candidate, ...(deviceProperties ? [deviceProperties] : []), ...(connectionProperties ? [connectionProperties] : [])],
-    keys: ['available', 'isAvailable', 'availability', 'isConnected', 'connectionState', 'bootState'],
-    trueValues: new Set(['available', 'connected', 'booted', 'online']),
-    falseValues: new Set(['unavailable', 'disconnected', 'shutdown', 'offline']),
+    fields: PHYSICAL_AVAILABILITY_FIELDS,
   });
-  const trusted = consistentBooleanValue({
+  const trusted = consistentPhysicalStateValue({
     records: [candidate, ...(connectionProperties ? [connectionProperties] : [])],
-    keys: ['trusted', 'isTrusted', 'trustState', 'authenticationState'],
-    trueValues: new Set(['trusted']),
-    falseValues: new Set(['untrusted']),
+    fields: PHYSICAL_TRUST_FIELDS,
   });
-  const developerMode = consistentBooleanValue({
+  const developerMode = consistentPhysicalStateValue({
     records: [candidate, ...(deviceProperties ? [deviceProperties] : [])],
-    keys: ['developerMode', 'developerModeEnabled', 'developerModeStatus'],
-    trueValues: new Set(['enabled']),
-    falseValues: new Set(['disabled']),
+    fields: PHYSICAL_DEVELOPER_MODE_FIELDS,
   });
   const alias = safePhysicalDeviceAlias(
     firstStringValue(

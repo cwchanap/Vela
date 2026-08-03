@@ -1789,6 +1789,46 @@ describe('iOS physical-device M1 foundation preflight', () => {
     expect(serializedManifest).not.toContain('tester@example.com');
   });
 
+  it.each([
+    { alias: 'authenticationState', deviceList: physicalDeviceList({ authenticationState: true }) },
+    { alias: 'developerModeStatus', deviceList: physicalDeviceList({ developerModeStatus: true }) },
+  ])('fails closed when CoreDevice $alias is a malformed boolean', async ({ deviceList }) => {
+    const repository = createTemporaryRepository();
+    const runner = createPhysicalPreflightRunner({ deviceList });
+
+    const manifest = onlyManifest(
+      await runM1FoundationVerification(
+        parseM1Arguments(['--phase', 'ios-physical-preflight', '--device-id', physicalDeviceId]),
+        createDependencies({ repoRoot: repository, runCommand: runner.runCommand }),
+      ),
+    );
+
+    expect(manifest.outcome).toBe('prerequisite_missing');
+    expect(manifest.exitCode).toBe(3);
+    expect(manifest.host).toEqual({});
+    expect(runner.calls).toHaveLength(1);
+  });
+
+  it('accepts the semantic string forms of CoreDevice state aliases', async () => {
+    const repository = createTemporaryRepository();
+    const runner = createPhysicalPreflightRunner({
+      deviceList: physicalDeviceList({
+        authenticationState: 'trusted',
+        developerModeStatus: 'enabled',
+      }),
+    });
+
+    const manifest = onlyManifest(
+      await runM1FoundationVerification(
+        parseM1Arguments(['--phase', 'ios-physical-preflight', '--device-id', physicalDeviceId]),
+        createDependencies({ repoRoot: repository, runCommand: runner.runCommand }),
+      ),
+    );
+
+    expect(manifest.outcome).toBe('passed');
+    expect(manifest.exitCode).toBe(0);
+  });
+
   it('uses the trusted-only redacted envelope when physical preflight execution throws', async () => {
     const repository = createTemporaryRepository();
     const calls: CommandSpec[] = [];
@@ -1832,6 +1872,62 @@ describe('iOS physical-device M1 foundation preflight', () => {
     expect(serializedManifest).not.toContain('SECRET-id-token');
     expect(serializedManifest).not.toContain(physicalDeviceId);
     expect(serializedManifest).not.toContain(deployedEnvironment.VITE_COGNITO_OAUTH_DOMAIN!);
+  });
+
+  it('uses the trusted-only redacted envelope when physical workspace disposal throws', async () => {
+    const repository = createTemporaryRepository();
+    const workspace = createTemporaryExecutionWorkspace();
+    const deviceList = physicalDeviceList();
+    const signingOutput = physicalBuildSettings();
+    const runner = createPhysicalPreflightRunner({ deviceList, buildSettings: signingOutput });
+    const dispose = vi.fn(async () => {
+      throw new Error(
+        `SECRET-id-token cleanup failure for ${physicalDeviceId} ${physicalSigningTeam}`,
+      );
+    });
+    const dependencies = createDependencies({ repoRoot: repository, runCommand: runner.runCommand });
+    dependencies.createExecutionWorkspace = async () => ({ root: workspace, dispose });
+
+    const manifest = onlyManifest(
+      await runM1FoundationVerification(
+        parseM1Arguments(['--phase', 'ios-physical-preflight', '--device-id', physicalDeviceId]),
+        dependencies,
+      ),
+    );
+    const serializedManifest = readFileSync(
+      join(
+        repository,
+        'apps/vela-mobile/docs/evidence/hpa-210',
+        testedBehaviorCommit,
+        manifest.runId,
+        'manifest.json',
+      ),
+      'utf8',
+    );
+
+    expect(runner.calls).toHaveLength(2);
+    expect(dispose).toHaveBeenCalledTimes(1);
+    expect(manifest.outcome).toBe('harness_error');
+    expect(manifest.exitCode).toBe(1);
+    expect(manifest.config).toEqual({
+      source: 'none',
+      class: 'missing',
+      publicIdentifiersConsistent: false,
+    });
+    expect(manifest.host).toEqual({});
+    expect(manifest.commands).toEqual([]);
+    expect(manifest.evidence).toEqual([]);
+    expect(manifest.findings).toEqual([
+      {
+        severity: 'error',
+        summary: 'The iOS physical-device preflight harness could not execute safely',
+      },
+    ]);
+    expect(serializedManifest).not.toContain('SECRET-id-token');
+    expect(serializedManifest).not.toContain(physicalDeviceId);
+    expect(serializedManifest).not.toContain(physicalSigningTeam);
+    expect(serializedManifest).not.toContain(JSON.stringify(deviceList));
+    expect(serializedManifest).not.toContain(JSON.stringify(signingOutput));
   });
 });
 
