@@ -189,6 +189,11 @@ type AutomatedManifestInput = {
   findings: M1Manifest['findings'];
 };
 
+type TrustedAutomatedManifestInput = Pick<
+  AutomatedManifestInput,
+  'context' | 'testedBehaviorCommit' | 'startedAt' | 'endedAt'
+>;
+
 type AutomaticRunContext = {
   directory: string;
   runId: string;
@@ -950,6 +955,20 @@ function safeDate(now: () => Date): Date {
   return value;
 }
 
+function safeFinalManifestTiming(now: () => Date, startedAt: Date): {
+  endedAt: Date;
+  isReliable: boolean;
+} {
+  try {
+    const endedAt = safeDate(now);
+    return endedAt.getTime() >= startedAt.getTime()
+      ? { endedAt, isReliable: true }
+      : { endedAt: startedAt, isReliable: false };
+  } catch {
+    return { endedAt: startedAt, isReliable: false };
+  }
+}
+
 function relativePath(repoRoot: string, path: string): string {
   const pathFromRoot = relative(repoRoot, path).replaceAll('\\', '/');
   return pathFromRoot === '' ? '.' : pathFromRoot;
@@ -1076,27 +1095,72 @@ function containsUnsafeAutomatedManifestContent(manifest: M1Manifest): boolean {
   return containsUnsafeEvidenceText(JSON.stringify(content));
 }
 
-function createSafeAutomatedManifest(input: AutomatedManifestInput): M1Manifest {
-  const manifest = createAutomatedManifest(input);
-  if (!containsUnsafeAutomatedManifestContent(manifest)) return manifest;
+function normalizedFallbackManifestTimes(input: TrustedAutomatedManifestInput): {
+  startedAt: Date;
+  endedAt: Date;
+} {
+  const epoch = new Date(0);
+  const startedAt =
+    input.startedAt instanceof Date && Number.isFinite(input.startedAt.getTime())
+      ? input.startedAt
+      : epoch;
+  const endedAt =
+    input.endedAt instanceof Date &&
+    Number.isFinite(input.endedAt.getTime()) &&
+    input.endedAt.getTime() >= startedAt.getTime()
+      ? input.endedAt
+      : startedAt;
+  return { startedAt, endedAt };
+}
 
-  // This fallback deliberately omits every value that could have crossed an
-  // unanticipated failure boundary. It is constructed before writing, so no
-  // unsafe manifest is ever persisted to the original checkout.
-  return createAutomatedManifest({
-    ...input,
+function createRedactedAutomatedManifest(
+  input: TrustedAutomatedManifestInput,
+  summary: string,
+): M1Manifest {
+  const { startedAt, endedAt } = normalizedFallbackManifestTimes(input);
+  return validateM1Manifest({
+    schemaVersion: 1,
+    runId: input.context.runId,
+    testedBehaviorCommit: input.testedBehaviorCommit,
+    phase: 'automated',
+    matrixClass: 'automated',
+    startedAt: startedAt.toISOString(),
+    endedAt: endedAt.toISOString(),
     outcome: 'harness_error',
+    exitCode: M1_EXIT_CODE.harness_error,
     config: redactedMissingConfiguration(),
-    platform: 'redacted',
+    host: { platform: 'redacted' },
     commands: [],
     evidence: [],
-    findings: [
-      {
-        severity: 'error',
-        summary: 'The automated verification manifest contained prohibited sensitive content',
-      },
-    ],
+    findings: [{ severity: 'error', summary }],
   });
+}
+
+function createSafeAutomatedManifest(input: AutomatedManifestInput): M1Manifest {
+  const trustedInput: TrustedAutomatedManifestInput = {
+    context: input.context,
+    testedBehaviorCommit: input.testedBehaviorCommit,
+    startedAt: input.startedAt,
+    endedAt: input.endedAt,
+  };
+
+  try {
+    const manifest = createAutomatedManifest(input);
+    if (!containsUnsafeAutomatedManifestContent(manifest)) return manifest;
+    return createRedactedAutomatedManifest(
+      trustedInput,
+      'The automated verification manifest contained prohibited sensitive content',
+    );
+  } catch {
+    // Candidate schema validation and serialization both happen before the
+    // evidence writer. The fallback omits every candidate field that could be
+    // runtime-invalid or unsafe, so a context that already exists always gets
+    // a valid diagnostic manifest instead of a raw harness exception.
+    return createRedactedAutomatedManifest(
+      trustedInput,
+      'The automated verification manifest could not be serialized safely',
+    );
+  }
 }
 
 async function writeManifest(directory: string, manifest: M1Manifest): Promise<void> {
@@ -1311,18 +1375,29 @@ async function runAutomatedPhase(
     }
   }
 
-  const manifest = createSafeAutomatedManifest({
-    context,
-    testedBehaviorCommit,
-    startedAt,
-    endedAt: safeDate(dependencies.now),
-    outcome,
-    config: configuration.config,
-    platform: dependencies.platform,
-    commands,
-    evidence,
-    findings,
-  });
+  const finalTiming = safeFinalManifestTiming(dependencies.now, startedAt);
+  const manifest = finalTiming.isReliable
+    ? createSafeAutomatedManifest({
+        context,
+        testedBehaviorCommit,
+        startedAt,
+        endedAt: finalTiming.endedAt,
+        outcome,
+        config: configuration.config,
+        platform: dependencies.platform,
+        commands,
+        evidence,
+        findings,
+      })
+    : createRedactedAutomatedManifest(
+        {
+          context,
+          testedBehaviorCommit,
+          startedAt,
+          endedAt: finalTiming.endedAt,
+        },
+        'The automated verification harness could not produce a valid final timestamp',
+      );
   await writeManifest(context.directory, manifest);
   return manifest;
 }
