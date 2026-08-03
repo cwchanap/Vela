@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   M1HarnessError,
@@ -54,6 +54,13 @@ const expectedCommands: Array<[string, string[]]> = [
     ],
   ],
 ];
+const PUBLIC_MOBILE_ENV_KEYS = [
+  'VITE_MOBILE_API_URL',
+  'VITE_COGNITO_USER_POOL_ID',
+  'VITE_COGNITO_MOBILE_USER_POOL_CLIENT_ID',
+  'VITE_COGNITO_OAUTH_DOMAIN',
+  'VITE_AWS_REGION',
+].sort();
 
 afterEach(() => {
   for (const directory of temporaryDirectories.splice(0)) {
@@ -65,6 +72,23 @@ function createTemporaryRepository(): string {
   const repository = mkdtempSync(join(tmpdir(), 'vela-m1-harness-'));
   temporaryDirectories.push(repository);
   return repository;
+}
+
+function createTemporaryExecutionWorkspace(): string {
+  const workspace = mkdtempSync(join(tmpdir(), 'vela-m1-clean-workspace-'));
+  temporaryDirectories.push(workspace);
+  mkdirSync(join(workspace, 'apps/vela-mobile'), { recursive: true });
+  return workspace;
+}
+
+function attachCleanExecutionWorkspace(
+  dependencies: HarnessDependencies,
+  workspace: string,
+) {
+  const dispose = vi.fn(async () => undefined);
+  const createExecutionWorkspace = vi.fn(async () => ({ root: workspace, dispose }));
+  Object.assign(dependencies, { createExecutionWorkspace });
+  return { createExecutionWorkspace, dispose };
 }
 
 function createRunner(exitCodes: number[] = []) {
@@ -85,8 +109,11 @@ function createDependencies(input: {
   verifyGitCommitExists?: HarnessDependencies['verifyGitCommitExists'];
   resolveDirtyPaths?: HarnessDependencies['resolveDirtyPaths'];
   loadDeployedIdentityProof?: HarnessDependencies['loadDeployedIdentityProof'];
+  createExecutionWorkspace?: HarnessDependencies['createExecutionWorkspace'];
+  executionProcessEnvironment?: HarnessDependencies['executionProcessEnvironment'];
 }): HarnessDependencies {
   const environment = input.env ?? deployedEnvironment;
+  const workspace = createTemporaryExecutionWorkspace();
   return {
     repoRoot: input.repoRoot,
     now: () => new Date('2026-08-03T02:15:00.000Z'),
@@ -98,6 +125,9 @@ function createDependencies(input: {
     resolveDirtyPaths: input.resolveDirtyPaths ?? (async () => []),
     loadDeployedIdentityProof:
       input.loadDeployedIdentityProof ?? (async () => deployedIdentityProofFrom(environment)),
+    createExecutionWorkspace:
+      input.createExecutionWorkspace ?? (async () => ({ root: workspace, dispose: async () => undefined })),
+    executionProcessEnvironment: input.executionProcessEnvironment ?? {},
   };
 }
 
@@ -241,6 +271,150 @@ describe('M1 foundation CLI arguments', () => {
 });
 
 describe('automated M1 foundation verification', () => {
+  it('runs the eight gates from a clean pinned checkout while writing the manifest in the original repository', async () => {
+    const repository = createTemporaryRepository();
+    const workspace = createTemporaryExecutionWorkspace();
+    const runner = createRunner();
+    const dependencies = createDependencies({
+      repoRoot: repository,
+      env: { ...deployedEnvironment, UNRELATED_SECRET: 'must-not-reach-gates' },
+      runCommand: runner.runCommand,
+    });
+    const { createExecutionWorkspace, dispose } = attachCleanExecutionWorkspace(
+      dependencies,
+      workspace,
+    );
+
+    const manifest = onlyManifest(
+      await runM1FoundationVerification(
+        parseM1Arguments(['--phase', 'automated']),
+        dependencies,
+      ),
+    );
+
+    expect(createExecutionWorkspace).toHaveBeenCalledWith({
+      repoRoot: repository,
+      testedBehaviorCommit,
+    });
+    expect(runner.calls.map(({ command, args }) => [command, args])).toEqual(expectedCommands);
+    expect(runner.calls.every(({ cwd }) => cwd === workspace)).toBe(true);
+    expect(runner.calls.map(({ env }) => Object.keys(env ?? {}).sort())).toEqual(
+      Array.from({ length: expectedCommands.length }, () => PUBLIC_MOBILE_ENV_KEYS),
+    );
+    expect(
+      existsSync(
+        join(
+          repository,
+          'apps/vela-mobile/docs/evidence/hpa-210',
+          testedBehaviorCommit,
+          manifest.runId,
+          'manifest.json',
+        ),
+      ),
+    ).toBe(true);
+    expect(dispose).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not inherit ignored execution inputs from the original repository', async () => {
+    const repository = createTemporaryRepository();
+    const workspace = createTemporaryExecutionWorkspace();
+    const ignoredPaths = [
+      'apps/vela-mobile/node_modules/ignored-dependency/input.js',
+      'apps/vela-mobile/src-capacitor/www/ignored-web-bundle.js',
+      'apps/vela-mobile/src-capacitor/ios/ignored-native-input.txt',
+      'apps/vela-mobile/.quasar/ignored-generated-input.json',
+    ];
+    for (const ignoredPath of ignoredPaths) {
+      const file = join(repository, ignoredPath);
+      mkdirSync(dirname(file), { recursive: true });
+      writeFileSync(file, 'ignored execution input');
+    }
+
+    const observedMissingInputs: boolean[] = [];
+    const runCommand: CommandRunner = async (spec) => {
+      observedMissingInputs.push(
+        ...ignoredPaths.map((ignoredPath) => !existsSync(join(spec.cwd, ignoredPath))),
+      );
+      return { exitCode: 0, stdout: '', stderr: '' };
+    };
+    const dependencies = createDependencies({ repoRoot: repository, runCommand });
+    attachCleanExecutionWorkspace(dependencies, workspace);
+
+    const manifest = onlyManifest(
+      await runM1FoundationVerification(
+        parseM1Arguments(['--phase', 'automated']),
+        dependencies,
+      ),
+    );
+
+    expect(manifest.outcome).toBe('passed');
+    expect(observedMissingInputs).toHaveLength(expectedCommands.length * ignoredPaths.length);
+    expect(observedMissingInputs.every(Boolean)).toBe(true);
+  });
+
+  it('stages the current run scanner input in the clean checkout before gate eight', async () => {
+    const repository = createTemporaryRepository();
+    const workspace = createTemporaryExecutionWorkspace();
+    const runId = '20260803T021500Z-automated';
+    const scanInputPath = join(
+      workspace,
+      'apps/vela-mobile/docs/evidence/hpa-210',
+      testedBehaviorCommit,
+      runId,
+      'scan-input.json',
+    );
+    const originalScanInputPath = join(
+      repository,
+      'apps/vela-mobile/docs/evidence/hpa-210',
+      testedBehaviorCommit,
+      runId,
+      'scan-input.json',
+    );
+    let scannerInput: string | undefined;
+    const runCommand: CommandRunner = async (spec) => {
+      if (spec.label === 'mobile-secret-scan') {
+        scannerInput = readFileSync(scanInputPath, 'utf8');
+      }
+      return { exitCode: 0, stdout: '', stderr: '' };
+    };
+    const dependencies = createDependencies({
+      repoRoot: repository,
+      env: { ...deployedEnvironment, UNRELATED_SECRET: 'must-not-reach-scan-input' },
+      runCommand,
+    });
+    attachCleanExecutionWorkspace(dependencies, workspace);
+
+    const manifest = onlyManifest(
+      await runM1FoundationVerification(
+        parseM1Arguments(['--phase', 'automated']),
+        dependencies,
+      ),
+    );
+
+    expect(manifest.outcome).toBe('passed');
+    expect(scannerInput).toContain('"schemaVersion": 1');
+    expect(scannerInput).not.toContain('must-not-reach-scan-input');
+    expect(existsSync(originalScanInputPath)).toBe(false);
+  });
+
+  it('disposes the clean execution checkout after a gate failure', async () => {
+    const repository = createTemporaryRepository();
+    const workspace = createTemporaryExecutionWorkspace();
+    const runner = createRunner([1]);
+    const dependencies = createDependencies({ repoRoot: repository, runCommand: runner.runCommand });
+    const { dispose } = attachCleanExecutionWorkspace(dependencies, workspace);
+
+    const manifest = onlyManifest(
+      await runM1FoundationVerification(
+        parseM1Arguments(['--phase', 'automated']),
+        dependencies,
+      ),
+    );
+
+    expect(manifest.outcome).toBe('gate_failed');
+    expect(dispose).toHaveBeenCalledTimes(1);
+  });
+
   it('runs the exact eight automated gates in order and records placeholder configuration', async () => {
     const repository = createTemporaryRepository();
     const runner = createRunner();
@@ -279,7 +453,7 @@ describe('automated M1 foundation verification', () => {
     expect(runner.calls).toHaveLength(4);
   });
 
-  it('stores bounded secret-free failed-gate output as hashed external evidence', async () => {
+  it('does not copy failed-gate output to original evidence before the clean scanner succeeds', async () => {
     const repository = createTemporaryRepository();
     const calls: CommandSpec[] = [];
     const runCommand: CommandRunner = async (spec) => {
@@ -295,14 +469,11 @@ describe('automated M1 foundation verification', () => {
     );
 
     expect(calls).toHaveLength(1);
-    expect(manifest.evidence).toEqual([
-      expect.objectContaining({
-        kind: 'local-hash',
-        location: expect.stringMatching(/command-01-install\.txt$/u),
-        mediaType: 'text/plain; charset=utf-8',
-      }),
-    ]);
-    expect(existsSync(join(repository, manifest.evidence[0]!.location))).toBe(true);
+    expect(manifest.evidence).toEqual([]);
+    expect(manifest.findings).toContainEqual({
+      severity: 'error',
+      summary: 'Automated gate failed: install',
+    });
   });
 
   it('returns prerequisite_missing before any production command when configuration is absent', async () => {
@@ -375,6 +546,7 @@ describe('automated M1 foundation verification', () => {
 
   it('rejects dirty executable paths before it starts a machine gate', async () => {
     const repository = createTemporaryRepository();
+    const workspace = createTemporaryExecutionWorkspace();
     const runner = createRunner();
     const resolveDirtyPaths = vi.fn(async () => ['apps/vela-mobile/src/config/index.ts']);
     const dependencies = createDependencies({
@@ -382,6 +554,7 @@ describe('automated M1 foundation verification', () => {
       runCommand: runner.runCommand,
       resolveDirtyPaths,
     });
+    const { createExecutionWorkspace } = attachCleanExecutionWorkspace(dependencies, workspace);
 
     const manifest = onlyManifest(
       await runM1FoundationVerification(
@@ -394,6 +567,7 @@ describe('automated M1 foundation verification', () => {
     expect(manifest.outcome).toBe('prerequisite_missing');
     expect(manifest.evidence).toEqual([]);
     expect(runner.calls).toEqual([]);
+    expect(createExecutionWorkspace).not.toHaveBeenCalled();
   });
 
   it('allows documentation and generated HPA-210 evidence changes to accompany an automated run', async () => {
@@ -516,6 +690,7 @@ describe('automated M1 foundation verification', () => {
         }).map(([OutputKey, OutputValue]) => ({ OutputKey, OutputValue })),
       ),
     );
+    const workspace = createTemporaryExecutionWorkspace();
     const dependencies: HarnessDependencies = {
       repoRoot: repository,
       now: () => new Date('2026-08-03T02:15:00.000Z'),
@@ -524,6 +699,8 @@ describe('automated M1 foundation verification', () => {
       runCommand: runner.runCommand,
       resolveTestedBehaviorCommit: async () => testedBehaviorCommit,
       resolveDirtyPaths: async () => [],
+      createExecutionWorkspace: async () => ({ root: workspace, dispose: async () => undefined }),
+      executionProcessEnvironment: {},
     };
 
     const manifest = onlyManifest(
@@ -585,6 +762,43 @@ describe('manual M1 foundation recording', () => {
 
     expect(existsSync(join(repository, 'apps/vela-mobile/docs/evidence/hpa-210'))).toBe(false);
   });
+
+  it.each(['oauthCode', 'oauth_code'] as const)(
+    'rejects quoted OAuth-prefixed %s material before it writes evidence',
+    async (field) => {
+      const repository = createTemporaryRepository();
+      const inputPath = join(repository, `${field}.json`);
+      const syntheticValue = ['synthetic', 'oauth', 'field', 'material'].join('-');
+      writeFileSync(
+        inputPath,
+        JSON.stringify({
+          ...validManualInput(),
+          findings: [
+            {
+              severity: 'info',
+              summary: `Observed redirect payload: ${JSON.stringify({ [field]: syntheticValue })}`,
+            },
+          ],
+        }),
+      );
+
+      await expect(
+        runM1FoundationVerification(
+          parseM1Arguments([
+            '--record-manual',
+            'production-smoke',
+            '--tested-behavior-commit',
+            testedBehaviorCommit,
+            '--input',
+            inputPath,
+          ]),
+          createDependencies({ repoRoot: repository, runCommand: createRunner().runCommand }),
+        ),
+      ).rejects.toThrow(M1UsageError);
+
+      expect(existsSync(join(repository, 'apps/vela-mobile/docs/evidence/hpa-210'))).toBe(false);
+    },
+  );
 
   it('rejects a full-looking behavior SHA that does not name a Git commit before it writes evidence', async () => {
     const repository = createTemporaryRepository();
