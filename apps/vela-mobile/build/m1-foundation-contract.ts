@@ -95,6 +95,8 @@ const COMMIT_PATTERN = /^[a-f0-9]{40}$/u;
 const SHA256_PATTERN = /^[a-f0-9]{64}$/u;
 const RUN_ID_PATTERN = /^\d{8}T\d{6}Z-[A-Za-z0-9][A-Za-z0-9._-]*$/u;
 const PATH_SEPARATOR_PATTERN = /[\\/]/u;
+const AWS_REGION_PATTERN = /^[a-z]{2}(?:-gov)?-[a-z]+-\d+$/u;
+const HOSTNAME_PATTERN = /^(?!-)[a-z0-9-]{1,63}(?<!-)(?:\.(?!-)[a-z0-9-]{1,63}(?<!-))+$/u;
 
 type UnknownRecord = Record<string, unknown>;
 
@@ -174,6 +176,60 @@ function assertRunId(value: unknown): asserts value is string {
 function assertMatrixClass(value: unknown): asserts value is M1MatrixClass {
   assertSafePathSegment(value, 'matrixClass');
   assertEnum(value, 'matrixClass', MATRIX_CLASSES);
+}
+
+/**
+ * Validates that `apiOrigin` is a structural HTTP/HTTPS URL with a hostname
+ * and no credentials, query, or fragment. This mirrors the harness's
+ * `normalizeMobileApiIdentifier` so a manual manifest cannot record an
+ * arbitrary string like `"not-even-a-url"` as a deployed API origin.
+ */
+function assertValidApiOrigin(value: unknown): asserts value is string {
+  assertNonEmptyString(value, 'config.apiOrigin');
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    throw new Error('config.apiOrigin must be a valid HTTP or HTTPS URL');
+  }
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+    throw new Error('config.apiOrigin must use the http: or https: protocol');
+  }
+  if (!url.hostname) {
+    throw new Error('config.apiOrigin must include a hostname');
+  }
+  if (url.username || url.password) {
+    throw new Error('config.apiOrigin must not include credentials');
+  }
+  if (url.search || url.hash) {
+    throw new Error('config.apiOrigin must not include a query string or fragment');
+  }
+}
+
+/**
+ * Validates that `region` matches the AWS region shape (e.g. `us-east-1`,
+ * `ap-northeast-1`, `us-gov-west-1`). This rejects arbitrary strings like
+ * `"wrong-region"` that would otherwise pass a non-empty-string check.
+ */
+function assertValidAwsRegion(value: unknown): asserts value is string {
+  assertNonEmptyString(value, 'config.region');
+  if (!AWS_REGION_PATTERN.test(value.trim().toLowerCase())) {
+    throw new Error('config.region must match the AWS region format (e.g. us-east-1)');
+  }
+}
+
+/**
+ * Validates that `oauthDomain` is a bare hostname (no protocol, path, port, or
+ * credentials). Cognito OAuth domains follow `<name>.auth.<region>.amazoncognito.com`,
+ * but the contract layer only enforces hostname structure so the harness can
+ * compare the normalized value against deployed proof.
+ */
+function assertValidOauthDomain(value: unknown): asserts value is string {
+  assertNonEmptyString(value, 'config.oauthDomain');
+  const normalized = value.trim().toLowerCase().replace(/\.$/u, '');
+  if (!HOSTNAME_PATTERN.test(normalized)) {
+    throw new Error('config.oauthDomain must be a bare hostname (e.g. name.auth.us-east-1.amazoncognito.com)');
+  }
 }
 
 function validateConfig(value: unknown): void {
@@ -448,13 +504,14 @@ function runIdMatrixClassSuffix(runId: string): string {
  * `--require-deployed-config` is not supplied.
  *
  * For a `passed` manual manifest, the config must also carry real provenance:
- * a non-`none` source and non-empty `apiOrigin`, `region`, and `oauthDomain`.
- * Without these, a manifest can claim `class: 'deployed'` and
- * `publicIdentifiersConsistent: true` while recording no backend identifiers,
- * which cannot demonstrate that the physical observation used the same backend
- * as the machine phases. The boolean assertions are caller-supplied, so the
- * presence of the underlying public identifiers is the minimum verifiable
- * proof at the contract layer.
+ * a non-`none` source and structurally valid `apiOrigin`, `region`, and
+ * `oauthDomain`. Without structural validation, a manifest can claim
+ * `class: 'deployed'` and `publicIdentifiersConsistent: true` while recording
+ * arbitrary strings like `"not-even-a-url"` or `"wrong-region"`, which cannot
+ * demonstrate that the physical observation used the same backend as the
+ * machine phases. The harness layer additionally compares these values
+ * against CDK deployed identity proof; the contract layer enforces structure
+ * so a non-structural value fails before reaching that comparison.
  */
 export function validateManualM1ManifestSemantics(manifest: M1Manifest): void {
   if (runIdMatrixClassSuffix(manifest.runId) !== manifest.matrixClass) {
@@ -473,18 +530,9 @@ export function validateManualM1ManifestSemantics(manifest: M1Manifest): void {
   if (manifest.config.source === 'none') {
     throw new Error('a passed manual manifest must record a real configuration source');
   }
-  if (
-    manifest.config.apiOrigin === undefined ||
-    manifest.config.apiOrigin.trim() === '' ||
-    manifest.config.region === undefined ||
-    manifest.config.region.trim() === '' ||
-    manifest.config.oauthDomain === undefined ||
-    manifest.config.oauthDomain.trim() === ''
-  ) {
-    throw new Error(
-      'a passed manual manifest must record non-empty apiOrigin, region, and oauthDomain',
-    );
-  }
+  assertValidApiOrigin(manifest.config.apiOrigin);
+  assertValidAwsRegion(manifest.config.region);
+  assertValidOauthDomain(manifest.config.oauthDomain);
   if (manifest.evidence.length === 0) {
     throw new Error('a passed manual manifest must reference non-empty evidence');
   }
