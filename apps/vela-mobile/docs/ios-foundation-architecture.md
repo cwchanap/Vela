@@ -1,19 +1,32 @@
 # iOS Foundation Architecture
 
-## Tested Revision
+## Tested Revision and Evidence Linkage
 
-This document records the current architecture contract. It does not select a
-tested-behavior commit or make a measured pass/fail conclusion. Those fields
-belong in [M1 iOS Foundation Verification](m1-ios-foundation-verification.md)
-only after the corresponding committed manifest and observation evidence exist.
+`testedBehaviorCommit`:
+`f0c6fe9d5282c3f5f34e6e5453ed3c23c0808f65`
+
+The selected [automated](evidence/hpa-210/f0c6fe9d5282c3f5f34e6e5453ed3c23c0808f65/20260803T042451Z-automated/manifest.json)
+and [iOS Simulator](evidence/hpa-210/f0c6fe9d5282c3f5f34e6e5453ed3c23c0808f65/20260803T042601Z-automated-ios-simulator/manifest.json)
+machine manifests passed on that revision. The selected
+[physical preflight](evidence/hpa-210/f0c6fe9d5282c3f5f34e6e5453ed3c23c0808f65/20260803T042801Z-physical-preflight/manifest.json)
+is `prerequisite_missing`. Physical-device testing was explicitly deferred, so
+these machine results establish neither physical readiness nor any
+human-observed native outcome.
+
+The manifest-only evidence revision
+`c8f0e6db627f12cd92467fed7761fea4add53a05` and the documentation-only
+decision record do not change or invalidate executable evidence pinned to
+`testedBehaviorCommit`. See [M1 iOS Foundation Verification](m1-ios-foundation-verification.md)
+for the `NO-GO` decision and deferred physical rows.
 
 ## Authentication and OAuth Callback
 
-On native iOS, the mobile-auth boot module wires Capacitor App, Browser,
-Preferences, Capacitor HTTP, and the iOS session store into one mobile-auth
-coordinator. A sign-in request uses Cognito authorization-code flow with
-PKCE S256, `state`, `nonce`, and `identity_provider=Google`; the registered
-callback is `dev.cwchanap.vela.oauth:/oauth/callback`.
+On native iOS, [the mobile-auth boot module](../src/boot/mobile-auth.ts) wires
+Capacitor App, Browser, Preferences, Capacitor HTTP, and the iOS session store
+into one mobile-auth coordinator. A sign-in request uses Cognito
+authorization-code flow with PKCE S256, `state`, `nonce`, and
+`identity_provider=Google`; the registered callback is
+`dev.cwchanap.vela.oauth:/oauth/callback`.
 
 The coordinator receives both launch URLs and `appUrlOpen` events. It accepts
 only the private-use callback URI, rejects malformed or unrelated URLs before
@@ -34,8 +47,9 @@ not as an authenticated session store.
 
 ## Session Storage and Restoration
 
-The refresh token is the only durable authenticated credential. On native iOS
-it is stored through `@aparajita/capacitor-secure-storage` in the Keychain with
+The refresh token is the only durable authenticated credential. [The native
+iOS session store](../src/auth/mobile-session-store.ts) uses
+`@aparajita/capacitor-secure-storage` in the Keychain with
 `afterFirstUnlockThisDeviceOnly` accessibility, keyed by the Cognito user pool
 and mobile client. Access and ID tokens remain in the coordinator's active
 session state rather than the OAuth transaction store.
@@ -50,45 +64,47 @@ any observed device behavior rather than infer it from this implementation.
 ## API Origin and Authenticated Transport
 
 The mobile build supplies an absolute API origin through the validated mobile
-configuration. Authenticated callers provide a relative, non-escaping API
-path; the coordinator resolves it below that origin and centrally supplies the
-standard bearer authorization header carrying the ID token. Callers cannot
-override that header.
+configuration. [The authenticated transport](../src/services/mobile-auth.ts)
+accepts a relative, non-escaping API path; the coordinator resolves it below
+that origin and centrally supplies the standard bearer authorization header
+carrying the ID token. Callers cannot override that header.
 
 HTTPS is required for authenticated transport, except for a development-only
 loopback HTTP origin. A request is rejected when its path, headers, timeout, or
 session state is invalid, or when the session changes or recovery is pending.
 
-## User-Scoped Query Isolation
+## User-Scoped Due-Review Query Isolation
 
-Mobile authenticated query data is keyed by user identity. The isolation
-watcher cancels and removes only the prior user's `srsKeys.stats(userId)` entry
-on an identity change or terminal sign-out, rather than globally clearing the
-query client. During recovery with an unusable session it cancels only that
-user's in-flight query without clearing the cache. This protects a successor
-session from stale cleanup work.
+The M1 due-review count is keyed by user identity. [The isolation watcher](../src/services/mobile-query-auth-isolation.ts)
+cancels and removes only the prior user's `srsKeys.stats(userId)` entry on an
+identity change or terminal sign-out, rather than globally clearing the query
+client. During recovery with an unusable session it cancels only that user's
+in-flight query without clearing the cache. This protects a successor session
+from stale cleanup work.
 
 ## Shared App Lifecycle
 
-The Capacitor lifecycle boot registers `resume` and `appStateChange` listeners
-once. It records diagnostic lifecycle state and mirrors active/inactive state
-to TanStack Query's focus manager. The auth coordinator separately receives
-the Capacitor application state alongside OAuth callback and browser-finished
-events, so lifecycle and authentication state remain explicit inputs rather
-than page-local behavior.
+[The Capacitor lifecycle boot](../src/boot/capacitor-lifecycle.ts) registers
+`resume` and `appStateChange` listeners once. It records diagnostic lifecycle
+state and mirrors active/inactive state to TanStack Query's focus manager. The
+auth coordinator separately receives Capacitor application-state, OAuth
+callback, and browser-finished events, so lifecycle and authentication state
+remain explicit inputs rather than page-local behavior.
 
 ## Safe Areas, Keyboard, and Navigation
 
 The source policy is native `contentInset: "never"` with CSS ownership of the
 headerless top inset. Quasar owns fixed top/bottom CSS behavior, while pages,
-toolbars, and footer tabs own horizontal safe-area insets. The native keyboard
-adapter tracks show/hide events and scrolls the focused block after layout.
+toolbars, and footer tabs own horizontal safe-area insets. [The keyboard
+viewport composable](../src/composables/useKeyboardViewport.ts) tracks native
+show/hide events and scrolls the focused block after layout.
 
-Navigation records an app-owned `mobileDepth`: ordinary pushes and allowed
-in-session entry share chronological history, a fresh cold entry replaces at
-depth zero, and back falls back safely when no matching history entry settles.
-The historical HPA-209 evidence remains the record for its selected layout
-policy; this document does not reinterpret it as HPA-210 physical evidence.
+[The mobile navigation helper](../src/router/mobile-navigation.ts) records an
+app-owned `mobileDepth`: ordinary pushes and allowed in-session entry share
+chronological history, a fresh cold entry replaces at depth zero, and back
+falls back safely when no matching history entry settles. The historical
+HPA-209 evidence remains the record for its selected layout policy; this
+document does not reinterpret it as HPA-210 physical evidence.
 
 ## Audio Adapter Decision
 
@@ -97,7 +113,7 @@ Pending physical HPA-210 evidence
 The current diagnostic implementation uses the `MobileAudioPlayer` contract
 with `HtmlAudioPlayer`, including explicit stop, interruption, and disposal
 outcomes. That implementation is not an adapter selection conclusion; the
-decision is deferred until the required physical evidence is recorded.
+decision remains deferred until the required physical evidence is recorded.
 
 ## Development Diagnostics and Production Exclusion
 
@@ -111,13 +127,17 @@ record must not rely on a development-only route.
 M1 accepts UserDefaults only for the short-lived, single-use OAuth transaction
 described above; it does not accept it as a session store. Local signing is
 tester-controlled: the iOS project intentionally has no committed development
-team. Physical behavior, signing readiness, and production configuration are
-evidence-gated and must be recorded by their actual runs.
+team. Automated and Simulator machine evidence passed on the selected revision,
+but physical preflight is `prerequisite_missing` and physical testing is
+deferred. Physical behavior, signing readiness, and the audio decision remain
+evidence-gated and must be recorded by actual physical runs.
 
 ## Change Policy
 
 Update this architecture record when an implementation contract changes, with
 the associated source and automated coverage changed first. Append results to
 the verification record only from a committed HPA-210 manifest or a linked
-manual observation; use the full tested-behavior SHA, retain the build/config
-class, and do not create placeholder pass, failure, or unrun rows.
+manual observation; use the full tested-behavior SHA and retain the
+build/config class. Do not create placeholder pass or failure rows. A
+user-directed deferred physical row may identify its unrun state without a
+manifest or observation; all other result rows require their actual evidence.

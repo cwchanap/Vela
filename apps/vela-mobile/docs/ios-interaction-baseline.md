@@ -137,6 +137,14 @@ Selected-mode replacement hashes after the page-control fix:
 - A failure includes reproduction steps and a linked follow-up issue.
 - Physical Japanese IME and WKWebView swipe results are release-blocking.
 
+## HPA-210 linkage
+
+HPA-210 selected passing automated and Simulator machine manifests for
+`f0c6fe9d5282c3f5f34e6e5453ed3c23c0808f65`, but its physical preflight is
+`prerequisite_missing`. Physical-device testing was deferred, so this baseline
+remains historical evidence and has no HPA-210 physical acceptance result. See
+[M1 iOS Foundation Verification](m1-ios-foundation-verification.md).
+
 ## Environment matrix
 
 | Environment                                     | Commit                                     | Build configuration | Asset source                                 | Model         | OS       | Xcode         | Japanese keyboard                  | Orientation                                                       | Result                                                                                                                                                                                                                                                                                                                                                                                             |
