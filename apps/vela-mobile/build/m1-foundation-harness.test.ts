@@ -246,17 +246,26 @@ function physicalBuildSettings(overrides: Record<string, unknown> = {}) {
         CODE_SIGN_STYLE: 'Automatic',
         DEVELOPMENT_TEAM: physicalSigningTeam,
         PRODUCT_BUNDLE_IDENTIFIER: 'com.vela.app',
+        CODE_SIGN_IDENTITY: 'iPhone Developer',
+        PROVISIONING_PROFILE: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
         ...overrides,
       },
     },
   ];
 }
 
+const codesigningIdentityOutput = [
+  '  1) A1B2C3D4E5F6A1B2C3D4E5F6A1B2C3D4E5F6A1B2 "iPhone Developer: Tester (LOCAL-TEAM)"',
+  '     1 valid identity found',
+].join('\n');
+
 function createPhysicalPreflightRunner(input: {
   deviceList?: unknown;
   buildSettings?: unknown;
   deviceListExitCode?: number;
   buildSettingsExitCode?: number;
+  codesigningIdentityOutput?: string;
+  codesigningIdentityExitCode?: number;
 } = {}) {
   const calls: CommandSpec[] = [];
   const rawJsonPaths: string[] = [];
@@ -279,6 +288,13 @@ function createPhysicalPreflightRunner(input: {
       return {
         exitCode: input.buildSettingsExitCode ?? 0,
         stdout: JSON.stringify(input.buildSettings ?? physicalBuildSettings()),
+        stderr: '',
+      };
+    }
+    if (spec.command === 'security' && spec.args[0] === 'find-identity') {
+      return {
+        exitCode: input.codesigningIdentityExitCode ?? 0,
+        stdout: input.codesigningIdentityOutput ?? codesigningIdentityOutput,
         stderr: '',
       };
     }
@@ -1850,7 +1866,7 @@ describe('iOS physical-device M1 foundation preflight', () => {
     const rawJsonPath = runner.rawJsonPaths[0]!;
     const xcodeWorkspace = join(workspace, 'apps/vela-mobile/src-capacitor/ios/App/App.xcworkspace');
 
-    expect(runner.calls).toHaveLength(2);
+    expect(runner.calls).toHaveLength(3);
     expect(runner.calls[0]).toMatchObject({
       command: 'xcrun',
       args: ['devicectl', 'list', 'devices', '--json-output', rawJsonPath],
@@ -1872,7 +1888,13 @@ describe('iOS physical-device M1 foundation preflight', () => {
       ],
       cwd: workspace,
     });
+    expect(runner.calls[2]).toMatchObject({
+      command: 'security',
+      args: ['find-identity', '-v', '-p', 'codesigning'],
+      cwd: workspace,
+    });
     expect(runner.calls.map(({ env }) => Object.keys(env ?? {}).sort())).toEqual([
+      PUBLIC_MOBILE_ENV_KEYS,
       PUBLIC_MOBILE_ENV_KEYS,
       PUBLIC_MOBILE_ENV_KEYS,
     ]);
@@ -1975,6 +1997,39 @@ describe('iOS physical-device M1 foundation preflight', () => {
       deviceList: physicalDeviceList(),
       buildSettings: physicalBuildSettings({ PRODUCT_BUNDLE_IDENTIFIER: 'com.example.other' }),
       expectedCallCount: 2,
+      expectedHost: {
+        deviceAlias: 'iPhone 16 Pro',
+        deviceModel: 'iPhone17,1',
+        signingReady: false,
+      },
+    },
+    {
+      name: 'the resolved signing identity is empty',
+      deviceList: physicalDeviceList(),
+      buildSettings: physicalBuildSettings({ CODE_SIGN_IDENTITY: '' }),
+      expectedCallCount: 2,
+      expectedHost: {
+        deviceAlias: 'iPhone 16 Pro',
+        deviceModel: 'iPhone17,1',
+        signingReady: false,
+      },
+    },
+    {
+      name: 'no provisioning profile is resolved',
+      deviceList: physicalDeviceList(),
+      buildSettings: physicalBuildSettings({ PROVISIONING_PROFILE: '', PROVISIONING_PROFILE_SPECIFIER: '' }),
+      expectedCallCount: 2,
+      expectedHost: {
+        deviceAlias: 'iPhone 16 Pro',
+        deviceModel: 'iPhone17,1',
+        signingReady: false,
+      },
+    },
+    {
+      name: 'the keychain has no usable codesigning identity',
+      deviceList: physicalDeviceList(),
+      codesigningIdentityOutput: '     0 valid identities found',
+      expectedCallCount: 3,
       expectedHost: {
         deviceAlias: 'iPhone 16 Pro',
         deviceModel: 'iPhone17,1',
@@ -2127,7 +2182,7 @@ describe('iOS physical-device M1 foundation preflight', () => {
       'utf8',
     );
 
-    expect(runner.calls).toHaveLength(2);
+    expect(runner.calls).toHaveLength(3);
     expect(dispose).toHaveBeenCalledTimes(1);
     expect(manifest.outcome).toBe('harness_error');
     expect(manifest.exitCode).toBe(1);

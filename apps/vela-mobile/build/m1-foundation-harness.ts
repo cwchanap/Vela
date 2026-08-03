@@ -2603,6 +2603,11 @@ async function readPhysicalDeviceList(input: {
  * Treats unresolved, manual, or differently-targeted signing as a local
  * prerequisite. The team value is read only to establish non-emptiness and
  * is never returned, recorded, or included in a finding.
+ *
+ * Beyond the project-level style, team, and bundle identifier, this also
+ * requires a resolved `CODE_SIGN_IDENTITY` and a resolved provisioning
+ * profile (UUID or specifier). A configured team without a resolved identity
+ * or profile does not prove the project can be signed.
  */
 function hasReadyPhysicalSigning(output: string): boolean {
   let parsed: unknown;
@@ -2623,14 +2628,32 @@ function hasReadyPhysicalSigning(output: string): boolean {
   const codeSignStyle = buildSettings.CODE_SIGN_STYLE;
   const developmentTeam = buildSettings.DEVELOPMENT_TEAM;
   const bundleIdentifier = buildSettings.PRODUCT_BUNDLE_IDENTIFIER;
+  const codeSignIdentity = buildSettings.CODE_SIGN_IDENTITY;
+  const provisioningProfile = buildSettings.PROVISIONING_PROFILE;
+  const provisioningProfileSpecifier = buildSettings.PROVISIONING_PROFILE_SPECIFIER;
   return (
     typeof codeSignStyle === 'string' &&
     codeSignStyle.trim() === 'Automatic' &&
     typeof developmentTeam === 'string' &&
     developmentTeam.trim() !== '' &&
     typeof bundleIdentifier === 'string' &&
-    bundleIdentifier.trim() === 'com.vela.app'
+    bundleIdentifier.trim() === 'com.vela.app' &&
+    typeof codeSignIdentity === 'string' &&
+    codeSignIdentity.trim() !== '' &&
+    ((typeof provisioningProfile === 'string' && provisioningProfile.trim() !== '') ||
+      (typeof provisioningProfileSpecifier === 'string' &&
+        provisioningProfileSpecifier.trim() !== ''))
   );
+}
+
+/**
+ * Confirms the keychain has at least one valid codesigning identity. The raw
+ * `security find-identity` output is never persisted; only the command
+ * metadata (label, command, exit code) is recorded by the caller.
+ */
+function hasUsableCodesigningIdentity(output: string): boolean {
+  const text = boundedOutput(output);
+  return /(?:^|\n)\s*\d+\)\s+[0-9A-Fa-f]{40}\s+"/u.test(text);
 }
 
 function createPhysicalManifest(input: PhysicalManifestInput): M1Manifest {
@@ -2849,6 +2872,28 @@ async function runIosPhysicalPreflightPhase(
           findings.push({
             severity: 'error',
             summary: 'Physical iOS signing readiness is incomplete or invalid',
+          });
+        }
+      }
+
+      if (outcome === 'passed') {
+        const identityResult = await runStep({
+          spec: {
+            label: 'physical-codesigning-identity',
+            command: 'security',
+            args: ['find-identity', '-v', '-p', 'codesigning'],
+            cwd: executionRoot,
+            env: commandEnv,
+          },
+          summary: 'Physical iOS codesigning identities could not be enumerated',
+        });
+        const identityReady = identityResult ? hasUsableCodesigningIdentity(identityResult.stdout) : false;
+        if (!identityReady) {
+          host.signingReady = false;
+          outcome = 'prerequisite_missing';
+          findings.push({
+            severity: 'error',
+            summary: 'No usable iOS codesigning identity was found in the keychain',
           });
         }
       }
