@@ -61,3 +61,6 @@ specs/
 
 # Git worktrees
 .worktrees/
+
+# Mobile verification evidence (local-only artifacts)
+apps/vela-mobile/docs/evidence/
