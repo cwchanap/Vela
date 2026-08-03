@@ -2,13 +2,14 @@ import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { dirname, join, relative } from 'node:path';
+import { basename, dirname, join, relative, resolve } from 'node:path';
 import { TextDecoder } from 'node:util';
 import {
   M1_EXIT_CODE,
   createM1RunDirectory,
   createM1RunId,
   createManualM1Manifest,
+  hashDirectory,
   validateM1Manifest,
   type M1CommandResult,
   type M1EvidenceReference,
@@ -24,6 +25,9 @@ const MAX_MANUAL_INPUT_BYTES = 256 * 1024;
 const MAX_RUN_DIRECTORY_ATTEMPTS = 1_000;
 const MAX_GIT_STATUS_BYTES = 1024 * 1024;
 const EXECUTION_WORKSPACE_PREFIX = 'vela-m1-foundation-';
+const SIMULATOR_DERIVED_DATA_DIRECTORY = '.m1-ios-simulator';
+const SIMULATOR_PROCESS_CHECK_DELAY_MS = 5_000;
+const MAX_SIMULATOR_HOST_VALUE_LENGTH = 256;
 const GENERIC_AUTOMATED_HARNESS_FAILURE =
   'The automated verification harness could not execute safely';
 const MANUAL_INPUT_DECODER = new TextDecoder('utf-8', { fatal: true });
@@ -139,6 +143,11 @@ export type HarnessDependencies = {
    * gates need in addition to the five public mobile VITE values.
    */
   executionProcessEnvironment?: ProcessEnvironment;
+  /**
+   * Test-only clock seam for the bounded post-launch process check. Production
+   * callers omit it and wait the five seconds required by the Simulator gate.
+   */
+  sleep?: (milliseconds: number) => Promise<void>;
 };
 
 export type M1VerifyArguments = {
@@ -1042,17 +1051,16 @@ function containsUnsafeEvidenceText(text: string): boolean {
   ].some((pattern) => pattern.test(text)) || containsSensitiveOAuthFieldValue(text);
 }
 
-async function createAutomaticRunContext(input: {
+async function createMachineRunContext(input: {
   repoRoot: string;
   testedBehaviorCommit: string;
-  startedAt: Date;
+  baseRunId: string;
 }): Promise<AutomaticRunContext> {
   const evidenceRoot = join(input.repoRoot, 'apps/vela-mobile/docs/evidence/hpa-210');
-  const baseRunId = createM1RunId(input.startedAt, 'automated');
   await mkdir(join(evidenceRoot, input.testedBehaviorCommit), { recursive: true });
 
   for (let attempt = 0; attempt < MAX_RUN_DIRECTORY_ATTEMPTS; attempt += 1) {
-    const runId = attempt === 0 ? baseRunId : `${baseRunId}-${attempt + 1}`;
+    const runId = attempt === 0 ? input.baseRunId : `${input.baseRunId}-${attempt + 1}`;
     const directory = createM1RunDirectory({
       evidenceRoot,
       testedBehaviorCommit: input.testedBehaviorCommit,
@@ -1208,18 +1216,25 @@ async function stageCleanScannerInput(input: {
   await writeFile(join(directory, 'scan-input.json'), `${scanInput}\n`, { flag: 'wx' });
 }
 
-async function runAutomatedPhase(
+type MachinePreflight = {
+  configuration: ConfigurationEvaluation;
+  outcome: M1Outcome;
+  findings: M1Manifest['findings'];
+};
+
+/**
+ * Establishes the trusted public configuration and clean-worktree provenance
+ * shared by every machine phase. No native command or detached execution
+ * checkout can begin until this preflight has completed successfully.
+ */
+async function evaluateMachinePreflight(
   args: M1VerifyArguments,
   dependencies: HarnessDependencies,
-): Promise<M1Manifest> {
-  const startedAt = safeDate(dependencies.now);
-  const testedBehaviorCommit = await resolveTestedBehaviorCommit(dependencies);
-  const commands: M1CommandResult[] = [];
-  const evidence: M1EvidenceReference[] = [];
+  evidenceLabel: string,
+): Promise<MachinePreflight> {
   const findings: M1Manifest['findings'] = [];
   let configuration = evaluateMobileConfiguration(dependencies);
   let outcome: M1Outcome = 'passed';
-  let forceRedactedFallback = false;
 
   try {
     if (await hasBlockingDirtyExecutableState(dependencies)) {
@@ -1233,7 +1248,7 @@ async function runAutomatedPhase(
     outcome = 'prerequisite_missing';
     findings.push({
       severity: 'error',
-      summary: 'Git working tree state could not be verified before automated evidence',
+      summary: `Git working tree state could not be verified before ${evidenceLabel} evidence`,
     });
   }
 
@@ -1293,12 +1308,29 @@ async function runAutomatedPhase(
     }
   }
 
+  return { configuration, outcome, findings };
+}
+
+async function runAutomatedPhase(
+  args: M1VerifyArguments,
+  dependencies: HarnessDependencies,
+): Promise<M1Manifest> {
+  const startedAt = safeDate(dependencies.now);
+  const testedBehaviorCommit = await resolveTestedBehaviorCommit(dependencies);
+  const commands: M1CommandResult[] = [];
+  const evidence: M1EvidenceReference[] = [];
+  const preflight = await evaluateMachinePreflight(args, dependencies, 'automated');
+  const findings = preflight.findings;
+  let configuration = preflight.configuration;
+  let outcome = preflight.outcome;
+  let forceRedactedFallback = false;
+
   // A prerequisite manifest is diagnostic only: it has no gate output or
   // evidence references and cannot be treated as passing verification.
-  const context = await createAutomaticRunContext({
+  const context = await createMachineRunContext({
     repoRoot: dependencies.repoRoot,
     testedBehaviorCommit,
-    startedAt,
+    baseRunId: createM1RunId(startedAt, 'automated'),
   });
 
   if (outcome === 'passed') {
@@ -1407,6 +1439,704 @@ async function runAutomatedPhase(
       outcome,
       config: configuration.config,
       platform: dependencies.platform,
+      commands,
+      evidence,
+      findings,
+    });
+  }
+  await writeManifest(context.directory, manifest);
+  return manifest;
+}
+
+type SimulatorDiscovery = {
+  alias: string;
+  runtime: string;
+};
+
+type SimulatorManifestInput = {
+  context: AutomaticRunContext;
+  testedBehaviorCommit: string;
+  startedAt: Date;
+  endedAt: Date;
+  outcome: M1Outcome;
+  config: M1Manifest['config'];
+  host: M1Manifest['host'];
+  commands: M1CommandResult[];
+  evidence: M1EvidenceReference[];
+  findings: M1Manifest['findings'];
+};
+
+type TrustedSimulatorManifestInput = Pick<
+  SimulatorManifestInput,
+  'context' | 'testedBehaviorCommit' | 'startedAt' | 'endedAt'
+>;
+
+function boundedOutput(value: string): string {
+  return value.slice(0, MAX_CAPTURED_OUTPUT_BYTES);
+}
+
+function delay(milliseconds: number): Promise<void> {
+  return new Promise((resolveDelay) => {
+    setTimeout(resolveDelay, milliseconds);
+  });
+}
+
+function safeSimulatorHostValue(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined;
+  const normalized = value.trim();
+  if (
+    normalized === '' ||
+    normalized.length > MAX_SIMULATOR_HOST_VALUE_LENGTH ||
+    Array.from(normalized).some((character) => {
+      const code = character.charCodeAt(0);
+      return code < 32 || code === 127;
+    }) ||
+    containsUnsafeEvidenceText(normalized)
+  ) {
+    return undefined;
+  }
+  return normalized;
+}
+
+function safeSimulatorAlias(value: unknown): string | undefined {
+  const alias = safeSimulatorHostValue(value);
+  return alias && /^(?:iPhone|iPad|Apple Vision Pro)(?: [A-Za-z0-9._-]+)*$/u.test(alias)
+    ? alias
+    : undefined;
+}
+
+function safeSimulatorRuntime(value: unknown): string | undefined {
+  const runtime = safeSimulatorHostValue(value);
+  return runtime && /^com\.apple\.CoreSimulator\.SimRuntime\.iOS-[A-Za-z0-9._-]+$/u.test(runtime)
+    ? runtime
+    : undefined;
+}
+
+/**
+ * Parses only the requested available simulator's non-identifying display
+ * name and runtime. The raw simctl JSON, including UDIDs and local paths,
+ * remains in memory and is never copied into a manifest or finding.
+ */
+function discoverAvailableSimulator(output: string, requestedUdid: string): SimulatorDiscovery | undefined {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(boundedOutput(output));
+  } catch {
+    return undefined;
+  }
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return undefined;
+
+  const devices = (parsed as UnknownRecord).devices;
+  if (typeof devices !== 'object' || devices === null || Array.isArray(devices)) return undefined;
+
+  for (const [runtimeValue, candidates] of Object.entries(devices as UnknownRecord)) {
+    if (!Array.isArray(candidates)) continue;
+    for (const candidate of candidates) {
+      if (typeof candidate !== 'object' || candidate === null || Array.isArray(candidate)) continue;
+      const record = candidate as UnknownRecord;
+      if (record.udid !== requestedUdid) continue;
+      if (record.isAvailable !== true) return undefined;
+
+      const alias = safeSimulatorAlias(record.name);
+      const runtime = safeSimulatorRuntime(runtimeValue);
+      return alias && runtime ? { alias, runtime } : undefined;
+    }
+  }
+
+  return undefined;
+}
+
+function parseXcodeVersion(output: string): string | undefined {
+  const firstLine = boundedOutput(output)
+    .split(/\r?\n/u)
+    .find((line) => line.trim() !== '');
+  const match = firstLine?.trim().match(/^Xcode\s+([0-9]+(?:\.[0-9]+){0,2})(?:\s+\S.*)?$/u);
+  return match?.[1];
+}
+
+function hasSafeBunVersion(output: string): boolean {
+  return /^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/u.test(boundedOutput(output).trim());
+}
+
+function isPathInside(root: string, candidate: string): boolean {
+  const relativePathFromRoot = relative(resolve(root), resolve(candidate));
+  return relativePathFromRoot !== '' && !relativePathFromRoot.startsWith('..');
+}
+
+function deriveSimulatorAppBundlePath(input: {
+  output: string;
+  derivedDataPath: string;
+}): string | undefined {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(boundedOutput(input.output));
+  } catch {
+    return undefined;
+  }
+  if (!Array.isArray(parsed)) return undefined;
+
+  const candidates = new Set<string>();
+  for (const item of parsed) {
+    if (typeof item !== 'object' || item === null || Array.isArray(item)) continue;
+    const buildSettings = (item as UnknownRecord).buildSettings;
+    if (typeof buildSettings !== 'object' || buildSettings === null || Array.isArray(buildSettings)) {
+      continue;
+    }
+    const targetBuildDirectory = (buildSettings as UnknownRecord).TARGET_BUILD_DIR;
+    const wrapperName = (buildSettings as UnknownRecord).WRAPPER_NAME;
+    if (
+      typeof targetBuildDirectory !== 'string' ||
+      typeof wrapperName !== 'string' ||
+      !/^[A-Za-z0-9_.-]+\.app$/u.test(wrapperName)
+    ) {
+      continue;
+    }
+    const appBundlePath = resolve(targetBuildDirectory, wrapperName);
+    if (!isPathInside(input.derivedDataPath, appBundlePath)) continue;
+    candidates.add(appBundlePath);
+  }
+
+  return candidates.size === 1 ? Array.from(candidates)[0] : undefined;
+}
+
+function safeRelativeSimulatorAppPath(workspaceRoot: string, appBundlePath: string): string | undefined {
+  if (!isPathInside(workspaceRoot, appBundlePath)) return undefined;
+  return safeSimulatorHostValue(relativePath(workspaceRoot, appBundlePath));
+}
+
+function parseExecutableName(output: string): string | undefined {
+  const executable = boundedOutput(output).trim();
+  return /^[A-Za-z0-9_.-]+$/u.test(executable) ? executable : undefined;
+}
+
+function processListIncludesExecutable(output: string, executable: string): boolean {
+  return boundedOutput(output)
+    .split(/\r?\n/u)
+    .some((line) => basename(line.trim()) === executable);
+}
+
+async function runSimulatorCommand(input: {
+  dependencies: HarnessDependencies;
+  workspaceRoot: string;
+  commands: M1CommandResult[];
+  spec: CommandSpec;
+}): Promise<Awaited<ReturnType<CommandRunner>>> {
+  const startedAt = safeDate(input.dependencies.now);
+  const result = await input.dependencies.runCommand(input.spec);
+  const endedAt = safeDate(input.dependencies.now);
+  if (!Number.isSafeInteger(result.exitCode)) {
+    throw new M1HarnessError(`Command runner returned an invalid exit code for ${input.spec.label}`);
+  }
+  input.commands.push(
+    createCommandResult({
+      spec: input.spec,
+      repoRoot: input.workspaceRoot,
+      startedAt,
+      endedAt,
+      exitCode: result.exitCode,
+    }),
+  );
+  return result;
+}
+
+function createSimulatorManifest(input: SimulatorManifestInput): M1Manifest {
+  return validateM1Manifest({
+    schemaVersion: 1,
+    runId: input.context.runId,
+    testedBehaviorCommit: input.testedBehaviorCommit,
+    phase: 'ios-simulator',
+    matrixClass: 'automated',
+    startedAt: input.startedAt.toISOString(),
+    endedAt: input.endedAt.toISOString(),
+    outcome: input.outcome,
+    exitCode: M1_EXIT_CODE[input.outcome],
+    config: input.config,
+    host: input.host,
+    commands: input.commands,
+    evidence: input.evidence,
+    findings: input.findings,
+  });
+}
+
+function createRedactedSimulatorManifest(
+  input: TrustedSimulatorManifestInput,
+  summary: string,
+): M1Manifest {
+  const { startedAt, endedAt } = normalizedFallbackManifestTimes(input);
+  return validateM1Manifest({
+    schemaVersion: 1,
+    runId: input.context.runId,
+    testedBehaviorCommit: input.testedBehaviorCommit,
+    phase: 'ios-simulator',
+    matrixClass: 'automated',
+    startedAt: startedAt.toISOString(),
+    endedAt: endedAt.toISOString(),
+    outcome: 'harness_error',
+    exitCode: M1_EXIT_CODE.harness_error,
+    config: redactedMissingConfiguration(),
+    host: {},
+    commands: [],
+    evidence: [],
+    findings: [{ severity: 'error', summary }],
+  });
+}
+
+function createSafeSimulatorManifest(input: SimulatorManifestInput): M1Manifest {
+  const trustedInput: TrustedSimulatorManifestInput = {
+    context: input.context,
+    testedBehaviorCommit: input.testedBehaviorCommit,
+    startedAt: input.startedAt,
+    endedAt: input.endedAt,
+  };
+
+  try {
+    const manifest = createSimulatorManifest(input);
+    const { testedBehaviorCommit: _testedBehaviorCommit, ...content } = manifest;
+    if (!containsUnsafeEvidenceText(JSON.stringify(content))) return manifest;
+    return createRedactedSimulatorManifest(
+      trustedInput,
+      'The iOS Simulator verification manifest contained prohibited sensitive content',
+    );
+  } catch {
+    return createRedactedSimulatorManifest(
+      trustedInput,
+      'The iOS Simulator verification manifest could not be serialized safely',
+    );
+  }
+}
+
+/**
+ * Builds and launches the exact committed WebView artifact on one explicitly
+ * selected Simulator. The UDID is only an in-memory command argument: it is
+ * absent from command records, host fields, findings, and evidence metadata.
+ */
+async function runIosSimulatorPhase(
+  args: M1VerifyArguments,
+  dependencies: HarnessDependencies,
+): Promise<M1Manifest> {
+  const startedAt = safeDate(dependencies.now);
+  const testedBehaviorCommit = await resolveTestedBehaviorCommit(dependencies);
+  const commands: M1CommandResult[] = [];
+  const evidence: M1EvidenceReference[] = [];
+  const preflight = await evaluateMachinePreflight(args, dependencies, 'iOS Simulator');
+  const findings = preflight.findings;
+  const host: M1Manifest['host'] = {};
+  let configuration = preflight.configuration;
+  let outcome = preflight.outcome;
+  let forceRedactedFallback = false;
+
+  if (outcome === 'passed' && dependencies.platform !== 'darwin') {
+    outcome = 'prerequisite_missing';
+    findings.push({
+      severity: 'error',
+      summary: 'iOS Simulator verification requires macOS',
+    });
+  }
+  if (outcome === 'passed' && !args.simulatorUdid) {
+    outcome = 'prerequisite_missing';
+    findings.push({
+      severity: 'error',
+      summary: 'An explicit iOS Simulator identifier is required',
+    });
+  }
+
+  const context = await createMachineRunContext({
+    repoRoot: dependencies.repoRoot,
+    testedBehaviorCommit,
+    baseRunId: `${createM1RunId(startedAt, 'automated')}-ios-simulator`,
+  });
+
+  if (outcome === 'passed') {
+    let workspace: ExecutionWorkspace | undefined;
+    try {
+      if (!configuration.loaded || !args.simulatorUdid) {
+        throw new M1HarnessError('Validated Simulator inputs are unexpectedly unavailable');
+      }
+      workspace = dependencies.createExecutionWorkspace
+        ? await dependencies.createExecutionWorkspace({
+            repoRoot: dependencies.repoRoot,
+            testedBehaviorCommit,
+          })
+        : await createDetachedExecutionWorkspace({
+            repoRoot: dependencies.repoRoot,
+            testedBehaviorCommit,
+          });
+
+      const executionRoot = workspace.root;
+      const mobileRoot = join(executionRoot, 'apps/vela-mobile');
+      const capacitorRoot = join(mobileRoot, 'src-capacitor');
+      const xcodeWorkspace = join(capacitorRoot, 'ios/App/App.xcworkspace');
+      const wwwRoot = join(capacitorRoot, 'www');
+      const derivedDataPath = join(
+        executionRoot,
+        SIMULATOR_DERIVED_DATA_DIRECTORY,
+        context.runId,
+        'DerivedData',
+      );
+      const xcodeBuildArguments = [
+        '-workspace',
+        xcodeWorkspace,
+        '-scheme',
+        'App',
+        '-configuration',
+        'Release',
+        '-sdk',
+        'iphonesimulator',
+        '-destination',
+        `platform=iOS Simulator,id=${args.simulatorUdid}`,
+        '-derivedDataPath',
+        derivedDataPath,
+      ];
+      const commandEnv = commandEnvironment(
+        configuration.loaded,
+        dependencies.executionProcessEnvironment ?? process.env,
+      );
+      const runStep = async (input: {
+        spec: CommandSpec;
+        failureOutcome: 'prerequisite_missing' | 'gate_failed';
+        summary: string;
+      }) => {
+        const result = await runSimulatorCommand({
+          dependencies,
+          workspaceRoot: executionRoot,
+          commands,
+          spec: input.spec,
+        });
+        if (result.exitCode !== 0) {
+          outcome = input.failureOutcome;
+          findings.push({ severity: 'error', summary: input.summary });
+          return undefined;
+        }
+        return result;
+      };
+
+      const xcodeVersionResult = await runStep({
+        spec: {
+          label: 'xcode-version',
+          command: 'xcodebuild',
+          args: ['-version'],
+          cwd: executionRoot,
+          env: commandEnv,
+        },
+        failureOutcome: 'prerequisite_missing',
+        summary: 'Xcode is unavailable for iOS Simulator verification',
+      });
+      if (xcodeVersionResult) {
+        const xcodeVersion = parseXcodeVersion(xcodeVersionResult.stdout);
+        if (!xcodeVersion) {
+          outcome = 'prerequisite_missing';
+          findings.push({ severity: 'error', summary: 'Xcode version output could not be verified safely' });
+        } else {
+          host.xcodeVersion = xcodeVersion;
+        }
+      }
+
+      if (outcome === 'passed') {
+        const bunVersionResult = await runStep({
+          spec: {
+            label: 'bun-version',
+            command: 'bun',
+            args: ['--version'],
+            cwd: executionRoot,
+            env: commandEnv,
+          },
+          failureOutcome: 'prerequisite_missing',
+          summary: 'Bun is unavailable for iOS Simulator verification',
+        });
+        if (bunVersionResult && !hasSafeBunVersion(bunVersionResult.stdout)) {
+          outcome = 'prerequisite_missing';
+          findings.push({ severity: 'error', summary: 'Bun version output could not be verified safely' });
+        }
+      }
+
+      if (outcome === 'passed') {
+        await runStep({
+          spec: {
+            label: 'mobile-dependency-versions',
+            command: 'bun',
+            args: [
+              'pm',
+              'ls',
+              'quasar',
+              '@capacitor/core',
+              '@capacitor/ios',
+              '@capacitor/app',
+              '@capacitor/keyboard',
+            ],
+            cwd: mobileRoot,
+            env: commandEnv,
+          },
+          failureOutcome: 'prerequisite_missing',
+          summary: 'Mobile dependency versions could not be verified',
+        });
+      }
+
+      if (outcome === 'passed') {
+        const discoveryResult = await runStep({
+          spec: {
+            label: 'simulator-discovery',
+            command: 'xcrun',
+            args: ['simctl', 'list', 'devices', 'available', '--json'],
+            cwd: executionRoot,
+            env: commandEnv,
+          },
+          failureOutcome: 'prerequisite_missing',
+          summary: 'Available iOS Simulators could not be discovered',
+        });
+        if (discoveryResult) {
+          const simulator = discoverAvailableSimulator(discoveryResult.stdout, args.simulatorUdid);
+          if (!simulator) {
+            outcome = 'prerequisite_missing';
+            findings.push({
+              severity: 'error',
+              summary: 'The requested iOS Simulator or runtime is unavailable',
+            });
+          } else {
+            host.simulatorAlias = simulator.alias;
+            host.simulatorRuntime = simulator.runtime;
+          }
+        }
+      }
+
+      if (outcome === 'passed') {
+        await runStep({
+          spec: {
+            label: 'production-diagnostics',
+            command: 'bun',
+            args: ['run', '--cwd', 'apps/vela-mobile', 'verify:production-diagnostics'],
+            cwd: executionRoot,
+            env: commandEnv,
+          },
+          failureOutcome: 'gate_failed',
+          summary: 'Production diagnostics failed before iOS Simulator build',
+        });
+      }
+
+      let wwwHashBefore: string | undefined;
+      if (outcome === 'passed') {
+        try {
+          wwwHashBefore = await hashDirectory(wwwRoot);
+          host.wwwHashBefore = wwwHashBefore;
+        } catch {
+          outcome = 'gate_failed';
+          findings.push({
+            severity: 'error',
+            summary: 'Verified production WebView assets could not be hashed',
+          });
+        }
+      }
+
+      if (outcome === 'passed') {
+        await runStep({
+          spec: {
+            label: 'capacitor-sync-ios',
+            command: 'bunx',
+            args: ['cap', 'sync', 'ios'],
+            cwd: capacitorRoot,
+            env: commandEnv,
+          },
+          failureOutcome: 'gate_failed',
+          summary: 'Capacitor iOS sync failed after production asset verification',
+        });
+      }
+
+      if (outcome === 'passed' && wwwHashBefore) {
+        try {
+          const wwwHashAfter = await hashDirectory(wwwRoot);
+          host.wwwHashAfter = wwwHashAfter;
+          if (wwwHashAfter !== wwwHashBefore) {
+            outcome = 'gate_failed';
+            findings.push({
+              severity: 'error',
+              summary: 'cap sync changed verified WebView assets',
+            });
+          }
+        } catch {
+          outcome = 'gate_failed';
+          findings.push({
+            severity: 'error',
+            summary: 'WebView assets could not be re-hashed after Capacitor sync',
+          });
+        }
+      }
+
+      let appBundlePath: string | undefined;
+      if (outcome === 'passed') {
+        const buildSettingsResult = await runStep({
+          spec: {
+            label: 'simulator-build-settings',
+            command: 'xcodebuild',
+            args: ['-showBuildSettings', '-json', ...xcodeBuildArguments],
+            cwd: executionRoot,
+            env: commandEnv,
+          },
+          failureOutcome: 'gate_failed',
+          summary: 'Simulator app build settings could not be resolved',
+        });
+        if (buildSettingsResult) {
+          appBundlePath = deriveSimulatorAppBundlePath({
+            output: buildSettingsResult.stdout,
+            derivedDataPath,
+          });
+          const relativeAppBundlePath = appBundlePath
+            ? safeRelativeSimulatorAppPath(executionRoot, appBundlePath)
+            : undefined;
+          if (!appBundlePath || !relativeAppBundlePath) {
+            outcome = 'gate_failed';
+            findings.push({
+              severity: 'error',
+              summary: 'Simulator app bundle path could not be derived safely',
+            });
+          } else {
+            host.appBundlePath = relativeAppBundlePath;
+          }
+        }
+      }
+
+      if (outcome === 'passed') {
+        await runStep({
+          spec: {
+            label: 'simulator-build',
+            command: 'xcodebuild',
+            args: [...xcodeBuildArguments, 'CODE_SIGNING_ALLOWED=NO', 'build'],
+            cwd: executionRoot,
+            env: commandEnv,
+          },
+          failureOutcome: 'gate_failed',
+          summary: 'Unsigned iOS Simulator build failed',
+        });
+      }
+
+      let executable: string | undefined;
+      if (outcome === 'passed' && appBundlePath) {
+        const executableResult = await runStep({
+          spec: {
+            label: 'simulator-executable',
+            command: 'plutil',
+            args: ['-extract', 'CFBundleExecutable', 'raw', join(appBundlePath, 'Info.plist')],
+            cwd: executionRoot,
+            env: commandEnv,
+          },
+          failureOutcome: 'gate_failed',
+          summary: 'Simulator app executable could not be read from Info.plist',
+        });
+        if (executableResult) {
+          executable = parseExecutableName(executableResult.stdout);
+          if (!executable) {
+            outcome = 'gate_failed';
+            findings.push({
+              severity: 'error',
+              summary: 'Simulator app executable name could not be verified safely',
+            });
+          }
+        }
+      }
+
+      if (outcome === 'passed') {
+        await runStep({
+          spec: {
+            label: 'simulator-bootstatus',
+            command: 'xcrun',
+            args: ['simctl', 'bootstatus', args.simulatorUdid, '-b'],
+            cwd: executionRoot,
+            env: commandEnv,
+          },
+          failureOutcome: 'gate_failed',
+          summary: 'Requested iOS Simulator could not be booted',
+        });
+      }
+
+      if (outcome === 'passed' && appBundlePath) {
+        await runStep({
+          spec: {
+            label: 'simulator-install',
+            command: 'xcrun',
+            args: ['simctl', 'install', args.simulatorUdid, appBundlePath],
+            cwd: executionRoot,
+            env: commandEnv,
+          },
+          failureOutcome: 'gate_failed',
+          summary: 'Simulator app installation failed',
+        });
+      }
+
+      if (outcome === 'passed') {
+        await runStep({
+          spec: {
+            label: 'simulator-launch',
+            command: 'xcrun',
+            args: ['simctl', 'launch', args.simulatorUdid, 'com.vela.app'],
+            cwd: executionRoot,
+            env: commandEnv,
+          },
+          failureOutcome: 'gate_failed',
+          summary: 'Simulator app launch failed',
+        });
+      }
+
+      if (outcome === 'passed' && executable) {
+        await (dependencies.sleep ?? delay)(SIMULATOR_PROCESS_CHECK_DELAY_MS);
+        const processResult = await runStep({
+          spec: {
+            label: 'simulator-process-list',
+            command: 'xcrun',
+            args: ['simctl', 'spawn', args.simulatorUdid, 'ps', '-A', '-o', 'comm='],
+            cwd: executionRoot,
+            env: commandEnv,
+          },
+          failureOutcome: 'gate_failed',
+          summary: 'Simulator process list could not be inspected',
+        });
+        if (processResult && !processListIncludesExecutable(processResult.stdout, executable)) {
+          outcome = 'gate_failed';
+          findings.push({
+            severity: 'error',
+            summary: 'Launched simulator app process was not present after the bounded wait',
+          });
+        }
+      }
+    } catch {
+      forceRedactedFallback = true;
+      outcome = 'harness_error';
+    } finally {
+      if (workspace) {
+        try {
+          await workspace.dispose();
+        } catch {
+          forceRedactedFallback = true;
+          outcome = 'harness_error';
+        }
+      }
+    }
+  }
+
+  const finalTiming = safeFinalManifestTiming(dependencies.now, startedAt);
+  const trustedFinalInput: TrustedSimulatorManifestInput = {
+    context,
+    testedBehaviorCommit,
+    startedAt,
+    endedAt: finalTiming.endedAt,
+  };
+  let manifest: M1Manifest;
+  if (!finalTiming.isReliable) {
+    manifest = createRedactedSimulatorManifest(
+      trustedFinalInput,
+      'The iOS Simulator verification harness could not produce a valid final timestamp',
+    );
+  } else if (forceRedactedFallback) {
+    manifest = createRedactedSimulatorManifest(
+      trustedFinalInput,
+      'The iOS Simulator verification harness could not execute safely',
+    );
+  } else {
+    manifest = createSafeSimulatorManifest({
+      context,
+      testedBehaviorCommit,
+      startedAt,
+      endedAt: finalTiming.endedAt,
+      outcome,
+      config: configuration.config,
+      host,
       commands,
       evidence,
       findings,
@@ -1601,17 +2331,18 @@ async function runManualPhase(
 }
 
 /**
- * Runs the currently implemented verification phase. Simulator and physical
- * preflight remain explicit extension points for Tasks 6–7: they are accepted
- * syntax but never silently produce partial automation evidence in Task 5.
+ * Runs the currently implemented verification phase. The Simulator phase is
+ * independent evidence; `all` remains deliberately unimplemented until the
+ * physical preflight can join every required machine phase atomically.
  */
 export async function runM1FoundationVerification(
   args: ReturnType<typeof parseM1Arguments>,
   dependencies: HarnessDependencies,
 ): Promise<M1Manifest[]> {
   if (args.mode === 'record-manual') return [await runManualPhase(args, dependencies)];
-  if (args.phase !== 'automated') {
-    throw new M1HarnessError(`${args.phase} verification is not implemented in the automated phase`);
-  }
-  return [await runAutomatedPhase(args, dependencies)];
+  if (args.phase === 'automated') return [await runAutomatedPhase(args, dependencies)];
+  if (args.phase === 'ios-simulator') return [await runIosSimulatorPhase(args, dependencies)];
+  throw new M1HarnessError(
+    `${args.phase} verification is not implemented until every required machine phase can run atomically`,
+  );
 }
