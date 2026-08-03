@@ -124,6 +124,50 @@ cd apps/vela-mobile/src-capacitor && bunx cap open ios
 `build:ios:ide` runs `sync:ios-version` first so `MARKETING_VERSION` stays
 aligned with the Home page version before Xcode archives the bundle.
 
+## M1 Foundation Verification
+
+Run one verifier phase at a time from `apps/vela-mobile`:
+
+```bash
+bun run verify:m1-foundation -- --phase automated
+bun run verify:m1-foundation -- --phase ios-simulator --simulator-udid <id>
+bun run verify:m1-foundation -- --phase ios-physical-preflight --device-id <id>
+```
+
+The record distinguishes two build classes. A **diagnostic observation** uses
+a Debug development build and development-only diagnostic routes for an
+interactive observation. A **production smoke** uses packaged production
+Capacitor assets, where the diagnostics are excluded and scanned from
+`src-capacitor/www/`. Do not treat a diagnostic observation as production
+smoke evidence or vice versa.
+
+For a closure run, add `--require-deployed-config` to the applicable command.
+It requires a valid, non-placeholder production configuration, rejects
+`MOBILE_SKIP_ENV_VALIDATION=true`, and checks the loaded public mobile
+identifiers against the deployed CDK outputs. A local or CI run without that
+flag can still be useful, but it is not deployed closure evidence.
+
+The verifier's exit codes are stable:
+
+| Exit code | Meaning                             |
+| --------- | ----------------------------------- |
+| `0`       | Verification passed.                |
+| `1`       | Harness error.                      |
+| `2`       | Invalid command usage.              |
+| `3`       | A required prerequisite is missing. |
+| `4`       | A verification gate failed.         |
+
+There is intentionally no committed `DEVELOPMENT_TEAM`; physical-device
+signing remains a tester-controlled prerequisite. After production
+`src-capacitor/www/` has been hashed for an iOS Simulator verification run,
+do not run a Quasar rebuild in that verification workspace. Capacitor sync may
+follow only if it preserves the hash; start a new verification run before
+building Quasar assets again.
+
+See [iOS Foundation Architecture](docs/ios-foundation-architecture.md) for the
+source contract and [M1 iOS Foundation Verification](docs/m1-ios-foundation-verification.md)
+for the append-only evidence record.
+
 ## Physical Device
 
 `cap open ios` only launches Xcode — it does not build web assets, install
