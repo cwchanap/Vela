@@ -9,6 +9,9 @@ import { resolveMobileSecretRoot, scanMobileSecretRoots } from './scan-mobile-se
 
 const temporaryRoots = [];
 const scannerPath = fileURLToPath(new URL('./scan-mobile-secrets.mjs', import.meta.url));
+const iosFoundationArchitecturePath = fileURLToPath(
+  new URL('../docs/ios-foundation-architecture.md', import.meta.url),
+);
 
 async function createTemporaryRoot() {
   const root = await mkdtemp(join(tmpdir(), 'vela-secret-scan-'));
@@ -23,6 +26,18 @@ afterEach(async () => {
 });
 
 describe('scanMobileSecretRoots', () => {
+  it('keeps the iOS foundation architecture record free of secret-shaped examples', async () => {
+    const root = await createTemporaryRoot();
+    await writeFile(
+      join(root, 'ios-foundation-architecture.md'),
+      await readFile(iosFoundationArchitecturePath, 'utf8'),
+    );
+
+    await expect(scanMobileSecretRoots({ roots: [root], exclusions: [] })).resolves.toEqual(
+      expect.objectContaining({ findings: [] }),
+    );
+  });
+
   it('resolves the Task 5 repository-relative mobile root from a Bun package CWD', async () => {
     const repositoryRoot = await createTemporaryRoot();
     const mobilePackageRoot = join(repositoryRoot, 'apps', 'vela-mobile');

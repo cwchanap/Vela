@@ -52,7 +52,8 @@ any observed device behavior rather than infer it from this implementation.
 The mobile build supplies an absolute API origin through the validated mobile
 configuration. Authenticated callers provide a relative, non-escaping API
 path; the coordinator resolves it below that origin and centrally supplies the
-`Authorization: Bearer <ID token>` header. Callers cannot override that header.
+standard bearer authorization header carrying the ID token. Callers cannot
+override that header.
 
 HTTPS is required for authenticated transport, except for a development-only
 loopback HTTP origin. A request is rejected when its path, headers, timeout, or
