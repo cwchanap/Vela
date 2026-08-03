@@ -1854,6 +1854,20 @@ async function runIosSimulatorPhase(
       if (outcome === 'passed') {
         await runStep({
           spec: {
+            label: 'simulator-dependency-install',
+            command: 'bun',
+            args: ['install', '--frozen-lockfile'],
+            cwd: executionRoot,
+            env: commandEnv,
+          },
+          failureOutcome: 'gate_failed',
+          summary: 'Clean iOS Simulator dependency installation failed',
+        });
+      }
+
+      if (outcome === 'passed') {
+        await runStep({
+          spec: {
             label: 'mobile-dependency-versions',
             command: 'bun',
             args: [

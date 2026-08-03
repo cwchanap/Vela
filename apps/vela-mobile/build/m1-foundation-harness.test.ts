@@ -1176,6 +1176,7 @@ describe('iOS Simulator M1 foundation verification', () => {
       ['git', 'rev-parse', 'HEAD'],
       ['xcodebuild', '-version', undefined],
       ['bun', '--version', undefined],
+      ['bun', 'install', '--frozen-lockfile'],
       ['bun', 'pm', 'ls'],
       ['xcrun', 'simctl', 'list'],
       ['bun', 'run', '--cwd'],
@@ -1188,7 +1189,8 @@ describe('iOS Simulator M1 foundation verification', () => {
       ['xcrun', 'simctl', 'launch'],
       ['xcrun', 'simctl', 'spawn'],
     ]);
-    expect(runner.calls[2]!.args).toEqual([
+    expect(runner.calls[2]!.args).toEqual(['install', '--frozen-lockfile']);
+    expect(runner.calls[3]!.args).toEqual([
       'pm',
       'ls',
       'quasar',
@@ -1197,7 +1199,7 @@ describe('iOS Simulator M1 foundation verification', () => {
       '@capacitor/app',
       '@capacitor/keyboard',
     ]);
-    expect(runner.calls[7]!.args).toEqual(
+    expect(runner.calls[8]!.args).toEqual(
       expect.arrayContaining([
         '-scheme',
         'App',
@@ -1211,11 +1213,11 @@ describe('iOS Simulator M1 foundation verification', () => {
         'build',
       ]),
     );
-    expect(runner.calls[10]!.args).toEqual(['simctl', 'install', simulatorUdid, expect.any(String)]);
-    expect(runner.calls[11]!.args).toEqual(['simctl', 'launch', simulatorUdid, 'com.vela.app']);
-    expect(runner.calls[12]!.args).toEqual(['simctl', 'spawn', simulatorUdid, 'ps', '-A', '-o', 'comm=']);
-    const derivedDataPath = runner.calls[6]!.args[runner.calls[6]!.args.indexOf('-derivedDataPath') + 1]!;
-    expect(runner.calls[8]!.args).toEqual([
+    expect(runner.calls[11]!.args).toEqual(['simctl', 'install', simulatorUdid, expect.any(String)]);
+    expect(runner.calls[12]!.args).toEqual(['simctl', 'launch', simulatorUdid, 'com.vela.app']);
+    expect(runner.calls[13]!.args).toEqual(['simctl', 'spawn', simulatorUdid, 'ps', '-A', '-o', 'comm=']);
+    const derivedDataPath = runner.calls[7]!.args[runner.calls[7]!.args.indexOf('-derivedDataPath') + 1]!;
+    expect(runner.calls[9]!.args).toEqual([
       '-extract',
       'CFBundleExecutable',
       'raw',
@@ -1330,6 +1332,7 @@ describe('iOS Simulator M1 foundation verification', () => {
     expect(runner.calls.map(({ command, args }) => [command, args[0]])).toEqual([
       ['xcodebuild', '-version'],
       ['bun', '--version'],
+      ['bun', 'install'],
       ['bun', 'pm'],
       ['xcrun', 'simctl'],
       ['bun', 'run'],
@@ -1392,6 +1395,7 @@ describe('iOS Simulator M1 foundation verification', () => {
     expect(runner.calls.map(({ command, args }) => [command, args[0]])).toEqual([
       ['xcodebuild', '-version'],
       ['bun', '--version'],
+      ['bun', 'install'],
       ['bun', 'pm'],
       ['xcrun', 'simctl'],
     ]);
@@ -1558,7 +1562,7 @@ describe('iOS Simulator M1 foundation verification', () => {
       'utf8',
     );
 
-    expect(runner.calls).toHaveLength(13);
+    expect(runner.calls).toHaveLength(14);
     expect(dispose).toHaveBeenCalledTimes(1);
     expect(manifest.outcome).toBe('harness_error');
     expect(manifest.config).toEqual({
