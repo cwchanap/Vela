@@ -69,6 +69,8 @@ const simulatorUdid = [
   'b'.repeat(12),
 ].join('-');
 const simulatorRuntime = 'com.apple.CoreSimulator.SimRuntime.iOS-18-2';
+const physicalDeviceId = '00008120-001A185E0E234567';
+const physicalSigningTeam = 'LOCAL-TEAM-MUST-NOT-PERSIST';
 
 afterEach(() => {
   for (const directory of temporaryDirectories.splice(0)) {
@@ -188,6 +190,75 @@ function createSimulatorRunner(input: {
   };
 
   return { calls, runCommand };
+}
+
+function physicalDeviceList(overrides: Record<string, unknown> = {}) {
+  return {
+    result: {
+      devices: [
+        {
+          identifier: physicalDeviceId,
+          name: 'iPhone 16 Pro',
+          model: 'iPhone17,1',
+          available: true,
+          trusted: true,
+          developerMode: true,
+          accountEmail: 'tester@example.com',
+          ...overrides,
+        },
+      ],
+    },
+  };
+}
+
+function physicalBuildSettings(overrides: Record<string, unknown> = {}) {
+  return [
+    {
+      buildSettings: {
+        CODE_SIGN_STYLE: 'Automatic',
+        DEVELOPMENT_TEAM: physicalSigningTeam,
+        PRODUCT_BUNDLE_IDENTIFIER: 'com.vela.app',
+        ...overrides,
+      },
+    },
+  ];
+}
+
+function createPhysicalPreflightRunner(input: {
+  deviceList?: unknown;
+  buildSettings?: unknown;
+  deviceListExitCode?: number;
+  buildSettingsExitCode?: number;
+} = {}) {
+  const calls: CommandSpec[] = [];
+  const rawJsonPaths: string[] = [];
+  const runCommand: CommandRunner = async (spec) => {
+    calls.push(spec);
+
+    if (
+      spec.command === 'xcrun' &&
+      spec.args.slice(0, 3).join(' ') === 'devicectl list devices'
+    ) {
+      const jsonOutputIndex = spec.args.indexOf('--json-output');
+      const rawJsonPath = spec.args[jsonOutputIndex + 1];
+      if (typeof rawJsonPath === 'string') {
+        rawJsonPaths.push(rawJsonPath);
+        writeFileSync(rawJsonPath, JSON.stringify(input.deviceList ?? physicalDeviceList()));
+      }
+      return { exitCode: input.deviceListExitCode ?? 0, stdout: '', stderr: '' };
+    }
+    if (spec.command === 'xcodebuild' && spec.args[0] === '-showBuildSettings') {
+      return {
+        exitCode: input.buildSettingsExitCode ?? 0,
+        stdout: JSON.stringify(input.buildSettings ?? physicalBuildSettings()),
+        stderr: '',
+      };
+    }
+
+    return { exitCode: 0, stdout: '', stderr: '' };
+  };
+
+  return { calls, rawJsonPaths, runCommand };
 }
 
 function createDependencies(input: {
@@ -1521,6 +1592,246 @@ describe('iOS Simulator M1 foundation verification', () => {
       ),
     ).rejects.toThrow(M1HarnessError);
     expect(runner.calls).toEqual([]);
+  });
+});
+
+describe('iOS physical-device M1 foundation preflight', () => {
+  it('runs the pinned physical discovery and Debug signing checks without persisting raw device data', async () => {
+    const repository = createTemporaryRepository();
+    const workspace = createTemporaryExecutionWorkspace();
+    const runner = createPhysicalPreflightRunner();
+    const dependencies = createDependencies({ repoRoot: repository, runCommand: runner.runCommand });
+    const { createExecutionWorkspace, dispose } = attachCleanExecutionWorkspace(
+      dependencies,
+      workspace,
+    );
+
+    const manifest = onlyManifest(
+      await runM1FoundationVerification(
+        parseM1Arguments([
+          '--phase',
+          'ios-physical-preflight',
+          '--device-id',
+          physicalDeviceId,
+          '--require-deployed-config',
+        ]),
+        dependencies,
+      ),
+    );
+    const manifestPath = join(
+      repository,
+      'apps/vela-mobile/docs/evidence/hpa-210',
+      testedBehaviorCommit,
+      manifest.runId,
+      'manifest.json',
+    );
+    const rawJsonPath = runner.rawJsonPaths[0]!;
+    const xcodeWorkspace = join(workspace, 'apps/vela-mobile/src-capacitor/ios/App/App.xcworkspace');
+
+    expect(runner.calls).toHaveLength(2);
+    expect(runner.calls[0]).toMatchObject({
+      command: 'xcrun',
+      args: ['devicectl', 'list', 'devices', '--json-output', rawJsonPath],
+      cwd: workspace,
+    });
+    expect(runner.calls[1]).toMatchObject({
+      command: 'xcodebuild',
+      args: [
+        '-showBuildSettings',
+        '-json',
+        '-workspace',
+        xcodeWorkspace,
+        '-scheme',
+        'App',
+        '-configuration',
+        'Debug',
+        '-destination',
+        `id=${physicalDeviceId}`,
+      ],
+      cwd: workspace,
+    });
+    expect(runner.calls.map(({ env }) => Object.keys(env ?? {}).sort())).toEqual([
+      PUBLIC_MOBILE_ENV_KEYS,
+      PUBLIC_MOBILE_ENV_KEYS,
+    ]);
+    expect(createExecutionWorkspace).toHaveBeenCalledWith({ repoRoot: repository, testedBehaviorCommit });
+    expect(dispose).toHaveBeenCalledTimes(1);
+    expect(rawJsonPath.startsWith(tmpdir())).toBe(true);
+    expect(rawJsonPath).not.toContain('/docs/evidence/');
+    expect(existsSync(rawJsonPath)).toBe(false);
+    expect(manifest).toMatchObject({
+      phase: 'ios-physical-preflight',
+      matrixClass: 'physical-preflight',
+      outcome: 'passed',
+      exitCode: 0,
+      config: { class: 'deployed', publicIdentifiersConsistent: true },
+      host: {
+        deviceAlias: 'iPhone 16 Pro',
+        deviceModel: 'iPhone17,1',
+        signingReady: true,
+      },
+    });
+    expect(Object.keys(manifest.host).sort()).toEqual([
+      'deviceAlias',
+      'deviceModel',
+      'signingReady',
+    ]);
+    const serializedManifest = readFileSync(manifestPath, 'utf8');
+    expect(serializedManifest).not.toContain(physicalDeviceId);
+    expect(serializedManifest).not.toContain(physicalSigningTeam);
+    expect(serializedManifest).not.toContain('tester@example.com');
+    expect(serializedManifest).not.toContain(JSON.stringify(physicalDeviceList()));
+  });
+
+  it('returns prerequisite_missing without native commands on non-macOS', async () => {
+    const repository = createTemporaryRepository();
+    const runner = createPhysicalPreflightRunner();
+    const dependencies = createDependencies({ repoRoot: repository, runCommand: runner.runCommand });
+    dependencies.platform = 'linux';
+
+    const manifest = onlyManifest(
+      await runM1FoundationVerification(
+        parseM1Arguments(['--phase', 'ios-physical-preflight', '--device-id', physicalDeviceId]),
+        dependencies,
+      ),
+    );
+
+    expect(manifest.outcome).toBe('prerequisite_missing');
+    expect(manifest.exitCode).toBe(3);
+    expect(runner.calls).toEqual([]);
+  });
+
+  it.each([
+    {
+      name: 'the requested device is absent',
+      deviceList: { result: { devices: [] } },
+      expectedCallCount: 1,
+      expectedHost: {},
+    },
+    {
+      name: 'the requested device is unavailable',
+      deviceList: physicalDeviceList({ available: false }),
+      expectedCallCount: 1,
+      expectedHost: {},
+    },
+    {
+      name: 'the requested device is untrusted',
+      deviceList: physicalDeviceList({ trusted: false }),
+      expectedCallCount: 1,
+      expectedHost: {},
+    },
+    {
+      name: 'Developer Mode is disabled',
+      deviceList: physicalDeviceList({ developerMode: false }),
+      expectedCallCount: 1,
+      expectedHost: {},
+    },
+    {
+      name: 'the resolved signing team is empty',
+      deviceList: physicalDeviceList(),
+      buildSettings: physicalBuildSettings({ DEVELOPMENT_TEAM: '  ' }),
+      expectedCallCount: 2,
+      expectedHost: {
+        deviceAlias: 'iPhone 16 Pro',
+        deviceModel: 'iPhone17,1',
+        signingReady: false,
+      },
+    },
+    {
+      name: 'the project resolves manual signing',
+      deviceList: physicalDeviceList(),
+      buildSettings: physicalBuildSettings({ CODE_SIGN_STYLE: 'Manual' }),
+      expectedCallCount: 2,
+      expectedHost: {
+        deviceAlias: 'iPhone 16 Pro',
+        deviceModel: 'iPhone17,1',
+        signingReady: false,
+      },
+    },
+    {
+      name: 'the project resolves a different bundle identifier',
+      deviceList: physicalDeviceList(),
+      buildSettings: physicalBuildSettings({ PRODUCT_BUNDLE_IDENTIFIER: 'com.example.other' }),
+      expectedCallCount: 2,
+      expectedHost: {
+        deviceAlias: 'iPhone 16 Pro',
+        deviceModel: 'iPhone17,1',
+        signingReady: false,
+      },
+    },
+  ])('returns a redacted prerequisite manifest when $name', async (scenario) => {
+    const repository = createTemporaryRepository();
+    const runner = createPhysicalPreflightRunner(scenario);
+
+    const manifest = onlyManifest(
+      await runM1FoundationVerification(
+        parseM1Arguments(['--phase', 'ios-physical-preflight', '--device-id', physicalDeviceId]),
+        createDependencies({ repoRoot: repository, runCommand: runner.runCommand }),
+      ),
+    );
+    const serializedManifest = readFileSync(
+      join(
+        repository,
+        'apps/vela-mobile/docs/evidence/hpa-210',
+        testedBehaviorCommit,
+        manifest.runId,
+        'manifest.json',
+      ),
+      'utf8',
+    );
+
+    expect(manifest.outcome).toBe('prerequisite_missing');
+    expect(manifest.exitCode).toBe(3);
+    expect(manifest.host).toEqual(scenario.expectedHost);
+    expect(runner.calls).toHaveLength(scenario.expectedCallCount);
+    expect(serializedManifest).not.toContain(physicalDeviceId);
+    expect(serializedManifest).not.toContain(physicalSigningTeam);
+    expect(serializedManifest).not.toContain('tester@example.com');
+  });
+
+  it('uses the trusted-only redacted envelope when physical preflight execution throws', async () => {
+    const repository = createTemporaryRepository();
+    const calls: CommandSpec[] = [];
+    let rawJsonPath: string | undefined;
+    const runner: CommandRunner = async (spec) => {
+      calls.push(spec);
+      rawJsonPath = spec.args[spec.args.indexOf('--json-output') + 1];
+      throw new Error(`SECRET-id-token physical failure for ${physicalDeviceId}`);
+    };
+
+    const manifest = onlyManifest(
+      await runM1FoundationVerification(
+        parseM1Arguments(['--phase', 'ios-physical-preflight', '--device-id', physicalDeviceId]),
+        createDependencies({ repoRoot: repository, runCommand: runner }),
+      ),
+    );
+    const serializedManifest = readFileSync(
+      join(
+        repository,
+        'apps/vela-mobile/docs/evidence/hpa-210',
+        testedBehaviorCommit,
+        manifest.runId,
+        'manifest.json',
+      ),
+      'utf8',
+    );
+
+    expect(calls).toHaveLength(1);
+    expect(rawJsonPath).toEqual(expect.any(String));
+    expect(existsSync(rawJsonPath!)).toBe(false);
+    expect(manifest.outcome).toBe('harness_error');
+    expect(manifest.exitCode).toBe(1);
+    expect(manifest.config).toEqual({
+      source: 'none',
+      class: 'missing',
+      publicIdentifiersConsistent: false,
+    });
+    expect(manifest.host).toEqual({});
+    expect(manifest.commands).toEqual([]);
+    expect(manifest.evidence).toEqual([]);
+    expect(serializedManifest).not.toContain('SECRET-id-token');
+    expect(serializedManifest).not.toContain(physicalDeviceId);
+    expect(serializedManifest).not.toContain(deployedEnvironment.VITE_COGNITO_OAUTH_DOMAIN!);
   });
 });
 

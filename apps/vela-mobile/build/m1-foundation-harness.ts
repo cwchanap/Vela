@@ -28,6 +28,8 @@ const EXECUTION_WORKSPACE_PREFIX = 'vela-m1-foundation-';
 const SIMULATOR_DERIVED_DATA_DIRECTORY = '.m1-ios-simulator';
 const SIMULATOR_PROCESS_CHECK_DELAY_MS = 5_000;
 const MAX_SIMULATOR_HOST_VALUE_LENGTH = 256;
+const PHYSICAL_DEVICE_TEMPORARY_PREFIX = 'vela-m1-physical-device-';
+const MAX_PHYSICAL_DEVICE_JSON_BYTES = 256 * 1024;
 const GENERIC_AUTOMATED_HARNESS_FAILURE =
   'The automated verification harness could not execute safely';
 const MANUAL_INPUT_DECODER = new TextDecoder('utf-8', { fatal: true });
@@ -2146,6 +2148,528 @@ async function runIosSimulatorPhase(
   return manifest;
 }
 
+type PhysicalDeviceSummary = {
+  alias: string;
+  model: string;
+  available: boolean;
+  trusted: boolean;
+  developerMode: boolean;
+};
+
+type PhysicalManifestInput = {
+  context: AutomaticRunContext;
+  testedBehaviorCommit: string;
+  startedAt: Date;
+  endedAt: Date;
+  outcome: M1Outcome;
+  config: M1Manifest['config'];
+  host: M1Manifest['host'];
+  commands: M1CommandResult[];
+  evidence: M1EvidenceReference[];
+  findings: M1Manifest['findings'];
+};
+
+type TrustedPhysicalManifestInput = Pick<
+  PhysicalManifestInput,
+  'context' | 'testedBehaviorCommit' | 'startedAt' | 'endedAt'
+>;
+
+function asUnknownRecord(value: unknown): UnknownRecord | undefined {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+    ? (value as UnknownRecord)
+    : undefined;
+}
+
+function nestedRecord(record: UnknownRecord, key: string): UnknownRecord | undefined {
+  return asUnknownRecord(record[key]);
+}
+
+function firstStringValue(records: readonly UnknownRecord[], keys: readonly string[]): string | undefined {
+  for (const record of records) {
+    for (const key of keys) {
+      const value = record[key];
+      if (typeof value === 'string') return value;
+    }
+  }
+  return undefined;
+}
+
+function normalizedBooleanValue(
+  value: unknown,
+  trueValues: ReadonlySet<string>,
+  falseValues: ReadonlySet<string>,
+): boolean | undefined {
+  if (typeof value === 'boolean') return value;
+  if (typeof value !== 'string') return undefined;
+
+  const normalized = value.trim().toLowerCase();
+  if (trueValues.has(normalized)) return true;
+  if (falseValues.has(normalized)) return false;
+  return undefined;
+}
+
+function consistentBooleanValue(input: {
+  records: readonly UnknownRecord[];
+  keys: readonly string[];
+  trueValues: ReadonlySet<string>;
+  falseValues: ReadonlySet<string>;
+}): boolean | undefined {
+  let resolved: boolean | undefined;
+  for (const record of input.records) {
+    for (const key of input.keys) {
+      const value = normalizedBooleanValue(record[key], input.trueValues, input.falseValues);
+      if (value === undefined) continue;
+      if (resolved !== undefined && resolved !== value) return undefined;
+      resolved = value;
+    }
+  }
+  return resolved;
+}
+
+function safePhysicalHostValue(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined;
+  const normalized = value.trim();
+  if (
+    normalized === '' ||
+    normalized.length > MAX_SIMULATOR_HOST_VALUE_LENGTH ||
+    Array.from(normalized).some((character) => {
+      const code = character.charCodeAt(0);
+      return code < 32 || code === 127;
+    }) ||
+    containsUnsafeEvidenceText(normalized)
+  ) {
+    return undefined;
+  }
+  return normalized;
+}
+
+function safePhysicalDeviceAlias(value: unknown): string | undefined {
+  const alias = safePhysicalHostValue(value);
+  return alias && /^(?:iPhone|iPad|iPod touch)(?: [A-Za-z0-9._-]+)*$/u.test(alias)
+    ? alias
+    : undefined;
+}
+
+function safePhysicalDeviceModel(value: unknown): string | undefined {
+  const model = safePhysicalHostValue(value);
+  return model && /^(?:iPhone|iPad|iPod)(?:[A-Za-z0-9,._ -]+)?$/u.test(model) ? model : undefined;
+}
+
+function physicalDeviceCandidates(parsed: unknown): UnknownRecord[] | undefined {
+  const root = asUnknownRecord(parsed);
+  if (!root) return undefined;
+  const result = nestedRecord(root, 'result');
+  const candidates = result?.devices ?? root.devices;
+  if (!Array.isArray(candidates)) return undefined;
+
+  const records: UnknownRecord[] = [];
+  for (const candidate of candidates) {
+    const record = asUnknownRecord(candidate);
+    if (!record) return undefined;
+    records.push(record);
+  }
+  return records;
+}
+
+/**
+ * Parses a CoreDevice list only in memory. The requested identifier is used
+ * solely to choose the device; the return value intentionally has no field
+ * capable of carrying that identifier or any other raw discovery detail.
+ */
+function discoverPhysicalDevice(
+  rawDeviceList: string,
+  requestedDeviceId: string,
+): PhysicalDeviceSummary | undefined {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(rawDeviceList);
+  } catch {
+    return undefined;
+  }
+
+  const candidates = physicalDeviceCandidates(parsed);
+  if (!candidates) return undefined;
+
+  const matchingCandidates = candidates.filter((candidate) =>
+    ['identifier', 'udid', 'deviceIdentifier', 'id'].some(
+      (key) => candidate[key] === requestedDeviceId,
+    ),
+  );
+  if (matchingCandidates.length !== 1) return undefined;
+
+  const candidate = matchingCandidates[0]!;
+  const deviceProperties = nestedRecord(candidate, 'deviceProperties');
+  const connectionProperties = nestedRecord(candidate, 'connectionProperties');
+  const hardwareProperties = nestedRecord(candidate, 'hardwareProperties');
+  const available = consistentBooleanValue({
+    records: [candidate, ...(deviceProperties ? [deviceProperties] : []), ...(connectionProperties ? [connectionProperties] : [])],
+    keys: ['available', 'isAvailable', 'availability', 'isConnected', 'connectionState', 'bootState'],
+    trueValues: new Set(['available', 'connected', 'booted', 'online']),
+    falseValues: new Set(['unavailable', 'disconnected', 'shutdown', 'offline']),
+  });
+  const trusted = consistentBooleanValue({
+    records: [candidate, ...(connectionProperties ? [connectionProperties] : [])],
+    keys: ['trusted', 'isTrusted', 'trustState', 'authenticationState'],
+    trueValues: new Set(['trusted']),
+    falseValues: new Set(['untrusted']),
+  });
+  const developerMode = consistentBooleanValue({
+    records: [candidate, ...(deviceProperties ? [deviceProperties] : [])],
+    keys: ['developerMode', 'developerModeEnabled', 'developerModeStatus'],
+    trueValues: new Set(['enabled']),
+    falseValues: new Set(['disabled']),
+  });
+  const alias = safePhysicalDeviceAlias(
+    firstStringValue(
+      [candidate, ...(deviceProperties ? [deviceProperties] : [])],
+      ['name', 'deviceName'],
+    ),
+  );
+  const model = safePhysicalDeviceModel(
+    firstStringValue(
+      [candidate, ...(hardwareProperties ? [hardwareProperties] : [])],
+      ['model', 'modelName', 'deviceType', 'productType'],
+    ),
+  );
+
+  if (
+    available === undefined ||
+    trusted === undefined ||
+    developerMode === undefined ||
+    !alias ||
+    !model
+  ) {
+    return undefined;
+  }
+
+  return { alias, model, available, trusted, developerMode };
+}
+
+async function readPhysicalDeviceList(input: {
+  path: string;
+  requestedDeviceId: string;
+}): Promise<PhysicalDeviceSummary | undefined> {
+  try {
+    const metadata = await stat(input.path);
+    if (!metadata.isFile() || metadata.size > MAX_PHYSICAL_DEVICE_JSON_BYTES) return undefined;
+    return discoverPhysicalDevice(await readFile(input.path, 'utf8'), input.requestedDeviceId);
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Treats unresolved, manual, or differently-targeted signing as a local
+ * prerequisite. The team value is read only to establish non-emptiness and
+ * is never returned, recorded, or included in a finding.
+ */
+function hasReadyPhysicalSigning(output: string): boolean {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(boundedOutput(output));
+  } catch {
+    return false;
+  }
+  if (!Array.isArray(parsed)) return false;
+
+  const settings = parsed
+    .map((item) => asUnknownRecord(item))
+    .map((item) => (item ? nestedRecord(item, 'buildSettings') : undefined))
+    .filter((item): item is UnknownRecord => item !== undefined);
+  if (settings.length !== 1) return false;
+
+  const buildSettings = settings[0]!;
+  const codeSignStyle = buildSettings.CODE_SIGN_STYLE;
+  const developmentTeam = buildSettings.DEVELOPMENT_TEAM;
+  const bundleIdentifier = buildSettings.PRODUCT_BUNDLE_IDENTIFIER;
+  return (
+    typeof codeSignStyle === 'string' &&
+    codeSignStyle.trim() === 'Automatic' &&
+    typeof developmentTeam === 'string' &&
+    developmentTeam.trim() !== '' &&
+    typeof bundleIdentifier === 'string' &&
+    bundleIdentifier.trim() === 'com.vela.app'
+  );
+}
+
+function createPhysicalManifest(input: PhysicalManifestInput): M1Manifest {
+  return validateM1Manifest({
+    schemaVersion: 1,
+    runId: input.context.runId,
+    testedBehaviorCommit: input.testedBehaviorCommit,
+    phase: 'ios-physical-preflight',
+    matrixClass: 'physical-preflight',
+    startedAt: input.startedAt.toISOString(),
+    endedAt: input.endedAt.toISOString(),
+    outcome: input.outcome,
+    exitCode: M1_EXIT_CODE[input.outcome],
+    config: input.config,
+    host: input.host,
+    commands: input.commands,
+    evidence: input.evidence,
+    findings: input.findings,
+  });
+}
+
+function createRedactedPhysicalManifest(
+  input: TrustedPhysicalManifestInput,
+  summary: string,
+): M1Manifest {
+  const { startedAt, endedAt } = normalizedFallbackManifestTimes(input);
+  return validateM1Manifest({
+    schemaVersion: 1,
+    runId: input.context.runId,
+    testedBehaviorCommit: input.testedBehaviorCommit,
+    phase: 'ios-physical-preflight',
+    matrixClass: 'physical-preflight',
+    startedAt: startedAt.toISOString(),
+    endedAt: endedAt.toISOString(),
+    outcome: 'harness_error',
+    exitCode: M1_EXIT_CODE.harness_error,
+    config: redactedMissingConfiguration(),
+    host: {},
+    commands: [],
+    evidence: [],
+    findings: [{ severity: 'error', summary }],
+  });
+}
+
+function createSafePhysicalManifest(input: PhysicalManifestInput): M1Manifest {
+  const trustedInput: TrustedPhysicalManifestInput = {
+    context: input.context,
+    testedBehaviorCommit: input.testedBehaviorCommit,
+    startedAt: input.startedAt,
+    endedAt: input.endedAt,
+  };
+
+  try {
+    const manifest = createPhysicalManifest(input);
+    const { testedBehaviorCommit: _testedBehaviorCommit, ...content } = manifest;
+    if (!containsUnsafeEvidenceText(JSON.stringify(content))) return manifest;
+    return createRedactedPhysicalManifest(
+      trustedInput,
+      'The iOS physical-device preflight manifest contained prohibited sensitive content',
+    );
+  } catch {
+    return createRedactedPhysicalManifest(
+      trustedInput,
+      'The iOS physical-device preflight manifest could not be serialized safely',
+    );
+  }
+}
+
+/**
+ * Verifies only the non-product prerequisites for a tester-controlled
+ * physical iPhone. Discovery JSON and signing output stay local and are
+ * reduced to a non-identifying alias/model and one signing-ready boolean.
+ */
+async function runIosPhysicalPreflightPhase(
+  args: M1VerifyArguments,
+  dependencies: HarnessDependencies,
+): Promise<M1Manifest> {
+  const startedAt = safeDate(dependencies.now);
+  const testedBehaviorCommit = await resolveTestedBehaviorCommit(dependencies);
+  const commands: M1CommandResult[] = [];
+  const evidence: M1EvidenceReference[] = [];
+  const preflight = await evaluateMachinePreflight(args, dependencies, 'iOS physical-device');
+  const findings = preflight.findings;
+  const host: M1Manifest['host'] = {};
+  let configuration = preflight.configuration;
+  let outcome = preflight.outcome;
+  let forceRedactedFallback = false;
+
+  if (outcome === 'passed' && dependencies.platform !== 'darwin') {
+    outcome = 'prerequisite_missing';
+    findings.push({
+      severity: 'error',
+      summary: 'iOS physical-device verification requires macOS',
+    });
+  }
+  if (outcome === 'passed' && !args.deviceId) {
+    outcome = 'prerequisite_missing';
+    findings.push({
+      severity: 'error',
+      summary: 'An explicit physical iOS device identifier is required',
+    });
+  }
+
+  const context = await createMachineRunContext({
+    repoRoot: dependencies.repoRoot,
+    testedBehaviorCommit,
+    baseRunId: createM1RunId(startedAt, 'physical-preflight'),
+  });
+
+  if (outcome === 'passed') {
+    let workspace: ExecutionWorkspace | undefined;
+    let rawDeviceOutputDirectory: string | undefined;
+    try {
+      if (!configuration.loaded || !args.deviceId) {
+        throw new M1HarnessError('Validated physical preflight inputs are unexpectedly unavailable');
+      }
+      workspace = dependencies.createExecutionWorkspace
+        ? await dependencies.createExecutionWorkspace({
+            repoRoot: dependencies.repoRoot,
+            testedBehaviorCommit,
+          })
+        : await createDetachedExecutionWorkspace({
+            repoRoot: dependencies.repoRoot,
+            testedBehaviorCommit,
+          });
+
+      const executionRoot = workspace.root;
+      const xcodeWorkspace = join(executionRoot, 'apps/vela-mobile/src-capacitor/ios/App/App.xcworkspace');
+      const commandEnv = commandEnvironment(
+        configuration.loaded,
+        dependencies.executionProcessEnvironment ?? process.env,
+      );
+      const runStep = async (input: { spec: CommandSpec; summary: string }) => {
+        const result = await runSimulatorCommand({
+          dependencies,
+          workspaceRoot: executionRoot,
+          commands,
+          spec: input.spec,
+        });
+        if (result.exitCode !== 0) {
+          outcome = 'prerequisite_missing';
+          findings.push({ severity: 'error', summary: input.summary });
+          return undefined;
+        }
+        return result;
+      };
+
+      rawDeviceOutputDirectory = await mkdtemp(join(tmpdir(), PHYSICAL_DEVICE_TEMPORARY_PREFIX));
+      const rawDeviceOutputPath = join(rawDeviceOutputDirectory, 'devices.json');
+      const deviceDiscoveryResult = await runStep({
+        spec: {
+          label: 'physical-device-discovery',
+          command: 'xcrun',
+          args: ['devicectl', 'list', 'devices', '--json-output', rawDeviceOutputPath],
+          cwd: executionRoot,
+          env: commandEnv,
+        },
+        summary: 'Physical iOS devices could not be discovered',
+      });
+
+      let device: PhysicalDeviceSummary | undefined;
+      if (deviceDiscoveryResult) {
+        device = await readPhysicalDeviceList({
+          path: rawDeviceOutputPath,
+          requestedDeviceId: args.deviceId,
+        });
+        if (!device) {
+          outcome = 'prerequisite_missing';
+          findings.push({
+            severity: 'error',
+            summary: 'The requested physical iOS device could not be verified safely',
+          });
+        } else if (!device.available) {
+          outcome = 'prerequisite_missing';
+          findings.push({ severity: 'error', summary: 'The requested physical iOS device is unavailable' });
+        } else if (!device.trusted) {
+          outcome = 'prerequisite_missing';
+          findings.push({ severity: 'error', summary: 'The requested physical iOS device is not trusted' });
+        } else if (!device.developerMode) {
+          outcome = 'prerequisite_missing';
+          findings.push({
+            severity: 'error',
+            summary: 'Developer Mode is disabled on the requested physical iOS device',
+          });
+        } else {
+          host.deviceAlias = device.alias;
+          host.deviceModel = device.model;
+        }
+      }
+
+      if (outcome === 'passed') {
+        const signingResult = await runStep({
+          spec: {
+            label: 'physical-signing-settings',
+            command: 'xcodebuild',
+            args: [
+              '-showBuildSettings',
+              '-json',
+              '-workspace',
+              xcodeWorkspace,
+              '-scheme',
+              'App',
+              '-configuration',
+              'Debug',
+              '-destination',
+              `id=${args.deviceId}`,
+            ],
+            cwd: executionRoot,
+            env: commandEnv,
+          },
+          summary: 'Physical iOS signing settings could not be resolved',
+        });
+        host.signingReady = signingResult ? hasReadyPhysicalSigning(signingResult.stdout) : false;
+        if (signingResult && !host.signingReady) {
+          outcome = 'prerequisite_missing';
+          findings.push({
+            severity: 'error',
+            summary: 'Physical iOS signing readiness is incomplete or invalid',
+          });
+        }
+      }
+    } catch {
+      forceRedactedFallback = true;
+      outcome = 'harness_error';
+    } finally {
+      if (rawDeviceOutputDirectory) {
+        try {
+          await rm(rawDeviceOutputDirectory, { force: true, recursive: true });
+        } catch {
+          forceRedactedFallback = true;
+          outcome = 'harness_error';
+        }
+      }
+      if (workspace) {
+        try {
+          await workspace.dispose();
+        } catch {
+          forceRedactedFallback = true;
+          outcome = 'harness_error';
+        }
+      }
+    }
+  }
+
+  const finalTiming = safeFinalManifestTiming(dependencies.now, startedAt);
+  const trustedFinalInput: TrustedPhysicalManifestInput = {
+    context,
+    testedBehaviorCommit,
+    startedAt,
+    endedAt: finalTiming.endedAt,
+  };
+  let manifest: M1Manifest;
+  if (!finalTiming.isReliable) {
+    manifest = createRedactedPhysicalManifest(
+      trustedFinalInput,
+      'The iOS physical-device preflight harness could not produce a valid final timestamp',
+    );
+  } else if (forceRedactedFallback) {
+    manifest = createRedactedPhysicalManifest(
+      trustedFinalInput,
+      'The iOS physical-device preflight harness could not execute safely',
+    );
+  } else {
+    manifest = createSafePhysicalManifest({
+      context,
+      testedBehaviorCommit,
+      startedAt,
+      endedAt: finalTiming.endedAt,
+      outcome,
+      config: configuration.config,
+      host,
+      commands,
+      evidence,
+      findings,
+    });
+  }
+  await writeManifest(context.directory, manifest);
+  return manifest;
+}
+
 function assertRecord(value: unknown): asserts value is UnknownRecord {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
     throw new M1UsageError('Manual input must be a JSON object');
@@ -2331,9 +2855,9 @@ async function runManualPhase(
 }
 
 /**
- * Runs the currently implemented verification phase. The Simulator phase is
- * independent evidence; `all` remains deliberately unimplemented until the
- * physical preflight can join every required machine phase atomically.
+ * Runs one independent machine-verification phase. `all` remains deliberately
+ * unavailable until automated, Simulator, and physical evidence can be
+ * created atomically without leaving a misleading partial run behind.
  */
 export async function runM1FoundationVerification(
   args: ReturnType<typeof parseM1Arguments>,
@@ -2342,6 +2866,9 @@ export async function runM1FoundationVerification(
   if (args.mode === 'record-manual') return [await runManualPhase(args, dependencies)];
   if (args.phase === 'automated') return [await runAutomatedPhase(args, dependencies)];
   if (args.phase === 'ios-simulator') return [await runIosSimulatorPhase(args, dependencies)];
+  if (args.phase === 'ios-physical-preflight') {
+    return [await runIosPhysicalPreflightPhase(args, dependencies)];
+  }
   throw new M1HarnessError(
     `${args.phase} verification is not implemented until every required machine phase can run atomically`,
   );
