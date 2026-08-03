@@ -350,6 +350,87 @@ describe('automated M1 foundation verification', () => {
     expect(readFileSync(manifestPath, 'utf8')).not.toContain(unsafePlatform);
   });
 
+  it('writes a redacted diagnostic manifest when a runtime platform violates the schema', async () => {
+    const repository = createTemporaryRepository();
+    const runner = createRunner();
+    const dependencies = createDependencies({ repoRoot: repository, runCommand: runner.runCommand });
+    dependencies.platform = null as unknown as typeof process.platform;
+
+    const manifest = onlyManifest(
+      await runM1FoundationVerification(
+        parseM1Arguments(['--phase', 'automated']),
+        dependencies,
+      ),
+    );
+    const manifestPath = join(
+      repository,
+      'apps/vela-mobile/docs/evidence/hpa-210',
+      testedBehaviorCommit,
+      manifest.runId,
+      'manifest.json',
+    );
+    const serializedManifest = readFileSync(manifestPath, 'utf8');
+
+    expect(manifest.outcome).toBe('harness_error');
+    expect(manifest.exitCode).toBe(1);
+    expect(manifest.config).toEqual({
+      source: 'none',
+      class: 'missing',
+      publicIdentifiersConsistent: false,
+    });
+    expect(manifest.host).toEqual({ platform: 'redacted' });
+    expect(manifest.commands).toEqual([]);
+    expect(manifest.evidence).toEqual([]);
+    expect(serializedManifest).toContain('"outcome": "harness_error"');
+    expect(serializedManifest).not.toContain('"platform": null');
+  });
+
+  it('writes a redacted diagnostic manifest when the final harness clock read is invalid', async () => {
+    const repository = createTemporaryRepository();
+    const workspace = createTemporaryExecutionWorkspace();
+    const runner = createRunner();
+    let finalClockReadShouldFail = false;
+    const dependencies = createDependencies({
+      repoRoot: repository,
+      runCommand: runner.runCommand,
+      createExecutionWorkspace: async () => ({
+        root: workspace,
+        dispose: async () => {
+          finalClockReadShouldFail = true;
+        },
+      }),
+    });
+    dependencies.now = () =>
+      finalClockReadShouldFail ? new Date(Number.NaN) : new Date('2026-08-03T02:15:00.000Z');
+
+    const manifest = onlyManifest(
+      await runM1FoundationVerification(
+        parseM1Arguments(['--phase', 'automated']),
+        dependencies,
+      ),
+    );
+    const manifestPath = join(
+      repository,
+      'apps/vela-mobile/docs/evidence/hpa-210',
+      testedBehaviorCommit,
+      manifest.runId,
+      'manifest.json',
+    );
+
+    expect(runner.calls).toHaveLength(expectedCommands.length);
+    expect(manifest.outcome).toBe('harness_error');
+    expect(manifest.config).toEqual({
+      source: 'none',
+      class: 'missing',
+      publicIdentifiersConsistent: false,
+    });
+    expect(manifest.host).toEqual({ platform: 'redacted' });
+    expect(manifest.commands).toEqual([]);
+    expect(manifest.evidence).toEqual([]);
+    expect(manifest.endedAt).toBe(manifest.startedAt);
+    expect(readFileSync(manifestPath, 'utf8')).toContain('"outcome": "harness_error"');
+  });
+
   it('runs the eight gates from a clean pinned checkout while writing the manifest in the original repository', async () => {
     const repository = createTemporaryRepository();
     const workspace = createTemporaryExecutionWorkspace();
