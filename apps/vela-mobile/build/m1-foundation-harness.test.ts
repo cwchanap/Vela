@@ -1215,7 +1215,15 @@ describe('iOS Simulator M1 foundation verification', () => {
     );
     expect(runner.calls[11]!.args).toEqual(['simctl', 'install', simulatorUdid, expect.any(String)]);
     expect(runner.calls[12]!.args).toEqual(['simctl', 'launch', simulatorUdid, 'com.vela.app']);
-    expect(runner.calls[13]!.args).toEqual(['simctl', 'spawn', simulatorUdid, 'ps', '-A', '-o', 'comm=']);
+    expect(runner.calls[13]!.args).toEqual([
+      'simctl',
+      'spawn',
+      simulatorUdid,
+      '/bin/ps',
+      '-A',
+      '-o',
+      'comm=',
+    ]);
     const derivedDataPath = runner.calls[7]!.args[runner.calls[7]!.args.indexOf('-derivedDataPath') + 1]!;
     expect(runner.calls[9]!.args).toEqual([
       '-extract',
@@ -1439,7 +1447,7 @@ describe('iOS Simulator M1 foundation verification', () => {
       'simctl',
       'spawn',
       simulatorUdid,
-      'ps',
+      '/bin/ps',
       '-A',
       '-o',
       'comm=',
