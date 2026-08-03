@@ -61,6 +61,14 @@ const PUBLIC_MOBILE_ENV_KEYS = [
   'VITE_COGNITO_OAUTH_DOMAIN',
   'VITE_AWS_REGION',
 ].sort();
+const simulatorUdid = [
+  'd'.repeat(8),
+  'e'.repeat(4),
+  'a'.repeat(4),
+  'd'.repeat(4),
+  'b'.repeat(12),
+].join('-');
+const simulatorRuntime = 'com.apple.CoreSimulator.SimRuntime.iOS-18-2';
 
 afterEach(() => {
   for (const directory of temporaryDirectories.splice(0)) {
@@ -97,6 +105,86 @@ function createRunner(exitCodes: number[] = []) {
     calls.push(spec);
     const exitCode = exitCodes[calls.length - 1] ?? 0;
     return { exitCode, stdout: '', stderr: '' };
+  };
+
+  return { calls, runCommand };
+}
+
+function createSimulatorRunner(input: {
+  wwwRoot: string;
+  mutateWebViewAssets?: boolean;
+  simulatorDevices?: unknown;
+  processList?: string;
+}) {
+  const calls: CommandSpec[] = [];
+  const simulatorDevices =
+    input.simulatorDevices ??
+    {
+      devices: {
+        [simulatorRuntime]: [
+          {
+            udid: simulatorUdid,
+            name: 'iPhone 16 Pro Simulator',
+            isAvailable: true,
+          },
+        ],
+      },
+    };
+  const runCommand: CommandRunner = async (spec) => {
+    calls.push(spec);
+
+    if (spec.command === 'xcodebuild' && spec.args[0] === '-version') {
+      return { exitCode: 0, stdout: 'Xcode 16.2\nBuild version 16C5032a\n', stderr: '' };
+    }
+    if (spec.command === 'bun' && spec.args.join(' ') === '--version') {
+      return { exitCode: 0, stdout: '1.3.1\n', stderr: '' };
+    }
+    if (spec.command === 'bun' && spec.args[0] === 'pm' && spec.args[1] === 'ls') {
+      return { exitCode: 0, stdout: 'quasar@2.18.1\n@capacitor/core@7.4.0\n', stderr: '' };
+    }
+    if (
+      spec.command === 'xcrun' &&
+      spec.args.join(' ') === 'simctl list devices available --json'
+    ) {
+      return { exitCode: 0, stdout: JSON.stringify(simulatorDevices), stderr: '' };
+    }
+    if (spec.command === 'bunx' && spec.args.join(' ') === 'cap sync ios') {
+      if (input.mutateWebViewAssets) {
+        writeFileSync(join(input.wwwRoot, 'index.html'), 'cap sync changed the verified bundle');
+      }
+      return { exitCode: 0, stdout: '', stderr: '' };
+    }
+    if (spec.command === 'xcodebuild' && spec.args[0] === '-showBuildSettings') {
+      const derivedDataIndex = spec.args.indexOf('-derivedDataPath');
+      const derivedDataPath = spec.args[derivedDataIndex + 1]!;
+      return {
+        exitCode: 0,
+        stdout: JSON.stringify([
+          {
+            buildSettings: {
+              TARGET_BUILD_DIR: join(
+                derivedDataPath,
+                'Build/Products/Release-iphonesimulator',
+              ),
+              WRAPPER_NAME: 'App.app',
+              DEVELOPMENT_TEAM: 'LOCAL-TEAM-MUST-NOT-PERSIST',
+            },
+          },
+        ]),
+        stderr: '',
+      };
+    }
+    if (spec.command === 'plutil') {
+      return { exitCode: 0, stdout: 'Vela\n', stderr: '' };
+    }
+    if (
+      spec.command === 'xcrun' &&
+      spec.args.slice(0, 3).join(' ') === 'simctl spawn ' + simulatorUdid
+    ) {
+      return { exitCode: 0, stdout: input.processList ?? '/Applications/Vela\n', stderr: '' };
+    }
+
+    return { exitCode: 0, stdout: '', stderr: '' };
   };
 
   return { calls, runCommand };
@@ -967,6 +1055,472 @@ describe('automated M1 foundation verification', () => {
     expect(manifest.outcome).toBe('passed');
     expect(manifest.config.publicIdentifiersConsistent).toBe(true);
     expect(runner.calls).toHaveLength(expectedCommands.length);
+  });
+});
+
+describe('iOS Simulator M1 foundation verification', () => {
+  it('runs the pinned Simulator build, launch, and process-presence sequence without persisting raw identifiers', async () => {
+    const repository = createTemporaryRepository();
+    const workspace = createTemporaryExecutionWorkspace();
+    const wwwRoot = join(workspace, 'apps/vela-mobile/src-capacitor/www');
+    mkdirSync(wwwRoot, { recursive: true });
+    writeFileSync(join(wwwRoot, 'index.html'), 'verified production WebView asset');
+    const runner = createSimulatorRunner({ wwwRoot });
+    const dependencies = createDependencies({ repoRoot: repository, runCommand: runner.runCommand });
+    const { createExecutionWorkspace, dispose } = attachCleanExecutionWorkspace(
+      dependencies,
+      workspace,
+    );
+    const commandSequence: Array<[string, string[]]> = [];
+    dependencies.resolveTestedBehaviorCommit = async () => {
+      commandSequence.push(['git', ['rev-parse', 'HEAD']]);
+      return testedBehaviorCommit;
+    };
+    const sleep = vi.fn(async (_milliseconds: number) => undefined);
+    (dependencies as HarnessDependencies & { sleep?: (milliseconds: number) => Promise<void> }).sleep =
+      sleep;
+
+    const manifest = onlyManifest(
+      await runM1FoundationVerification(
+        parseM1Arguments([
+          '--phase',
+          'ios-simulator',
+          '--simulator-udid',
+          simulatorUdid,
+          '--require-deployed-config',
+        ]),
+        dependencies,
+      ),
+    );
+    commandSequence.push(...runner.calls.map(({ command, args }) => [command, args] as [string, string[]]));
+    const manifestPath = join(
+      repository,
+      'apps/vela-mobile/docs/evidence/hpa-210',
+      testedBehaviorCommit,
+      manifest.runId,
+      'manifest.json',
+    );
+
+    expect(commandSequence.map(([command, args]) => [command, args[0], args[1]])).toEqual([
+      ['git', 'rev-parse', 'HEAD'],
+      ['xcodebuild', '-version', undefined],
+      ['bun', '--version', undefined],
+      ['bun', 'pm', 'ls'],
+      ['xcrun', 'simctl', 'list'],
+      ['bun', 'run', '--cwd'],
+      ['bunx', 'cap', 'sync'],
+      ['xcodebuild', '-showBuildSettings', '-json'],
+      ['xcodebuild', '-workspace', expect.any(String)],
+      ['plutil', '-extract', 'CFBundleExecutable'],
+      ['xcrun', 'simctl', 'bootstatus'],
+      ['xcrun', 'simctl', 'install'],
+      ['xcrun', 'simctl', 'launch'],
+      ['xcrun', 'simctl', 'spawn'],
+    ]);
+    expect(runner.calls[2]!.args).toEqual([
+      'pm',
+      'ls',
+      'quasar',
+      '@capacitor/core',
+      '@capacitor/ios',
+      '@capacitor/app',
+      '@capacitor/keyboard',
+    ]);
+    expect(runner.calls[7]!.args).toEqual(
+      expect.arrayContaining([
+        '-scheme',
+        'App',
+        '-configuration',
+        'Release',
+        '-sdk',
+        'iphonesimulator',
+        '-destination',
+        `platform=iOS Simulator,id=${simulatorUdid}`,
+        'CODE_SIGNING_ALLOWED=NO',
+        'build',
+      ]),
+    );
+    expect(runner.calls[10]!.args).toEqual(['simctl', 'install', simulatorUdid, expect.any(String)]);
+    expect(runner.calls[11]!.args).toEqual(['simctl', 'launch', simulatorUdid, 'com.vela.app']);
+    expect(runner.calls[12]!.args).toEqual(['simctl', 'spawn', simulatorUdid, 'ps', '-A', '-o', 'comm=']);
+    const derivedDataPath = runner.calls[6]!.args[runner.calls[6]!.args.indexOf('-derivedDataPath') + 1]!;
+    expect(runner.calls[8]!.args).toEqual([
+      '-extract',
+      'CFBundleExecutable',
+      'raw',
+      join(
+        derivedDataPath,
+        'Build/Products/Release-iphonesimulator/App.app/Info.plist',
+      ),
+    ]);
+    expect(runner.calls.map(({ env }) => Object.keys(env ?? {}).sort())).toEqual(
+      Array.from({ length: runner.calls.length }, () => PUBLIC_MOBILE_ENV_KEYS),
+    );
+    expect(sleep).toHaveBeenCalledWith(5_000);
+    expect(createExecutionWorkspace).toHaveBeenCalledWith({ repoRoot: repository, testedBehaviorCommit });
+    expect(dispose).toHaveBeenCalledTimes(1);
+    expect(manifest).toMatchObject({
+      phase: 'ios-simulator',
+      matrixClass: 'automated',
+      outcome: 'passed',
+      exitCode: 0,
+      config: { class: 'deployed', publicIdentifiersConsistent: true },
+      host: {
+        simulatorAlias: 'iPhone 16 Pro Simulator',
+        simulatorRuntime,
+        xcodeVersion: '16.2',
+      },
+    });
+    expect(manifest.host).toMatchObject({
+      appBundlePath: expect.stringMatching(/\.app$/u),
+      wwwHashBefore: expect.stringMatching(/^[a-f0-9]{64}$/u),
+      wwwHashAfter: expect.stringMatching(/^[a-f0-9]{64}$/u),
+    });
+    expect(manifest.host.wwwHashAfter).toBe(manifest.host.wwwHashBefore);
+    expect(Object.keys(manifest.host).sort()).toEqual([
+      'appBundlePath',
+      'simulatorAlias',
+      'simulatorRuntime',
+      'wwwHashAfter',
+      'wwwHashBefore',
+      'xcodeVersion',
+    ]);
+    const serializedManifest = readFileSync(manifestPath, 'utf8');
+    expect(serializedManifest).not.toContain(simulatorUdid);
+    expect(serializedManifest).not.toContain('LOCAL-TEAM-MUST-NOT-PERSIST');
+    expect(serializedManifest).not.toContain('Build version 16C5032a');
+    expect(serializedManifest).not.toContain('/Applications/Vela');
+  });
+
+  it('returns prerequisite_missing before native commands without macOS or an explicit Simulator identifier', async () => {
+    const repository = createTemporaryRepository();
+    const runner = createRunner();
+    const nonMacDependencies = createDependencies({
+      repoRoot: repository,
+      runCommand: runner.runCommand,
+    });
+    nonMacDependencies.platform = 'linux';
+
+    const nonMacManifest = onlyManifest(
+      await runM1FoundationVerification(
+        parseM1Arguments(['--phase', 'ios-simulator', '--simulator-udid', simulatorUdid]),
+        nonMacDependencies,
+      ),
+    );
+    expect(nonMacManifest.outcome).toBe('prerequisite_missing');
+    expect(nonMacManifest.exitCode).toBe(3);
+    expect(runner.calls).toEqual([]);
+
+    const missingIdentifierRunner = createRunner();
+    const missingIdentifierManifest = onlyManifest(
+      await runM1FoundationVerification(
+        {
+          mode: 'verify',
+          phase: 'ios-simulator',
+          requireDeployedConfig: false,
+        } as unknown as ReturnType<typeof parseM1Arguments>,
+        createDependencies({
+          repoRoot: createTemporaryRepository(),
+          runCommand: missingIdentifierRunner.runCommand,
+        }),
+      ),
+    );
+    expect(missingIdentifierManifest.outcome).toBe('prerequisite_missing');
+    expect(missingIdentifierManifest.exitCode).toBe(3);
+    expect(missingIdentifierRunner.calls).toEqual([]);
+  });
+
+  it('stops at the immutable-WebView gate when cap sync changes production assets', async () => {
+    const repository = createTemporaryRepository();
+    const workspace = createTemporaryExecutionWorkspace();
+    const wwwRoot = join(workspace, 'apps/vela-mobile/src-capacitor/www');
+    mkdirSync(wwwRoot, { recursive: true });
+    writeFileSync(join(wwwRoot, 'index.html'), 'verified production WebView asset');
+    const runner = createSimulatorRunner({ wwwRoot, mutateWebViewAssets: true });
+    const dependencies = createDependencies({ repoRoot: repository, runCommand: runner.runCommand });
+    attachCleanExecutionWorkspace(dependencies, workspace);
+
+    const manifest = onlyManifest(
+      await runM1FoundationVerification(
+        parseM1Arguments([
+          '--phase',
+          'ios-simulator',
+          '--simulator-udid',
+          simulatorUdid,
+          '--require-deployed-config',
+        ]),
+        dependencies,
+      ),
+    );
+
+    expect(manifest.outcome).toBe('gate_failed');
+    expect(manifest.exitCode).toBe(4);
+    expect(manifest.host.wwwHashBefore).not.toBe(manifest.host.wwwHashAfter);
+    expect(runner.calls.map(({ command, args }) => [command, args[0]])).toEqual([
+      ['xcodebuild', '-version'],
+      ['bun', '--version'],
+      ['bun', 'pm'],
+      ['xcrun', 'simctl'],
+      ['bun', 'run'],
+      ['bunx', 'cap'],
+    ]);
+    expect(
+      runner.calls.some(
+        ({ command, args }) => command === 'xcodebuild' && args.includes('-showBuildSettings'),
+      ),
+    ).toBe(false);
+  });
+
+  it('returns a prerequisite manifest for unavailable Simulator discovery without leaking raw simctl data', async () => {
+    const repository = createTemporaryRepository();
+    const workspace = createTemporaryExecutionWorkspace();
+    const wwwRoot = join(workspace, 'apps/vela-mobile/src-capacitor/www');
+    mkdirSync(wwwRoot, { recursive: true });
+    writeFileSync(join(wwwRoot, 'index.html'), 'verified production WebView asset');
+    const rawSimulatorPath = `/private/var/db/CoreSimulator/Devices/${simulatorUdid}`;
+    const runner = createSimulatorRunner({
+      wwwRoot,
+      simulatorDevices: {
+        devices: {
+          [simulatorRuntime]: [
+            {
+              udid: simulatorUdid,
+              name: 'Unavailable Simulator',
+              isAvailable: false,
+              dataPath: rawSimulatorPath,
+            },
+          ],
+        },
+      },
+    });
+    const dependencies = createDependencies({ repoRoot: repository, runCommand: runner.runCommand });
+    attachCleanExecutionWorkspace(dependencies, workspace);
+
+    const manifest = onlyManifest(
+      await runM1FoundationVerification(
+        parseM1Arguments([
+          '--phase',
+          'ios-simulator',
+          '--simulator-udid',
+          simulatorUdid,
+          '--require-deployed-config',
+        ]),
+        dependencies,
+      ),
+    );
+    const manifestPath = join(
+      repository,
+      'apps/vela-mobile/docs/evidence/hpa-210',
+      testedBehaviorCommit,
+      manifest.runId,
+      'manifest.json',
+    );
+
+    expect(manifest.outcome).toBe('prerequisite_missing');
+    expect(manifest.exitCode).toBe(3);
+    expect(runner.calls.map(({ command, args }) => [command, args[0]])).toEqual([
+      ['xcodebuild', '-version'],
+      ['bun', '--version'],
+      ['bun', 'pm'],
+      ['xcrun', 'simctl'],
+    ]);
+    const serializedManifest = readFileSync(manifestPath, 'utf8');
+    expect(serializedManifest).not.toContain(simulatorUdid);
+    expect(serializedManifest).not.toContain(rawSimulatorPath);
+    expect(serializedManifest).not.toContain('Unavailable Simulator');
+  });
+
+  it('fails the Simulator phase when the launched executable is absent after the bounded wait', async () => {
+    const repository = createTemporaryRepository();
+    const workspace = createTemporaryExecutionWorkspace();
+    const wwwRoot = join(workspace, 'apps/vela-mobile/src-capacitor/www');
+    mkdirSync(wwwRoot, { recursive: true });
+    writeFileSync(join(wwwRoot, 'index.html'), 'verified production WebView asset');
+    const runner = createSimulatorRunner({ wwwRoot, processList: '/usr/libexec/other-process\n' });
+    const dependencies = createDependencies({ repoRoot: repository, runCommand: runner.runCommand });
+    attachCleanExecutionWorkspace(dependencies, workspace);
+    (dependencies as HarnessDependencies & { sleep?: (milliseconds: number) => Promise<void> }).sleep =
+      async () => undefined;
+
+    const manifest = onlyManifest(
+      await runM1FoundationVerification(
+        parseM1Arguments([
+          '--phase',
+          'ios-simulator',
+          '--simulator-udid',
+          simulatorUdid,
+        ]),
+        dependencies,
+      ),
+    );
+
+    expect(manifest.outcome).toBe('gate_failed');
+    expect(manifest.exitCode).toBe(4);
+    expect(manifest.findings).toContainEqual({
+      severity: 'error',
+      summary: 'Launched simulator app process was not present after the bounded wait',
+    });
+    expect(runner.calls.at(-1)?.args).toEqual([
+      'simctl',
+      'spawn',
+      simulatorUdid,
+      'ps',
+      '-A',
+      '-o',
+      'comm=',
+    ]);
+  });
+
+  it('rejects a personal or opaque simulator display name instead of persisting it as an alias', async () => {
+    const repository = createTemporaryRepository();
+    const workspace = createTemporaryExecutionWorkspace();
+    const wwwRoot = join(workspace, 'apps/vela-mobile/src-capacitor/www');
+    mkdirSync(wwwRoot, { recursive: true });
+    writeFileSync(join(wwwRoot, 'index.html'), 'verified production WebView asset');
+    const personalAlias = "Ava's private simulator";
+    const runner = createSimulatorRunner({
+      wwwRoot,
+      simulatorDevices: {
+        devices: {
+          [simulatorRuntime]: [
+            { udid: simulatorUdid, name: personalAlias, isAvailable: true },
+          ],
+        },
+      },
+    });
+    const dependencies = createDependencies({ repoRoot: repository, runCommand: runner.runCommand });
+    attachCleanExecutionWorkspace(dependencies, workspace);
+
+    const manifest = onlyManifest(
+      await runM1FoundationVerification(
+        parseM1Arguments(['--phase', 'ios-simulator', '--simulator-udid', simulatorUdid]),
+        dependencies,
+      ),
+    );
+    const serializedManifest = readFileSync(
+      join(
+        repository,
+        'apps/vela-mobile/docs/evidence/hpa-210',
+        testedBehaviorCommit,
+        manifest.runId,
+        'manifest.json',
+      ),
+      'utf8',
+    );
+
+    expect(manifest.outcome).toBe('prerequisite_missing');
+    expect(manifest.host).not.toHaveProperty('simulatorAlias');
+    expect(serializedManifest).not.toContain(personalAlias);
+  });
+
+  it('uses the trusted-only redacted envelope when a Simulator runner throws', async () => {
+    const repository = createTemporaryRepository();
+    const workspace = createTemporaryExecutionWorkspace();
+    const calls: CommandSpec[] = [];
+    const runner: CommandRunner = async (spec) => {
+      calls.push(spec);
+      throw new Error(`SECRET-id-token simulator failure for ${simulatorUdid}`);
+    };
+    const dependencies = createDependencies({ repoRoot: repository, runCommand: runner });
+    attachCleanExecutionWorkspace(dependencies, workspace);
+
+    const manifest = onlyManifest(
+      await runM1FoundationVerification(
+        parseM1Arguments(['--phase', 'ios-simulator', '--simulator-udid', simulatorUdid]),
+        dependencies,
+      ),
+    );
+    const manifestPath = join(
+      repository,
+      'apps/vela-mobile/docs/evidence/hpa-210',
+      testedBehaviorCommit,
+      manifest.runId,
+      'manifest.json',
+    );
+    const serializedManifest = readFileSync(manifestPath, 'utf8');
+
+    expect(calls).toHaveLength(1);
+    expect(manifest.outcome).toBe('harness_error');
+    expect(manifest.exitCode).toBe(1);
+    expect(manifest.config).toEqual({
+      source: 'none',
+      class: 'missing',
+      publicIdentifiersConsistent: false,
+    });
+    expect(manifest.host).toEqual({});
+    expect(manifest.commands).toEqual([]);
+    expect(manifest.evidence).toEqual([]);
+    expect(serializedManifest).not.toContain('SECRET-id-token');
+    expect(serializedManifest).not.toContain(simulatorUdid);
+    expect(serializedManifest).not.toContain(deployedEnvironment.VITE_COGNITO_OAUTH_DOMAIN!);
+  });
+
+  it('redacts completed Simulator state when clean-workspace disposal throws', async () => {
+    const repository = createTemporaryRepository();
+    const workspace = createTemporaryExecutionWorkspace();
+    const wwwRoot = join(workspace, 'apps/vela-mobile/src-capacitor/www');
+    mkdirSync(wwwRoot, { recursive: true });
+    writeFileSync(join(wwwRoot, 'index.html'), 'verified production WebView asset');
+    const runner = createSimulatorRunner({ wwwRoot });
+    const dispose = vi.fn(async () => {
+      throw new Error(`SECRET-id-token cleanup failure for ${simulatorUdid}`);
+    });
+    const dependencies = createDependencies({ repoRoot: repository, runCommand: runner.runCommand });
+    dependencies.createExecutionWorkspace = async () => ({ root: workspace, dispose });
+    (dependencies as HarnessDependencies & { sleep?: (milliseconds: number) => Promise<void> }).sleep =
+      async () => undefined;
+
+    const manifest = onlyManifest(
+      await runM1FoundationVerification(
+        parseM1Arguments(['--phase', 'ios-simulator', '--simulator-udid', simulatorUdid]),
+        dependencies,
+      ),
+    );
+    const serializedManifest = readFileSync(
+      join(
+        repository,
+        'apps/vela-mobile/docs/evidence/hpa-210',
+        testedBehaviorCommit,
+        manifest.runId,
+        'manifest.json',
+      ),
+      'utf8',
+    );
+
+    expect(runner.calls).toHaveLength(13);
+    expect(dispose).toHaveBeenCalledTimes(1);
+    expect(manifest.outcome).toBe('harness_error');
+    expect(manifest.config).toEqual({
+      source: 'none',
+      class: 'missing',
+      publicIdentifiersConsistent: false,
+    });
+    expect(manifest.host).toEqual({});
+    expect(manifest.commands).toEqual([]);
+    expect(manifest.evidence).toEqual([]);
+    expect(serializedManifest).not.toContain('SECRET-id-token');
+    expect(serializedManifest).not.toContain(simulatorUdid);
+    expect(serializedManifest).not.toContain(deployedEnvironment.VITE_COGNITO_OAUTH_DOMAIN!);
+  });
+
+  it('keeps --phase all explicitly unimplemented until the physical preflight can join it atomically', async () => {
+    const repository = createTemporaryRepository();
+    const runner = createRunner();
+
+    await expect(
+      runM1FoundationVerification(
+        parseM1Arguments([
+          '--phase',
+          'all',
+          '--simulator-udid',
+          simulatorUdid,
+          '--device-id',
+          'physical-device-id',
+        ]),
+        createDependencies({ repoRoot: repository, runCommand: runner.runCommand }),
+      ),
+    ).rejects.toThrow(M1HarnessError);
+    expect(runner.calls).toEqual([]);
   });
 });
 
