@@ -2647,13 +2647,71 @@ function hasReadyPhysicalSigning(output: string): boolean {
 }
 
 /**
- * Confirms the keychain has at least one valid codesigning identity. The raw
- * `security find-identity` output is never persisted; only the command
- * metadata (label, command, exit code) is recorded by the caller.
+ * Extracts the resolved `DEVELOPMENT_TEAM` and `CODE_SIGN_IDENTITY` from the
+ * `-showBuildSettings -json` output so the codesigning-identity check can
+ * correlate the keychain identity with the project's selected signing settings.
+ * Returns empty strings when the settings cannot be parsed; the caller treats
+ * an empty team or identity as a non-match.
  */
-function hasUsableCodesigningIdentity(output: string): boolean {
+function extractPhysicalSigningSettings(output: string): {
+  developmentTeam: string;
+  codeSignIdentity: string;
+} {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(boundedOutput(output));
+  } catch {
+    return { developmentTeam: '', codeSignIdentity: '' };
+  }
+  if (!Array.isArray(parsed)) return { developmentTeam: '', codeSignIdentity: '' };
+
+  const settings = parsed
+    .map((item) => asUnknownRecord(item))
+    .map((item) => (item ? nestedRecord(item, 'buildSettings') : undefined))
+    .filter((item): item is UnknownRecord => item !== undefined);
+  if (settings.length !== 1) return { developmentTeam: '', codeSignIdentity: '' };
+
+  const buildSettings = settings[0]!;
+  const developmentTeam = buildSettings.DEVELOPMENT_TEAM;
+  const codeSignIdentity = buildSettings.CODE_SIGN_IDENTITY;
+  return {
+    developmentTeam: typeof developmentTeam === 'string' ? developmentTeam.trim() : '',
+    codeSignIdentity: typeof codeSignIdentity === 'string' ? codeSignIdentity.trim() : '',
+  };
+}
+
+/**
+ * Confirms the keychain has a valid codesigning identity whose label correlates
+ * with the project's selected `DEVELOPMENT_TEAM` and `CODE_SIGN_IDENTITY`. The
+ * raw `security find-identity` output is never persisted; only the command
+ * metadata (label, command, exit code) is recorded by the caller.
+ *
+ * Without this correlation, an unrelated identity (for example a Developer ID
+ * certificate from a different team) could satisfy a mere existence check
+ * while no Apple Development certificate exists for the selected iOS team. The
+ * identity label follows the `<CODE_SIGN_IDENTITY>: <name> (<TEAM>)` form, so
+ * the label prefix must match the resolved identity class and the parenthesized
+ * team suffix must match the resolved development team.
+ */
+function hasMatchingCodesigningIdentity(
+  output: string,
+  developmentTeam: string,
+  codeSignIdentity: string,
+): boolean {
+  if (!developmentTeam || !codeSignIdentity) return false;
   const text = boundedOutput(output);
-  return /(?:^|\n)\s*\d+\)\s+[0-9A-Fa-f]{40}\s+"/u.test(text);
+  const identityPattern = /(?:^|\n)\s*\d+\)\s+[0-9A-Fa-f]{40}\s+"([^"]+)"/gu;
+  let match = identityPattern.exec(text);
+  while (match) {
+    const label = match[1]!;
+    const teamMatch = /\(([^)]+)\)\s*$/u.exec(label);
+    const team = teamMatch ? teamMatch[1]!.trim() : '';
+    if (team === developmentTeam && label.startsWith(codeSignIdentity)) {
+      return true;
+    }
+    match = identityPattern.exec(text);
+  }
+  return false;
 }
 
 function createPhysicalManifest(input: PhysicalManifestInput): M1Manifest {
@@ -2766,6 +2824,10 @@ async function runIosPhysicalPreflightPhase(
   if (outcome === 'passed') {
     let workspace: ExecutionWorkspace | undefined;
     let rawDeviceOutputDirectory: string | undefined;
+    let signingSettings: { developmentTeam: string; codeSignIdentity: string } = {
+      developmentTeam: '',
+      codeSignIdentity: '',
+    };
     try {
       if (!configuration.loaded || !args.deviceId) {
         throw new M1HarnessError('Validated physical preflight inputs are unexpectedly unavailable');
@@ -2867,6 +2929,9 @@ async function runIosPhysicalPreflightPhase(
           summary: 'Physical iOS signing settings could not be resolved',
         });
         host.signingReady = signingResult ? hasReadyPhysicalSigning(signingResult.stdout) : false;
+        if (signingResult && host.signingReady) {
+          signingSettings = extractPhysicalSigningSettings(signingResult.stdout);
+        }
         if (signingResult && !host.signingReady) {
           outcome = 'prerequisite_missing';
           findings.push({
@@ -2887,13 +2952,20 @@ async function runIosPhysicalPreflightPhase(
           },
           summary: 'Physical iOS codesigning identities could not be enumerated',
         });
-        const identityReady = identityResult ? hasUsableCodesigningIdentity(identityResult.stdout) : false;
+        const identityReady = identityResult
+          ? hasMatchingCodesigningIdentity(
+              identityResult.stdout,
+              signingSettings.developmentTeam,
+              signingSettings.codeSignIdentity,
+            )
+          : false;
         if (!identityReady) {
           host.signingReady = false;
           outcome = 'prerequisite_missing';
           findings.push({
             severity: 'error',
-            summary: 'No usable iOS codesigning identity was found in the keychain',
+            summary:
+              'No usable iOS codesigning identity matching the selected team and identity was found in the keychain',
           });
         }
       }

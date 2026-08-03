@@ -274,6 +274,51 @@ describe('M1 foundation manifest contract', () => {
     ).toThrow(/non-empty evidence/u);
   });
 
+  it('rejects a passed manual manifest whose config source is none', () => {
+    const config = { ...validManifest().config, source: 'none' as const };
+
+    expect(() =>
+      createManualM1Manifest({
+        testedBehaviorCommit: 'c'.repeat(40),
+        matrixClass: 'production-smoke',
+        runId: '20260803T021500Z-production-smoke',
+        startedAt: '2026-08-03T02:15:00.000Z',
+        endedAt: '2026-08-03T02:17:00.000Z',
+        config,
+        host: { deviceAlias: 'test iPhone' },
+        evidence: validManifest().evidence,
+        findings: [],
+        outcome: 'passed',
+      }),
+    ).toThrow(/real configuration source/u);
+  });
+
+  it.each([
+    { name: 'apiOrigin is omitted', omit: 'apiOrigin' },
+    { name: 'region is omitted', omit: 'region' },
+    { name: 'oauthDomain is omitted', omit: 'oauthDomain' },
+  ])('rejects a passed manual manifest when $name', (scenario) => {
+    const fullConfig = validManifest().config;
+    const config = { ...fullConfig } as Record<string, unknown>;
+    delete config[scenario.omit];
+    const omittedConfig = config as typeof fullConfig;
+
+    expect(() =>
+      createManualM1Manifest({
+        testedBehaviorCommit: 'c'.repeat(40),
+        matrixClass: 'production-smoke',
+        runId: '20260803T021500Z-production-smoke',
+        startedAt: '2026-08-03T02:15:00.000Z',
+        endedAt: '2026-08-03T02:17:00.000Z',
+        config: omittedConfig,
+        host: { deviceAlias: 'test iPhone' },
+        evidence: validManifest().evidence,
+        findings: [],
+        outcome: 'passed',
+      }),
+    ).toThrow(/non-empty apiOrigin, region, and oauthDomain/u);
+  });
+
   it('rejects a manual manifest whose run-ID suffix disagrees with the matrix class', () => {
     expect(() =>
       createManualM1Manifest({

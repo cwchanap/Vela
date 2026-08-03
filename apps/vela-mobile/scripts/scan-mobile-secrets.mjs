@@ -142,6 +142,13 @@ export async function scanMobileSecretRoots({
   const exclusionNames = new Set(exclusions);
   const findings = [];
   const skipped = [];
+  // Oversized supported artifacts are counted independently of the bounded
+  // `skipped` diagnostic sample. Once MAX_SKIPPED_RECORDS is reached, addSkipped
+  // stops retaining individual records (including max_text_bytes reasons), so a
+  // count derived from `skipped` would under-report and let the fail-closed
+  // gate pass an unscanned oversized bundle. This counter is the source of
+  // truth for the CLI's fail-closed check.
+  let oversizedCount = 0;
   const absoluteRoots = [...new Set(roots.map((candidate) => resolveMobileSecretRoot(candidate)))];
   const repositoryBase = commonAncestor(absoluteRoots);
 
@@ -177,6 +184,7 @@ export async function scanMobileSecretRoots({
 
         const fileStat = await stat(path);
         if (fileStat.size > maxTextBytes) {
+          oversizedCount += 1;
           addSkipped(skipped, { path: pathFromRepository, reason: 'max_text_bytes' });
           continue;
         }
@@ -204,6 +212,7 @@ export async function scanMobileSecretRoots({
   return {
     findings: findings.sort(sortByPath),
     skipped: skipped.sort(sortByPath),
+    oversizedCount,
   };
 }
 
@@ -286,13 +295,19 @@ export async function runMobileSecretScannerCli(argv = process.argv.slice(2)) {
     // scanned, so "No mobile secrets found" would be an unverified claim. The
     // gate must fail rather than silently pass an oversized bundle or source
     // map that may embed a credential. Raise --max-bytes only when the
-    // oversized file is understood and trusted.
-    const oversized = report.skipped.filter((record) => record.reason === 'max_text_bytes');
-    if (oversized.length > 0) {
+    // oversized file is understood and trusted. The oversized count is tracked
+    // independently of the bounded `skipped` sample so it stays accurate even
+    // after MAX_SKIPPED_RECORDS truncates the diagnostic list.
+    if (report.oversizedCount > 0) {
+      const listed = report.skipped
+        .filter((record) => record.reason === 'max_text_bytes')
+        .map(({ path }) => path);
+      const listedText =
+        listed.length > 0
+          ? `\n${listed.join('\n')}`
+          : '\n(oversized files were omitted from the skipped-record sample)';
       console.error(
-        `Mobile secret scanner could not scan ${oversized.length} supported text artifact(s) larger than ${maxTextBytes} bytes:\n${oversized
-          .map(({ path }) => path)
-          .join('\n')}\nRaise --max-bytes only after confirming these files are safe to load.`,
+        `Mobile secret scanner could not scan ${report.oversizedCount} supported text artifact(s) larger than ${maxTextBytes} bytes:${listedText}\nRaise --max-bytes only after confirming these files are safe to load.`,
       );
       return 3;
     }
