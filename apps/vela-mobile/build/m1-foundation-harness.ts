@@ -1855,6 +1855,9 @@ async function runIosSimulatorPhase(
 
   if (outcome === 'passed') {
     let workspace: ExecutionWorkspace | undefined;
+    let simulatorWorkStarted = false;
+    let simulatorExecutionRoot: string | undefined;
+    let simulatorCommandEnv: Record<string, string> | undefined;
     try {
       if (!configuration.loaded || !args.simulatorUdid) {
         throw new M1HarnessError('Validated Simulator inputs are unexpectedly unavailable');
@@ -1898,6 +1901,8 @@ async function runIosSimulatorPhase(
         configuration.loaded,
         dependencies.executionProcessEnvironment ?? process.env,
       );
+      simulatorExecutionRoot = executionRoot;
+      simulatorCommandEnv = commandEnv;
       const runStep = async (input: {
         spec: CommandSpec;
         failureOutcome: 'prerequisite_missing' | 'gate_failed';
@@ -2189,6 +2194,7 @@ async function runIosSimulatorPhase(
       }
 
       if (outcome === 'passed') {
+        simulatorWorkStarted = true;
         await runStep({
           spec: {
             label: 'simulator-bootstatus',
@@ -2261,6 +2267,36 @@ async function runIosSimulatorPhase(
         } catch {
           forceRedactedFallback = true;
           outcome = 'harness_error';
+        }
+      }
+      if (simulatorWorkStarted && args.simulatorUdid) {
+        const cleanupRoot = simulatorExecutionRoot ?? dependencies.repoRoot;
+        const cleanupEnv = simulatorCommandEnv;
+        const cleanupSpec = (label: string, simctlArgs: string[]): CommandSpec => ({
+          label,
+          command: 'xcrun',
+          args: simctlArgs,
+          cwd: cleanupRoot,
+          ...(cleanupEnv ? { env: cleanupEnv } : {}),
+        });
+        try {
+          await dependencies.runCommand(
+            cleanupSpec('simulator-cleanup-uninstall', [
+              'simctl',
+              'uninstall',
+              args.simulatorUdid,
+              'com.vela.app',
+            ]),
+          );
+        } catch {
+          // Best-effort cleanup: uninstall failures must not change outcome or findings.
+        }
+        try {
+          await dependencies.runCommand(
+            cleanupSpec('simulator-cleanup-shutdown', ['simctl', 'shutdown', args.simulatorUdid]),
+          );
+        } catch {
+          // Best-effort cleanup: shutdown failures must not change outcome or findings.
         }
       }
     }
@@ -2949,20 +2985,16 @@ function parseManualInput(value: unknown): ManualInput {
   assertManualEvidenceIsSafe(value.evidence);
   assertManualTextIsSafe(JSON.stringify(value));
 
-  try {
-    return {
-      runId: value.runId as string,
-      startedAt: value.startedAt as string,
-      endedAt: value.endedAt as string,
-      config: value.config as M1Manifest['config'],
-      host: value.host as M1Manifest['host'],
-      evidence: value.evidence as M1EvidenceReference[],
-      findings: value.findings as M1Manifest['findings'],
-      outcome: value.outcome as ManualInput['outcome'],
-    };
-  } catch {
-    throw new M1UsageError('Manual input has an invalid manifest shape');
-  }
+  return {
+    runId: value.runId as string,
+    startedAt: value.startedAt as string,
+    endedAt: value.endedAt as string,
+    config: value.config as M1Manifest['config'],
+    host: value.host as M1Manifest['host'],
+    evidence: value.evidence as M1EvidenceReference[],
+    findings: value.findings as M1Manifest['findings'],
+    outcome: value.outcome as ManualInput['outcome'],
+  };
 }
 
 async function readManualInput(inputPath: string): Promise<ManualInput> {

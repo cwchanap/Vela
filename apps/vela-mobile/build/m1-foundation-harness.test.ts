@@ -1176,8 +1176,7 @@ describe('iOS Simulator M1 foundation verification', () => {
       return testedBehaviorCommit;
     };
     const sleep = vi.fn(async (_milliseconds: number) => undefined);
-    (dependencies as HarnessDependencies & { sleep?: (milliseconds: number) => Promise<void> }).sleep =
-      sleep;
+    dependencies.sleep = sleep;
 
     const manifest = onlyManifest(
       await runM1FoundationVerification(
@@ -1217,6 +1216,8 @@ describe('iOS Simulator M1 foundation verification', () => {
       ['xcrun', 'simctl', 'install'],
       ['xcrun', 'simctl', 'launch'],
       ['xcrun', 'simctl', 'spawn'],
+      ['xcrun', 'simctl', 'uninstall'],
+      ['xcrun', 'simctl', 'shutdown'],
     ]);
     expect(runner.calls[2]!.args).toEqual(['install', '--frozen-lockfile']);
     expect(runner.calls[3]!.args).toEqual([
@@ -1333,8 +1334,7 @@ describe('iOS Simulator M1 foundation verification', () => {
     const runner = createSimulatorRunner({ wwwRoot, bunVersion: '1.3.0\n' });
     const dependencies = createDependencies({ repoRoot: repository, runCommand: runner.runCommand });
     attachCleanExecutionWorkspace(dependencies, workspace);
-    (dependencies as HarnessDependencies & { sleep?: (milliseconds: number) => Promise<void> }).sleep =
-      async () => undefined;
+    dependencies.sleep = async () => undefined;
 
     const manifest = onlyManifest(
       await runM1FoundationVerification(
@@ -1368,8 +1368,7 @@ describe('iOS Simulator M1 foundation verification', () => {
     const runner = createSimulatorRunner({ wwwRoot, bunVersion: `${unsafeBunVersion}\n` });
     const dependencies = createDependencies({ repoRoot: repository, runCommand: runner.runCommand });
     attachCleanExecutionWorkspace(dependencies, workspace);
-    (dependencies as HarnessDependencies & { sleep?: (milliseconds: number) => Promise<void> }).sleep =
-      async () => undefined;
+    dependencies.sleep = async () => undefined;
 
     const manifest = onlyManifest(
       await runM1FoundationVerification(
@@ -1402,8 +1401,7 @@ describe('iOS Simulator M1 foundation verification', () => {
     const runner = createSimulatorRunner({ wwwRoot, bunVersion: `${oversizedPrerelease}\n` });
     const dependencies = createDependencies({ repoRoot: repository, runCommand: runner.runCommand });
     attachCleanExecutionWorkspace(dependencies, workspace);
-    (dependencies as HarnessDependencies & { sleep?: (milliseconds: number) => Promise<void> }).sleep =
-      async () => undefined;
+    dependencies.sleep = async () => undefined;
 
     const manifest = onlyManifest(
       await runM1FoundationVerification(
@@ -1577,8 +1575,7 @@ describe('iOS Simulator M1 foundation verification', () => {
     const runner = createSimulatorRunner({ wwwRoot, processList: '/usr/libexec/other-process\n' });
     const dependencies = createDependencies({ repoRoot: repository, runCommand: runner.runCommand });
     attachCleanExecutionWorkspace(dependencies, workspace);
-    (dependencies as HarnessDependencies & { sleep?: (milliseconds: number) => Promise<void> }).sleep =
-      async () => undefined;
+    dependencies.sleep = async () => undefined;
 
     const manifest = onlyManifest(
       await runM1FoundationVerification(
@@ -1598,7 +1595,7 @@ describe('iOS Simulator M1 foundation verification', () => {
       severity: 'error',
       summary: 'Launched simulator app process was not present after the bounded wait',
     });
-    expect(runner.calls.at(-1)?.args).toEqual([
+    expect(runner.calls.at(-3)?.args).toEqual([
       'simctl',
       'spawn',
       simulatorUdid,
@@ -1705,8 +1702,7 @@ describe('iOS Simulator M1 foundation verification', () => {
     });
     const dependencies = createDependencies({ repoRoot: repository, runCommand: runner.runCommand });
     dependencies.createExecutionWorkspace = async () => ({ root: workspace, dispose });
-    (dependencies as HarnessDependencies & { sleep?: (milliseconds: number) => Promise<void> }).sleep =
-      async () => undefined;
+    dependencies.sleep = async () => undefined;
 
     const manifest = onlyManifest(
       await runM1FoundationVerification(
@@ -1725,7 +1721,7 @@ describe('iOS Simulator M1 foundation verification', () => {
       'utf8',
     );
 
-    expect(runner.calls).toHaveLength(15);
+    expect(runner.calls).toHaveLength(17);
     expect(dispose).toHaveBeenCalledTimes(1);
     expect(manifest.outcome).toBe('harness_error');
     expect(manifest.config).toEqual({

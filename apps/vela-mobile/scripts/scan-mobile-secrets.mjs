@@ -15,6 +15,12 @@ const REPOSITORY_ROOT = fileURLToPath(new URL('../../..', import.meta.url));
 
 export const MOBILE_SECRET_TEXT_ARTIFACT_EXTENSIONS = new Set([
   ...PRODUCTION_TEXT_ARTIFACT_EXTENSIONS,
+  '.ts',
+  '.tsx',
+  '.mts',
+  '.swift',
+  '.m',
+  '.h',
   '.log',
   '.md',
   '.plist',

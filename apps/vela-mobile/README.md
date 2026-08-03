@@ -126,6 +126,41 @@ aligned with the Home page version before Xcode archives the bundle.
 
 ## M1 Foundation Verification
 
+### Deployed configuration preparation
+
+Before running production verification, prepare the deployed configuration in
+this exact order:
+
+1. Deploy or synthesize and export the CDK outputs so
+   `packages/cdk/cdk-outputs.json` exists:
+   ```bash
+   cd packages/cdk
+   bun cdk:deploy          # or: bun cdk synth && export outputs
+   ```
+2. Run the environment injection script using those outputs to write
+   `apps/vela-mobile/.env.production`:
+   ```bash
+   cd packages/cdk
+   bun scripts/inject-env.ts
+   ```
+3. Build `@vela/mobile` before running production verification:
+   ```bash
+   cd apps/vela-mobile
+   bun run build:ios:assets
+   ```
+
+This ordering prevents stale `.env.production` usage: the injection script
+derives `VITE_MOBILE_API_URL` and the public Cognito identifiers from the
+current CDK outputs, so a build that skips step 2 would ship a stale or
+placeholder configuration. The pre-merge `verify:production-diagnostics` gate
+may bypass this prerequisite with an explicit placeholder
+(`VITE_MOBILE_API_URL=https://example.invalid/api/`) because it only checks
+diagnostic exclusion, not deployed-config consistency. The closure gate
+(`--require-deployed-config` on `verify:m1-foundation`) does not allow this
+bypass and rejects placeholder configuration.
+
+### Phases
+
 Run one verifier phase at a time from `apps/vela-mobile`:
 
 ```bash

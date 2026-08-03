@@ -248,15 +248,21 @@ export function scanMobileSecretText(input: MobileSecretScanInput): MobileSecret
     }
   }
 
-  const findings = candidates
+  const sorted = candidates
     .filter((current) => !isJavaScriptTemplatePlaceholder(current.rawValue))
     .filter(
       (current) =>
         !(input.allowPolicySentinelLiterals && current.finding.ruleId === 'secret_sentinel'),
     )
     .filter((current) => !isTestFixturePath(input.path) || !isAllowedTestFixtureCandidate(current))
-    .sort((left, right) => left.start - right.start || left.priority - right.priority)
-    .filter((current, index, sorted) => !sorted.slice(0, index).some((prior) => overlaps(prior, current)));
+    .sort((left, right) => left.start - right.start || left.priority - right.priority);
 
-  return findings.map(({ finding: result }) => result);
+  const retained: Candidate[] = [];
+  for (const current of sorted) {
+    if (!retained.some((prior) => overlaps(prior, current))) {
+      retained.push(current);
+    }
+  }
+
+  return retained.map(({ finding: result }) => result);
 }
