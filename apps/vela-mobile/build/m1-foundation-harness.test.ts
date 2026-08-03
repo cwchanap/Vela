@@ -431,6 +431,100 @@ describe('automated M1 foundation verification', () => {
     expect(readFileSync(manifestPath, 'utf8')).toContain('"outcome": "harness_error"');
   });
 
+  it('redacts all completed gate state when detached-workspace cleanup throws', async () => {
+    const repository = createTemporaryRepository();
+    const workspace = createTemporaryExecutionWorkspace();
+    const runner = createRunner();
+    const dispose = vi.fn(async () => {
+      throw new Error('SECRET-id-token cleanup failure');
+    });
+    const dependencies = createDependencies({
+      repoRoot: repository,
+      runCommand: runner.runCommand,
+      createExecutionWorkspace: async () => ({ root: workspace, dispose }),
+    });
+
+    const manifest = onlyManifest(
+      await runM1FoundationVerification(
+        parseM1Arguments(['--phase', 'automated']),
+        dependencies,
+      ),
+    );
+    const manifestPath = join(
+      repository,
+      'apps/vela-mobile/docs/evidence/hpa-210',
+      testedBehaviorCommit,
+      manifest.runId,
+      'manifest.json',
+    );
+    const serializedManifest = readFileSync(manifestPath, 'utf8');
+
+    expect(runner.calls).toHaveLength(expectedCommands.length);
+    expect(dispose).toHaveBeenCalledTimes(1);
+    expect(manifest.outcome).toBe('harness_error');
+    expect(manifest.config).toEqual({
+      source: 'none',
+      class: 'missing',
+      publicIdentifiersConsistent: false,
+    });
+    expect(manifest.host).toEqual({ platform: 'redacted' });
+    expect(manifest.commands).toEqual([]);
+    expect(manifest.evidence).toEqual([]);
+    expect(manifest.findings).toEqual([
+      {
+        severity: 'error',
+        summary: 'The automated verification harness could not execute safely',
+      },
+    ]);
+    expect(serializedManifest).not.toContain('SECRET-id-token');
+    expect(serializedManifest).not.toContain(deployedEnvironment.VITE_COGNITO_OAUTH_DOMAIN!);
+  });
+
+  it('redacts prior gate state when a runner throws after several commands', async () => {
+    const repository = createTemporaryRepository();
+    const calls: CommandSpec[] = [];
+    const runCommand: CommandRunner = async (spec) => {
+      calls.push(spec);
+      if (calls.length === 5) throw new Error('SECRET-id-token runner failure');
+      return { exitCode: 0, stdout: '', stderr: '' };
+    };
+    const dependencies = createDependencies({ repoRoot: repository, runCommand });
+
+    const manifest = onlyManifest(
+      await runM1FoundationVerification(
+        parseM1Arguments(['--phase', 'automated']),
+        dependencies,
+      ),
+    );
+    const manifestPath = join(
+      repository,
+      'apps/vela-mobile/docs/evidence/hpa-210',
+      testedBehaviorCommit,
+      manifest.runId,
+      'manifest.json',
+    );
+    const serializedManifest = readFileSync(manifestPath, 'utf8');
+
+    expect(calls).toHaveLength(5);
+    expect(manifest.outcome).toBe('harness_error');
+    expect(manifest.config).toEqual({
+      source: 'none',
+      class: 'missing',
+      publicIdentifiersConsistent: false,
+    });
+    expect(manifest.host).toEqual({ platform: 'redacted' });
+    expect(manifest.commands).toEqual([]);
+    expect(manifest.evidence).toEqual([]);
+    expect(manifest.findings).toEqual([
+      {
+        severity: 'error',
+        summary: 'The automated verification harness could not execute safely',
+      },
+    ]);
+    expect(serializedManifest).not.toContain('SECRET-id-token');
+    expect(serializedManifest).not.toContain(deployedEnvironment.VITE_COGNITO_OAUTH_DOMAIN!);
+  });
+
   it('runs the eight gates from a clean pinned checkout while writing the manifest in the original repository', async () => {
     const repository = createTemporaryRepository();
     const workspace = createTemporaryExecutionWorkspace();

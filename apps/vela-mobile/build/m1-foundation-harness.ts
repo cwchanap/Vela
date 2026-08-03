@@ -24,6 +24,8 @@ const MAX_MANUAL_INPUT_BYTES = 256 * 1024;
 const MAX_RUN_DIRECTORY_ATTEMPTS = 1_000;
 const MAX_GIT_STATUS_BYTES = 1024 * 1024;
 const EXECUTION_WORKSPACE_PREFIX = 'vela-m1-foundation-';
+const GENERIC_AUTOMATED_HARNESS_FAILURE =
+  'The automated verification harness could not execute safely';
 const MANUAL_INPUT_DECODER = new TextDecoder('utf-8', { fatal: true });
 const MOBILE_CONFIG_KEYS = [
   'VITE_MOBILE_API_URL',
@@ -1217,6 +1219,7 @@ async function runAutomatedPhase(
   const findings: M1Manifest['findings'] = [];
   let configuration = evaluateMobileConfiguration(dependencies);
   let outcome: M1Outcome = 'passed';
+  let forceRedactedFallback = false;
 
   try {
     if (await hasBlockingDirtyExecutableState(dependencies)) {
@@ -1355,6 +1358,7 @@ async function runAutomatedPhase(
         break;
       }
     } catch {
+      forceRedactedFallback = true;
       outcome = 'harness_error';
       findings.push({
         severity: 'error',
@@ -1365,6 +1369,7 @@ async function runAutomatedPhase(
         try {
           await workspace.dispose();
         } catch {
+          forceRedactedFallback = true;
           outcome = 'harness_error';
           findings.push({
             severity: 'error',
@@ -1376,28 +1381,37 @@ async function runAutomatedPhase(
   }
 
   const finalTiming = safeFinalManifestTiming(dependencies.now, startedAt);
-  const manifest = finalTiming.isReliable
-    ? createSafeAutomatedManifest({
-        context,
-        testedBehaviorCommit,
-        startedAt,
-        endedAt: finalTiming.endedAt,
-        outcome,
-        config: configuration.config,
-        platform: dependencies.platform,
-        commands,
-        evidence,
-        findings,
-      })
-    : createRedactedAutomatedManifest(
-        {
-          context,
-          testedBehaviorCommit,
-          startedAt,
-          endedAt: finalTiming.endedAt,
-        },
-        'The automated verification harness could not produce a valid final timestamp',
-      );
+  const trustedFinalInput: TrustedAutomatedManifestInput = {
+    context,
+    testedBehaviorCommit,
+    startedAt,
+    endedAt: finalTiming.endedAt,
+  };
+  let manifest: M1Manifest;
+  if (!finalTiming.isReliable) {
+    manifest = createRedactedAutomatedManifest(
+      trustedFinalInput,
+      'The automated verification harness could not produce a valid final timestamp',
+    );
+  } else if (forceRedactedFallback) {
+    manifest = createRedactedAutomatedManifest(
+      trustedFinalInput,
+      GENERIC_AUTOMATED_HARNESS_FAILURE,
+    );
+  } else {
+    manifest = createSafeAutomatedManifest({
+      context,
+      testedBehaviorCommit,
+      startedAt,
+      endedAt: finalTiming.endedAt,
+      outcome,
+      config: configuration.config,
+      platform: dependencies.platform,
+      commands,
+      evidence,
+      findings,
+    });
+  }
   await writeManifest(context.directory, manifest);
   return manifest;
 }
