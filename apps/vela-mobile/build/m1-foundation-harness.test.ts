@@ -255,7 +255,7 @@ function physicalBuildSettings(overrides: Record<string, unknown> = {}) {
 }
 
 const codesigningIdentityOutput = [
-  '  1) A1B2C3D4E5F6A1B2C3D4E5F6A1B2C3D4E5F6A1B2 "iPhone Developer: Tester (LOCAL-TEAM)"',
+  `  1) A1B2C3D4E5F6A1B2C3D4E5F6A1B2C3D4E5F6A1B2 "iPhone Developer: Tester (${physicalSigningTeam})"`,
   '     1 valid identity found',
 ].join('\n');
 
@@ -2029,6 +2029,34 @@ describe('iOS physical-device M1 foundation preflight', () => {
       name: 'the keychain has no usable codesigning identity',
       deviceList: physicalDeviceList(),
       codesigningIdentityOutput: '     0 valid identities found',
+      expectedCallCount: 3,
+      expectedHost: {
+        deviceAlias: 'iPhone 16 Pro',
+        deviceModel: 'iPhone17,1',
+        signingReady: false,
+      },
+    },
+    {
+      name: 'the codesigning identity belongs to a different team',
+      deviceList: physicalDeviceList(),
+      codesigningIdentityOutput: [
+        '  1) A1B2C3D4E5F6A1B2C3D4E5F6A1B2C3D4E5F6A1B2 "iPhone Developer: Tester (WRONG-TEAM)"',
+        '     1 valid identity found',
+      ].join('\n'),
+      expectedCallCount: 3,
+      expectedHost: {
+        deviceAlias: 'iPhone 16 Pro',
+        deviceModel: 'iPhone17,1',
+        signingReady: false,
+      },
+    },
+    {
+      name: 'the codesigning identity class does not match the resolved identity',
+      deviceList: physicalDeviceList(),
+      codesigningIdentityOutput: [
+        `  1) A1B2C3D4E5F6A1B2C3D4E5F6A1B2C3D4E5F6A1B2 "Developer ID Application: Tester (${physicalSigningTeam})"`,
+        '     1 valid identity found',
+      ].join('\n'),
       expectedCallCount: 3,
       expectedHost: {
         deviceAlias: 'iPhone 16 Pro',

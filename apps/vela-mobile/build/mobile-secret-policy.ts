@@ -67,15 +67,15 @@ export const TEST_FIXTURE_SECRET_VALUES: ReadonlySet<string> = new Set(
 
 export const TEST_FIXTURE_VALUE_SUFFIXES = ['.example.test', 'example.invalid'] as const;
 
-const BEARER_PATTERN = /Authorization:\s*Bearer\s+([^\s"'`]+)/giu;
+const BEARER_PATTERN = /["']?Authorization["']?\s*:\s*["']?Bearer["']?\s+([^\s"'`]+)/giu;
 const JWT_PATTERN = /\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b/gu;
 const PRIVATE_KEY_PATTERN = /-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----/gu;
 const PRESIGNED_URL_PATTERN =
   /https?:\/\/[^\s"'`?]+\?[^\s"'`]*(?:X-Amz-Credential|X-Amz-Signature|X-Amz-Security-Token)=[^\s"'`]*/giu;
 const AWS_SECRET_ASSIGNMENT_PATTERN =
-  /\b(?:AWS_SECRET_ACCESS_KEY|aws_secret_access_key|awsSecretAccessKey)\b\s*(?:=|:)\s*(?:(['"`])([A-Za-z0-9/+=]{40})\1|([A-Za-z0-9/+=]{40}))(?![A-Za-z0-9/+=])/giu;
+  /\b(?:AWS_SECRET_ACCESS_KEY|aws_secret_access_key|awsSecretAccessKey)["']?\s*(?:=|:)\s*(?:(['"`])([A-Za-z0-9/+=]{40})\1|([A-Za-z0-9/+=]{40}))(?![A-Za-z0-9/+=])/giu;
 const PROVIDER_SECRET_ASSIGNMENT_PATTERN =
-  /\b(?:ANTHROPIC_API_KEY|COHERE_API_KEY|GEMINI_API_KEY|GOOGLE_API_KEY|GROQ_API_KEY|HUGGINGFACE_API_KEY|HF_TOKEN|MISTRAL_API_KEY|OPENAI_API_KEY|OPENAI_KEY|PERPLEXITY_API_KEY|SENTRY_AUTH_TOKEN|SLACK_BOT_TOKEN|SLACK_TOKEN|STRIPE_SECRET_KEY)\b\s*(?:=|:)\s*(?:(['"`])([^\s"'`]{12,})\1|([^\s,;}\]]{12,}))/giu;
+  /\b(?:ANTHROPIC_API_KEY|COHERE_API_KEY|GEMINI_API_KEY|GOOGLE_API_KEY|GROQ_API_KEY|HUGGINGFACE_API_KEY|HF_TOKEN|MISTRAL_API_KEY|OPENAI_API_KEY|OPENAI_KEY|PERPLEXITY_API_KEY|SENTRY_AUTH_TOKEN|SLACK_BOT_TOKEN|SLACK_TOKEN|STRIPE_SECRET_KEY)["']?\s*(?:=|:)\s*(?:(['"`])([^\s"'`]{12,})\1|([^\s,;}\]]{12,}))/giu;
 
 type Candidate = {
   finding: MobileSecretFinding;

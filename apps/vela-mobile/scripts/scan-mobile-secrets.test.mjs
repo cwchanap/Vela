@@ -369,4 +369,31 @@ describe('scanMobileSecretRoots', () => {
     expect(result.status).toBe(0);
     expect(result.stdout).toContain('No mobile secrets found');
   });
+
+  it('fails closed (exit 3) when an oversized supported file appears after the skipped-record cap', async () => {
+    // Regression: addSkipped stops retaining individual records once
+    // MAX_SKIPPED_RECORDS is reached. An oversized supported artifact that
+    // sorts after 1000 unsupported files would have its max_text_bytes record
+    // dropped from the bounded `skipped` sample. The fail-closed gate must
+    // still fire via the independent oversizedCount counter rather than exit 0
+    // with "No mobile secrets found".
+    const root = await createTemporaryRoot();
+    const unsupportedFiles = Array.from({ length: 1000 }, (_, index) =>
+      join(root, `a${index.toString().padStart(4, '0')}.png`),
+    );
+    await Promise.all(unsupportedFiles.map((file) => writeFile(file, '')));
+    // `bundle.js` sorts after every `a*.png` entry, so it is visited once the
+    // skipped-record cap is already full.
+    await writeFile(join(root, 'bundle.js'), 'SECRET-callback-code'.repeat(8));
+
+    const result = spawnSync(
+      'bun',
+      [scannerPath, '--root', root, '--max-bytes', '64'],
+      { encoding: 'utf8' },
+    );
+
+    expect(result.status).toBe(3);
+    expect(result.stderr).toContain('could not scan');
+    expect(result.stderr).toContain('1 supported text artifact(s)');
+  });
 });

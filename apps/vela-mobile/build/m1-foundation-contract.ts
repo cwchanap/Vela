@@ -446,6 +446,15 @@ function runIdMatrixClassSuffix(runId: string): string {
  * proof. Machine phases are intentionally exempt: a non-closure automated or
  * Simulator run may legitimately pass against placeholder configuration when
  * `--require-deployed-config` is not supplied.
+ *
+ * For a `passed` manual manifest, the config must also carry real provenance:
+ * a non-`none` source and non-empty `apiOrigin`, `region`, and `oauthDomain`.
+ * Without these, a manifest can claim `class: 'deployed'` and
+ * `publicIdentifiersConsistent: true` while recording no backend identifiers,
+ * which cannot demonstrate that the physical observation used the same backend
+ * as the machine phases. The boolean assertions are caller-supplied, so the
+ * presence of the underlying public identifiers is the minimum verifiable
+ * proof at the contract layer.
  */
 export function validateManualM1ManifestSemantics(manifest: M1Manifest): void {
   if (runIdMatrixClassSuffix(manifest.runId) !== manifest.matrixClass) {
@@ -460,6 +469,21 @@ export function validateManualM1ManifestSemantics(manifest: M1Manifest): void {
   }
   if (!manifest.config.publicIdentifiersConsistent) {
     throw new Error('a passed manual manifest must record consistent public identifiers');
+  }
+  if (manifest.config.source === 'none') {
+    throw new Error('a passed manual manifest must record a real configuration source');
+  }
+  if (
+    manifest.config.apiOrigin === undefined ||
+    manifest.config.apiOrigin.trim() === '' ||
+    manifest.config.region === undefined ||
+    manifest.config.region.trim() === '' ||
+    manifest.config.oauthDomain === undefined ||
+    manifest.config.oauthDomain.trim() === ''
+  ) {
+    throw new Error(
+      'a passed manual manifest must record non-empty apiOrigin, region, and oauthDomain',
+    );
   }
   if (manifest.evidence.length === 0) {
     throw new Error('a passed manual manifest must reference non-empty evidence');

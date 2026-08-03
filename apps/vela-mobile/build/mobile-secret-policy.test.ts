@@ -238,4 +238,59 @@ describe('scanMobileSecretText', () => {
       }),
     ).toEqual([]);
   });
+
+  it('detects credentials in double-quoted JSON object form', () => {
+    const providerKey = 'sk-live-abcdefghijklmno';
+    const awsSecret = 'A'.repeat(40);
+    const bearer = 'live-token-1234567890';
+    const findings = scanMobileSecretText({
+      path: 'config.json',
+      text: [
+        '{',
+        `  "OPENAI_API_KEY": "${providerKey}",`,
+        `  "AWS_SECRET_ACCESS_KEY": "${awsSecret}",`,
+        `  "Authorization": "Bearer ${bearer}"`,
+        '}',
+      ].join('\n'),
+    });
+
+    expect(findings.map(({ ruleId }) => ruleId)).toEqual([
+      'provider_key',
+      'aws_secret',
+      'bearer_value',
+    ]);
+    expect(JSON.stringify(findings)).not.toContain(providerKey);
+    expect(JSON.stringify(findings)).not.toContain(awsSecret);
+    expect(JSON.stringify(findings)).not.toContain(bearer);
+  });
+
+  it('detects credentials in single-quoted object-literal form', () => {
+    const providerKey = 'sk-live-abcdefghijklmno';
+    const findings = scanMobileSecretText({
+      path: 'settings.ts',
+      text: `export const settings = { OPENAI_API_KEY: '${providerKey}' };`,
+    });
+
+    expect(findings).toEqual([
+      expect.objectContaining({ ruleId: 'provider_key', path: 'settings.ts' }),
+    ]);
+    expect(JSON.stringify(findings)).not.toContain(providerKey);
+  });
+
+  it('detects a quoted AWS secret access key in a Vue component config', () => {
+    const awsSecret = 'B'.repeat(40);
+    const findings = scanMobileSecretText({
+      path: 'src/components/AwsConfig.vue',
+      text: [
+        '<script setup lang="ts">',
+        `const config = { 'AWS_SECRET_ACCESS_KEY': '${awsSecret}' };`,
+        '</script>',
+      ].join('\n'),
+    });
+
+    expect(findings).toEqual([
+      expect.objectContaining({ ruleId: 'aws_secret', path: 'src/components/AwsConfig.vue' }),
+    ]);
+    expect(JSON.stringify(findings)).not.toContain(awsSecret);
+  });
 });
