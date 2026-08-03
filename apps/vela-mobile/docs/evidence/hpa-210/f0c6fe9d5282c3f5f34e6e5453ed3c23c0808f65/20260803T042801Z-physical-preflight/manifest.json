@@ -1,0 +1,39 @@
+{
+  "schemaVersion": 1,
+  "runId": "20260803T042801Z-physical-preflight",
+  "testedBehaviorCommit": "f0c6fe9d5282c3f5f34e6e5453ed3c23c0808f65",
+  "phase": "ios-physical-preflight",
+  "matrixClass": "physical-preflight",
+  "startedAt": "2026-08-03T04:28:01.944Z",
+  "endedAt": "2026-08-03T04:28:02.382Z",
+  "outcome": "prerequisite_missing",
+  "exitCode": 3,
+  "config": {
+    "source": ".env.production",
+    "class": "deployed",
+    "apiOrigin": "https://vela.cwchanap.dev",
+    "region": "us-east-1",
+    "oauthDomain": "vela-cwchanap-auth.auth.us-east-1.amazoncognito.com",
+    "publicIdentifiersConsistent": true
+  },
+  "host": {},
+  "commands": [
+    {
+      "label": "physical-device-discovery",
+      "command": "xcrun",
+      "cwd": ".",
+      "startedAt": "2026-08-03T04:28:02.272Z",
+      "endedAt": "2026-08-03T04:28:02.326Z",
+      "elapsedMs": 54,
+      "exitCode": 0,
+      "status": "passed"
+    }
+  ],
+  "evidence": [],
+  "findings": [
+    {
+      "severity": "error",
+      "summary": "The requested physical iOS device could not be verified safely"
+    }
+  ]
+}
