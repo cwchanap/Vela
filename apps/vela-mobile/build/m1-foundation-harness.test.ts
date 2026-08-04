@@ -14,7 +14,13 @@ import {
   type CommandSpec,
   type HarnessDependencies,
 } from './m1-foundation-harness';
-import { M1_EXIT_CODE, type M1Manifest, type M1Outcome } from './m1-foundation-contract';
+import {
+  AUTOMATED_COMMAND_LABELS,
+  M1_EXIT_CODE,
+  type M1CommandResult,
+  type M1Manifest,
+  type M1Outcome,
+} from './m1-foundation-contract';
 
 const temporaryDirectories: string[] = [];
 const testedBehaviorCommit = 'a'.repeat(40);
@@ -413,7 +419,9 @@ function createDependencies(input: {
     loadDeployedIdentityProof:
       input.loadDeployedIdentityProof ?? (async () => deployedIdentityProofFrom(environment)),
     loadPassedAutomatedManifest:
-      input.loadPassedAutomatedManifest ?? (async () => passedAutomatedManifestFrom(environment)),
+      input.loadPassedAutomatedManifest ??
+      (async (_repoRoot: string, _commit: string, _runId: string) =>
+        passedAutomatedManifestFrom(environment)),
     createExecutionWorkspace:
       input.createExecutionWorkspace ?? (async () => ({ root: workspace, dispose: async () => undefined })),
     executionProcessEnvironment: input.executionProcessEnvironment ?? {},
@@ -453,10 +461,23 @@ function passedAutomatedManifestFrom(environment: TestEnvironment): M1Manifest {
       publicIdentifiersConsistent: true,
     },
     host: { platform: 'darwin' },
-    commands: [],
+    commands: automatedCommandResults(),
     evidence: [],
     findings: [],
   };
+}
+
+function automatedCommandResults(labels: readonly string[] = AUTOMATED_COMMAND_LABELS): M1CommandResult[] {
+  return labels.map((label) => ({
+    label,
+    command: 'bun',
+    cwd: '.',
+    startedAt: '2026-08-03T02:15:00.000Z',
+    endedAt: '2026-08-03T02:15:01.000Z',
+    elapsedMs: 1000,
+    exitCode: 0,
+    status: 'passed',
+  }));
 }
 
 function onlyManifest(manifests: Awaited<ReturnType<typeof runM1FoundationVerification>>) {
@@ -491,6 +512,7 @@ function validManualInput() {
     ],
     findings: [{ severity: 'info', summary: 'Physical observation recorded' }],
     outcome: 'passed',
+    automatedRunId: '20260803T021500Z-automated',
   };
 }
 
@@ -2805,6 +2827,69 @@ describe('manual M1 foundation recording', () => {
     expect(JSON.parse(readFileSync(manifestPath, 'utf8'))).toEqual(manifest);
   });
 
+  it('persists linkedAutomatedRunId on a passed manual manifest for auditable cross-phase linkage', async () => {
+    const repository = createTemporaryRepository();
+    const inputPath = join(repository, 'linked.json');
+    writeFileSync(
+      inputPath,
+      JSON.stringify({
+        ...validManualInput(),
+        automatedRunId: '20260803T021500Z-automated',
+      }),
+    );
+
+    const manifest = onlyManifest(
+      await runM1FoundationVerification(
+        parseM1Arguments([
+          '--record-manual',
+          'production-smoke',
+          '--tested-behavior-commit',
+          testedBehaviorCommit,
+          '--input',
+          inputPath,
+        ]),
+        createDependencies({ repoRoot: repository, runCommand: createRunner().runCommand }),
+      ),
+    );
+
+    expect(manifest.linkedAutomatedRunId).toBe('20260803T021500Z-automated');
+    const manifestPath = join(
+      repository,
+      'apps/vela-mobile/docs/evidence/hpa-210',
+      testedBehaviorCommit,
+      manifest.runId,
+      'manifest.json',
+    );
+    expect(JSON.parse(readFileSync(manifestPath, 'utf8')).linkedAutomatedRunId).toBe(
+      '20260803T021500Z-automated',
+    );
+  });
+
+  it('rejects a passed manual manifest whose input lacks automatedRunId', async () => {
+    const repository = createTemporaryRepository();
+    const inputPath = join(repository, 'missing-automated-run-id.json');
+    const { automatedRunId: _omitted, ...inputWithoutAutomatedRunId } = validManualInput();
+    writeFileSync(inputPath, JSON.stringify(inputWithoutAutomatedRunId));
+
+    await expect(
+      runM1FoundationVerification(
+        parseM1Arguments([
+          '--record-manual',
+          'production-smoke',
+          '--tested-behavior-commit',
+          testedBehaviorCommit,
+          '--input',
+          inputPath,
+        ]),
+        createDependencies({ repoRoot: repository, runCommand: createRunner().runCommand }),
+      ),
+    ).rejects.toThrow(M1UsageError);
+
+    expect(
+      existsSync(join(repository, 'apps/vela-mobile/docs/evidence/hpa-210')),
+    ).toBe(false);
+  });
+
   it('rejects hostile manual JSON rather than allowing forced manifest fields to be injected', async () => {
     const repository = createTemporaryRepository();
     const inputPath = join(repository, 'hostile.json');
@@ -2908,7 +2993,7 @@ describe('manual M1 foundation recording', () => {
         createDependencies({
           repoRoot: repository,
           runCommand: createRunner().runCommand,
-          loadPassedAutomatedManifest: async () => ({
+          loadPassedAutomatedManifest: async (_repoRoot: string, _commit: string, _runId: string) => ({
             ...passedAutomatedManifestFrom(deployedEnvironment),
             config: { ...passedAutomatedManifestFrom(deployedEnvironment).config, ...mismatchedConfig },
           }) as M1Manifest,
@@ -2949,7 +3034,7 @@ describe('manual M1 foundation recording', () => {
         createDependencies({
           repoRoot: repository,
           runCommand: createRunner().runCommand,
-          loadPassedAutomatedManifest: async () => ({
+          loadPassedAutomatedManifest: async (_repoRoot: string, _commit: string, _runId: string) => ({
             ...passedAutomatedManifestFrom(deployedEnvironment),
             config: { ...passedAutomatedManifestFrom(deployedEnvironment).config, ...mismatchedConfig },
           }) as M1Manifest,
@@ -2976,7 +3061,7 @@ describe('manual M1 foundation recording', () => {
         createDependencies({
           repoRoot: repository,
           runCommand: createRunner().runCommand,
-          loadPassedAutomatedManifest: async () => null,
+          loadPassedAutomatedManifest: async (_repoRoot: string, _commit: string, _runId: string) => null,
         }),
       ),
     ).rejects.toThrow(/No passed automated manifest exists/u);
@@ -3079,16 +3164,19 @@ describe('manual M1 foundation recording', () => {
 });
 
 describe('loadPassedAutomatedManifest cross-phase linkage', () => {
+  const defaultAutomatedRunId = '20260803T021500Z-automated';
+
   function automatedManifest(input: {
     testedBehaviorCommit: string;
     runId?: string;
     matrixClass?: M1Manifest['matrixClass'];
     outcome?: M1Outcome;
     config?: Partial<M1Manifest['config']>;
+    commands?: M1CommandResult[];
   }): M1Manifest {
     return {
       schemaVersion: 1,
-      runId: input.runId ?? '20260803T021500Z-automated',
+      runId: input.runId ?? defaultAutomatedRunId,
       testedBehaviorCommit: input.testedBehaviorCommit,
       phase: 'automated',
       matrixClass: input.matrixClass ?? 'automated',
@@ -3108,7 +3196,7 @@ describe('loadPassedAutomatedManifest cross-phase linkage', () => {
         ...input.config,
       },
       host: { platform: 'darwin' },
-      commands: [],
+      commands: input.commands ?? automatedCommandResults(),
       evidence: [],
       findings: [],
     };
@@ -3128,11 +3216,15 @@ describe('loadPassedAutomatedManifest cross-phase linkage', () => {
     writeFileSync(join(directory, 'manifest.json'), JSON.stringify(manifest));
   }
 
-  it('returns the single qualifying closure manifest for the behavior commit', async () => {
+  it('returns the qualifying closure manifest at the named run ID', async () => {
     const repository = createTemporaryRepository();
     writeAutomatedManifest(repository, automatedManifest({ testedBehaviorCommit }));
 
-    const manifest = await loadPassedAutomatedManifest(repository, testedBehaviorCommit);
+    const manifest = await loadPassedAutomatedManifest(
+      repository,
+      testedBehaviorCommit,
+      defaultAutomatedRunId,
+    );
 
     expect(manifest).not.toBeNull();
     expect(manifest!.testedBehaviorCommit).toBe(testedBehaviorCommit);
@@ -3141,23 +3233,31 @@ describe('loadPassedAutomatedManifest cross-phase linkage', () => {
     expect(manifest!.config.publicIdentifiersConsistent).toBe(true);
   });
 
-  it('rejects a passed automated manifest whose internal behavior SHA differs from the directory commit', async () => {
+  it('throws when the manifest at the named run ID has a mismatched behavior SHA', async () => {
     // A manifest accidentally copied under another commit directory must not
     // establish false cross-phase linkage. The directory is keyed by the
     // supplied commit, but the manifest's testedBehaviorCommit field disagrees.
     const repository = createTemporaryRepository();
     const wrongCommit = 'b'.repeat(40);
-    writeAutomatedManifest(
+    const misfiledManifest = automatedManifest({ testedBehaviorCommit: wrongCommit });
+    const directory = join(
       repository,
-      automatedManifest({ testedBehaviorCommit: wrongCommit }),
+      'apps/vela-mobile/docs/evidence/hpa-210',
+      testedBehaviorCommit,
+      defaultAutomatedRunId,
     );
+    mkdirSync(directory, { recursive: true });
+    writeFileSync(join(directory, 'manifest.json'), JSON.stringify(misfiledManifest));
 
-    const manifest = await loadPassedAutomatedManifest(repository, testedBehaviorCommit);
-
-    expect(manifest).toBeNull();
+    await expect(
+      loadPassedAutomatedManifest(repository, testedBehaviorCommit, defaultAutomatedRunId),
+    ).rejects.toThrow(M1HarnessError);
+    await expect(
+      loadPassedAutomatedManifest(repository, testedBehaviorCommit, defaultAutomatedRunId),
+    ).rejects.toThrow(/does not qualify as closure evidence/u);
   });
 
-  it('rejects a passed automated manifest that did not verify deployed closure (placeholder config)', async () => {
+  it('throws when the manifest at the named run ID did not verify deployed closure', async () => {
     // An automated run executed without --require-deployed-config can pass
     // against placeholder configuration. The manual phase requires deployed
     // closure, so it must not accept linkage to a non-closure automated run.
@@ -3170,12 +3270,12 @@ describe('loadPassedAutomatedManifest cross-phase linkage', () => {
       }),
     );
 
-    const manifest = await loadPassedAutomatedManifest(repository, testedBehaviorCommit);
-
-    expect(manifest).toBeNull();
+    await expect(
+      loadPassedAutomatedManifest(repository, testedBehaviorCommit, defaultAutomatedRunId),
+    ).rejects.toThrow(M1HarnessError);
   });
 
-  it('rejects a passed automated manifest whose public identifiers were not verified', async () => {
+  it('throws when the manifest at the named run ID has unverified public identifiers', async () => {
     // Production-looking values with publicIdentifiersConsistent: false did
     // not match CDK proof at automated run time and cannot serve as immutable
     // closure evidence for a manual phase that itself requires consistency.
@@ -3188,12 +3288,12 @@ describe('loadPassedAutomatedManifest cross-phase linkage', () => {
       }),
     );
 
-    const manifest = await loadPassedAutomatedManifest(repository, testedBehaviorCommit);
-
-    expect(manifest).toBeNull();
+    await expect(
+      loadPassedAutomatedManifest(repository, testedBehaviorCommit, defaultAutomatedRunId),
+    ).rejects.toThrow(M1HarnessError);
   });
 
-  it('rejects a passed manifest whose matrix class is not automated', async () => {
+  it('throws when the manifest at the named run ID has a non-automated matrix class', async () => {
     const repository = createTemporaryRepository();
     writeAutomatedManifest(
       repository,
@@ -3204,63 +3304,103 @@ describe('loadPassedAutomatedManifest cross-phase linkage', () => {
       }),
     );
 
-    const manifest = await loadPassedAutomatedManifest(repository, testedBehaviorCommit);
-
-    expect(manifest).toBeNull();
-  });
-
-  it('ignores non-passed automated manifests and manifests of other phases', async () => {
-    const repository = createTemporaryRepository();
-    writeAutomatedManifest(
-      repository,
-      automatedManifest({
+    await expect(
+      loadPassedAutomatedManifest(
+        repository,
         testedBehaviorCommit,
-        runId: '20260803T021501Z-automated',
-        outcome: 'gate_failed',
-        config: { class: 'placeholder', publicIdentifiersConsistent: false },
-      }),
+        '20260803T021500Z-production-smoke',
+      ),
+    ).rejects.toThrow(M1HarnessError);
+  });
+
+  it('throws when the manifest at the named run ID has empty commands', async () => {
+    // A hand-authored manifest with commands: [] and outcome: 'passed' must
+    // not establish immutable cross-phase linkage without any gate ever running.
+    const repository = createTemporaryRepository();
+    writeAutomatedManifest(
+      repository,
+      automatedManifest({ testedBehaviorCommit, commands: [] }),
+    );
+
+    await expect(
+      loadPassedAutomatedManifest(repository, testedBehaviorCommit, defaultAutomatedRunId),
+    ).rejects.toThrow(M1HarnessError);
+    await expect(
+      loadPassedAutomatedManifest(repository, testedBehaviorCommit, defaultAutomatedRunId),
+    ).rejects.toThrow(/exactly 8 command results, got 0/u);
+  });
+
+  it('throws when the manifest at the named run ID has wrong command labels', async () => {
+    const repository = createTemporaryRepository();
+    const wrongCommands = automatedCommandResults();
+    wrongCommands[3] = { ...wrongCommands[3]!, label: 'wrong-label' };
+    writeAutomatedManifest(
+      repository,
+      automatedManifest({ testedBehaviorCommit, commands: wrongCommands }),
+    );
+
+    await expect(
+      loadPassedAutomatedManifest(repository, testedBehaviorCommit, defaultAutomatedRunId),
+    ).rejects.toThrow(M1HarnessError);
+    await expect(
+      loadPassedAutomatedManifest(repository, testedBehaviorCommit, defaultAutomatedRunId),
+    ).rejects.toThrow(/command\[3\] must be "compile"/u);
+  });
+
+  it('preserves every rerun and loads only the named run ID', async () => {
+    // Multiple qualifying manifests can coexist for the same commit. The
+    // loader does not infer selection from cardinality; it loads the exact
+    // run ID the operator names. This preserves every rerun for auditability
+    // while making cross-phase linkage deterministic.
+    const repository = createTemporaryRepository();
+    const firstRunId = '20260803T021500Z-automated';
+    const secondRunId = '20260803T021600Z-automated';
+    writeAutomatedManifest(
+      repository,
+      automatedManifest({ testedBehaviorCommit, runId: firstRunId }),
     );
     writeAutomatedManifest(
       repository,
-      automatedManifest({
-        testedBehaviorCommit,
-        runId: '20260803T021502Z-production-smoke',
-        matrixClass: 'production-smoke',
-      }),
+      automatedManifest({ testedBehaviorCommit, runId: secondRunId }),
     );
 
-    const manifest = await loadPassedAutomatedManifest(repository, testedBehaviorCommit);
+    const first = await loadPassedAutomatedManifest(repository, testedBehaviorCommit, firstRunId);
+    const second = await loadPassedAutomatedManifest(repository, testedBehaviorCommit, secondRunId);
+
+    expect(first).not.toBeNull();
+    expect(first!.runId).toBe(firstRunId);
+    expect(second).not.toBeNull();
+    expect(second!.runId).toBe(secondRunId);
+  });
+
+  it('returns null when the named run ID does not exist', async () => {
+    const repository = createTemporaryRepository();
+
+    const manifest = await loadPassedAutomatedManifest(
+      repository,
+      testedBehaviorCommit,
+      defaultAutomatedRunId,
+    );
 
     expect(manifest).toBeNull();
   });
 
-  it('throws when more than one qualifying closure manifest exists for the same commit', async () => {
-    // readdir() ordering is filesystem-dependent; without a deterministic
-    // rule, the selected manifest is arbitrary. Require exactly one qualifying
-    // deployed closure manifest so the linkage is unambiguous.
+  it('throws when the manifest at the named run ID is not valid JSON', async () => {
     const repository = createTemporaryRepository();
-    writeAutomatedManifest(
+    const directory = join(
       repository,
-      automatedManifest({ testedBehaviorCommit, runId: '20260803T021500Z-automated' }),
+      'apps/vela-mobile/docs/evidence/hpa-210',
+      testedBehaviorCommit,
+      defaultAutomatedRunId,
     );
-    writeAutomatedManifest(
-      repository,
-      automatedManifest({ testedBehaviorCommit, runId: '20260803T021600Z-automated' }),
-    );
+    mkdirSync(directory, { recursive: true });
+    writeFileSync(join(directory, 'manifest.json'), '{ not valid json');
 
-    await expect(loadPassedAutomatedManifest(repository, testedBehaviorCommit)).rejects.toThrow(
-      M1HarnessError,
-    );
-    await expect(loadPassedAutomatedManifest(repository, testedBehaviorCommit)).rejects.toThrow(
-      /Multiple passed automated closure manifests/u,
-    );
-  });
-
-  it('returns null when the commit directory does not exist', async () => {
-    const repository = createTemporaryRepository();
-
-    const manifest = await loadPassedAutomatedManifest(repository, testedBehaviorCommit);
-
-    expect(manifest).toBeNull();
+    await expect(
+      loadPassedAutomatedManifest(repository, testedBehaviorCommit, defaultAutomatedRunId),
+    ).rejects.toThrow(M1HarnessError);
+    await expect(
+      loadPassedAutomatedManifest(repository, testedBehaviorCommit, defaultAutomatedRunId),
+    ).rejects.toThrow(/not valid JSON/u);
   });
 });
