@@ -69,7 +69,34 @@ export type M1Manifest = {
   commands: M1CommandResult[];
   evidence: M1EvidenceReference[];
   findings: Array<{ severity: string; issue?: string; summary: string }>;
+  /**
+   * The run ID of the passed automated manifest that a passed manual manifest
+   * links against as immutable cross-phase evidence. Present only on manual
+   * manifests with `outcome: 'passed'` and `config.class: 'deployed'`. The
+   * harness loads the exact manifest at this run ID rather than inferring
+   * selection from directory cardinality, so every rerun is preserved while
+   * linkage stays deterministic and auditable.
+   */
+  linkedAutomatedRunId?: string;
 };
+
+/**
+ * The ordered command labels the automated phase must record. A passed
+ * automated manifest is closure evidence only when every required gate ran
+ * successfully; an empty or partial `commands` array must not establish
+ * cross-phase linkage. The harness's `automatedCommands` builder must produce
+ * exactly these labels in this order.
+ */
+export const AUTOMATED_COMMAND_LABELS: readonly string[] = Object.freeze([
+  'install',
+  'lint',
+  'typecheck',
+  'compile',
+  'build',
+  'test',
+  'production-diagnostics',
+  'mobile-secret-scan',
+]);
 
 const PHASES: ReadonlySet<M1Phase> = new Set([
   'automated',
@@ -492,6 +519,7 @@ export function validateM1Manifest(manifest: M1Manifest): M1Manifest {
     'commands',
     'evidence',
     'findings',
+    'linkedAutomatedRunId',
   ]);
   if (value.schemaVersion !== 1) {
     throw new Error('schemaVersion must be 1');
@@ -527,6 +555,9 @@ export function validateM1Manifest(manifest: M1Manifest): M1Manifest {
     throw new Error('findings must be an array');
   }
   value.findings.forEach(validateFinding);
+  if (value.linkedAutomatedRunId !== undefined) {
+    assertRunId(value.linkedAutomatedRunId);
+  }
 
   return manifest;
 }
@@ -588,6 +619,48 @@ export function validateManualM1ManifestSemantics(manifest: M1Manifest): void {
   if (manifest.evidence.length === 0) {
     throw new Error('a passed manual manifest must reference non-empty evidence');
   }
+  if (manifest.linkedAutomatedRunId === undefined) {
+    throw new Error(
+      'a passed manual manifest must record linkedAutomatedRunId for immutable cross-phase linkage',
+    );
+  }
+}
+
+/**
+ * Enforces the semantic closure rules for an automated manifest accepted as
+ * cross-phase evidence. Schema validation confirms `commands` is an array, but
+ * a hand-authored manifest with `commands: []` and `outcome: 'passed'` would
+ * otherwise establish immutable linkage without any gate ever running. This
+ * validator requires the exact expected command labels (see
+ * `AUTOMATED_COMMAND_LABELS`), each appearing once, in order, each with
+ * `status: 'passed'` and `exitCode: 0`. The harness calls this before accepting
+ * a manifest as closure evidence.
+ */
+export function validateAutomatedM1ManifestSemantics(manifest: M1Manifest): void {
+  if (manifest.outcome !== 'passed') return;
+  if (manifest.matrixClass !== 'automated') return;
+
+  const labels = manifest.commands.map((command) => command.label);
+  if (labels.length !== AUTOMATED_COMMAND_LABELS.length) {
+    throw new Error(
+      `automated manifest must record exactly ${AUTOMATED_COMMAND_LABELS.length} command results, got ${labels.length}`,
+    );
+  }
+  for (let index = 0; index < AUTOMATED_COMMAND_LABELS.length; index += 1) {
+    const expected = AUTOMATED_COMMAND_LABELS[index]!;
+    const actual = labels[index];
+    if (actual !== expected) {
+      throw new Error(
+        `automated manifest command[${index}] must be "${expected}", got "${actual}"`,
+      );
+    }
+    const command = manifest.commands[index]!;
+    if (command.status !== 'passed' || command.exitCode !== 0) {
+      throw new Error(
+        `automated manifest command "${expected}" must have passed status and exit code 0`,
+      );
+    }
+  }
 }
 
 export function createManualM1Manifest(input: {
@@ -601,6 +674,7 @@ export function createManualM1Manifest(input: {
   evidence: M1EvidenceReference[];
   findings: M1Manifest['findings'];
   outcome: 'passed' | 'gate_failed' | 'prerequisite_missing';
+  linkedAutomatedRunId?: string;
 }): M1Manifest {
   const manifest = validateM1Manifest({
     ...input,

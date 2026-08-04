@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir, homedir } from 'node:os';
 import { basename, dirname, join, relative, resolve } from 'node:path';
 import { TextDecoder } from 'node:util';
@@ -11,6 +11,7 @@ import {
   createM1RunId,
   createManualM1Manifest,
   hashDirectory,
+  validateAutomatedM1ManifestSemantics,
   validateM1Manifest,
   type M1CommandResult,
   type M1EvidenceReference,
@@ -134,14 +135,17 @@ export type HarnessDependencies = {
    */
   loadDeployedIdentityProof?: (repoRoot: string) => Promise<DeployedIdentityProof | null>;
   /**
-   * Test-only injection point. Production callers scan the evidence
-   * directory for a passed automated manifest matching the supplied
-   * behavior commit, providing immutable cross-phase linkage between
-   * the automated machine phase and a manual observation.
+   * Test-only injection point. Production callers load the specific passed
+   * automated manifest at the supplied run ID under the behavior commit's
+   * evidence directory, providing immutable cross-phase linkage between
+   * the automated machine phase and a manual observation. The caller names
+   * the exact run ID so every rerun is preserved while linkage stays
+   * deterministic and auditable.
    */
   loadPassedAutomatedManifest?: (
     repoRoot: string,
     testedBehaviorCommit: string,
+    automatedRunId: string,
   ) => Promise<M1Manifest | null>;
   /**
    * Test-only injection point. Production callers create a detached Git
@@ -240,6 +244,7 @@ type ManualInput = {
   evidence: M1EvidenceReference[];
   findings: M1Manifest['findings'];
   outcome: 'passed' | 'gate_failed' | 'prerequisite_missing';
+  automatedRunId: string;
 };
 
 type UnknownRecord = Record<string, unknown>;
@@ -1024,107 +1029,113 @@ function manualConfigMatchesAutomatedManifest(
 }
 
 /**
- * Loads a passed automated manifest for the supplied behavior commit from
- * the evidence directory. Scans `docs/evidence/hpa-210/<commit>/<run-id>/`
- * for a manifest with `phase: 'automated'` and `outcome: 'passed'`.
+ * Loads the passed automated manifest at the exact supplied run ID under the
+ * behavior commit's evidence directory. The caller names the specific run ID
+ * (from the manual input's `automatedRunId` field) so every rerun is preserved
+ * for auditability while cross-phase linkage stays deterministic: no
+ * cardinality-based selection, no "remove all but one" requirement.
  *
- * Cross-phase linkage is closure evidence, so a qualifying manifest must also
- * verify the SAME behavior commit (`testedBehaviorCommit`), be an automated
- * matrix run (`matrixClass: 'automated'`), and carry closure-grade
- * configuration (`config.class: 'deployed'` with
- * `publicIdentifiersConsistent: true`). Without these, a manifest copied into
- * the wrong `<commit>/` directory, or a passed automated run executed without
- * `--require-deployed-config` that recorded production-looking but unverified
- * identifiers, could establish false linkage for a manual phase that itself
- * requires deployed closure.
+ * Cross-phase linkage is closure evidence, so the loaded manifest must verify
+ * the SAME behavior commit (`testedBehaviorCommit`), be an automated matrix
+ * run (`matrixClass: 'automated'`), carry closure-grade configuration
+ * (`config.class: 'deployed'` with `publicIdentifiersConsistent: true`), and
+ * pass automated semantic validation (every required gate ran successfully).
+ * Without these, a manifest copied into the wrong `<commit>/` directory, a
+ * passed automated run executed without `--require-deployed-config`, or a
+ * hand-authored manifest with an empty `commands` array cannot establish
+ * false linkage for a manual phase that itself requires deployed closure.
  *
- * Directory entries are sorted before scanning so the selection is
- * deterministic across filesystems. When more than one qualifying closure
- * manifest exists for the same behavior commit the linkage is ambiguous and
- * this throws `M1HarnessError` rather than picking one arbitrarily. Returns
- * `null` when no qualifying manifest is found.
+ * Returns `null` when the manifest file does not exist. Throws
+ * `M1HarnessError` when the file exists but fails schema or semantic
+ * validation, or when the manifest's internal fields disagree with the
+ * supplied commit — a broken or misfiled evidence file named by the operator
+ * must surface rather than silently masquerade as "no manifest exists".
  */
 export async function loadPassedAutomatedManifest(
   repoRoot: string,
   testedBehaviorCommit: string,
+  automatedRunId: string,
 ): Promise<M1Manifest | null> {
-  const evidenceRoot = join(repoRoot, 'apps/vela-mobile/docs/evidence/hpa-210');
-  const commitDirectory = join(evidenceRoot, testedBehaviorCommit);
-  let entries: string[];
+  const manifestPath = join(
+    repoRoot,
+    'apps/vela-mobile/docs/evidence/hpa-210',
+    testedBehaviorCommit,
+    automatedRunId,
+    'manifest.json',
+  );
+
+  let raw: string;
   try {
-    entries = await readdir(commitDirectory);
+    raw = await readFile(manifestPath, 'utf8');
   } catch {
     return null;
   }
 
-  entries.sort((left, right) => (left < right ? -1 : left > right ? 1 : 0));
-
-  const qualifying: M1Manifest[] = [];
-
-  for (const entry of entries) {
-    const manifestPath = join(commitDirectory, entry, 'manifest.json');
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(await readFile(manifestPath, 'utf8'));
-    } catch {
-      continue;
-    }
-
-    if (
-      typeof parsed !== 'object' ||
-      parsed === null ||
-      Array.isArray(parsed) ||
-      (parsed as { phase?: unknown }).phase !== 'automated' ||
-      (parsed as { outcome?: unknown }).outcome !== 'passed'
-    ) {
-      continue;
-    }
-
-    let manifest: M1Manifest;
-    try {
-      manifest = validateM1Manifest(parsed as unknown as M1Manifest);
-    } catch {
-      continue;
-    }
-
-    if (
-      manifest.testedBehaviorCommit !== testedBehaviorCommit ||
-      manifest.matrixClass !== 'automated' ||
-      manifest.config.class !== 'deployed' ||
-      !manifest.config.publicIdentifiersConsistent
-    ) {
-      continue;
-    }
-
-    qualifying.push(manifest);
-  }
-
-  if (qualifying.length === 0) return null;
-  if (qualifying.length > 1) {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
     throw new M1HarnessError(
-      'Multiple passed automated closure manifests exist for the supplied behavior commit; ' +
-        'remove all but one at apps/vela-mobile/docs/evidence/hpa-210/<commit>/',
+      `The automated manifest at ${automatedRunId} is not valid JSON`,
     );
   }
-  return qualifying[0]!;
+
+  let manifest: M1Manifest;
+  try {
+    manifest = validateM1Manifest(parsed as unknown as M1Manifest);
+  } catch (error) {
+    throw new M1HarnessError(
+      `The automated manifest at ${automatedRunId} failed schema validation: ${(error as Error).message}`,
+    );
+  }
+
+  if (
+    manifest.testedBehaviorCommit !== testedBehaviorCommit ||
+    manifest.matrixClass !== 'automated' ||
+    manifest.config.class !== 'deployed' ||
+    !manifest.config.publicIdentifiersConsistent
+  ) {
+    throw new M1HarnessError(
+      `The automated manifest at ${automatedRunId} does not qualify as closure evidence for the supplied behavior commit`,
+    );
+  }
+
+  try {
+    validateAutomatedM1ManifestSemantics(manifest);
+  } catch (error) {
+    throw new M1HarnessError(
+      `The automated manifest at ${automatedRunId} failed semantic validation: ${(error as Error).message}`,
+    );
+  }
+
+  return manifest;
 }
 
 async function verifyManualConfigAgainstAutomatedManifest(
   dependencies: HarnessDependencies,
   config: M1Manifest['config'],
   testedBehaviorCommit: string,
+  automatedRunId: string,
 ): Promise<{ matched: boolean; available: boolean }> {
   try {
     const automated = dependencies.loadPassedAutomatedManifest
-      ? await dependencies.loadPassedAutomatedManifest(dependencies.repoRoot, testedBehaviorCommit)
-      : await loadPassedAutomatedManifest(dependencies.repoRoot, testedBehaviorCommit);
+      ? await dependencies.loadPassedAutomatedManifest(
+          dependencies.repoRoot,
+          testedBehaviorCommit,
+          automatedRunId,
+        )
+      : await loadPassedAutomatedManifest(
+          dependencies.repoRoot,
+          testedBehaviorCommit,
+          automatedRunId,
+        );
     if (!automated) return { matched: false, available: false };
     return { matched: manualConfigMatchesAutomatedManifest(config, automated), available: true };
   } catch (error) {
-    // Ambiguous linkage is a harness error the operator must resolve (e.g.
-    // remove all but one qualifying manifest); let it surface rather than
-    // masquerade as "no passed automated manifest exists". Malformed manifest
-    // files are still treated as non-qualifying.
+    // A harness error (broken/misfiled evidence file, failed semantic
+    // validation) must surface rather than masquerade as "no passed automated
+    // manifest exists". The operator named a specific run ID, so a broken
+    // file at that ID is not the same as absence.
     if (error instanceof M1HarnessError) throw error;
     return { matched: false, available: false };
   }
@@ -3690,6 +3701,7 @@ function parseManualInput(value: unknown): ManualInput {
     'evidence',
     'findings',
     'outcome',
+    'automatedRunId',
   ]);
 
   assertManualHostIsSafe(value.host);
@@ -3705,6 +3717,7 @@ function parseManualInput(value: unknown): ManualInput {
     evidence: value.evidence as M1EvidenceReference[],
     findings: value.findings as M1Manifest['findings'],
     outcome: value.outcome as ManualInput['outcome'],
+    automatedRunId: value.automatedRunId as string,
   };
 }
 
@@ -3793,6 +3806,7 @@ async function runManualPhase(
       evidence: input.evidence,
       findings: input.findings,
       outcome: input.outcome,
+      linkedAutomatedRunId: input.automatedRunId,
     });
   } catch {
     throw new M1UsageError('Manual input has an invalid manifest shape');
@@ -3804,13 +3818,15 @@ async function runManualPhase(
   // `publicIdentifiersConsistent: true` is a verified assertion, not a
   // self-attested boolean.
   //
-  // 1. Immutable cross-phase linkage: a passed automated manifest for the
-  //    supplied behavior commit must exist, and all five public identifiers
-  //    must match. Without this, a human could record a manual observation
-  //    using a backend that changed after the automated phase, while both
-  //    records individually match CDK proof from their respective execution
-  //    times. The automated manifest is immutable evidence of the backend
-  //    the automated phase verified.
+  // 1. Immutable cross-phase linkage: the passed automated manifest named by
+  //    the input's automatedRunId must exist for the supplied behavior commit,
+  //    and all five public identifiers must match. Without this, a human could
+  //    record a manual observation using a backend that changed after the
+  //    automated phase, while both records individually match CDK proof from
+  //    their respective execution times. The automated manifest is immutable
+  //    evidence of the backend the automated phase verified. The operator names
+  //    the exact run ID so every rerun is preserved while linkage stays
+  //    deterministic and auditable.
   //
   // 2. CDK deployed identity proof: the current `packages/cdk/cdk-outputs.json`
   //    must also match. This is an additional freshness check confirming the
@@ -3820,12 +3836,13 @@ async function runManualPhase(
       dependencies,
       manifest.config,
       args.testedBehaviorCommit,
+      input.automatedRunId,
     );
     if (!automatedCheck.available) {
       throw new M1UsageError(
-        'No passed automated manifest exists for the supplied behavior commit; ' +
+        `No passed automated manifest exists at run ID ${input.automatedRunId} for the supplied behavior commit; ` +
           'a passed manual manifest requires immutable cross-phase linkage with a ' +
-          'passed automated manifest at apps/vela-mobile/docs/evidence/hpa-210/<commit>/',
+          'passed automated manifest at apps/vela-mobile/docs/evidence/hpa-210/<commit>/<run-id>/',
       );
     }
     if (!automatedCheck.matched) {

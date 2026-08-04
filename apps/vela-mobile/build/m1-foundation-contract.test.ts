@@ -4,13 +4,16 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
+  AUTOMATED_COMMAND_LABELS,
   M1_EXIT_CODE,
   createM1RunDirectory,
   createM1RunId,
   createManualM1Manifest,
   hashDirectory,
   hashFile,
+  validateAutomatedM1ManifestSemantics,
   validateM1Manifest,
+  type M1CommandResult,
   type M1Manifest,
   type M1MatrixClass,
 } from './m1-foundation-contract';
@@ -215,10 +218,12 @@ describe('M1 foundation manifest contract', () => {
       evidence: validManifest().evidence,
       findings: [{ severity: 'info', summary: 'Physical observation recorded' }],
       outcome: 'passed',
+      linkedAutomatedRunId: '20260803T021500Z-automated',
     });
 
     expect(manifest.outcome).toBe('passed');
     expect(manifest.exitCode).toBe(0);
+    expect(manifest.linkedAutomatedRunId).toBe('20260803T021500Z-automated');
   });
 
   it('rejects a passed manual manifest with placeholder configuration', () => {
@@ -511,6 +516,7 @@ describe('M1 foundation manifest contract', () => {
       evidence: validManifest().evidence,
       findings: [],
       outcome: 'passed',
+      linkedAutomatedRunId: '20260803T021500Z-automated',
     });
 
     expect(manifest.outcome).toBe('passed');
@@ -568,5 +574,160 @@ describe('M1 foundation manifest contract', () => {
     expect(manifest.phase).toBe('manual');
     expect(manifest.exitCode).toBe(4);
     expect(manifest.commands).toEqual([]);
+  });
+
+  it('rejects a passed manual manifest without linkedAutomatedRunId', () => {
+    expect(() =>
+      createManualM1Manifest({
+        testedBehaviorCommit: 'c'.repeat(40),
+        matrixClass: 'production-smoke',
+        runId: '20260803T021500Z-production-smoke',
+        startedAt: '2026-08-03T02:15:00.000Z',
+        endedAt: '2026-08-03T02:17:00.000Z',
+        config: validManifest().config,
+        host: { deviceAlias: 'test iPhone' },
+        evidence: validManifest().evidence,
+        findings: [],
+        outcome: 'passed',
+      }),
+    ).toThrow(/linkedAutomatedRunId/u);
+  });
+
+  it('rejects a passed manual manifest with a malformed linkedAutomatedRunId', () => {
+    expect(() =>
+      createManualM1Manifest({
+        testedBehaviorCommit: 'c'.repeat(40),
+        matrixClass: 'production-smoke',
+        runId: '20260803T021500Z-production-smoke',
+        startedAt: '2026-08-03T02:15:00.000Z',
+        endedAt: '2026-08-03T02:17:00.000Z',
+        config: validManifest().config,
+        host: { deviceAlias: 'test iPhone' },
+        evidence: validManifest().evidence,
+        findings: [],
+        outcome: 'passed',
+        linkedAutomatedRunId: 'not-a-run-id',
+      }),
+    ).toThrow(/run ID format/u);
+  });
+
+  it('does not require linkedAutomatedRunId for a non-passed manual manifest', () => {
+    const manifest = createManualM1Manifest({
+      testedBehaviorCommit: 'c'.repeat(40),
+      matrixClass: 'production-smoke',
+      runId: '20260803T021500Z-production-smoke',
+      startedAt: '2026-08-03T02:15:00.000Z',
+      endedAt: '2026-08-03T02:17:00.000Z',
+      config: validManifest().config,
+      host: { deviceAlias: 'test iPhone' },
+      evidence: [],
+      findings: [],
+      outcome: 'gate_failed',
+    });
+
+    expect(manifest.linkedAutomatedRunId).toBeUndefined();
+  });
+});
+
+describe('validateAutomatedM1ManifestSemantics', () => {
+  function automatedCommandResult(label: string, status: 'passed' | 'failed' = 'passed'): M1CommandResult {
+    return {
+      label,
+      command: 'bun',
+      cwd: '.',
+      startedAt: '2026-08-03T02:15:00.000Z',
+      endedAt: '2026-08-03T02:15:01.000Z',
+      elapsedMs: 1000,
+      exitCode: status === 'passed' ? 0 : 1,
+      status,
+    };
+  }
+
+  function automatedManifest(commands: M1CommandResult[]): M1Manifest {
+    return {
+      schemaVersion: 1,
+      runId: '20260803T021500Z-automated',
+      testedBehaviorCommit: 'a'.repeat(40),
+      phase: 'automated',
+      matrixClass: 'automated',
+      startedAt: '2026-08-03T02:15:00.000Z',
+      endedAt: '2026-08-03T02:17:00.000Z',
+      outcome: 'passed',
+      exitCode: 0,
+      config: {
+        source: 'process_env',
+        class: 'deployed',
+        apiOrigin: 'https://api.vela.example',
+        region: 'us-east-1',
+        oauthDomain: 'vela.auth.us-east-1.amazoncognito.com',
+        cognitoUserPoolId: 'us-east-1_example',
+        cognitoMobileUserPoolClientId: 'mobile-client-id',
+        publicIdentifiersConsistent: true,
+      },
+      host: { platform: 'darwin' },
+      commands,
+      evidence: [],
+      findings: [],
+    };
+  }
+
+  it('accepts a passed automated manifest with all expected gates in order', () => {
+    const commands = AUTOMATED_COMMAND_LABELS.map((label) => automatedCommandResult(label));
+    const manifest = automatedManifest(commands);
+
+    expect(() => validateAutomatedM1ManifestSemantics(manifest)).not.toThrow();
+  });
+
+  it('rejects a passed automated manifest with empty commands', () => {
+    const manifest = automatedManifest([]);
+
+    expect(() => validateAutomatedM1ManifestSemantics(manifest)).toThrow(
+      /exactly 8 command results, got 0/u,
+    );
+  });
+
+  it('rejects a passed automated manifest with a missing gate', () => {
+    const commands = AUTOMATED_COMMAND_LABELS.slice(0, -1).map((label) => automatedCommandResult(label));
+    const manifest = automatedManifest(commands);
+
+    expect(() => validateAutomatedM1ManifestSemantics(manifest)).toThrow(
+      /exactly 8 command results, got 7/u,
+    );
+  });
+
+  it('rejects a passed automated manifest with a wrong label', () => {
+    const commands = AUTOMATED_COMMAND_LABELS.map((label) => automatedCommandResult(label));
+    commands[3] = automatedCommandResult('wrong-label');
+    const manifest = automatedManifest(commands);
+
+    expect(() => validateAutomatedM1ManifestSemantics(manifest)).toThrow(
+      /command\[3\] must be "compile"/u,
+    );
+  });
+
+  it('rejects a passed automated manifest with a failed gate', () => {
+    const commands = AUTOMATED_COMMAND_LABELS.map((label) => automatedCommandResult(label));
+    commands[4] = automatedCommandResult('build', 'failed');
+    const manifest = automatedManifest(commands);
+
+    expect(() => validateAutomatedM1ManifestSemantics(manifest)).toThrow(
+      /"build" must have passed status/u,
+    );
+  });
+
+  it('skips semantic validation for a non-passed automated manifest', () => {
+    const manifest = automatedManifest([]);
+    manifest.outcome = 'gate_failed';
+    manifest.exitCode = 4;
+
+    expect(() => validateAutomatedM1ManifestSemantics(manifest)).not.toThrow();
+  });
+
+  it('skips semantic validation for a non-automated matrix class', () => {
+    const manifest = automatedManifest([]);
+    manifest.matrixClass = 'production-smoke';
+    manifest.runId = '20260803T021500Z-production-smoke';
+
+    expect(() => validateAutomatedM1ManifestSemantics(manifest)).not.toThrow();
   });
 });
