@@ -140,7 +140,7 @@ Selected-mode replacement hashes after the page-control fix:
 ## HPA-210 linkage
 
 HPA-210 selected passing automated machine manifest for
-`c673e7ca2d0380c823655df9155d3ec2a1d5e594`, the current behavior revision
+`24ad58104f54d375b9e619aec5be719811106c71`, the current behavior revision
 containing the verification-tooling fixes. The iOS Simulator manifest on
 `de276f372c7973e2fb49c81e9a78e50df95266c0` is stale: it predates
 verification-tooling changes that create a new behavior commit under the
