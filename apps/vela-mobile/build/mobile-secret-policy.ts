@@ -7,7 +7,9 @@ export type MobileSecretRuleId =
   | 'private_key'
   | 'aws_secret'
   | 'provider_key'
-  | 'presigned_url';
+  | 'presigned_url'
+  | 'device_identifier'
+  | 'account_email';
 
 export type MobileSecretFinding = {
   ruleId: MobileSecretRuleId;
@@ -76,6 +78,19 @@ const AWS_SECRET_ASSIGNMENT_PATTERN =
   /\b(?:AWS_SECRET_ACCESS_KEY|aws_secret_access_key|awsSecretAccessKey)["']?\s*(?:=|:)\s*(?:(['"`])([A-Za-z0-9/+=]{40})\1|([A-Za-z0-9/+=]{40}))(?![A-Za-z0-9/+=])/giu;
 const PROVIDER_SECRET_ASSIGNMENT_PATTERN =
   /\b(?:ANTHROPIC_API_KEY|COHERE_API_KEY|GEMINI_API_KEY|GOOGLE_API_KEY|GROQ_API_KEY|HUGGINGFACE_API_KEY|HF_TOKEN|MISTRAL_API_KEY|OPENAI_API_KEY|OPENAI_KEY|PERPLEXITY_API_KEY|SENTRY_AUTH_TOKEN|SLACK_BOT_TOKEN|SLACK_TOKEN|STRIPE_SECRET_KEY)["']?\s*(?:=|:)\s*(?:(['"`])([^\s"'`]{12,})\1|([^\s,;}\]]{12,}))/giu;
+
+// Device identifiers: standard UUIDs (8-4-4-4-12) and CoreDevice-style
+// identifiers (8-16+ hex chars after a dash). The bare 40-hex-char form is
+// intentionally excluded here because it matches every git commit SHA in
+// documentation; the harness's containsUnsafeEvidenceText keeps that pattern
+// for manifest/evidence scanning where commit SHAs are stripped beforehand.
+const DEVICE_IDENTIFIER_PATTERN =
+  /\b[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}\b|\b[0-9A-Fa-f]{8}-[0-9A-Fa-f]{16,}\b/gu;
+// Account emails: matches standard email addresses but excludes retina image
+// filename conventions (e.g. icon@2x.png, icon@3x.png) via a negative
+// lookahead so asset filenames are not mistaken for emails.
+const ACCOUNT_EMAIL_PATTERN =
+  /\b[A-Z0-9._%+-]+@(?!2x\b|3x\b)[A-Z0-9.-]+\.[A-Z]{2,}\b/giu;
 
 type Candidate = {
   finding: MobileSecretFinding;
@@ -152,6 +167,18 @@ function isTestFixturePath(path: string): boolean {
   return /(?:^|[/\\])[^/\\]+\.(?:test|spec)\.[^/\\]+$/u.test(path);
 }
 
+/**
+ * Package metadata files (package.json, *.podspec.json) contain author contact
+ * emails as legitimate metadata. These are not tester account emails, so
+ * account_email findings in these paths are exempted.
+ */
+function isPackageMetadataPath(path: string): boolean {
+  return (
+    /(?:^|[/\\])package\.json$/u.test(path) ||
+    /(?:^|[/\\])[^/\\]+\.podspec\.json$/u.test(path)
+  );
+}
+
 function isJavaScriptTemplatePlaceholder(rawValue: string): boolean {
   return /^\$\{[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*\}?$/u.test(rawValue);
 }
@@ -177,7 +204,17 @@ export function isMobileSecretFixtureValue(rawValue: string): boolean {
 
 function isAllowedTestFixtureCandidate(candidate: Candidate): boolean {
   if (TEST_FIXTURE_SECRET_VALUES.has(candidate.rawValue)) return true;
-  return candidate.finding.ruleId === 'presigned_url' && isTestFixtureUrl(candidate.rawValue);
+  if (candidate.finding.ruleId === 'presigned_url' && isTestFixtureUrl(candidate.rawValue)) {
+    return true;
+  }
+  // Test files use synthetic device identifiers and account emails as fixture
+  // values (e.g. physicalDeviceId, a synthetic account email). These are not
+  // real device identifiers or account emails, so they are exempted in test
+  // paths.
+  return (
+    candidate.finding.ruleId === 'device_identifier' ||
+    candidate.finding.ruleId === 'account_email'
+  );
 }
 
 export function scanMobileSecretText(input: MobileSecretScanInput): MobileSecretFinding[] {
@@ -229,6 +266,24 @@ export function scanMobileSecretText(input: MobileSecretScanInput): MobileSecret
     5,
     (match) => match[2] ?? match[3],
   );
+  addPatternCandidates(
+    candidates,
+    input,
+    DEVICE_IDENTIFIER_PATTERN,
+    'device_identifier',
+    'device_identifier',
+    7,
+    (match) => match[0],
+  );
+  addPatternCandidates(
+    candidates,
+    input,
+    ACCOUNT_EMAIL_PATTERN,
+    'account_email',
+    'account_email',
+    8,
+    (match) => match[0],
+  );
 
   for (const sentinel of TEST_FIXTURE_SECRET_VALUES) {
     let start = input.text.indexOf(sentinel);
@@ -255,6 +310,10 @@ export function scanMobileSecretText(input: MobileSecretScanInput): MobileSecret
         !(input.allowPolicySentinelLiterals && current.finding.ruleId === 'secret_sentinel'),
     )
     .filter((current) => !isTestFixturePath(input.path) || !isAllowedTestFixtureCandidate(current))
+    .filter(
+      (current) =>
+        !isPackageMetadataPath(input.path) || current.finding.ruleId !== 'account_email',
+    )
     .sort((left, right) => left.start - right.start || left.priority - right.priority);
 
   const retained: Candidate[] = [];

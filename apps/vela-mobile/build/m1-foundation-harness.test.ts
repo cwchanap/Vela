@@ -1,4 +1,5 @@
 // @vitest-environment node
+import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -264,8 +265,18 @@ function physicalBuildSettings(overrides: Record<string, unknown> = {}) {
   ];
 }
 
+const physicalCertificateDer = Buffer.from(
+  'MIIBdummy-certificate-der-content-for-testing-purposes-only-not-a-real-cert',
+  'utf8',
+);
+const physicalCertificateFingerprint = createHash('sha1')
+  .update(physicalCertificateDer)
+  .digest('hex')
+  .toUpperCase();
+const physicalCertificateBase64 = physicalCertificateDer.toString('base64');
+
 const codesigningIdentityOutput = [
-  `  1) A1B2C3D4E5F6A1B2C3D4E5F6A1B2C3D4E5F6A1B2 "iPhone Developer: Tester (${physicalSigningTeam})"`,
+  `  1) ${physicalCertificateFingerprint} "iPhone Developer: Tester (${physicalSigningTeam})"`,
   '     1 valid identity found',
 ].join('\n');
 
@@ -277,6 +288,7 @@ function physicalProvisioningProfilePlist(overrides: {
   expirationDate?: string;
   provisionedDevices?: string[] | null;
   hasCertificates?: boolean;
+  certificateBase64?: string;
 } = {}) {
   const team = overrides.teamIdentifier ?? physicalSigningTeam;
   const appId = overrides.applicationIdentifier ?? `${physicalSigningTeam}.com.vela.app`;
@@ -286,7 +298,11 @@ function physicalProvisioningProfilePlist(overrides: {
     devices === null
       ? ''
       : `<key>ProvisionedDevices</key><array>${devices.map((d) => `<string>${d}</string>`).join('')}</array>`;
-  const certsXml = overrides.hasCertificates === false ? '' : '<key>DeveloperCertificates</key><array><data>MIIB...</data></array>';
+  const certData = overrides.certificateBase64 ?? physicalCertificateBase64;
+  const certsXml =
+    overrides.hasCertificates === false
+      ? ''
+      : `<key>DeveloperCertificates</key><array><data>${certData}</data></array>`;
   return [
     '<?xml version="1.0" encoding="UTF-8"?>',
     '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">',
@@ -418,9 +434,11 @@ function validManualInput() {
     config: {
       source: 'process_env',
       class: 'deployed',
-      apiOrigin: 'https://api.vela.example/api/',
+      apiOrigin: 'https://api.vela.example',
       region: 'us-east-1',
       oauthDomain: 'vela.auth.us-east-1.amazoncognito.com',
+      cognitoUserPoolId: 'us-east-1_example',
+      cognitoMobileUserPoolClientId: 'mobile-client-id',
       publicIdentifiersConsistent: true,
     },
     host: { deviceAlias: 'test iPhone', operatingSystem: 'iOS 18' },
@@ -2522,6 +2540,44 @@ describe('iOS physical-device M1 foundation preflight', () => {
       summary: 'The provisioning profile is malformed or missing required fields',
     });
   });
+
+  it('fails the preflight when the provisioning profile certificate does not match the keychain identity', async () => {
+    const repository = createTemporaryRepository();
+    const workspace = createTemporaryExecutionWorkspace();
+    // Use a different certificate in the profile than in the keychain.
+    const mismatchedCertDer = Buffer.from(
+      'different-certificate-content-not-in-keychain',
+      'utf8',
+    );
+    const mismatchedCertBase64 = mismatchedCertDer.toString('base64');
+    const profileDirectory = createTemporaryProvisioningProfileDirectory(
+      physicalProfileUuid,
+      physicalProvisioningProfilePlist({ certificateBase64: mismatchedCertBase64 }),
+    );
+    const runner = createPhysicalPreflightRunner();
+    const dependencies = createDependencies({
+      repoRoot: repository,
+      runCommand: runner.runCommand,
+      provisioningProfileDirectory: profileDirectory,
+    });
+    attachCleanExecutionWorkspace(dependencies, workspace);
+
+    const manifest = onlyManifest(
+      await runM1FoundationVerification(
+        parseM1Arguments(['--phase', 'ios-physical-preflight', '--device-id', physicalDeviceId]),
+        dependencies,
+      ),
+    );
+
+    expect(manifest.outcome).toBe('prerequisite_missing');
+    expect(manifest.host.signingReady).toBe(false);
+    expect(manifest.findings).toContainEqual({
+      severity: 'error',
+      summary:
+        'No certificate embedded in the provisioning profile matches a keychain codesigning identity; ' +
+        'the profile may reference a certificate that is not installed',
+    });
+  });
 });
 
 describe('M1 foundation CLI', () => {
@@ -2759,7 +2815,7 @@ describe('manual M1 foundation recording', () => {
         ...validManualInput(),
         config: {
           ...validManualInput().config,
-          apiOrigin: 'https://api.different.example/api/',
+          apiOrigin: 'https://api.different.example',
         },
       }),
     );
@@ -2845,7 +2901,7 @@ describe('manual M1 foundation recording', () => {
         ...validManualInput(),
         config: {
           ...validManualInput().config,
-          apiOrigin: 'https://api.different.example/api/',
+          apiOrigin: 'https://api.different.example',
           region: 'us-west-2',
         },
         outcome: 'gate_failed',

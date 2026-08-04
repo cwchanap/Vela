@@ -6,7 +6,7 @@ import { TextDecoder } from 'node:util';
 import { scanMobileSecretText } from '../build/mobile-secret-policy.ts';
 import { PRODUCTION_TEXT_ARTIFACT_EXTENSIONS } from './verify-production-diagnostics.mjs';
 
-const DEFAULT_EXCLUSIONS = ['node_modules', 'DerivedData', 'coverage', '.git'];
+const DEFAULT_EXCLUSIONS = ['node_modules', 'DerivedData', 'coverage', '.git', 'Pods'];
 const MAX_SKIPPED_RECORDS = 1_000;
 const MOBILE_SECRET_POLICY_SOURCE_PATH = fileURLToPath(
   new URL('../build/mobile-secret-policy.ts', import.meta.url),
