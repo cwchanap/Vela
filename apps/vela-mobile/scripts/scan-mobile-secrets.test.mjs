@@ -397,6 +397,37 @@ describe('scanMobileSecretRoots', () => {
     expect(result.stderr).toContain('1 supported text artifact(s)');
   });
 
+  it('fails closed (exit 3) when a binary supported artifact appears after the skipped-record cap', async () => {
+    // Regression: addSkipped stops retaining individual records once
+    // MAX_SKIPPED_RECORDS is reached. A supported artifact with binary content
+    // that sorts after 1000 unsupported files would have its binary_content
+    // record dropped from the bounded `skipped` sample. The fail-closed gate
+    // must still fire via the independent binarySkippedCount counter rather
+    // than exit 0 with "No mobile secrets found".
+    const root = await createTemporaryRoot();
+    const unsupportedFiles = Array.from({ length: 1000 }, (_, index) =>
+      join(root, `a${index.toString().padStart(4, '0')}.png`),
+    );
+    await Promise.all(unsupportedFiles.map((file) => writeFile(file, '')));
+    // `capture.log` sorts after every `a*.png` entry, so it is visited once the
+    // skipped-record cap is already full. The file has a supported extension
+    // but contains binary content (a null byte) that cannot be decoded as
+    // UTF-8.
+    await writeFile(
+      join(root, 'capture.log'),
+      Buffer.concat([Buffer.from([0, 255, 16]), Buffer.from('SECRET-callback-code')]),
+    );
+
+    const result = spawnSync('bun', [scannerPath, '--root', root], {
+      encoding: 'utf8',
+    });
+
+    expect(result.status).toBe(3);
+    expect(result.stderr).toContain('could not scan');
+    expect(result.stderr).toContain('binary content');
+    expect(result.stderr).toContain('1 supported text artifact(s)');
+  });
+
   it('classifies .env and .env.* basenames as supported env files', () => {
     expect(isMobileSecretEnvFile('.env')).toBe(true);
     expect(isMobileSecretEnvFile('.env.production')).toBe(true);

@@ -239,6 +239,40 @@ describe('scanMobileSecretText', () => {
     ).toEqual([]);
   });
 
+  it('exempts only fixture device identifiers under allowPolicySentinelLiterals, not nonfixture ones', () => {
+    // The policy source file itself uses allowPolicySentinelLiterals to avoid
+    // flagging its own sentinel literals and known fixture device identifiers.
+    // A nonfixture (realistic) device identifier in the policy source must
+    // still produce a finding so a real device identifier copied into the
+    // policy file is not silently exempted.
+    const fixtureDeviceId = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
+    const nonfixtureDeviceId = ['00008120', '001A498E3E210011'].join('-');
+
+    // Fixture identifier is exempted under allowPolicySentinelLiterals.
+    expect(
+      scanMobileSecretText({
+        path: 'apps/vela-mobile/build/mobile-secret-policy.ts',
+        text: `const fixture = '${fixtureDeviceId}';`,
+        allowPolicySentinelLiterals: true,
+      }),
+    ).toEqual([]);
+
+    // Nonfixture identifier still produces a finding.
+    expect(
+      scanMobileSecretText({
+        path: 'apps/vela-mobile/build/mobile-secret-policy.ts',
+        text: `const real = '${nonfixtureDeviceId}';`,
+        allowPolicySentinelLiterals: true,
+      }),
+    ).toEqual([
+      expect.objectContaining({
+        ruleId: 'device_identifier',
+        valueClass: 'device_identifier',
+        fingerprint: '',
+      }),
+    ]);
+  });
+
   it('detects credentials in double-quoted JSON object form', () => {
     const providerKey = 'sk-live-abcdefghijklmno';
     const awsSecret = 'A'.repeat(40);
@@ -306,6 +340,7 @@ describe('scanMobileSecretText', () => {
         ruleId: 'device_identifier',
         path: 'docs/ios-interaction-baseline.md',
         valueClass: 'device_identifier',
+        fingerprint: '',
       }),
     ]);
     expect(JSON.stringify(findings)).not.toContain(deviceUuid);
@@ -322,6 +357,7 @@ describe('scanMobileSecretText', () => {
       expect.objectContaining({
         ruleId: 'device_identifier',
         valueClass: 'device_identifier',
+        fingerprint: '',
       }),
     ]);
     expect(JSON.stringify(findings)).not.toContain(coreDeviceId);
@@ -349,6 +385,7 @@ describe('scanMobileSecretText', () => {
         ruleId: 'account_email',
         path: 'docs/observations.md',
         valueClass: 'account_email',
+        fingerprint: '',
       }),
     ]);
     expect(JSON.stringify(findings)).not.toContain(email);
@@ -377,6 +414,7 @@ describe('scanMobileSecretText', () => {
       expect.objectContaining({
         ruleId: 'device_identifier',
         valueClass: 'device_identifier',
+        fingerprint: '',
       }),
     ]);
     expect(JSON.stringify(findings)).not.toContain(realisticDeviceId);
@@ -393,6 +431,7 @@ describe('scanMobileSecretText', () => {
       expect.objectContaining({
         ruleId: 'account_email',
         valueClass: 'account_email',
+        fingerprint: '',
       }),
     ]);
     expect(JSON.stringify(findings)).not.toContain(realisticEmail);

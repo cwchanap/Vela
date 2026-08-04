@@ -142,12 +142,16 @@ record must not rely on a development-only route.
 M1 accepts UserDefaults only for the short-lived, single-use OAuth transaction
 described above; it does not accept it as a session store. Local signing is
 tester-controlled: the iOS project intentionally has no committed development
-team. Automated and Simulator machine evidence passed on the current selected
-revision, while the `f0c6fe9d5282c3f5f34e6e5453ed3c23c0808f65` physical
-preflight is historical and cannot establish physical status for that revision.
-Physical testing remains deferred. Physical behavior, signing readiness, and
-the audio decision remain evidence-gated and must be recorded by actual
-physical runs.
+team. Only automated machine evidence passed on the selected revision
+`24ad58104f54d375b9e619aec5be719811106c71`. The iOS Simulator manifest on
+`de276f372c7973e2fb49c81e9a78e50df95266c0` is historical evidence: it predates
+verification-tooling changes that create a new behavior commit under the
+design's rerun policy, so it is retained as historical evidence only and must
+be regenerated on the final PR head before it can be selected. The
+`f0c6fe9d5282c3f5f34e6e5453ed3c23c0808f65` physical preflight is historical
+and cannot establish physical status for that revision. Physical testing
+remains deferred. Physical behavior, signing readiness, and the audio decision
+remain evidence-gated and must be recorded by actual physical runs.
 
 ## Change Policy
 

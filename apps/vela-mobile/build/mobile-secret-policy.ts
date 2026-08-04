@@ -122,6 +122,18 @@ type Candidate = {
   priority: number;
 };
 
+// Rule IDs whose matched raw value is itself PII (an email address or a
+// physical device identifier). A deterministic SHA-256 digest of low-entropy
+// PII is reversible via rainbow tables or known-plaintext hashing, so these
+// rules omit the fingerprint entirely (empty string) rather than emitting a
+// deterministic digest derived from the matched PII. Finding metadata (rule,
+// path, line, value class) and redaction are preserved; only the fingerprint
+// is withheld.
+const PII_RULE_IDS: ReadonlySet<MobileSecretRuleId> = new Set([
+  'account_email',
+  'device_identifier',
+]);
+
 function finding(
   ruleId: MobileSecretRuleId,
   path: string,
@@ -134,7 +146,9 @@ function finding(
     path,
     line,
     valueClass,
-    fingerprint: createHash('sha256').update(rawValue).digest('hex'),
+    fingerprint: PII_RULE_IDS.has(ruleId)
+      ? ''
+      : createHash('sha256').update(rawValue).digest('hex'),
   };
 }
 
@@ -346,7 +360,8 @@ export function scanMobileSecretText(input: MobileSecretScanInput): MobileSecret
         !(
           input.allowPolicySentinelLiterals &&
           (current.finding.ruleId === 'secret_sentinel' ||
-            current.finding.ruleId === 'device_identifier')
+            (current.finding.ruleId === 'device_identifier' &&
+              isTestFixtureDeviceIdentifier(current.rawValue)))
         ),
     )
     .filter((current) => !isTestFixturePath(input.path) || !isAllowedTestFixtureCandidate(current))
