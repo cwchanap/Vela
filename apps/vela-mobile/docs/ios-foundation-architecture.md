@@ -3,14 +3,19 @@
 ## Tested Revision and Evidence Linkage
 
 `testedBehaviorCommit`:
-`c673e7ca2d0380c823655df9155d3ec2a1d5e594`
+`24ad58104f54d375b9e619aec5be719811106c71`
 
-The selected [automated](evidence/hpa-210/c673e7ca2d0380c823655df9155d3ec2a1d5e594/20260804T040151Z-automated/manifest.json)
+The selected [automated](evidence/hpa-210/24ad58104f54d375b9e619aec5be719811106c71/20260804T063052Z-automated/manifest.json)
 machine manifest passed on that revision, which contains the
 verification-tooling fixes for bounded test fixture exemptions in the mobile
 secret policy, provisioning profile device eligibility and development
 entitlement verification, immutable cross-phase linkage between manual and
-automated manifests, and manual config CDK proof verification.
+automated manifests, manual config CDK proof verification, and manifest
+internal run-identity and phase verification in the cross-phase loader (the
+loaded manifest's `runId` must equal the requested run ID and its `phase` must
+be `automated`, so a manifest copied into the wrong run directory or a
+Simulator manifest reusing `matrixClass: 'automated'` cannot masquerade as
+automated closure evidence).
 
 The [iOS Simulator](evidence/hpa-210/de276f372c7973e2fb49c81e9a78e50df95266c0/20260803T071701Z-automated-ios-simulator/manifest.json)
 manifest on `de276f372c7973e2fb49c81e9a78e50df95266c0` is stale: it predates
@@ -24,7 +29,7 @@ device identifier.
 The [physical preflight](evidence/hpa-210/f0c6fe9d5282c3f5f34e6e5453ed3c23c0808f65/20260803T042801Z-physical-preflight/manifest.json)
 under `f0c6fe9d5282c3f5f34e6e5453ed3c23c0808f65` remains historical
 `prerequisite_missing` evidence. Physical-device testing was explicitly
-deferred, so it is not evidence for `c673e7ca2d0380c823655df9155d3ec2a1d5e594`
+deferred, so it is not evidence for `24ad58104f54d375b9e619aec5be719811106c71`
 and these machine results establish neither physical readiness nor any
 human-observed native outcome. See [M1 iOS Foundation Verification](m1-ios-foundation-verification.md)
 for the `NO-GO` decision and deferred physical rows.
