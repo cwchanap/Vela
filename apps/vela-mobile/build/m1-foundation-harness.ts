@@ -1036,14 +1036,18 @@ function manualConfigMatchesAutomatedManifest(
  * cardinality-based selection, no "remove all but one" requirement.
  *
  * Cross-phase linkage is closure evidence, so the loaded manifest must verify
- * the SAME behavior commit (`testedBehaviorCommit`), be an automated matrix
- * run (`matrixClass: 'automated'`), carry closure-grade configuration
- * (`config.class: 'deployed'` with `publicIdentifiersConsistent: true`), and
- * pass automated semantic validation (every required gate ran successfully).
- * Without these, a manifest copied into the wrong `<commit>/` directory, a
- * passed automated run executed without `--require-deployed-config`, or a
- * hand-authored manifest with an empty `commands` array cannot establish
- * false linkage for a manual phase that itself requires deployed closure.
+ * the SAME behavior commit (`testedBehaviorCommit`), identify itself by the
+ * SAME run ID the operator named (`runId`), be an automated phase run
+ * (`phase: 'automated'` and `matrixClass: 'automated'`), carry closure-grade
+ * configuration (`config.class: 'deployed'` with
+ * `publicIdentifiersConsistent: true`), and pass automated semantic validation
+ * (every required gate ran successfully). Without these, a manifest copied
+ * into the wrong `<commit>/` or `<runId>/` directory, a Simulator manifest
+ * (which reuses `matrixClass: 'automated'` but records `phase: 'ios-simulator'`)
+ * copied into an automated run directory, a passed automated run executed
+ * without `--require-deployed-config`, or a hand-authored manifest with an
+ * empty `commands` array cannot establish false linkage for a manual phase
+ * that itself requires deployed closure.
  *
  * Returns `null` when the manifest file does not exist. Throws
  * `M1HarnessError` when the file exists but fails schema or semantic
@@ -1091,6 +1095,8 @@ export async function loadPassedAutomatedManifest(
 
   if (
     manifest.testedBehaviorCommit !== testedBehaviorCommit ||
+    manifest.runId !== automatedRunId ||
+    manifest.phase !== 'automated' ||
     manifest.matrixClass !== 'automated' ||
     manifest.config.class !== 'deployed' ||
     !manifest.config.publicIdentifiersConsistent

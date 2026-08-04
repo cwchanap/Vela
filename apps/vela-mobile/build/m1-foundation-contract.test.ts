@@ -730,4 +730,27 @@ describe('validateAutomatedM1ManifestSemantics', () => {
 
     expect(() => validateAutomatedM1ManifestSemantics(manifest)).not.toThrow();
   });
+
+  it('rejects a passed automated-class manifest with a non-automated phase', () => {
+    // A Simulator manifest reuses `matrixClass: 'automated'` but records
+    // `phase: 'ios-simulator'`. Keying only off matrixClass would accept it as
+    // automated closure evidence; the phase check rejects it.
+    const commands = AUTOMATED_COMMAND_LABELS.map((label) => automatedCommandResult(label));
+    const manifest = automatedManifest(commands);
+    manifest.phase = 'ios-simulator';
+
+    expect(() => validateAutomatedM1ManifestSemantics(manifest)).toThrow(
+      /must record phase "automated"/u,
+    );
+  });
+
+  it('rejects a passed automated-class manifest with a non-automated runId suffix', () => {
+    const commands = AUTOMATED_COMMAND_LABELS.map((label) => automatedCommandResult(label));
+    const manifest = automatedManifest(commands);
+    manifest.runId = '20260803T021500Z-ios-simulator';
+
+    expect(() => validateAutomatedM1ManifestSemantics(manifest)).toThrow(
+      /runId suffix must be "automated"/u,
+    );
+  });
 });
