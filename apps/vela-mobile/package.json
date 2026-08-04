@@ -16,6 +16,7 @@
     "sync:ios-version": "bun run scripts/sync-ios-version.mjs",
     "scan:secrets": "bun run scripts/scan-mobile-secrets.mjs",
     "verify:m1-foundation": "bun run scripts/verify-m1-foundation.mjs",
+    "verify:deployed-config": "bun run build/verify-deployed-config.ts",
     "verify:production-diagnostics": "bun run build:ios:assets && bun run scripts/verify-production-diagnostics.mjs",
     "lint": "eslint \"./src/**/*.{ts,js,vue}\" \"./build/**/*.{ts,js}\" \"./scripts/**/*.{mjs,js,ts}\"",
     "lint:fix": "eslint \"./src/**/*.{ts,js,vue}\" \"./build/**/*.{ts,js}\" --fix",
