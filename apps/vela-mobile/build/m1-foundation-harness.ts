@@ -1026,8 +1026,23 @@ function manualConfigMatchesAutomatedManifest(
 /**
  * Loads a passed automated manifest for the supplied behavior commit from
  * the evidence directory. Scans `docs/evidence/hpa-210/<commit>/<run-id>/`
- * for a manifest with `phase: 'automated'` and `outcome: 'passed'`. Returns
- * the first match, or `null` when none is found.
+ * for a manifest with `phase: 'automated'` and `outcome: 'passed'`.
+ *
+ * Cross-phase linkage is closure evidence, so a qualifying manifest must also
+ * verify the SAME behavior commit (`testedBehaviorCommit`), be an automated
+ * matrix run (`matrixClass: 'automated'`), and carry closure-grade
+ * configuration (`config.class: 'deployed'` with
+ * `publicIdentifiersConsistent: true`). Without these, a manifest copied into
+ * the wrong `<commit>/` directory, or a passed automated run executed without
+ * `--require-deployed-config` that recorded production-looking but unverified
+ * identifiers, could establish false linkage for a manual phase that itself
+ * requires deployed closure.
+ *
+ * Directory entries are sorted before scanning so the selection is
+ * deterministic across filesystems. When more than one qualifying closure
+ * manifest exists for the same behavior commit the linkage is ambiguous and
+ * this throws `M1HarnessError` rather than picking one arbitrarily. Returns
+ * `null` when no qualifying manifest is found.
  */
 export async function loadPassedAutomatedManifest(
   repoRoot: string,
@@ -1042,26 +1057,56 @@ export async function loadPassedAutomatedManifest(
     return null;
   }
 
+  entries.sort((left, right) => (left < right ? -1 : left > right ? 1 : 0));
+
+  const qualifying: M1Manifest[] = [];
+
   for (const entry of entries) {
     const manifestPath = join(commitDirectory, entry, 'manifest.json');
+    let parsed: unknown;
     try {
-      const raw = await readFile(manifestPath, 'utf8');
-      const parsed: unknown = JSON.parse(raw);
-      if (
-        typeof parsed === 'object' &&
-        parsed !== null &&
-        !Array.isArray(parsed) &&
-        (parsed as { phase?: unknown }).phase === 'automated' &&
-        (parsed as { outcome?: unknown }).outcome === 'passed'
-      ) {
-        return validateM1Manifest(parsed as unknown as M1Manifest);
-      }
+      parsed = JSON.parse(await readFile(manifestPath, 'utf8'));
     } catch {
       continue;
     }
+
+    if (
+      typeof parsed !== 'object' ||
+      parsed === null ||
+      Array.isArray(parsed) ||
+      (parsed as { phase?: unknown }).phase !== 'automated' ||
+      (parsed as { outcome?: unknown }).outcome !== 'passed'
+    ) {
+      continue;
+    }
+
+    let manifest: M1Manifest;
+    try {
+      manifest = validateM1Manifest(parsed as unknown as M1Manifest);
+    } catch {
+      continue;
+    }
+
+    if (
+      manifest.testedBehaviorCommit !== testedBehaviorCommit ||
+      manifest.matrixClass !== 'automated' ||
+      manifest.config.class !== 'deployed' ||
+      !manifest.config.publicIdentifiersConsistent
+    ) {
+      continue;
+    }
+
+    qualifying.push(manifest);
   }
 
-  return null;
+  if (qualifying.length === 0) return null;
+  if (qualifying.length > 1) {
+    throw new M1HarnessError(
+      'Multiple passed automated closure manifests exist for the supplied behavior commit; ' +
+        'remove all but one at apps/vela-mobile/docs/evidence/hpa-210/<commit>/',
+    );
+  }
+  return qualifying[0]!;
 }
 
 async function verifyManualConfigAgainstAutomatedManifest(
@@ -1075,7 +1120,12 @@ async function verifyManualConfigAgainstAutomatedManifest(
       : await loadPassedAutomatedManifest(dependencies.repoRoot, testedBehaviorCommit);
     if (!automated) return { matched: false, available: false };
     return { matched: manualConfigMatchesAutomatedManifest(config, automated), available: true };
-  } catch {
+  } catch (error) {
+    // Ambiguous linkage is a harness error the operator must resolve (e.g.
+    // remove all but one qualifying manifest); let it surface rather than
+    // masquerade as "no passed automated manifest exists". Malformed manifest
+    // files are still treated as non-qualifying.
+    if (error instanceof M1HarnessError) throw error;
     return { matched: false, available: false };
   }
 }

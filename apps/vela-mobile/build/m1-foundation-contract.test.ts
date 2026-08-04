@@ -386,6 +386,32 @@ describe('M1 foundation manifest contract', () => {
     ).toThrow(/credentials/u);
   });
 
+  it('rejects a passed manual manifest whose apiOrigin carries a non-root path', () => {
+    // The contract records only the API origin (protocol + host). Both proof
+    // comparisons normalize via `url.origin`, so a pathname like
+    // `/unrelated-path` would be silently discarded and the field would persist
+    // a misleading value while still matching the automated manifest's origin.
+    const config = {
+      ...validManifest().config,
+      apiOrigin: 'https://api.vela.example/unrelated-path',
+    } as ReturnType<typeof validManifest>['config'];
+
+    expect(() =>
+      createManualM1Manifest({
+        testedBehaviorCommit: 'c'.repeat(40),
+        matrixClass: 'production-smoke',
+        runId: '20260803T021500Z-production-smoke',
+        startedAt: '2026-08-03T02:15:00.000Z',
+        endedAt: '2026-08-03T02:17:00.000Z',
+        config,
+        host: { deviceAlias: 'test iPhone' },
+        evidence: validManifest().evidence,
+        findings: [],
+        outcome: 'passed',
+      }),
+    ).toThrow(/origin only/u);
+  });
+
   it('rejects a passed manual manifest with a malformed region', () => {
     const config = { ...validManifest().config, region: 'wrong-region' };
 

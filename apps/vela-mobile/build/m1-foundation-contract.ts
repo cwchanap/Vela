@@ -206,6 +206,15 @@ function assertValidApiOrigin(value: unknown): asserts value is string {
   if (url.search || url.hash) {
     throw new Error('config.apiOrigin must not include a query string or fragment');
   }
+  // The manifest records only the API origin (protocol + host), matching the
+  // automated harness's `publicApiOrigin` (which stores `url.origin`). Both
+  // proof comparisons normalize via `url.origin`, so a pathname like
+  // `/unrelated-path` would be silently discarded and the field would persist
+  // a misleading value while still matching. Reject any non-root pathname so
+  // the recorded value is exactly the origin the manual observation used.
+  if (url.pathname !== '/') {
+    throw new Error('config.apiOrigin must be an origin only (no path)');
+  }
 }
 
 /**
