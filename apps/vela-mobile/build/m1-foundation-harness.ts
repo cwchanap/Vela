@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
@@ -647,6 +648,8 @@ function evaluateMobileConfiguration(dependencies: HarnessDependencies): Configu
         apiOrigin: publicApiOrigin(loaded.VITE_MOBILE_API_URL!),
         region: loaded.VITE_AWS_REGION!,
         oauthDomain: loaded.VITE_COGNITO_OAUTH_DOMAIN!,
+        cognitoUserPoolId: loaded.VITE_COGNITO_USER_POOL_ID!,
+        cognitoMobileUserPoolClientId: loaded.VITE_COGNITO_MOBILE_USER_POOL_CLIENT_ID!,
         // This is deliberately false until --require-deployed-config matches
         // every loaded public identifier to the deployed CDK output proof.
         publicIdentifiersConsistent: false,
@@ -713,6 +716,35 @@ function normalizeMobileApiIdentifier(value: unknown): string | undefined {
     }
     const pathname = url.pathname.replace(/\/+$/u, '') || '/';
     return `${url.protocol}//${url.host}${pathname}`;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Normalizes a mobile API identifier to its origin only (protocol + host),
+ * stripping any path such as `/api/`. The CDK `MobileApiURL` output includes
+ * the `/api/` path, but the manifest's `apiOrigin` field records only the
+ * origin. This function ensures both sides of the manual config comparison
+ * use the same origin-only representation, so a manual manifest recording the
+ * documented origin (e.g. `https://vela.cwchanap.dev`) is compared against the
+ * proof's origin, not its full URL with path.
+ */
+function normalizeMobileApiOrigin(value: unknown): string | undefined {
+  const candidate = normalizeRequiredIdentifier(value);
+  if (!candidate) return undefined;
+
+  try {
+    const url = new URL(candidate);
+    if (
+      (url.protocol !== 'http:' && url.protocol !== 'https:') ||
+      !url.hostname ||
+      url.username ||
+      url.password
+    ) {
+      return undefined;
+    }
+    return url.origin;
   } catch {
     return undefined;
   }
@@ -863,15 +895,20 @@ async function deployedIdentityMatchesLoadedConfiguration(
 }
 
 /**
- * Compares a manual manifest's recorded `apiOrigin`, `region`, and
- * `oauthDomain` against the CDK deployed identity proof. The manual config
- * records only the three public identifiers the contract requires; this
- * function normalizes both sides with the same logic used for machine-phase
- * identity matching so a human cannot record a structurally valid but
- * incorrect backend (e.g. `https://api.example.invalid/api/`) and claim
- * `publicIdentifiersConsistent: true`.
+ * Compares a manual manifest's recorded public identifiers against the CDK
+ * deployed identity proof. The manual config records all five public
+ * identifiers the contract requires (`apiOrigin`, `region`, `oauthDomain`,
+ * `cognitoUserPoolId`, `cognitoMobileUserPoolClientId`); this function
+ * normalizes both sides so a human cannot record a structurally valid but
+ * incorrect backend and claim `publicIdentifiersConsistent: true`.
  *
- * Returns `true` only when all three normalized values match the deployed
+ * The `apiOrigin` field records only the origin (protocol + host), while the
+ * CDK `MobileApiURL` output includes the `/api/` path. Both sides are
+ * normalized to origins via `normalizeMobileApiOrigin` so the comparison is
+ * consistent regardless of whether the manual manifest records the origin or
+ * the full URL.
+ *
+ * Returns `true` only when all five normalized values match the deployed
  * proof. Returns `false` when the proof is unavailable or any value differs.
  */
 function manualConfigMatchesDeployedProof(
@@ -881,15 +918,25 @@ function manualConfigMatchesDeployedProof(
   const normalizedProof = normalizeDeployedIdentityProof(proof);
   if (!normalizedProof) return false;
 
-  const apiOrigin = normalizeMobileApiIdentifier(config.apiOrigin);
+  const apiOrigin = normalizeMobileApiOrigin(config.apiOrigin);
+  const proofApiOrigin = normalizeMobileApiOrigin(normalizedProof.mobileApiUrl);
   const region = normalizeRegion(config.region);
   const oauthDomain = normalizeOauthDomain(config.oauthDomain);
-  if (!apiOrigin || !region || !oauthDomain) return false;
+  const cognitoUserPoolId = normalizeRequiredIdentifier(config.cognitoUserPoolId);
+  const cognitoMobileUserPoolClientId = normalizeRequiredIdentifier(
+    config.cognitoMobileUserPoolClientId,
+  );
+  if (!apiOrigin || !proofApiOrigin || !region || !oauthDomain || !cognitoUserPoolId) {
+    return false;
+  }
+  if (!cognitoMobileUserPoolClientId) return false;
 
   return (
-    apiOrigin === normalizedProof.mobileApiUrl &&
+    apiOrigin === proofApiOrigin &&
     region === normalizedProof.cognitoRegion &&
-    oauthDomain === normalizedProof.cognitoOAuthDomain
+    oauthDomain === normalizedProof.cognitoOAuthDomain &&
+    cognitoUserPoolId === normalizedProof.cognitoUserPoolId &&
+    cognitoMobileUserPoolClientId === normalizedProof.cognitoMobileUserPoolClientId
   );
 }
 
@@ -2735,8 +2782,9 @@ function extractPhysicalSigningSettings(output: string): {
 
 /**
  * Confirms the keychain has a valid codesigning identity whose label correlates
- * with the project's selected `DEVELOPMENT_TEAM` and `CODE_SIGN_IDENTITY`. The
- * raw `security find-identity` output is never persisted; only the command
+ * with the project's selected `DEVELOPMENT_TEAM` and `CODE_SIGN_IDENTITY`, and
+ * returns the SHA-1 fingerprints of every matching identity. The raw
+ * `security find-identity` output is never persisted; only the command
  * metadata (label, command, exit code) is recorded by the caller.
  *
  * Without this correlation, an unrelated identity (for example a Developer ID
@@ -2745,26 +2793,34 @@ function extractPhysicalSigningSettings(output: string): {
  * identity label follows the `<CODE_SIGN_IDENTITY>: <name> (<TEAM>)` form, so
  * the label prefix must match the resolved identity class and the parenthesized
  * team suffix must match the resolved development team.
+ *
+ * The returned fingerprints are used by `verifyProvisioningProfile` to confirm
+ * that at least one certificate embedded in the provisioning profile is
+ * actually present in the keychain. Without this, a team with multiple Apple
+ * Development certificates could have certificate A in the profile and only
+ * certificate B in the keychain; both checks would pass but signing would fail.
  */
-function hasMatchingCodesigningIdentity(
+function extractMatchingCodesigningIdentityFingerprints(
   output: string,
   developmentTeam: string,
   codeSignIdentity: string,
-): boolean {
-  if (!developmentTeam || !codeSignIdentity) return false;
+): string[] {
+  if (!developmentTeam || !codeSignIdentity) return [];
   const text = boundedOutput(output);
-  const identityPattern = /(?:^|\n)\s*\d+\)\s+[0-9A-Fa-f]{40}\s+"([^"]+)"/gu;
+  const identityPattern = /(?:^|\n)\s*\d+\)\s+([0-9A-Fa-f]{40})\s+"([^"]+)"/gu;
+  const fingerprints: string[] = [];
   let match = identityPattern.exec(text);
   while (match) {
-    const label = match[1]!;
+    const fingerprint = match[1]!.toUpperCase();
+    const label = match[2]!;
     const teamMatch = /\(([^)]+)\)\s*$/u.exec(label);
     const team = teamMatch ? teamMatch[1]!.trim() : '';
     if (team === developmentTeam && label.startsWith(codeSignIdentity)) {
-      return true;
+      fingerprints.push(fingerprint);
     }
     match = identityPattern.exec(text);
   }
-  return false;
+  return fingerprints;
 }
 
 type ProvisioningProfileInfo = {
@@ -2779,6 +2835,7 @@ type ParsedProvisioningProfile = {
   expirationDate: Date | undefined;
   provisionedDevices: string[] | undefined;
   hasDeveloperCertificates: boolean;
+  certificateFingerprints: string[];
 };
 
 /**
@@ -2845,7 +2902,28 @@ function parseProvisioningProfilePlist(xml: string): ParsedProvisioningProfile |
     : undefined;
 
   const certMatch = text.match(/<key>DeveloperCertificates<\/key>\s*<array>([\s\S]*?)<\/array>/u);
-  const hasDeveloperCertificates = certMatch ? /<data>/.test(certMatch[1]!) : false;
+  const certDataElements = certMatch
+    ? [...certMatch[1]!.matchAll(/<data>([^<]+)<\/data>/gu)].map((m) => m[1]!.trim())
+    : [];
+  const hasDeveloperCertificates = certDataElements.length > 0;
+
+  // Compute SHA-1 fingerprints of the embedded certificates. Each <data>
+  // element contains a base64-encoded DER certificate; the SHA-1 fingerprint
+  // is the hash of the raw DER bytes, matching what `security find-identity`
+  // reports. This allows the profile verification to confirm that at least
+  // one certificate in the profile is actually present in the keychain.
+  const certificateFingerprints: string[] = [];
+  for (const base64Data of certDataElements) {
+    try {
+      const certBytes = Buffer.from(base64Data, 'base64');
+      const fingerprint = createHash('sha1').update(certBytes).digest('hex').toUpperCase();
+      if (fingerprint.length === 40) certificateFingerprints.push(fingerprint);
+    } catch {
+      // Skip unparseable certificate data rather than failing the entire parse;
+      // the caller's certificate-match check will fail if no valid fingerprint
+      // is produced.
+    }
+  }
 
   if (teamIdentifiers.length === 0 || !applicationIdentifier || !expirationDate) return undefined;
 
@@ -2855,6 +2933,7 @@ function parseProvisioningProfilePlist(xml: string): ParsedProvisioningProfile |
     expirationDate,
     provisionedDevices,
     hasDeveloperCertificates,
+    certificateFingerprints,
   };
 }
 
@@ -2872,8 +2951,11 @@ function parseProvisioningProfilePlist(xml: string): ParsedProvisioningProfile |
  *    profile uses a wildcard (`<TEAM>.*`).
  * 3. **Expiration**: `ExpirationDate` is in the future.
  * 4. **Developer certificates**: the profile contains at least one
- *    developer certificate (the keychain identity check already correlates
- *    the certificate with the team).
+ *    developer certificate, and at least one of its SHA-1 fingerprints
+ *    matches a keychain identity fingerprint. Without this correlation, a
+ *    team with multiple Apple Development certificates could have certificate
+ *    A in the profile and only certificate B in the keychain; both the
+ *    keychain and profile existence checks would pass, but signing would fail.
  * 5. **Device eligibility**: if `ProvisionedDevices` is present (non-wildcard
  *    profiles), the selected device UDID must be in the list. Wildcard and
  *    enterprise profiles omit `ProvisionedDevices` and are not device-bound.
@@ -2883,6 +2965,7 @@ function verifyProvisioningProfile(
   info: ProvisioningProfileInfo,
   deviceId: string,
   now: Date,
+  keychainCertificateFingerprints: string[],
 ): { valid: boolean; reason: string } {
   if (!info.developmentTeam || !info.bundleIdentifier || !info.provisioningProfileUuid) {
     return { valid: false, reason: 'Provisioning profile UUID, team, or bundle identifier is missing' };
@@ -2906,6 +2989,24 @@ function verifyProvisioningProfile(
 
   if (!profile.hasDeveloperCertificates) {
     return { valid: false, reason: 'Provisioning profile contains no developer certificates' };
+  }
+
+  // Require that at least one certificate embedded in the profile is present
+  // in the keychain. The keychain fingerprints come from
+  // `security find-identity -v -p codesigning` (SHA-1 of the DER certificate),
+  // and the profile fingerprints are computed from the base64-decoded
+  // DeveloperCertificates <data> elements. If no fingerprint matches, the
+  // profile embeds certificates that are not available for signing.
+  const hasMatchingCertificate = profile.certificateFingerprints.some((fp) =>
+    keychainCertificateFingerprints.includes(fp),
+  );
+  if (!hasMatchingCertificate) {
+    return {
+      valid: false,
+      reason:
+        'No certificate embedded in the provisioning profile matches a keychain codesigning identity; ' +
+        'the profile may reference a certificate that is not installed',
+    };
   }
 
   if (profile.provisionedDevices !== undefined && !profile.provisionedDevices.includes(deviceId)) {
@@ -3041,6 +3142,7 @@ async function runIosPhysicalPreflightPhase(
       codeSignIdentity: '',
     };
     let provisioningInfo: ProvisioningProfileInfo | undefined;
+    let keychainCertificateFingerprints: string[] = [];
     try {
       if (!configuration.loaded || !args.deviceId) {
         throw new M1HarnessError('Validated physical preflight inputs are unexpectedly unavailable');
@@ -3166,13 +3268,17 @@ async function runIosPhysicalPreflightPhase(
           },
           summary: 'Physical iOS codesigning identities could not be enumerated',
         });
-        const identityReady = identityResult
-          ? hasMatchingCodesigningIdentity(
+        const identityFingerprints = identityResult
+          ? extractMatchingCodesigningIdentityFingerprints(
               identityResult.stdout,
               signingSettings.developmentTeam,
               signingSettings.codeSignIdentity,
             )
-          : false;
+          : [];
+        const identityReady = identityFingerprints.length > 0;
+        if (identityReady) {
+          keychainCertificateFingerprints = identityFingerprints;
+        }
         if (!identityReady) {
           host.signingReady = false;
           outcome = 'prerequisite_missing';
@@ -3230,6 +3336,7 @@ async function runIosPhysicalPreflightPhase(
                 provisioningInfo,
                 args.deviceId,
                 safeDate(dependencies.now),
+                keychainCertificateFingerprints,
               );
               if (!verification.valid) {
                 host.signingReady = false;
@@ -3488,8 +3595,9 @@ async function runManualPhase(
     if (!matches) {
       throw new M1UsageError(
         'Manual manifest config does not match the CDK deployed identity proof; ' +
-          'a passed manual manifest must record the same apiOrigin, region, and oauthDomain ' +
-          'as the deployed backend in packages/cdk/cdk-outputs.json',
+          'a passed manual manifest must record the same apiOrigin, region, oauthDomain, ' +
+          'cognitoUserPoolId, and cognitoMobileUserPoolClientId as the deployed backend ' +
+          'in packages/cdk/cdk-outputs.json',
       );
     }
   }

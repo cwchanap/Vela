@@ -293,4 +293,76 @@ describe('scanMobileSecretText', () => {
     ]);
     expect(JSON.stringify(findings)).not.toContain(awsSecret);
   });
+
+  it('detects a standard UUID device identifier in a documentation file', () => {
+    const deviceUuid = '6D61BD3D-227F-5333-8430-DFF74E0ED65B';
+    const findings = scanMobileSecretText({
+      path: 'docs/ios-interaction-baseline.md',
+      text: `CoreDevice identifier \`${deviceUuid}\` was available.`,
+    });
+
+    expect(findings).toEqual([
+      expect.objectContaining({
+        ruleId: 'device_identifier',
+        path: 'docs/ios-interaction-baseline.md',
+        valueClass: 'device_identifier',
+      }),
+    ]);
+    expect(JSON.stringify(findings)).not.toContain(deviceUuid);
+  });
+
+  it('detects a CoreDevice-style identifier (8-16+ hex) in a documentation file', () => {
+    const coreDeviceId = '00008120-001A185E0E234567';
+    const findings = scanMobileSecretText({
+      path: 'docs/evidence.md',
+      text: `The device UDID was ${coreDeviceId}.`,
+    });
+
+    expect(findings).toEqual([
+      expect.objectContaining({
+        ruleId: 'device_identifier',
+        valueClass: 'device_identifier',
+      }),
+    ]);
+    expect(JSON.stringify(findings)).not.toContain(coreDeviceId);
+  });
+
+  it('does not flag a 40-character git commit SHA as a device identifier', () => {
+    const commitSha = 'd261de358a54d8ffd41a02e0107c84e5e3d90c2d';
+    const findings = scanMobileSecretText({
+      path: 'docs/evidence.md',
+      text: `Source commit: ${commitSha}`,
+    });
+
+    expect(findings.map(({ ruleId }) => ruleId)).not.toContain('device_identifier');
+  });
+
+  it('detects an account email in a documentation file', () => {
+    const email = 'tester@real-account.com';
+    const findings = scanMobileSecretText({
+      path: 'docs/observations.md',
+      text: `The tester signed in as ${email}.`,
+    });
+
+    expect(findings).toEqual([
+      expect.objectContaining({
+        ruleId: 'account_email',
+        path: 'docs/observations.md',
+        valueClass: 'account_email',
+      }),
+    ]);
+    expect(JSON.stringify(findings)).not.toContain(email);
+  });
+
+  it('exempts device identifiers and account emails in test fixture paths', () => {
+    const deviceUuid = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
+    const email = 'tester@example.com';
+
+    expect(
+      scanMobileSecretText({
+        path: 'build/m1-foundation-harness.test.ts',
+        text: `const deviceId = '${deviceUuid}'; const email = '${email}';`,
+      }),
+    ).toEqual([]);
+  });
 });

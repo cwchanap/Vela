@@ -17,8 +17,8 @@ with the CSS probe class on `.q-page-container`, placed the same page at
 
 - Source commit before task changes:
   `8559155d90eeb08cded62ee8a1f3ba242861475e`
-- Simulator: iPhone 17 Pro, UDID
-  `C248EC05-3E01-4A13-9BEF-5EB06C171432`
+- Simulator: iPhone 17 Pro, UDID redacted (raw identifier
+  removed from source per the mobile secret policy)
 - Simulator runtime: iOS 26.5
 - Xcode: 26.6 (build 17F113)
 - Build configuration: Debug, Quasar Capacitor development mode
@@ -139,12 +139,17 @@ Selected-mode replacement hashes after the page-control fix:
 
 ## HPA-210 linkage
 
-HPA-210 selected passing automated and Simulator machine manifests for
-`de276f372c7973e2fb49c81e9a78e50df95266c0`. The earlier physical preflight on
-`f0c6fe9d5282c3f5f34e6e5453ed3c23c0808f65` is historical only: its physical
-preflight is `prerequisite_missing`, physical-device testing was deferred, and
-it has no physical acceptance result. This baseline therefore remains
-historical evidence with no HPA-210 physical acceptance result. See
+HPA-210 selected passing automated machine manifest for
+`8c4bdfbf3cb6c4f6f224c0908ff028fd758c6e67`, the current behavior revision
+containing the verification-tooling fixes. The iOS Simulator manifest on
+`de276f372c7973e2fb49c81e9a78e50df95266c0` is stale: it predates
+verification-tooling changes that create a new behavior commit under the
+design's rerun policy, so it is retained as historical evidence only and must
+be regenerated on the final PR head before it can be selected. The earlier
+physical preflight on `f0c6fe9d5282c3f5f34e6e5453ed3c23c0808f65` is historical
+only: its physical preflight is `prerequisite_missing`, physical-device testing
+was deferred, and it has no physical acceptance result. This baseline therefore
+remains historical evidence with no HPA-210 physical acceptance result. See
 [M1 iOS Foundation Verification](m1-ios-foundation-verification.md).
 
 ## Environment matrix
@@ -156,11 +161,11 @@ historical evidence with no HPA-210 physical acceptance result. See
 | iOS Simulator, packaged core-shell run          | `d261de358a54d8ffd41a02e0107c84e5e3d90c2d` | Release smoke       | packaged WebView assets                      | iPhone 17 Pro | iOS 26.5 | 26.6 (17F113) | Not opened                         | Landscape; direction not exposed by the headless capture          | **PARTIAL.** The Release build installed and launched Home with the Production badge; first and last footer tabs were visible inside the tested safe edges. The production artifact scan found no diagnostic marker. More, portrait, and both landscape directions were not all interactively exercised, so the full Release smoke is not marked passing.                                          |
 
 The paired physical inventory contained an available iPhone 15
-(`iPhone15,4`, CoreDevice identifier
-`6D61BD3D-227F-5333-8430-DFF74E0ED65B`). This XcodeBuildMCP session exposed
-simulator workflows only, with no physical-device build or UI interaction
-tools. The physical scenarios were therefore not run, no physical environment
-row was added, and HPA-209 remains release-blocked.
+(`iPhone15,4`, CoreDevice identifier redacted — raw identifier removed
+from source per the mobile secret policy). This XcodeBuildMCP session
+exposed simulator workflows only, with no physical-device build or UI
+interaction tools. The physical scenarios were therefore not run, no
+physical environment row was added, and HPA-209 remains release-blocked.
 
 ## Japanese IME evidence
 

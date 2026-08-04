@@ -3,18 +3,27 @@
 ## Tested Revision and Evidence Linkage
 
 `testedBehaviorCommit`:
-`de276f372c7973e2fb49c81e9a78e50df95266c0`
+`8c4bdfbf3cb6c4f6f224c0908ff028fd758c6e67`
 
-The selected [automated](evidence/hpa-210/de276f372c7973e2fb49c81e9a78e50df95266c0/20260803T071503Z-automated/manifest.json)
-and [iOS Simulator](evidence/hpa-210/de276f372c7973e2fb49c81e9a78e50df95266c0/20260803T071701Z-automated-ios-simulator/manifest.json)
-machine manifests passed on that revision. The Simulator manifest records
-sanitized Xcode, Bun, Quasar, and key Capacitor dependency versions without
-retaining raw command output or a device identifier.
+The selected [automated](evidence/hpa-210/8c4bdfbf3cb6c4f6f224c0908ff028fd758c6e67/20260803T232145Z-automated/manifest.json)
+machine manifest passed on that revision, which contains the
+verification-tooling fixes for provisioning profile content verification,
+manual config CDK proof verification, `.env` secret scanning, and manual
+manifest structural validation.
+
+The [iOS Simulator](evidence/hpa-210/de276f372c7973e2fb49c81e9a78e50df95266c0/20260803T071701Z-automated-ios-simulator/manifest.json)
+manifest on `de276f372c7973e2fb49c81e9a78e50df95266c0` is stale: it predates
+the verification-tooling changes that create a new behavior commit under the
+design's rerun policy. It is retained as historical evidence but is not
+selected. It must be regenerated on the final PR head before it can be
+selected. The Simulator manifest records sanitized Xcode, Bun, Quasar, and
+key Capacitor dependency versions without retaining raw command output or a
+device identifier.
 
 The [physical preflight](evidence/hpa-210/f0c6fe9d5282c3f5f34e6e5453ed3c23c0808f65/20260803T042801Z-physical-preflight/manifest.json)
 under `f0c6fe9d5282c3f5f34e6e5453ed3c23c0808f65` remains historical
 `prerequisite_missing` evidence. Physical-device testing was explicitly
-deferred, so it is not evidence for `de276f372c7973e2fb49c81e9a78e50df95266c0`
+deferred, so it is not evidence for `8c4bdfbf3cb6c4f6f224c0908ff028fd758c6e67`
 and these machine results establish neither physical readiness nor any
 human-observed native outcome. See [M1 iOS Foundation Verification](m1-ios-foundation-verification.md)
 for the `NO-GO` decision and deferred physical rows.

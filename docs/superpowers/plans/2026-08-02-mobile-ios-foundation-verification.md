@@ -620,6 +620,8 @@ export type M1Manifest = {
     apiOrigin?: string;
     region?: string;
     oauthDomain?: string;
+    cognitoUserPoolId?: string;
+    cognitoMobileUserPoolClientId?: string;
     publicIdentifiersConsistent: boolean;
   };
   host: Record<string, string | number | boolean>;

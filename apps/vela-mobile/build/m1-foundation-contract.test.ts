@@ -43,9 +43,11 @@ function validManifest(): M1Manifest {
     config: {
       source: 'process_env',
       class: 'deployed',
-      apiOrigin: 'https://api.vela.example/api/',
+      apiOrigin: 'https://api.vela.example',
       region: 'us-east-1',
       oauthDomain: 'vela.auth.us-east-1.amazoncognito.com',
+      cognitoUserPoolId: 'us-east-1_example',
+      cognitoMobileUserPoolClientId: 'mobile-client-id',
       publicIdentifiersConsistent: true,
     },
     host: {
@@ -297,6 +299,8 @@ describe('M1 foundation manifest contract', () => {
     { name: 'apiOrigin is omitted', omit: 'apiOrigin' },
     { name: 'region is omitted', omit: 'region' },
     { name: 'oauthDomain is omitted', omit: 'oauthDomain' },
+    { name: 'cognitoUserPoolId is omitted', omit: 'cognitoUserPoolId' },
+    { name: 'cognitoMobileUserPoolClientId is omitted', omit: 'cognitoMobileUserPoolClientId' },
   ])('rejects a passed manual manifest when $name', (scenario) => {
     const fullConfig = validManifest().config;
     const config = { ...fullConfig } as Record<string, unknown>;
@@ -320,7 +324,7 @@ describe('M1 foundation manifest contract', () => {
   });
 
   it('rejects a passed manual manifest with a non-URL apiOrigin', () => {
-    const config = { ...validManifest().config, apiOrigin: 'not-even-a-url' };
+    const config = { ...validManifest().config, apiOrigin: 'not-even-a-url' } as ReturnType<typeof validManifest>['config'];
 
     expect(() =>
       createManualM1Manifest({
@@ -339,7 +343,10 @@ describe('M1 foundation manifest contract', () => {
   });
 
   it('rejects a passed manual manifest with a non-HTTP apiOrigin', () => {
-    const config = { ...validManifest().config, apiOrigin: 'ftp://api.vela.example/api/' };
+    const config = {
+      ...validManifest().config,
+      apiOrigin: 'ftp://api.vela.example',
+    } as ReturnType<typeof validManifest>['config'];
 
     expect(() =>
       createManualM1Manifest({
@@ -360,8 +367,8 @@ describe('M1 foundation manifest contract', () => {
   it('rejects a passed manual manifest with credentials in apiOrigin', () => {
     const config = {
       ...validManifest().config,
-      apiOrigin: 'https://user:pass@api.vela.example/api/',
-    };
+      apiOrigin: 'https://user:pass@api.vela.example',
+    } as ReturnType<typeof validManifest>['config'];
 
     expect(() =>
       createManualM1Manifest({
@@ -417,8 +424,55 @@ describe('M1 foundation manifest contract', () => {
     ).toThrow(/bare hostname/u);
   });
 
+  it('rejects a passed manual manifest with a malformed cognitoUserPoolId', () => {
+    const config = {
+      ...validManifest().config,
+      cognitoUserPoolId: 'wrong-pool-id',
+    } as ReturnType<typeof validManifest>['config'];
+
+    expect(() =>
+      createManualM1Manifest({
+        testedBehaviorCommit: 'c'.repeat(40),
+        matrixClass: 'production-smoke',
+        runId: '20260803T021500Z-production-smoke',
+        startedAt: '2026-08-03T02:15:00.000Z',
+        endedAt: '2026-08-03T02:17:00.000Z',
+        config,
+        host: { deviceAlias: 'test iPhone' },
+        evidence: validManifest().evidence,
+        findings: [],
+        outcome: 'passed',
+      }),
+    ).toThrow(/Cognito user pool ID format/u);
+  });
+
+  it('rejects a passed manual manifest with a malformed cognitoMobileUserPoolClientId', () => {
+    const config = {
+      ...validManifest().config,
+      cognitoMobileUserPoolClientId: 'sh!',
+    } as ReturnType<typeof validManifest>['config'];
+
+    expect(() =>
+      createManualM1Manifest({
+        testedBehaviorCommit: 'c'.repeat(40),
+        matrixClass: 'production-smoke',
+        runId: '20260803T021500Z-production-smoke',
+        startedAt: '2026-08-03T02:15:00.000Z',
+        endedAt: '2026-08-03T02:17:00.000Z',
+        config,
+        host: { deviceAlias: 'test iPhone' },
+        evidence: validManifest().evidence,
+        findings: [],
+        outcome: 'passed',
+      }),
+    ).toThrow(/alphanumeric client identifier/u);
+  });
+
   it('accepts a passed manual manifest with a loopback HTTP apiOrigin', () => {
-    const config = { ...validManifest().config, apiOrigin: 'http://127.0.0.1:9000/api/' };
+    const config = {
+      ...validManifest().config,
+      apiOrigin: 'http://127.0.0.1:9000',
+    } as ReturnType<typeof validManifest>['config'];
 
     const manifest = createManualM1Manifest({
       testedBehaviorCommit: 'c'.repeat(40),

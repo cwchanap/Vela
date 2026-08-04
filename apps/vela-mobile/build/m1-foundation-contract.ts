@@ -61,6 +61,8 @@ export type M1Manifest = {
     apiOrigin?: string;
     region?: string;
     oauthDomain?: string;
+    cognitoUserPoolId?: string;
+    cognitoMobileUserPoolClientId?: string;
     publicIdentifiersConsistent: boolean;
   };
   host: Record<string, string | number | boolean>;
@@ -232,6 +234,36 @@ function assertValidOauthDomain(value: unknown): asserts value is string {
   }
 }
 
+/**
+ * Validates that `cognitoUserPoolId` matches the Cognito user pool ID format
+ * (`<region>_<alphanumeric>`, e.g. `us-east-1_abcdef123`). This rejects
+ * arbitrary strings that would otherwise pass a non-empty-string check.
+ */
+const COGNITO_USER_POOL_ID_PATTERN = /^[a-z]{2}(?:-gov)?-[a-z]+-\d+_[A-Za-z0-9]+$/u;
+function assertValidCognitoUserPoolId(value: unknown): asserts value is string {
+  assertNonEmptyString(value, 'config.cognitoUserPoolId');
+  if (!COGNITO_USER_POOL_ID_PATTERN.test(value.trim())) {
+    throw new Error(
+      'config.cognitoUserPoolId must match the Cognito user pool ID format (e.g. us-east-1_abcdef123)',
+    );
+  }
+}
+
+/**
+ * Validates that `cognitoMobileUserPoolClientId` is a non-empty alphanumeric
+ * string with hyphens/underscores. Cognito client IDs are opaque tokens, so
+ * the contract layer only enforces a safe character set and minimum length.
+ */
+const COGNITO_CLIENT_ID_PATTERN = /^[A-Za-z0-9_-]{6,}$/u;
+function assertValidCognitoMobileUserPoolClientId(value: unknown): asserts value is string {
+  assertNonEmptyString(value, 'config.cognitoMobileUserPoolClientId');
+  if (!COGNITO_CLIENT_ID_PATTERN.test(value.trim())) {
+    throw new Error(
+      'config.cognitoMobileUserPoolClientId must be a non-empty alphanumeric client identifier',
+    );
+  }
+}
+
 function validateConfig(value: unknown): void {
   assertRecord(value, 'config');
   assertOnlyKeys(value, 'config', [
@@ -240,6 +272,8 @@ function validateConfig(value: unknown): void {
     'apiOrigin',
     'region',
     'oauthDomain',
+    'cognitoUserPoolId',
+    'cognitoMobileUserPoolClientId',
     'publicIdentifiersConsistent',
   ]);
   assertEnum(value.source, 'config.source', CONFIG_SOURCES);
@@ -247,6 +281,12 @@ function validateConfig(value: unknown): void {
   if (value.apiOrigin !== undefined) assertNonEmptyString(value.apiOrigin, 'config.apiOrigin');
   if (value.region !== undefined) assertNonEmptyString(value.region, 'config.region');
   if (value.oauthDomain !== undefined) assertNonEmptyString(value.oauthDomain, 'config.oauthDomain');
+  if (value.cognitoUserPoolId !== undefined) {
+    assertNonEmptyString(value.cognitoUserPoolId, 'config.cognitoUserPoolId');
+  }
+  if (value.cognitoMobileUserPoolClientId !== undefined) {
+    assertNonEmptyString(value.cognitoMobileUserPoolClientId, 'config.cognitoMobileUserPoolClientId');
+  }
   if (typeof value.publicIdentifiersConsistent !== 'boolean') {
     throw new Error('config.publicIdentifiersConsistent must be a boolean');
   }
@@ -504,14 +544,15 @@ function runIdMatrixClassSuffix(runId: string): string {
  * `--require-deployed-config` is not supplied.
  *
  * For a `passed` manual manifest, the config must also carry real provenance:
- * a non-`none` source and structurally valid `apiOrigin`, `region`, and
- * `oauthDomain`. Without structural validation, a manifest can claim
- * `class: 'deployed'` and `publicIdentifiersConsistent: true` while recording
- * arbitrary strings like `"not-even-a-url"` or `"wrong-region"`, which cannot
- * demonstrate that the physical observation used the same backend as the
- * machine phases. The harness layer additionally compares these values
- * against CDK deployed identity proof; the contract layer enforces structure
- * so a non-structural value fails before reaching that comparison.
+ * a non-`none` source and structurally valid `apiOrigin`, `region`,
+ * `oauthDomain`, `cognitoUserPoolId`, and `cognitoMobileUserPoolClientId`.
+ * Without structural validation, a manifest can claim `class: 'deployed'` and
+ * `publicIdentifiersConsistent: true` while recording arbitrary strings like
+ * `"not-even-a-url"` or `"wrong-region"`, which cannot demonstrate that the
+ * physical observation used the same backend as the machine phases. The
+ * harness layer additionally compares these values against CDK deployed
+ * identity proof; the contract layer enforces structure so a non-structural
+ * value fails before reaching that comparison.
  */
 export function validateManualM1ManifestSemantics(manifest: M1Manifest): void {
   if (runIdMatrixClassSuffix(manifest.runId) !== manifest.matrixClass) {
@@ -533,6 +574,8 @@ export function validateManualM1ManifestSemantics(manifest: M1Manifest): void {
   assertValidApiOrigin(manifest.config.apiOrigin);
   assertValidAwsRegion(manifest.config.region);
   assertValidOauthDomain(manifest.config.oauthDomain);
+  assertValidCognitoUserPoolId(manifest.config.cognitoUserPoolId);
+  assertValidCognitoMobileUserPoolClientId(manifest.config.cognitoMobileUserPoolClientId);
   if (manifest.evidence.length === 0) {
     throw new Error('a passed manual manifest must reference non-empty evidence');
   }
