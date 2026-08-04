@@ -2999,6 +2999,13 @@ function extractMatchingCodesigningIdentityFingerprints(
   codeSignIdentity: string,
 ): string[] {
   if (!developmentTeam || !codeSignIdentity) return [];
+  // "Apple Development" (current Xcode label) and "iPhone Developer" (legacy
+  // Xcode label) are the same identity class. A keychain may still contain
+  // certificates with the legacy label, so treat both as equivalent acceptable
+  // prefixes when the resolved CODE_SIGN_IDENTITY is either one.
+  const acceptedPrefixes = new Set([codeSignIdentity]);
+  if (codeSignIdentity === 'Apple Development') acceptedPrefixes.add('iPhone Developer');
+  if (codeSignIdentity === 'iPhone Developer') acceptedPrefixes.add('Apple Development');
   const text = boundedOutput(output);
   const identityPattern = /(?:^|\n)\s*\d+\)\s+([0-9A-Fa-f]{40})\s+"([^"]+)"/gu;
   const fingerprints: string[] = [];
@@ -3008,7 +3015,7 @@ function extractMatchingCodesigningIdentityFingerprints(
     const label = match[2]!;
     const teamMatch = /\(([^)]+)\)\s*$/u.exec(label);
     const team = teamMatch ? teamMatch[1]!.trim() : '';
-    if (team === developmentTeam && label.startsWith(codeSignIdentity)) {
+    if (team === developmentTeam && [...acceptedPrefixes].some((prefix) => label.startsWith(prefix))) {
       fingerprints.push(fingerprint);
     }
     match = identityPattern.exec(text);
@@ -3088,7 +3095,17 @@ function parseProvisioningProfilePlist(xml: string): ParsedProvisioningProfile |
   const applicationIdentifier = appIdMatch?.[1];
 
   const expirationMatch = text.match(/<key>ExpirationDate<\/key>\s*<date>([^<]+)<\/date>/u);
-  const expirationDate = expirationMatch ? new Date(expirationMatch[1]!) : undefined;
+  const parsedExpiration = expirationMatch ? new Date(expirationMatch[1]!) : undefined;
+  // An unparseable date string produces an Invalid Date (truthy but with
+  // getTime() === NaN). Without this finiteness check, the Invalid Date would
+  // pass the `!expirationDate` guard below and then bypass the expiry
+  // comparison in verifyProvisioningProfile (NaN <= now is false), letting a
+  // malformed profile pass as unexpired. Treat a non-finite date as undefined
+  // so the parser rejects the profile as malformed.
+  const expirationDate =
+    parsedExpiration && Number.isFinite(parsedExpiration.getTime())
+      ? parsedExpiration
+      : undefined;
 
   const devicesMatch = text.match(/<key>ProvisionedDevices<\/key>\s*<array>([\s\S]*?)<\/array>/u);
   const provisionedDevices = devicesMatch
@@ -3529,6 +3546,15 @@ async function runIosPhysicalPreflightPhase(
       // and device eligibility so a non-functional profile fails the
       // preflight rather than passing as "signing ready".
       if (outcome === 'passed' && provisioningInfo && args.deviceId) {
+        if (!provisioningInfo.provisioningProfileUuid) {
+          host.signingReady = false;
+          outcome = 'prerequisite_missing';
+          findings.push({
+            severity: 'error',
+            summary:
+              'The build settings do not specify a PROVISIONING_PROFILE UUID; no provisioning profile can be resolved',
+          });
+        } else {
         const profilePath = provisioningProfilePath(
           provisioningInfo.provisioningProfileUuid,
           dependencies.provisioningProfileDirectory,
@@ -3578,6 +3604,7 @@ async function runIosPhysicalPreflightPhase(
           } else {
             host.signingReady = false;
           }
+        }
         }
       }
     } catch {
@@ -3814,8 +3841,9 @@ async function runManualPhase(
       outcome: input.outcome,
       linkedAutomatedRunId: input.automatedRunId,
     });
-  } catch {
-    throw new M1UsageError('Manual input has an invalid manifest shape');
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    throw new M1UsageError(`Manual input has an invalid manifest shape: ${detail}`);
   }
 
   // A passed manual manifest claims deployed configuration with consistent

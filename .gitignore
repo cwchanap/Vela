@@ -62,5 +62,8 @@ specs/
 # Git worktrees
 .worktrees/
 
-# Mobile verification evidence (local-only artifacts)
-apps/vela-mobile/docs/evidence/
+# Mobile verification evidence: committed manifests are tracked under
+# apps/vela-mobile/docs/evidence/. Only local raw artifacts (screenshots,
+# logs, captures not committed as evidence) are ignored, in a dedicated
+# subdirectory so the evidence root and its manifests remain trackable.
+apps/vela-mobile/docs/evidence/local-raw/

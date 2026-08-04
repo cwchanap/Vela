@@ -2637,6 +2637,112 @@ describe('iOS physical-device M1 foundation preflight', () => {
     });
   });
 
+  it('fails the preflight when the provisioning profile expiration date is unparseable', async () => {
+    // An unparseable ExpirationDate produces an Invalid Date (truthy but
+    // getTime() === NaN). Without the finiteness check, the Invalid Date would
+    // bypass the expiry comparison (NaN <= now is false) and let a malformed
+    // profile pass as unexpired. The parser must reject it as malformed.
+    const repository = createTemporaryRepository();
+    const workspace = createTemporaryExecutionWorkspace();
+    const profileDirectory = createTemporaryProvisioningProfileDirectory(
+      physicalProfileUuid,
+      physicalProvisioningProfilePlist({ expirationDate: 'not-a-real-date' }),
+    );
+    const runner = createPhysicalPreflightRunner();
+    const dependencies = createDependencies({
+      repoRoot: repository,
+      runCommand: runner.runCommand,
+      provisioningProfileDirectory: profileDirectory,
+    });
+    attachCleanExecutionWorkspace(dependencies, workspace);
+
+    const manifest = onlyManifest(
+      await runM1FoundationVerification(
+        parseM1Arguments(['--phase', 'ios-physical-preflight', '--device-id', physicalDeviceId]),
+        dependencies,
+      ),
+    );
+
+    expect(manifest.outcome).toBe('prerequisite_missing');
+    expect(manifest.host.signingReady).toBe(false);
+    expect(manifest.findings).toContainEqual({
+      severity: 'error',
+      summary: 'The provisioning profile is malformed or missing required fields',
+    });
+  });
+
+  it('fails the preflight with a missing-UUID finding when PROVISIONING_PROFILE is empty but a specifier is set', async () => {
+    // When PROVISIONING_PROFILE_SPECIFIER is non-empty but PROVISIONING_PROFILE
+    // is empty, hasReadyPhysicalSigning returns true (specifier satisfies the
+    // readiness check), but extractPhysicalProvisioningInfo returns an empty
+    // UUID. The preflight must report the missing UUID explicitly rather than
+    // the misleading "profile is not installed" message.
+    const repository = createTemporaryRepository();
+    const workspace = createTemporaryExecutionWorkspace();
+    const runner = createPhysicalPreflightRunner({
+      buildSettings: physicalBuildSettings({
+        PROVISIONING_PROFILE: '',
+        PROVISIONING_PROFILE_SPECIFIER: 'vela-development',
+      }),
+    });
+    const dependencies = createDependencies({
+      repoRoot: repository,
+      runCommand: runner.runCommand,
+    });
+    attachCleanExecutionWorkspace(dependencies, workspace);
+
+    const manifest = onlyManifest(
+      await runM1FoundationVerification(
+        parseM1Arguments(['--phase', 'ios-physical-preflight', '--device-id', physicalDeviceId]),
+        dependencies,
+      ),
+    );
+
+    expect(manifest.outcome).toBe('prerequisite_missing');
+    expect(manifest.host.signingReady).toBe(false);
+    expect(manifest.findings).toContainEqual({
+      severity: 'error',
+      summary:
+        'The build settings do not specify a PROVISIONING_PROFILE UUID; no provisioning profile can be resolved',
+    });
+  });
+
+  it('accepts an iPhone Developer keychain identity when CODE_SIGN_IDENTITY is Apple Development', async () => {
+    // "Apple Development" (current Xcode label) and "iPhone Developer" (legacy
+    // Xcode label) are the same identity class. A keychain may still contain
+    // certificates with the legacy label, so the fingerprint extraction must
+    // accept either prefix when the resolved CODE_SIGN_IDENTITY is either one.
+    const repository = createTemporaryRepository();
+    const workspace = createTemporaryExecutionWorkspace();
+    const profileDirectory = createTemporaryProvisioningProfileDirectory(
+      physicalProfileUuid,
+      physicalProvisioningProfilePlist(),
+    );
+    const runner = createPhysicalPreflightRunner({
+      buildSettings: physicalBuildSettings({ CODE_SIGN_IDENTITY: 'Apple Development' }),
+      codesigningIdentityOutput: [
+        `  1) ${physicalCertificateFingerprint} "iPhone Developer: Tester (${physicalSigningTeam})"`,
+        '     1 valid identity found',
+      ].join('\n'),
+    });
+    const dependencies = createDependencies({
+      repoRoot: repository,
+      runCommand: runner.runCommand,
+      provisioningProfileDirectory: profileDirectory,
+    });
+    attachCleanExecutionWorkspace(dependencies, workspace);
+
+    const manifest = onlyManifest(
+      await runM1FoundationVerification(
+        parseM1Arguments(['--phase', 'ios-physical-preflight', '--device-id', physicalDeviceId]),
+        dependencies,
+      ),
+    );
+
+    expect(manifest.outcome).toBe('passed');
+    expect(manifest.host.signingReady).toBe(true);
+  });
+
   it('fails the preflight when the provisioning profile certificate does not match the keychain identity', async () => {
     const repository = createTemporaryRepository();
     const workspace = createTemporaryExecutionWorkspace();

@@ -1,0 +1,176 @@
+{
+  "schemaVersion": 1,
+  "runId": "20260803T041610Z-automated-ios-simulator",
+  "testedBehaviorCommit": "81653840e54f6c2399a8668850e3f5a8fdb5bfa2",
+  "phase": "ios-simulator",
+  "matrixClass": "automated",
+  "startedAt": "2026-08-03T04:16:10.831Z",
+  "endedAt": "2026-08-03T04:17:04.198Z",
+  "outcome": "gate_failed",
+  "exitCode": 4,
+  "config": {
+    "source": ".env.production",
+    "class": "deployed",
+    "apiOrigin": "https://vela.cwchanap.dev",
+    "region": "us-east-1",
+    "oauthDomain": "vela-cwchanap-auth.auth.us-east-1.amazoncognito.com",
+    "publicIdentifiersConsistent": true
+  },
+  "host": {
+    "xcodeVersion": "26.6",
+    "simulatorAlias": "iPhone 17",
+    "simulatorRuntime": "com.apple.CoreSimulator.SimRuntime.iOS-26-5",
+    "wwwHashBefore": "0d44919a31b046d2feafda2620b87e3152448a63b76d2d9c0dca08ef7cbc3fec",
+    "wwwHashAfter": "0d44919a31b046d2feafda2620b87e3152448a63b76d2d9c0dca08ef7cbc3fec",
+    "appBundlePath": ".m1-ios-simulator/20260803T041610Z-automated-ios-simulator/DerivedData/Build/Products/Release-iphonesimulator/App.app"
+  },
+  "commands": [
+    {
+      "label": "xcode-version",
+      "command": "xcodebuild",
+      "cwd": ".",
+      "startedAt": "2026-08-03T04:16:11.323Z",
+      "endedAt": "2026-08-03T04:16:11.408Z",
+      "elapsedMs": 85,
+      "exitCode": 0,
+      "status": "passed"
+    },
+    {
+      "label": "bun-version",
+      "command": "bun",
+      "cwd": ".",
+      "startedAt": "2026-08-03T04:16:11.409Z",
+      "endedAt": "2026-08-03T04:16:11.421Z",
+      "elapsedMs": 12,
+      "exitCode": 0,
+      "status": "passed"
+    },
+    {
+      "label": "simulator-dependency-install",
+      "command": "bun",
+      "cwd": ".",
+      "startedAt": "2026-08-03T04:16:11.422Z",
+      "endedAt": "2026-08-03T04:16:16.140Z",
+      "elapsedMs": 4718,
+      "exitCode": 0,
+      "status": "passed"
+    },
+    {
+      "label": "mobile-dependency-versions",
+      "command": "bun",
+      "cwd": "apps/vela-mobile",
+      "startedAt": "2026-08-03T04:16:16.140Z",
+      "endedAt": "2026-08-03T04:16:16.153Z",
+      "elapsedMs": 13,
+      "exitCode": 0,
+      "status": "passed"
+    },
+    {
+      "label": "simulator-discovery",
+      "command": "xcrun",
+      "cwd": ".",
+      "startedAt": "2026-08-03T04:16:16.153Z",
+      "endedAt": "2026-08-03T04:16:16.285Z",
+      "elapsedMs": 132,
+      "exitCode": 0,
+      "status": "passed"
+    },
+    {
+      "label": "production-diagnostics",
+      "command": "bun",
+      "cwd": ".",
+      "startedAt": "2026-08-03T04:16:16.286Z",
+      "endedAt": "2026-08-03T04:16:21.439Z",
+      "elapsedMs": 5153,
+      "exitCode": 0,
+      "status": "passed"
+    },
+    {
+      "label": "capacitor-sync-ios",
+      "command": "bunx",
+      "cwd": "apps/vela-mobile/src-capacitor",
+      "startedAt": "2026-08-03T04:16:21.442Z",
+      "endedAt": "2026-08-03T04:16:23.481Z",
+      "elapsedMs": 2039,
+      "exitCode": 0,
+      "status": "passed"
+    },
+    {
+      "label": "simulator-build-settings",
+      "command": "xcodebuild",
+      "cwd": ".",
+      "startedAt": "2026-08-03T04:16:23.484Z",
+      "endedAt": "2026-08-03T04:16:24.652Z",
+      "elapsedMs": 1168,
+      "exitCode": 0,
+      "status": "passed"
+    },
+    {
+      "label": "simulator-build",
+      "command": "xcodebuild",
+      "cwd": ".",
+      "startedAt": "2026-08-03T04:16:24.653Z",
+      "endedAt": "2026-08-03T04:16:48.253Z",
+      "elapsedMs": 23600,
+      "exitCode": 0,
+      "status": "passed"
+    },
+    {
+      "label": "simulator-executable",
+      "command": "plutil",
+      "cwd": ".",
+      "startedAt": "2026-08-03T04:16:48.253Z",
+      "endedAt": "2026-08-03T04:16:48.262Z",
+      "elapsedMs": 9,
+      "exitCode": 0,
+      "status": "passed"
+    },
+    {
+      "label": "simulator-bootstatus",
+      "command": "xcrun",
+      "cwd": ".",
+      "startedAt": "2026-08-03T04:16:48.262Z",
+      "endedAt": "2026-08-03T04:16:48.483Z",
+      "elapsedMs": 221,
+      "exitCode": 0,
+      "status": "passed"
+    },
+    {
+      "label": "simulator-install",
+      "command": "xcrun",
+      "cwd": ".",
+      "startedAt": "2026-08-03T04:16:48.483Z",
+      "endedAt": "2026-08-03T04:16:49.005Z",
+      "elapsedMs": 522,
+      "exitCode": 0,
+      "status": "passed"
+    },
+    {
+      "label": "simulator-launch",
+      "command": "xcrun",
+      "cwd": ".",
+      "startedAt": "2026-08-03T04:16:49.005Z",
+      "endedAt": "2026-08-03T04:16:49.678Z",
+      "elapsedMs": 673,
+      "exitCode": 0,
+      "status": "passed"
+    },
+    {
+      "label": "simulator-process-list",
+      "command": "xcrun",
+      "cwd": ".",
+      "startedAt": "2026-08-03T04:16:54.680Z",
+      "endedAt": "2026-08-03T04:16:54.822Z",
+      "elapsedMs": 142,
+      "exitCode": 2,
+      "status": "failed"
+    }
+  ],
+  "evidence": [],
+  "findings": [
+    {
+      "severity": "error",
+      "summary": "Simulator process list could not be inspected"
+    }
+  ]
+}

@@ -170,6 +170,11 @@ export async function scanMobileSecretRoots({
   // gate pass an unscanned oversized bundle. This counter is the source of
   // truth for the CLI's fail-closed check.
   let oversizedCount = 0;
+  // Binary supported artifacts are counted independently for the same reason:
+  // a supported extension whose content is binary cannot be scanned, so the
+  // fail-closed gate must fire even if the bounded `skipped` sample has already
+  // dropped the individual binary_content record.
+  let binarySkippedCount = 0;
   const absoluteRoots = [...new Set(roots.map((candidate) => resolveMobileSecretRoot(candidate)))];
   const repositoryBase = commonAncestor(absoluteRoots);
 
@@ -212,6 +217,7 @@ export async function scanMobileSecretRoots({
 
         const bytes = await readFile(path);
         if (isBinaryContent(bytes)) {
+          binarySkippedCount += 1;
           addSkipped(skipped, { path: pathFromRepository, reason: 'binary_content' });
           continue;
         }
@@ -234,6 +240,7 @@ export async function scanMobileSecretRoots({
     findings: findings.sort(sortByPath),
     skipped: skipped.sort(sortByPath),
     oversizedCount,
+    binarySkippedCount,
   };
 }
 
@@ -306,19 +313,24 @@ export async function runMobileSecretScannerCli(argv = process.argv.slice(2)) {
     if (report.findings.length > 0) {
       console.error(
         `Mobile secret findings:\n${report.findings
-          .map(({ path, line, ruleId, fingerprint }) => `${path}:${line} ${ruleId} ${fingerprint}`)
+          .map(({ path, line, ruleId, fingerprint }) =>
+            fingerprint
+              ? `${path}:${line} ${ruleId} ${fingerprint}`
+              : `${path}:${line} ${ruleId}`,
+          )
           .join('\n')}`,
       );
       return 4;
     }
 
-    // Fail closed: a supported text artifact that exceeds --max-bytes cannot be
-    // scanned, so "No mobile secrets found" would be an unverified claim. The
-    // gate must fail rather than silently pass an oversized bundle or source
-    // map that may embed a credential. Raise --max-bytes only when the
-    // oversized file is understood and trusted. The oversized count is tracked
-    // independently of the bounded `skipped` sample so it stays accurate even
-    // after MAX_SKIPPED_RECORDS truncates the diagnostic list.
+    // Fail closed: a supported text artifact that exceeds --max-bytes or
+    // contains binary content cannot be scanned, so "No mobile secrets found"
+    // would be an unverified claim. The gate must fail rather than silently
+    // pass an oversized bundle, source map, or binary file that may embed a
+    // credential. Raise --max-bytes only when the oversized file is understood
+    // and trusted. Both counts are tracked independently of the bounded
+    // `skipped` sample so they stay accurate even after MAX_SKIPPED_RECORDS
+    // truncates the diagnostic list.
     if (report.oversizedCount > 0) {
       const listed = report.skipped
         .filter((record) => record.reason === 'max_text_bytes')
@@ -329,6 +341,20 @@ export async function runMobileSecretScannerCli(argv = process.argv.slice(2)) {
           : '\n(oversized files were omitted from the skipped-record sample)';
       console.error(
         `Mobile secret scanner could not scan ${report.oversizedCount} supported text artifact(s) larger than ${maxTextBytes} bytes:${listedText}\nRaise --max-bytes only after confirming these files are safe to load.`,
+      );
+      return 3;
+    }
+
+    if (report.binarySkippedCount > 0) {
+      const listed = report.skipped
+        .filter((record) => record.reason === 'binary_content')
+        .map(({ path }) => path);
+      const listedText =
+        listed.length > 0
+          ? `\n${listed.join('\n')}`
+          : '\n(binary files were omitted from the skipped-record sample)';
+      console.error(
+        `Mobile secret scanner could not scan ${report.binarySkippedCount} supported text artifact(s) with binary content:${listedText}\nThese files have a supported extension but cannot be decoded as UTF-8; confirm they are safe before excluding them.`,
       );
       return 3;
     }

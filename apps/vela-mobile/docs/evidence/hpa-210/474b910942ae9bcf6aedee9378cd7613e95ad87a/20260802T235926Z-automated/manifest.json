@@ -1,0 +1,106 @@
+{
+  "schemaVersion": 1,
+  "runId": "20260802T235926Z-automated",
+  "testedBehaviorCommit": "474b910942ae9bcf6aedee9378cd7613e95ad87a",
+  "phase": "automated",
+  "matrixClass": "automated",
+  "startedAt": "2026-08-02T23:59:26.684Z",
+  "endedAt": "2026-08-02T23:59:59.553Z",
+  "outcome": "passed",
+  "exitCode": 0,
+  "config": {
+    "source": "process_env",
+    "class": "placeholder",
+    "apiOrigin": "https://example.invalid",
+    "region": "us-east-1",
+    "oauthDomain": "ci-placeholder.auth.us-east-1.amazoncognito.com",
+    "publicIdentifiersConsistent": true
+  },
+  "host": {
+    "platform": "darwin"
+  },
+  "commands": [
+    {
+      "label": "install",
+      "command": "bun",
+      "cwd": ".",
+      "startedAt": "2026-08-02T23:59:26.700Z",
+      "endedAt": "2026-08-02T23:59:28.457Z",
+      "elapsedMs": 1757,
+      "exitCode": 0,
+      "status": "passed"
+    },
+    {
+      "label": "lint",
+      "command": "bun",
+      "cwd": ".",
+      "startedAt": "2026-08-02T23:59:28.457Z",
+      "endedAt": "2026-08-02T23:59:32.726Z",
+      "elapsedMs": 4269,
+      "exitCode": 0,
+      "status": "passed"
+    },
+    {
+      "label": "typecheck",
+      "command": "bun",
+      "cwd": ".",
+      "startedAt": "2026-08-02T23:59:32.726Z",
+      "endedAt": "2026-08-02T23:59:39.563Z",
+      "elapsedMs": 6837,
+      "exitCode": 0,
+      "status": "passed"
+    },
+    {
+      "label": "compile",
+      "command": "bun",
+      "cwd": ".",
+      "startedAt": "2026-08-02T23:59:39.563Z",
+      "endedAt": "2026-08-02T23:59:40.595Z",
+      "elapsedMs": 1032,
+      "exitCode": 0,
+      "status": "passed"
+    },
+    {
+      "label": "build",
+      "command": "bun",
+      "cwd": ".",
+      "startedAt": "2026-08-02T23:59:40.595Z",
+      "endedAt": "2026-08-02T23:59:43.105Z",
+      "elapsedMs": 2510,
+      "exitCode": 0,
+      "status": "passed"
+    },
+    {
+      "label": "test",
+      "command": "bun",
+      "cwd": ".",
+      "startedAt": "2026-08-02T23:59:43.105Z",
+      "endedAt": "2026-08-02T23:59:53.962Z",
+      "elapsedMs": 10857,
+      "exitCode": 0,
+      "status": "passed"
+    },
+    {
+      "label": "production-diagnostics",
+      "command": "bun",
+      "cwd": ".",
+      "startedAt": "2026-08-02T23:59:53.962Z",
+      "endedAt": "2026-08-02T23:59:59.410Z",
+      "elapsedMs": 5448,
+      "exitCode": 0,
+      "status": "passed"
+    },
+    {
+      "label": "mobile-secret-scan",
+      "command": "bun",
+      "cwd": ".",
+      "startedAt": "2026-08-02T23:59:59.410Z",
+      "endedAt": "2026-08-02T23:59:59.553Z",
+      "elapsedMs": 143,
+      "exitCode": 0,
+      "status": "passed"
+    }
+  ],
+  "evidence": [],
+  "findings": []
+}
