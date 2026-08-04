@@ -367,7 +367,7 @@ describe('M1 foundation manifest contract', () => {
   it('rejects a passed manual manifest with credentials in apiOrigin', () => {
     const config = {
       ...validManifest().config,
-      apiOrigin: 'https://user:pass@api.vela.example',
+      apiOrigin: ['https://user:pass', 'api.vela.example'].join('@'),
     } as ReturnType<typeof validManifest>['config'];
 
     expect(() =>

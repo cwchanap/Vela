@@ -69,6 +69,28 @@ export const TEST_FIXTURE_SECRET_VALUES: ReadonlySet<string> = new Set(
 
 export const TEST_FIXTURE_VALUE_SUFFIXES = ['.example.test', 'example.invalid'] as const;
 
+// Reserved email domains that are safe to use in test fixtures (RFC 2606 /
+// RFC 6761). A real tester email using a non-reserved domain copied into a
+// test file is still flagged.
+const TEST_FIXTURE_EMAIL_DOMAINS: ReadonlySet<string> = new Set([
+  'example.com',
+  'example.test',
+  'example.invalid',
+  'example',
+  'test',
+  'localhost',
+]);
+
+// Known synthetic device identifiers used in test fixtures. These are clearly
+// non-real identifiers (sequential hex, all zeros, or repeated patterns). A
+// real device identifier copied into a test file would not match any of these
+// and would still be flagged.
+const TEST_FIXTURE_DEVICE_IDENTIFIERS: ReadonlySet<string> = new Set([
+  'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
+  '00008120-001a185e0e234567',
+  '00000000-0000000000000000',
+]);
+
 const BEARER_PATTERN = /["']?Authorization["']?\s*:\s*["']?Bearer["']?\s+([^\s"'`]+)/giu;
 const JWT_PATTERN = /\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b/gu;
 const PRIVATE_KEY_PATTERN = /-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----/gu;
@@ -198,6 +220,16 @@ function isTestFixtureUrl(rawValue: string): boolean {
   }
 }
 
+function isTestFixtureEmail(rawValue: string): boolean {
+  const match = rawValue.match(/^[A-Za-z0-9._%+-]+@([A-Za-z0-9.-]+\.[A-Za-z]{2,})$/u);
+  if (!match) return false;
+  return TEST_FIXTURE_EMAIL_DOMAINS.has(match[1]!.toLowerCase());
+}
+
+function isTestFixtureDeviceIdentifier(rawValue: string): boolean {
+  return TEST_FIXTURE_DEVICE_IDENTIFIERS.has(rawValue.toLowerCase());
+}
+
 export function isMobileSecretFixtureValue(rawValue: string): boolean {
   return TEST_FIXTURE_SECRET_VALUES.has(rawValue) || isTestFixtureUrl(rawValue);
 }
@@ -208,13 +240,17 @@ function isAllowedTestFixtureCandidate(candidate: Candidate): boolean {
     return true;
   }
   // Test files use synthetic device identifiers and account emails as fixture
-  // values (e.g. physicalDeviceId, a synthetic account email). These are not
-  // real device identifiers or account emails, so they are exempted in test
-  // paths.
-  return (
-    candidate.finding.ruleId === 'device_identifier' ||
-    candidate.finding.ruleId === 'account_email'
-  );
+  // values. Only bounded synthetic values are exempted: reserved email domains
+  // (RFC 2606 / RFC 6761) and exact known fake device identifiers. A real
+  // tester email or physical-device identifier copied into a test file does
+  // not match these bounds and is still flagged.
+  if (candidate.finding.ruleId === 'device_identifier') {
+    return isTestFixtureDeviceIdentifier(candidate.rawValue);
+  }
+  if (candidate.finding.ruleId === 'account_email') {
+    return isTestFixtureEmail(candidate.rawValue);
+  }
+  return false;
 }
 
 export function scanMobileSecretText(input: MobileSecretScanInput): MobileSecretFinding[] {
@@ -307,7 +343,11 @@ export function scanMobileSecretText(input: MobileSecretScanInput): MobileSecret
     .filter((current) => !isJavaScriptTemplatePlaceholder(current.rawValue))
     .filter(
       (current) =>
-        !(input.allowPolicySentinelLiterals && current.finding.ruleId === 'secret_sentinel'),
+        !(
+          input.allowPolicySentinelLiterals &&
+          (current.finding.ruleId === 'secret_sentinel' ||
+            current.finding.ruleId === 'device_identifier')
+        ),
     )
     .filter((current) => !isTestFixturePath(input.path) || !isAllowedTestFixtureCandidate(current))
     .filter(
