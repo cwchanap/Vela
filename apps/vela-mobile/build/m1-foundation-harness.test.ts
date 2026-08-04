@@ -3169,6 +3169,7 @@ describe('loadPassedAutomatedManifest cross-phase linkage', () => {
   function automatedManifest(input: {
     testedBehaviorCommit: string;
     runId?: string;
+    phase?: M1Manifest['phase'];
     matrixClass?: M1Manifest['matrixClass'];
     outcome?: M1Outcome;
     config?: Partial<M1Manifest['config']>;
@@ -3178,7 +3179,7 @@ describe('loadPassedAutomatedManifest cross-phase linkage', () => {
       schemaVersion: 1,
       runId: input.runId ?? defaultAutomatedRunId,
       testedBehaviorCommit: input.testedBehaviorCommit,
-      phase: 'automated',
+      phase: input.phase ?? 'automated',
       matrixClass: input.matrixClass ?? 'automated',
       startedAt: '2026-08-03T02:15:00.000Z',
       endedAt: '2026-08-03T02:17:00.000Z',
@@ -3311,6 +3312,56 @@ describe('loadPassedAutomatedManifest cross-phase linkage', () => {
         '20260803T021500Z-production-smoke',
       ),
     ).rejects.toThrow(M1HarnessError);
+  });
+
+  it('throws when the manifest at the named run ID has a mismatched internal run ID', async () => {
+    // A manifest that internally identifies itself as run Y but is filed under
+    // run X must not establish false cross-phase linkage. The directory is
+    // keyed by the supplied run ID, but the manifest's runId field disagrees,
+    // so a manifest copied into the wrong run directory is rejected.
+    const repository = createTemporaryRepository();
+    const internalRunId = '20260803T021600Z-automated';
+    const misfiledManifest = automatedManifest({
+      testedBehaviorCommit,
+      runId: internalRunId,
+    });
+    const directory = join(
+      repository,
+      'apps/vela-mobile/docs/evidence/hpa-210',
+      testedBehaviorCommit,
+      defaultAutomatedRunId,
+    );
+    mkdirSync(directory, { recursive: true });
+    writeFileSync(join(directory, 'manifest.json'), JSON.stringify(misfiledManifest));
+
+    await expect(
+      loadPassedAutomatedManifest(repository, testedBehaviorCommit, defaultAutomatedRunId),
+    ).rejects.toThrow(M1HarnessError);
+    await expect(
+      loadPassedAutomatedManifest(repository, testedBehaviorCommit, defaultAutomatedRunId),
+    ).rejects.toThrow(/does not qualify as closure evidence/u);
+  });
+
+  it('throws when the manifest at the named run ID has a non-automated phase', async () => {
+    // A Simulator manifest reuses `matrixClass: 'automated'` but records
+    // `phase: 'ios-simulator'`. Without a phase check, such a manifest copied
+    // into an automated run directory would satisfy the matrixClass guard and
+    // masquerade as automated cross-phase evidence.
+    const repository = createTemporaryRepository();
+    writeAutomatedManifest(
+      repository,
+      automatedManifest({
+        testedBehaviorCommit,
+        phase: 'ios-simulator',
+      }),
+    );
+
+    await expect(
+      loadPassedAutomatedManifest(repository, testedBehaviorCommit, defaultAutomatedRunId),
+    ).rejects.toThrow(M1HarnessError);
+    await expect(
+      loadPassedAutomatedManifest(repository, testedBehaviorCommit, defaultAutomatedRunId),
+    ).rejects.toThrow(/does not qualify as closure evidence/u);
   });
 
   it('throws when the manifest at the named run ID has empty commands', async () => {

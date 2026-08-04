@@ -640,6 +640,25 @@ export function validateAutomatedM1ManifestSemantics(manifest: M1Manifest): void
   if (manifest.outcome !== 'passed') return;
   if (manifest.matrixClass !== 'automated') return;
 
+  // A manifest accepted as automated closure evidence must identify itself as
+  // an automated run, not a Simulator or manual run that happens to carry
+  // `matrixClass: 'automated'` (the Simulator phase reuses that matrix class).
+  // Keying only off `matrixClass` would let a Simulator manifest copied into an
+  // automated run directory masquerade as cross-phase evidence. The run-ID
+  // suffix must also be `automated`, mirroring the manual semantic validator's
+  // suffix agreement rule so a mislabelled run cannot be persisted as closure
+  // proof.
+  if (manifest.phase !== 'automated') {
+    throw new Error(
+      'an automated manifest accepted as closure evidence must record phase "automated"',
+    );
+  }
+  if (runIdMatrixClassSuffix(manifest.runId) !== 'automated') {
+    throw new Error(
+      'an automated manifest runId suffix must be "automated"',
+    );
+  }
+
   const labels = manifest.commands.map((command) => command.label);
   if (labels.length !== AUTOMATED_COMMAND_LABELS.length) {
     throw new Error(
