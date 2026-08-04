@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir, homedir } from 'node:os';
 import { basename, dirname, join, relative, resolve } from 'node:path';
 import { TextDecoder } from 'node:util';
@@ -133,6 +133,16 @@ export type HarnessDependencies = {
    * identifiers from packages/cdk/cdk-outputs.json.
    */
   loadDeployedIdentityProof?: (repoRoot: string) => Promise<DeployedIdentityProof | null>;
+  /**
+   * Test-only injection point. Production callers scan the evidence
+   * directory for a passed automated manifest matching the supplied
+   * behavior commit, providing immutable cross-phase linkage between
+   * the automated machine phase and a manual observation.
+   */
+  loadPassedAutomatedManifest?: (
+    repoRoot: string,
+    testedBehaviorCommit: string,
+  ) => Promise<M1Manifest | null>;
   /**
    * Test-only injection point. Production callers create a detached Git
    * worktree at the exact tested behavior commit.
@@ -951,6 +961,122 @@ async function verifyManualConfigAgainstDeployedProof(
     return manualConfigMatchesDeployedProof(config, proof);
   } catch {
     return false;
+  }
+}
+
+/**
+ * Compares a manual manifest's recorded public identifiers against a passed
+ * automated manifest's config. Both sides record the same five public
+ * identifiers (`apiOrigin`, `region`, `oauthDomain`, `cognitoUserPoolId`,
+ * `cognitoMobileUserPoolClientId`); this function normalizes both sides so
+ * a manual observation recorded against a different backend than the one
+ * the automated phase verified is rejected.
+ *
+ * Returns `true` only when all five normalized values match the automated
+ * manifest's config. Returns `false` when the automated manifest is
+ * unavailable or any value differs.
+ */
+function manualConfigMatchesAutomatedManifest(
+  config: M1Manifest['config'],
+  automated: M1Manifest | null,
+): boolean {
+  if (!automated || automated.outcome !== 'passed') return false;
+
+  const apiOrigin = normalizeMobileApiOrigin(config.apiOrigin);
+  const automatedApiOrigin = normalizeMobileApiOrigin(automated.config.apiOrigin);
+  const region = normalizeRegion(config.region);
+  const automatedRegion = normalizeRegion(automated.config.region);
+  const oauthDomain = normalizeOauthDomain(config.oauthDomain);
+  const automatedOauthDomain = normalizeOauthDomain(automated.config.oauthDomain);
+  const cognitoUserPoolId = normalizeRequiredIdentifier(config.cognitoUserPoolId);
+  const automatedCognitoUserPoolId = normalizeRequiredIdentifier(
+    automated.config.cognitoUserPoolId,
+  );
+  const cognitoMobileUserPoolClientId = normalizeRequiredIdentifier(
+    config.cognitoMobileUserPoolClientId,
+  );
+  const automatedCognitoMobileUserPoolClientId = normalizeRequiredIdentifier(
+    automated.config.cognitoMobileUserPoolClientId,
+  );
+
+  if (
+    !apiOrigin ||
+    !automatedApiOrigin ||
+    !region ||
+    !automatedRegion ||
+    !oauthDomain ||
+    !automatedOauthDomain ||
+    !cognitoUserPoolId ||
+    !automatedCognitoUserPoolId ||
+    !cognitoMobileUserPoolClientId ||
+    !automatedCognitoMobileUserPoolClientId
+  ) {
+    return false;
+  }
+
+  return (
+    apiOrigin === automatedApiOrigin &&
+    region === automatedRegion &&
+    oauthDomain === automatedOauthDomain &&
+    cognitoUserPoolId === automatedCognitoUserPoolId &&
+    cognitoMobileUserPoolClientId === automatedCognitoMobileUserPoolClientId
+  );
+}
+
+/**
+ * Loads a passed automated manifest for the supplied behavior commit from
+ * the evidence directory. Scans `docs/evidence/hpa-210/<commit>/<run-id>/`
+ * for a manifest with `phase: 'automated'` and `outcome: 'passed'`. Returns
+ * the first match, or `null` when none is found.
+ */
+export async function loadPassedAutomatedManifest(
+  repoRoot: string,
+  testedBehaviorCommit: string,
+): Promise<M1Manifest | null> {
+  const evidenceRoot = join(repoRoot, 'apps/vela-mobile/docs/evidence/hpa-210');
+  const commitDirectory = join(evidenceRoot, testedBehaviorCommit);
+  let entries: string[];
+  try {
+    entries = await readdir(commitDirectory);
+  } catch {
+    return null;
+  }
+
+  for (const entry of entries) {
+    const manifestPath = join(commitDirectory, entry, 'manifest.json');
+    try {
+      const raw = await readFile(manifestPath, 'utf8');
+      const parsed: unknown = JSON.parse(raw);
+      if (
+        typeof parsed === 'object' &&
+        parsed !== null &&
+        !Array.isArray(parsed) &&
+        (parsed as { phase?: unknown }).phase === 'automated' &&
+        (parsed as { outcome?: unknown }).outcome === 'passed'
+      ) {
+        return validateM1Manifest(parsed as unknown as M1Manifest);
+      }
+    } catch {
+      continue;
+    }
+  }
+
+  return null;
+}
+
+async function verifyManualConfigAgainstAutomatedManifest(
+  dependencies: HarnessDependencies,
+  config: M1Manifest['config'],
+  testedBehaviorCommit: string,
+): Promise<{ matched: boolean; available: boolean }> {
+  try {
+    const automated = dependencies.loadPassedAutomatedManifest
+      ? await dependencies.loadPassedAutomatedManifest(dependencies.repoRoot, testedBehaviorCommit)
+      : await loadPassedAutomatedManifest(dependencies.repoRoot, testedBehaviorCommit);
+    if (!automated) return { matched: false, available: false };
+    return { matched: manualConfigMatchesAutomatedManifest(config, automated), available: true };
+  } catch {
+    return { matched: false, available: false };
   }
 }
 
@@ -2836,6 +2962,7 @@ type ParsedProvisioningProfile = {
   provisionedDevices: string[] | undefined;
   hasDeveloperCertificates: boolean;
   certificateFingerprints: string[];
+  getTaskAllow: boolean | undefined;
 };
 
 /**
@@ -2907,6 +3034,14 @@ function parseProvisioningProfilePlist(xml: string): ParsedProvisioningProfile |
     : [];
   const hasDeveloperCertificates = certDataElements.length > 0;
 
+  // Parse get-task-allow from the Entitlements dictionary. Development
+  // profiles set this to true (enabling debugger attachment); distribution
+  // and App Store profiles set it to false or omit it. This distinguishes
+  // development profiles from App Store and enterprise profiles that may
+  // also omit ProvisionedDevices.
+  const getTaskAllowMatch = text.match(/<key>get-task-allow<\/key>\s*<(true|false)\/>/u);
+  const getTaskAllow = getTaskAllowMatch ? getTaskAllowMatch[1] === 'true' : undefined;
+
   // Compute SHA-1 fingerprints of the embedded certificates. Each <data>
   // element contains a base64-encoded DER certificate; the SHA-1 fingerprint
   // is the hash of the raw DER bytes, matching what `security find-identity`
@@ -2934,6 +3069,7 @@ function parseProvisioningProfilePlist(xml: string): ParsedProvisioningProfile |
     provisionedDevices,
     hasDeveloperCertificates,
     certificateFingerprints,
+    getTaskAllow,
   };
 }
 
@@ -2956,9 +3092,13 @@ function parseProvisioningProfilePlist(xml: string): ParsedProvisioningProfile |
  *    team with multiple Apple Development certificates could have certificate
  *    A in the profile and only certificate B in the keychain; both the
  *    keychain and profile existence checks would pass, but signing would fail.
- * 5. **Device eligibility**: if `ProvisionedDevices` is present (non-wildcard
- *    profiles), the selected device UDID must be in the list. Wildcard and
- *    enterprise profiles omit `ProvisionedDevices` and are not device-bound.
+ * 5. **Device eligibility**: the profile must include `ProvisionedDevices`
+ *    with the selected device UDID in the list. For a Debug personal-iPhone
+ *    preflight, absence of `ProvisionedDevices` does not by itself mean the
+ *    profile can install on the selected phone — App Store and enterprise
+ *    profiles also omit that field. The `get-task-allow` entitlement must be
+ *    true, distinguishing development profiles from distribution and App
+ *    Store profiles.
  */
 function verifyProvisioningProfile(
   profile: ParsedProvisioningProfile,
@@ -3009,8 +3149,32 @@ function verifyProvisioningProfile(
     };
   }
 
-  if (profile.provisionedDevices !== undefined && !profile.provisionedDevices.includes(deviceId)) {
+  // Require the selected device in ProvisionedDevices. For a Debug
+  // personal-iPhone preflight, absence of ProvisionedDevices does not mean
+  // the profile can install on the selected phone — App Store and enterprise
+  // profiles also omit that field. A bounded signed device build remains the
+  // definitive check; this preflight gate rejects profiles that cannot be
+  // confirmed as device-bound development profiles.
+  if (profile.provisionedDevices === undefined) {
+    return {
+      valid: false,
+      reason:
+        'Provisioning profile does not include ProvisionedDevices; a Debug personal-iPhone preflight requires an explicit device list',
+    };
+  }
+  if (!profile.provisionedDevices.includes(deviceId)) {
     return { valid: false, reason: 'The selected physical device is not in the provisioning profile' };
+  }
+
+  // Require get-task-allow to be true, distinguishing development profiles
+  // from distribution and App Store profiles that may also include
+  // ProvisionedDevices in some edge cases.
+  if (profile.getTaskAllow !== true) {
+    return {
+      valid: false,
+      reason:
+        'Provisioning profile does not have get-task-allow=true; a Debug personal-iPhone preflight requires a development entitlement',
+    };
   }
 
   return { valid: true, reason: '' };
@@ -3586,11 +3750,43 @@ async function runManualPhase(
 
   // A passed manual manifest claims deployed configuration with consistent
   // public identifiers. The contract layer validates structure; this harness
-  // layer verifies the claim against CDK deployed identity proof so
+  // layer verifies the claim against two independent sources so
   // `publicIdentifiersConsistent: true` is a verified assertion, not a
-  // self-attested boolean. Without this, a human could record a structurally
-  // valid but incorrect backend and claim closure.
+  // self-attested boolean.
+  //
+  // 1. Immutable cross-phase linkage: a passed automated manifest for the
+  //    supplied behavior commit must exist, and all five public identifiers
+  //    must match. Without this, a human could record a manual observation
+  //    using a backend that changed after the automated phase, while both
+  //    records individually match CDK proof from their respective execution
+  //    times. The automated manifest is immutable evidence of the backend
+  //    the automated phase verified.
+  //
+  // 2. CDK deployed identity proof: the current `packages/cdk/cdk-outputs.json`
+  //    must also match. This is an additional freshness check confirming the
+  //    backend has not drifted since the manual observation was recorded.
   if (manifest.outcome === 'passed' && manifest.config.class === 'deployed') {
+    const automatedCheck = await verifyManualConfigAgainstAutomatedManifest(
+      dependencies,
+      manifest.config,
+      args.testedBehaviorCommit,
+    );
+    if (!automatedCheck.available) {
+      throw new M1UsageError(
+        'No passed automated manifest exists for the supplied behavior commit; ' +
+          'a passed manual manifest requires immutable cross-phase linkage with a ' +
+          'passed automated manifest at apps/vela-mobile/docs/evidence/hpa-210/<commit>/',
+      );
+    }
+    if (!automatedCheck.matched) {
+      throw new M1UsageError(
+        'Manual manifest config does not match the passed automated manifest for the ' +
+          'supplied behavior commit; a passed manual manifest must record the same ' +
+          'apiOrigin, region, oauthDomain, cognitoUserPoolId, and ' +
+          'cognitoMobileUserPoolClientId as the automated phase verified',
+      );
+    }
+
     const matches = await verifyManualConfigAgainstDeployedProof(dependencies, manifest.config);
     if (!matches) {
       throw new M1UsageError(

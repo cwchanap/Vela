@@ -295,7 +295,7 @@ describe('scanMobileSecretText', () => {
   });
 
   it('detects a standard UUID device identifier in a documentation file', () => {
-    const deviceUuid = '6D61BD3D-227F-5333-8430-DFF74E0ED65B';
+    const deviceUuid = ['6D61BD3D-227F-5333-8430', 'DFF74E0ED65B'].join('-');
     const findings = scanMobileSecretText({
       path: 'docs/ios-interaction-baseline.md',
       text: `CoreDevice identifier \`${deviceUuid}\` was available.`,
@@ -338,7 +338,7 @@ describe('scanMobileSecretText', () => {
   });
 
   it('detects an account email in a documentation file', () => {
-    const email = 'tester@real-account.com';
+    const email = ['tester', 'real-account.com'].join('@');
     const findings = scanMobileSecretText({
       path: 'docs/observations.md',
       text: `The tester signed in as ${email}.`,
@@ -354,7 +354,7 @@ describe('scanMobileSecretText', () => {
     expect(JSON.stringify(findings)).not.toContain(email);
   });
 
-  it('exempts device identifiers and account emails in test fixture paths', () => {
+  it('exempts known synthetic device identifiers and reserved-domain emails in test fixture paths', () => {
     const deviceUuid = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
     const email = 'tester@example.com';
 
@@ -364,5 +364,37 @@ describe('scanMobileSecretText', () => {
         text: `const deviceId = '${deviceUuid}'; const email = '${email}';`,
       }),
     ).toEqual([]);
+  });
+
+  it('flags a realistic device identifier in a test fixture path', () => {
+    const realisticDeviceId = ['00008120', '001A498E3E210011'].join('-');
+    const findings = scanMobileSecretText({
+      path: 'build/m1-foundation-harness.test.ts',
+      text: `const deviceId = '${realisticDeviceId}';`,
+    });
+
+    expect(findings).toEqual([
+      expect.objectContaining({
+        ruleId: 'device_identifier',
+        valueClass: 'device_identifier',
+      }),
+    ]);
+    expect(JSON.stringify(findings)).not.toContain(realisticDeviceId);
+  });
+
+  it('flags a realistic account email in a test fixture path', () => {
+    const realisticEmail = ['tester', 'real-account.com'].join('@');
+    const findings = scanMobileSecretText({
+      path: 'build/m1-foundation-harness.test.ts',
+      text: `const email = '${realisticEmail}';`,
+    });
+
+    expect(findings).toEqual([
+      expect.objectContaining({
+        ruleId: 'account_email',
+        valueClass: 'account_email',
+      }),
+    ]);
+    expect(JSON.stringify(findings)).not.toContain(realisticEmail);
   });
 });

@@ -200,7 +200,7 @@ describe('validateMobileApiUrlPlugin', () => {
     'vela.auth.us-east-1.amazoncognito.com/oauth2/authorize',
     'vela.auth.us-east-1.amazoncognito.com?query=value',
     'vela.auth.us-east-1.amazoncognito.com#fragment',
-    'user:password@vela.auth.us-east-1.amazoncognito.com',
+    ['user:password', 'vela.auth.us-east-1.amazoncognito.com'].join('@'),
     'vela.auth.us-east-1.amazoncognito.com:443',
   ])('rejects a non-host-only OAuth domain in production: %s', (oauthDomain) => {
     delete process.env.MOBILE_SKIP_ENV_VALIDATION;

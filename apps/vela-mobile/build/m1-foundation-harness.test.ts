@@ -13,6 +13,7 @@ import {
   type CommandSpec,
   type HarnessDependencies,
 } from './m1-foundation-harness';
+import type { M1Manifest } from './m1-foundation-contract';
 
 const temporaryDirectories: string[] = [];
 const testedBehaviorCommit = 'a'.repeat(40);
@@ -289,11 +290,12 @@ function physicalProvisioningProfilePlist(overrides: {
   provisionedDevices?: string[] | null;
   hasCertificates?: boolean;
   certificateBase64?: string;
+  getTaskAllow?: boolean | null;
 } = {}) {
   const team = overrides.teamIdentifier ?? physicalSigningTeam;
   const appId = overrides.applicationIdentifier ?? `${physicalSigningTeam}.com.vela.app`;
   const expiration = overrides.expirationDate ?? '2027-01-01T00:00:00Z';
-  const devices = overrides.provisionedDevices ?? [physicalDeviceId];
+  const devices = overrides.provisionedDevices !== undefined ? overrides.provisionedDevices : [physicalDeviceId];
   const devicesXml =
     devices === null
       ? ''
@@ -303,12 +305,16 @@ function physicalProvisioningProfilePlist(overrides: {
     overrides.hasCertificates === false
       ? ''
       : `<key>DeveloperCertificates</key><array><data>${certData}</data></array>`;
+  const getTaskAllowXml =
+    overrides.getTaskAllow === null
+      ? ''
+      : `<key>get-task-allow</key><${overrides.getTaskAllow ?? true}/>`;
   return [
     '<?xml version="1.0" encoding="UTF-8"?>',
     '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">',
     '<plist version="1.0"><dict>',
     `<key>TeamIdentifier</key><array><string>${team}</string></array>`,
-    `<key>Entitlements</key><dict><key>application-identifier</key><string>${appId}</string></dict>`,
+    `<key>Entitlements</key><dict><key>application-identifier</key><string>${appId}</string>${getTaskAllowXml}</dict>`,
     `<key>ExpirationDate</key><date>${expiration}</date>`,
     devicesXml,
     certsXml,
@@ -387,6 +393,7 @@ function createDependencies(input: {
   verifyGitCommitExists?: HarnessDependencies['verifyGitCommitExists'];
   resolveDirtyPaths?: HarnessDependencies['resolveDirtyPaths'];
   loadDeployedIdentityProof?: HarnessDependencies['loadDeployedIdentityProof'];
+  loadPassedAutomatedManifest?: HarnessDependencies['loadPassedAutomatedManifest'];
   createExecutionWorkspace?: HarnessDependencies['createExecutionWorkspace'];
   executionProcessEnvironment?: HarnessDependencies['executionProcessEnvironment'];
   provisioningProfileDirectory?: string;
@@ -404,6 +411,8 @@ function createDependencies(input: {
     resolveDirtyPaths: input.resolveDirtyPaths ?? (async () => []),
     loadDeployedIdentityProof:
       input.loadDeployedIdentityProof ?? (async () => deployedIdentityProofFrom(environment)),
+    loadPassedAutomatedManifest:
+      input.loadPassedAutomatedManifest ?? (async () => passedAutomatedManifestFrom(environment)),
     createExecutionWorkspace:
       input.createExecutionWorkspace ?? (async () => ({ root: workspace, dispose: async () => undefined })),
     executionProcessEnvironment: input.executionProcessEnvironment ?? {},
@@ -418,6 +427,34 @@ function deployedIdentityProofFrom(environment: TestEnvironment) {
     cognitoMobileUserPoolClientId: environment.VITE_COGNITO_MOBILE_USER_POOL_CLIENT_ID!,
     cognitoOAuthDomain: environment.VITE_COGNITO_OAUTH_DOMAIN!,
     cognitoRegion: environment.VITE_AWS_REGION!,
+  };
+}
+
+function passedAutomatedManifestFrom(environment: TestEnvironment): M1Manifest {
+  return {
+    schemaVersion: 1,
+    runId: '20260803T021500Z-automated',
+    testedBehaviorCommit,
+    phase: 'automated',
+    matrixClass: 'automated',
+    startedAt: '2026-08-03T02:15:00.000Z',
+    endedAt: '2026-08-03T02:17:00.000Z',
+    outcome: 'passed',
+    exitCode: 0,
+    config: {
+      source: 'process_env',
+      class: 'deployed',
+      apiOrigin: environment.VITE_MOBILE_API_URL!,
+      region: environment.VITE_AWS_REGION!,
+      oauthDomain: environment.VITE_COGNITO_OAUTH_DOMAIN!,
+      cognitoUserPoolId: environment.VITE_COGNITO_USER_POOL_ID!,
+      cognitoMobileUserPoolClientId: environment.VITE_COGNITO_MOBILE_USER_POOL_CLIENT_ID!,
+      publicIdentifiersConsistent: true,
+    },
+    host: { platform: 'darwin' },
+    commands: [],
+    evidence: [],
+    findings: [],
   };
 }
 
@@ -2482,7 +2519,7 @@ describe('iOS physical-device M1 foundation preflight', () => {
     });
   });
 
-  it('accepts a wildcard provisioning profile without ProvisionedDevices', async () => {
+  it('rejects a wildcard provisioning profile without ProvisionedDevices', async () => {
     const repository = createTemporaryRepository();
     const workspace = createTemporaryExecutionWorkspace();
     const profileDirectory = createTemporaryProvisioningProfileDirectory(
@@ -2507,8 +2544,44 @@ describe('iOS physical-device M1 foundation preflight', () => {
       ),
     );
 
-    expect(manifest.outcome).toBe('passed');
-    expect(manifest.host.signingReady).toBe(true);
+    expect(manifest.outcome).toBe('prerequisite_missing');
+    expect(manifest.host.signingReady).toBe(false);
+    expect(manifest.findings).toContainEqual({
+      severity: 'error',
+      summary:
+        'Provisioning profile does not include ProvisionedDevices; a Debug personal-iPhone preflight requires an explicit device list',
+    });
+  });
+
+  it('rejects a provisioning profile with get-task-allow=false', async () => {
+    const repository = createTemporaryRepository();
+    const workspace = createTemporaryExecutionWorkspace();
+    const profileDirectory = createTemporaryProvisioningProfileDirectory(
+      physicalProfileUuid,
+      physicalProvisioningProfilePlist({ getTaskAllow: false }),
+    );
+    const runner = createPhysicalPreflightRunner();
+    const dependencies = createDependencies({
+      repoRoot: repository,
+      runCommand: runner.runCommand,
+      provisioningProfileDirectory: profileDirectory,
+    });
+    attachCleanExecutionWorkspace(dependencies, workspace);
+
+    const manifest = onlyManifest(
+      await runM1FoundationVerification(
+        parseM1Arguments(['--phase', 'ios-physical-preflight', '--device-id', physicalDeviceId]),
+        dependencies,
+      ),
+    );
+
+    expect(manifest.outcome).toBe('prerequisite_missing');
+    expect(manifest.host.signingReady).toBe(false);
+    expect(manifest.findings).toContainEqual({
+      severity: 'error',
+      summary:
+        'Provisioning profile does not have get-task-allow=true; a Debug personal-iPhone preflight requires a development entitlement',
+    });
   });
 
   it('fails the preflight when the provisioning profile plist is malformed', async () => {
@@ -2809,14 +2882,15 @@ describe('manual M1 foundation recording', () => {
   it('rejects a passed manual manifest whose apiOrigin does not match the CDK deployed proof', async () => {
     const repository = createTemporaryRepository();
     const inputPath = join(repository, 'mismatched-backend.json');
+    const mismatchedConfig = {
+      ...validManualInput().config,
+      apiOrigin: 'https://api.different.example',
+    };
     writeFileSync(
       inputPath,
       JSON.stringify({
         ...validManualInput(),
-        config: {
-          ...validManualInput().config,
-          apiOrigin: 'https://api.different.example',
-        },
+        config: mismatchedConfig,
       }),
     );
 
@@ -2830,7 +2904,14 @@ describe('manual M1 foundation recording', () => {
           '--input',
           inputPath,
         ]),
-        createDependencies({ repoRoot: repository, runCommand: createRunner().runCommand }),
+        createDependencies({
+          repoRoot: repository,
+          runCommand: createRunner().runCommand,
+          loadPassedAutomatedManifest: async () => ({
+            ...passedAutomatedManifestFrom(deployedEnvironment),
+            config: { ...passedAutomatedManifestFrom(deployedEnvironment).config, ...mismatchedConfig },
+          }) as M1Manifest,
+        }),
       ),
     ).rejects.toThrow(/does not match the CDK deployed identity proof/u);
 
@@ -2842,13 +2923,78 @@ describe('manual M1 foundation recording', () => {
   it('rejects a passed manual manifest whose region does not match the CDK deployed proof', async () => {
     const repository = createTemporaryRepository();
     const inputPath = join(repository, 'mismatched-region.json');
+    const mismatchedConfig = {
+      ...validManualInput().config,
+      region: 'us-west-2',
+    };
+    writeFileSync(
+      inputPath,
+      JSON.stringify({
+        ...validManualInput(),
+        config: mismatchedConfig,
+      }),
+    );
+
+    await expect(
+      runM1FoundationVerification(
+        parseM1Arguments([
+          '--record-manual',
+          'production-smoke',
+          '--tested-behavior-commit',
+          testedBehaviorCommit,
+          '--input',
+          inputPath,
+        ]),
+        createDependencies({
+          repoRoot: repository,
+          runCommand: createRunner().runCommand,
+          loadPassedAutomatedManifest: async () => ({
+            ...passedAutomatedManifestFrom(deployedEnvironment),
+            config: { ...passedAutomatedManifestFrom(deployedEnvironment).config, ...mismatchedConfig },
+          }) as M1Manifest,
+        }),
+      ),
+    ).rejects.toThrow(/does not match the CDK deployed identity proof/u);
+  });
+
+  it('rejects a passed manual manifest when no passed automated manifest exists for the behavior commit', async () => {
+    const repository = createTemporaryRepository();
+    const inputPath = join(repository, 'no-automated.json');
+    writeFileSync(inputPath, JSON.stringify(validManualInput()));
+
+    await expect(
+      runM1FoundationVerification(
+        parseM1Arguments([
+          '--record-manual',
+          'production-smoke',
+          '--tested-behavior-commit',
+          testedBehaviorCommit,
+          '--input',
+          inputPath,
+        ]),
+        createDependencies({
+          repoRoot: repository,
+          runCommand: createRunner().runCommand,
+          loadPassedAutomatedManifest: async () => null,
+        }),
+      ),
+    ).rejects.toThrow(/No passed automated manifest exists/u);
+
+    expect(
+      existsSync(join(repository, 'apps/vela-mobile/docs/evidence/hpa-210')),
+    ).toBe(false);
+  });
+
+  it('rejects a passed manual manifest whose config does not match the passed automated manifest', async () => {
+    const repository = createTemporaryRepository();
+    const inputPath = join(repository, 'automated-mismatch.json');
     writeFileSync(
       inputPath,
       JSON.stringify({
         ...validManualInput(),
         config: {
           ...validManualInput().config,
-          region: 'us-west-2',
+          cognitoUserPoolId: 'us-east-1_different',
         },
       }),
     );
@@ -2865,7 +3011,11 @@ describe('manual M1 foundation recording', () => {
         ]),
         createDependencies({ repoRoot: repository, runCommand: createRunner().runCommand }),
       ),
-    ).rejects.toThrow(/does not match the CDK deployed identity proof/u);
+    ).rejects.toThrow(/does not match the passed automated manifest/u);
+
+    expect(
+      existsSync(join(repository, 'apps/vela-mobile/docs/evidence/hpa-210')),
+    ).toBe(false);
   });
 
   it('rejects a passed manual manifest when CDK deployed identity proof is unavailable', async () => {
