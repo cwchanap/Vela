@@ -139,18 +139,16 @@ Selected-mode replacement hashes after the page-control fix:
 
 ## HPA-210 linkage
 
-HPA-210 selected passing automated machine manifest for
-`24ad58104f54d375b9e619aec5be719811106c71`, the current behavior revision
-containing the verification-tooling fixes. The iOS Simulator manifest on
-`de276f372c7973e2fb49c81e9a78e50df95266c0` is stale: it predates
-verification-tooling changes that create a new behavior commit under the
-design's rerun policy, so it is retained as historical evidence only and must
-be regenerated on the final PR head before it can be selected. The earlier
-physical preflight on `f0c6fe9d5282c3f5f34e6e5453ed3c23c0808f65` is historical
-only: its physical preflight is `prerequisite_missing`, physical-device testing
-was deferred, and it has no physical acceptance result. This baseline therefore
-remains historical evidence with no HPA-210 physical acceptance result. See
-[M1 iOS Foundation Verification](m1-ios-foundation-verification.md).
+The automated phase passed on the cleanup-head commit recorded in [M1 iOS
+Foundation Verification](m1-ios-foundation-verification.md): the eight gates
+ran in order and the receipt is a local artifact under `.artifacts/hpa-210/`
+(not committed). The earlier iOS Simulator run is historical — it predates
+the verification-tooling changes that create a new behavior commit under the
+design's rerun policy — and the earlier physical preflight was historical
+only: it recorded `prerequisite_missing` because physical-device testing was
+deferred, and it has no physical acceptance result. Physical testing remains
+deferred. This baseline therefore remains historical evidence with no HPA-210
+physical acceptance result.
 
 ## Environment matrix
 

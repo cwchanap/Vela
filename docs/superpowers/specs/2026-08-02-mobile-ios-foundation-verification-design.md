@@ -1,3 +1,11 @@
+> **SUPERSEDED (partially) by `2026-08-04-hpa210-evidence-cleanup-design.md`.**
+> The manifest-contract schema, the `ios-simulator` / `ios-physical-preflight` /
+> `manual` phases, cross-phase linkage, evidence hashes, and the in-manifest
+> deployed-config check are replaced. **Retained**: the closure requirement for
+> deployed-config consistency (now via the standalone `verify:deployed-config`)
+> and the eight-gate automated definition. Physical acceptance remains a manual
+> matrix criterion in both docs.
+
 # Mobile iOS Foundation Verification and Architecture Record Design
 
 **Linear:** HPA-210  

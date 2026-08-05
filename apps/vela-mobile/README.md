@@ -155,19 +155,23 @@ current CDK outputs, so a build that skips step 2 would ship a stale or
 placeholder configuration. The pre-merge `verify:production-diagnostics` gate
 may bypass this prerequisite with an explicit placeholder
 (`VITE_MOBILE_API_URL=https://example.invalid/api/`) because it only checks
-diagnostic exclusion, not deployed-config consistency. The closure gate
-(`--require-deployed-config` on `verify:m1-foundation`) does not allow this
-bypass and rejects placeholder configuration.
+diagnostic exclusion, not deployed-config consistency.
 
-### Phases
+### Automated gates
 
-Run one verifier phase at a time from `apps/vela-mobile`:
+Run the eight automated gates from `apps/vela-mobile`:
 
 ```bash
-bun run verify:m1-foundation -- --phase automated
-bun run verify:m1-foundation -- --phase ios-simulator --simulator-udid <id>
-bun run verify:m1-foundation -- --phase ios-physical-preflight --device-id <id>
+bun run verify:m1-foundation [-- --evidence-dir <path>]
 ```
+
+The runner resolves the current Git HEAD as the tested behavior commit and
+executes the gates in order (install, lint, typecheck, compile, build, test,
+production-diagnostics, mobile-secret-scan) on a clean detached worktree. It
+writes a local manifest receipt under `.artifacts/hpa-210/` by default, or
+under `<evidence-dir>` when given. Receipts are local and ephemeral
+(gitignored); the committed record is
+[docs/m1-ios-foundation-verification.md](docs/m1-ios-foundation-verification.md).
 
 The record distinguishes two build classes. A **diagnostic observation** uses
 a Debug development build and development-only diagnostic routes for an
@@ -177,32 +181,29 @@ diagnostics are excluded and scanned from
 `src-capacitor/www/`. Do not treat a diagnostic observation as production
 smoke evidence or vice versa.
 
-For a closure run, add `--require-deployed-config` to the applicable command.
-It requires a valid, non-placeholder production configuration, rejects
-`MOBILE_SKIP_ENV_VALIDATION=true`, and checks the loaded public mobile
-identifiers against the deployed CDK outputs. A local or CI run without that
-flag can still be useful, but it is not deployed closure evidence.
+### Deployed-config consistency (closure criterion)
 
-The verifier's exit codes are stable:
+The closure requirement that the mobile build env's public Cognito identifiers
+match the deployed CDK outputs is checked by the standalone verifier (run
+from `apps/vela-mobile`):
 
-| Exit code | Meaning                             |
-| --------- | ----------------------------------- |
-| `0`       | Verification passed.                |
-| `1`       | Harness error.                      |
-| `2`       | Invalid command usage.              |
-| `3`       | A required prerequisite is missing. |
-| `4`       | A verification gate failed.         |
+```bash
+bun run verify:deployed-config -- --cdk-outputs ../../packages/cdk/cdk-outputs.json
+```
+
+`--cdk-outputs` is resolved from the process cwd, hence the `../../` prefix
+when invoked from `apps/vela-mobile`. The verifier loads `.env.production`
+directly and compares the five public mobile identifiers against the CDK
+outputs, rejecting any mismatch; `MOBILE_SKIP_ENV_VALIDATION=true` does not
+bypass it. Without `--cdk-outputs`, it validates env presence only, so a
+closure check must pass the flag.
 
 There is intentionally no committed `DEVELOPMENT_TEAM`; physical-device
-signing remains a tester-controlled prerequisite. After production
-`src-capacitor/www/` has been hashed for an iOS Simulator verification run,
-do not run a Quasar rebuild in that verification workspace. Capacitor sync may
-follow only if it preserves the hash; start a new verification run before
-building Quasar assets again.
+signing remains a tester-controlled prerequisite.
 
 See [iOS Foundation Architecture](docs/ios-foundation-architecture.md) for the
 source contract and [M1 iOS Foundation Verification](docs/m1-ios-foundation-verification.md)
-for the append-only evidence record.
+for the committed verification record.
 
 ## Physical Device
 
