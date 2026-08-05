@@ -18,15 +18,18 @@ describe('verifyDeployedConfig', () => {
           'VITE_AWS_REGION=us-east-1',
         ].join('\n'),
       );
+      // cdk-outputs.json holds the CloudFormation-exports array, not a flat
+      // object. MobileApiURL is the bare origin while the env carries the
+      // derived `${origin}/api/` URL — equality is asserted by origin only.
       await writeFile(
         join(dir, 'cdk-outputs.json'),
-        JSON.stringify({
-          MobileApiURL: 'https://vela.example/api/',
-          CognitoUserPoolId: 'us-east-1_POOL',
-          CognitoMobileUserPoolClientId: 'abc123',
-          CognitoOAuthDomain: 'auth.example',
-          CognitoRegion: 'us-east-1',
-        }),
+        JSON.stringify([
+          { OutputKey: 'MobileApiURL', OutputValue: 'https://vela.example' },
+          { OutputKey: 'CognitoUserPoolId', OutputValue: 'us-east-1_POOL' },
+          { OutputKey: 'CognitoMobileUserPoolClientId', OutputValue: 'abc123' },
+          { OutputKey: 'CognitoOAuthDomain', OutputValue: 'auth.example' },
+          { OutputKey: 'CognitoRegion', OutputValue: 'us-east-1' },
+        ]),
       );
       const result = await verifyDeployedConfig({ mobileRoot: dir, cdkOutputsPath: join(dir, 'cdk-outputs.json') });
       expect(result.cognitoUserPoolId).toBe('us-east-1_POOL');
@@ -41,7 +44,13 @@ describe('verifyDeployedConfig', () => {
       await writeFile(join(dir, '.env.production'),
         'VITE_COGNITO_USER_POOL_ID=us-east-1_POOL\nVITE_MOBILE_API_URL=https://vela.example/api/\nVITE_COGNITO_MOBILE_USER_POOL_CLIENT_ID=abc\nVITE_COGNITO_OAUTH_DOMAIN=auth.example\nVITE_AWS_REGION=us-east-1\n');
       await writeFile(join(dir, 'cdk-outputs.json'),
-        JSON.stringify({ CognitoUserPoolId: 'us-east-1_DIFFERENT', MobileApiURL: 'https://vela.example/api/', CognitoMobileUserPoolClientId: 'abc', CognitoOAuthDomain: 'auth.example', CognitoRegion: 'us-east-1' }));
+        JSON.stringify([
+          { OutputKey: 'CognitoUserPoolId', OutputValue: 'us-east-1_DIFFERENT' },
+          { OutputKey: 'MobileApiURL', OutputValue: 'https://vela.example' },
+          { OutputKey: 'CognitoMobileUserPoolClientId', OutputValue: 'abc' },
+          { OutputKey: 'CognitoOAuthDomain', OutputValue: 'auth.example' },
+          { OutputKey: 'CognitoRegion', OutputValue: 'us-east-1' },
+        ]));
       await expect(verifyDeployedConfig({ mobileRoot: dir, cdkOutputsPath: join(dir, 'cdk-outputs.json') }))
         .rejects.toThrow(/CognitoUserPoolId/u);
     } finally {
