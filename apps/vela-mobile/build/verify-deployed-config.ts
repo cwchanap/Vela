@@ -151,16 +151,45 @@ export async function verifyDeployedConfig(options: VerifyOptions): Promise<Depl
   return actual;
 }
 
-async function runCli(argv: string[]): Promise<number> {
-  // Derive the mobile root from the module location (repo convention, cf.
-  // scripts/verify-m1-foundation.mjs) rather than process.cwd(), which is the
-  // package dir when run via `bun run verify:deployed-config`.
-  const mobileRoot = fileURLToPath(new URL('..', import.meta.url));
-  const cdkIdx = argv.indexOf('--cdk-outputs');
-  const cdkOutputsPath = cdkIdx !== -1 ? argv[cdkIdx + 1] : undefined;
-  if (cdkIdx !== -1 && !cdkOutputsPath) {
-    console.error('--cdk-outputs requires a path');
-    return 2;
+/**
+ * CLI entry, exported for direct unit testing (no subprocess needed).
+ *
+ * @param argv Arguments after the script path (e.g. `['--cdk-outputs', '...']`).
+ * @param mobileRoot Optional override of the mobile root directory; defaults
+ *   to the package dir derived from the module location (repo convention, cf.
+ *   scripts/verify-m1-foundation.mjs) rather than process.cwd(), which is the
+ *   package dir when run via `bun run verify:deployed-config`.
+ *
+ * Argument parsing is STRICT: the only supported flag is a single
+ * `--cdk-outputs <path>`. Any unknown flag (including a typo such as
+ * `--cdk-output`), a duplicate `--cdk-outputs`, or a missing/empty value is a
+ * usage error (exit 2) — silently accepting unknown arguments would downgrade
+ * verification to presence-only and could false-positive the HPA-210 closure
+ * gate. Exit contract: 0 consistent / 1 mismatch-or-error / 2 usage.
+ */
+export async function runCli(
+  argv: string[],
+  mobileRoot = fileURLToPath(new URL('..', import.meta.url)),
+): Promise<number> {
+  let cdkOutputsPath: string | undefined;
+  for (let i = 0; i < argv.length; i += 1) {
+    const arg = argv[i];
+    if (arg !== '--cdk-outputs') {
+      console.error(`Unknown argument: ${arg}`);
+      console.error('Usage: verify:deployed-config [--cdk-outputs <path>]');
+      return 2;
+    }
+    if (cdkOutputsPath !== undefined) {
+      console.error('--cdk-outputs may only be specified once');
+      return 2;
+    }
+    const value = argv[i + 1];
+    if (value === undefined || value === '' || value.startsWith('--')) {
+      console.error('--cdk-outputs requires a path');
+      return 2;
+    }
+    cdkOutputsPath = value;
+    i += 1;
   }
   try {
     const options: VerifyOptions = { mobileRoot };
