@@ -19,12 +19,13 @@ describe('verifyDeployedConfig', () => {
         ].join('\n'),
       );
       // cdk-outputs.json holds the CloudFormation-exports array, not a flat
-      // object. MobileApiURL is the bare origin while the env carries the
-      // derived `${origin}/api/` URL — equality is asserted by origin only.
+      // object. MobileApiURL is the full `${websiteOrigin}/api/` URL emitted
+      // by static-web-stack.ts; the env carries the same full URL written by
+      // inject-env.ts. Equality is asserted on the full normalized URL.
       await writeFile(
         join(dir, 'cdk-outputs.json'),
         JSON.stringify([
-          { OutputKey: 'MobileApiURL', OutputValue: 'https://vela.example' },
+          { OutputKey: 'MobileApiURL', OutputValue: 'https://vela.example/api/' },
           { OutputKey: 'CognitoUserPoolId', OutputValue: 'us-east-1_POOL' },
           { OutputKey: 'CognitoMobileUserPoolClientId', OutputValue: 'abc123' },
           { OutputKey: 'CognitoOAuthDomain', OutputValue: 'auth.example' },
@@ -46,7 +47,7 @@ describe('verifyDeployedConfig', () => {
       await writeFile(join(dir, 'cdk-outputs.json'),
         JSON.stringify([
           { OutputKey: 'CognitoUserPoolId', OutputValue: 'us-east-1_DIFFERENT' },
-          { OutputKey: 'MobileApiURL', OutputValue: 'https://vela.example' },
+          { OutputKey: 'MobileApiURL', OutputValue: 'https://vela.example/api/' },
           { OutputKey: 'CognitoMobileUserPoolClientId', OutputValue: 'abc' },
           { OutputKey: 'CognitoOAuthDomain', OutputValue: 'auth.example' },
           { OutputKey: 'CognitoRegion', OutputValue: 'us-east-1' },
@@ -61,9 +62,82 @@ describe('verifyDeployedConfig', () => {
   it('throws when cdk-outputs.json is missing but requested', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'vela-cfg-'));
     try {
-      await writeFile(join(dir, '.env.production'), 'VITE_AWS_REGION=us-east-1\n');
+      // validateMobileBuildEnv runs before the CDK outputs read, so the env
+      // must be complete and valid to reach the cdk-outputs error path.
+      await writeFile(join(dir, '.env.production'),
+        'VITE_MOBILE_API_URL=https://vela.example/api/\nVITE_COGNITO_USER_POOL_ID=us-east-1_POOL\nVITE_COGNITO_MOBILE_USER_POOL_CLIENT_ID=abc\nVITE_COGNITO_OAUTH_DOMAIN=auth.example\nVITE_AWS_REGION=us-east-1\n');
       await expect(verifyDeployedConfig({ mobileRoot: dir, cdkOutputsPath: join(dir, 'missing.json') }))
         .rejects.toThrow(/cdk-outputs/u);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  // Regression: a same-origin wrong path must not satisfy closure. CDK emits
+  // the full `${websiteOrigin}/api/` URL; origin-only comparison would treat
+  // `https://vela.example/wrong` and `https://vela.example/api/` as equal.
+  it('rejects a same-origin MobileApiURL with the wrong path', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'vela-cfg-'));
+    try {
+      await writeFile(join(dir, '.env.production'),
+        'VITE_MOBILE_API_URL=https://vela.example/api/\nVITE_COGNITO_USER_POOL_ID=us-east-1_POOL\nVITE_COGNITO_MOBILE_USER_POOL_CLIENT_ID=abc\nVITE_COGNITO_OAUTH_DOMAIN=auth.example\nVITE_AWS_REGION=us-east-1\n');
+      await writeFile(join(dir, 'cdk-outputs.json'),
+        JSON.stringify([
+          { OutputKey: 'MobileApiURL', OutputValue: 'https://vela.example/wrong-backend-path' },
+          { OutputKey: 'CognitoUserPoolId', OutputValue: 'us-east-1_POOL' },
+          { OutputKey: 'CognitoMobileUserPoolClientId', OutputValue: 'abc' },
+          { OutputKey: 'CognitoOAuthDomain', OutputValue: 'auth.example' },
+          { OutputKey: 'CognitoRegion', OutputValue: 'us-east-1' },
+        ]));
+      await expect(verifyDeployedConfig({ mobileRoot: dir, cdkOutputsPath: join(dir, 'cdk-outputs.json') }))
+        .rejects.toThrow(/MobileApiURL/u);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  // Regression: the verifier must see the same env precedence Vite uses.
+  // Existing process.env values win over .env files. If the verifier ignored
+  // process.env (the old `?? {}` behavior), it could pass against
+  // .env.production while the build uses a different VITE_* value from the
+  // shell or CI environment.
+  it('respects a process.env override that differs from .env.production', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'vela-cfg-'));
+    try {
+      // File carries a wrong URL; the env override carries the correct one
+      // that matches the CDK output. The verifier must use the override.
+      await writeFile(join(dir, '.env.production'),
+        'VITE_MOBILE_API_URL=https://wrong.example/api/\nVITE_COGNITO_USER_POOL_ID=us-east-1_POOL\nVITE_COGNITO_MOBILE_USER_POOL_CLIENT_ID=abc\nVITE_COGNITO_OAUTH_DOMAIN=auth.example\nVITE_AWS_REGION=us-east-1\n');
+      await writeFile(join(dir, 'cdk-outputs.json'),
+        JSON.stringify([
+          { OutputKey: 'MobileApiURL', OutputValue: 'https://vela.example/api/' },
+          { OutputKey: 'CognitoUserPoolId', OutputValue: 'us-east-1_POOL' },
+          { OutputKey: 'CognitoMobileUserPoolClientId', OutputValue: 'abc' },
+          { OutputKey: 'CognitoOAuthDomain', OutputValue: 'auth.example' },
+          { OutputKey: 'CognitoRegion', OutputValue: 'us-east-1' },
+        ]));
+      const result = await verifyDeployedConfig({
+        mobileRoot: dir,
+        cdkOutputsPath: join(dir, 'cdk-outputs.json'),
+        env: { VITE_MOBILE_API_URL: 'https://vela.example/api/' },
+      });
+      expect(result.mobileApiUrl).toBe('https://vela.example/api/');
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  // Regression: validateMobileBuildEnv is enforced so invalid-but-matching
+  // values cannot satisfy closure. A user-pool-id whose region prefix does
+  // not match VITE_AWS_REGION would pass presence + CDK-output comparison but
+  // fail at app boot.
+  it('throws on a user-pool-id region mismatch before CDK-output comparison', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'vela-cfg-'));
+    try {
+      await writeFile(join(dir, '.env.production'),
+        'VITE_MOBILE_API_URL=https://vela.example/api/\nVITE_COGNITO_USER_POOL_ID=us-west-2_POOL\nVITE_COGNITO_MOBILE_USER_POOL_CLIENT_ID=abc\nVITE_COGNITO_OAUTH_DOMAIN=auth.example\nVITE_AWS_REGION=us-east-1\n');
+      await expect(verifyDeployedConfig({ mobileRoot: dir }))
+        .rejects.toThrow(/VITE_COGNITO_USER_POOL_ID must start with the configured VITE_AWS_REGION/u);
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
@@ -115,7 +189,7 @@ describe('runCli', () => {
       await writeFile(
         join(dir, 'cdk-outputs.json'),
         JSON.stringify([
-          { OutputKey: 'MobileApiURL', OutputValue: 'https://vela.example' },
+          { OutputKey: 'MobileApiURL', OutputValue: 'https://vela.example/api/' },
           { OutputKey: 'CognitoUserPoolId', OutputValue: 'us-east-1_POOL' },
           { OutputKey: 'CognitoMobileUserPoolClientId', OutputValue: 'abc123' },
           { OutputKey: 'CognitoOAuthDomain', OutputValue: 'auth.example' },
