@@ -41,6 +41,7 @@ function fakeDeps(overrides: Partial<HarnessDependencies> = {}): HarnessDependen
     runCommand: async () => ({ exitCode: 0, stdout: '', stderr: '' }),
     resolveTestedBehaviorCommit: async () => 'a'.repeat(40),
     createExecutionWorkspace: async () => ({ root: '/ws', dispose: async () => undefined }),
+    assertCleanWorkingTree: async () => undefined,
     ...overrides,
   } as HarnessDependencies;
 }
@@ -136,6 +137,48 @@ describe('runM1FoundationVerification (automated)', () => {
       const file = join(evidenceDir, 'a'.repeat(40), second.runId, 'manifest.json');
       const written = JSON.parse(await readFile(file, 'utf8')) as { runId: string };
       expect(written.runId).toBe(second.runId);
+    } finally {
+      await rm(evidenceDir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('runM1FoundationVerification (clean-working-tree gate)', () => {
+  it('rejects when the working tree has tracked staged/unstaged changes', async () => {
+    const evidenceDir = await mkdtemp(join(tmpdir(), 'vela-ev-'));
+    const deps = fakeDeps({
+      assertCleanWorkingTree: async () => {
+        throw new Error(
+          'Working tree has tracked staged/unstaged changes; commit or stash them before running verification.',
+        );
+      },
+      runCommand: async () => {
+        throw new Error('no gate should run when the working tree is dirty');
+      },
+    });
+    try {
+      await expect(
+        runM1FoundationVerification(parseM1Arguments(['--evidence-dir', evidenceDir]), deps),
+      ).rejects.toThrow(/tracked staged\/unstaged changes/u);
+    } finally {
+      await rm(evidenceDir, { recursive: true, force: true });
+    }
+  });
+
+  it('runs the gates when the working tree is clean', async () => {
+    const evidenceDir = await mkdtemp(join(tmpdir(), 'vela-ev-'));
+    let checked = false;
+    const deps = fakeDeps({
+      assertCleanWorkingTree: async () => {
+        checked = true;
+      },
+    });
+    try {
+      const manifest = onlyManifest(
+        await runM1FoundationVerification(parseM1Arguments(['--evidence-dir', evidenceDir]), deps),
+      );
+      expect(checked).toBe(true);
+      expect(manifest.outcome).toBe('passed');
     } finally {
       await rm(evidenceDir, { recursive: true, force: true });
     }

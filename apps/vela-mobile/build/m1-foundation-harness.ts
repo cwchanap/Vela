@@ -121,6 +121,13 @@ export type HarnessDependencies = {
    * the restricted gate environment (defaults to `env`).
    */
   executionProcessEnvironment?: Record<string, string | undefined>;
+  /**
+   * Test-only injection point. Production callers verify the live checkout has
+   * no tracked staged/unstaged changes before pinning a receipt to its HEAD,
+   * so uncommitted edits to the harness or validators cannot leak into
+   * verification evidence recorded against a clean commit.
+   */
+  assertCleanWorkingTree?: () => Promise<void>;
 };
 
 /**
@@ -335,6 +342,37 @@ async function resolveGitHeadDirectly(repoRoot: string): Promise<string> {
   return commit;
 }
 
+/**
+ * Rejects tracked staged/unstaged changes in the live checkout before a receipt
+ * is pinned to its HEAD. The orchestration code (this harness, the env loader,
+ * the deployed-config verifier) runs from the live checkout — only the eight
+ * gate commands execute in the detached worktree. Without this check, an
+ * uncommitted edit to the harness or a validator could alter command selection,
+ * environment construction, or receipt semantics while the manifest still
+ * records the clean HEAD as `testedCommit`.
+ *
+ * Uses `git status --porcelain=v1 -uno`: `-uno` suppresses untracked files, so
+ * gitignored files (e.g. `.env.production`) remain allowed. Any non-empty
+ * output means a tracked file has staged or unstaged modifications.
+ */
+async function assertCleanTrackedTree(repoRoot: string): Promise<void> {
+  const result = await runGitDirectly({
+    repoRoot,
+    args: ['status', '--porcelain=v1', '-uno'],
+    maxOutputBytes: 64 * 1024,
+    failureMessage: 'Unable to verify the working tree is clean',
+  });
+  if (result.exitCode !== 0) {
+    throw new M1HarnessError('Unable to verify the working tree is clean');
+  }
+  const output = result.stdout.toString('utf8').trim();
+  if (output !== '') {
+    throw new M1HarnessError(
+      'Working tree has tracked staged/unstaged changes; commit or stash them before running verification. Ignored files are allowed.',
+    );
+  }
+}
+
 function createRunId(now: Date): string {
   return (
     now
@@ -426,6 +464,17 @@ export async function runM1FoundationVerification(
   args: M1Arguments,
   deps: HarnessDependencies,
 ): Promise<M1Manifest[]> {
+  // Reject tracked dirty state before pinning a receipt to HEAD. The
+  // orchestration code runs from the live checkout; only the gate commands
+  // use the detached worktree. Without this guard, uncommitted edits to the
+  // harness or validators could leak into evidence recorded against a clean
+  // commit. Ignored files (e.g. .env.production) remain allowed.
+  if (deps.assertCleanWorkingTree) {
+    await deps.assertCleanWorkingTree();
+  } else {
+    await assertCleanTrackedTree(deps.repoRoot);
+  }
+
   const startedAt = deps.now();
   const testedCommit = deps.resolveTestedBehaviorCommit
     ? await deps.resolveTestedBehaviorCommit()
