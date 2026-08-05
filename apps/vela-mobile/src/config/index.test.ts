@@ -149,10 +149,10 @@ describe('validateConfig', () => {
     'vela.auth.us-east-1.amazoncognito.com/oauth2/authorize',
     'vela.auth.us-east-1.amazoncognito.com?query=value',
     'vela.auth.us-east-1.amazoncognito.com#fragment',
-    // The user:password@host form is split across an array join so the literal
-    // "user:password@vela.auth..." never appears in source. Keeping it split
-    // prevents the repository secret scanner from classifying the input as an
-    // account_email finding while still exercising the userinfo rejection path.
+    // The user:password@host form is split across an array join so the joined
+    // userinfo URL never appears in source. Keeping it split prevents the
+    // repository secret scanner from classifying the input as an account_email
+    // finding while still exercising the userinfo rejection path.
     ['user:password', 'vela.auth.us-east-1.amazoncognito.com'].join('@'),
     'vela.auth.us-east-1.amazoncognito.com:443',
   ])('rejects non-host-only OAuth domain %s in production', (oauthDomain) => {
