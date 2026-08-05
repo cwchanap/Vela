@@ -25,14 +25,81 @@ export type VerifyOptions = {
   env?: Record<string, string | undefined>;
 };
 
+type OutputEntry = {
+  OutputKey?: string;
+  OutputValue?: unknown;
+};
+
+/**
+ * Reduce the CloudFormation-exports array that `cdk deploy` writes to
+ * cdk-outputs.json (entries of `{ OutputKey, OutputValue, ... }`) to a
+ * key → value map. Same proven pattern as `packages/cdk/scripts/inject-env.ts`
+ * `loadOutputs`, inlined here to avoid a cross-package import.
+ */
+function loadOutputs(outputsPath: string, raw: string): Record<string, string> {
+  let data: OutputEntry[];
+  try {
+    data = JSON.parse(raw) as OutputEntry[];
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`Unable to parse cdk-outputs.json at ${outputsPath}: ${message}`);
+  }
+
+  if (!Array.isArray(data)) {
+    throw new Error(
+      `Expected cdk-outputs.json at ${outputsPath} to be an array of CloudFormation outputs`,
+    );
+  }
+
+  const map: Record<string, string> = {};
+  for (const item of data) {
+    if (item && item.OutputKey && Object.prototype.hasOwnProperty.call(item, 'OutputValue')) {
+      map[item.OutputKey] = String(item.OutputValue ?? '');
+    }
+  }
+  return map;
+}
+
+/**
+ * Normalizes a mobile API identifier to its origin only (protocol + host),
+ * stripping any path such as `/api/`. Mirrors the harness's
+ * `normalizeMobileApiOrigin` (m1-foundation-harness.ts): `inject-env.ts`
+ * derives `VITE_MOBILE_API_URL` as `${origin}/api/` while the CDK
+ * `MobileApiURL` output may be the bare origin, so raw string equality would
+ * false-positive. Returns undefined when the value is not a valid
+ * credential-free http(s) URL with a hostname.
+ */
+function normalizeMobileApiOrigin(value: unknown): string | undefined {
+  if (typeof value !== 'string' || value.trim() === '') return undefined;
+  try {
+    const url = new URL(value);
+    if (
+      (url.protocol !== 'http:' && url.protocol !== 'https:') ||
+      !url.hostname ||
+      url.username ||
+      url.password
+    ) {
+      return undefined;
+    }
+    return url.origin;
+  } catch {
+    return undefined;
+  }
+}
+
 /**
  * Validates that the mobile build env's public Cognito identifiers match the
  * deployed CDK outputs. This is the HPA-210 closure criterion previously
  * carried by the manifest subsystem's --require-deployed-config check.
  *
- * When a `cdkOutputsPath` is requested but unreadable, that error surfaces
- * first (the deployment state is unknowable); env presence is validated
- * afterwards, before any value comparison.
+ * `cdk-outputs.json` holds the CloudFormation-exports array; it is reduced to
+ * a key → value map before comparison. `MobileApiURL` is compared by origin
+ * only (see `normalizeMobileApiOrigin`); the remaining identifiers must match
+ * exactly after trimming.
+ *
+ * When a `cdkOutputsPath` is requested but unreadable or unparseable, that
+ * error surfaces first (the deployment state is unknowable); env presence is
+ * validated afterwards, before any value comparison.
  */
 export async function verifyDeployedConfig(options: VerifyOptions): Promise<DeployedConfig> {
   const loaded = loadMobileBuildEnv('production', options.mobileRoot, options.env ?? {});
@@ -44,7 +111,7 @@ export async function verifyDeployedConfig(options: VerifyOptions): Promise<Depl
     cognitoRegion: loaded.VITE_AWS_REGION!,
   };
 
-  let outputs: Record<string, unknown> | undefined;
+  let outputs: Record<string, string> | undefined;
   if (options.cdkOutputsPath) {
     let raw: string;
     try {
@@ -52,7 +119,7 @@ export async function verifyDeployedConfig(options: VerifyOptions): Promise<Depl
     } catch {
       throw new Error(`Unable to read cdk-outputs.json at ${options.cdkOutputsPath}`);
     }
-    outputs = JSON.parse(raw) as Record<string, unknown>;
+    outputs = loadOutputs(options.cdkOutputsPath, raw);
   }
 
   for (const [key, value] of Object.entries(actual)) {
@@ -64,7 +131,19 @@ export async function verifyDeployedConfig(options: VerifyOptions): Promise<Depl
   if (outputs) {
     for (const [field, cdkKey] of Object.entries(CDK_OUTPUT_KEYS)) {
       const expected = outputs[cdkKey];
-      if (typeof expected !== 'string' || expected !== (actual as Record<string, unknown>)[field]) {
+      const actualValue = (actual as Record<string, unknown>)[field];
+      let matches = false;
+      if (field === 'mobileApiUrl') {
+        const expectedOrigin = normalizeMobileApiOrigin(expected);
+        matches =
+          expectedOrigin !== undefined && expectedOrigin === normalizeMobileApiOrigin(actualValue);
+      } else {
+        matches =
+          typeof expected === 'string' &&
+          typeof actualValue === 'string' &&
+          actualValue.trim() === expected.trim();
+      }
+      if (!matches) {
         throw new Error(`Deployed config mismatch for ${cdkKey}: env does not match cdk-outputs.json`);
       }
     }
