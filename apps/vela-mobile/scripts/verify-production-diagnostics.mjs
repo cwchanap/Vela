@@ -7,10 +7,11 @@ import { fileURLToPath } from 'node:url';
 // a live CDK deployment. The build:ios:assets step still enforces .env.production
 // presence via the validate-mobile-api-url Vite plugin; only the deployed-config
 // consistency check is bypassed here. Requiring injected .env.production from
-// packages/cdk/cdk-outputs.json is the closure gate's job: pass
-// --require-deployed-config to `bun run verify:m1-foundation` for that check.
-// To use real deployed config instead, run packages/cdk/scripts/inject-env.ts
-// before this script so apps/vela-mobile/.env.production is freshly generated.
+// packages/cdk/cdk-outputs.json is the closure gate's job: run
+// `bun run verify:deployed-config -- --cdk-outputs ../../packages/cdk/cdk-outputs.json`
+// for that check. To use real deployed config instead, run
+// packages/cdk/scripts/inject-env.ts before this script so
+// apps/vela-mobile/.env.production is freshly generated.
 
 const PRODUCTION_FORBIDDEN_TOKENS = [
   'ios-interaction-diagnostics',

@@ -89,8 +89,8 @@ function normalizeMobileApiOrigin(value: unknown): string | undefined {
 
 /**
  * Validates that the mobile build env's public Cognito identifiers match the
- * deployed CDK outputs. This is the HPA-210 closure criterion previously
- * carried by the manifest subsystem's --require-deployed-config check.
+ * deployed CDK outputs. This is the HPA-210 closure criterion, exposed as the
+ * standalone `bun run verify:deployed-config` command.
  *
  * `cdk-outputs.json` holds the CloudFormation-exports array; it is reduced to
  * a key → value map before comparison. `MobileApiURL` is compared by origin

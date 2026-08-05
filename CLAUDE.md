@@ -196,10 +196,10 @@ COGNITO_MOBILE_LOGOUT_URLS=dev.cwchanap.vela.oauth:/oauth/logout
 Both accept comma-separated lists for dev/QA overrides. **Override URIs must use the `dev.cwchanap.vela.oauth:/` scheme** (RFC 8252 §7.1 private-use form, single slash) and an allowed path (`/oauth/callback` or `/oauth/staging-callback` for callbacks; `/oauth/logout` or `/oauth/staging-logout` for logouts) — CDK validates both at synth time and throws otherwise, because iOS only registers that one scheme and the app's router only handles known paths. Vary the path within the allowlist, not the scheme or URI form. The mobile client ID is published as the `CognitoMobileUserPoolClientId` CloudFormation output.
 
 The current live/native limitation is physical acceptance, not missing M1 OAuth
-implementation. HPA-210 is `NO-GO`: physical preflight is
-`prerequisite_missing`, and the user deferred the physical callback,
-restoration, due-count, audio, IME, keyboard/layout, and navigation runs.
-Those observations, including the audio adapter conclusion, must remain
+implementation. HPA-210 is `NO-GO`: the automated phase passed on the cleanup
+head, but physical acceptance is deferred and the user deferred the physical
+callback, restoration, due-count, audio, IME, keyboard/layout, and navigation
+runs. Those observations, including the audio adapter conclusion, must remain
 unclaimed until physical HPA-210 evidence exists.
 
 ## Testing
@@ -217,9 +217,10 @@ The iOS interaction diagnostics page (`apps/vela-mobile/src/pages/diagnostics/Io
 1. **IME composition flow** — `compositionstart` / `compositionend` / `input` listeners on the native `<input>` (see `JapaneseInputProbe.vue`) and the `isComposing` guard against premature Enter submission. The simulator's software keyboard does not exercise the real iOS Kana IME candidate-selection path.
 2. **Native edge-swipe back gesture** — `mobile-navigation.ts` depth tracking and the back-navigation outcome surfacing. The simulator's swipe was a no-op, so the depth-decrement path was not exercised on-device.
 
-The selected HPA-210 automated and Simulator manifests do not replace those
-physical observations; use its deferred Physical iPhone Matrix rows as the
-current closure record. The device run is a closure gate, not a merge gate.
+The automated gate does not replace those physical observations; use the
+deferred Physical iPhone Matrix rows in
+`apps/vela-mobile/docs/m1-ios-foundation-verification.md` as the current
+closure record. The device run is a closure gate, not a merge gate.
 Remove this section once a physical-device run confirms both behaviors.
 
 ## Environment Variables
