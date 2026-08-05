@@ -108,6 +108,41 @@ describe('runM1FoundationVerification (automated)', () => {
     }
   });
 
+  // Regression: a rejected runCommand (spawn error, signal, etc.) must not
+  // bypass writeManifest. The harness contract is to always emit a receipt
+  // for a gate failure; before the fix, a rejection propagated past the
+  // finally block and no manifest was persisted.
+  it('records a rejecting runCommand as a failed gate and still writes the manifest', async () => {
+    const evidenceDir = await mkdtemp(join(tmpdir(), 'vela-ev-'));
+    const deps = fakeDeps({
+      runCommand: async (spec) => {
+        if (spec.label === 'typecheck') {
+          throw new Error('spawn ENOENT');
+        }
+        return { exitCode: 0, stdout: '', stderr: '' };
+      },
+    });
+    try {
+      const manifest = onlyManifest(
+        await runM1FoundationVerification(parseM1Arguments(['--evidence-dir', evidenceDir]), deps),
+      );
+      expect(manifest.outcome).toBe('failed');
+      expect(manifest.exitCode).toBe(1);
+      const ran = manifest.commands.map((c) => c.label);
+      expect(ran).toContain('typecheck');
+      expect(ran).not.toContain('build');
+      const typecheck = manifest.commands.find((c) => c.label === 'typecheck');
+      expect(typecheck?.status).toBe('failed');
+      expect(typecheck?.exitCode).toBe(1);
+      // The manifest file must be persisted despite the rejection.
+      const file = join(evidenceDir, 'a'.repeat(40), manifest.runId, 'manifest.json');
+      const written = JSON.parse(await readFile(file, 'utf8')) as { outcome: string };
+      expect(written.outcome).toBe('failed');
+    } finally {
+      await rm(evidenceDir, { recursive: true, force: true });
+    }
+  });
+
   it('writes the manifest file under <evidenceDir>/<commit>/<runId>/manifest.json', async () => {
     const evidenceDir = await mkdtemp(join(tmpdir(), 'vela-ev-'));
     try {

@@ -511,7 +511,24 @@ export async function runM1FoundationVerification(
     );
     for (const spec of specs) {
       const cmdStart = deps.now();
-      const result = await deps.runCommand(spec);
+      // A rejected runCommand (spawn error, signal, etc.) must not bypass
+      // writeManifest: the harness contract is to always emit a receipt for a
+      // gate failure. Catch it here, record the command as failed with exit
+      // code 1, stop further gates, and fall through to writeManifest below.
+      let result;
+      try {
+        result = await deps.runCommand(spec);
+      } catch {
+        const cmdEnd = deps.now();
+        commands.push({
+          label: spec.label,
+          status: 'failed',
+          exitCode: 1,
+          elapsedMs: cmdEnd.getTime() - cmdStart.getTime(),
+        });
+        outcome = 'failed';
+        break;
+      }
       const cmdEnd = deps.now();
       const exitCode = Number.isSafeInteger(result.exitCode) ? result.exitCode : 1;
       commands.push({

@@ -99,7 +99,7 @@ physical matrix row.
   `.env.production` carries no bundle identifier.
 - Device eligibility: safe availability, generic non-identifying alias —
   **no UDID/email persistence**.
-- Deployed-config consistency: `bun run verify:deployed-config -- --cdk-outputs ../../packages/cdk/cdk-outputs.json`.
+- Deployed-config consistency: `bun run --cwd apps/vela-mobile verify:deployed-config -- --cdk-outputs ../../packages/cdk/cdk-outputs.json` (run from the repository root; the `--cwd` flag makes the `../../packages/cdk/cdk-outputs.json` path resolve relative to `apps/vela-mobile`).
 
 ## Security and Secret Scan
 
@@ -134,5 +134,6 @@ performed in this closeout.
 
 ## Milestone 2 Recommendation
 
-No Milestone 2 recommendation is recorded while HPA-210 is `NO-GO`. Resume the
-physical closure gate before making a milestone progression recommendation.
+Milestone 2 progression is **deferred** while HPA-210 remains `NO-GO`. Resume
+the physical closure gate before reconsidering Milestone 2 progression; no
+progression recommendation is recorded until physical HPA-210 evidence exists.
