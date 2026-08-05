@@ -5,7 +5,7 @@
 **Decision:** NO-GO
 
 HPA-210 remains open. The automated phase passed on the cleanup-head commit
-`<SHA>` (filled in by the final gate run): the eight automated gates ran in
+`ceb36bb43c0b9977c4a9055b3a3e9d345916253c`: the eight automated gates ran in
 order (install, lint, typecheck, compile, build, test,
 production-diagnostics, mobile-secret-scan) on a clean detached worktree of
 that commit. The receipt is a local artifact under `.artifacts/hpa-210/` and
@@ -33,7 +33,7 @@ Minimum corrective issues:
 
 ## Tested Behavior Commit
 
-`testedBehaviorCommit`: `<SHA>` (filled in by the final gate run)
+`testedBehaviorCommit`: `ceb36bb43c0b9977c4a9055b3a3e9d345916253c`
 
 This is the frozen behavior revision for the automated phase: the cleanup
 head containing the app, native project, configuration, dependencies, and
@@ -41,8 +41,8 @@ the minimal verification runner.
 
 ## Automated Phase Evidence
 
-The automated phase passed on the cleanup-head commit `<SHA>` (filled in by
-the final gate run): the eight gates ran in order (install, lint, typecheck,
+The automated phase passed on the cleanup-head commit
+`ceb36bb43c0b9977c4a9055b3a3e9d345916253c`: the eight gates ran in order (install, lint, typecheck,
 compile, build, test, production-diagnostics, mobile-secret-scan), and the
 passing receipt is a local artifact under `.artifacts/hpa-210/` (not
 committed). Receipts are local and ephemeral; this document is the committed
@@ -95,7 +95,8 @@ physical matrix row.
 ## Security and Secret Scan
 
 The automated phase records a passing `mobile-secret-scan` gate on the
-cleanup-head commit `<SHA>`. Machine evidence does not substitute a source
+cleanup-head commit `ceb36bb43c0b9977c4a9055b3a3e9d345916253c`. Machine
+evidence does not substitute a source
 inspection or a physical acceptance observation.
 
 ## Architecture Decision Summary
