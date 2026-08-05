@@ -216,6 +216,6 @@ export async function runCli(
   }
 }
 
-if (import.meta.main) {
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
   process.exitCode = await runCli(process.argv.slice(2));
 }
