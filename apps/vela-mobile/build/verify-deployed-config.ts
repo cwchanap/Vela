@@ -1,6 +1,6 @@
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
-import { loadMobileBuildEnv } from './validate-mobile-api-url';
+import { loadMobileBuildEnv, validateMobileBuildEnv } from './validate-mobile-api-url';
 
 const CDK_OUTPUT_KEYS = {
   mobileApiUrl: 'MobileApiURL',
@@ -61,15 +61,18 @@ function loadOutputs(outputsPath: string, raw: string): Record<string, string> {
 }
 
 /**
- * Normalizes a mobile API identifier to its origin only (protocol + host),
- * stripping any path such as `/api/`. Mirrors the harness's
- * `normalizeMobileApiOrigin` (m1-foundation-harness.ts): `inject-env.ts`
- * derives `VITE_MOBILE_API_URL` as `${origin}/api/` while the CDK
- * `MobileApiURL` output may be the bare origin, so raw string equality would
- * false-positive. Returns undefined when the value is not a valid
- * credential-free http(s) URL with a hostname.
+ * Normalizes a mobile API URL for comparison, preserving the path. The CDK
+ * `MobileApiURL` output is the full `${websiteOrigin}/api/` URL (see
+ * `static-web-stack.ts`), and `inject-env.ts` consumes that full URL when
+ * generating `.env.production`, so the comparison must respect the path —
+ * a same-origin wrong path (e.g. `https://vela.example/wrong` vs
+ * `https://vela.example/api/`) is a real misconfiguration that origin-only
+ * comparison would false-positive. Only trailing slashes on the pathname are
+ * normalized, so `https://x/api/` and `https://x/api` compare equal. Returns
+ * undefined when the value is not a valid credential-free http(s) URL with a
+ * hostname.
  */
-function normalizeMobileApiOrigin(value: unknown): string | undefined {
+function normalizeMobileApiUrl(value: unknown): string | undefined {
   if (typeof value !== 'string' || value.trim() === '') return undefined;
   try {
     const url = new URL(value);
@@ -81,7 +84,8 @@ function normalizeMobileApiOrigin(value: unknown): string | undefined {
     ) {
       return undefined;
     }
-    return url.origin;
+    const pathname = url.pathname.replace(/\/+$/u, '') || '/';
+    return `${url.origin}${pathname}${url.search}${url.hash}`;
   } catch {
     return undefined;
   }
@@ -93,16 +97,31 @@ function normalizeMobileApiOrigin(value: unknown): string | undefined {
  * standalone `bun run verify:deployed-config` command.
  *
  * `cdk-outputs.json` holds the CloudFormation-exports array; it is reduced to
- * a key → value map before comparison. `MobileApiURL` is compared by origin
- * only (see `normalizeMobileApiOrigin`); the remaining identifiers must match
+ * a key → value map before comparison. `MobileApiURL` is compared by full
+ * normalized URL (see `normalizeMobileApiUrl` — the path is preserved so a
+ * same-origin wrong path is rejected); the remaining identifiers must match
  * exactly after trimming.
  *
+ * The build-time env contract (`validateMobileBuildEnv`) is enforced first,
+ * so a missing or malformed env fails before any deployed-state comparison.
  * When a `cdkOutputsPath` is requested but unreadable or unparseable, that
- * error surfaces first (the deployment state is unknowable); env presence is
- * validated afterwards, before any value comparison.
+ * error surfaces next (the deployment state is unknowable); the value
+ * comparison runs last.
  */
 export async function verifyDeployedConfig(options: VerifyOptions): Promise<DeployedConfig> {
-  const loaded = loadMobileBuildEnv('production', options.mobileRoot, options.env ?? {});
+  // Use process.env when no explicit override is given so the verifier sees
+  // the same Vite precedence the actual build uses: existing process.env
+  // values win over .env files. Passing {} would ignore shell/CI overrides,
+  // letting the verifier pass against .env.production while the build uses
+  // different VITE_* values from the environment.
+  const loaded = loadMobileBuildEnv('production', options.mobileRoot, options.env ?? process.env);
+
+  // Enforce the full build-time contract (valid URL, host-only OAuth domain,
+  // matching pool region, no whitespace) before comparing against deployed
+  // outputs. Without this, malformed-but-present values that match CDK outputs
+  // could satisfy closure while failing at app boot.
+  validateMobileBuildEnv(loaded);
+
   const actual: DeployedConfig = {
     mobileApiUrl: loaded.VITE_MOBILE_API_URL!,
     cognitoUserPoolId: loaded.VITE_COGNITO_USER_POOL_ID!,
@@ -122,21 +141,15 @@ export async function verifyDeployedConfig(options: VerifyOptions): Promise<Depl
     outputs = loadOutputs(options.cdkOutputsPath, raw);
   }
 
-  for (const [key, value] of Object.entries(actual)) {
-    if (typeof value !== 'string' || value.trim() === '') {
-      throw new Error(`Missing mobile build identifier: ${key}`);
-    }
-  }
-
   if (outputs) {
     for (const [field, cdkKey] of Object.entries(CDK_OUTPUT_KEYS)) {
       const expected = outputs[cdkKey];
       const actualValue = (actual as Record<string, unknown>)[field];
       let matches = false;
       if (field === 'mobileApiUrl') {
-        const expectedOrigin = normalizeMobileApiOrigin(expected);
+        const expectedUrl = normalizeMobileApiUrl(expected);
         matches =
-          expectedOrigin !== undefined && expectedOrigin === normalizeMobileApiOrigin(actualValue);
+          expectedUrl !== undefined && expectedUrl === normalizeMobileApiUrl(actualValue);
       } else {
         matches =
           typeof expected === 'string' &&
