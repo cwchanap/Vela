@@ -4,8 +4,8 @@
 
 **Decision:** NO-GO
 
-HPA-210 remains open. The automated phase passed on the cleanup-head commit
-`663a3a158d882a12654b76345dbb0f03a811ba24`: the eight automated gates ran in
+HPA-210 remains open. The automated phase passed on commit
+`75fd49c9b43c9053d832f076d709e1db894a394a`: the eight automated gates ran in
 order (install, lint, typecheck, compile, build, test,
 production-diagnostics, mobile-secret-scan) on a clean detached worktree of
 that commit. The receipt is a local artifact under `.artifacts/hpa-210/` and
@@ -33,16 +33,18 @@ Minimum corrective issues:
 
 ## Tested Behavior Commit
 
-`testedBehaviorCommit`: `663a3a158d882a12654b76345dbb0f03a811ba24`
+`testedBehaviorCommit`: `75fd49c9b43c9053d832f076d709e1db894a394a`
 
-This is the frozen behavior revision for the automated phase: the cleanup
-head containing the app, native project, configuration, dependencies, and
-the minimal verification runner.
+This is the frozen behavior revision for the automated phase. It includes
+the app, native project, configuration, dependencies, the minimal
+verification runner, the deployed-config verifier fix (full-URL comparison,
+process.env precedence, build-time env validation), the portable ESM
+main-module check, and the clean-working-tree gate in the M1 harness.
 
 ## Automated Phase Evidence
 
-The automated phase passed on the cleanup-head commit
-`663a3a158d882a12654b76345dbb0f03a811ba24`: the eight gates ran in order (install, lint, typecheck,
+The automated phase passed on commit
+`75fd49c9b43c9053d832f076d709e1db894a394a`: the eight gates ran in order (install, lint, typecheck,
 compile, build, test, production-diagnostics, mobile-secret-scan), and the
 passing receipt is a local artifact under `.artifacts/hpa-210/` (not
 committed). Receipts are local and ephemeral; this document is the committed
@@ -60,10 +62,10 @@ substitute for it. The two rows below are the cleanup-design additions: the
 Simulator build/install/launch row (deferred, unrun) and the
 deployed-config-consistency row (run, passed).
 
-| ID                                     | Commit                                     | Run ID | Matrix class                   | Build/config                                                                                                 | Environment                                                                                 | Precondition                                       | Observation                                                                                                                                | Status     | Evidence                            | Follow-up                                               |
-| -------------------------------------- | ------------------------------------------ | ------ | ------------------------------ | ------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------- | -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ | ---------- | ----------------------------------- | ------------------------------------------------------- |
-| HPA-210-SIMULATOR-BUILD-INSTALL-LAUNCH | —                                          | —      | Simulator build/install/launch | Xcode Simulator build/install/launch                                                                         | iOS Simulator                                                                               | Explicitly deferred by the user                    | Build, install, and launch were not re-run on the cleanup head                                                                             | `deferred` | No receipt; unrun                   | Resume when physical HPA-210 work resumes               |
-| HPA-210-DEPLOYED-CONFIG-CONSISTENCY    | `663a3a158d882a12654b76345dbb0f03a811ba24` | —      | Deployed-config consistency    | `bun run --cwd apps/vela-mobile verify:deployed-config -- --cdk-outputs ../../packages/cdk/cdk-outputs.json` | Local shell; shipping `apps/vela-mobile/.env.production` vs `packages/cdk/cdk-outputs.json` | cdk-outputs.json present from the deployed backend | All five public identifiers (api origin, user-pool id, mobile client id, oauth domain, region) match; strict parsing rejects unknown flags | `passed`   | CLI exit 0 (local run, no manifest) | Re-run after any CDK output or `.env.production` change |
+| ID                                     | Commit                                     | Run ID | Matrix class                   | Build/config                                                                                                 | Environment                                                                                 | Precondition                                       | Observation                                                                                                                                                                                                      | Status     | Evidence                            | Follow-up                                               |
+| -------------------------------------- | ------------------------------------------ | ------ | ------------------------------ | ------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------- | -------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------- | ----------------------------------- | ------------------------------------------------------- |
+| HPA-210-SIMULATOR-BUILD-INSTALL-LAUNCH | —                                          | —      | Simulator build/install/launch | Xcode Simulator build/install/launch                                                                         | iOS Simulator                                                                               | Explicitly deferred by the user                    | Build, install, and launch were not re-run on the cleanup head                                                                                                                                                   | `deferred` | No receipt; unrun                   | Resume when physical HPA-210 work resumes               |
+| HPA-210-DEPLOYED-CONFIG-CONSISTENCY    | `75fd49c9b43c9053d832f076d709e1db894a394a` | —      | Deployed-config consistency    | `bun run --cwd apps/vela-mobile verify:deployed-config -- --cdk-outputs ../../packages/cdk/cdk-outputs.json` | Local shell; shipping `apps/vela-mobile/.env.production` vs `packages/cdk/cdk-outputs.json` | cdk-outputs.json present from the deployed backend | All five public identifiers (full MobileApiURL with path, user-pool id, mobile client id, oauth domain, region) match; strict parsing rejects unknown flags; build-time env contract validated before comparison | `passed`   | CLI exit 0 (local run, no manifest) | Re-run after any CDK output or `.env.production` change |
 
 ## Diagnostic Observation Matrix
 
@@ -101,8 +103,8 @@ physical matrix row.
 
 ## Security and Secret Scan
 
-The automated phase records a passing `mobile-secret-scan` gate on the
-cleanup-head commit `663a3a158d882a12654b76345dbb0f03a811ba24`. Machine
+The automated phase records a passing `mobile-secret-scan` gate on commit
+`75fd49c9b43c9053d832f076d709e1db894a394a`. Machine
 evidence does not substitute a source
 inspection or a physical acceptance observation.
 
