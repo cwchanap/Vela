@@ -5,7 +5,7 @@
 **Decision:** NO-GO
 
 HPA-210 remains open. The automated phase passed on the cleanup-head commit
-`ceb36bb43c0b9977c4a9055b3a3e9d345916253c`: the eight automated gates ran in
+`663a3a158d882a12654b76345dbb0f03a811ba24`: the eight automated gates ran in
 order (install, lint, typecheck, compile, build, test,
 production-diagnostics, mobile-secret-scan) on a clean detached worktree of
 that commit. The receipt is a local artifact under `.artifacts/hpa-210/` and
@@ -33,7 +33,7 @@ Minimum corrective issues:
 
 ## Tested Behavior Commit
 
-`testedBehaviorCommit`: `ceb36bb43c0b9977c4a9055b3a3e9d345916253c`
+`testedBehaviorCommit`: `663a3a158d882a12654b76345dbb0f03a811ba24`
 
 This is the frozen behavior revision for the automated phase: the cleanup
 head containing the app, native project, configuration, dependencies, and
@@ -42,7 +42,7 @@ the minimal verification runner.
 ## Automated Phase Evidence
 
 The automated phase passed on the cleanup-head commit
-`ceb36bb43c0b9977c4a9055b3a3e9d345916253c`: the eight gates ran in order (install, lint, typecheck,
+`663a3a158d882a12654b76345dbb0f03a811ba24`: the eight gates ran in order (install, lint, typecheck,
 compile, build, test, production-diagnostics, mobile-secret-scan), and the
 passing receipt is a local artifact under `.artifacts/hpa-210/` (not
 committed). Receipts are local and ephemeral; this document is the committed
@@ -54,11 +54,16 @@ HPA-210 receipts.
 
 ## Production Smoke Matrix
 
-No row is recorded. Physical production-smoke work was explicitly deferred;
-the automated and Simulator manifests are not a substitute for it.
+No production-smoke row is recorded — physical production-smoke work was
+explicitly deferred; the automated and Simulator manifests are not a
+substitute for it. The two rows below are the cleanup-design additions: the
+Simulator build/install/launch row (deferred, unrun) and the
+deployed-config-consistency row (run, passed).
 
-| ID  | Commit | Run ID | Matrix class | Build/config | Environment | Precondition | Observation | Status | Evidence | Follow-up |
-| --- | ------ | ------ | ------------ | ------------ | ----------- | ------------ | ----------- | ------ | -------- | --------- |
+| ID                                     | Commit                                     | Run ID | Matrix class                   | Build/config                                                                                                 | Environment                                                                                 | Precondition                                       | Observation                                                                                                                                | Status     | Evidence                            | Follow-up                                               |
+| -------------------------------------- | ------------------------------------------ | ------ | ------------------------------ | ------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------- | -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ | ---------- | ----------------------------------- | ------------------------------------------------------- |
+| HPA-210-SIMULATOR-BUILD-INSTALL-LAUNCH | —                                          | —      | Simulator build/install/launch | Xcode Simulator build/install/launch                                                                         | iOS Simulator                                                                               | Explicitly deferred by the user                    | Build, install, and launch were not re-run on the cleanup head                                                                             | `deferred` | No receipt; unrun                   | Resume when physical HPA-210 work resumes               |
+| HPA-210-DEPLOYED-CONFIG-CONSISTENCY    | `663a3a158d882a12654b76345dbb0f03a811ba24` | —      | Deployed-config consistency    | `bun run --cwd apps/vela-mobile verify:deployed-config -- --cdk-outputs ../../packages/cdk/cdk-outputs.json` | Local shell; shipping `apps/vela-mobile/.env.production` vs `packages/cdk/cdk-outputs.json` | cdk-outputs.json present from the deployed backend | All five public identifiers (api origin, user-pool id, mobile client id, oauth domain, region) match; strict parsing rejects unknown flags | `passed`   | CLI exit 0 (local run, no manifest) | Re-run after any CDK output or `.env.production` change |
 
 ## Diagnostic Observation Matrix
 
@@ -87,7 +92,9 @@ physical matrix row.
 - Device trust + Developer Mode enabled.
 - Signing: team/identity correlation, profile expiry, `get-task-allow`,
   certificate availability (confirm via Xcode).
-- Bundle id matches the mobile client config in `.env.production`.
+- Bundle id (`com.vela.app`) matches the Capacitor/Xcode signing config
+  (`src-capacitor/capacitor.config.json` `appId`), not `.env.production` —
+  `.env.production` carries no bundle identifier.
 - Device eligibility: safe availability, generic non-identifying alias —
   **no UDID/email persistence**.
 - Deployed-config consistency: `bun run verify:deployed-config -- --cdk-outputs ../../packages/cdk/cdk-outputs.json`.
@@ -95,7 +102,7 @@ physical matrix row.
 ## Security and Secret Scan
 
 The automated phase records a passing `mobile-secret-scan` gate on the
-cleanup-head commit `ceb36bb43c0b9977c4a9055b3a3e9d345916253c`. Machine
+cleanup-head commit `663a3a158d882a12654b76345dbb0f03a811ba24`. Machine
 evidence does not substitute a source
 inspection or a physical acceptance observation.
 
