@@ -409,6 +409,10 @@ async function writeManifest(
     const dir = join(commitDir, runId);
     try {
       await mkdir(dir, { recursive: false });
+      // Mutate the manifest's runId to the chosen directory name BEFORE
+      // serializing so a same-second rerun's receipt always matches its
+      // directory (a -2, -3, ... suffix must never be left out of the file).
+      manifest.runId = runId;
       await writeFile(join(dir, 'manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`, 'utf8');
       return runId;
     } catch (error) {
@@ -488,6 +492,6 @@ export async function runM1FoundationVerification(
     commands,
   };
   const evidenceDir = resolve(deps.repoRoot, args.evidenceDir ?? DEFAULT_EVIDENCE_DIR_RELATIVE);
-  manifest.runId = await writeManifest(evidenceDir, testedCommit, runId, manifest);
+  await writeManifest(evidenceDir, testedCommit, runId, manifest);
   return [manifest];
 }

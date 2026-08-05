@@ -123,6 +123,23 @@ describe('runM1FoundationVerification (automated)', () => {
       await rm(evidenceDir, { recursive: true, force: true });
     }
   });
+
+  it('writes a same-second rerun to a suffixed run directory whose receipt runId matches', async () => {
+    const evidenceDir = await mkdtemp(join(tmpdir(), 'vela-ev-'));
+    try {
+      const args = parseM1Arguments(['--evidence-dir', evidenceDir]);
+      // The injected `now` is fixed, so both runs share the same base runId
+      // and the second run must collide into a -2 suffixed directory.
+      const first = onlyManifest(await runM1FoundationVerification(args, fakeDeps()));
+      const second = onlyManifest(await runM1FoundationVerification(args, fakeDeps()));
+      expect(second.runId).toBe(`${first.runId}-2`);
+      const file = join(evidenceDir, 'a'.repeat(40), second.runId, 'manifest.json');
+      const written = JSON.parse(await readFile(file, 'utf8')) as { runId: string };
+      expect(written.runId).toBe(second.runId);
+    } finally {
+      await rm(evidenceDir, { recursive: true, force: true });
+    }
+  });
 });
 
 describe('spawnCommand', () => {
