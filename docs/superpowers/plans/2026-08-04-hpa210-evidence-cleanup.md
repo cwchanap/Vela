@@ -86,15 +86,19 @@ describe('verifyDeployedConfig', () => {
           'VITE_AWS_REGION=us-east-1',
         ].join('\n'),
       );
+      // cdk-outputs.json holds the CloudFormation-exports array that
+      // `cdk deploy` writes (entries of `{ OutputKey, OutputValue, ... }`),
+      // not a flat object. verify-deployed-config.ts reduces this array to a
+      // key → value map before comparison (see its `loadOutputs`).
       await writeFile(
         join(dir, 'cdk-outputs.json'),
-        JSON.stringify({
-          MobileApiURL: 'https://vela.example/api/',
-          CognitoUserPoolId: 'us-east-1_POOL',
-          CognitoMobileUserPoolClientId: 'abc123',
-          CognitoOAuthDomain: 'auth.example',
-          CognitoRegion: 'us-east-1',
-        }),
+        JSON.stringify([
+          { OutputKey: 'MobileApiURL', OutputValue: 'https://vela.example/api/' },
+          { OutputKey: 'CognitoUserPoolId', OutputValue: 'us-east-1_POOL' },
+          { OutputKey: 'CognitoMobileUserPoolClientId', OutputValue: 'abc123' },
+          { OutputKey: 'CognitoOAuthDomain', OutputValue: 'auth.example' },
+          { OutputKey: 'CognitoRegion', OutputValue: 'us-east-1' },
+        ]),
       );
       const result = await verifyDeployedConfig({
         mobileRoot: dir,
@@ -115,13 +119,13 @@ describe('verifyDeployedConfig', () => {
       );
       await writeFile(
         join(dir, 'cdk-outputs.json'),
-        JSON.stringify({
-          CognitoUserPoolId: 'us-east-1_DIFFERENT',
-          MobileApiURL: 'https://vela.example/api/',
-          CognitoMobileUserPoolClientId: 'abc',
-          CognitoOAuthDomain: 'auth.example',
-          CognitoRegion: 'us-east-1',
-        }),
+        JSON.stringify([
+          { OutputKey: 'CognitoUserPoolId', OutputValue: 'us-east-1_DIFFERENT' },
+          { OutputKey: 'MobileApiURL', OutputValue: 'https://vela.example/api/' },
+          { OutputKey: 'CognitoMobileUserPoolClientId', OutputValue: 'abc' },
+          { OutputKey: 'CognitoOAuthDomain', OutputValue: 'auth.example' },
+          { OutputKey: 'CognitoRegion', OutputValue: 'us-east-1' },
+        ]),
       );
       await expect(
         verifyDeployedConfig({ mobileRoot: dir, cdkOutputsPath: join(dir, 'cdk-outputs.json') }),
