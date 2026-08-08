@@ -7,7 +7,7 @@ on:
     branches: [main]
     # Retargeting an existing PR changes its base via the `edited` activity.
     # Include it so a PR moved to main reports the required checks.
-    types: [opened, synchronize, reopened, edited]
+    types: [opened, synchronize, reopened, edited, ready_for_review]
   workflow_dispatch:
 
 env:
@@ -22,6 +22,7 @@ permissions:
 
 jobs:
   web-tests:
+    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -73,6 +74,7 @@ jobs:
         continue-on-error: true
 
   api-tests:
+    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -117,6 +119,7 @@ jobs:
         continue-on-error: true
 
   ext-tests:
+    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -167,6 +170,7 @@ jobs:
         continue-on-error: true
 
   mobile-tests:
+    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -232,6 +236,7 @@ jobs:
         continue-on-error: true
 
   cdk-tests:
+    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
