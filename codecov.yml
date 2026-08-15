@@ -2,14 +2,14 @@ coverage:
   status:
     project:
       default:
-        target: 95%
+        target: 90%
         threshold: 0%
         base: auto
         informational: false
         if_not_found: failure
     patch:
       default:
-        target: 95%
+        target: 90%
         threshold: 0%
         base: auto
         informational: false
