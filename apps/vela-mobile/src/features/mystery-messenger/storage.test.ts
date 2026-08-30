@@ -34,7 +34,7 @@ function createFakeBackend(): FakeBackend {
 }
 
 const userId = 'user:a';
-const chapterId = 'chapter/1';
+const chapterId = chapter.id;
 const key = mysteryProgressStorageKey(userId, chapterId);
 
 function progressAtScene04(): MysteryProgress {
@@ -60,7 +60,7 @@ describe('createBrowserMysteryProgressStorage', () => {
   it('returns null when nothing is stored', () => {
     const storage = createBrowserMysteryProgressStorage(createFakeBackend());
 
-    expect(storage.load(userId, chapterId, chapter)).toBeNull();
+    expect(storage.load(userId, chapter)).toBeNull();
   });
 
   it('round-trips a saved progress', () => {
@@ -68,18 +68,18 @@ describe('createBrowserMysteryProgressStorage', () => {
     const storage = createBrowserMysteryProgressStorage(backend);
     const progress = progressAtScene04();
 
-    expect(storage.save(userId, chapterId, progress)).toBe(true);
-    expect(storage.load(userId, chapterId, chapter)).toEqual(progress);
+    expect(storage.save(userId, progress)).toBe(true);
+    expect(storage.load(userId, chapter)).toEqual(progress);
   });
 
   it('clears stored progress', () => {
     const backend = createFakeBackend();
     const storage = createBrowserMysteryProgressStorage(backend);
-    storage.save(userId, chapterId, progressAtScene04());
+    storage.save(userId, progressAtScene04());
 
     expect(storage.clear(userId, chapterId)).toBe(true);
     expect(backend.has(key)).toBe(false);
-    expect(storage.load(userId, chapterId, chapter)).toBeNull();
+    expect(storage.load(userId, chapter)).toBeNull();
   });
 
   it('deletes and ignores malformed JSON', () => {
@@ -87,18 +87,26 @@ describe('createBrowserMysteryProgressStorage', () => {
     const storage = createBrowserMysteryProgressStorage(backend);
     backend.set(key, '{not json');
 
-    expect(storage.load(userId, chapterId, chapter)).toBeNull();
+    expect(storage.load(userId, chapter)).toBeNull();
     expect(backend.has(key)).toBe(false);
   });
 
-  it('ignores data stored under an older chapter version', () => {
+  it('discards a snapshot whose chapter id does not match', () => {
     const backend = createFakeBackend();
     const storage = createBrowserMysteryProgressStorage(backend);
-    const oldKey = 'vela:mobile:mystery-messenger:user%3Aa:chapter%2F1:v0';
-    backend.set(oldKey, JSON.stringify(progressAtScene04()));
+    backend.set(key, JSON.stringify({ ...progressAtScene04(), chapterId: 'chapter/0' }));
 
-    expect(storage.load(userId, chapterId, chapter)).toBeNull();
-    expect(backend.has(oldKey)).toBe(true);
+    expect(storage.load(userId, chapter)).toBeNull();
+    expect(backend.has(key)).toBe(false);
+  });
+
+  it('discards a snapshot from an older chapter version under the same key', () => {
+    const backend = createFakeBackend();
+    const storage = createBrowserMysteryProgressStorage(backend);
+    backend.set(key, JSON.stringify({ ...progressAtScene04(), chapterVersion: 0 }));
+
+    expect(storage.load(userId, chapter)).toBeNull();
+    expect(backend.has(key)).toBe(false);
   });
 
   it('rejects an unknown current scene', () => {
@@ -106,7 +114,7 @@ describe('createBrowserMysteryProgressStorage', () => {
     const storage = createBrowserMysteryProgressStorage(backend);
     backend.set(key, JSON.stringify({ ...progressAtScene04(), currentSceneId: 'scene-x' }));
 
-    expect(storage.load(userId, chapterId, chapter)).toBeNull();
+    expect(storage.load(userId, chapter)).toBeNull();
     expect(backend.has(key)).toBe(false);
   });
 
@@ -121,7 +129,7 @@ describe('createBrowserMysteryProgressStorage', () => {
       }),
     );
 
-    expect(storage.load(userId, chapterId, chapter)).toBeNull();
+    expect(storage.load(userId, chapter)).toBeNull();
     expect(backend.has(key)).toBe(false);
   });
 
@@ -136,7 +144,7 @@ describe('createBrowserMysteryProgressStorage', () => {
       }),
     );
 
-    expect(storage.load(userId, chapterId, chapter)).toBeNull();
+    expect(storage.load(userId, chapter)).toBeNull();
     expect(backend.has(key)).toBe(false);
   });
 
@@ -151,7 +159,7 @@ describe('createBrowserMysteryProgressStorage', () => {
       }),
     );
 
-    expect(storage.load(userId, chapterId, chapter)).toBeNull();
+    expect(storage.load(userId, chapter)).toBeNull();
     expect(backend.has(key)).toBe(false);
   });
 
@@ -160,10 +168,10 @@ describe('createBrowserMysteryProgressStorage', () => {
     const storage = createBrowserMysteryProgressStorage(backend);
 
     backend.set(key, JSON.stringify({ ...progressAtScene04(), completed: true }));
-    expect(storage.load(userId, chapterId, chapter)).toBeNull();
+    expect(storage.load(userId, chapter)).toBeNull();
 
     backend.set(key, JSON.stringify({ ...progressAtEnding(), completed: false }));
-    expect(storage.load(userId, chapterId, chapter)).toBeNull();
+    expect(storage.load(userId, chapter)).toBeNull();
   });
 
   it('returns null when the backend throws on read', () => {
@@ -175,7 +183,7 @@ describe('createBrowserMysteryProgressStorage', () => {
       removeItem: () => undefined,
     });
 
-    expect(storage.load(userId, chapterId, chapter)).toBeNull();
+    expect(storage.load(userId, chapter)).toBeNull();
   });
 
   it('returns false when the backend throws on write', () => {
@@ -187,7 +195,7 @@ describe('createBrowserMysteryProgressStorage', () => {
       removeItem: () => undefined,
     });
 
-    expect(storage.save(userId, chapterId, progressAtScene04())).toBe(false);
+    expect(storage.save(userId, progressAtScene04())).toBe(false);
   });
 
   it('returns false when the backend throws on clear', () => {
@@ -211,6 +219,6 @@ describe('createBrowserMysteryProgressStorage', () => {
       },
     });
 
-    expect(storage.load(userId, chapterId, chapter)).toBeNull();
+    expect(storage.load(userId, chapter)).toBeNull();
   });
 });

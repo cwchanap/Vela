@@ -1,9 +1,9 @@
 import type { MysteryChapter, MysteryProgress } from './model';
 
 export type MysteryProgressStorage = {
-  load: (userId: string, chapterId: string, chapter: MysteryChapter) => MysteryProgress | null;
-  save: (userId: string, chapterId: string, progress: MysteryProgress) => boolean;
-  clear: (userId: string, chapterId: string) => boolean;
+  load(userId: string, chapter: MysteryChapter): MysteryProgress | null;
+  save(userId: string, progress: MysteryProgress): boolean;
+  clear(userId: string, chapterId: string): boolean;
 };
 
 export function mysteryProgressStorageKey(userId: string, chapterId: string): string {
@@ -14,6 +14,9 @@ function isKnownProgress(progress: MysteryProgress, chapter: MysteryChapter): bo
   if (typeof progress !== 'object' || progress === null || !Array.isArray(progress.history)) {
     return false;
   }
+  if (progress.chapterId !== chapter.id || progress.chapterVersion !== chapter.version) {
+    return false;
+  }
   const scenes = new Map(chapter.scenes.map((scene) => [scene.id, scene]));
   const current = scenes.get(progress.currentSceneId);
   if (!current) return false;
@@ -21,7 +24,7 @@ function isKnownProgress(progress: MysteryProgress, chapter: MysteryChapter): bo
   for (const entry of progress.history) {
     const scene = scenes.get(entry?.sceneId);
     if (!scene || scene.kind !== entry.kind) return false;
-    if (scene.kind === 'choice' && entry.kind === 'choice') {
+    if (scene.kind === 'choice') {
       if (!scene.options.some((option) => option.id === entry.selectedOptionId)) return false;
     }
   }
@@ -33,8 +36,8 @@ export function createBrowserMysteryProgressStorage(
   storage: Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>,
 ): MysteryProgressStorage {
   return {
-    load(userId, chapterId, chapter) {
-      const key = mysteryProgressStorageKey(userId, chapterId);
+    load(userId, chapter) {
+      const key = mysteryProgressStorageKey(userId, chapter.id);
       try {
         const raw = storage.getItem(key);
         if (raw === null) return null;
@@ -50,9 +53,12 @@ export function createBrowserMysteryProgressStorage(
       }
       return null;
     },
-    save(userId, chapterId, progress) {
+    save(userId, progress) {
       try {
-        storage.setItem(mysteryProgressStorageKey(userId, chapterId), JSON.stringify(progress));
+        storage.setItem(
+          mysteryProgressStorageKey(userId, progress.chapterId),
+          JSON.stringify(progress),
+        );
         return true;
       } catch {
         return false;

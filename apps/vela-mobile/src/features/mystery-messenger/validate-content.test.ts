@@ -24,7 +24,7 @@ describe('validateMysteryChapter', () => {
 
   it('reports duplicate scene ids', () => {
     const chapter = cloneChapter();
-    chapter.scenes.push(structuredClone(chapter.scenes[0]!));
+    chapter.scenes = [...chapter.scenes, structuredClone(chapter.scenes[0]!)];
 
     expect(codes(chapter)).toContain('duplicate_scene_id');
   });
@@ -73,8 +73,20 @@ describe('validateMysteryChapter', () => {
     const scene03 = sceneOf(chapter, 'scene-03');
     if (scene03.kind !== 'choice') throw new Error('expected choice scene');
     scene03.options = [
-      { id: 'understood', label: 'わかりました', feedback: 'a', nextSceneId: 'scene-04' },
-      { id: 'understood', label: 'もう一度', feedback: 'b', nextSceneId: 'scene-04' },
+      {
+        id: 'understood',
+        label: 'わかりました',
+        result: 'correct',
+        feedback: 'a',
+        nextSceneId: 'scene-04',
+      },
+      {
+        id: 'understood',
+        label: 'もう一度',
+        result: 'incorrect',
+        feedback: 'b',
+        nextSceneId: 'scene-04',
+      },
     ];
 
     expect(codes(chapter)).toContain('duplicate_choice_id');
@@ -85,6 +97,15 @@ describe('validateMysteryChapter', () => {
     const scene03 = sceneOf(chapter, 'scene-03');
     if (scene03.kind !== 'choice') throw new Error('expected choice scene');
     scene03.options = [];
+
+    expect(codes(chapter)).toContain('empty_choice_options');
+  });
+
+  it('reports choice scenes with a single option', () => {
+    const chapter = cloneChapter();
+    const scene03 = sceneOf(chapter, 'scene-03');
+    if (scene03.kind !== 'choice') throw new Error('expected choice scene');
+    scene03.options = [scene03.options[0]!];
 
     expect(codes(chapter)).toContain('empty_choice_options');
   });
