@@ -419,16 +419,14 @@ Do not set `bypassMobileAuth`. `MobilePageHeader` continues to own back/fallback
 
 `expectedSceneId` remains useful for stale/late emits, but it cannot by itself prevent a second physical click from reading the newly advanced reactive scene.
 
-The page therefore owns one local `transitionLocked` flag:
+A `nextTick`-only unlock is also insufficient for a real browser double-click because the second click is a later input event and can arrive after Vue's microtask flush. Keep the domain timing-free and use one page-local guard instead:
 
-- set it synchronously before Continue or choice submission;
+- set `transitionLocked` synchronously before Continue or choice submission;
 - return immediately if a submission arrives while it is already set;
-- bind it to Continue/choice `disabled` state;
-- after the synchronous progression update and Vue render, keep the control locked for a short `500ms` rapid-click guard before enabling the newly rendered action.
+- bind the flag to Continue/choice `disabled` state;
+- keep the newly rendered action locked for `500ms`, then re-enable it.
 
-This is intentionally page-local UX protection, not a domain debounce framework. The model remains deterministic and timing-free.
-
-The page test must submit twice without waiting for the guard to clear and prove only one scene advances, then advance fake timers and prove the next deliberate action is accepted.
+The 500ms constant is local accidental-repeat suppression for this story page, not a reusable debounce abstraction. The page test uses fake timers and a mocked messenger that synchronously advances `currentScene`, proving a second rapid event cannot act on the new scene.
 
 ### Transcript and Composer
 
