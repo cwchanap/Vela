@@ -13,6 +13,17 @@ const coreRoutes: RouteRecordRaw[] = [
   { path: '', name: 'home', component: () => import('pages/HomePage.vue') },
   { path: 'review', name: 'review', component: () => import('pages/ReviewPage.vue') },
   { path: 'learn', name: 'learn', component: () => import('pages/LearnPage.vue') },
+  {
+    path: 'learn/mystery-messenger',
+    name: 'mysteryMessenger',
+    component: () => import('src/features/mystery-messenger/MysteryMessengerPage.vue'),
+    meta: {
+      mobileHeader: {
+        title: 'Mystery Messenger',
+        fallback: '/learn',
+      },
+    },
+  },
   { path: 'words', name: 'words', component: () => import('pages/WordsPage.vue') },
   { path: 'more', name: 'more', component: () => import('pages/MorePage.vue') },
 ];

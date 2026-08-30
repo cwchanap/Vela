@@ -19,9 +19,9 @@ describe('diagnostic route construction', () => {
     expect(paths).toContain('diagnostics/tts-pronunciation');
   });
 
-  it('keeps production construction at the five shell routes', () => {
+  it('keeps production construction at the six authenticated core routes', () => {
     const productionRoutes = buildMobileChildRoutes([]);
-    expect(productionRoutes).toHaveLength(5);
+    expect(productionRoutes).toHaveLength(6);
     expect(productionRoutes.map((route) => route.path)).not.toContain(
       IOS_DIAGNOSTIC_ROOT_PATH.slice(1),
     );
