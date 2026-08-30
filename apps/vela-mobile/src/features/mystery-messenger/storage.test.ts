@@ -148,6 +148,21 @@ describe('createBrowserMysteryProgressStorage', () => {
     expect(backend.has(key)).toBe(false);
   });
 
+  it('rejects a history entry outside the closed message|choice union', () => {
+    const backend = createFakeBackend();
+    const storage = createBrowserMysteryProgressStorage(backend);
+    backend.set(
+      key,
+      JSON.stringify({
+        ...progressAtScene04(),
+        history: [{ kind: 'ending', sceneId: 'scene-05' }],
+      }),
+    );
+
+    expect(storage.load(userId, chapter)).toBeNull();
+    expect(backend.has(key)).toBe(false);
+  });
+
   it('rejects an unknown selected option', () => {
     const backend = createFakeBackend();
     const storage = createBrowserMysteryProgressStorage(backend);

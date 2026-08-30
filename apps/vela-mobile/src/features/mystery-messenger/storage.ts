@@ -22,7 +22,10 @@ function isKnownProgress(progress: MysteryProgress, chapter: MysteryChapter): bo
   if (!current) return false;
 
   for (const entry of progress.history) {
-    const scene = scenes.get(entry?.sceneId);
+    // history is a closed message|choice union; an ending scene is only ever
+    // represented by currentSceneId + completed and never lands in history
+    if (entry?.kind !== 'message' && entry?.kind !== 'choice') return false;
+    const scene = scenes.get(entry.sceneId);
     if (!scene || scene.kind !== entry.kind) return false;
     if (scene.kind === 'choice') {
       if (!scene.options.some((option) => option.id === entry.selectedOptionId)) return false;
