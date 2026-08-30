@@ -507,23 +507,22 @@ Assert each option renders as a Quasar button, emits its ID, and does not emit w
 
 - [ ] **Step 4: Write failing page tests including the real rapid-submit regression**
 
-Mock the two composables and use fake timers. Cover message/choice/ending UI, session recovery, save warning, inline audio error, and this sequence:
+Mock the two composables and use fake timers. The mocked messenger should synchronously replace `currentScene` after the first `continueMessage()` call, reproducing the real reactive failure mode where a second click would otherwise see scene 2.
 
 ```ts
 vi.useFakeTimers();
 
-// first visible message
 await wrapper.get('[data-testid="mystery-continue"]').trigger('click');
-// invoke the handler again before the 500ms transition guard clears
+// Simulate a second click in the same rapid user burst while currentScene has already moved.
 await wrapper.get('[data-testid="mystery-continue"]').trigger('click');
 
 expect(continueMessage).toHaveBeenCalledTimes(1);
 
 await vi.advanceTimersByTimeAsync(500);
-// the next deliberate action can now proceed
+// After the guard expires, a deliberate next action is accepted.
 ```
 
-The test must prove two rapid submissions cannot advance two messages. Do not rely on `expectedSceneId` alone.
+Also cover message/choice/ending UI, session recovery, save warning, inline audio error, and rapid duplicate choice submission.
 
 - [ ] **Step 5: Implement the page-level transition lock**
 
