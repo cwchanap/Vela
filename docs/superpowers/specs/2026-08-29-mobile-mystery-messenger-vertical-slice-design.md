@@ -22,11 +22,11 @@ The repository already contains the platform pieces this slice needs:
 
 - `apps/vela-mobile/src/pages/LearnPage.vue` is still a `Coming soon` stub.
 - `MobileLayout.vue` owns mobile bottom navigation, safe-area layout, keyboard/footer behavior, and the common page header.
-- authenticated routes already live under the existing mobile child-route tree.
+- authenticated routes already live in `coreRoutes` inside `router/diagnostic-routes.ts`; despite the filename, that is the current owner for Home/Review/Learn/Words/More.
 - `pushMobileRoute()` and `backOrFallback()` already define app-owned mobile navigation history.
 - `MobileAuthCoordinator.state` plus `selectMobileFeatureSessionStatus()` provide the signed-in user identity without exposing tokens to feature code.
 - `MobileTtsService.preparePronunciation()` already handles authenticated TTS preparation and cache isolation.
-- `HtmlAudioPlayer` already implements the mobile playback contract.
+- `HtmlAudioPlayer` already implements the `MobileAudioPlayer` contract and settles playback as `ended`, `stopped`, or `interrupted`.
 
 No backend, CDK, DynamoDB, shared-package, or native-plugin change is needed.
 
@@ -38,6 +38,7 @@ HPA-299 adds:
 - one authenticated `/learn/mystery-messenger` route;
 - feature-local `message`, `choice`, and `ending` scene types;
 - one authored five-scene chapter with one converging choice and one ending;
+- pure progression and transcript projection;
 - chronological transcript rendering;
 - one active fixed-choice composer;
 - TTS replay for authored Japanese using the existing mobile service and audio player;
@@ -74,12 +75,12 @@ apps/vela-mobile/src/features/mystery-messenger/
 Use focused feature-local modules:
 
 ```text
-model.ts
-content.ts
-validate-content.ts
-storage.ts
-useMysteryMessenger.ts
-useMysteryAudio.ts
+model.ts                 closed contracts, pure transitions, transcript selector
+content.ts               five-scene authored constant + stable TTS IDs
+validate-content.ts      pure content validation
+storage.ts               localStorage snapshot adapter
+useMysteryMessenger.ts   auth/persistence orchestration
+useMysteryAudio.ts       thin TTS + MobileAudioPlayer adapter
 components/
   MysteryTranscript.vue
   MysteryChoiceComposer.vue
@@ -155,15 +156,14 @@ export type MysteryProgress = {
 
 `content.ts` exports one chapter constant using `satisfies MysteryChapter`.
 
-The five-scene shape is fixed for this ticket:
+The five-scene topology is fixed:
 
-1. opening message;
-2. second message;
-3. one language choice;
-4. consequence message;
-5. ending.
+```text
+scene-01 -> scene-02 -> scene-03(choice) -> scene-04 -> scene-05(ending)
+                                      \-> scene-04
+```
 
-Both choice options continue to the same next scene. The pilot tests comprehension and flow, not branching narrative.
+Both authored choice options must share `scene-04` as `nextSceneId`. Pin that directly in the real-content unit test; do not add a generic `branching_choice` validation code for a pilot that intentionally has no branches.
 
 ## Progression
 
@@ -196,11 +196,65 @@ Rules:
 - message continuation appends the current scene once and advances;
 - choice submission appends the current scene plus selected option once and advances;
 - reaching an ending leaves that ending as `currentSceneId` and marks `completed: true`;
-- transitions require an `expectedSceneId` matching the current progress scene;
-- a stale second tap after progress advances becomes a no-op at the composable boundary instead of skipping the next scene;
+- `expectedSceneId` protects late/stale events: if it does not match `progress.currentSceneId`, the transition returns the same progress object unchanged;
+- stale detection happens before scene-kind or option validation, so a late choice event cannot throw against a newer scene;
+- invalid transitions for the actual current scene and unknown option IDs still throw fixed feature errors;
 - transcript text is reconstructed from chapter content plus history; full rendered text is not persisted.
 
+`expectedSceneId` is not the primary rapid-double-tap defense. A second click can evaluate the newly advanced reactive scene before it fires. The page therefore owns a small rapid-transition lock as described below.
+
 No undo, rewind, checkpoints, or migration layer is added.
+
+## Transcript Projection
+
+Keep transcript reconstruction out of the Vue component, following the existing `selectDueReviewView()` pattern.
+
+`model.ts` exports a closed view-item union and selector:
+
+```ts
+export type MysteryTranscriptItem =
+  | {
+      kind: 'message';
+      sceneId: string;
+      speaker: MysterySpeaker;
+      text: string;
+      ttsId: string;
+      active: boolean;
+    }
+  | {
+      kind: 'choice-result';
+      sceneId: string;
+      speaker: MysterySpeaker;
+      prompt: string;
+      selectedLabel: string;
+      feedback: string;
+      result: 'correct' | 'incorrect';
+      ttsId: string;
+    }
+  | {
+      kind: 'choice-prompt';
+      sceneId: string;
+      speaker: MysterySpeaker;
+      prompt: string;
+      ttsId: string;
+    }
+  | {
+      kind: 'ending';
+      sceneId: string;
+      title: string;
+      text: string;
+      ttsId: string;
+    };
+
+export function selectMysteryTranscript(
+  chapter: MysteryChapter,
+  progress: MysteryProgress,
+): readonly MysteryTranscriptItem[];
+```
+
+The selector maps completed history entries first, then appends the current scene exactly once. A completed choice becomes `choice-result`; an unanswered current choice becomes `choice-prompt`.
+
+`MysteryTranscript.vue` receives only the selected items and renders them. Its tests stay thin: Japanese `lang="ja"`, order/rendering, and replay emission. HPA-300 can extend one pure selector when `response-build` arrives rather than teaching an SFC how to reconstruct a new scene kind.
 
 ## Content Validation
 
@@ -270,7 +324,7 @@ Storage errors do not block play. The in-memory run continues and the page shows
 
 ## Authentication Ownership
 
-`useMysteryMessenger.ts` injects the existing mobile auth coordinator and derives the feature-session status.
+`useMysteryMessenger.ts` injects the existing mobile auth coordinator and derives the feature-session status through `selectMobileFeatureSessionStatus()`.
 
 - `usable`: load/create that user's run and enable progression.
 - `recovering`: keep the current same-user in-memory run visible, but disable story mutations.
@@ -280,7 +334,19 @@ The feature never accesses Cognito tokens.
 
 ## TTS and Audio
 
-`useMysteryAudio.ts` is a thin adapter over existing services. It owns one `HtmlAudioPlayer` instance and injects the existing `MobileTtsService`.
+`useMysteryAudio.ts` stays a thin adapter. It reuses `MOBILE_TTS_SERVICE_KEY` and accepts a `MobileAudioPlayer` dependency from the page rather than constructing a hidden `HtmlAudioPlayer` internally:
+
+```ts
+export function useMysteryAudio(audioPlayer: MobileAudioPlayer): MysteryAudioController;
+```
+
+`MysteryMessengerPage.vue` creates the concrete adapter exactly once:
+
+```ts
+const audio = useMysteryAudio(new HtmlAudioPlayer());
+```
+
+This mirrors the existing pronunciation diagnostic seam and keeps controller tests independent of DOM audio.
 
 ```ts
 export type MysteryAudioState =
@@ -294,10 +360,14 @@ Playback:
 
 1. require a usable signed-in user;
 2. call `preparePronunciation({ userId, vocabularyId: scene.ttsId, text })`;
-3. pass the prepared URL to `HtmlAudioPlayer.play()`;
-4. keep audio failures non-blocking;
-5. on media-unavailable, invalidate that single pronunciation identity and wait for the next explicit tap rather than adding an automatic retry loop;
-6. stop/dispose audio when the page unmounts or identity changes.
+3. pass the prepared URL to `audioPlayer.play()`;
+4. set `playing` while the returned handle is active;
+5. await `handle.finished`; `ended`, `stopped`, and `interrupted` all settle the simple product state back to `idle`;
+6. keep audio failures non-blocking;
+7. on `MobileAudioError('media_unavailable')`, invalidate that single pronunciation identity, show the inline error, and wait for the next explicit tap; do not add an automatic retry loop;
+8. stop/dispose audio when the page unmounts or identity changes.
+
+The pilot deliberately does not expose an `interrupted` product state or copy the diagnostic controller's counters/retry/URL-refresh machine.
 
 Each authored line gets a stable TTS identity that includes chapter version, for example:
 
@@ -327,7 +397,7 @@ Do not build an activity catalog for one card.
 
 ### Route
 
-Add one authenticated core route with the existing page header metadata:
+Add one authenticated route to the existing `coreRoutes` list:
 
 ```ts
 {
@@ -343,11 +413,28 @@ Add one authenticated core route with the existing page header metadata:
 }
 ```
 
+Do not set `bypassMobileAuth`. `MobilePageHeader` continues to own back/fallback behavior through the existing navigation helper.
+
+### Rapid transition guard
+
+`expectedSceneId` remains useful for stale/late emits, but it cannot by itself prevent a second physical click from reading the newly advanced reactive scene.
+
+The page therefore owns one local `transitionLocked` flag:
+
+- set it synchronously before Continue or choice submission;
+- return immediately if a submission arrives while it is already set;
+- bind it to Continue/choice `disabled` state;
+- after the synchronous progression update and Vue render, keep the control locked for a short `500ms` rapid-click guard before enabling the newly rendered action.
+
+This is intentionally page-local UX protection, not a domain debounce framework. The model remains deterministic and timing-free.
+
+The page test must submit twice without waiting for the guard to clear and prove only one scene advances, then advance fake timers and prove the next deliberate action is accepted.
+
 ### Transcript and Composer
 
-`MysteryTranscript.vue` is presentational. It renders chronological completed scenes and the active scene from chapter/history inputs.
+`MysteryTranscript.vue` receives `readonly MysteryTranscriptItem[]` and emits replay only. It does not reconstruct history or touch auth/persistence/progression.
 
-`MysteryChoiceComposer.vue` renders fixed buttons and emits one option ID. It owns no progression rules.
+`MysteryChoiceComposer.vue` renders fixed buttons and emits one option ID. It owns no progression rules. Its `disabled` prop includes session recovery and the page transition lock.
 
 The page renders:
 
@@ -357,6 +444,15 @@ The page renders:
 - audio replay alongside authored Japanese.
 
 No free text, drag-and-drop, typing animation, or branch map is included.
+
+## Existing-Test Updates
+
+Replacing the Learn placeholder changes existing repository expectations, so HPA-299 must update them deliberately:
+
+- `apps/vela-mobile/src/pages/StubPages.test.ts`: remove Learn from the parameterized `Coming soon` stub cases; `LearnPage.test.ts` becomes the owner of Learn behavior.
+- `apps/vela-mobile/src/router/routes.test.ts`: development root children become 9 and production/core children become 6; assert `learn/mystery-messenger` is present. Keep the existing `loadDefault()` loop so the new lazy page import is actually resolved.
+
+These are part of the feature change, not cleanup deferred to the final test run.
 
 ## Error Handling
 
@@ -372,21 +468,26 @@ No retry queue, telemetry framework, or recovery subsystem is introduced.
 
 ## Testing
 
-Focused automated coverage should include:
+Focused automated coverage includes:
 
 - pure message/choice/ending progression;
-- stale expected-scene action cannot skip a scene;
-- chapter validation failures;
-- valid chapter reachability;
+- stale `expectedSceneId` returns the same progress unchanged;
+- rapid page submission cannot skip a newly rendered message;
+- pure transcript projection for completed message, selected choice feedback, active choice, and ending;
+- chapter validation failures and valid reachability;
+- real chapter assertion that both choice options converge to `scene-04`;
 - local snapshot load/save/clear;
 - malformed and version-mismatched snapshots are discarded;
 - same-user resume and restart;
 - identity change clears in-memory state;
 - TTS request uses existing user ID, stable TTS ID, and authored text;
+- `ended`, `stopped`, and `interrupted` playback outcomes all settle to `idle`;
+- media-unavailable invalidates only the affected TTS identity;
 - audio failure is non-blocking;
 - Learn card navigation;
-- route/header metadata;
-- transcript and choice composer rendering.
+- existing stub-page expectations after Learn stops being a stub;
+- route counts/path/header metadata and lazy import resolution;
+- thin transcript/component rendering and replay emission.
 
 Final automated gate:
 
@@ -397,7 +498,15 @@ bun run --cwd apps/vela-mobile typecheck
 bun run --cwd apps/vela-mobile build
 ```
 
-Then manually complete the five-scene loop in an iOS Simulator, including leave/resume and restart. HPA-300 remains blocked until this manual acceptance succeeds.
+Then manually complete the five-scene loop in an iOS Simulator, including:
+
+- leave/resume;
+- restart;
+- rapid double-click/tap on Continue does not skip the following scene;
+- TTS playback reaches idle after natural completion and after interruption/backgrounding; and
+- no stuck `playing` UI remains after audio settles.
+
+HPA-300 remains blocked until this manual acceptance succeeds.
 
 ## Success Criteria
 
@@ -405,7 +514,9 @@ HPA-299 is successful when:
 
 - the signed-in learner can discover and enter the pilot from Learn;
 - all five scenes are playable through one choice to the ending;
-- TTS replay uses the existing authenticated path;
+- rapid repeated submission cannot skip a scene;
+- transcript reconstruction stays in a pure selector rather than an SFC;
+- TTS replay uses the existing authenticated path and settles cleanly for every existing playback outcome;
 - route re-entry and relaunch restore the same run;
 - restart starts fresh;
 - chapter-version mismatch resets stale local progress;
