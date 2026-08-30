@@ -3,7 +3,6 @@ import { flushPromises, mount } from '@vue/test-utils';
 import { Quasar, QLayout, QPageContainer } from 'quasar';
 import { defineComponent, type Component } from 'vue';
 import { createMemoryHistory, createRouter } from 'vue-router';
-import LearnPage from './LearnPage.vue';
 import ReviewPage from './ReviewPage.vue';
 import WordsPage from './WordsPage.vue';
 import MorePage from './MorePage.vue';
@@ -56,7 +55,6 @@ const mountPage = (Page: Component) => {
 };
 
 describe.each([
-  ['LearnPage', LearnPage, 'Learn'],
   ['ReviewPage', ReviewPage, 'Review'],
   ['WordsPage', WordsPage, 'Words'],
   ['MorePage', MorePage, 'More'],

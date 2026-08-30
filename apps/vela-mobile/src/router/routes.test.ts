@@ -31,13 +31,13 @@ describe('routes', () => {
     expect(await loadDefault(root?.component)).toBeDefined();
   });
 
-  it('has five core routes plus three development routes under the root layout', () => {
+  it('has six core routes plus three development routes under the root layout', () => {
     const root = routes.find((r) => r.path === '/');
-    expect(root?.children).toHaveLength(8);
+    expect(root?.children).toHaveLength(9);
   });
 
-  it('constructs production routes with only the five core children', () => {
-    expect(buildMobileChildRoutes([])).toHaveLength(5);
+  it('constructs production routes with only the six core children', () => {
+    expect(buildMobileChildRoutes([])).toHaveLength(6);
   });
 
   it('includes all expected child paths with resolvable components', async () => {
@@ -46,6 +46,7 @@ describe('routes', () => {
     expect(paths).toContain('');
     expect(paths).toContain('review');
     expect(paths).toContain('learn');
+    expect(paths).toContain('learn/mystery-messenger');
     expect(paths).toContain('words');
     expect(paths).toContain('more');
     expect(paths).toContain(IOS_DIAGNOSTIC_ROOT_PATH.slice(1));
