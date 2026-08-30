@@ -526,7 +526,7 @@ Also cover message/choice/ending UI, session recovery, save warning, inline audi
 
 - [ ] **Step 5: Implement the page-level transition lock**
 
-Keep timing out of `model.ts`.
+Keep timing out of `model.ts`. A `nextTick`-only unlock is not sufficient because the browser's second click is a later input event and can arrive after Vue's microtask flush.
 
 ```ts
 const RAPID_TRANSITION_GUARD_MS = 500;
