@@ -17,20 +17,29 @@ function progressAtScene03() {
 }
 
 describe('mystery messenger model', () => {
-  it('starts at the first scene with empty history', () => {
+  it('starts at startSceneId with chapter identity and empty history', () => {
     expect(createMysteryProgress(chapter)).toEqual({
+      chapterId: 'mystery-message-tomorrow-v1',
+      chapterVersion: 1,
       currentSceneId: 'scene-01',
       history: [],
       completed: false,
     });
   });
 
+  it('throws for a missing start scene', () => {
+    expect(() => createMysteryProgress({ ...chapter, startSceneId: 'scene-99' })).toThrow(
+      'mystery_scene_not_found',
+    );
+  });
+
   it('continues a message scene and appends a closed history entry', () => {
     const start = createMysteryProgress(chapter);
+    const next = continueMysteryMessage(chapter, start, 'scene-01');
 
-    expect(continueMysteryMessage(chapter, start, 'scene-01').history).toEqual([
-      { kind: 'message', sceneId: 'scene-01' },
-    ]);
+    expect(next.history).toEqual([{ kind: 'message', sceneId: 'scene-01' }]);
+    expect(next.chapterId).toBe('mystery-message-tomorrow-v1');
+    expect(next.chapterVersion).toBe(1);
   });
 
   it('returns the same progress for a stale originating scene', () => {
@@ -94,6 +103,8 @@ describe('mystery messenger model', () => {
     progress = continueMysteryMessage(chapter, progress, 'scene-04');
 
     expect(progress).toEqual({
+      chapterId: 'mystery-message-tomorrow-v1',
+      chapterVersion: 1,
       currentSceneId: 'scene-05',
       history: [
         { kind: 'message', sceneId: 'scene-01' },
@@ -129,7 +140,10 @@ describe('selectMysteryTranscript', () => {
 
     expect(selectMysteryTranscript(chapter, progress)[0]).toEqual({
       kind: 'message',
+      sceneId: 'scene-01',
+      speaker: 'mina',
       text: 'こんにちは。これは「あした」からのメッセージです。',
+      ttsId: 'mystery-message-tomorrow-v1-scene-01',
       active: false,
     });
   });
@@ -139,9 +153,23 @@ describe('selectMysteryTranscript', () => {
 
     expect(selectMysteryTranscript(chapter, progress)[2]).toEqual({
       kind: 'choice-result',
+      sceneId: 'scene-03',
+      speaker: 'mina',
+      prompt: 'どう返事をしますか？',
       selectedLabel: 'わかりました',
       feedback: '「わかりました」という短い返事が送られました。',
-      result: 'scene-04',
+      result: 'correct',
+      ttsId: 'mystery-message-tomorrow-v1-scene-03-prompt',
+    });
+  });
+
+  it('sources an incorrect result from the chosen option', () => {
+    const progress = chooseMysteryOption(chapter, progressAtScene03(), 'scene-03', 'hesitant');
+
+    expect(selectMysteryTranscript(chapter, progress)[2]).toMatchObject({
+      kind: 'choice-result',
+      selectedLabel: '少し待って…',
+      result: 'incorrect',
     });
   });
 
@@ -151,7 +179,10 @@ describe('selectMysteryTranscript', () => {
 
     expect(selectMysteryTranscript(chapter, progress).at(-1)).toEqual({
       kind: 'message',
+      sceneId: 'scene-02',
+      speaker: 'mina',
       text: 'あしたの朝7時、あなたはまだ知らない言葉と出会います。遅れないで来てください。',
+      ttsId: 'mystery-message-tomorrow-v1-scene-02',
       active: true,
     });
   });
@@ -161,11 +192,10 @@ describe('selectMysteryTranscript', () => {
 
     expect(selectMysteryTranscript(chapter, progress).at(-1)).toEqual({
       kind: 'choice-prompt',
+      sceneId: 'scene-03',
+      speaker: 'mina',
       prompt: 'どう返事をしますか？',
-      options: [
-        { id: 'understood', label: 'わかりました' },
-        { id: 'hesitant', label: '少し待って…' },
-      ],
+      ttsId: 'mystery-message-tomorrow-v1-scene-03-prompt',
     });
   });
 
@@ -176,7 +206,10 @@ describe('selectMysteryTranscript', () => {
 
     expect(selectMysteryTranscript(chapter, progress).at(-1)).toEqual({
       kind: 'ending',
+      sceneId: 'scene-05',
+      title: 'あしたの約束',
       text: '──あした、朝7時。ノートに新しい言葉が現れ、謎の相手との勉強が始まります。',
+      ttsId: 'mystery-message-tomorrow-v1-scene-05',
     });
   });
 
@@ -190,6 +223,11 @@ describe('selectMysteryTranscript', () => {
 });
 
 describe('MYSTERY_MESSENGER_VERTICAL_SLICE', () => {
+  it('pins the chapter version and start scene', () => {
+    expect(chapter.version).toBe(1);
+    expect(chapter.startSceneId).toBe('scene-01');
+  });
+
   it('authors exactly five scenes in the linear topology', () => {
     expect(chapter.scenes.map((scene) => scene.id)).toEqual([
       'scene-01',

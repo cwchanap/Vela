@@ -1,6 +1,9 @@
+export type MysterySpeaker = 'mina' | 'haru';
+
 export type MysteryMessageScene = {
   kind: 'message';
   id: string;
+  speaker: MysterySpeaker;
   text: string;
   ttsId: string;
   nextSceneId: string;
@@ -9,6 +12,7 @@ export type MysteryMessageScene = {
 export type MysteryChoiceOption = {
   id: string;
   label: string;
+  result: 'correct' | 'incorrect';
   feedback: string;
   nextSceneId: string;
 };
@@ -16,14 +20,16 @@ export type MysteryChoiceOption = {
 export type MysteryChoiceScene = {
   kind: 'choice';
   id: string;
+  speaker: MysterySpeaker;
   prompt: string;
   ttsId: string;
-  options: MysteryChoiceOption[];
+  options: readonly MysteryChoiceOption[];
 };
 
 export type MysteryEndingScene = {
   kind: 'ending';
   id: string;
+  title: string;
   text: string;
   ttsId: string;
 };
@@ -32,8 +38,10 @@ export type MysteryScene = MysteryMessageScene | MysteryChoiceScene | MysteryEnd
 
 export type MysteryChapter = {
   id: string;
+  version: number;
   title: string;
-  scenes: MysteryScene[];
+  startSceneId: string;
+  scenes: readonly MysteryScene[];
 };
 
 export type MysteryHistoryEntry =
@@ -41,16 +49,46 @@ export type MysteryHistoryEntry =
   | { kind: 'choice'; sceneId: string; selectedOptionId: string };
 
 export type MysteryProgress = {
+  chapterId: string;
+  chapterVersion: number;
   currentSceneId: string;
-  history: MysteryHistoryEntry[];
+  history: readonly MysteryHistoryEntry[];
   completed: boolean;
 };
 
 export type MysteryTranscriptItem =
-  | { kind: 'message'; text: string; active: boolean }
-  | { kind: 'choice-result'; selectedLabel: string; feedback: string; result: string }
-  | { kind: 'choice-prompt'; prompt: string; options: Array<{ id: string; label: string }> }
-  | { kind: 'ending'; text: string };
+  | {
+      kind: 'message';
+      sceneId: string;
+      speaker: MysterySpeaker;
+      text: string;
+      ttsId: string;
+      active: boolean;
+    }
+  | {
+      kind: 'choice-result';
+      sceneId: string;
+      speaker: MysterySpeaker;
+      prompt: string;
+      selectedLabel: string;
+      feedback: string;
+      result: 'correct' | 'incorrect';
+      ttsId: string;
+    }
+  | {
+      kind: 'choice-prompt';
+      sceneId: string;
+      speaker: MysterySpeaker;
+      prompt: string;
+      ttsId: string;
+    }
+  | {
+      kind: 'ending';
+      sceneId: string;
+      title: string;
+      text: string;
+      ttsId: string;
+    };
 
 export function getMysteryScene(chapter: MysteryChapter, sceneId: string): MysteryScene {
   const scene = chapter.scenes.find((candidate) => candidate.id === sceneId);
@@ -61,11 +99,14 @@ export function getMysteryScene(chapter: MysteryChapter, sceneId: string): Myste
 }
 
 export function createMysteryProgress(chapter: MysteryChapter): MysteryProgress {
-  const firstScene = chapter.scenes[0];
-  if (!firstScene) {
-    throw new Error('mystery_scene_not_found');
-  }
-  return { currentSceneId: firstScene.id, history: [], completed: false };
+  getMysteryScene(chapter, chapter.startSceneId);
+  return {
+    chapterId: chapter.id,
+    chapterVersion: chapter.version,
+    currentSceneId: chapter.startSceneId,
+    history: [],
+    completed: false,
+  };
 }
 
 export function restartMysteryProgress(chapter: MysteryChapter): MysteryProgress {
@@ -85,6 +126,7 @@ export function continueMysteryMessage(
   }
   const next = getMysteryScene(chapter, scene.nextSceneId);
   return {
+    ...progress,
     currentSceneId: next.id,
     history: [...progress.history, { kind: 'message', sceneId: scene.id }],
     completed: next.kind === 'ending',
@@ -109,6 +151,7 @@ export function chooseMysteryOption(
   }
   const next = getMysteryScene(chapter, option.nextSceneId);
   return {
+    ...progress,
     currentSceneId: next.id,
     history: [
       ...progress.history,
@@ -129,7 +172,14 @@ export function selectMysteryTranscript(
         if (scene.kind !== 'message') {
           throw new Error('mystery_invalid_transition');
         }
-        return { kind: 'message', text: scene.text, active: false };
+        return {
+          kind: 'message',
+          sceneId: scene.id,
+          speaker: scene.speaker,
+          text: scene.text,
+          ttsId: scene.ttsId,
+          active: false,
+        };
       }
       case 'choice': {
         const scene = getMysteryScene(chapter, entry.sceneId);
@@ -142,9 +192,13 @@ export function selectMysteryTranscript(
         }
         return {
           kind: 'choice-result',
+          sceneId: scene.id,
+          speaker: scene.speaker,
+          prompt: scene.prompt,
           selectedLabel: option.label,
           feedback: option.feedback,
-          result: option.nextSceneId,
+          result: option.result,
+          ttsId: scene.ttsId,
         };
       }
     }
@@ -152,15 +206,30 @@ export function selectMysteryTranscript(
 
   const current = getMysteryScene(chapter, progress.currentSceneId);
   if (current.kind === 'message') {
-    items.push({ kind: 'message', text: current.text, active: true });
+    items.push({
+      kind: 'message',
+      sceneId: current.id,
+      speaker: current.speaker,
+      text: current.text,
+      ttsId: current.ttsId,
+      active: true,
+    });
   } else if (current.kind === 'choice') {
     items.push({
       kind: 'choice-prompt',
+      sceneId: current.id,
+      speaker: current.speaker,
       prompt: current.prompt,
-      options: current.options.map((option) => ({ id: option.id, label: option.label })),
+      ttsId: current.ttsId,
     });
   } else {
-    items.push({ kind: 'ending', text: current.text });
+    items.push({
+      kind: 'ending',
+      sceneId: current.id,
+      title: current.title,
+      text: current.text,
+      ttsId: current.ttsId,
+    });
   }
   return items;
 }
