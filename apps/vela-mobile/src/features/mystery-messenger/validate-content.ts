@@ -35,7 +35,7 @@ export function validateMysteryChapter(chapter: MysteryChapter): MysteryContentI
         });
       }
     } else if (scene.kind === 'choice') {
-      if (scene.options.length === 0) {
+      if (scene.options.length < 2) {
         issues.push({ code: 'empty_choice_options', sceneId: scene.id });
       }
       const optionIds = new Set<string>();
@@ -66,12 +66,11 @@ export function validateMysteryChapter(chapter: MysteryChapter): MysteryContentI
     issues.push({ code: 'missing_ending' });
   }
 
-  const start = chapter.scenes[0];
-  if (!start) {
+  if (!sceneMap.has(chapter.startSceneId)) {
     issues.push({ code: 'missing_start_scene' });
   } else if (endingIds.length > 0) {
     const visited = new Set<string>();
-    const stack = [start.id];
+    const stack = [chapter.startSceneId];
     while (stack.length > 0) {
       const sceneId = stack.pop()!;
       if (visited.has(sceneId)) continue;
