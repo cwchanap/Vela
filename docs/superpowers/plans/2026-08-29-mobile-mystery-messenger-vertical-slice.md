@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Ship a five-scene, authenticated Mystery Messenger loop in Vela Mobile with one choice, local resume/restart, and existing TTS/audio playback.
+**Goal:** Ship a five-scene, authenticated Mystery Messenger loop in Vela Mobile with one converging choice, local resume/restart, and existing TTS/audio playback.
 
-**Architecture:** Keep the feature entirely under `apps/vela-mobile/src/features/mystery-messenger`. Use a closed local scene union, pure transitions and authored-content validation, one user/chapter `localStorage` snapshot, one feature composable for auth/persistence orchestration, and a thin adapter over the existing `MobileTtsService` + `HtmlAudioPlayer`. Reuse existing mobile routing/header/safe-area/auth boundaries unchanged.
+**Architecture:** Keep the feature entirely under `apps/vela-mobile/src/features/mystery-messenger`. Use a closed local scene union, pure progression + transcript projection + authored-content validation, one user/chapter `localStorage` snapshot, one feature composable for auth/persistence orchestration, and a thin adapter over the existing `MobileTtsService` + injected `MobileAudioPlayer`. Reuse existing mobile routing/header/safe-area/auth boundaries unchanged.
 
 **Tech Stack:** Vue 3, Quasar 2, TypeScript, Vue Router, Vitest, `@vue/test-utils`, existing Vela Mobile auth/TTS/audio services.
 
@@ -12,14 +12,14 @@
 
 ## Global Constraints
 
-- One ticket and one PR: HPA-299 implementation stays on this branch/PR.
+- One ticket and one PR: HPA-299 implementation stays on PR #62.
 - Keep all new feature code under `apps/vela-mobile/src/features/mystery-messenger`.
 - Only `message`, `choice`, and `ending` scene variants in this ticket.
 - Exactly one five-scene authored slice with one converging choice and one ending.
 - No backend/API/CDK/DynamoDB/shared narrative package changes.
 - No Pinia, generic story engine, branching framework, response builder, missed-phrase recap, or SRS mutation.
 - Use `localStorage`; chapter-version mismatch discards the pilot save with no migration.
-- Reuse existing `MobileTtsService` and `HtmlAudioPlayer`; audio failure must never block story progression.
+- Reuse existing `MobileTtsService` and `MobileAudioPlayer`; audio failure must never block story progression.
 - HPA-300 remains blocked until this slice is manually accepted in an iOS Simulator.
 
 ---
@@ -53,13 +53,14 @@ apps/vela-mobile/src/pages/LearnPage.test.ts
 
 ```text
 apps/vela-mobile/src/pages/LearnPage.vue
+apps/vela-mobile/src/pages/StubPages.test.ts
 apps/vela-mobile/src/router/diagnostic-routes.ts
 apps/vela-mobile/src/router/routes.test.ts
 ```
 
 ---
 
-### Task 1: Add the closed scene model, progression rules, and five-scene content
+### Task 1: Add the closed scene model, progression, transcript selector, and five-scene content
 
 **Files:**
 - Create: `apps/vela-mobile/src/features/mystery-messenger/model.ts`
@@ -67,12 +68,10 @@ apps/vela-mobile/src/router/routes.test.ts
 - Create: `apps/vela-mobile/src/features/mystery-messenger/content.ts`
 
 **Interfaces:**
-- Produces: `MysteryChapter`, `MysteryScene`, `MysteryProgress`, `createMysteryProgress`, `continueMysteryMessage`, `chooseMysteryOption`, `restartMysteryProgress`, `getMysteryScene`, `MYSTERY_MESSENGER_VERTICAL_SLICE`.
-- Later tasks must pass the originating `expectedSceneId` into transitions so stale/double taps cannot skip scenes.
+- Produces: `MysteryChapter`, `MysteryScene`, `MysteryProgress`, `MysteryTranscriptItem`, `createMysteryProgress`, `continueMysteryMessage`, `chooseMysteryOption`, `restartMysteryProgress`, `getMysteryScene`, `selectMysteryTranscript`, `MYSTERY_MESSENGER_VERTICAL_SLICE`.
+- Stale `expectedSceneId` is an idempotent no-op. The page-level rapid-transition lock in Task 5 owns accidental double-click/tap prevention.
 
 - [ ] **Step 1: Write failing progression tests**
-
-Cover new-run creation, one message transition, one choice transition, ending completion, restart, invalid option, and stale expected-scene behavior.
 
 ```ts
 import { describe, expect, it } from 'vitest';
@@ -80,32 +79,42 @@ import {
   chooseMysteryOption,
   continueMysteryMessage,
   createMysteryProgress,
+  selectMysteryTranscript,
 } from './model';
 import { MYSTERY_MESSENGER_VERTICAL_SLICE as chapter } from './content';
 
 describe('mystery progression', () => {
-  it('advances one message exactly once', () => {
+  it('advances one message', () => {
     const start = createMysteryProgress(chapter);
     const next = continueMysteryMessage(chapter, start, start.currentSceneId);
 
     expect(next.history).toEqual([{ sceneId: start.currentSceneId }]);
-    expect(next.currentSceneId).not.toBe(start.currentSceneId);
+    expect(next.currentSceneId).toBe('scene-02');
   });
 
-  it('rejects a stale second tap instead of skipping a scene', () => {
+  it('treats a stale originating scene as an idempotent no-op', () => {
     const start = createMysteryProgress(chapter);
     const first = continueMysteryMessage(chapter, start, start.currentSceneId);
+    const stale = continueMysteryMessage(chapter, first, start.currentSceneId);
 
-    expect(() =>
-      continueMysteryMessage(chapter, first, start.currentSceneId),
-    ).toThrow('mystery_stale_scene_action');
+    expect(stale).toBe(first);
+  });
+
+  it('checks staleness before validating the newer scene kind', () => {
+    const start = createMysteryProgress(chapter);
+    const afterFirst = continueMysteryMessage(chapter, start, 'scene-01');
+    const afterSecond = continueMysteryMessage(chapter, afterFirst, 'scene-02');
+
+    expect(
+      chooseMysteryOption(chapter, afterSecond, 'scene-02', 'option-that-belongs-to-old-scene'),
+    ).toBe(afterSecond);
   });
 });
 ```
 
-- [ ] **Step 2: Run the focused test and confirm failure**
+Also cover valid choice progression, invalid current-scene transition, unknown option, ending completion, and restart.
 
-Run:
+- [ ] **Step 2: Run the focused test and confirm failure**
 
 ```bash
 bun run --cwd apps/vela-mobile test:unit -- src/features/mystery-messenger/model.test.ts
@@ -115,30 +124,45 @@ Expected: FAIL because the feature modules do not exist.
 
 - [ ] **Step 3: Implement the closed model and pure transitions**
 
-Use the exact discriminated union from the design. Implement scene lookup with a simple `find` or local map helper. Transition rules:
+Use the exact discriminated union from the spec. In both transitions, stale detection is first:
 
 ```ts
-function assertExpectedScene(progress: MysteryProgress, expectedSceneId: string): void {
-  if (progress.currentSceneId !== expectedSceneId) {
-    throw new Error('mystery_stale_scene_action');
-  }
+if (progress.currentSceneId !== expectedSceneId) {
+  return progress;
 }
 ```
 
-`continueMysteryMessage()` must require `kind === 'message'`, append one history entry, move to the next scene, and mark completion when the destination is `ending`.
-
-`chooseMysteryOption()` must require `kind === 'choice'`, resolve a real option ID, append `{ sceneId, selectedOptionId }`, move to the option destination, and mark completion when that destination is `ending`.
-
-Use fixed feature errors:
+Then validate the actual current scene kind and option. Use fixed errors only for real current-state defects:
 
 ```text
 mystery_scene_not_found
 mystery_invalid_transition
 mystery_option_not_found
-mystery_stale_scene_action
 ```
 
-- [ ] **Step 4: Author the five-scene TypeScript constant**
+Do not add `mystery_stale_scene_action`; stale inputs are normal late UI events and return unchanged progress.
+
+- [ ] **Step 4: Add transcript projection tests before the selector**
+
+Build progress fixtures and assert the pure selector returns:
+
+```text
+completed message -> kind=message, active=false
+completed choice -> kind=choice-result with selectedLabel + feedback
+current unanswered choice -> kind=choice-prompt
+current message -> kind=message, active=true
+current ending -> kind=ending
+```
+
+Assert the current scene appears exactly once after all completed history entries.
+
+- [ ] **Step 5: Implement `selectMysteryTranscript()` in `model.ts`**
+
+Use the closed `MysteryTranscriptItem` union from the spec. Resolve each history entry through `getMysteryScene()`. For choice history, require `selectedOptionId` and map the selected option into `selectedLabel`, `feedback`, and `result`. Append the current scene once after history.
+
+Do not move this reconstruction into `MysteryTranscript.vue`.
+
+- [ ] **Step 6: Author the five-scene TypeScript constant**
 
 Use this exact topology:
 
@@ -157,9 +181,19 @@ mystery-message-tomorrow-v1-scene-04
 mystery-message-tomorrow-v1-scene-05
 ```
 
-Keep Japanese beginner/N5-adjacent and make the choice comprehension-based rather than trivia-based.
+Pin convergence directly in `model.test.ts`:
 
-- [ ] **Step 5: Run focused tests**
+```ts
+const choice = chapter.scenes.find((scene) => scene.id === 'scene-03');
+expect(choice?.kind).toBe('choice');
+if (choice?.kind === 'choice') {
+  expect(new Set(choice.options.map((option) => option.nextSceneId))).toEqual(new Set(['scene-04']));
+}
+```
+
+Do not add a generic branching validator code.
+
+- [ ] **Step 7: Run focused tests**
 
 ```bash
 bun run --cwd apps/vela-mobile test:unit -- src/features/mystery-messenger/model.test.ts
@@ -167,7 +201,7 @@ bun run --cwd apps/vela-mobile test:unit -- src/features/mystery-messenger/model
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 8: Commit**
 
 ```bash
 git add apps/vela-mobile/src/features/mystery-messenger/model.ts \
@@ -192,50 +226,33 @@ git commit -m "feat(mobile): add mystery messenger progression"
 
 - [ ] **Step 1: Write failing content-validator tests**
 
-Include one passing real-chapter test and explicit failures for duplicate scene ID, dangling reference, missing ending, unreachable ending, duplicate choice option ID, and fewer than two choice options.
+Cover the real chapter success plus duplicate scene ID, dangling message/choice references, missing start, missing ending, unreachable ending, duplicate choice option ID, and fewer than two choice options.
 
 ```ts
 it('accepts the authored vertical slice', () => {
   expect(validateMysteryChapter(MYSTERY_MESSENGER_VERTICAL_SLICE)).toEqual([]);
 });
-
-it('reports an unreachable ending', () => {
-  const chapter = {
-    id: 'test',
-    version: 1,
-    title: 'Test',
-    startSceneId: 'a',
-    scenes: [
-      { id: 'a', kind: 'message', speaker: 'mina', text: 'A', ttsId: 'a', nextSceneId: 'a' },
-      { id: 'end', kind: 'ending', title: 'End', text: '終わり', ttsId: 'end' },
-    ],
-  } as const;
-
-  expect(validateMysteryChapter(chapter)).toContainEqual({
-    code: 'unreachable_ending',
-    sceneId: 'end',
-  });
-});
 ```
 
-- [ ] **Step 2: Implement the validator with `Map` + DFS/BFS**
+- [ ] **Step 2: Implement validator with `Map` + DFS/BFS**
 
-Do not add dependencies. Build a scene map, collect structural issues, then traverse from `startSceneId` only when the start exists. A choice contributes all option destinations to traversal.
+No dependencies. Build a scene map, collect structural issues, then traverse from `startSceneId` when it exists. A choice contributes all option destinations to traversal.
+
+Supported codes remain exactly:
+
+```text
+duplicate_scene_id
+missing_start_scene
+dangling_scene_reference
+missing_ending
+unreachable_ending
+duplicate_choice_id
+empty_choice_options
+```
 
 - [ ] **Step 3: Write failing storage tests with an in-memory Storage-like fake**
 
-Cover:
-
-- user/chapter key encoding;
-- missing load;
-- round-trip save/load;
-- invalid JSON deletion;
-- chapter-version mismatch deletion;
-- invalid current scene deletion;
-- invalid history scene/option deletion;
-- storage exceptions returning `false` rather than throwing.
-
-Use a small fake:
+Cover user/chapter key encoding, missing load, round trip, invalid JSON deletion, chapter-version mismatch deletion, invalid current/history/option references, completion mismatch, and storage exceptions.
 
 ```ts
 const values = new Map<string, string>();
@@ -248,7 +265,7 @@ const fakeStorage = {
 
 - [ ] **Step 4: Implement the storage adapter**
 
-`load()` must parse unknown JSON defensively and validate only the fields HPA-299 stores. Reject/delete when:
+Reject/delete when:
 
 ```text
 chapterId !== chapter.id
@@ -259,9 +276,9 @@ selectedOptionId is absent from the referenced choice scene
 completed disagrees with whether current scene is ending
 ```
 
-On `getItem`, `setItem`, or `removeItem` exception, catch and return the documented safe value (`null` for load, `false` for save/clear).
+On browser-storage exceptions: `load -> null`, `save/clear -> false`. Do not throw into gameplay.
 
-- [ ] **Step 5: Run focused validator/storage tests**
+- [ ] **Step 5: Run focused tests**
 
 ```bash
 bun run --cwd apps/vela-mobile test:unit -- \
@@ -293,12 +310,11 @@ git commit -m "feat(mobile): persist and validate mystery runs"
 - Consumes: `MOBILE_AUTH_KEY`, `selectMobileFeatureSessionStatus`, chapter model functions, `MysteryProgressStorage`.
 - Produces: `useMysteryMessenger()` controller consumed by the page.
 
-Use this public shape:
-
 ```ts
 export type MysteryMessengerController = {
   progress: Readonly<Ref<MysteryProgress | null>>;
   currentScene: ComputedRef<MysteryScene | null>;
+  transcript: ComputedRef<readonly MysteryTranscriptItem[]>;
   sessionStatus: ComputedRef<MobileFeatureSessionStatus>;
   persistenceWarning: Readonly<Ref<boolean>>;
   continueMessage(expectedSceneId: string): void;
@@ -309,22 +325,11 @@ export type MysteryMessengerController = {
 
 - [ ] **Step 1: Write failing orchestration tests**
 
-Provide a fake auth state and fake `MysteryProgressStorage`. Cover:
-
-- usable user loads an existing run;
-- usable user with no run gets `createMysteryProgress()` and saves it;
-- transition saves new progress;
-- storage failure sets `persistenceWarning` but keeps in-memory progress;
-- restart clears then saves fresh progress;
-- recovering same-user state retains current progress but mutations are ignored;
-- user identity change discards old in-memory progress and loads the new user's snapshot;
-- stale originating scene ID cannot advance twice.
+Cover usable restore, new-run save, transition save, storage-warning fallback, restart clear+save, recovering same-user mutation refusal, identity swap, and stale transition returning unchanged state without persistence churn.
 
 - [ ] **Step 2: Implement the composable**
 
 Use `computed` + `watch` over `selectMobileFeatureSessionStatus(coordinator.state)`.
-
-Keep initialization per current usable user in one helper:
 
 ```ts
 function loadForUser(userId: string): void {
@@ -338,18 +343,17 @@ function loadForUser(userId: string): void {
 }
 ```
 
-Mutation guards must require all of:
+For mutations require usable same-user ownership and non-null progress. Call the pure transition with `expectedSceneId`. If it returns the exact same progress object, do not save or replace the ref.
 
-```text
-sessionStatus.kind === 'usable'
-activeUserId === sessionStatus.userId
-progress !== null
-progress.currentSceneId === expectedSceneId
+Expose:
+
+```ts
+const transcript = computed(() =>
+  progress.value ? selectMysteryTranscript(chapter, progress.value) : [],
+);
 ```
 
-If the last equality fails, return without mutation. The pure model still throws if called directly with stale data; the composable turns rapid stale UI actions into no-ops.
-
-- [ ] **Step 3: Run focused test**
+- [ ] **Step 3: Run focused tests**
 
 ```bash
 bun run --cwd apps/vela-mobile test:unit -- src/features/mystery-messenger/useMysteryMessenger.test.ts
@@ -367,17 +371,15 @@ git commit -m "feat(mobile): orchestrate mystery messenger runs"
 
 ---
 
-### Task 4: Reuse authenticated TTS and existing HTML audio playback
+### Task 4: Reuse authenticated TTS and the existing `MobileAudioPlayer` contract
 
 **Files:**
 - Create: `apps/vela-mobile/src/features/mystery-messenger/useMysteryAudio.ts`
 - Create: `apps/vela-mobile/src/features/mystery-messenger/useMysteryAudio.test.ts`
 
 **Interfaces:**
-- Consumes: `MOBILE_AUTH_KEY`, `MOBILE_TTS_SERVICE_KEY`, `HtmlAudioPlayer`, `MobileTtsService`.
-- Produces: `MysteryAudioController`.
-
-Use:
+- Consumes: `MOBILE_AUTH_KEY`, `MOBILE_TTS_SERVICE_KEY`, caller-supplied `MobileAudioPlayer`, `MobileTtsService`.
+- Produces: `useMysteryAudio(audioPlayer: MobileAudioPlayer): MysteryAudioController`.
 
 ```ts
 export type MysteryAudioState =
@@ -385,44 +387,54 @@ export type MysteryAudioState =
   | { kind: 'preparing'; sceneId: string }
   | { kind: 'playing'; sceneId: string }
   | { kind: 'error'; sceneId: string; message: string };
-
-export type MysteryAudioController = {
-  state: Readonly<Ref<MysteryAudioState>>;
-  play(scene: MysteryMessageScene | MysteryChoiceScene | MysteryEndingScene): Promise<void>;
-  dispose(): void;
-};
 ```
 
-- [ ] **Step 1: Write failing audio-controller tests**
+- [ ] **Step 1: Write failing controller tests**
 
-Inject fakes through an internal factory option rather than mocking DOM audio globally. Test:
+Pass a fake `MobileAudioPlayer` directly. Cover:
 
-- usable user calls `preparePronunciation()` with the user's ID, scene TTS ID, and exact authored Japanese;
-- prepared URL is passed to the audio player;
-- TTS failure produces `{ kind: 'error' }` and does not throw to the page;
-- media-unavailable invalidates only the scene pronunciation identity;
+- usable user prepares with `userId`, exact `ttsId`, exact authored Japanese;
+- prepared URL goes to `audioPlayer.play()`;
+- `finished -> { kind: 'ended' }` settles state to `idle`;
+- `finished -> { kind: 'stopped', reason: 'user' }` settles state to `idle`;
+- `finished -> { kind: 'interrupted', reason: 'external' }` settles state to `idle`;
+- TTS failure sets `error` and does not throw to page;
+- rejected `MobileAudioError('media_unavailable')` invalidates only `(userId, scene.ttsId)` and sets error copy;
 - unavailable/recovering auth refuses playback;
 - `dispose()` stops/disposes owned playback;
 - identity change prevents an old async preparation from starting playback.
 
-- [ ] **Step 2: Implement a thin controller**
+Use a deferred `finished` promise in the fake so settlement is explicit.
 
-Do not duplicate the diagnostic controller's counters/retry state machine. HPA-299 only needs explicit-tap prepare/play plus simple error state.
+- [ ] **Step 2: Implement the thin controller**
 
-When playback fails with `MobileAudioError('media_unavailable')`:
+Signature:
 
 ```ts
-ttsService.invalidatePronunciation(userId, scene.ttsId);
-state.value = {
-  kind: 'error',
-  sceneId: scene.id,
-  message: 'Audio expired. Tap replay to try again.',
-};
+export function useMysteryAudio(audioPlayer: MobileAudioPlayer): MysteryAudioController
 ```
 
-Do not automatically prepare a second URL.
+Do not instantiate `HtmlAudioPlayer` inside the composable and do not copy the pronunciation diagnostic's counters/retry/interruption state machine.
 
-- [ ] **Step 3: Run focused test**
+After successful prepare:
+
+```ts
+const handle = audioPlayer.play(pronunciation.audioUrl);
+state.value = { kind: 'playing', sceneId: scene.id };
+
+try {
+  await handle.finished;
+  if (operationIsStillCurrent) {
+    state.value = { kind: 'idle' };
+  }
+} catch (error) {
+  // map MobileAudioError; media_unavailable also invalidates the one TTS identity
+}
+```
+
+All three resolved outcome kinds map to `idle`. HPA-299 does not expose an interrupted UI state.
+
+- [ ] **Step 3: Run focused tests**
 
 ```bash
 bun run --cwd apps/vela-mobile test:unit -- src/features/mystery-messenger/useMysteryAudio.test.ts
@@ -440,7 +452,7 @@ git commit -m "feat(mobile): add mystery messenger audio replay"
 
 ---
 
-### Task 5: Build transcript, choice composer, and playable page
+### Task 5: Build the dumb transcript UI, choice composer, and rapid-input-safe page
 
 **Files:**
 - Create: `apps/vela-mobile/src/features/mystery-messenger/components/MysteryTranscript.vue`
@@ -451,36 +463,34 @@ git commit -m "feat(mobile): add mystery messenger audio replay"
 - Create: `apps/vela-mobile/src/features/mystery-messenger/MysteryMessengerPage.test.ts`
 
 **Interfaces:**
-- Consumes: `useMysteryMessenger`, `useMysteryAudio`, chapter content.
-- Produces: one authenticated messenger screen rendered inside existing `MobileLayout`.
+- Consumes: `useMysteryMessenger`, `useMysteryAudio`, `HtmlAudioPlayer`, `MysteryTranscriptItem[]`.
+- Produces: one authenticated messenger screen inside the existing `MobileLayout`.
 
-- [ ] **Step 1: Write failing transcript tests**
+- [ ] **Step 1: Write thin transcript component tests**
 
-Mount with a small chapter/progress fixture and assert:
+Pass already-selected view items. Assert order, Japanese `lang="ja"`, selected-choice feedback rendering, and replay emission.
 
-- completed message appears once;
-- completed choice renders selected answer plus feedback;
-- current scene appears after history;
-- Japanese text has `lang="ja"`;
-- replay emits the requested scene ID rather than performing service work directly.
-
-- [ ] **Step 2: Implement `MysteryTranscript.vue` as presentation only**
-
-Use props for chapter/progress/current scene and emit:
+Public contract:
 
 ```ts
-const emit = defineEmits<{
+defineProps<{
+  items: readonly MysteryTranscriptItem[];
+}>();
+
+defineEmits<{
   replay: [sceneId: string];
 }>();
 ```
 
-No auth, persistence, or progression mutation inside the component.
+Do not pass `chapter` + `progress` and reconstruct history in the SFC.
 
-- [ ] **Step 3: Write failing choice-composer tests**
+- [ ] **Step 2: Implement `MysteryTranscript.vue`**
 
-Assert each option renders as a Quasar button, emits once per click, and disables when `disabled` is true.
+Use a `v-for` over the closed view-item union and switch only on `item.kind`. No auth, persistence, progression, or history lookup.
 
-Public contract:
+- [ ] **Step 3: Write and implement choice-composer tests**
+
+Contract:
 
 ```ts
 defineProps<{
@@ -493,48 +503,70 @@ defineEmits<{
 }>();
 ```
 
-- [ ] **Step 4: Implement `MysteryChoiceComposer.vue`**
+Assert each option renders as a Quasar button, emits its ID, and does not emit while disabled.
 
-Use fixed buttons with minimum mobile touch target sizing. Do not add answer validation or feedback state here.
+- [ ] **Step 4: Write failing page tests including the real rapid-submit regression**
 
-- [ ] **Step 5: Write failing page tests**
-
-Mock the two composables and cover:
-
-- message scene renders Continue;
-- choice scene renders composer;
-- ending renders Restart;
-- recovering session disables progression;
-- persistence warning is visible but non-blocking;
-- audio error is inline and progression stays enabled;
-- a captured message/choice action passes the scene ID visible at render time.
-
-- [ ] **Step 6: Implement the page**
-
-The page should:
+Mock the two composables and use fake timers. Cover message/choice/ending UI, session recovery, save warning, inline audio error, and this sequence:
 
 ```ts
-const messenger = useMysteryMessenger(MYSTERY_MESSENGER_VERTICAL_SLICE);
-const audio = useMysteryAudio();
+vi.useFakeTimers();
+
+// first visible message
+await wrapper.get('[data-testid="mystery-continue"]').trigger('click');
+// invoke the handler again before the 500ms transition guard clears
+await wrapper.get('[data-testid="mystery-continue"]').trigger('click');
+
+expect(continueMessage).toHaveBeenCalledTimes(1);
+
+await vi.advanceTimersByTimeAsync(500);
+// the next deliberate action can now proceed
 ```
 
-For Continue:
+The test must prove two rapid submissions cannot advance two messages. Do not rely on `expectedSceneId` alone.
+
+- [ ] **Step 5: Implement the page-level transition lock**
+
+Keep timing out of `model.ts`.
 
 ```ts
-const sceneId = currentScene.value.id;
-messenger.continueMessage(sceneId);
+const RAPID_TRANSITION_GUARD_MS = 500;
+const transitionLocked = ref(false);
+let transitionUnlockTimer: ReturnType<typeof setTimeout> | null = null;
+
+function lockTransition(): boolean {
+  if (transitionLocked.value) return false;
+  transitionLocked.value = true;
+  if (transitionUnlockTimer) clearTimeout(transitionUnlockTimer);
+  transitionUnlockTimer = setTimeout(() => {
+    transitionLocked.value = false;
+    transitionUnlockTimer = null;
+  }, RAPID_TRANSITION_GUARD_MS);
+  return true;
+}
 ```
 
-For a choice:
+Continue handler:
 
 ```ts
-const sceneId = currentScene.value.id;
-messenger.chooseOption(sceneId, optionId);
+function continueCurrentMessage(): void {
+  const scene = messenger.currentScene.value;
+  if (!scene || scene.kind !== 'message' || !lockTransition()) return;
+  messenger.continueMessage(scene.id);
+}
 ```
 
-This preserves the originating scene identity through rapid taps.
+Choice handler follows the same lock before passing the visible scene ID and option ID. Bind `transitionLocked` into Continue/choice disabled state. Clear the timer on unmount.
 
-Dispose audio on unmount.
+- [ ] **Step 6: Wire audio through an explicit player dependency**
+
+The page creates one concrete player:
+
+```ts
+const audio = useMysteryAudio(new HtmlAudioPlayer());
+```
+
+Replay resolves the scene by ID from the chapter and calls `audio.play(scene)`. Dispose audio on unmount.
 
 - [ ] **Step 7: Run component/page tests**
 
@@ -558,22 +590,23 @@ git commit -m "feat(mobile): render mystery messenger loop"
 
 ---
 
-### Task 6: Wire Learn entry, authenticated route, full gates, and Simulator acceptance
+### Task 6: Wire Learn entry, authenticated route, existing regression tests, full gates, and Simulator acceptance
 
 **Files:**
 - Modify: `apps/vela-mobile/src/pages/LearnPage.vue`
 - Create: `apps/vela-mobile/src/pages/LearnPage.test.ts`
+- Modify: `apps/vela-mobile/src/pages/StubPages.test.ts`
 - Modify: `apps/vela-mobile/src/router/diagnostic-routes.ts`
 - Modify: `apps/vela-mobile/src/router/routes.test.ts`
-- Update as needed: HPA-299 and the same draft PR with validation evidence.
+- Update: HPA-299 and PR #62 with final validation evidence.
 
 **Interfaces:**
-- Consumes: existing `pushMobileRoute`, core authenticated child-route tree, mobile header metadata.
+- Consumes: existing `pushMobileRoute`, `coreRoutes`, mobile header metadata.
 - Produces: discoverable activity and final acceptance evidence.
 
 - [ ] **Step 1: Write failing Learn-page test**
 
-Mount `LearnPage.vue` with a router stub and assert one direct card exists with:
+Assert:
 
 ```text
 Mystery Messenger
@@ -581,22 +614,48 @@ The Message That Arrived Tomorrow
 Play pilot
 ```
 
-Clicking the button must call the existing mobile navigation helper for `/learn/mystery-messenger`.
+and clicking uses `pushMobileRoute(router, '/learn/mystery-messenger')`. Do not add Start/Resume persistence inspection.
 
-Do not test `Start`/`Resume` copy because Learn intentionally does not read persistence.
+- [ ] **Step 2: Update the existing stub-page test before replacing Learn**
 
-- [ ] **Step 2: Replace the Learn placeholder with the direct pilot card**
+In `apps/vela-mobile/src/pages/StubPages.test.ts`, remove `LearnPage` from the parameterized stub cases that require `Coming soon`. Leave Review/Words/More under the existing placeholder assertions. `LearnPage.test.ts` now owns Learn behavior.
 
-Keep the page simple. No generic activity array or registry.
+Run:
 
-- [ ] **Step 3: Write failing route metadata test**
+```bash
+bun run --cwd apps/vela-mobile test:unit -- src/pages/StubPages.test.ts src/pages/LearnPage.test.ts
+```
 
-Assert the core route contains:
+Expected before implementation: Learn test FAIL; remaining stub tests PASS.
+
+- [ ] **Step 3: Replace the Learn placeholder with one direct pilot card**
+
+Keep the page literal and small; no activity registry or generic card catalog.
+
+- [ ] **Step 4: Update route tests first**
+
+Change the hard-coded expectations in `apps/vela-mobile/src/router/routes.test.ts`:
+
+```ts
+expect(root?.children).toHaveLength(9); // six core + three dev diagnostics
+expect(buildMobileChildRoutes([])).toHaveLength(6); // production/core
+```
+
+Add:
+
+```ts
+expect(paths).toContain('learn/mystery-messenger');
+```
+
+Keep the existing `Promise.all(...loadDefault(c.component))` loop unchanged so the new lazy page import is resolved and a missing/broken page fails here.
+
+- [ ] **Step 5: Add the route to existing `coreRoutes`**
 
 ```ts
 {
   path: 'learn/mystery-messenger',
   name: 'mysteryMessenger',
+  component: () => import('src/features/mystery-messenger/MysteryMessengerPage.vue'),
   meta: {
     mobileHeader: {
       title: 'Mystery Messenger',
@@ -606,21 +665,21 @@ Assert the core route contains:
 }
 ```
 
-Also assert it does **not** set `bypassMobileAuth`.
+Do not set `bypassMobileAuth` and do not create a second router module.
 
-- [ ] **Step 4: Add the route to the existing authenticated core routes**
-
-Do not create a second router module just for one feature route.
-
-- [ ] **Step 5: Run all HPA-299 focused tests**
+- [ ] **Step 6: Run all focused tests**
 
 ```bash
-bun run --cwd apps/vela-mobile test:unit -- src/features/mystery-messenger src/pages/LearnPage.test.ts src/router/routes.test.ts
+bun run --cwd apps/vela-mobile test:unit -- \
+  src/features/mystery-messenger \
+  src/pages/LearnPage.test.ts \
+  src/pages/StubPages.test.ts \
+  src/router/routes.test.ts
 ```
 
 Expected: PASS.
 
-- [ ] **Step 6: Run the full mobile automated gate**
+- [ ] **Step 7: Run the full mobile gates**
 
 ```bash
 bun run --cwd apps/vela-mobile test:unit
@@ -629,53 +688,38 @@ bun run --cwd apps/vela-mobile typecheck
 bun run --cwd apps/vela-mobile build
 ```
 
-Expected: all commands exit 0.
+Expected: all PASS.
 
-- [ ] **Step 7: Build/sync the iOS target using the repository's existing workflow**
+- [ ] **Step 8: Build/sync the iOS target and manually accept the slice in Simulator**
 
-Run:
-
-```bash
-bun run --cwd apps/vela-mobile build:ios:assets
-```
-
-Then use the existing Xcode/Simulator path already documented for Vela Mobile; do not add a new automation framework.
-
-- [ ] **Step 8: Manually verify the five-scene slice in an iOS Simulator**
-
-Record these exact observations on HPA-299 / the PR:
+Use the repository's existing iOS workflow, then record the exact Simulator/device runtime used. Manually verify:
 
 ```text
-[ ] Signed-in Learn page shows Mystery Messenger card.
-[ ] Play pilot opens /learn/mystery-messenger with existing mobile header/back behavior.
-[ ] Scene 1 -> Scene 2 -> choice -> Scene 4 -> ending completes without dead end.
-[ ] Correct and incorrect choice both converge and display authored feedback.
-[ ] Rapid double-tap on Continue does not skip a scene.
-[ ] Japanese replay uses the existing TTS/audio path.
-[ ] TTS failure does not block Continue/choice progression.
-[ ] Leaving to Learn and returning restores the same scene/history.
-[ ] Relaunch restores the same signed-in user's run.
-[ ] Restart returns to scene 1 and clears prior history.
-[ ] Safe-area layout, scrolling, and header/back remain usable.
+Learn -> Mystery Messenger entry
+five scenes -> one choice -> ending
+leave route -> re-enter -> same scene, no duplicate transcript
+app relaunch -> same local snapshot
+restart -> scene-01
+rapid repeated Continue -> only one scene advances
+rapid repeated choice submit -> only one answer advances
+TTS replay audible
+natural audio end -> no stuck playing state
+background/interruption during replay -> no stuck playing state
+TTS error does not disable Continue/choice
 ```
 
-- [ ] **Step 9: Update the same draft PR with implementation evidence**
+HPA-300 remains blocked unless this Simulator pass succeeds.
 
-The PR body should list:
+- [ ] **Step 9: Update the same PR and Linear ticket with evidence**
 
-- focused/full test results;
-- lint/typecheck/build results;
-- Simulator model/iOS version;
-- manual acceptance results;
-- any accepted limitations.
+Add the exact commands/results and Simulator observation to PR #62 and HPA-299. Do not open a second implementation PR.
 
-Do not open another PR for implementation or verification.
-
-- [ ] **Step 10: Commit final wiring/evidence-related code changes**
+- [ ] **Step 10: Commit integration/evidence updates**
 
 ```bash
 git add apps/vela-mobile/src/pages/LearnPage.vue \
   apps/vela-mobile/src/pages/LearnPage.test.ts \
+  apps/vela-mobile/src/pages/StubPages.test.ts \
   apps/vela-mobile/src/router/diagnostic-routes.ts \
   apps/vela-mobile/src/router/routes.test.ts
 git commit -m "feat(mobile): expose mystery messenger pilot"
@@ -683,30 +727,9 @@ git commit -m "feat(mobile): expose mystery messenger pilot"
 
 ---
 
-## Self-Review
+## Plan Self-Review
 
-### Spec coverage
-
-- Closed local scene model: Task 1.
-- Five-scene converging chapter: Task 1.
-- Authored-content validation: Task 2.
-- User/chapter local snapshot and version reset: Task 2.
-- Same-user auth ownership, resume, restart, identity isolation: Task 3.
-- Existing TTS/audio reuse with non-blocking errors: Task 4.
-- Transcript, choice composer, page flow, stale-action protection: Task 5.
-- Learn entry, authenticated route, automated gates, Simulator acceptance: Task 6.
-
-### YAGNI check
-
-The plan adds no backend route, cloud save, generic narrative engine, shared package, Pinia store, response builder, missed-phrase model, branching abstraction, or new E2E framework.
-
-### Type/signature consistency
-
-- `expectedSceneId` is present in both pure transition APIs and composable mutation methods.
-- the page passes the rendered scene's ID into every mutation.
-- storage consumes only `MysteryChapter` + `MysteryProgress` from Task 1.
-- audio consumes existing auth/TTS/audio contracts and does not own progression.
-
-### Completion gate
-
-HPA-299 can move out of implementation only after the automated mobile gates pass and the five-scene loop is manually accepted in an iOS Simulator. HPA-300 remains blocked until then.
+- Spec coverage: progression, transcript projection, authored validation, local persistence, auth ownership, audio settlement, Learn entry, route integration, existing-test updates, and Simulator acceptance all have owning tasks.
+- Placeholder scan: no `TBD`, `TODO`, generic “add tests”, or undefined later interface remains.
+- Type consistency: `MysteryTranscriptItem`, stale no-op transitions, `useMysteryAudio(audioPlayer)`, `transitionLocked`, six core routes, and nine development children are used consistently across tasks.
+- Scope check: no backend/shared package/native plugin/store/engine work was added; HPA-300 remains the expansion gate.
