@@ -12,84 +12,97 @@
 
 Prove the smallest enjoyable Mystery Messenger loop with working software before investing in a reusable narrative platform or the full 10–15-scene pilot.
 
-A signed-in learner should be able to discover the pilot from the existing mobile Learn tab, open a five-scene Japanese messenger story, advance through authored messages, answer one language-based choice, replay Japanese audio through Vela's existing authenticated TTS path, leave and resume, restart, and reach a single ending.
+A signed-in learner can discover the pilot from the existing mobile Learn tab, play a five-scene Japanese messenger story, answer one language-based choice, replay authored Japanese through Vela's existing authenticated TTS/audio path, leave and resume, restart, and reach one ending.
 
-This ticket owns one implementation branch and one PR. The PR begins with this design and its implementation plan; implementation and review fixes stay on the same PR.
+HPA-287 owns one branch and one PR. This design and its implementation plan are the first commits on that PR; implementation, review fixes, and acceptance evidence stay on the same PR.
 
 ## Current State
 
-Vela Mobile already has the foundations this slice needs:
+The repository already has the required foundations:
 
-- `apps/vela-mobile/src/pages/LearnPage.vue` is still a `Coming soon` stub, so the pilot can become the first real Learn entry without displacing existing mobile learning UI.
-- `MobileLayout.vue` already owns bottom navigation, horizontal safe-area handling, keyboard/footer behavior, and the shared `MobilePageHeader`.
-- `router/diagnostic-routes.ts` owns the authenticated core child routes. Ordinary routes inherit the existing auth gate; only explicit development diagnostics bypass it.
-- `pushMobileRoute()` and `backOrFallback()` already define app-owned mobile history semantics.
-- `MobileAuthCoordinator.state` exposes the authenticated user through the existing feature-session selector without exposing tokens to feature code.
-- `MobileTtsService.preparePronunciation({ userId, vocabularyId, text })` already owns authenticated TTS preparation, cache isolation, session recovery, and bounded generation requests.
-- `HtmlAudioPlayer` already implements the mobile audio contract and is exercised by the existing TTS diagnostic flow.
+- `apps/vela-mobile/src/pages/LearnPage.vue` is still a `Coming soon` stub.
+- `MobileLayout.vue` owns bottom navigation, safe-area behavior, keyboard/footer behavior, and the shared `MobilePageHeader`.
+- `router/diagnostic-routes.ts` owns authenticated core child routes. Only explicit development diagnostics bypass the mobile auth gate.
+- `pushMobileRoute()` and `backOrFallback()` own mobile history semantics.
+- `MobileAuthCoordinator.state` plus `selectMobileFeatureSessionStatus()` expose the current feature user without exposing tokens.
+- `MobileTtsService.preparePronunciation({ userId, vocabularyId, text })` owns authenticated TTS preparation, session recovery, and caching.
+- `HtmlAudioPlayer` already implements the mobile audio contract and is exercised by the TTS diagnostic flow.
 
-No backend, shared-package, infrastructure, or native-plugin change is required for this vertical slice.
+No backend, `@vela/common`, infrastructure, native-plugin, or dependency change is needed.
 
-## Approved Product Scope
+## Product Scope
 
-The five-scene slice contains exactly three scene variants:
+The slice has exactly three scene variants:
 
-1. `message` — one authored messenger bubble with a Continue action;
-2. `choice` — one authored prompt with two or more fixed answers, immediate feedback, and a deterministic next scene;
+1. `message` — one authored messenger bubble plus Continue;
+2. `choice` — one authored prompt with fixed answers, immediate feedback, and a deterministic next scene;
 3. `ending` — the conclusive end of the slice.
 
-The authored fixture uses one linear route with one language choice. Different choice answers may show different feedback, but they converge to the same next scene. The slice is testing whether the messenger-learning loop is clear and pleasant, not whether branching narrative is valuable.
+The five-scene topology is linear apart from the answer selection:
 
-The slice includes:
+```text
+scene-01 message
+  → scene-02 message
+  → scene-03 choice
+       ├─ correct answer ─┐
+       └─ wrong answer ───┤
+                         ↓
+                    scene-04 message
+                         ↓
+                    scene-05 ending
+```
+
+Different answers may show different feedback, but both converge to `scene-04`. This slice validates the messenger learning loop, not branching narrative.
+
+Included:
 
 - one Learn-page pilot card;
 - one authenticated `/learn/mystery-messenger` route;
 - five authored scenes;
 - chronological transcript rendering;
 - one active choice composer;
-- Japanese audio replay on authored Japanese lines;
-- one local progress snapshot per authenticated user and chapter;
-- resume after route re-entry or relaunch;
+- Japanese audio replay;
+- one local progress snapshot per authenticated user/chapter;
+- route re-entry and relaunch resume;
 - restart;
 - chapter-version reset;
-- authored-content validation; and
-- focused automated tests plus iOS Simulator acceptance.
+- authored-content validation;
+- focused tests; and
+- iOS Simulator acceptance.
 
 ## Non-goals
 
-Do not add any of the following in HPA-287:
+Do not add:
 
-- the final 10–15-scene chapter;
+- the full 10–15-scene pilot;
 - `response-build`;
-- missed-phrase tracking or recap;
-- SRS or personal-dictionary mutation;
-- cloud progress, API routes, DynamoDB, sync, conflict handling, or event logs;
-- reinstall recovery;
-- branching paths or alternate endings;
-- adaptive hints, familiarity scores, case notes, relationship meters, inventory, evidence graphs, or city exploration;
-- AI-generated dialogue, speech input, or pronunciation scoring;
+- missed-phrase recap or SRS writes;
+- cloud persistence, API routes, DynamoDB, sync, event logs, idempotency, or reinstall recovery;
+- branches or alternate endings;
+- adaptive hints, case notes, familiarity models, relationship meters, inventory, evidence graphs, or city exploration;
+- AI dialogue, speech input, or pronunciation scoring;
 - Pinia or another state package;
-- a general visual-novel engine, story registry, scripting runtime, CMS, or editor;
-- moving the feature contract into `@vela/common` before there is a second consumer;
-- web parity or extraction from the web learning pages; or
-- a new mobile E2E framework.
+- a narrative engine, registry, scripting runtime, CMS, or editor;
+- shared narrative contracts in `@vela/common` before a second consumer exists;
+- web parity; or
+- a new E2E framework.
 
 ## Chosen Architecture
 
-Keep the entire feature under:
+Keep the feature local to:
 
 ```text
 apps/vela-mobile/src/features/mystery-messenger/
 ```
 
-Use a small set of feature-local modules:
+Planned modules:
 
 ```text
-model.ts                 closed scene/progress contracts + pure transitions
-content.ts               five-scene authored chapter and stable TTS IDs
+model.ts                 closed contracts + pure progression
+content.ts               five-scene authored chapter + stable TTS IDs
 validate-content.ts      pure authored-content validation
 storage.ts               localStorage snapshot adapter
-useMysteryMessenger.ts   authenticated run/resume/restart orchestration
+useMysteryMessenger.ts   auth-aware run/resume/restart orchestration
 useMysteryAudio.ts       thin TTS + HtmlAudioPlayer adapter
 components/
   MysteryTranscript.vue
@@ -97,21 +110,19 @@ components/
 MysteryMessengerPage.vue
 ```
 
-Keep tests next to the feature files they cover.
-
-This is deliberately not split into a framework/domain package, persistence package, or platform service. A second real narrative consumer is the gate for extraction.
+Tests stay beside the feature files. Do not add a barrel file or a shared framework.
 
 ### Alternatives rejected
 
-**Shared narrative engine now:** rejected because one five-scene feature cannot establish stable engine boundaries. It adds indirection before product validation.
+**Shared story engine now:** one five-scene consumer cannot establish stable abstractions; this adds indirection before product validation.
 
-**Reuse a web learning page:** rejected because this flow needs mobile-owned navigation, transcript interaction, safe-area behavior, and local run state. Sharing stable domain logic can happen later if a second consumer appears.
+**Reuse a web learning page:** the flow needs mobile-owned navigation, transcript interaction, safe-area behavior, and local run state. Share later only if a stable second consumer exists.
 
-**Cloud-save first:** rejected because the pilot's risk is product enjoyment, not cross-device continuity. One local snapshot is sufficient to validate start/resume/restart.
+**Cloud save first:** the pilot risk is whether the interaction is enjoyable, not cross-device continuity. Same-installation resume is sufficient.
 
 ## Feature Contract
 
-Use a closed discriminated union. Do not add generic `payload`, registry, handler, or plugin fields.
+Use one closed discriminated union:
 
 ```ts
 export type MysterySpeaker = 'mina' | 'haru';
@@ -174,7 +185,7 @@ export type MysteryProgress = {
 };
 ```
 
-`content.ts` exports one constant:
+`content.ts` exports:
 
 ```ts
 export const MYSTERY_MESSENGER_VERTICAL_SLICE = {
@@ -185,63 +196,62 @@ export const MYSTERY_MESSENGER_VERTICAL_SLICE = {
 } satisfies MysteryChapter;
 ```
 
-The exact Japanese copy can be polished during implementation, but the fixture shape is fixed: two opening messages, one choice, one consequence message, one ending.
+The exact Japanese wording can be polished during implementation, but the five-scene topology and closed variants do not change in this ticket.
 
 ## Progression Semantics
 
-`model.ts` owns pure functions; Vue is not involved.
+`model.ts` owns pure functions only:
 
 ```ts
 export function createMysteryProgress(chapter: MysteryChapter): MysteryProgress;
-
+export function getMysteryScene(chapter: MysteryChapter, sceneId: string): MysteryScene;
 export function continueMysteryMessage(
   chapter: MysteryChapter,
   progress: MysteryProgress,
 ): MysteryProgress;
-
 export function chooseMysteryOption(
   chapter: MysteryChapter,
   progress: MysteryProgress,
   optionId: string,
 ): MysteryProgress;
-
 export function restartMysteryProgress(chapter: MysteryChapter): MysteryProgress;
-
-export function getMysteryScene(
-  chapter: MysteryChapter,
-  sceneId: string,
-): MysteryScene;
 ```
 
 Rules:
 
-- A new run starts at `chapter.startSceneId` with empty history.
-- Continuing a `message` appends that scene ID once, then moves to its `nextSceneId`.
-- Choosing an option appends the choice scene ID plus the selected option ID once, then moves to that option's `nextSceneId`.
-- Entering an `ending` marks `completed: true`; the ending remains `currentSceneId` so relaunch restores the completed ending surface.
-- A transition invoked for the wrong scene kind throws a fixed feature error rather than silently mutating state.
-- Repeating the same UI action after progress has already advanced must not duplicate history; the composable serializes one active transition and persistence occurs from the resulting state.
-- The transcript is reconstructed from `history` plus `currentSceneId`; full rendered text is not persisted.
+- New run: start scene + empty history.
+- Continue: append the current message once, then advance.
+- Choice: append the current choice plus selected option ID once, then advance.
+- Entering the ending sets `completed: true`; the ending remains the current scene so it restores after relaunch.
+- Calling a pure transition for the wrong scene kind throws a fixed `mystery_invalid_transition` error.
+- Transcript is reconstructed from `history` plus `currentSceneId`; rendered text is not persisted.
 
-The slice does not need undo, rewind, branching history, checkpoints, or migrations.
+### Stale/double-tap guard
+
+UI actions carry the scene ID that rendered the control:
+
+```ts
+continueMessage(sceneId: string): void;
+chooseOption(sceneId: string, optionId: string): void;
+```
+
+`useMysteryMessenger` compares that `sceneId` with `progress.currentSceneId` before applying a transition. If they differ, the action is stale and is ignored. This prevents a rapid double tap on an old Continue button from advancing through the next message after the first tap has already changed state.
+
+No mutex, event queue, or debounce framework is needed.
 
 ## Authenticated Run Ownership
 
-`useMysteryMessenger.ts` injects `MOBILE_AUTH_KEY` and derives the user through `selectMobileFeatureSessionStatus()` just like existing mobile features.
+`useMysteryMessenger.ts` injects `MOBILE_AUTH_KEY` and derives the feature user with `selectMobileFeatureSessionStatus()`.
 
-The feature only owns a run while the session selector is `usable`.
+- `usable`: load/create that user's run and enable mutations.
+- `recovering` for the same user: retain the in-memory run but disable mutations.
+- `unavailable` or user identity change: discard the prior in-memory run/audio state before loading anything for another user.
 
-- `usable`: load/create that user's local snapshot and enable interaction.
-- `recovering`: keep the last rendered in-memory run visible but disable progression until the same user becomes usable again.
-- `unavailable` or user identity change: discard the in-memory run and audio state; do not display another user's saved progress.
-
-The auth coordinator remains the only token owner. Mystery Messenger never reads or stores Cognito tokens.
+Mystery Messenger never reads or stores Cognito tokens.
 
 ## Local Persistence
 
-Use `window.localStorage`; no Capacitor storage plugin is needed because the pilot only requires same-installation WebView persistence.
-
-Use one namespace per authenticated user and chapter:
+Use `window.localStorage`; no new Capacitor storage plugin is needed.
 
 ```ts
 export function mysteryProgressStorageKey(userId: string, chapterId: string): string {
@@ -249,13 +259,7 @@ export function mysteryProgressStorageKey(userId: string, chapterId: string): st
 }
 ```
 
-The snapshot stores the chapter version:
-
-```ts
-export type StoredMysteryProgress = MysteryProgress;
-```
-
-`storage.ts` exposes a narrow adapter:
+The snapshot itself includes `chapterVersion`. This lets the feature detect and delete stale data rather than maintaining migration code.
 
 ```ts
 export type MysteryProgressStorage = {
@@ -269,21 +273,20 @@ export function createBrowserMysteryProgressStorage(
 ): MysteryProgressStorage;
 ```
 
-Load rules are intentionally destructive and migration-free:
+Load behavior:
 
-- missing snapshot → return `null`;
-- invalid JSON or invalid progress shape → remove it and return `null`;
-- `chapterId` mismatch → remove it and return `null`;
-- `chapterVersion` mismatch → remove it and return `null`;
-- referenced current/history/choice IDs no longer valid → remove it and return `null`.
+- missing → `null`;
+- malformed JSON/shape → delete + `null`;
+- chapter ID/version mismatch → delete + `null`;
+- invalid current/history/choice references → delete + `null`.
 
-If browser storage throws, the current run continues in memory and the page shows one non-blocking warning that progress cannot be saved on this device. No retry queue or fallback persistence layer is added.
+Storage exceptions do not kill the run. The page continues in memory and shows one non-blocking “progress cannot be saved” warning. Do not add a retry queue or fallback persistence layer.
 
-Restart clears the stored snapshot first, then installs and saves a fresh `createMysteryProgress(chapter)` result.
+Restart clears the snapshot and immediately installs/saves a fresh run.
 
 ## Authored-Content Validation
 
-Validate the TypeScript constant before the feature is trusted by tests. The validator is a pure function:
+Pure validator:
 
 ```ts
 export type MysteryContentIssue = {
@@ -302,30 +305,21 @@ export type MysteryContentIssue = {
 export function validateMysteryChapter(chapter: MysteryChapter): readonly MysteryContentIssue[];
 ```
 
-Checks for HPA-287:
+Check:
 
-- scene IDs are unique;
-- choice IDs are unique within their scene;
-- a choice has at least two options;
-- `startSceneId` exists;
-- every message `nextSceneId` exists;
-- every choice option `nextSceneId` exists;
-- at least one `ending` exists; and
-- at least one ending is reachable from the start through authored links.
+- unique scene IDs;
+- unique choice IDs per choice scene;
+- at least two choice options;
+- valid start scene;
+- valid message/choice next references;
+- at least one ending; and
+- at least one ending reachable from the start.
 
-Do not add schema libraries or a graph framework. A `Map` plus a small DFS/BFS is enough.
+Use `Map` plus a small DFS/BFS. No schema or graph dependency.
 
 ## TTS and Audio Reuse
 
-Mystery Messenger does not create a new API or TTS service.
-
-`useMysteryAudio.ts` injects:
-
-- `MOBILE_AUTH_KEY` for the current feature-session user;
-- `MOBILE_TTS_SERVICE_KEY` for `preparePronunciation()`; and
-- one feature-owned `HtmlAudioPlayer` instance.
-
-It exposes only the UI state this feature needs:
+`useMysteryAudio.ts` reuses `MOBILE_AUTH_KEY`, `MOBILE_TTS_SERVICE_KEY`, and one feature-owned `HtmlAudioPlayer`.
 
 ```ts
 export type MysteryAudioState =
@@ -341,44 +335,48 @@ export type MysteryAudioController = {
 };
 ```
 
-Playback flow:
+Flow:
 
-1. Require a `usable` same-user session.
-2. Call existing `MobileTtsService.preparePronunciation()` with current `userId`, the scene's `ttsId`, and the exact authored Japanese text/prompt.
-3. Pass the prepared URL to `HtmlAudioPlayer.play()`.
-4. Keep TTS failure non-blocking; the learner can continue the story without audio.
-5. If playback reports `media_unavailable`, invalidate that one TTS cache identity once and allow the next explicit tap to prepare a fresh URL. Do not add an automatic retry loop.
-6. Dispose/stop playback when the page unmounts, the user identity changes, or the feature session becomes unavailable.
+1. require a usable current user;
+2. `preparePronunciation({ userId, vocabularyId: scene.ttsId, text })`;
+3. `HtmlAudioPlayer.play(prepared.audioUrl)`;
+4. keep any failure non-blocking for story progress;
+5. on `media_unavailable`, invalidate only that `(userId, ttsId)` and let the next explicit tap prepare a fresh URL; no automatic retry loop;
+6. stop/abort on page unmount or user loss/change.
 
-### Stable authored TTS identity
+Do not copy the diagnostic counters or state machine wholesale.
 
-The API cache identity uses `vocabularyId` independently of text, so a scene's `ttsId` must remain paired with exactly one authored text value.
+### Stable TTS IDs
 
-Use IDs such as:
+The backend cache identity uses `vocabularyId` independently of text. Each authored `ttsId` therefore stays paired with exactly one text value:
 
 ```text
 mystery-message-tomorrow-v1-scene-01
 mystery-message-tomorrow-v1-scene-03-prompt
 ```
 
-If authored Japanese for a cached line changes, bump the chapter version and therefore its TTS IDs. No cache migration is needed.
+If cached Japanese text changes, bump the chapter version and corresponding TTS IDs. No cache migration is required.
 
 ## UI and Navigation
 
 ### Learn entry
 
-Replace the `LearnPage.vue` placeholder with a simple page containing a single Mystery Messenger card:
+Replace the Learn stub with one simple card:
 
-- title: `Mystery Messenger`;
-- chapter title: `The Message That Arrived Tomorrow`;
+- `Mystery Messenger`;
+- `The Message That Arrived Tomorrow`;
 - one short description;
-- `Start` when there is no valid snapshot;
-- `Resume` when a valid snapshot exists; and
-- `Play again` after completion.
+- one primary `Play pilot` action.
 
-The card navigates with `pushMobileRoute(router, '/learn/mystery-messenger')`, preserving the existing app-owned history depth.
+The card always navigates with:
 
-Do not build a generic learning-activity catalog in this ticket. A direct card is the correct size for one activity.
+```ts
+pushMobileRoute(router, '/learn/mystery-messenger');
+```
+
+Resume behavior belongs to the route controller. Learn does not read the snapshot merely to change Start/Resume copy. This avoids a second persistence consumer for cosmetic text.
+
+Do not build a generic learning-activity catalog for one activity.
 
 ### Messenger route
 
@@ -398,91 +396,71 @@ Add the authenticated core route:
 }
 ```
 
-This reuses `MobilePageHeader` and `backOrFallback()` rather than adding route-local back handling.
+No auth bypass and no route-local back implementation.
 
-### Transcript
+### Transcript and composer
 
-`MysteryTranscript.vue` receives the chapter, history, and current scene as props and renders only presentation:
+`MysteryTranscript.vue` is presentation-only: completed messages, selected choice + authored feedback, current scene, compact speaker label, audio buttons.
 
-- chronological completed messages;
-- the selected choice and its authored feedback for completed choice scenes;
-- the current message/choice/ending;
-- compact speaker labels;
-- a speaker/audio icon for Japanese content.
+`MysteryChoiceComposer.vue` renders authored `q-btn` options and emits `select(optionId)` once. It owns no correctness rules.
 
-It does not mutate progress or access storage/auth services.
+For a message, the page renders Continue and passes that scene ID to `continueMessage(scene.id)`. For a choice it passes `chooseOption(scene.id, optionId)`. For the ending it renders completion + Restart.
 
-### Active composer
+No free text, typing animation, drag/drop, interaction registry, or branching map.
 
-`MysteryChoiceComposer.vue` renders fixed `q-btn` choices and emits the selected option ID once. It owns no answer rules.
+## Error States
 
-For message scenes, the page renders a single Continue button. For the ending, the page renders the ending state plus Restart.
+Keep them small:
 
-No free text, drag-and-drop, keyboard entry, branching map, or animated typing system is added.
+- invalid authored chapter in tests/development → fixed initialization error;
+- recovering/unavailable session → visible status + mutations disabled;
+- local storage failure → in-memory run + persistence warning;
+- TTS failure → inline audio error; progression remains enabled;
+- corrupt/stale save → silently discard and start fresh.
 
-## Error and Empty States
+No telemetry, retry queue, recovery protocol, or migration UI.
 
-Keep error handling visible but small:
+## Testing
 
-- invalid authored chapter in development/tests: fail initialization with a fixed error;
-- unavailable/recovering session: disable story mutations and show the existing-session state in plain copy;
-- local storage failure: continue in-memory with a persistence warning;
-- TTS failure: show an inline audio error beside the replay action; story progression remains enabled;
-- corrupt/stale saved snapshot: silently discard and start a fresh run because there is no released save compatibility requirement.
+Use existing Vitest + Vue Test Utils.
 
-Do not add telemetry, crash reporting, retry queues, or recovery protocols in this pilot slice.
+Pure tests:
 
-## Testing Strategy
-
-Use the existing Vitest and Vue Test Utils stack.
-
-### Pure tests
-
-Cover:
-
-- valid five-scene chapter;
-- duplicate scene ID;
-- dangling message/choice reference;
-- missing ending;
-- unreachable ending;
+- valid fixture;
+- duplicate/dangling/missing/unreachable content;
 - initial progress;
 - message advance;
-- choice selection and persisted choice history;
+- choice history;
 - ending completion;
 - restart;
-- prevention of duplicate history entries;
-- snapshot save/load;
+- snapshot load/save;
 - user isolation;
-- version reset;
-- malformed snapshot reset.
+- version/corruption reset.
 
-### Composable/audio tests
-
-Cover:
+Composable/audio tests:
 
 - same-user resume;
-- identity change clears in-memory state;
-- one transition produces one persisted snapshot;
-- storage failure keeps the run usable with a warning;
-- audio requests use current user + stable scene TTS ID + exact authored text;
+- user change isolation;
+- stale scene action ignored;
+- one valid action → one save;
+- storage failure stays playable;
+- audio request uses current user + stable TTS ID + exact authored text;
 - TTS failure is non-blocking;
-- audio disposal on unmount/user loss.
+- audio is disposed on user loss/unmount.
 
-### Component/router tests
+Component/router tests:
 
-Cover:
+- Learn card + mobile navigation;
+- authenticated route meta;
+- transcript has no duplicate entries;
+- choice emits one selection;
+- page advances, resumes, restarts, and reaches ending with fakes.
 
-- Learn renders the pilot card and uses mobile navigation;
-- route exists with the expected mobile header/fallback;
-- transcript renders completed history only once;
-- choice composer emits one selected option;
-- messenger page advances, restores, restarts, and reaches the ending with injected fakes.
-
-No Playwright or native automation is added.
+No Playwright/native automation is added.
 
 ## Verification Gates
 
-Before the PR becomes ready for review, run:
+Before marking the existing draft PR ready:
 
 ```bash
 bun run --cwd apps/vela-mobile test:unit
@@ -491,26 +469,23 @@ bun run --cwd apps/vela-mobile typecheck
 bun run --cwd apps/vela-mobile build
 ```
 
-Then build/run through the existing iOS Simulator workflow and manually verify:
+Then use the existing iOS Simulator workflow and verify:
 
-1. sign in;
-2. open Learn → Mystery Messenger;
-3. advance to the choice;
-4. play Japanese audio;
-5. choose an answer and see feedback;
-6. leave to Learn and return; transcript/current scene are unchanged and not duplicated;
-7. terminate/relaunch the app and confirm resume;
-8. restart and confirm scene 1;
-9. complete the five-scene ending; and
-10. use native/header back navigation without a trap or blank frame.
+1. signed-in Learn → Mystery Messenger;
+2. progress to the choice;
+3. Japanese audio replay;
+4. choose answer + feedback;
+5. leave and return with no transcript duplication;
+6. terminate/relaunch and resume;
+7. restart to scene 1;
+8. reach ending;
+9. header/native back returns to Learn; and
+10. no obvious safe-area/touch-target problem.
 
-Physical-iPhone acceptance belongs to the later complete-pilot verification ticket, not HPA-287.
+Physical-iPhone verification is deferred to the complete-pilot acceptance ticket.
 
 ## Follow-up Gate
 
-Only after this five-scene loop is manually accepted in the Simulator should the next pilot slice add:
-
-- the complete 10–15-scene authored chapter; and
-- the single additional `response-build` interaction.
+Only after the five-scene loop is accepted in Simulator should the next slice add the full 10–15-scene chapter plus `response-build`.
 
 Do not extract shared narrative abstractions during that expansion unless a second real consumer also exists.
