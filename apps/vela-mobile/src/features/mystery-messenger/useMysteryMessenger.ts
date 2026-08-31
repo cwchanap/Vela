@@ -52,12 +52,14 @@ export function useMysteryMessenger(
     const next = restored ?? createMysteryProgress(chapter);
     activeUserId.value = userId;
     progress.value = next;
+    persistenceWarning.value = false;
     if (!restored && !storage.save(userId, next)) persistenceWarning.value = true;
   }
 
   function clearRun(): void {
     activeUserId.value = null;
     progress.value = null;
+    persistenceWarning.value = false;
   }
 
   watch(
@@ -88,7 +90,7 @@ export function useMysteryMessenger(
     const updated = next(progress.value);
     if (updated === progress.value) return;
     progress.value = updated;
-    if (!storage.save(status.userId, updated)) persistenceWarning.value = true;
+    persistenceWarning.value = !storage.save(status.userId, updated);
   }
 
   const currentScene = computed(() =>
