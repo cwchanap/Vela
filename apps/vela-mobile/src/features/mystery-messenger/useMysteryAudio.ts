@@ -117,7 +117,12 @@ export function useMysteryAudio(options: UseMysteryAudioOptions): MysteryAudioCo
   }
 
   async function play(scene: MysteryScene): Promise<void> {
-    if (disposed || state.value.kind === 'preparing') return;
+    if (disposed) return;
+    // Suppress only a duplicate tap for the scene currently preparing. A different
+    // scene must fall through so the prepare path below aborts the pending request
+    // and switches to it; otherwise the pending scene's audio would auto-play stale
+    // after the story has advanced.
+    if (state.value.kind === 'preparing' && state.value.sceneId === scene.id) return;
 
     const status = sessionStatus.value;
     if (status.kind !== 'usable') return;

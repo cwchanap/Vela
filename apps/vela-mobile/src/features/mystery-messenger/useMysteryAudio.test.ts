@@ -271,6 +271,50 @@ describe('useMysteryAudio', () => {
     expect(controller.state.value).toEqual({ kind: 'idle' });
   });
 
+  it('cancels a pending preparation for scene A and switches to scene B without auto-playing stale A audio', async () => {
+    const preparationA = deferred<PreparedPronunciation>();
+    let signalA: AbortSignal | null = null;
+    const preparedB: PreparedPronunciation = {
+      ...PREPARED,
+      audioUrl: 'https://audio.example.test/scene-03.mp3',
+    };
+    tts.preparePronunciation.mockImplementation(
+      (input: MobilePronunciationInput, options?: { signal?: AbortSignal }) => {
+        if (input.vocabularyId === MESSAGE_SCENE.ttsId) {
+          signalA = options?.signal ?? null;
+          return preparationA.promise;
+        }
+        return Promise.resolve(preparedB);
+      },
+    );
+    const handleB = controllablePlaybackHandle();
+    audio.play.mockReturnValue(handleB.publicHandle);
+    const controller = createController();
+
+    const actionA = controller.play(MESSAGE_SCENE);
+    expect(controller.state.value).toEqual({ kind: 'preparing', sceneId: MESSAGE_SCENE.id });
+
+    // Story advanced to scene B while A is still preparing; user taps replay there.
+    const actionB = controller.play(CHOICE_SCENE);
+    await flushPromises();
+
+    expect(signalAborted(signalA)).toBe(true);
+    expect(tts.preparePronunciation).toHaveBeenCalledTimes(2);
+    expect(audio.play).toHaveBeenCalledWith(preparedB.audioUrl);
+    expect(audio.play).not.toHaveBeenCalledWith(PREPARED.audioUrl);
+    expect(controller.state.value).toEqual({ kind: 'playing', sceneId: CHOICE_SCENE.id });
+
+    // A resolves late — must not auto-play stale A audio or mutate state.
+    preparationA.resolve(PREPARED);
+    await Promise.all([actionA, flushPromises()]);
+    expect(audio.play).toHaveBeenCalledTimes(1);
+    expect(controller.state.value).toEqual({ kind: 'playing', sceneId: CHOICE_SCENE.id });
+
+    handleB.resolve({ kind: 'ended' });
+    await actionB;
+    expect(controller.state.value).toEqual({ kind: 'idle' });
+  });
+
   it('does nothing without a usable session', async () => {
     setRecovering(authState);
     const controller = createController();
