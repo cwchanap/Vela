@@ -204,6 +204,51 @@ describe('useMysteryMessenger', () => {
     expect(oldRun).not.toBeNull();
   });
 
+  it('clears persistenceWarning when a new user loads after a prior save failure', () => {
+    const auth = reactive(authState());
+    const storage = createStorage({
+      save: vi.fn((userId: string) => userId !== 'user:a'),
+    });
+    const controller = useMysteryMessenger({ authState: auth, storage, chapter });
+
+    // user:a's fresh run failed to save.
+    expect(controller.persistenceWarning.value).toBe(true);
+
+    Object.assign(auth, {
+      phase: 'signedOut',
+      sessionUsable: false,
+      user: null,
+    });
+    expect(controller.progress.value).toBeNull();
+    // Bug: warning carried across sign-out before the fix.
+    expect(controller.persistenceWarning.value).toBe(false);
+
+    Object.assign(auth, authState({ user: { userId: 'user:b', email: null } }));
+    // user:b's fresh run saves successfully; the prior user's warning
+    // must not bleed into the new run.
+    expect(controller.persistenceWarning.value).toBe(false);
+  });
+
+  it('clears persistenceWarning after a successful save follows a failed one', () => {
+    const saves = [false, true];
+    const storage = createStorage({
+      save: vi.fn(() => saves.shift() ?? true),
+    });
+    const controller = useMysteryMessenger({
+      authState: reactive(authState()),
+      storage,
+      chapter,
+    });
+
+    // Initial fresh-run save failed.
+    expect(controller.persistenceWarning.value).toBe(true);
+
+    controller.continueMessage('scene-01');
+
+    // Next transition saves successfully; the stale warning must clear.
+    expect(controller.persistenceWarning.value).toBe(false);
+  });
+
   it('does not save or replace progress on a stale transition', () => {
     const storage = createStorage();
     const controller = useMysteryMessenger({

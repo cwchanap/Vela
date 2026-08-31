@@ -5,7 +5,7 @@
         <div class="text-h6">Mystery Messenger</div>
         <div class="text-subtitle2 text-grey-6">The Message That Arrived Tomorrow</div>
         <p class="text-body2 q-mt-sm q-mb-md">
-          A five-scene pilot where your choices shape the ending.
+          A five-scene pilot. Choose how to reply to a message from tomorrow.
         </p>
         <q-btn
           data-testid="mystery-messenger-entry"
