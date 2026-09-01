@@ -78,7 +78,7 @@ import { MOBILE_TTS_SERVICE_KEY } from 'src/services/mobile-services';
 import MysteryChoiceComposer from './components/MysteryChoiceComposer.vue';
 import MysteryResponseBuildComposer from './components/MysteryResponseBuildComposer.vue';
 import MysteryTranscript from './components/MysteryTranscript.vue';
-import { MYSTERY_MESSENGER_VERTICAL_SLICE } from './content';
+import { MESSAGE_THAT_ARRIVED_TOMORROW_CHAPTER } from './content';
 import { getMysteryScene } from './model';
 import { createBrowserMysteryProgressStorage } from './storage';
 import { useMysteryAudio } from './useMysteryAudio';
@@ -90,7 +90,7 @@ if (!coordinator || !ttsService) {
   throw new Error('mystery_messenger_dependencies_unavailable');
 }
 
-const chapter = MYSTERY_MESSENGER_VERTICAL_SLICE;
+const chapter = MESSAGE_THAT_ARRIVED_TOMORROW_CHAPTER;
 const messenger = useMysteryMessenger({
   authState: coordinator.state,
   storage: createBrowserMysteryProgressStorage(window.localStorage),

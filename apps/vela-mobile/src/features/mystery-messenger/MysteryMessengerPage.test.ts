@@ -8,7 +8,7 @@ import type { MobileFeatureSessionStatus } from 'src/auth/mobile-feature-session
 import { MOBILE_AUTH_KEY } from 'src/services/mobile-auth';
 import { MOBILE_TTS_SERVICE_KEY } from 'src/services/mobile-services';
 import type { MobileTtsService } from 'src/services/mobile-tts';
-import { MYSTERY_MESSENGER_VERTICAL_SLICE as chapter } from './content';
+import { MESSAGE_THAT_ARRIVED_TOMORROW_CHAPTER as chapter } from './content';
 import type {
   MysteryProgress,
   MysteryResponseBuildScene,
@@ -37,13 +37,21 @@ const PageHost = defineComponent({
     '<q-layout view="hHh Lpr fFf"><q-page-container><mystery-messenger-page /></q-page-container></q-layout>',
 });
 
-// Mirrors the linear slice: each scene id leads to the next one.
+// Mirrors the linear chapter: each scene id leads to the next one.
 const NEXT_SCENE_ID: Record<string, string | null> = {
   'scene-01': 'scene-02',
   'scene-02': 'scene-03',
   'scene-03': 'scene-04',
   'scene-04': 'scene-05',
-  'scene-05': null,
+  'scene-05': 'scene-06',
+  'scene-06': 'scene-07',
+  'scene-07': 'scene-08',
+  'scene-08': 'scene-09',
+  'scene-09': 'scene-10',
+  'scene-10': 'scene-11',
+  'scene-11': 'scene-12',
+  'scene-12': 'scene-13',
+  'scene-13': null,
   'response-04': 'scene-05',
 };
 
@@ -213,14 +221,14 @@ describe('MysteryMessengerPage', () => {
     messenger.chooseOption = vi.fn();
     const wrapper = mountPageWithController(messenger);
 
-    await wrapper.get('[data-testid="mystery-option-understood"]').trigger('click');
-    await wrapper.get('[data-testid="mystery-option-understood"]').trigger('click');
+    await wrapper.get('[data-testid="mystery-option-tomorrow-morning"]').trigger('click');
+    await wrapper.get('[data-testid="mystery-option-tomorrow-morning"]').trigger('click');
     expect(messenger.chooseOption).toHaveBeenCalledTimes(1);
 
     await vi.advanceTimersByTimeAsync(500);
-    await wrapper.get('[data-testid="mystery-option-understood"]').trigger('click');
+    await wrapper.get('[data-testid="mystery-option-tomorrow-morning"]').trigger('click');
     expect(messenger.chooseOption).toHaveBeenCalledTimes(2);
-    expect(messenger.chooseOption).toHaveBeenLastCalledWith('scene-03', 'understood');
+    expect(messenger.chooseOption).toHaveBeenLastCalledWith('scene-03', 'tomorrow-morning');
   });
 
   it('captures the visible scene only after acquiring the transition lock', async () => {
@@ -254,9 +262,9 @@ describe('MysteryMessengerPage', () => {
 
     expect(wrapper.get('[data-testid="mystery-session-status"]').text()).toContain('unavailable');
     expect(
-      wrapper.get('[data-testid="mystery-option-understood"]').attributes('disabled'),
+      wrapper.get('[data-testid="mystery-option-tomorrow-morning"]').attributes('disabled'),
     ).toBeDefined();
-    await wrapper.get('[data-testid="mystery-option-understood"]').trigger('click');
+    await wrapper.get('[data-testid="mystery-option-tomorrow-morning"]').trigger('click');
     expect(messenger.chooseOption).not.toHaveBeenCalled();
   });
 
@@ -332,7 +340,7 @@ describe('MysteryMessengerPage', () => {
   });
 
   it('renders the restart action at the ending and restarts the run', async () => {
-    const messenger = messengerFixture({ currentSceneId: 'scene-05' });
+    const messenger = messengerFixture({ currentSceneId: 'scene-13' });
     const wrapper = mountPageWithController(messenger);
 
     expect(wrapper.find('[data-testid="mystery-continue"]').exists()).toBe(false);
@@ -361,8 +369,8 @@ describe('MysteryMessengerPage', () => {
 
     expect(messenger.submitResponse).toHaveBeenCalledTimes(1);
     expect(messenger.submitResponse).toHaveBeenCalledWith('response-04', ['time', 'ni']);
-    expect(wrapper.find('[data-testid="mystery-restart"]').exists()).toBe(true);
     expect(wrapper.find('[data-testid="mystery-response-build-composer"]').exists()).toBe(false);
+    expect(wrapper.find('[data-testid="mystery-choice-composer"]').exists()).toBe(true);
   });
 
   it('guards rapid response submissions with the 500 ms transition lock', async () => {

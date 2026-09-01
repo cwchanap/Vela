@@ -15,7 +15,7 @@ import {
   type MobileTtsService,
   type PreparedPronunciation,
 } from '../../services/mobile-tts';
-import { MYSTERY_MESSENGER_VERTICAL_SLICE as chapter } from './content';
+import { MESSAGE_THAT_ARRIVED_TOMORROW_CHAPTER as chapter } from './content';
 import {
   getMysteryScene,
   type MysteryChoiceScene,
@@ -27,8 +27,8 @@ import { useMysteryAudio } from './useMysteryAudio';
 const MESSAGE_SCENE = getMysteryScene(chapter, 'scene-01') as MysteryMessageScene;
 const CHOICE_SCENE = getMysteryScene(chapter, 'scene-03') as MysteryChoiceScene;
 const CHOICE_AUDIO = {
-  ttsId: 'mystery-message-tomorrow-v1-scene-03-prompt',
-  text: 'どう返事をしますか？',
+  ttsId: 'mystery-message-tomorrow-v2-scene-03-prompt',
+  text: 'ミナさんは、いつ駅に来てほしいですか？',
 };
 const RESPONSE_SCENE: MysteryResponseBuildScene = {
   kind: 'response-build',

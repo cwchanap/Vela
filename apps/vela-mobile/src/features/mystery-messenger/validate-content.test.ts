@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { MYSTERY_MESSENGER_VERTICAL_SLICE } from './content';
+import { MESSAGE_THAT_ARRIVED_TOMORROW_CHAPTER } from './content';
 import type { MysteryChapter, MysteryResponseBuildScene } from './model';
 import { validateMysteryChapter } from './validate-content';
 
 function cloneChapter(): MysteryChapter {
-  return JSON.parse(JSON.stringify(MYSTERY_MESSENGER_VERTICAL_SLICE)) as MysteryChapter;
+  return JSON.parse(JSON.stringify(MESSAGE_THAT_ARRIVED_TOMORROW_CHAPTER)) as MysteryChapter;
 }
 
 function codes(chapter: MysteryChapter): string[] {
@@ -49,8 +49,8 @@ function responseSceneOf(chapter: MysteryChapter): MysteryResponseBuildScene {
 }
 
 describe('validateMysteryChapter', () => {
-  it('accepts the real vertical slice', () => {
-    expect(validateMysteryChapter(MYSTERY_MESSENGER_VERTICAL_SLICE)).toEqual([]);
+  it('accepts the real chapter', () => {
+    expect(validateMysteryChapter(MESSAGE_THAT_ARRIVED_TOMORROW_CHAPTER)).toEqual([]);
   });
 
   it('reports duplicate scene ids', () => {
@@ -82,10 +82,10 @@ describe('validateMysteryChapter', () => {
 
   it('reports a chapter without an ending', () => {
     const chapter = cloneChapter();
-    chapter.scenes = chapter.scenes.filter((scene) => scene.id !== 'scene-05');
-    const scene04 = sceneOf(chapter, 'scene-04');
-    if (scene04.kind !== 'message') throw new Error('expected message scene');
-    scene04.nextSceneId = 'scene-04';
+    chapter.scenes = chapter.scenes.filter((scene) => scene.id !== 'scene-13');
+    const scene12 = sceneOf(chapter, 'scene-12');
+    if (scene12.kind !== 'message') throw new Error('expected message scene');
+    scene12.nextSceneId = 'scene-12';
 
     expect(codes(chapter)).toContain('missing_ending');
   });

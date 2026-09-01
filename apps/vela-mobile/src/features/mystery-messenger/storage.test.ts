@@ -1,11 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { MYSTERY_MESSENGER_VERTICAL_SLICE as chapter } from './content';
+import { MESSAGE_THAT_ARRIVED_TOMORROW_CHAPTER as chapter } from './content';
 import {
   chooseMysteryOption,
   continueMysteryMessage,
   createMysteryProgress,
   type MysteryChapter,
   type MysteryProgress,
+  type MysteryResponseBuildScene,
   submitMysteryResponse,
 } from './model';
 import { createBrowserMysteryProgressStorage, mysteryProgressStorageKey } from './storage';
@@ -39,15 +40,31 @@ const userId = 'user:a';
 const chapterId = chapter.id;
 const key = mysteryProgressStorageKey(userId, chapterId);
 
+const scene07 = chapter.scenes.find(
+  (candidate) => candidate.id === 'scene-07',
+) as MysteryResponseBuildScene;
+const scene11 = chapter.scenes.find(
+  (candidate) => candidate.id === 'scene-11',
+) as MysteryResponseBuildScene;
+
 function progressAtScene04(): MysteryProgress {
   let progress = createMysteryProgress(chapter);
   progress = continueMysteryMessage(chapter, progress, 'scene-01');
   progress = continueMysteryMessage(chapter, progress, 'scene-02');
-  return chooseMysteryOption(chapter, progress, 'scene-03', 'understood');
+  return chooseMysteryOption(chapter, progress, 'scene-03', 'tomorrow-morning');
 }
 
 function progressAtEnding(): MysteryProgress {
-  return continueMysteryMessage(chapter, progressAtScene04(), 'scene-04');
+  let progress = progressAtScene04();
+  progress = continueMysteryMessage(chapter, progress, 'scene-04');
+  progress = chooseMysteryOption(chapter, progress, 'scene-05', 'minas-notebook');
+  progress = continueMysteryMessage(chapter, progress, 'scene-06');
+  progress = submitMysteryResponse(chapter, progress, 'scene-07', scene07.correctTokenIds);
+  progress = continueMysteryMessage(chapter, progress, 'scene-08');
+  progress = chooseMysteryOption(chapter, progress, 'scene-09', 'ask-when-tomorrow');
+  progress = continueMysteryMessage(chapter, progress, 'scene-10');
+  progress = submitMysteryResponse(chapter, progress, 'scene-11', scene11.correctTokenIds);
+  return continueMysteryMessage(chapter, progress, 'scene-12');
 }
 
 const RESPONSE_STORAGE_CHAPTER: MysteryChapter = {
