@@ -277,7 +277,10 @@ describe('MysteryMessengerPage', () => {
           sceneId: 'scene-02',
           speaker: 'mina',
           text: 'あしたの朝7時、あなたはまだ知らない言葉と出会います。',
-          ttsId: 'tts-scene-02',
+          audio: {
+            ttsId: 'tts-scene-02',
+            text: 'あしたの朝7時、あなたはまだ知らない言葉と出会います。',
+          },
           active: true,
         },
       ],

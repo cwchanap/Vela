@@ -5,6 +5,7 @@ export const MYSTERY_MESSENGER_VERTICAL_SLICE = {
   version: 1,
   title: '明日からのメッセージ',
   startSceneId: 'scene-01',
+  targetPhrases: [],
   scenes: [
     {
       kind: 'message',
@@ -27,7 +28,10 @@ export const MYSTERY_MESSENGER_VERTICAL_SLICE = {
       id: 'scene-03',
       speaker: 'mina',
       prompt: 'どう返事をしますか？',
-      ttsId: 'mystery-message-tomorrow-v1-scene-03-prompt',
+      audioPrompt: {
+        ttsId: 'mystery-message-tomorrow-v1-scene-03-prompt',
+        text: 'どう返事をしますか？',
+      },
       options: [
         {
           id: 'understood',
@@ -44,6 +48,9 @@ export const MYSTERY_MESSENGER_VERTICAL_SLICE = {
           nextSceneId: 'scene-04',
         },
       ],
+      hint: '短い返事で大丈夫です。',
+      explanation: '「わかりました」は自然で丁寧な短い返事です。',
+      targetPhraseIds: [],
     },
     {
       kind: 'message',

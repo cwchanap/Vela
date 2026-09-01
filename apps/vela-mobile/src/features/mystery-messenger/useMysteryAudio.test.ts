@@ -16,11 +16,32 @@ import {
   type PreparedPronunciation,
 } from '../../services/mobile-tts';
 import { MYSTERY_MESSENGER_VERTICAL_SLICE as chapter } from './content';
-import { getMysteryScene, type MysteryChoiceScene, type MysteryMessageScene } from './model';
+import {
+  getMysteryScene,
+  type MysteryChoiceScene,
+  type MysteryMessageScene,
+  type MysteryResponseBuildScene,
+} from './model';
 import { useMysteryAudio } from './useMysteryAudio';
 
 const MESSAGE_SCENE = getMysteryScene(chapter, 'scene-01') as MysteryMessageScene;
 const CHOICE_SCENE = getMysteryScene(chapter, 'scene-03') as MysteryChoiceScene;
+const CHOICE_AUDIO = {
+  ttsId: 'mystery-message-tomorrow-v1-scene-03-prompt',
+  text: 'どう返事をしますか？',
+};
+const RESPONSE_SCENE: MysteryResponseBuildScene = {
+  kind: 'response-build',
+  id: 'response-01',
+  prompt: '返事を作ってください。',
+  tokens: [{ id: 'time', text: '7時' }],
+  correctTokenIds: ['time'],
+  feedback: { correct: '正しいです。', incorrect: '確認しましょう。' },
+  hint: 'ヒント',
+  explanation: '解説',
+  targetPhraseIds: [],
+  nextSceneId: 'ending',
+};
 const PREPARED: PreparedPronunciation = {
   audioUrl: 'https://audio.example.test/scene-01.mp3',
   source: 'generated',
@@ -187,7 +208,7 @@ describe('useMysteryAudio', () => {
     expect(controller.state.value).toEqual({ kind: 'idle' });
   });
 
-  it('uses the choice prompt as TTS text', async () => {
+  it('uses the choice audioPrompt as the exact TTS input', async () => {
     tts.preparePronunciation.mockResolvedValue(PREPARED);
     audio.play.mockReturnValue(resolvedPlaybackHandle());
     const controller = createController();
@@ -195,9 +216,39 @@ describe('useMysteryAudio', () => {
     await controller.play(CHOICE_SCENE);
 
     expect(tts.preparePronunciation).toHaveBeenCalledWith(
-      { userId: 'user-1', vocabularyId: CHOICE_SCENE.ttsId, text: CHOICE_SCENE.prompt },
+      { userId: 'user-1', vocabularyId: CHOICE_AUDIO.ttsId, text: CHOICE_AUDIO.text },
       { signal: expect.any(AbortSignal) },
     );
+  });
+
+  it('does nothing for a synthetic text-only choice', async () => {
+    const scene: MysteryChoiceScene = {
+      kind: 'choice',
+      id: 'choice-silent',
+      speaker: 'haru',
+      prompt: '選んでください。',
+      options: [],
+      hint: '',
+      explanation: '',
+      targetPhraseIds: [],
+    };
+    const controller = createController();
+
+    await controller.play(scene);
+
+    expect(tts.preparePronunciation).not.toHaveBeenCalled();
+    expect(audio.play).not.toHaveBeenCalled();
+    expect(controller.state.value).toEqual({ kind: 'idle' });
+  });
+
+  it('does nothing for a response-build scene', async () => {
+    const controller = createController();
+
+    await controller.play(RESPONSE_SCENE);
+
+    expect(tts.preparePronunciation).not.toHaveBeenCalled();
+    expect(audio.play).not.toHaveBeenCalled();
+    expect(controller.state.value).toEqual({ kind: 'idle' });
   });
 
   it('keeps the prepared URL ready after a gesture rejection and replays it without preparing again', async () => {
@@ -237,6 +288,16 @@ describe('useMysteryAudio', () => {
       sceneId: MESSAGE_SCENE.id,
       message: 'media_unavailable',
     });
+  });
+
+  it('invalidates the audioPrompt tts id when choice audio is unavailable', async () => {
+    tts.preparePronunciation.mockResolvedValue(PREPARED);
+    audio.play.mockReturnValue(rejectedPlaybackHandle(new MobileAudioError('media_unavailable')));
+    const controller = createController();
+
+    await controller.play(CHOICE_SCENE);
+
+    expect(tts.invalidatePronunciation).toHaveBeenCalledWith('user-1', CHOICE_AUDIO.ttsId);
   });
 
   it('surfaces a preparation failure as an inline error without retrying', async () => {
