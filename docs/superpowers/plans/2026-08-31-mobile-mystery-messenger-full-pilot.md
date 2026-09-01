@@ -74,6 +74,7 @@ No router, backend, shared-package, or workspace-dependency change is expected.
 ### Task 1: Land the widened model, transcript, and audio contract as one compile unit
 
 **Files:**
+
 - Modify: `apps/vela-mobile/src/features/mystery-messenger/model.ts`
 - Modify: `apps/vela-mobile/src/features/mystery-messenger/model.test.ts`
 - Modify: `apps/vela-mobile/src/features/mystery-messenger/content.ts`
@@ -84,6 +85,7 @@ No router, backend, shared-package, or workspace-dependency change is expected.
 - Update widened-contract fixtures in `MysteryChoiceComposer.test.ts`, `useMysteryMessenger.test.ts`, `MysteryMessengerPage.test.ts`, `storage.test.ts`, and `validate-content.test.ts`.
 
 **Interfaces:**
+
 - Produces: `MysteryTargetPhrase`, `MysteryChoiceAudioPrompt`, `MysteryResponseToken`, `MysteryResponseBuildScene`, `MysterySceneAudio`, widened `MysteryScene`, widened `MysteryHistoryEntry`, widened `MysteryTranscriptItem`, `submitMysteryResponse`, `selectMysterySceneAudio`.
 - Leaves the existing five-scene content temporarily in place but valid under the widened contract.
 
@@ -263,9 +265,11 @@ git commit -m "feat(mobile): extend mystery interaction model"
 ### Task 2: Extend persistence and authored-content validation
 
 **Files:**
+
 - Modify: `storage.ts`, `storage.test.ts`, `validate-content.ts`, `validate-content.test.ts` under the feature folder.
 
 **Interfaces:**
+
 - Consumes Task-1 response/history/target-phrase contracts.
 - Produces response-history load acceptance plus structural validation for response answers and target references.
 
@@ -336,10 +340,12 @@ git commit -m "feat(mobile): validate full mystery content"
 ### Task 3: Add tap-to-order responses and ephemeral assistance UI
 
 **Files:**
+
 - Create: `components/MysteryResponseBuildComposer.vue`, `components/MysteryResponseBuildComposer.test.ts`.
 - Modify: `components/MysteryChoiceComposer.vue`, `components/MysteryChoiceComposer.test.ts`.
 
 **Interfaces:**
+
 - Consumes `MysteryResponseBuildScene`.
 - Produces response composer emitting ordered token IDs plus local Hint behavior.
 
@@ -402,9 +408,11 @@ git commit -m "feat(mobile): add tap-to-build mystery responses"
 ### Task 4: Wire response submission through the existing controller and page
 
 **Files:**
+
 - Modify: `useMysteryMessenger.ts`, `useMysteryMessenger.test.ts`, `MysteryMessengerPage.vue`, `MysteryMessengerPage.test.ts`.
 
 **Interfaces:**
+
 - Consumes `submitMysteryResponse` and `MysteryResponseBuildComposer`.
 - Produces authenticated/persisted response submission using existing transition and rapid-tap mechanisms.
 
@@ -483,11 +491,13 @@ git commit -m "feat(mobile): wire full mystery interactions"
 ### Task 5: Freeze language content, author the 13-scene chapter, and fix Learn copy
 
 **Files:**
+
 - Modify the spec first only if language review changes canonical copy/alternates.
 - Modify: `content.ts`, `model.test.ts`, `validate-content.test.ts`, feature imports.
 - Modify: `apps/vela-mobile/src/pages/LearnPage.vue`, `apps/vela-mobile/src/pages/LearnPage.test.ts`.
 
 **Interfaces:**
+
 - Produces `MESSAGE_THAT_ARRIVED_TOMORROW_CHAPTER` and durable Learn-card copy.
 - Canonical authored values come from **Spec → Canonical Pilot Copy and Token Sheet** after the language-review freeze gate.
 
@@ -530,7 +540,7 @@ expect(target('mina-possession').reading).toBe('ミナさんのです');
 Pin the exact scene-07 and scene-11 token arrays/canonical answers from the spec. Pin scene 07 `alternateAnswerTokenIds` contains at least:
 
 ```ts
-['train', 'de', 'time', 'ni-time', 'station', 'ni-place', 'go', 'period']
+['train', 'de', 'time', 'ni-time', 'station', 'ni-place', 'go', 'period'];
 ```
 
 Pin every additional alternate added by the independent review.
@@ -612,10 +622,12 @@ git commit -m "feat(mobile): author full mystery messenger chapter"
 ### Task 6: Full verification and acceptance evidence
 
 **Files:**
+
 - Modify only files requiring test/review/Japanese fixes.
 - Update PR #63 and HPA-300 with final evidence.
 
 **Interfaces:**
+
 - Produces acceptance evidence and a clean HPA-301 handoff.
 
 - [ ] **Step 1: Run complete mobile coverage**
@@ -645,7 +657,7 @@ Expected: PASS.
 - [ ] **Step 4: Run production-shaped local build**
 
 ```bash
-MOBILE_SKIP_ENV_VALIDATION=1 bun run --cwd apps/vela-mobile build
+MOBILE_SKIP_ENV_VALIDATION=true bun run --cwd apps/vela-mobile build
 ```
 
 Expected: PASS. CI owns the configured environment path.
