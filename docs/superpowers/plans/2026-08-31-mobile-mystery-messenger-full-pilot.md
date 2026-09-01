@@ -76,12 +76,7 @@ No router, Learn-page, backend, or workspace dependency changes are expected.
 - Modify: `apps/vela-mobile/src/features/mystery-messenger/useMysteryAudio.test.ts`
 - Modify: `apps/vela-mobile/src/features/mystery-messenger/components/MysteryTranscript.vue`
 - Modify: `apps/vela-mobile/src/features/mystery-messenger/components/MysteryTranscript.test.ts`
-- Modify fixtures/imports as required in:
-  - `apps/vela-mobile/src/features/mystery-messenger/components/MysteryChoiceComposer.test.ts`
-  - `apps/vela-mobile/src/features/mystery-messenger/useMysteryMessenger.test.ts`
-  - `apps/vela-mobile/src/features/mystery-messenger/MysteryMessengerPage.test.ts`
-  - `apps/vela-mobile/src/features/mystery-messenger/storage.test.ts`
-  - `apps/vela-mobile/src/features/mystery-messenger/validate-content.test.ts`
+- Modify affected fixtures/imports in `MysteryChoiceComposer.test.ts`, `useMysteryMessenger.test.ts`, `MysteryMessengerPage.test.ts`, `storage.test.ts`, and `validate-content.test.ts`.
 
 **Interfaces:**
 - Produces: `MysteryTargetPhrase`, `MysteryChoiceAudioPrompt`, `MysteryResponseToken`, `MysteryResponseBuildScene`, `MysterySceneAudio`, widened `MysteryScene`, widened `MysteryHistoryEntry`, widened `MysteryTranscriptItem`, `submitMysteryResponse`, `selectMysterySceneAudio`.
@@ -90,7 +85,7 @@ No router, Learn-page, backend, or workspace dependency changes are expected.
 
 - [ ] **Step 1: Add failing model tests for `response-build` transition semantics**
 
-Use a local chapter fixture with `targetPhrases: []` and this response scene:
+Use a local chapter fixture with `startSceneId: 'response-01'`, `targetPhrases: []`, the response scene below, and an `ending` scene:
 
 ```ts
 const responseScene: MysteryResponseBuildScene = {
@@ -137,7 +132,7 @@ Expected: FAIL because the new scene/history/transition contracts do not exist.
 
 - [ ] **Step 3: Extend the closed model types**
 
-Add exactly:
+Add:
 
 ```ts
 export type MysteryTargetPhrase = {
@@ -188,44 +183,21 @@ export type MysteryChoiceScene = {
 };
 ```
 
-Extend `MysteryChapter` with:
-
-```ts
-targetPhrases: readonly MysteryTargetPhrase[];
-```
-
-Extend `MysteryScene` and `MysteryHistoryEntry` with only `response-build` as described in the spec.
+Extend `MysteryChapter` with `targetPhrases: readonly MysteryTargetPhrase[]`; extend `MysteryScene` and `MysteryHistoryEntry` with only the response-build variants defined in the spec.
 
 - [ ] **Step 4: Implement `submitMysteryResponse()`**
 
-Keep the stale-first behavior:
+Start with:
 
 ```ts
 if (progress.currentSceneId !== expectedSceneId) return progress;
 ```
 
-Then:
+Then require `scene.kind === 'response-build'`, reject unknown/duplicate submitted token IDs, append the closed response history entry, resolve `scene.nextSceneId`, and advance regardless of correctness.
 
-1. require the actual current scene to be `response-build`;
-2. build a token map from `scene.tokens`;
-3. reject unknown submitted IDs;
-4. reject duplicate submitted identities;
-5. append `{ kind: 'response-build', sceneId, selectedTokenIds: [...selectedTokenIds] }`;
-6. resolve `scene.nextSceneId`; and
-7. advance regardless of correctness.
+Use `mystery_response_token_not_found`, `mystery_duplicate_response_token`, and the existing `mystery_invalid_transition` only.
 
-Use only these new feature errors:
-
-```text
-mystery_response_token_not_found
-mystery_duplicate_response_token
-```
-
-Keep `mystery_invalid_transition` for the wrong current scene kind.
-
-- [ ] **Step 5: Add the pure scene-audio selector and tests before changing playback/UI**
-
-Add:
+- [ ] **Step 5: Add `selectMysterySceneAudio()` and its four-kind tests**
 
 ```ts
 export type MysterySceneAudio = {
@@ -246,19 +218,11 @@ export function selectMysterySceneAudio(scene: MysteryScene): MysterySceneAudio 
 }
 ```
 
-Pin all four cases:
-
-```text
-message -> own ttsId/text
-ending -> own ttsId/text
-text choice -> null
-audio choice -> exact audioPrompt
-response-build -> null
-```
+Pin message, ending, text-choice, audio-choice, and response-build outputs explicitly.
 
 - [ ] **Step 6: Widen transcript items with optional audio and make projection exhaustive**
 
-Use one optional audio field shared by the transcript union:
+Use:
 
 ```ts
 type MysteryTranscriptAudio = {
@@ -266,157 +230,133 @@ type MysteryTranscriptAudio = {
 };
 ```
 
-Remove required choice `ttsId` fields. Add:
+Remove required choice `ttsId` fields. Add `choice-result.explanation`, `response-prompt`, and `response-result(selectedText, correctText, result, feedback, explanation)`.
 
-```text
-choice-result.explanation
-response-prompt
-response-result(selectedText, correctText, result, feedback, explanation)
-```
+For every completed/current scene call `selectMysterySceneAudio(scene)` and set `audio` only when non-null. Replace the current catch-all ending branch with an explicit switch over `message`, `choice`, `response-build`, and `ending`.
 
-For each completed/current scene call `selectMysterySceneAudio(scene)` and set `audio` only when non-null.
+For completed response results, compare resolved token-text arrays, not identities, and join visible Japanese with `join('')`.
 
-Do not retain the current `else => ending` projection. Switch explicitly over:
+- [ ] **Step 7: Make the existing five-scene `content.ts` satisfy the widened model now**
 
-```text
-message
-choice
-response-build
-ending
-```
-
-For completed response results, compare arrays of resolved token text, not submitted IDs, and join visible Japanese with `join('')`.
-
-- [ ] **Step 7: Update the temporary five-scene `content.ts` immediately**
-
-Keep the existing five scenes for Tasks 1–4, but make them satisfy the widened contract:
+Add `targetPhrases: []` at chapter level. Keep the existing message and ending objects unchanged. Replace only the current scene-03 object with this exact temporary text-choice object:
 
 ```ts
-export const MYSTERY_MESSENGER_VERTICAL_SLICE = {
-  id: 'mystery-message-tomorrow-v1',
-  version: 1,
-  title: '明日からのメッセージ',
-  startSceneId: 'scene-01',
-  targetPhrases: [],
-  // existing scenes
-} satisfies MysteryChapter;
+{
+  kind: 'choice',
+  id: 'scene-03',
+  speaker: 'mina',
+  prompt: 'どう返事をしますか？',
+  options: [
+    {
+      id: 'understood',
+      label: 'わかりました',
+      result: 'correct',
+      feedback: '「わかりました」という短い返事が送られました。',
+      nextSceneId: 'scene-04',
+    },
+    {
+      id: 'hesitant',
+      label: '少し待って…',
+      result: 'incorrect',
+      feedback: '少し迷ったけれど、返事を送りました。',
+      nextSceneId: 'scene-04',
+    },
+  ],
+  hint: '「わかりました」は、理解したことを伝える返事です。',
+  explanation: '短い返事でも、相手に理解したことを伝えられます。',
+  targetPhraseIds: [],
+},
 ```
 
-For the existing scene-03 choice:
+Do not add `audioPrompt` or a response-build scene to the real content in Task 1.
 
-```ts
-hint: '「わかりました」は、理解したことを伝える返事です。',
-explanation: '短い返事でも、相手に理解したことを伝えられます。',
-targetPhraseIds: [],
-```
+- [ ] **Step 8: Change `useMysteryAudio` to consume the model selector**
 
-Remove its old `ttsId`; it is a text choice in the temporary content and therefore has no `audioPrompt`.
-
-Do not add `response-build` to the real content yet.
-
-- [ ] **Step 8: Change `useMysteryAudio` to consume `selectMysterySceneAudio()`**
-
-Delete `authoredTextFor()` and remove every direct `scene.ttsId` assumption from prepare/invalidate paths.
-
-At the start of `play()` after the usable-session check:
+Delete `authoredTextFor()` and remove direct `scene.ttsId` assumptions from prepare/invalidate paths. After the usable-session check:
 
 ```ts
 const audio = selectMysterySceneAudio(scene);
 if (!audio) return;
 ```
 
-Use:
+Use `audio.ttsId` and `audio.text` for `preparePronunciation()` and `invalidatePronunciation()`. Pass the selected audio identity through helper functions so widened `MysteryScene` is never assumed to own `ttsId`.
+
+Preserve all existing cancellation/playback semantics.
+
+- [ ] **Step 9: Add exact optional-audio regressions**
+
+Create this local fixture in `useMysteryAudio.test.ts`:
 
 ```ts
-audio.ttsId
-audio.text
+const audioChoice: MysteryChoiceScene = {
+  kind: 'choice',
+  id: 'audio-choice',
+  speaker: 'haru',
+  prompt: '音声を聞いて選んでください。',
+  audioPrompt: {
+    ttsId: 'mystery-audio-choice-test',
+    text: '青いノートはミナさんのです。',
+  },
+  options: [
+    {
+      id: 'mina',
+      label: 'ミナさん',
+      result: 'correct',
+      feedback: '正しいです。',
+      nextSceneId: 'ending',
+    },
+    {
+      id: 'haru',
+      label: 'ハルさん',
+      result: 'incorrect',
+      feedback: 'もう一度聞いてみましょう。',
+      nextSceneId: 'ending',
+    },
+  ],
+  hint: '「ミナさん」に注目してください。',
+  explanation: '「の」は持ち主を表します。',
+  targetPhraseIds: [],
+};
 ```
 
-for `preparePronunciation()` and `invalidatePronunciation()`. Pass the selected audio identity into helper functions so `handlePlaybackError()` never reads `ttsId` directly from a widened `MysteryScene`.
-
-Preserve gesture-required, media-unavailable, cancellation, lifecycle, identity-change, and disposal behavior.
-
-- [ ] **Step 9: Add exact audio regression tests**
-
-Pin:
+Assert:
 
 ```ts
 expect(ttsService.preparePronunciation).toHaveBeenCalledWith(
   {
     userId: 'user-1',
-    vocabularyId: audioChoice.audioPrompt!.ttsId,
-    text: audioChoice.audioPrompt!.text,
+    vocabularyId: 'mystery-audio-choice-test',
+    text: '青いノートはミナさんのです。',
   },
   { signal: expect.any(AbortSignal) },
 );
 ```
 
-Also assert:
+Also pin text-choice play -> no TTS, response-build play -> no TTS, message behavior unchanged, and media-unavailable on this audio choice invalidates `mystery-audio-choice-test`.
+
+- [ ] **Step 10: Update `MysteryTranscript.vue` and tests in the same task**
+
+Render explicit branches for message, choice-result, choice-prompt, response-result, response-prompt, and ending. Render replay only when `item.audio` exists.
+
+Pin:
 
 ```text
-text choice play -> no TTS call, state idle
-response-build play -> no TTS call, state idle
-message -> existing TTS behavior remains
-media_unavailable on audio choice invalidates audioPrompt.ttsId, not a scene field
-```
-
-- [ ] **Step 10: Update `MysteryTranscript.vue` and its tests in the same task**
-
-Make every transcript kind explicit:
-
-```text
-message
-choice-result
-choice-prompt
-response-result
-response-prompt
-ending
-```
-
-Render replay only when `item.audio` exists:
-
-```vue
-<q-btn
-  v-if="item.audio"
-  ...
-  @click="emit('replay', item.sceneId)"
-/>
-```
-
-Pin both sides of the listening contract:
-
-```text
-text choice-prompt -> no replay button
-text choice-result -> no replay button
-audio choice-prompt -> replay button present
-audio choice-result -> replay button present
+text choice prompt/result -> no replay
+audio choice prompt/result -> replay present
 message/ending -> replay present
 response prompt/result -> no replay
 ```
 
 - [ ] **Step 11: Update every affected current fixture/import**
 
-Search the feature for the current content constant and closed choice shapes:
+Run:
 
 ```bash
 rg "MYSTERY_MESSENGER_VERTICAL_SLICE|MysteryChoiceScene|kind: 'choice'" \
   apps/vela-mobile/src/features/mystery-messenger
 ```
 
-Update the current fixtures in at least:
-
-```text
-model.test.ts
-useMysteryAudio.test.ts
-useMysteryMessenger.test.ts
-MysteryChoiceComposer.test.ts
-MysteryMessengerPage.test.ts
-validate-content.test.ts
-storage.test.ts
-MysteryTranscript.test.ts
-```
-
-Every chapter fixture gains `targetPhrases`. Every typed choice fixture gains `hint`, `explanation`, and `targetPhraseIds`; choices only gain `audioPrompt` when the test explicitly needs listening.
+Update typed chapter/choice fixtures in `model.test.ts`, `useMysteryAudio.test.ts`, `useMysteryMessenger.test.ts`, `MysteryChoiceComposer.test.ts`, `MysteryMessengerPage.test.ts`, `validate-content.test.ts`, `storage.test.ts`, and `MysteryTranscript.test.ts`. Every chapter fixture gains `targetPhrases`; every typed choice fixture gains `hint`, `explanation`, and `targetPhraseIds`; only listening-specific fixtures gain `audioPrompt`.
 
 - [ ] **Step 12: Run the closed Task-1 gate**
 
@@ -458,17 +398,9 @@ git commit -m "feat(mobile): close mystery interaction and audio model"
 
 - [ ] **Step 1: Write failing storage tests for response history**
 
-Use a local chapter with one `response-build` scene. Cover valid round-trip plus reset/deletion for:
+Use a local chapter with a response-build scene. Cover valid round-trip and reset/deletion for: response entry pointing at a non-response scene, non-array `selectedTokenIds`, unknown token ID, duplicate token ID, and chapter-version mismatch.
 
-```text
-response entry references a non-response scene
-selectedTokenIds is not an array
-unknown selected response token ID
-duplicate selected response token ID
-chapter version mismatch
-```
-
-Also keep this exact key invariant:
+Keep this key assertion:
 
 ```ts
 expect(mysteryProgressStorageKey('user:a', 'chapter/1')).toBe(
@@ -486,7 +418,7 @@ Expected: new response-history tests FAIL.
 
 - [ ] **Step 3: Extend `isKnownProgress()` with one response-build branch**
 
-A persisted response entry is valid only when:
+Require:
 
 ```ts
 scene.kind === 'response-build'
@@ -495,11 +427,9 @@ entry.selectedTokenIds.every((id) => scene.tokens.some((token) => token.id === i
 new Set(entry.selectedTokenIds).size === entry.selectedTokenIds.length
 ```
 
-Keep history closed to `message | choice | response-build`; ending remains represented only by current scene + `completed`.
+Keep ending out of history and do not persist partial composer UI state.
 
-Do not persist or validate partial composer UI state.
-
-- [ ] **Step 4: Write failing validator tests for the new authored rules**
+- [ ] **Step 4: Write failing validator tests for the new rules**
 
 Add exact issue codes:
 
@@ -513,25 +443,7 @@ unsupported_tts_markup
 multiple_endings
 ```
 
-Tests must also prove `response-build.nextSceneId` participates in dangling-reference and reachability checks.
-
-Examples:
-
-```ts
-expect(validateMysteryChapter(chapterWithDuplicateToken)).toContainEqual({
-  code: 'duplicate_response_token_id',
-  sceneId: 'response-01',
-  referenceId: 'ni',
-});
-```
-
-```ts
-expect(validateMysteryChapter(chapterWithUnknownTarget)).toContainEqual({
-  code: 'unknown_target_phrase_reference',
-  sceneId: 'choice-01',
-  referenceId: 'missing-phrase',
-});
-```
+Also prove response `nextSceneId` participates in dangling-reference and reachability checks.
 
 - [ ] **Step 5: Run validator tests and verify failure**
 
@@ -541,49 +453,11 @@ bun run --cwd apps/vela-mobile test:unit -- src/features/mystery-messenger/valid
 
 Expected: FAIL for the new rules.
 
-- [ ] **Step 6: Extend `validateMysteryChapter()` without changing its shape**
+- [ ] **Step 6: Extend the current Map + graph validator**
 
-Keep the existing `Map` + graph traversal.
+For response-build validate: destination exists, token IDs unique, correct IDs exist and are not repeated, and target phrase references exist. For choice validate target phrase references in addition to existing options. For target phrases validate unique IDs and existing source scenes.
 
-For every response scene:
-
-```text
-validate nextSceneId exists
-validate token IDs are unique
-validate every correctTokenIds entry exists
-validate correctTokenIds contains no repeated identity
-validate targetPhraseIds exist
-```
-
-For every choice scene validate `targetPhraseIds`; preserve current option-ID and destination validation.
-
-For chapter target phrases validate unique IDs and existing `sourceSceneId`.
-
-Require exactly one ending:
-
-```ts
-if (endingIds.length === 0) issues.push({ code: 'missing_ending' });
-if (endingIds.length > 1) issues.push({ code: 'multiple_endings' });
-```
-
-During traversal:
-
-```text
-message -> nextSceneId
-choice -> every option nextSceneId
-response-build -> nextSceneId
-ending -> no edge
-```
-
-For TTS markup inspect the same content that `selectMysterySceneAudio()` can expose:
-
-```text
-message.text
-ending.text
-choice.audioPrompt?.text
-```
-
-Flag `unsupported_tts_markup` when a TTS-bound string contains an HTML/SSML-like `<...>` tag.
+Require exactly one ending. Traverse message/response single edges and every choice option edge. TTS markup validation inspects only `message.text`, `ending.text`, and `choice.audioPrompt?.text`, matching `selectMysterySceneAudio()`.
 
 - [ ] **Step 7: Run storage + validator tests**
 
@@ -616,28 +490,14 @@ git commit -m "feat(mobile): validate full mystery pilot content"
 - Modify: `apps/vela-mobile/src/features/mystery-messenger/components/MysteryChoiceComposer.test.ts`
 
 **Interfaces:**
-- Consumes: Task 1 `MysteryResponseBuildScene` and Task-1 transcript rendering.
-- Produces: `MysteryResponseBuildComposer` with `submit: [selectedTokenIds]` event and ephemeral Hint behavior for both interaction composers.
+- Consumes: Task 1 `MysteryResponseBuildScene` and transcript rendering.
+- Produces: `MysteryResponseBuildComposer` with `submit: [selectedTokenIds]` and ephemeral Hint behavior for both interaction composers.
 
 - [ ] **Step 1: Write response-composer tests first**
 
-Use a scene whose authored available-token order is intentionally scrambled and contains two visible `に` values with different IDs plus `。`.
+Use a scrambled token fixture containing two separate visible `に` IDs and `。`. Cover exact-ID selection/removal, punctuation, Clear, Hint, ordered submit, empty-send disabled, and parent-disabled controls.
 
-Cover:
-
-```text
-tapping available token appends exact ID
-two visible に buttons remain independently addressable
-selected token tap removes only that ID
-punctuation can be selected and removed
-Clear empties selection
-Hint toggles the authored hint
-Send emits selected IDs in tap order
-Send disabled when selection is empty
-all response-changing controls disabled when disabled=true
-```
-
-Use stable test IDs:
+Use test IDs:
 
 ```text
 mystery-response-token-<tokenId>
@@ -657,56 +517,33 @@ bun run --cwd apps/vela-mobile test:unit -- \
 
 Expected: FAIL because the component does not exist.
 
-- [ ] **Step 3: Implement `MysteryResponseBuildComposer.vue` with only local input state**
+- [ ] **Step 3: Implement the response composer with only local state**
 
 ```ts
 const selectedTokenIds = ref<string[]>([]);
 const showHint = ref(false);
-```
 
-Available tokens:
-
-```ts
 const availableTokens = computed(() => {
   const selected = new Set(selectedTokenIds.value);
   return props.scene.tokens.filter((token) => !selected.has(token.id));
 });
 ```
 
-Tap handlers move token IDs only. Render each selected token as an individually removable control keyed by token ID. Do not use drag/drop, scoring, Pinia, backend questions, or runtime shuffle.
-
-Emit:
+Emit copied ordered IDs:
 
 ```ts
 const emit = defineEmits<{
   submit: [selectedTokenIds: readonly string[]];
 }>();
-```
 
-Emit a copied array, not the mutable local ref:
-
-```ts
 emit('submit', [...selectedTokenIds.value]);
 ```
 
+No drag/drop, score state, Pinia, backend question fetch, or runtime shuffle.
+
 - [ ] **Step 4: Add ephemeral Hint behavior to `MysteryChoiceComposer.vue`**
 
-Use:
-
-```ts
-const showHint = ref(false);
-```
-
-Add test IDs:
-
-```text
-mystery-choice-hint
-mystery-choice-hint-copy
-```
-
-Keep option selection unchanged. The page will key the component by `scene.id`, so no reset watcher or persisted hint state is needed.
-
-Hint remains available when the story transition controls are otherwise usable; it never emits a story transition.
+Use local `showHint` and test IDs `mystery-choice-hint` / `mystery-choice-hint-copy`. Keep option selection unchanged; page keying by scene ID handles reset. Hint emits no story transition.
 
 - [ ] **Step 5: Run focused component tests**
 
@@ -739,29 +576,20 @@ git commit -m "feat(mobile): add tap-to-build mystery responses"
 - Modify: `apps/vela-mobile/src/features/mystery-messenger/MysteryMessengerPage.test.ts`
 
 **Interfaces:**
-- Consumes: Task 1 `submitMysteryResponse`; Task 3 response composer; Task 1 audio/transcript behavior unchanged.
-- Produces: controller/page support for response submission with the existing auth, persistence, replay, and 500 ms transition semantics.
+- Consumes: Task 1 `submitMysteryResponse`; Task 3 response composer; Task 1 audio/transcript behavior.
+- Produces: controller/page response submission using existing auth, persistence, replay, and 500 ms transition semantics.
 
 - [ ] **Step 1: Add failing `useMysteryMessenger` tests**
 
-Extend the controller contract:
+Add:
 
 ```ts
 submitResponse(expectedSceneId: string, selectedTokenIds: readonly string[]): void;
 ```
 
-Cover:
+Cover one-save usable transition, stale no-save, recovering/unavailable no-op, and save-failure warning with in-memory advance.
 
-```text
-usable owned run -> response transition saved exactly once
-stale response transition -> same object and no save
-recovering/unavailable -> no mutation/no save
-save failure -> in-memory progress advances + persistenceWarning=true
-```
-
-- [ ] **Step 2: Implement controller wiring through existing `transition()`**
-
-Import the Task-1 pure transition and expose:
+- [ ] **Step 2: Implement through existing `transition()`**
 
 ```ts
 submitResponse: (expectedSceneId, selectedTokenIds) =>
@@ -770,55 +598,27 @@ submitResponse: (expectedSceneId, selectedTokenIds) =>
   ),
 ```
 
-Do not add another auth, persistence, or state-management branch.
+No new auth or persistence branch.
 
-- [ ] **Step 3: Add failing page tests for response rendering and transition locking**
+- [ ] **Step 3: Add failing page tests**
 
-Extend the page controller fixture with `submitResponse`.
+Cover response composer rendering, first Send submission, second Send ignored inside 500 ms, submission enabled again after 500 ms, unusable-session disable, and Hint not acquiring the story lock.
 
-Cover:
-
-```text
-response scene renders MysteryResponseBuildComposer
-first Send calls submitResponse(sceneId, ids)
-second Send inside 500 ms is ignored
-after 500 ms another Send can transition
-unusable session disables response submission
-Hint click does not call submitResponse/continue/choice and does not acquire the 500 ms story lock
-```
-
-Also add an integration-level listening check using the existing transcript replay surface:
+Also cover the replay surface:
 
 ```text
-text choice transcript has no replay control
-listening choice transcript has replay control
-replay for listening choice invokes audio.play(scene-05)
+text choice -> no transcript replay control
+listening choice -> replay control present
+listening replay -> audio.play(listeningScene)
 ```
 
-The exact `audioPrompt.text + ttsId` request remains pinned in Task 1 `useMysteryAudio.test.ts`.
-
-- [ ] **Step 4: Wire `MysteryMessengerPage.vue`**
-
-Add:
+- [ ] **Step 4: Wire the page**
 
 ```ts
 const currentResponseBuild = computed(() =>
   currentScene.value?.kind === 'response-build' ? currentScene.value : null,
 );
-```
 
-Template order:
-
-```text
-message -> Continue
-choice -> MysteryChoiceComposer keyed by scene.id
-response-build -> MysteryResponseBuildComposer keyed by scene.id
-ending -> Restart
-```
-
-Handler:
-
-```ts
 function handleResponseSubmit(selectedTokenIds: readonly string[]): void {
   if (!lockTransition()) return;
   const scene = messenger.currentScene.value;
@@ -827,7 +627,7 @@ function handleResponseSubmit(selectedTokenIds: readonly string[]): void {
 }
 ```
 
-Do not change `handleReplay()` beyond whatever Task-1 type changes require; it still resolves the scene then calls `audio.play(scene)`.
+Template order is message Continue -> choice composer keyed by scene ID -> response composer keyed by scene ID -> ending Restart. Keep replay resolving `sceneId` then calling `audio.play(scene)`.
 
 - [ ] **Step 5: Run focused controller/page tests**
 
@@ -839,7 +639,7 @@ bun run --cwd apps/vela-mobile test:unit -- \
 
 Expected: PASS.
 
-- [ ] **Step 6: Run the existing Task-1 audio/transcript regressions again**
+- [ ] **Step 6: Re-run Task-1 audio/transcript regressions**
 
 ```bash
 bun run --cwd apps/vela-mobile test:unit -- \
@@ -847,7 +647,7 @@ bun run --cwd apps/vela-mobile test:unit -- \
   src/features/mystery-messenger/components/MysteryTranscript.test.ts
 ```
 
-Expected: PASS; text choice remains silent/no-replay and listening choice still uses `audioPrompt`.
+Expected: PASS; text choice remains silent/no-replay and listening choice uses `audioPrompt`.
 
 - [ ] **Step 7: Commit**
 
@@ -861,21 +661,19 @@ git commit -m "feat(mobile): wire full mystery interactions"
 
 ---
 
-### Task 5: Replace the temporary five-scene content with the frozen 13-scene pilot
+### Task 5: Replace temporary content with the frozen 13-scene pilot
 
 **Files:**
 - Modify: `apps/vela-mobile/src/features/mystery-messenger/content.ts`
 - Modify: `apps/vela-mobile/src/features/mystery-messenger/model.test.ts`
 - Modify: `apps/vela-mobile/src/features/mystery-messenger/validate-content.test.ts`
-- Modify all feature imports that still reference `MYSTERY_MESSENGER_VERTICAL_SLICE`.
+- Modify all feature imports still referencing `MYSTERY_MESSENGER_VERTICAL_SLICE`.
 
 **Interfaces:**
 - Produces: `MYSTERY_MESSENGER_PILOT` satisfying the final `MysteryChapter` contract.
-- Canonical authored values come only from **Spec → Frozen Pilot Copy and Token Sheet**. Do not invent alternate Japanese, token segmentation, target-phrase readings, or TTS IDs in this task.
+- Canonical authored values come only from **Spec → Frozen Pilot Copy and Token Sheet**. Do not invent alternate Japanese, token segmentation, target-phrase readings, or TTS IDs.
 
-- [ ] **Step 1: Write real-content tests before replacing `content.ts`**
-
-Pin the chapter shape:
+- [ ] **Step 1: Add real-content chapter-shape tests**
 
 ```ts
 expect(MYSTERY_MESSENGER_PILOT.id).toBe('mystery-message-tomorrow-v1');
@@ -886,85 +684,84 @@ expect(MYSTERY_MESSENGER_PILOT.targetPhrases).toHaveLength(6);
 expect(validateMysteryChapter(MYSTERY_MESSENGER_PILOT)).toEqual([]);
 ```
 
-Pin exactly one ending and only the two speakers:
+Pin exactly one ending, exactly speakers `mina`/`haru`, convergence of every choice, and one content-specific walk visiting all 13 IDs exactly once by following single edges and the first choice edge.
+
+- [ ] **Step 2: Add local lookup helpers and pin the frozen assessed copy**
+
+Use helpers defined in the test itself:
 
 ```ts
-expect(chapter.scenes.filter((scene) => scene.kind === 'ending')).toHaveLength(1);
-expect(
-  new Set(
-    chapter.scenes.flatMap((scene) => ('speaker' in scene ? [scene.speaker] : [])),
-  ),
-).toEqual(new Set(['mina', 'haru']));
-```
+function target(id: string) {
+  const phrase = MYSTERY_MESSENGER_PILOT.targetPhrases.find((candidate) => candidate.id === id);
+  expect(phrase).toBeDefined();
+  return phrase!;
+}
 
-Pin every choice converges:
-
-```ts
-for (const scene of chapter.scenes) {
-  if (scene.kind !== 'choice') continue;
-  expect(new Set(scene.options.map((option) => option.nextSceneId)).size).toBe(1);
+function scene(id: string) {
+  const found = MYSTERY_MESSENGER_PILOT.scenes.find((candidate) => candidate.id === id);
+  expect(found).toBeDefined();
+  return found!;
 }
 ```
 
-Add one content-specific walk: start at `startSceneId`, follow message/response single edges and the first choice option, and expect all 13 scene IDs exactly once before the sole ending. This is the one-path proof; do not add a generic branching validator.
-
-- [ ] **Step 2: Pin the frozen assessed copy before implementation**
-
-At minimum assert:
+Pin:
 
 ```ts
 expect(target('tomorrow-seven').text).toBe('あしたの朝7時');
 expect(target('mina-possession').reading).toBe('ミナさんのです');
 ```
 
-Pin scene-05 listening identity:
+For scene 05:
 
 ```ts
-expect(scene05.audioPrompt).toEqual({
-  ttsId: 'mystery-message-tomorrow-v2-scene-05-audio',
-  text: '青いノートはミナさんのです。きのう、駅に忘れました。',
-});
+const scene05 = scene('scene-05');
+expect(scene05.kind).toBe('choice');
+if (scene05.kind === 'choice') {
+  expect(scene05.audioPrompt).toEqual({
+    ttsId: 'mystery-message-tomorrow-v2-scene-05-audio',
+    text: '青いノートはミナさんのです。きのう、駅に忘れました。',
+  });
+}
 ```
 
-Pin scene-07 prompt and token contract:
+For scene 07:
 
 ```ts
-expect(scene07.prompt).toBe('ミナさんに、あしたの予定を伝えてください。');
-expect(scene07.tokens).toEqual([
-  { id: 'station', text: 'さくら駅' },
-  { id: 'ni-time', text: 'に' },
-  { id: 'period', text: '。' },
-  { id: 'train', text: '電車' },
-  { id: 'go', text: '行きます' },
-  { id: 'time', text: '7時' },
-  { id: 'de', text: 'で' },
-  { id: 'ni-place', text: 'に' },
-]);
-expect(scene07.correctTokenIds).toEqual([
-  'time',
-  'ni-time',
-  'train',
-  'de',
-  'station',
-  'ni-place',
-  'go',
-  'period',
-]);
+const scene07 = scene('scene-07');
+expect(scene07.kind).toBe('response-build');
+if (scene07.kind === 'response-build') {
+  expect(scene07.prompt).toBe('ミナさんに、あしたの予定を伝えてください。');
+  expect(scene07.tokens).toEqual([
+    { id: 'station', text: 'さくら駅' },
+    { id: 'ni-time', text: 'に' },
+    { id: 'period', text: '。' },
+    { id: 'train', text: '電車' },
+    { id: 'go', text: '行きます' },
+    { id: 'time', text: '7時' },
+    { id: 'de', text: 'で' },
+    { id: 'ni-place', text: 'に' },
+  ]);
+  expect(scene07.correctTokenIds).toEqual([
+    'time', 'ni-time', 'train', 'de', 'station', 'ni-place', 'go', 'period',
+  ]);
+}
 ```
 
-Pin scene-11 segmentation exactly:
+For scene 11:
 
 ```ts
-expect(scene11.tokens).toEqual([
-  { id: 'please', text: 'ください' },
-  { id: 'period', text: '。' },
-  { id: 'again', text: 'もう一度' },
-  { id: 'say', text: '言って' },
-]);
-expect(scene11.correctTokenIds).toEqual(['again', 'say', 'please', 'period']);
+const scene11 = scene('scene-11');
+expect(scene11.kind).toBe('response-build');
+if (scene11.kind === 'response-build') {
+  expect(scene11.tokens).toEqual([
+    { id: 'please', text: 'ください' },
+    { id: 'period', text: '。' },
+    { id: 'again', text: 'もう一度' },
+    { id: 'say', text: '言って' },
+  ]);
+  expect(scene11.correctTokenIds).toEqual(['again', 'say', 'please', 'period']);
+}
 ```
-
-These assertions prevent the two response exercises from silently choosing different tokenization than the design.
 
 - [ ] **Step 3: Run content tests and verify failure**
 
@@ -974,38 +771,30 @@ bun run --cwd apps/vela-mobile test:unit -- \
   src/features/mystery-messenger/validate-content.test.ts
 ```
 
-Expected: FAIL because `content.ts` still exports the temporary five-scene slice.
+Expected: FAIL because the final pilot export/content does not exist yet.
 
-- [ ] **Step 4: Replace `content.ts` from the frozen copy/token sheet exactly**
+- [ ] **Step 4: Replace `content.ts` using the canonical frozen sheet**
 
-Rename the export:
+Rename the export to `MYSTERY_MESSENGER_PILOT`. Set the top-level identity exactly:
 
 ```ts
-export const MYSTERY_MESSENGER_PILOT = {
-  id: 'mystery-message-tomorrow-v1',
-  version: 2,
-  title: '明日からのメッセージ',
-  startSceneId: 'scene-01',
-  targetPhrases: [/* exact frozen six records */],
-  scenes: [/* exact frozen 13 scenes */],
-} satisfies MysteryChapter;
+id: 'mystery-message-tomorrow-v1',
+version: 2,
+title: '明日からのメッセージ',
+startSceneId: 'scene-01',
 ```
 
-Copy all learner-facing text, Hint/explanation copy, option labels, target phrase text/readings/meanings, response token arrays, `correctTokenIds`, and TTS IDs from **Spec → Frozen Pilot Copy and Token Sheet** without translation or normalization.
+Then copy the complete six-record `targetPhrases` array and complete 13-scene `scenes` array from **Spec → Frozen Pilot Copy and Token Sheet**, including every option label, Hint, explanation, target reference, token ID/text pair, correct token sequence, message/ending TTS ID, and scene-05 `audioPrompt`.
 
-Use fresh `mystery-message-tomorrow-v2-*` TTS IDs exactly as frozen because the mobile TTS cache treats vocabulary ID as canonical identity for immutable text. Do not reuse HPA-299 `...-v1-*` IDs for rewritten lines.
+Do not reuse HPA-299 `...-v1-*` TTS IDs. Use the frozen `mystery-message-tomorrow-v2-*` IDs because `MobileTtsService` treats vocabulary ID as immutable cache identity for text.
 
-- [ ] **Step 5: Update every feature import to `MYSTERY_MESSENGER_PILOT`**
-
-Run:
+- [ ] **Step 5: Update all feature imports**
 
 ```bash
 rg "MYSTERY_MESSENGER_VERTICAL_SLICE" apps/vela-mobile/src/features/mystery-messenger
 ```
 
-Expected before edits: current page/tests still reference the old constant.
-
-Update every runtime/test import. Then rerun the same `rg`; expected: no matches under feature runtime/tests.
+Update every runtime/test reference to `MYSTERY_MESSENGER_PILOT`. Re-run the command; expected: no matches under feature runtime/tests.
 
 - [ ] **Step 6: Add the real duplicate-token semantic regression**
 
@@ -1015,40 +804,22 @@ For scene 07 submit:
 ['time', 'ni-place', 'train', 'de', 'station', 'ni-time', 'go', 'period']
 ```
 
-Expect `response-result.result === 'correct'` because both swapped identities render the same visible `に` sequence.
+Expect `response-result.result === 'correct'`. Then remove `period` from the correct sequence and expect `incorrect`.
 
-Then submit the correct sequence without `period`; expect `response-result.result === 'incorrect'`.
+- [ ] **Step 7: Pin real-content audio selection**
 
-- [ ] **Step 7: Pin text-vs-listening audio on the real content**
+Assert `selectMysterySceneAudio()` returns `null` for scene 03, exact scene-05 `audioPrompt` for scene 05, `null` for scene 09, and `null` for response scenes 07/11.
 
-Assert:
-
-```text
-scene-03 text choice -> selectMysterySceneAudio() === null
-scene-05 listening choice -> exact audioPrompt source
-scene-09 text choice -> selectMysterySceneAudio() === null
-scene-07/scene-11 response-build -> null
-```
-
-This prevents later authored changes from accidentally giving text questions a dead speaker or making scene 05 speak the visible instruction.
-
-- [ ] **Step 8: Run all Mystery Messenger tests**
+- [ ] **Step 8: Run all Mystery Messenger tests and typecheck**
 
 ```bash
 bun run --cwd apps/vela-mobile test:unit -- src/features/mystery-messenger
-```
-
-Expected: PASS.
-
-- [ ] **Step 9: Run typecheck immediately after content replacement**
-
-```bash
 bun run --cwd apps/vela-mobile typecheck
 ```
 
 Expected: PASS.
 
-- [ ] **Step 10: Commit**
+- [ ] **Step 9: Commit**
 
 ```bash
 git add apps/vela-mobile/src/features/mystery-messenger
@@ -1067,13 +838,13 @@ git commit -m "feat(mobile): author full mystery messenger pilot"
 - Consumes the complete HPA-300 implementation.
 - Produces acceptance evidence for HPA-300 and a clean handoff to HPA-301.
 
-- [ ] **Step 1: Run the complete mobile coverage suite**
+- [ ] **Step 1: Run complete mobile coverage**
 
 ```bash
 bun run --cwd apps/vela-mobile test:coverage
 ```
 
-Expected: PASS with the repository's existing mobile line threshold (>=95%).
+Expected: PASS with existing mobile line threshold >=95%.
 
 - [ ] **Step 2: Run lint**
 
@@ -1091,71 +862,63 @@ bun run --cwd apps/vela-mobile typecheck
 
 Expected: PASS.
 
-- [ ] **Step 4: Run a production-shaped local build**
+- [ ] **Step 4: Run production-shaped local build**
 
 ```bash
 MOBILE_SKIP_ENV_VALIDATION=1 bun run --cwd apps/vela-mobile build
 ```
 
-Expected: PASS. CI remains responsible for the real configured environment path.
+Expected: PASS. CI owns the real configured environment path.
 
-- [ ] **Step 5: Review Codecov after the PR is ready for CI**
+- [ ] **Step 5: Review Codecov when the PR is ready for CI**
 
-Expected: patch coverage >=90%. Add focused tests instead of lowering thresholds.
-
-Codecov is a final gate only. Do not use it as evidence for the two design-sensitive Task-1 contracts: typecheck closure and listening-choice audio identity.
+Expected: patch coverage >=90%. Add focused tests rather than lowering thresholds. Codecov is a final gate, not evidence for Task-1 typecheck closure or listening audio identity.
 
 - [ ] **Step 6: Perform the manual Japanese pass against the frozen sheet**
 
-Read all 13 scenes and six target phrases in sequence. Verify:
+Verify:
 
 ```text
 learner-facing mystery word is consistently あした; title kanji stays intentional
-relative-time logic is understandable: yesterday -> today's delivery -> yesterday's “tomorrow”
+relative-time logic is understandable
 tomorrow-seven is exactly あしたの朝7時
 mina-possession reading preserves ミナ rather than ambiguous みな
 all English meanings are accurate
 scene-07 particles and duplicate に placement are natural
 scene-11 segmentation is exactly もう一度 / 言って / ください / 。
 audio prompt is natural spoken Japanese
-hints do not reveal unrelated information
-explanations are short and beginner-friendly
+hints are short and relevant
+explanations are beginner-friendly
 no TTS-bound string contains HTML/SSML markup
 ```
 
-If Japanese copy must change, update the **design spec frozen sheet**, `content.ts`, and the pinned real-content test in the same commit. Do not silently edit only `content.ts`.
+If copy changes, update the design spec frozen sheet, `content.ts`, and pinned real-content test in the same commit.
 
 - [ ] **Step 7: Run focused iOS Simulator smoke acceptance**
 
-Exercise one complete run:
+Exercise:
 
 ```text
 Learn -> Mystery Messenger
-scene 03 text choice: confirm there is no replay control; try wrong answer; story continues
-scene 05 audio choice: replay and confirm spoken Japanese is 青いノートはミナさんのです。きのう、駅に忘れました。, not the visible instruction
-scene 07 response: select both distinct に tokens and punctuation; send
-restart/re-enter once to confirm version-2 persistence / old v1 chapter reset
-scene 09 use Hint; confirm text choice has no replay; choose answer
-scene 11 use Hint; exercise explicit もう一度 / 言って / ください / 。 tokens; send a wrong known-token order and confirm story continues
-reach scene 13 ending
-restart and confirm clean new run
+scene 03: no replay; wrong answer still advances
+scene 05: replay speaks 青いノートはミナさんのです。きのう、駅に忘れました。 rather than the visible instruction
+scene 07: use both distinct に tokens and punctuation
+restart/re-enter once to confirm version-2 chapter persistence/reset behavior
+scene 09: Hint works; no replay
+scene 11: exact もう一度 / 言って / ください / 。 tokens; wrong order still advances
+scene 13 ending reached
+restart produces a clean run
 ```
 
-Also verify the existing `Tap play again` gesture fallback and background cancellation still behave when replaying scene 05.
+Also verify existing `Tap play again` gesture fallback and background cancellation on scene 05.
 
 - [ ] **Step 8: Final diff scope review**
 
-Confirm the branch contains only:
-
-```text
-HPA-300 planning docs
-mystery-messenger feature runtime/tests
-no router/Learn/backend/shared-package/dependency changes unless a concrete regression forced one
-```
+Confirm only HPA-300 planning docs plus Mystery Messenger runtime/tests changed; no router/Learn/backend/shared-package/dependency changes unless a concrete regression forced one.
 
 - [ ] **Step 9: Commit any verification fixes**
 
-Use scoped messages such as:
+Use a scoped message such as:
 
 ```bash
 git commit -m "fix(mobile): polish mystery pilot interactions"
@@ -1163,6 +926,6 @@ git commit -m "fix(mobile): polish mystery pilot interactions"
 
 Do not create a follow-up PR for HPA-300.
 
-- [ ] **Step 10: Update Linear HPA-300 with final evidence when implementation is accepted**
+- [ ] **Step 10: Update Linear HPA-300 with final evidence**
 
-Record coverage, lint/typecheck/build, Simulator smoke, manual Japanese pass, PR link, and any explicit deferrals to HPA-301/HPA-302. Mark HPA-300 Done only after those gates pass.
+Record coverage, lint/typecheck/build, Simulator smoke, manual Japanese pass, PR link, and explicit HPA-301/HPA-302 deferrals. Mark HPA-300 Done only after those gates pass.
