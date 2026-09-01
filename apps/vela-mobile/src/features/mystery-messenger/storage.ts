@@ -22,13 +22,25 @@ function isKnownProgress(progress: MysteryProgress, chapter: MysteryChapter): bo
   if (!current) return false;
 
   for (const entry of progress.history) {
-    // history is a closed message|choice union; an ending scene is only ever
-    // represented by currentSceneId + completed and never lands in history
-    if (entry?.kind !== 'message' && entry?.kind !== 'choice') return false;
+    // history covers the message|choice|response-build union; an ending scene is
+    // only ever represented by currentSceneId + completed, never by a history entry
+    if (entry?.kind !== 'message' && entry?.kind !== 'choice' && entry?.kind !== 'response-build') {
+      return false;
+    }
     const scene = scenes.get(entry.sceneId);
     if (!scene || scene.kind !== entry.kind) return false;
     if (scene.kind === 'choice') {
       if (!scene.options.some((option) => option.id === entry.selectedOptionId)) return false;
+    } else if (scene.kind === 'response-build') {
+      // mirrors submitMysteryResponse: known token ids, no repeated identity;
+      // no draft/hint state is persisted alongside the selected ids
+      if (!Array.isArray(entry.selectedTokenIds)) return false;
+      const seen = new Set<string>();
+      for (const tokenId of entry.selectedTokenIds) {
+        if (!scene.tokens.some((token) => token.id === tokenId)) return false;
+        if (seen.has(tokenId)) return false;
+        seen.add(tokenId);
+      }
     }
   }
 

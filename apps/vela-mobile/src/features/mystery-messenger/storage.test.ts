@@ -4,7 +4,9 @@ import {
   chooseMysteryOption,
   continueMysteryMessage,
   createMysteryProgress,
+  type MysteryChapter,
   type MysteryProgress,
+  submitMysteryResponse,
 } from './model';
 import { createBrowserMysteryProgressStorage, mysteryProgressStorageKey } from './storage';
 
@@ -47,6 +49,147 @@ function progressAtScene04(): MysteryProgress {
 function progressAtEnding(): MysteryProgress {
   return continueMysteryMessage(chapter, progressAtScene04(), 'scene-04');
 }
+
+const RESPONSE_STORAGE_CHAPTER: MysteryChapter = {
+  id: 'mystery-storage-response-v1',
+  version: 2,
+  title: '返事の保存',
+  startSceneId: 'scene-01',
+  targetPhrases: [],
+  scenes: [
+    {
+      kind: 'message',
+      id: 'scene-01',
+      speaker: 'mina',
+      text: 'メッセージ。',
+      ttsId: 't-scene-01',
+      nextSceneId: 'response-01',
+    },
+    {
+      kind: 'response-build',
+      id: 'response-01',
+      prompt: '返事を作ってください。',
+      tokens: [
+        { id: 'time', text: '7時' },
+        { id: 'ni', text: 'に' },
+        { id: 'train', text: '電車' },
+      ],
+      correctTokenIds: ['time', 'ni'],
+      feedback: { correct: '正しい。', incorrect: '確認しましょう。' },
+      hint: 'h',
+      explanation: 'e',
+      targetPhraseIds: [],
+      nextSceneId: 'ending',
+    },
+    { kind: 'ending', id: 'ending', title: '終わり', text: '…', ttsId: 't-ending' },
+  ],
+};
+
+const responseKey = mysteryProgressStorageKey(userId, RESPONSE_STORAGE_CHAPTER.id);
+
+function responseProgress(): MysteryProgress {
+  let progress = createMysteryProgress(RESPONSE_STORAGE_CHAPTER);
+  progress = continueMysteryMessage(RESPONSE_STORAGE_CHAPTER, progress, 'scene-01');
+  return submitMysteryResponse(RESPONSE_STORAGE_CHAPTER, progress, 'response-01', ['time', 'ni']);
+}
+
+function storedResponseProgress(patch: Record<string, unknown>): string {
+  return JSON.stringify({ ...responseProgress(), ...patch });
+}
+
+describe('response history persistence', () => {
+  it('round-trips a saved response-build history entry', () => {
+    const backend = createFakeBackend();
+    const storage = createBrowserMysteryProgressStorage(backend);
+    const progress = responseProgress();
+
+    expect(storage.save(userId, progress)).toBe(true);
+    expect(storage.load(userId, RESPONSE_STORAGE_CHAPTER)).toEqual(progress);
+  });
+
+  it('resets a response entry whose scene is not a response-build scene', () => {
+    const backend = createFakeBackend();
+    const storage = createBrowserMysteryProgressStorage(backend);
+    backend.set(
+      responseKey,
+      storedResponseProgress({
+        history: [{ kind: 'response-build', sceneId: 'scene-01', selectedTokenIds: ['time'] }],
+      }),
+    );
+
+    expect(storage.load(userId, RESPONSE_STORAGE_CHAPTER)).toBeNull();
+    expect(backend.has(responseKey)).toBe(false);
+  });
+
+  it('resets a response entry whose selected ids are not an array', () => {
+    const backend = createFakeBackend();
+    const storage = createBrowserMysteryProgressStorage(backend);
+    backend.set(
+      responseKey,
+      storedResponseProgress({
+        history: [
+          {
+            kind: 'response-build',
+            sceneId: 'response-01',
+            selectedTokenIds: 'time',
+          },
+        ],
+      }),
+    );
+
+    expect(storage.load(userId, RESPONSE_STORAGE_CHAPTER)).toBeNull();
+    expect(backend.has(responseKey)).toBe(false);
+  });
+
+  it('resets a response entry with an unknown selected token id', () => {
+    const backend = createFakeBackend();
+    const storage = createBrowserMysteryProgressStorage(backend);
+    backend.set(
+      responseKey,
+      storedResponseProgress({
+        history: [
+          {
+            kind: 'response-build',
+            sceneId: 'response-01',
+            selectedTokenIds: ['time', 'nope'],
+          },
+        ],
+      }),
+    );
+
+    expect(storage.load(userId, RESPONSE_STORAGE_CHAPTER)).toBeNull();
+    expect(backend.has(responseKey)).toBe(false);
+  });
+
+  it('resets a response entry with a repeated selected token identity', () => {
+    const backend = createFakeBackend();
+    const storage = createBrowserMysteryProgressStorage(backend);
+    backend.set(
+      responseKey,
+      storedResponseProgress({
+        history: [
+          {
+            kind: 'response-build',
+            sceneId: 'response-01',
+            selectedTokenIds: ['time', 'time'],
+          },
+        ],
+      }),
+    );
+
+    expect(storage.load(userId, RESPONSE_STORAGE_CHAPTER)).toBeNull();
+    expect(backend.has(responseKey)).toBe(false);
+  });
+
+  it('resets version-1 progress loaded against version-2 content', () => {
+    const backend = createFakeBackend();
+    const storage = createBrowserMysteryProgressStorage(backend);
+    backend.set(responseKey, storedResponseProgress({ chapterVersion: 1 }));
+
+    expect(storage.load(userId, RESPONSE_STORAGE_CHAPTER)).toBeNull();
+    expect(backend.has(responseKey)).toBe(false);
+  });
+});
 
 describe('mysteryProgressStorageKey', () => {
   it('namespaces, encodes, and versions the key', () => {
