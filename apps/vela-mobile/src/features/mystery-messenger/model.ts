@@ -311,21 +311,25 @@ export function selectMysteryTranscript(
           throw new Error('mystery_invalid_transition');
         }
         const textById = new Map(scene.tokens.map((token) => [token.id, token.text] as const));
-        const visibleText = (tokenIds: readonly string[]): string =>
-          tokenIds
-            .map((tokenId) => {
-              const tokenText = textById.get(tokenId);
-              if (tokenText === undefined) {
-                throw new Error('mystery_response_token_not_found');
-              }
-              return tokenText;
-            })
-            .join('');
-        const selectedText = visibleText(entry.selectedTokenIds);
-        const correctText = visibleText(scene.correctTokenIds);
+        const visibleTexts = (tokenIds: readonly string[]): readonly string[] =>
+          tokenIds.map((tokenId) => {
+            const tokenText = textById.get(tokenId);
+            if (tokenText === undefined) {
+              throw new Error('mystery_response_token_not_found');
+            }
+            return tokenText;
+          });
+        const textsEqual = (a: readonly string[], b: readonly string[]): boolean =>
+          a.length === b.length && a.every((text, index) => text === b[index]);
+        const selectedTexts = visibleTexts(entry.selectedTokenIds);
+        const correctTexts = visibleTexts(scene.correctTokenIds);
+        const selectedText = selectedTexts.join('');
+        const correctText = correctTexts.join('');
         const result =
-          selectedText === correctText ||
-          (scene.alternateAnswerTokenIds ?? []).some((ids) => visibleText(ids) === selectedText)
+          textsEqual(selectedTexts, correctTexts) ||
+          (scene.alternateAnswerTokenIds ?? []).some((ids) =>
+            textsEqual(visibleTexts(ids), selectedTexts),
+          )
             ? ('correct' as const)
             : ('incorrect' as const);
         return {
