@@ -184,7 +184,7 @@ export const MESSAGE_THAT_ARRIVED_TOMORROW_CHAPTER = {
           id: 'ask-when-tomorrow',
           label: '「あした」はいつですか？',
           result: 'correct',
-          feedback: '「「あした」はいつですか？」と聞きました。',
+          feedback: '「『あした』はいつですか？」と聞きました。',
           nextSceneId: 'scene-10',
         },
         {
