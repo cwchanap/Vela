@@ -729,7 +729,7 @@ Before HPA-300 is accepted on this PR:
 bun run --cwd apps/vela-mobile test:coverage
 bun run --cwd apps/vela-mobile lint
 bun run --cwd apps/vela-mobile typecheck
-MOBILE_SKIP_ENV_VALIDATION=1 bun run --cwd apps/vela-mobile build
+MOBILE_SKIP_ENV_VALIDATION=true bun run --cwd apps/vela-mobile build
 ```
 
 Keep the existing mobile line-coverage threshold and require Codecov patch coverage >= 90% when CI runs. Codecov is a final gate, not a substitute for the model/audio/language checks above.

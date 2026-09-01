@@ -330,6 +330,7 @@ describe('submitMysteryResponse', () => {
   });
 
   it('accepts a swap of the duplicate-visible に particles as correct', () => {
+    // Array equality: both に ids resolve to the same visible text, so the swap is correct.
     const swapped = [...CANONICAL];
     [swapped[1], swapped[5]] = [swapped[5]!, swapped[1]!];
 
