@@ -8,7 +8,12 @@ export type MysteryContentIssue = {
     | 'missing_ending'
     | 'unreachable_ending'
     | 'duplicate_choice_id'
-    | 'empty_choice_options';
+    | 'empty_choice_options'
+    | 'duplicate_target_phrase_id'
+    | 'unknown_target_phrase_reference'
+    | 'duplicate_response_token_id'
+    | 'invalid_response_answer_token'
+    | 'multiple_endings';
   sceneId?: string;
   referenceId?: string;
 };
@@ -23,6 +28,14 @@ export function validateMysteryChapter(chapter: MysteryChapter): MysteryContentI
       continue;
     }
     sceneMap.set(scene.id, scene);
+  }
+
+  const targetPhraseIds = new Set<string>();
+  for (const phrase of chapter.targetPhrases) {
+    if (targetPhraseIds.has(phrase.id)) {
+      issues.push({ code: 'duplicate_target_phrase_id', referenceId: phrase.id });
+    }
+    targetPhraseIds.add(phrase.id);
   }
 
   for (const scene of sceneMap.values()) {
@@ -56,6 +69,55 @@ export function validateMysteryChapter(chapter: MysteryChapter): MysteryContentI
           });
         }
       }
+    } else if (scene.kind === 'response-build') {
+      if (!sceneMap.has(scene.nextSceneId)) {
+        issues.push({
+          code: 'dangling_scene_reference',
+          sceneId: scene.id,
+          referenceId: scene.nextSceneId,
+        });
+      }
+      const tokenIds = new Set<string>();
+      for (const token of scene.tokens) {
+        if (tokenIds.has(token.id)) {
+          issues.push({
+            code: 'duplicate_response_token_id',
+            sceneId: scene.id,
+            referenceId: token.id,
+          });
+        }
+        tokenIds.add(token.id);
+      }
+      // mirrors submitMysteryResponse: unknown or repeated identity is invalid,
+      // in the canonical answer and in every alternate answer
+      const checkAnswerTokens = (tokenIdsInAnswer: readonly string[]) => {
+        const seen = new Set<string>();
+        for (const tokenId of tokenIdsInAnswer) {
+          if (!tokenIds.has(tokenId) || seen.has(tokenId)) {
+            issues.push({
+              code: 'invalid_response_answer_token',
+              sceneId: scene.id,
+              referenceId: tokenId,
+            });
+          }
+          seen.add(tokenId);
+        }
+      };
+      checkAnswerTokens(scene.correctTokenIds);
+      for (const alternate of scene.alternateAnswerTokenIds ?? []) {
+        checkAnswerTokens(alternate);
+      }
+    }
+    if (scene.kind === 'choice' || scene.kind === 'response-build') {
+      for (const targetPhraseId of scene.targetPhraseIds) {
+        if (!targetPhraseIds.has(targetPhraseId)) {
+          issues.push({
+            code: 'unknown_target_phrase_reference',
+            sceneId: scene.id,
+            referenceId: targetPhraseId,
+          });
+        }
+      }
     }
   }
 
@@ -64,6 +126,8 @@ export function validateMysteryChapter(chapter: MysteryChapter): MysteryContentI
     .map((scene) => scene.id);
   if (endingIds.length === 0) {
     issues.push({ code: 'missing_ending' });
+  } else if (endingIds.length > 1) {
+    issues.push({ code: 'multiple_endings' });
   }
 
   if (!sceneMap.has(chapter.startSceneId)) {
@@ -81,6 +145,8 @@ export function validateMysteryChapter(chapter: MysteryChapter): MysteryContentI
         stack.push(scene.nextSceneId);
       } else if (scene.kind === 'choice') {
         for (const option of scene.options) stack.push(option.nextSceneId);
+      } else if (scene.kind === 'response-build') {
+        stack.push(scene.nextSceneId);
       }
     }
     if (!endingIds.some((endingId) => visited.has(endingId))) {
