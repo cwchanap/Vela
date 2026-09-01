@@ -16,16 +16,38 @@
             <p lang="ja" class="q-my-none" :data-testid="`mystery-choice-feedback-${item.sceneId}`">
               {{ item.selectedLabel }} · {{ item.feedback }}
             </p>
+            <p lang="ja" class="q-my-none">{{ item.explanation }}</p>
           </template>
           <p v-else-if="item.kind === 'choice-prompt'" lang="ja" class="q-my-none">
             {{ item.prompt }}
           </p>
-          <template v-else>
+          <p v-else-if="item.kind === 'response-prompt'" lang="ja" class="q-my-none">
+            {{ item.prompt }}
+          </p>
+          <template v-else-if="item.kind === 'response-result'">
+            <p lang="ja" class="q-my-none">{{ item.prompt }}</p>
+            <p
+              lang="ja"
+              class="q-my-none"
+              :data-testid="`mystery-response-feedback-${item.sceneId}`"
+            >
+              {{ item.selectedText }} · {{ item.feedback }}
+            </p>
+            <p
+              lang="ja"
+              class="q-my-none"
+              :data-testid="`mystery-response-explanation-${item.sceneId}`"
+            >
+              {{ item.explanation }}
+            </p>
+          </template>
+          <template v-else-if="item.kind === 'ending'">
             <h2 lang="ja" class="text-h6 q-my-none">{{ item.title }}</h2>
             <p lang="ja" class="q-my-none">{{ item.text }}</p>
           </template>
         </div>
         <q-btn
+          v-if="item.audio"
           flat
           round
           dense

@@ -11,7 +11,7 @@ import {
 } from '../../audio/mobile-audio-contract';
 import { mobileLifecycleState } from '../../services/mobile-lifecycle';
 import type { MobileTtsService } from '../../services/mobile-tts';
-import type { MysteryScene } from './model';
+import { selectMysterySceneAudio, type MysteryScene, type MysterySceneAudio } from './model';
 
 export type UseMysteryAudioOptions = {
   authState: Readonly<MobileAuthState>;
@@ -33,10 +33,6 @@ export type MysteryAudioController = {
   play(scene: MysteryScene): Promise<void>;
   dispose(): void;
 };
-
-function authoredTextFor(scene: MysteryScene): string {
-  return scene.kind === 'choice' ? scene.prompt : scene.text;
-}
 
 function statusUserId(status: MobileFeatureSessionStatus): string | null {
   return status.kind === 'unavailable' ? null : status.userId;
@@ -63,6 +59,7 @@ export function useMysteryAudio(options: UseMysteryAudioOptions): MysteryAudioCo
 
   function handlePlaybackError(
     scene: MysteryScene,
+    audio: MysterySceneAudio,
     audioUrl: string,
     userId: string,
     generation: number,
@@ -71,7 +68,7 @@ export function useMysteryAudio(options: UseMysteryAudioOptions): MysteryAudioCo
     if (!isCurrent(generation)) return;
 
     if (error instanceof MobileAudioError && error.code === 'media_unavailable') {
-      options.ttsService.invalidatePronunciation(userId, scene.ttsId);
+      options.ttsService.invalidatePronunciation(userId, audio.ttsId);
       preparedUserId = null;
     }
 
@@ -83,6 +80,7 @@ export function useMysteryAudio(options: UseMysteryAudioOptions): MysteryAudioCo
 
   async function playAudio(
     scene: MysteryScene,
+    audio: MysterySceneAudio,
     audioUrl: string,
     userId: string,
     generation: number,
@@ -93,7 +91,7 @@ export function useMysteryAudio(options: UseMysteryAudioOptions): MysteryAudioCo
     try {
       handle = options.audioPlayer.play(audioUrl);
     } catch (error) {
-      handlePlaybackError(scene, audioUrl, userId, generation, error);
+      handlePlaybackError(scene, audio, audioUrl, userId, generation, error);
       return;
     }
 
@@ -112,7 +110,7 @@ export function useMysteryAudio(options: UseMysteryAudioOptions): MysteryAudioCo
     } catch (error) {
       if (!isCurrent(generation)) return;
       if (activeHandle === handle) activeHandle = null;
-      handlePlaybackError(scene, audioUrl, userId, generation, error);
+      handlePlaybackError(scene, audio, audioUrl, userId, generation, error);
     }
   }
 
@@ -127,13 +125,16 @@ export function useMysteryAudio(options: UseMysteryAudioOptions): MysteryAudioCo
     const status = sessionStatus.value;
     if (status.kind !== 'usable') return;
 
+    const audio = selectMysterySceneAudio(scene);
+    if (!audio) return;
+
     const current = state.value;
     if (
       current.kind === 'ready' &&
       current.sceneId === scene.id &&
       preparedUserId === status.userId
     ) {
-      await playAudio(scene, current.audioUrl, status.userId, operationGeneration);
+      await playAudio(scene, audio, current.audioUrl, status.userId, operationGeneration);
       return;
     }
 
@@ -151,13 +152,13 @@ export function useMysteryAudio(options: UseMysteryAudioOptions): MysteryAudioCo
     requestController = controller;
     try {
       const pronunciation = await options.ttsService.preparePronunciation(
-        { userId: status.userId, vocabularyId: scene.ttsId, text: authoredTextFor(scene) },
+        { userId: status.userId, vocabularyId: audio.ttsId, text: audio.text },
         { signal: controller.signal },
       );
       if (!isCurrent(generation)) return;
       preparedUserId = status.userId;
       state.value = { kind: 'ready', sceneId: scene.id, audioUrl: pronunciation.audioUrl };
-      await playAudio(scene, pronunciation.audioUrl, status.userId, generation);
+      await playAudio(scene, audio, pronunciation.audioUrl, status.userId, generation);
     } catch (error) {
       if (!isCurrent(generation)) return;
       preparedUserId = null;
