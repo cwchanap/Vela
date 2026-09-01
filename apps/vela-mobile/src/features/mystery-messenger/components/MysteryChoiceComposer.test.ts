@@ -48,4 +48,26 @@ describe('MysteryChoiceComposer', () => {
 
     expect(wrapper.emitted('choose')).toBeUndefined();
   });
+
+  it('toggles the authored hint copy inline', async () => {
+    const wrapper = mountComposer(false);
+
+    expect(wrapper.find('[data-testid="mystery-choice-hint-copy"]').exists()).toBe(false);
+
+    await wrapper.get('[data-testid="mystery-choice-hint"]').trigger('click');
+    expect(wrapper.get('[data-testid="mystery-choice-hint-copy"]').text()).toBe(CHOICE_SCENE.hint);
+
+    await wrapper.get('[data-testid="mystery-choice-hint"]').trigger('click');
+    expect(wrapper.find('[data-testid="mystery-choice-hint-copy"]').exists()).toBe(false);
+  });
+
+  it('does not open the hint for a disabled composer', async () => {
+    const wrapper = mountComposer(true);
+
+    expect(wrapper.get('[data-testid="mystery-choice-hint"]').attributes('disabled')).toBeDefined();
+
+    await wrapper.get('[data-testid="mystery-choice-hint"]').trigger('click');
+
+    expect(wrapper.find('[data-testid="mystery-choice-hint-copy"]').exists()).toBe(false);
+  });
 });
