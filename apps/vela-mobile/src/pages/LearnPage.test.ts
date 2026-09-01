@@ -34,7 +34,15 @@ describe('LearnPage', () => {
     const wrapper = mountPage();
     expect(wrapper.text()).toContain('Mystery Messenger');
     expect(wrapper.text()).toContain('The Message That Arrived Tomorrow');
+    expect(wrapper.text()).toContain(
+      'A short Japanese mystery. Read, listen, and build replies to uncover what “tomorrow” means.',
+    );
     expect(wrapper.text()).toContain('Play pilot');
+  });
+
+  it('keeps the expanded-chapter description free of the five-scene pilot copy', () => {
+    const wrapper = mountPage();
+    expect(wrapper.text()).not.toContain('five-scene');
   });
 
   it('navigates to the mystery messenger route when Play pilot is clicked', async () => {

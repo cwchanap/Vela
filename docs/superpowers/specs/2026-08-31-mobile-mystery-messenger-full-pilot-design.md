@@ -523,21 +523,23 @@ Canonical visible response:
 7時に電車でさくら駅に行きます。
 ```
 
-At minimum, author this alternate correct order:
+The Task-5 independent language review froze exactly two alternate correct orders:
 
 ```ts
 [
   ['train', 'de', 'time', 'ni-time', 'station', 'ni-place', 'go', 'period'],
+  ['time', 'ni-time', 'station', 'ni-place', 'train', 'de', 'go', 'period'],
 ]
 ```
 
-which renders:
+which render:
 
 ```text
 電車で7時にさくら駅に行きます。
+7時にさくら駅に電車で行きます。
 ```
 
-The Task-5 independent language review may add other clearly natural token orders before the sheet freezes. Swapping only `ni-time` and `ni-place` also remains correct automatically because correctness compares resolved visible text.
+Both are authored; the sheet freezes no other scene-07 alternate. Swapping only `ni-time` and `ni-place` also remains correct automatically because correctness compares resolved visible text.
 
 ### Scenes 08–10
 

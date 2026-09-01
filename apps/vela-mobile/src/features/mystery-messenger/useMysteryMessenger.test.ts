@@ -1,7 +1,7 @@
 import { reactive } from 'vue';
 import { describe, expect, it, vi } from 'vitest';
 import type { MobileAuthState } from '../../auth/mobile-auth-contract';
-import { MYSTERY_MESSENGER_VERTICAL_SLICE as chapter } from './content';
+import { MESSAGE_THAT_ARRIVED_TOMORROW_CHAPTER as chapter } from './content';
 import {
   continueMysteryMessage,
   createMysteryProgress,
@@ -144,7 +144,7 @@ describe('useMysteryMessenger', () => {
 
     controller.continueMessage('scene-01');
     controller.continueMessage('scene-02');
-    controller.chooseOption('scene-03', 'understood');
+    controller.chooseOption('scene-03', 'tomorrow-morning');
 
     expect(controller.progress.value?.currentSceneId).toBe('scene-04');
     expect(saved.map((progress) => progress.currentSceneId)).toEqual([
@@ -206,7 +206,7 @@ describe('useMysteryMessenger', () => {
     expect(controller.progress.value).toBe(retained);
 
     controller.continueMessage('scene-02');
-    controller.chooseOption('scene-03', 'understood');
+    controller.chooseOption('scene-03', 'tomorrow-morning');
     controller.restart();
 
     expect(controller.progress.value).toBe(retained);
