@@ -9,7 +9,12 @@ import { MOBILE_AUTH_KEY } from 'src/services/mobile-auth';
 import { MOBILE_TTS_SERVICE_KEY } from 'src/services/mobile-services';
 import type { MobileTtsService } from 'src/services/mobile-tts';
 import { MYSTERY_MESSENGER_VERTICAL_SLICE as chapter } from './content';
-import type { MysteryProgress, MysteryScene, MysteryTranscriptItem } from './model';
+import type {
+  MysteryProgress,
+  MysteryResponseBuildScene,
+  MysteryScene,
+  MysteryTranscriptItem,
+} from './model';
 import type { MysteryProgressStorage } from './storage';
 import type { MysteryAudioState } from './useMysteryAudio';
 import MysteryMessengerPage from './MysteryMessengerPage.vue';
@@ -39,6 +44,25 @@ const NEXT_SCENE_ID: Record<string, string | null> = {
   'scene-03': 'scene-04',
   'scene-04': 'scene-05',
   'scene-05': null,
+  'response-04': 'scene-05',
+};
+
+// Test-only response-build scene spliced in as scene-04's successor role.
+const RESPONSE_SCENE: MysteryResponseBuildScene = {
+  kind: 'response-build',
+  id: 'response-04',
+  prompt: '返事を作ってください。',
+  tokens: [
+    { id: 'time', text: '7時' },
+    { id: 'ni', text: 'に' },
+    { id: 'train', text: '電車' },
+  ],
+  correctTokenIds: ['time', 'ni'],
+  feedback: { correct: '正しいです。', incorrect: 'もう一度確認しましょう。' },
+  hint: '「7時」のあとに「に」を置きます。',
+  explanation: '時間の後ろに「に」を使います。',
+  targetPhraseIds: [],
+  nextSceneId: 'scene-05',
 };
 
 type MutableMessenger = {
@@ -49,6 +73,7 @@ type MutableMessenger = {
   persistenceWarning: Ref<boolean>;
   continueMessage: ReturnType<typeof vi.fn>;
   chooseOption: ReturnType<typeof vi.fn>;
+  submitResponse: ReturnType<typeof vi.fn>;
   restart: ReturnType<typeof vi.fn>;
 };
 
@@ -67,7 +92,7 @@ function messengerFixture(
     persistenceWarning?: boolean;
   } = {},
 ): MutableMessenger {
-  const scenes = chapter.scenes;
+  const scenes = [...chapter.scenes, RESPONSE_SCENE];
   const currentScene = ref<MysteryScene | null>(
     options.currentSceneId === undefined
       ? scenes[0]!
@@ -90,6 +115,7 @@ function messengerFixture(
     persistenceWarning: ref(options.persistenceWarning ?? false),
     continueMessage: vi.fn(advance),
     chooseOption: vi.fn(advance),
+    submitResponse: vi.fn(advance),
     restart: vi.fn(() => {
       currentScene.value = scenes[0]!;
     }),
@@ -314,6 +340,80 @@ describe('MysteryMessengerPage', () => {
 
     await wrapper.get('[data-testid="mystery-restart"]').trigger('click');
     expect(messenger.restart).toHaveBeenCalledTimes(1);
+  });
+
+  it('renders the response composer for a response-build scene', () => {
+    const messenger = messengerFixture({ currentSceneId: 'response-04' });
+    const wrapper = mountPageWithController(messenger);
+
+    expect(wrapper.find('[data-testid="mystery-continue"]').exists()).toBe(false);
+    expect(wrapper.find('[data-testid="mystery-response-build-composer"]').exists()).toBe(true);
+    expect(wrapper.get('[data-testid="mystery-response-token-time"]').text()).toBe('7時');
+  });
+
+  it('advances to the next scene after the first Send', async () => {
+    const messenger = messengerFixture({ currentSceneId: 'response-04' });
+    const wrapper = mountPageWithController(messenger);
+
+    await wrapper.get('[data-testid="mystery-response-token-time"]').trigger('click');
+    await wrapper.get('[data-testid="mystery-response-token-ni"]').trigger('click');
+    await wrapper.get('[data-testid="mystery-response-send"]').trigger('click');
+
+    expect(messenger.submitResponse).toHaveBeenCalledTimes(1);
+    expect(messenger.submitResponse).toHaveBeenCalledWith('response-04', ['time', 'ni']);
+    expect(wrapper.find('[data-testid="mystery-restart"]').exists()).toBe(true);
+    expect(wrapper.find('[data-testid="mystery-response-build-composer"]').exists()).toBe(false);
+  });
+
+  it('guards rapid response submissions with the 500 ms transition lock', async () => {
+    vi.useFakeTimers();
+    const messenger = messengerFixture({ currentSceneId: 'response-04' });
+    messenger.submitResponse = vi.fn();
+    const wrapper = mountPageWithController(messenger);
+
+    await wrapper.get('[data-testid="mystery-response-token-time"]').trigger('click');
+    await wrapper.get('[data-testid="mystery-response-send"]').trigger('click');
+    await wrapper.get('[data-testid="mystery-response-send"]').trigger('click');
+    expect(messenger.submitResponse).toHaveBeenCalledTimes(1);
+    expect(messenger.submitResponse).toHaveBeenCalledWith('response-04', ['time']);
+
+    await vi.advanceTimersByTimeAsync(500);
+    await wrapper.get('[data-testid="mystery-response-send"]').trigger('click');
+    expect(messenger.submitResponse).toHaveBeenCalledTimes(2);
+  });
+
+  it('disables the response composer while the session is not usable', async () => {
+    const messenger = messengerFixture({ currentSceneId: 'response-04' });
+    const wrapper = mountPageWithController(messenger);
+    messenger.sessionStatus.value = { kind: 'unavailable' };
+    await nextTick();
+
+    expect(
+      wrapper.get('[data-testid="mystery-response-send"]').attributes('disabled'),
+    ).toBeDefined();
+    await wrapper.get('[data-testid="mystery-response-token-time"]').trigger('click');
+    await wrapper.get('[data-testid="mystery-response-send"]').trigger('click');
+    expect(messenger.submitResponse).not.toHaveBeenCalled();
+  });
+
+  it('toggles the hint without locking the transition or advancing the story', async () => {
+    vi.useFakeTimers();
+    const messenger = messengerFixture({ currentSceneId: 'response-04' });
+    messenger.submitResponse = vi.fn();
+    const wrapper = mountPageWithController(messenger);
+
+    await wrapper.get('[data-testid="mystery-response-hint"]').trigger('click');
+    expect(wrapper.get('[data-testid="mystery-response-hint-copy"]').text()).toBe(
+      RESPONSE_SCENE.hint,
+    );
+    expect(messenger.submitResponse).not.toHaveBeenCalled();
+    expect(messenger.continueMessage).not.toHaveBeenCalled();
+    expect(messenger.chooseOption).not.toHaveBeenCalled();
+
+    // The hint tap must not consume the 500 ms lock: the next Send is accepted.
+    await wrapper.get('[data-testid="mystery-response-token-time"]').trigger('click');
+    await wrapper.get('[data-testid="mystery-response-send"]').trigger('click');
+    expect(messenger.submitResponse).toHaveBeenCalledTimes(1);
   });
 
   it('supplies the auth coordinator, browser storage, TTS service, and audio player', () => {

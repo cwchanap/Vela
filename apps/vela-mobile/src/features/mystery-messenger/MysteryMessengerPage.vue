@@ -43,9 +43,18 @@
 
       <MysteryChoiceComposer
         v-else-if="currentChoice"
+        :key="currentChoice.id"
         :scene="currentChoice"
         :disabled="transitionsDisabled"
         @choose="handleChoose"
+      />
+
+      <MysteryResponseBuildComposer
+        v-else-if="currentResponseBuild"
+        :key="currentResponseBuild.id"
+        :scene="currentResponseBuild"
+        :disabled="transitionsDisabled"
+        @submit="handleResponseSubmit"
       />
 
       <q-btn
@@ -67,6 +76,7 @@ import { HtmlAudioPlayer } from 'src/audio/html-audio-player';
 import { MOBILE_AUTH_KEY } from 'src/services/mobile-auth';
 import { MOBILE_TTS_SERVICE_KEY } from 'src/services/mobile-services';
 import MysteryChoiceComposer from './components/MysteryChoiceComposer.vue';
+import MysteryResponseBuildComposer from './components/MysteryResponseBuildComposer.vue';
 import MysteryTranscript from './components/MysteryTranscript.vue';
 import { MYSTERY_MESSENGER_VERTICAL_SLICE } from './content';
 import { getMysteryScene } from './model';
@@ -112,6 +122,9 @@ const currentMessage = computed(() =>
 );
 const currentChoice = computed(() =>
   currentScene.value?.kind === 'choice' ? currentScene.value : null,
+);
+const currentResponseBuild = computed(() =>
+  currentScene.value?.kind === 'response-build' ? currentScene.value : null,
 );
 const currentEnding = computed(() =>
   currentScene.value?.kind === 'ending' ? currentScene.value : null,
@@ -163,6 +176,13 @@ function handleChoose(optionId: string): void {
   const scene = messenger.currentScene.value;
   if (scene?.kind !== 'choice') return;
   messenger.chooseOption(scene.id, optionId);
+}
+
+function handleResponseSubmit(selectedTokenIds: readonly string[]): void {
+  if (!lockTransition()) return;
+  const scene = messenger.currentScene.value;
+  if (scene?.kind !== 'response-build') return;
+  messenger.submitResponse(scene.id, selectedTokenIds);
 }
 
 function handleRestart(): void {
