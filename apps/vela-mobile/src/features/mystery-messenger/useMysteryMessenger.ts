@@ -11,6 +11,7 @@ import {
   getMysteryScene,
   restartMysteryProgress,
   selectMysteryTranscript,
+  submitMysteryResponse,
   type MysteryChapter,
   type MysteryProgress,
   type MysteryScene,
@@ -32,6 +33,7 @@ export type MysteryMessengerController = {
   persistenceWarning: Readonly<Ref<boolean>>;
   continueMessage(expectedSceneId: string): void;
   chooseOption(expectedSceneId: string, optionId: string): void;
+  submitResponse(expectedSceneId: string, selectedTokenIds: readonly string[]): void;
   restart(): void;
 };
 
@@ -111,6 +113,10 @@ export function useMysteryMessenger(
       transition((current) => continueMysteryMessage(chapter, current, expectedSceneId)),
     chooseOption: (expectedSceneId: string, optionId: string) =>
       transition((current) => chooseMysteryOption(chapter, current, expectedSceneId, optionId)),
+    submitResponse: (expectedSceneId: string, selectedTokenIds: readonly string[]) =>
+      transition((current) =>
+        submitMysteryResponse(chapter, current, expectedSceneId, selectedTokenIds),
+      ),
     restart(): void {
       const status = sessionStatus.value;
       if (!isOwnedRun(status) || progress.value === null) return;

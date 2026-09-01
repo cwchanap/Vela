@@ -2,7 +2,12 @@ import { reactive } from 'vue';
 import { describe, expect, it, vi } from 'vitest';
 import type { MobileAuthState } from '../../auth/mobile-auth-contract';
 import { MYSTERY_MESSENGER_VERTICAL_SLICE as chapter } from './content';
-import { continueMysteryMessage, createMysteryProgress, type MysteryProgress } from './model';
+import {
+  continueMysteryMessage,
+  createMysteryProgress,
+  type MysteryChapter,
+  type MysteryProgress,
+} from './model';
 import type { MysteryProgressStorage } from './storage';
 import { useMysteryMessenger } from './useMysteryMessenger';
 
@@ -30,6 +35,54 @@ function createStorage(overrides: Partial<MysteryProgressStorage> = {}): Mystery
 
 function progressAtScene02(): MysteryProgress {
   return continueMysteryMessage(chapter, createMysteryProgress(chapter), 'scene-01');
+}
+
+const RESPONSE_CHAPTER: MysteryChapter = {
+  id: 'mystery-response-controller',
+  version: 1,
+  title: '返事',
+  startSceneId: 'scene-01',
+  targetPhrases: [],
+  scenes: [
+    {
+      kind: 'message',
+      id: 'scene-01',
+      speaker: 'mina',
+      text: '7時に来てください。',
+      ttsId: 'tts-scene-01',
+      nextSceneId: 'response-01',
+    },
+    {
+      kind: 'response-build',
+      id: 'response-01',
+      prompt: '返事を作ってください。',
+      tokens: [
+        { id: 'time', text: '7時' },
+        { id: 'ni', text: 'に' },
+      ],
+      correctTokenIds: ['time', 'ni'],
+      feedback: { correct: '正しいです。', incorrect: 'もう一度確認しましょう。' },
+      hint: '「7時」のあとに「に」を置きます。',
+      explanation: '時間の後ろに「に」を使います。',
+      targetPhraseIds: [],
+      nextSceneId: 'ending',
+    },
+    {
+      kind: 'ending',
+      id: 'ending',
+      title: 'あしたの約束',
+      text: 'また明日。',
+      ttsId: 'tts-ending',
+    },
+  ],
+};
+
+function progressAtResponseScene(): MysteryProgress {
+  return continueMysteryMessage(
+    RESPONSE_CHAPTER,
+    createMysteryProgress(RESPONSE_CHAPTER),
+    'scene-01',
+  );
 }
 
 describe('useMysteryMessenger', () => {
@@ -247,6 +300,95 @@ describe('useMysteryMessenger', () => {
 
     // Next transition saves successfully; the stale warning must clear.
     expect(controller.persistenceWarning.value).toBe(false);
+  });
+
+  it('saves an accepted response submission once', () => {
+    const saved: MysteryProgress[] = [];
+    const storage = createStorage({
+      save: vi.fn((_userId: string, progress: MysteryProgress) => {
+        saved.push(progress);
+        return true;
+      }),
+    });
+    const controller = useMysteryMessenger({
+      authState: reactive(authState()),
+      storage,
+      chapter: RESPONSE_CHAPTER,
+    });
+    controller.continueMessage('scene-01');
+    expect(controller.progress.value).toEqual(progressAtResponseScene());
+    const savesAfterSetup = vi.mocked(storage.save).mock.calls.length;
+
+    controller.submitResponse('response-01', ['time', 'ni']);
+
+    expect(controller.progress.value?.currentSceneId).toBe('ending');
+    expect(controller.progress.value?.completed).toBe(true);
+    expect(controller.progress.value?.history.at(-1)).toEqual({
+      kind: 'response-build',
+      sceneId: 'response-01',
+      selectedTokenIds: ['time', 'ni'],
+    });
+    expect(vi.mocked(storage.save).mock.calls.length).toBe(savesAfterSetup + 1);
+    expect(vi.mocked(storage.save).mock.lastCall?.[1].currentSceneId).toBe('ending');
+    expect(controller.persistenceWarning.value).toBe(false);
+  });
+
+  it('does not save or replace progress on a stale response submission', () => {
+    const storage = createStorage();
+    const controller = useMysteryMessenger({
+      authState: reactive(authState()),
+      storage,
+      chapter: RESPONSE_CHAPTER,
+    });
+    controller.continueMessage('scene-01');
+    controller.submitResponse('response-01', ['time', 'ni']);
+    const before = controller.progress.value;
+    const savesAfterSubmission = vi.mocked(storage.save).mock.calls.length;
+
+    controller.submitResponse('response-01', ['time', 'ni']);
+
+    expect(controller.progress.value).toBe(before);
+    expect(vi.mocked(storage.save).mock.calls.length).toBe(savesAfterSubmission);
+  });
+
+  it('keeps the run unchanged when recovering or unavailable during a response submission', () => {
+    const auth = reactive(authState());
+    const storage = createStorage();
+    const controller = useMysteryMessenger({
+      authState: auth,
+      storage,
+      chapter: RESPONSE_CHAPTER,
+    });
+    controller.continueMessage('scene-01');
+    const retained = controller.progress.value;
+    const savesAfterSetup = vi.mocked(storage.save).mock.calls.length;
+
+    Object.assign(auth, { operation: 'refreshing' });
+    controller.submitResponse('response-01', ['time', 'ni']);
+    expect(controller.progress.value).toBe(retained);
+
+    Object.assign(auth, { operation: 'idle', sessionUsable: false });
+    expect(controller.sessionStatus.value).toEqual({ kind: 'unavailable' });
+    controller.submitResponse('response-01', ['time', 'ni']);
+
+    expect(vi.mocked(storage.save).mock.calls.length).toBe(savesAfterSetup);
+  });
+
+  it('advances in memory and warns when the response save fails', () => {
+    const saves = [true, true, false];
+    const storage = createStorage({ save: vi.fn(() => saves.shift() ?? true) });
+    const controller = useMysteryMessenger({
+      authState: reactive(authState()),
+      storage,
+      chapter: RESPONSE_CHAPTER,
+    });
+    controller.continueMessage('scene-01');
+    expect(controller.persistenceWarning.value).toBe(false);
+
+    controller.submitResponse('response-01', ['time', 'ni']);
+
+    expect(controller.progress.value?.currentSceneId).toBe('ending');
+    expect(controller.persistenceWarning.value).toBe(true);
   });
 
   it('does not save or replace progress on a stale transition', () => {
