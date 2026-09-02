@@ -34,6 +34,14 @@
               {{ item.selectedText }} · {{ item.feedback }}
             </p>
             <p
+              v-if="item.result === 'incorrect'"
+              lang="ja"
+              class="q-my-none"
+              :data-testid="`mystery-response-correct-${item.sceneId}`"
+            >
+              {{ item.correctText }}
+            </p>
+            <p
               lang="ja"
               class="q-my-none"
               :data-testid="`mystery-response-explanation-${item.sceneId}`"

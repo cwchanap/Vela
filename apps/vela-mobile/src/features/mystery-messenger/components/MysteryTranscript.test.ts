@@ -46,6 +46,16 @@ const ITEMS: readonly MysteryTranscriptItem[] = [
     result: 'correct',
   },
   {
+    kind: 'response-result',
+    sceneId: 'response-02',
+    prompt: '返事を作ってください。',
+    selectedText: '行きます。駅に電車で7時に',
+    correctText: '7時に電車でさくら駅に行きます。',
+    feedback: '自然な語順の例も確認しましょう。',
+    explanation: '時間と行き先に「に」を使います。',
+    result: 'incorrect',
+  },
+  {
     kind: 'ending',
     sceneId: 'scene-05',
     title: 'あしたの約束',
@@ -72,6 +82,7 @@ describe('MysteryTranscript', () => {
       'mystery-transcript-choice-prompt',
       'mystery-transcript-response-prompt',
       'mystery-transcript-response-result',
+      'mystery-transcript-response-result',
       'mystery-transcript-ending',
     ]);
     expect(rendered[0]!.text()).toContain('こんにちは。これは「あした」からのメッセージです。');
@@ -79,11 +90,12 @@ describe('MysteryTranscript', () => {
     expect(rendered[2]!.text()).toContain('どう返事をしますか？');
     expect(rendered[3]!.text()).toContain('返事を作ってください。');
     expect(rendered[4]!.text()).toContain('正しいです。');
-    expect(rendered[5]!.text()).toContain('あしたの約束');
-    expect(rendered[5]!.text()).toContain('──あした、朝7時。ノートに新しい言葉が現れます。');
+    expect(rendered[5]!.text()).toContain('自然な語順の例も確認しましょう。');
+    expect(rendered[6]!.text()).toContain('あしたの約束');
+    expect(rendered[6]!.text()).toContain('──あした、朝7時。ノートに新しい言葉が現れます。');
 
     const jaContainers = wrapper.findAll('[lang="ja"]');
-    expect(jaContainers).toHaveLength(11);
+    expect(jaContainers).toHaveLength(15);
     for (const container of jaContainers) {
       expect(container.attributes('lang')).toBe('ja');
     }
@@ -106,6 +118,25 @@ describe('MysteryTranscript', () => {
     expect(
       wrapper.get('[data-testid="mystery-response-explanation-response-01"]').text(),
     ).toContain('時間と行き先に「に」を使います。');
+  });
+
+  it('renders the canonical correctText for an incorrect response result and hides it when correct', () => {
+    const wrapper = mountTranscript();
+
+    // incorrect: the corrective example referenced by the feedback is rendered
+    const responseResults = wrapper.findAll('[data-testid="mystery-transcript-response-result"]');
+    const incorrect = responseResults[1]!;
+    expect(incorrect.text()).toContain('行きます。駅に電車で7時に');
+    expect(incorrect.text()).toContain('自然な語順の例も確認しましょう。');
+    const correctExample = wrapper.get('[data-testid="mystery-response-correct-response-02"]');
+    expect(correctExample.text()).toBe('7時に電車でさくら駅に行きます。');
+
+    // correct: correctText is redundant with selectedText and must not be rendered
+    const correct = wrapper.get('[data-testid="mystery-response-feedback-response-01"]');
+    expect(correct.text()).toContain('7時に電車で駅に行きます。');
+    expect(wrapper.find('[data-testid="mystery-response-correct-response-01"]').exists()).toBe(
+      false,
+    );
   });
 
   it('renders replay buttons only for items with audio', () => {
