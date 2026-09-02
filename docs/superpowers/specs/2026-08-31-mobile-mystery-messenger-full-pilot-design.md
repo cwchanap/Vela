@@ -729,8 +729,30 @@ Before HPA-300 is accepted on this PR:
 bun run --cwd apps/vela-mobile test:coverage
 bun run --cwd apps/vela-mobile lint
 bun run --cwd apps/vela-mobile typecheck
-MOBILE_SKIP_ENV_VALIDATION=true bun run --cwd apps/vela-mobile build
 ```
+
+The production-shaped mobile build is gated by the `validate-mobile-api-url`
+Vite plugin, which enforces a valid `VITE_MOBILE_API_URL` and the Cognito
+build-env contract in production mode and is on by default. Do not bypass it
+with `MOBILE_SKIP_ENV_VALIDATION=true`; that flag exists only for CI pipelines
+that already guarantee `.env.production`. Run the real env-injection sequence:
+
+```bash
+# 1. Produce CDK outputs (deploy, or synth + export outputs) so
+#    packages/cdk/cdk-outputs.json exists.
+bun --cwd packages/cdk cdk:deploy        # or: cdk synth + export-outputs
+
+# 2. Generate apps/vela-mobile/.env.production from cdk-outputs.json.
+bun packages/cdk/scripts/inject-env.ts
+
+# 3. Build with the validated env.
+bun run --cwd apps/vela-mobile build
+```
+
+Only set `MOBILE_SKIP_ENV_VALIDATION=true` when a valid `.env.production`
+containing `VITE_MOBILE_API_URL` is already guaranteed by an earlier step (CI
+does this by exporting `VITE_MOBILE_API_URL=https://example.invalid/api/`
+instead of bypassing).
 
 Keep the existing mobile line-coverage threshold and require Codecov patch coverage >= 90% when CI runs. Codecov is a final gate, not a substitute for the model/audio/language checks above.
 

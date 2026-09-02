@@ -86,7 +86,7 @@ No router, backend, shared-package, or workspace-dependency change is expected.
 
 **Interfaces:**
 
-- Produces: `MysteryTargetPhrase`, `MysteryChoiceAudioPrompt`, `MysteryResponseToken`, `MysteryResponseBuildScene`, `MysterySceneAudio`, widened `MysteryScene`, widened `MysteryHistoryEntry`, widened `MysteryTranscriptItem`, `submitMysteryResponse`, `selectMysterySceneAudio`.
+- Produces: `MysteryTargetPhrase`, `MysteryResponseToken`, `MysteryResponseBuildScene`, `MysterySceneAudio`, widened `MysteryScene`, widened `MysteryHistoryEntry`, widened `MysteryTranscriptItem`, `submitMysteryResponse`, `selectMysterySceneAudio`.
 - Leaves the existing five-scene content temporarily in place but valid under the widened contract.
 
 - [ ] **Step 1: Add failing response-transition tests**
@@ -142,8 +142,8 @@ export type MysteryTargetPhrase = {
   meaning: string;
 };
 
-export type MysteryChoiceAudioPrompt = { ttsId: string; text: string };
 export type MysteryResponseToken = { id: string; text: string };
+export type MysterySceneAudio = { ttsId: string; text: string };
 
 export type MysteryResponseBuildScene = {
   kind: 'response-build';
@@ -160,7 +160,7 @@ export type MysteryResponseBuildScene = {
 };
 ```
 
-Change `MysteryChoiceScene` to `audioPrompt?: MysteryChoiceAudioPrompt` plus required `hint`, `explanation`, and `targetPhraseIds`. Add `targetPhrases: readonly MysteryTargetPhrase[]` to `MysteryChapter`. Extend only scene/history unions with `response-build`.
+Change `MysteryChoiceScene` to `audioPrompt?: MysterySceneAudio` plus required `hint`, `explanation`, and `targetPhraseIds`. Add `targetPhrases: readonly MysteryTargetPhrase[]` to `MysteryChapter`. Extend only scene/history unions with `response-build`.
 
 - [ ] **Step 4: Implement `submitMysteryResponse()`**
 
@@ -656,11 +656,30 @@ Expected: PASS.
 
 - [ ] **Step 4: Run production-shaped local build**
 
+The mobile build's `validate-mobile-api-url` Vite plugin enforces a valid
+`VITE_MOBILE_API_URL` (and the Cognito build-env contract) in production mode
+and is on by default. Do not bypass it with `MOBILE_SKIP_ENV_VALIDATION=true`;
+that flag exists for CI pipelines that already guarantee `.env.production`; a
+clean checkout without it should fail at build time, not at app launch. Run the
+real production env-injection sequence instead:
+
 ```bash
-MOBILE_SKIP_ENV_VALIDATION=true bun run --cwd apps/vela-mobile build
+# 1. Produce CDK outputs (deploy, or synth + export outputs) so
+#    packages/cdk/cdk-outputs.json exists.
+bun --cwd packages/cdk cdk:deploy        # or: cdk synth + export-outputs
+
+# 2. Generate apps/vela-mobile/.env.production from cdk-outputs.json.
+bun packages/cdk/scripts/inject-env.ts
+
+# 3. Build with the validated env.
+bun run --cwd apps/vela-mobile build
 ```
 
-Expected: PASS. CI owns the configured environment path.
+Expected: PASS with `.env.production` present and `VITE_MOBILE_API_URL` set to
+the deployment's absolute API URL. Only set `MOBILE_SKIP_ENV_VALIDATION=true`
+when a valid `.env.production` containing `VITE_MOBILE_API_URL` is already
+guaranteed by an earlier step (CI does this by exporting
+`VITE_MOBILE_API_URL=https://example.invalid/api/` instead of bypassing).
 
 - [ ] **Step 5: Review Codecov when the PR is ready for CI**
 

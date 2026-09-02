@@ -24,7 +24,6 @@ export type MysteryTargetPhrase = {
   meaning: string;
 };
 
-export type MysteryChoiceAudioPrompt = { ttsId: string; text: string };
 export type MysteryResponseToken = { id: string; text: string };
 export type MysterySceneAudio = { ttsId: string; text: string };
 
@@ -33,7 +32,7 @@ export type MysteryChoiceScene = {
   id: string;
   speaker: MysterySpeaker;
   prompt: string;
-  audioPrompt?: MysteryChoiceAudioPrompt;
+  audioPrompt?: MysterySceneAudio;
   options: readonly MysteryChoiceOption[];
   hint: string;
   explanation: string;
