@@ -7,6 +7,7 @@ import {
   type MysteryChapter,
   type MysteryProgress,
   type MysteryResponseBuildScene,
+  type MysteryScene,
   submitMysteryResponse,
 } from './model';
 import { createBrowserMysteryProgressStorage, mysteryProgressStorageKey } from './storage';
@@ -40,12 +41,22 @@ const userId = 'user:a';
 const chapterId = chapter.id;
 const key = mysteryProgressStorageKey(userId, chapterId);
 
-const scene07 = chapter.scenes.find(
-  (candidate) => candidate.id === 'scene-07',
-) as MysteryResponseBuildScene;
-const scene11 = chapter.scenes.find(
-  (candidate) => candidate.id === 'scene-11',
-) as MysteryResponseBuildScene;
+function sceneOf(id: string): MysteryScene {
+  const authoredScene = chapter.scenes.find((candidate) => candidate.id === id);
+  if (!authoredScene) throw new Error(`missing authored scene ${id}`);
+  return authoredScene;
+}
+
+function responseSceneOf(id: string): MysteryResponseBuildScene {
+  const authoredScene = sceneOf(id);
+  if (authoredScene.kind !== 'response-build') {
+    throw new Error(`expected response-build scene ${id}`);
+  }
+  return authoredScene;
+}
+
+const scene07 = responseSceneOf('scene-07');
+const scene11 = responseSceneOf('scene-11');
 
 function progressAtScene04(): MysteryProgress {
   let progress = createMysteryProgress(chapter);
