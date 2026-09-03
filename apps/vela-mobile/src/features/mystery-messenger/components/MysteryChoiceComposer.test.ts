@@ -27,12 +27,31 @@ describe('MysteryChoiceComposer', () => {
     );
   });
 
-  it('emits choose with the option id for an enabled option', async () => {
+  it('emits choose with the option id and hintUsed false for an enabled option', async () => {
     const wrapper = mountComposer(false);
 
     await wrapper.get('[data-testid="mystery-option-tomorrow-morning"]').trigger('click');
 
-    expect(wrapper.emitted('choose')).toEqual([['tomorrow-morning']]);
+    expect(wrapper.emitted('choose')).toEqual([['tomorrow-morning', false]]);
+  });
+
+  it('emits choose with hintUsed true after the hint was revealed', async () => {
+    const wrapper = mountComposer(false);
+
+    await wrapper.get('[data-testid="mystery-choice-hint"]').trigger('click');
+    await wrapper.get('[data-testid="mystery-option-tomorrow-morning"]').trigger('click');
+
+    expect(wrapper.emitted('choose')?.[0]).toEqual(['tomorrow-morning', true]);
+  });
+
+  it('keeps hintUsed true after the hint was revealed and hidden again', async () => {
+    const wrapper = mountComposer(false);
+
+    await wrapper.get('[data-testid="mystery-choice-hint"]').trigger('click');
+    await wrapper.get('[data-testid="mystery-choice-hint"]').trigger('click');
+    await wrapper.get('[data-testid="mystery-option-tomorrow-morning"]').trigger('click');
+
+    expect(wrapper.emitted('choose')?.[0]).toEqual(['tomorrow-morning', true]);
   });
 
   it('does not emit for disabled options', async () => {

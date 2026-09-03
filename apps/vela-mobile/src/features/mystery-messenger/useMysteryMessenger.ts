@@ -10,9 +10,11 @@ import {
   createMysteryProgress,
   getMysteryScene,
   restartMysteryProgress,
+  selectMysteryMissedPhraseRecap,
   selectMysteryTranscript,
   submitMysteryResponse,
   type MysteryChapter,
+  type MysteryMissedPhraseRecapItem,
   type MysteryProgress,
   type MysteryScene,
   type MysteryTranscriptItem,
@@ -29,11 +31,16 @@ export type MysteryMessengerController = {
   progress: Readonly<Ref<MysteryProgress | null>>;
   currentScene: ComputedRef<MysteryScene | null>;
   transcript: ComputedRef<readonly MysteryTranscriptItem[]>;
+  missedPhraseRecap: ComputedRef<readonly MysteryMissedPhraseRecapItem[]>;
   sessionStatus: ComputedRef<MobileFeatureSessionStatus>;
   persistenceWarning: Readonly<Ref<boolean>>;
   continueMessage(expectedSceneId: string): void;
-  chooseOption(expectedSceneId: string, optionId: string): void;
-  submitResponse(expectedSceneId: string, selectedTokenIds: readonly string[]): void;
+  chooseOption(expectedSceneId: string, optionId: string, hintUsed?: boolean): void;
+  submitResponse(
+    expectedSceneId: string,
+    selectedTokenIds: readonly string[],
+    hintUsed?: boolean,
+  ): void;
   restart(): void;
 };
 
@@ -103,19 +110,36 @@ export function useMysteryMessenger(
     progress.value ? selectMysteryTranscript(chapter, progress.value) : [],
   );
 
+  const missedPhraseRecap = computed(() =>
+    progress.value ? selectMysteryMissedPhraseRecap(chapter, progress.value) : [],
+  );
+
   return {
     progress,
     currentScene,
     transcript,
+    missedPhraseRecap,
     sessionStatus,
     persistenceWarning,
     continueMessage: (expectedSceneId: string) =>
       transition((current) => continueMysteryMessage(chapter, current, expectedSceneId)),
-    chooseOption: (expectedSceneId: string, optionId: string) =>
-      transition((current) => chooseMysteryOption(chapter, current, expectedSceneId, optionId)),
-    submitResponse: (expectedSceneId: string, selectedTokenIds: readonly string[]) =>
+    chooseOption: (expectedSceneId: string, optionId: string, hintUsed?: boolean) =>
       transition((current) =>
-        submitMysteryResponse(chapter, current, expectedSceneId, selectedTokenIds),
+        chooseMysteryOption(chapter, current, expectedSceneId, optionId, hintUsed ?? false),
+      ),
+    submitResponse: (
+      expectedSceneId: string,
+      selectedTokenIds: readonly string[],
+      hintUsed?: boolean,
+    ) =>
+      transition((current) =>
+        submitMysteryResponse(
+          chapter,
+          current,
+          expectedSceneId,
+          selectedTokenIds,
+          hintUsed ?? false,
+        ),
       ),
     restart(): void {
       const status = sessionStatus.value;

@@ -171,18 +171,18 @@ function handleContinue(): void {
   messenger.continueMessage(scene.id);
 }
 
-function handleChoose(optionId: string): void {
+function handleChoose(optionId: string, hintUsed: boolean): void {
   if (!lockTransition()) return;
   const scene = messenger.currentScene.value;
   if (scene?.kind !== 'choice') return;
-  messenger.chooseOption(scene.id, optionId);
+  messenger.chooseOption(scene.id, optionId, hintUsed);
 }
 
-function handleResponseSubmit(selectedTokenIds: readonly string[]): void {
+function handleResponseSubmit(selectedTokenIds: readonly string[], hintUsed: boolean): void {
   if (!lockTransition()) return;
   const scene = messenger.currentScene.value;
   if (scene?.kind !== 'response-build') return;
-  messenger.submitResponse(scene.id, selectedTokenIds);
+  messenger.submitResponse(scene.id, selectedTokenIds, hintUsed);
 }
 
 function handleRestart(): void {
