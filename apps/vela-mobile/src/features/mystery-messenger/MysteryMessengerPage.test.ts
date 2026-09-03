@@ -279,7 +279,7 @@ describe('MysteryMessengerPage', () => {
     const audio = audioFixture({
       state: {
         kind: 'ready',
-        sceneId: 'scene-01',
+        playbackId: 'mystery-message-tomorrow-v2-scene-01',
         audioUrl: 'https://audio.example.test/scene-01.mp3',
       },
     });
@@ -292,7 +292,11 @@ describe('MysteryMessengerPage', () => {
     const audio = audioFixture();
     const wrapper = mountPageWithController(messengerFixture(), { audio });
 
-    audio.state.value = { kind: 'error', sceneId: 'scene-01', message: 'audio_sentinel_failure' };
+    audio.state.value = {
+      kind: 'error',
+      playbackId: 'mystery-message-tomorrow-v2-scene-01',
+      message: 'audio_sentinel_failure',
+    };
     await nextTick();
 
     const error = wrapper.get('[data-testid="mystery-audio-error"]');
@@ -329,7 +333,7 @@ describe('MysteryMessengerPage', () => {
 
     audio.state.value = {
       kind: 'ready',
-      sceneId: 'scene-02',
+      playbackId: 'tts-scene-02',
       audioUrl: 'https://audio.example.test/scene-02.mp3',
     };
     await nextTick();
