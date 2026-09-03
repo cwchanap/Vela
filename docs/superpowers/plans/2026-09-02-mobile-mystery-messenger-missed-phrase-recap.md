@@ -2,27 +2,31 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Add a run-local Mystery Messenger missed-phrase recap derived from persisted interaction history plus the one new fact history cannot recover: hint use.
+**Goal:** Add a run-local Mystery Messenger ending recap that derives missed phrases from persisted interaction history, records hint use on the submitted history entry, and provides read-only phrase replay with visible row-local audio feedback.
 
-**Architecture:** Keep `history` as the single source of truth for completed interaction outcomes. Persist only `hintedSceneIds`, extract response grading so transcript and recap share one rule, derive recap rows on demand from history plus chapter content, render one ending-only feature-local recap, and generalize the existing audio controller from scene identity to `audio.ttsId` so recap clips reuse the same retry/cancellation state machine.
+**Architecture:** Keep history as the only durable source of completed interaction outcomes. Add optional `hintUsed` to choice/response-build history entries, extract the existing response grader, derive recap rows from history + chapter content, and generalize the existing audio controller from scene IDs to TTS playback IDs so both scenes and phrase clips use one state machine. No top-level progress field, compatibility parser, recap cache, or hint-only persistence path is added.
 
-**Tech Stack:** Vue 3, TypeScript, Quasar, Vitest, Bun/Turborepo, existing `MobileTtsService` + `HtmlAudioPlayer` integration.
+**Tech Stack:** Vue 3, TypeScript, Quasar, Vitest, Bun/Turborepo, existing `MobileTtsService` and `HtmlAudioPlayer` integration.
 
 **Spec:** `docs/superpowers/specs/2026-09-02-mobile-mystery-messenger-missed-phrase-recap-design.md`
 
 ## Global Constraints
 
 - Keep HPA-301 on one branch and one PR.
-- No persisted `missedPhrases` collection; the deduplicated missed-phrase set is derived from history + `hintedSceneIds`.
+- Keep all runtime work under `apps/vela-mobile/src/features/mystery-messenger`.
 - No backend/API/CDK/DynamoDB changes.
 - No SRS writes, vocabulary-save APIs, personal dictionary mutation, or Review-flow dependency.
-- No Pinia, generic mistakes/review framework, event bus, migrator registry, or shared package extraction.
-- Keep the existing chapter ID, chapter version, and local-storage `:v1` key namespace.
-- A valid HPA-300 snapshot missing only `hintedSceneIds` loads with `[]`; explicit malformed hint state still resets through the existing invalid-load boundary.
-- First qualifying history occurrence wins source-scene provenance when multiple interactions target the same phrase.
-- TTS replay is read-only and must reuse the existing Mystery Messenger audio state machine.
-- `useMysteryAudio` must preserve preparing suppression, switching cancellation, gesture-required prepared retry, media invalidation, auth/lifecycle cancellation, and dispose behavior while changing identity from `scene.id` to `audio.ttsId`.
-- Physical-device acceptance remains HPA-302.
+- No Pinia, generic mistakes/review framework, event bus, migration registry, or shared package extraction.
+- Do not add `missedPhrases` or `hintedSceneIds` to `MysteryProgress`.
+- Keep the chapter ID, chapter version, and local-storage `:v1` namespace unchanged.
+- HPA-300 history entries with no `hintUsed` remain valid and are interpreted as unhinted.
+- The deliberate trade-off is accepted: hint reveal before an unsubmitted force-quit is not persisted.
+- `gradeMysteryResponse()` is the single response correctness rule for transcript and recap.
+- Recap source provenance is displayed as the Japanese source prompt; do not add unused `sourceSceneId` to the recap item.
+- Recap phrase TTS IDs follow `mystery-message-tomorrow-v2-*`, not a doubled `v1-v2` form.
+- Recap replay is read-only and uses the existing audio state machine through `playClip()`.
+- Every implementation task ends with full mobile tests and mobile typecheck green before commit.
+- Physical-device/release acceptance remains HPA-302.
 
 ---
 
@@ -30,58 +34,68 @@
 
 ### Existing files to modify
 
-- `apps/vela-mobile/src/features/mystery-messenger/model.ts` — `hintedSceneIds`, hint transition, response grading extraction, history-derived recap projection, phrase-audio selector.
-- `apps/vela-mobile/src/features/mystery-messenger/model.test.ts` — pure hint/grading/recap/phrase-audio rules.
-- `apps/vela-mobile/src/features/mystery-messenger/storage.ts` — one-field HPA-300 compatibility default and hint validation.
-- `apps/vela-mobile/src/features/mystery-messenger/storage.test.ts` — old-snapshot, round-trip, malformed hint coverage.
-- `apps/vela-mobile/src/features/mystery-messenger/useMysteryMessenger.ts` — `markHintUsed()` and derived recap computed projection.
-- `apps/vela-mobile/src/features/mystery-messenger/useMysteryMessenger.test.ts` — persistence/resume/restart and derived recap coverage.
-- `apps/vela-mobile/src/features/mystery-messenger/useMysteryAudio.ts` — generic playback identity and public `playClip()` while retaining `play(scene)`.
-- `apps/vela-mobile/src/features/mystery-messenger/useMysteryAudio.test.ts` — state-field rename plus scene/clip retry, switch, cancellation, and invalidation regressions.
-- `apps/vela-mobile/src/features/mystery-messenger/components/MysteryChoiceComposer.vue` — one-shot `hintUsed` emit.
-- `apps/vela-mobile/src/features/mystery-messenger/components/MysteryChoiceComposer.test.ts` — first-reveal-only event coverage.
-- `apps/vela-mobile/src/features/mystery-messenger/components/MysteryResponseBuildComposer.vue` — one-shot `hintUsed` emit.
-- `apps/vela-mobile/src/features/mystery-messenger/components/MysteryResponseBuildComposer.test.ts` — first-reveal-only event coverage.
-- `apps/vela-mobile/src/features/mystery-messenger/MysteryMessengerPage.vue` — hint wiring, ending recap, phrase replay through `playClip()`.
-- `apps/vela-mobile/src/features/mystery-messenger/MysteryMessengerPage.test.ts` — end-to-end feature integration and no-write replay coverage.
+- `apps/vela-mobile/src/features/mystery-messenger/model.ts` — optional entry-local hint fact, response grader extraction, recap projection, phrase-audio selector.
+- `apps/vela-mobile/src/features/mystery-messenger/model.test.ts` — pure grading/recap/phrase-audio rules.
+- `apps/vela-mobile/src/features/mystery-messenger/storage.ts` — validate optional `hintUsed` inside the existing history loop.
+- `apps/vela-mobile/src/features/mystery-messenger/storage.test.ts` — HPA-300 compatibility and malformed hint metadata.
+- `apps/vela-mobile/src/features/mystery-messenger/components/MysteryChoiceComposer.vue` — track whether Hint was ever revealed and include the boolean in the existing `choose` event.
+- `apps/vela-mobile/src/features/mystery-messenger/components/MysteryChoiceComposer.test.ts` — submit-time hint fact coverage.
+- `apps/vela-mobile/src/features/mystery-messenger/components/MysteryResponseBuildComposer.vue` — same behavior for `submit`.
+- `apps/vela-mobile/src/features/mystery-messenger/components/MysteryResponseBuildComposer.test.ts` — submit-time hint fact coverage.
+- `apps/vela-mobile/src/features/mystery-messenger/useMysteryMessenger.ts` — widen existing assessed controller methods and expose derived recap projection.
+- `apps/vela-mobile/src/features/mystery-messenger/useMysteryMessenger.test.ts` — persistence/resume/restart projection coverage.
+- `apps/vela-mobile/src/features/mystery-messenger/useMysteryAudio.ts` — `playbackId`, shared resolved-audio path, and `playClip()`.
+- `apps/vela-mobile/src/features/mystery-messenger/useMysteryAudio.test.ts` — existing regression suite plus focused clip coverage.
+- `apps/vela-mobile/src/features/mystery-messenger/MysteryMessengerPage.vue` — forward hint booleans, render ending recap, phrase replay, active-row playback mapping.
+- `apps/vela-mobile/src/features/mystery-messenger/MysteryMessengerPage.test.ts` — recap integration and read-only replay.
 
 ### New files
 
-- `apps/vela-mobile/src/features/mystery-messenger/components/MysteryMissedPhraseRecap.vue` — ending-only read-only recap list/empty state and replay emit.
-- `apps/vela-mobile/src/features/mystery-messenger/components/MysteryMissedPhraseRecap.test.ts` — isolated zero/one/multiple rendering and replay behavior.
+- `apps/vela-mobile/src/features/mystery-messenger/components/MysteryMissedPhraseRecap.vue` — ending recap rows, empty state, Replay event, row-local audio status.
+- `apps/vela-mobile/src/features/mystery-messenger/components/MysteryMissedPhraseRecap.test.ts` — zero/one/multiple rendering, language attributes, replay, active-row state.
 
 ---
 
-### Task 1: Make hint use the only new run fact and derive recap from history
+### Task 1: Put hint use on history and derive recap from the model
 
 **Files:**
 - Modify: `apps/vela-mobile/src/features/mystery-messenger/model.ts`
-- Test: `apps/vela-mobile/src/features/mystery-messenger/model.test.ts`
+- Modify: `apps/vela-mobile/src/features/mystery-messenger/model.test.ts`
+- Modify: `apps/vela-mobile/src/features/mystery-messenger/storage.ts`
+- Modify: `apps/vela-mobile/src/features/mystery-messenger/storage.test.ts`
 
 **Interfaces:**
-- Produces `MysteryProgress.hintedSceneIds: readonly string[]`.
-- Produces `markMysteryHintUsed(chapter, progress, expectedSceneId): MysteryProgress`.
-- Produces `gradeMysteryResponse(scene, selectedTokenIds): 'correct' | 'incorrect'`.
-- Produces `MysteryMissedPhraseRecapItem` and `selectMysteryMissedPhraseRecap(chapter, progress)`.
-- Produces `selectMysteryPhraseAudio(chapter, phraseId): MysterySceneAudio | null`.
-- Does not add any missed-phrase write path to `chooseMysteryOption()` or `submitMysteryResponse()`.
+- Produces widened choice/response-build `MysteryHistoryEntry` variants with `hintUsed?: boolean`.
+- Produces `gradeMysteryResponse(scene, selectedTokenIds)`.
+- Produces `MysteryMissedPhraseRecapItem` without `sourceSceneId`.
+- Produces `selectMysteryMissedPhraseRecap(chapter, progress)`.
+- Produces `selectMysteryPhraseAudio(chapter, phraseId)` returning `MysterySceneAudio` or throwing for an unknown phrase.
+- Keeps `MysteryProgress` and `MysteryProgressStorage` top-level interfaces unchanged.
 
-- [ ] **Step 1: Add failing fresh/restart hint-state assertions**
+- [ ] **Step 1: Add failing history/grading tests**
 
-Update the existing creation and restart expectations:
+In `model.test.ts`, add tests proving old and new entry shapes are accepted by the model and grading is extracted:
 
 ```ts
-expect(createMysteryProgress(chapter)).toEqual({
-  chapterId: chapter.id,
-  chapterVersion: chapter.version,
-  currentSceneId: chapter.startSceneId,
-  history: [],
-  completed: false,
-  hintedSceneIds: [],
-});
-
-expect(restartMysteryProgress(chapter).hintedSceneIds).toEqual([]);
+expect(gradeMysteryResponse(responseScene, responseScene.correctTokenIds)).toBe('correct');
+expect(gradeMysteryResponse(responseScene, responseScene.alternateAnswerTokenIds![0]!)).toBe(
+  'correct',
+);
+expect(
+  gradeMysteryResponse(responseScene, [
+    'station',
+    'ni-place',
+    'time',
+    'ni-time',
+    'train',
+    'de',
+    'go',
+    'period',
+  ]),
+).toBe('incorrect');
 ```
+
+Use only known token IDs in the wrong-order fixture.
 
 Run:
 
@@ -89,158 +103,111 @@ Run:
 bun --filter @vela/mobile test -- model.test.ts
 ```
 
-Expected: FAIL because `MysteryProgress` does not carry hint use yet.
+Expected: FAIL because `gradeMysteryResponse` does not exist.
 
-- [ ] **Step 2: Add `hintedSceneIds` to fresh progress**
+- [ ] **Step 2: Extract `gradeMysteryResponse()` and make transcript use it**
 
-Extend `MysteryProgress`:
-
-```ts
-export type MysteryProgress = {
-  chapterId: string;
-  chapterVersion: number;
-  currentSceneId: string;
-  history: readonly MysteryHistoryEntry[];
-  completed: boolean;
-  hintedSceneIds: readonly string[];
-};
-```
-
-Initialize it in `createMysteryProgress()`:
+Move the current visible-text comparison out of the response-build branch in `selectMysteryTranscript()` into:
 
 ```ts
-return {
-  chapterId: chapter.id,
-  chapterVersion: chapter.version,
-  currentSceneId: chapter.startSceneId,
-  history: [],
-  completed: false,
-  hintedSceneIds: [],
-};
-```
-
-Run `model.test.ts` and expect the creation/restart assertions to PASS.
-
-- [ ] **Step 3: Write failing pure hint-transition tests**
-
-Pin interaction-only, stale-ID, and idempotent behavior:
-
-```ts
-const hinted = markMysteryHintUsed(chapter, progressAtChoice, progressAtChoice.currentSceneId);
-expect(hinted.hintedSceneIds).toEqual([progressAtChoice.currentSceneId]);
-expect(markMysteryHintUsed(chapter, hinted, hinted.currentSceneId)).toBe(hinted);
-expect(markMysteryHintUsed(chapter, progressAtChoice, 'stale-scene')).toBe(progressAtChoice);
-```
-
-Also assert progress at a message or ending returns the same object.
-
-Expected: FAIL because the function is missing.
-
-- [ ] **Step 4: Implement the immutable hint transition**
-
-Add:
-
-```ts
-export function markMysteryHintUsed(
-  chapter: MysteryChapter,
-  progress: MysteryProgress,
-  expectedSceneId: string,
-): MysteryProgress {
-  if (progress.currentSceneId !== expectedSceneId) return progress;
-
-  const scene = getMysteryScene(chapter, progress.currentSceneId);
-  if (scene.kind !== 'choice' && scene.kind !== 'response-build') return progress;
-  if (progress.hintedSceneIds.includes(scene.id)) return progress;
-
-  return {
-    ...progress,
-    hintedSceneIds: [...progress.hintedSceneIds, scene.id],
-  };
-}
-```
-
-Run `model.test.ts` and expect the new transition tests to PASS.
-
-- [ ] **Step 5: Write failing response-grading extraction tests**
-
-Use a response-build scene with valid token IDs. Pick one explicit sequence from that fixture that is neither the canonical answer nor any authored alternate for the incorrect case:
-
-```ts
-expect(gradeMysteryResponse(scene, scene.correctTokenIds)).toBe('correct');
-expect(gradeMysteryResponse(scene, scene.alternateAnswerTokenIds![0]!)).toBe('correct');
-expect(gradeMysteryResponse(scene, knownIncorrectTokenIds)).toBe('incorrect');
-```
-
-Keep `knownIncorrectTokenIds` concrete in the test fixture (for example, swap two non-equivalent authored tokens) rather than generating it with `reverse()`, so a future alternate answer cannot accidentally make the negative case valid. Retain the existing invalid-token regression for `mystery_response_token_not_found`.
-
-Expected: FAIL because correctness still lives inside transcript projection.
-
-- [ ] **Step 6: Extract the existing visible-text grader and reuse it in transcript projection**
-
-Add:
-
-```ts
-function resolveMysteryResponseTexts(
-  scene: MysteryResponseBuildScene,
-  tokenIds: readonly string[],
-): readonly string[] {
-  const textById = new Map(scene.tokens.map((token) => [token.id, token.text] as const));
-  return tokenIds.map((tokenId) => {
-    const text = textById.get(tokenId);
-    if (text === undefined) throw new Error('mystery_response_token_not_found');
-    return text;
-  });
-}
-
-function responseTextsEqual(a: readonly string[], b: readonly string[]): boolean {
-  return a.length === b.length && a.every((text, index) => text === b[index]);
-}
-
 export function gradeMysteryResponse(
   scene: MysteryResponseBuildScene,
   selectedTokenIds: readonly string[],
 ): 'correct' | 'incorrect' {
-  const selected = resolveMysteryResponseTexts(scene, selectedTokenIds);
-  const canonical = resolveMysteryResponseTexts(scene, scene.correctTokenIds);
-  if (responseTextsEqual(selected, canonical)) return 'correct';
+  const textById = new Map(scene.tokens.map((token) => [token.id, token.text] as const));
+  const visibleTexts = (tokenIds: readonly string[]): readonly string[] =>
+    tokenIds.map((tokenId) => {
+      const tokenText = textById.get(tokenId);
+      if (tokenText === undefined) throw new Error('mystery_response_token_not_found');
+      return tokenText;
+    });
+  const textsEqual = (a: readonly string[], b: readonly string[]): boolean =>
+    a.length === b.length && a.every((text, index) => text === b[index]);
 
-  return (scene.alternateAnswerTokenIds ?? []).some((ids) =>
-    responseTextsEqual(selected, resolveMysteryResponseTexts(scene, ids)),
-  )
+  const selected = visibleTexts(selectedTokenIds);
+  const canonical = visibleTexts(scene.correctTokenIds);
+  return textsEqual(selected, canonical) ||
+    (scene.alternateAnswerTokenIds ?? []).some((ids) => textsEqual(visibleTexts(ids), selected))
     ? 'correct'
     : 'incorrect';
 }
 ```
 
-In `selectMysteryTranscript()`, replace the inline result calculation with:
+In transcript projection, keep the selected/correct display-text construction but replace the inline correctness expression with:
 
 ```ts
 const result = gradeMysteryResponse(scene, entry.selectedTokenIds);
 ```
 
-Continue using `resolveMysteryResponseTexts()` for `selectedText` and `correctText` so display behavior stays unchanged.
+Run the focused model tests and expect PASS.
 
-Run `model.test.ts` and expect PASS.
+- [ ] **Step 3: Add failing entry-local hint and recap tests**
 
-- [ ] **Step 7: Write failing history-derived recap tests**
-
-Pin:
+Widen the history test fixtures and pin these cases:
 
 ```ts
-expect(selectMysteryMissedPhraseRecap(chapter, cleanProgress)).toEqual([]);
-expect(
-  selectMysteryMissedPhraseRecap(chapter, incorrectChoiceProgress).map((item) => item.phraseId),
-).toEqual(['tomorrow-seven']);
-expect(
-  selectMysteryMissedPhraseRecap(chapter, correctButHintedProgress).map((item) => item.phraseId),
-).toEqual(['tomorrow-seven']);
+// choice correct, no hintUsed -> []
+// choice incorrect -> target phrase row
+// choice correct, hintUsed: true -> target phrase row
+// response canonical/alternate, no hintUsed -> []
+// response incorrect -> target phrase row
+// response correct, hintUsed: true -> target phrase row
+// repeated phrase across qualifying entries -> one first-wins sourcePrompt
+// HPA-300 entry with missing hintUsed -> treated as false
 ```
 
-Also test incorrect response-build, canonical/alternate correct response without hint, repeated target phrase first-wins provenance, phrase metadata/source prompt projection, and a normalized HPA-300-style value containing incorrect history plus `hintedSceneIds: []`.
+For the two transition functions, add assertions that the supplied boolean is stored on the new history entry:
 
-Expected: FAIL because the selector is missing.
+```ts
+const next = chooseMysteryOption(chapter, atChoice, 'scene-03', 'tomorrow-morning', true);
+expect(next.history.at(-1)).toMatchObject({ kind: 'choice', hintUsed: true });
+```
 
-- [ ] **Step 8: Implement the recap selector as one ordered history walk**
+and equivalent response-build coverage.
+
+Expected: FAIL because the entry contract, transition arguments, and recap selector do not exist yet.
+
+- [ ] **Step 4: Widen history entries and transition signatures**
+
+Change only the assessed history variants:
+
+```ts
+export type MysteryHistoryEntry =
+  | { kind: 'message'; sceneId: string }
+  | { kind: 'choice'; sceneId: string; selectedOptionId: string; hintUsed?: boolean }
+  | {
+      kind: 'response-build';
+      sceneId: string;
+      selectedTokenIds: readonly string[];
+      hintUsed?: boolean;
+    };
+```
+
+Add trailing defaults:
+
+```ts
+export function chooseMysteryOption(
+  chapter: MysteryChapter,
+  progress: MysteryProgress,
+  expectedSceneId: string,
+  optionId: string,
+  hintUsed = false,
+): MysteryProgress
+```
+
+```ts
+export function submitMysteryResponse(
+  chapter: MysteryChapter,
+  progress: MysteryProgress,
+  expectedSceneId: string,
+  selectedTokenIds: readonly string[],
+  hintUsed = false,
+): MysteryProgress
+```
+
+Write `hintUsed` into the appended history entry. Do not add a field to `MysteryProgress`.
+
+- [ ] **Step 5: Implement the pure recap projection**
 
 Add:
 
@@ -250,46 +217,69 @@ export type MysteryMissedPhraseRecapItem = {
   text: string;
   reading: string;
   meaning: string;
-  sourceSceneId: string;
   sourcePrompt: string;
 };
 ```
 
-In `selectMysteryMissedPhraseRecap()`, create:
+Implement one history walk:
 
 ```ts
-const hinted = new Set(progress.hintedSceneIds);
-const seenPhraseIds = new Set<string>();
-const items: MysteryMissedPhraseRecapItem[] = [];
-```
+export function selectMysteryMissedPhraseRecap(
+  chapter: MysteryChapter,
+  progress: MysteryProgress,
+): MysteryMissedPhraseRecapItem[] {
+  const emitted = new Set<string>();
+  const items: MysteryMissedPhraseRecapItem[] = [];
 
-Walk `progress.history` in order. Ignore messages. A choice qualifies when its selected option is incorrect or its scene ID is hinted. A response-build qualifies when `gradeMysteryResponse(scene, entry.selectedTokenIds)` is incorrect or its scene ID is hinted. For every qualifying `scene.targetPhraseIds`, skip already-seen IDs; otherwise resolve the target phrase from `chapter.targetPhrases` and append:
+  for (const entry of progress.history) {
+    if (entry.kind === 'message') continue;
+    const scene = getMysteryScene(chapter, entry.sceneId);
 
-```ts
-{
-  phraseId: phrase.id,
-  text: phrase.text,
-  reading: phrase.reading,
-  meaning: phrase.meaning,
-  sourceSceneId: scene.id,
-  sourcePrompt: scene.prompt,
+    let qualifies = false;
+    if (entry.kind === 'choice' && scene.kind === 'choice') {
+      const option = scene.options.find((candidate) => candidate.id === entry.selectedOptionId);
+      if (!option) throw new Error('mystery_option_not_found');
+      qualifies = option.result === 'incorrect' || entry.hintUsed === true;
+    } else if (entry.kind === 'response-build' && scene.kind === 'response-build') {
+      qualifies = gradeMysteryResponse(scene, entry.selectedTokenIds) === 'incorrect' || entry.hintUsed === true;
+    } else {
+      throw new Error('mystery_invalid_transition');
+    }
+
+    if (!qualifies) continue;
+    for (const phraseId of scene.targetPhraseIds) {
+      if (emitted.has(phraseId)) continue;
+      const phrase = chapter.targetPhrases.find((candidate) => candidate.id === phraseId);
+      if (!phrase) throw new Error('mystery_target_phrase_not_found');
+      emitted.add(phraseId);
+      items.push({
+        phraseId,
+        text: phrase.text,
+        reading: phrase.reading,
+        meaning: phrase.meaning,
+        sourcePrompt: scene.prompt,
+      });
+    }
+  }
+
+  return items;
 }
 ```
 
-Return `items`. Do not mutate progress and do not add a stored missed-phrase field.
+Run focused model tests and expect PASS.
 
-Run `model.test.ts` and expect PASS.
+- [ ] **Step 6: Add failing phrase-audio identity tests and implement the selector**
 
-- [ ] **Step 9: Add the phrase-audio selector beside `selectMysterySceneAudio()`**
-
-Write a failing test:
+Pin the current chapter identity:
 
 ```ts
 expect(selectMysteryPhraseAudio(chapter, 'tomorrow-seven')).toEqual({
-  ttsId: `${chapter.id}-v${chapter.version}-recap-tomorrow-seven`,
-  text: chapter.targetPhrases.find((phrase) => phrase.id === 'tomorrow-seven')!.text,
+  ttsId: 'mystery-message-tomorrow-v2-recap-tomorrow-seven',
+  text: 'あしたの朝7時',
 });
-expect(selectMysteryPhraseAudio(chapter, 'missing')).toBeNull();
+expect(() => selectMysteryPhraseAudio(chapter, 'missing')).toThrow(
+  'mystery_target_phrase_not_found',
+);
 ```
 
 Implement:
@@ -298,175 +288,174 @@ Implement:
 export function selectMysteryPhraseAudio(
   chapter: MysteryChapter,
   phraseId: string,
-): MysterySceneAudio | null {
+): MysterySceneAudio {
   const phrase = chapter.targetPhrases.find((candidate) => candidate.id === phraseId);
-  if (!phrase) return null;
+  if (!phrase) throw new Error('mystery_target_phrase_not_found');
+  const chapterTtsBase = chapter.id.replace(/-v\d+$/, '');
   return {
-    ttsId: `${chapter.id}-v${chapter.version}-recap-${phrase.id}`,
+    ttsId: `${chapterTtsBase}-v${chapter.version}-recap-${phrase.id}`,
     text: phrase.text,
   };
 }
 ```
 
-Run `model.test.ts` and expect PASS.
+Run focused model tests and expect PASS.
 
-- [ ] **Step 10: Commit Task 1**
+- [ ] **Step 7: Add storage tests for optional `hintUsed`**
 
-```bash
-git add apps/vela-mobile/src/features/mystery-messenger/model.ts \
-  apps/vela-mobile/src/features/mystery-messenger/model.test.ts
-git commit -m "feat(mobile): derive mystery missed phrases"
-```
+In `storage.test.ts`, seed valid HPA-300-shaped choice/response entries without `hintUsed` and verify they still load unchanged. Add new snapshots with `hintUsed: true` and `hintUsed: false` and verify round-trip.
 
----
-
-### Task 2: Keep the storage boundary strict while defaulting historic missing hint state
-
-**Files:**
-- Modify: `apps/vela-mobile/src/features/mystery-messenger/storage.ts`
-- Test: `apps/vela-mobile/src/features/mystery-messenger/storage.test.ts`
-
-**Interfaces:**
-- Consumes `MysteryProgress.hintedSceneIds` from Task 1.
-- Maintains `MysteryProgressStorage` unchanged.
-- Produces one compatibility rule only: a valid HPA-300 object with no `hintedSceneIds` becomes an in-memory HPA-301 progress object with `hintedSceneIds: []`.
-
-- [ ] **Step 1: Add failing tests for missing versus malformed hint state**
-
-Store valid current-version JSON with the hint field omitted:
+Add a malformed case using a raw JSON object:
 
 ```ts
-const restored = storage.load(userId, chapter);
-expect(restored).not.toBeNull();
-expect(restored?.hintedSceneIds).toEqual([]);
+hintUsed: 'yes'
 ```
 
-Then store each malformed value and expect reset:
+Expected: current storage incorrectly accepts the unknown metadata because it does not validate it.
+
+- [ ] **Step 8: Extend the existing history validation in place**
+
+Inside the history loop, after scene-kind validation and before choice/response-specific payload checks, add:
 
 ```ts
-for (const hintedSceneIds of [null, 'scene-03', {}, 1]) {
-  backend.set(key, JSON.stringify({ ...validProgress, hintedSceneIds }));
-  expect(storage.load(userId, chapter)).toBeNull();
+if (
+  entry.kind !== 'message' &&
+  entry.hintUsed !== undefined &&
+  typeof entry.hintUsed !== 'boolean'
+) {
+  return false;
 }
 ```
 
-Expected: FAIL until missing is distinguished from malformed.
-
-- [ ] **Step 2: Default only a missing `hintedSceneIds` field before existing validation**
-
-After `JSON.parse`, require an object and resolve:
-
-```ts
-const parsed = JSON.parse(raw) as Record<string, unknown>;
-const hintedSceneIds =
-  parsed.hintedSceneIds === undefined
-    ? []
-    : Array.isArray(parsed.hintedSceneIds)
-      ? parsed.hintedSceneIds
-      : null;
-if (hintedSceneIds === null) throw new Error('mystery_invalid_progress');
-
-const progress = {
-  ...parsed,
-  hintedSceneIds,
-} as MysteryProgress;
-```
-
-Pass the candidate through the existing `isKnownProgress()` boundary. Do not save merely because a historic object was normalized in memory.
-
-Run the new tests and expect PASS.
-
-- [ ] **Step 3: Add failing validation tests for hinted scene IDs**
-
-Pin a valid choice ID, valid response-build ID, duplicate ID, unknown ID, message ID, and ending ID.
-
-Expected: FAIL until `isKnownProgress()` validates the new fact.
-
-- [ ] **Step 4: Extend `isKnownProgress()` only for hint facts**
-
-Require the array:
-
-```ts
-if (!Array.isArray(progress.hintedSceneIds)) return false;
-```
-
-Then validate:
-
-```ts
-const hinted = new Set<string>();
-for (const sceneId of progress.hintedSceneIds) {
-  if (typeof sceneId !== 'string' || hinted.has(sceneId)) return false;
-  const scene = scenes.get(sceneId);
-  if (!scene || (scene.kind !== 'choice' && scene.kind !== 'response-build')) return false;
-  hinted.add(sceneId);
-}
-```
-
-Preserve every existing history/current/completed check. Do not add phrase/source validation because recap rows are not persisted.
+Do not add load normalization, a compatibility constructor, or a new top-level snapshot field.
 
 Run:
 
 ```bash
-bun --filter @vela/mobile test -- storage.test.ts
+bun --filter @vela/mobile test -- model.test.ts storage.test.ts
+bun --filter @vela/mobile test
+bun --filter @vela/mobile typecheck
 ```
 
-Expected: PASS.
+Expected: all PASS.
 
-- [ ] **Step 5: Pin old incorrect history survives the compatibility default**
-
-Seed a valid HPA-300-shaped object containing incorrect choice history and no hint field. After load:
-
-```ts
-expect(restored?.history).toEqual(oldHistory);
-expect(restored?.hintedSceneIds).toEqual([]);
-```
-
-This joins Task 1's selector test to prove old incorrect runs do not silently become clean.
-
-Run `storage.test.ts` and expect PASS.
-
-- [ ] **Step 6: Commit Task 2**
+- [ ] **Step 9: Commit Task 1**
 
 ```bash
-git add apps/vela-mobile/src/features/mystery-messenger/storage.ts \
+git add apps/vela-mobile/src/features/mystery-messenger/model.ts \
+  apps/vela-mobile/src/features/mystery-messenger/model.test.ts \
+  apps/vela-mobile/src/features/mystery-messenger/storage.ts \
   apps/vela-mobile/src/features/mystery-messenger/storage.test.ts
-git commit -m "feat(mobile): persist mystery hint use"
+git commit -m "feat(mobile): derive mystery missed phrases from history"
 ```
 
 ---
 
-### Task 3: Persist hint use through the existing controller and composers
+### Task 2: Capture the hint fact only when the interaction is submitted
 
 **Files:**
-- Modify: `apps/vela-mobile/src/features/mystery-messenger/useMysteryMessenger.ts`
-- Test: `apps/vela-mobile/src/features/mystery-messenger/useMysteryMessenger.test.ts`
 - Modify: `apps/vela-mobile/src/features/mystery-messenger/components/MysteryChoiceComposer.vue`
-- Test: `apps/vela-mobile/src/features/mystery-messenger/components/MysteryChoiceComposer.test.ts`
+- Modify: `apps/vela-mobile/src/features/mystery-messenger/components/MysteryChoiceComposer.test.ts`
 - Modify: `apps/vela-mobile/src/features/mystery-messenger/components/MysteryResponseBuildComposer.vue`
-- Test: `apps/vela-mobile/src/features/mystery-messenger/components/MysteryResponseBuildComposer.test.ts`
+- Modify: `apps/vela-mobile/src/features/mystery-messenger/components/MysteryResponseBuildComposer.test.ts`
+- Modify: `apps/vela-mobile/src/features/mystery-messenger/useMysteryMessenger.ts`
+- Modify: `apps/vela-mobile/src/features/mystery-messenger/useMysteryMessenger.test.ts`
+- Modify: `apps/vela-mobile/src/features/mystery-messenger/MysteryMessengerPage.vue`
+- Modify: `apps/vela-mobile/src/features/mystery-messenger/MysteryMessengerPage.test.ts`
 
 **Interfaces:**
-- Produces controller `missedPhraseRecap: ComputedRef<readonly MysteryMissedPhraseRecapItem[]>`.
-- Produces controller `markHintUsed(expectedSceneId: string): void`.
-- Both composers emit `hintUsed` once per mounted scene when the hint first becomes visible.
+- Choice composer emits `choose(optionId, hintUsed)`.
+- Response builder emits `submit(tokenIds, hintUsed)`.
+- Controller widens only existing `chooseOption()` and `submitResponse()` methods.
+- Controller produces `missedPhraseRecap` as a computed projection; no new write method is added.
 
-- [ ] **Step 1: Add failing controller persistence/recap tests**
+- [ ] **Step 1: Add failing composer event tests**
 
-At an active interaction:
+For both composers, pin three cases:
 
 ```ts
-controller.markHintUsed(sceneId);
-expect(storage.save).toHaveBeenLastCalledWith(
-  userId,
-  expect.objectContaining({ hintedSceneIds: [sceneId] }),
+// submit without opening Hint -> emitted boolean false
+// reveal Hint, submit -> true
+// reveal Hint, hide Hint, submit -> still true
+```
+
+For choice, assert the existing event now looks like:
+
+```ts
+expect(wrapper.emitted('choose')?.[0]).toEqual(['tomorrow-morning', true]);
+```
+
+For response-build:
+
+```ts
+expect(wrapper.emitted('submit')?.[0]).toEqual([expectedTokenIds, true]);
+```
+
+Expected: FAIL because existing events carry only the answer.
+
+- [ ] **Step 2: Track `hintRevealed` locally and widen the existing events**
+
+In each composer add:
+
+```ts
+const showHint = ref(false);
+const hintRevealed = ref(false);
+
+function toggleHint(): void {
+  showHint.value = !showHint.value;
+  if (showHint.value) hintRevealed.value = true;
+}
+```
+
+Change the Hint button to `@click="toggleHint"`.
+
+Choice emit contract:
+
+```ts
+const emit = defineEmits<{ choose: [optionId: string, hintUsed: boolean] }>();
+```
+
+Choice button:
+
+```vue
+@click="emit('choose', option.id, hintRevealed)"
+```
+
+If Vue ref auto-unwrapping is not accepted in the template event expression, use a small `choose(optionId)` function that emits `hintRevealed.value`.
+
+Response emit contract:
+
+```ts
+const emit = defineEmits<{ submit: [tokenIds: string[], hintUsed: boolean] }>();
+```
+
+Use a `submit()` function that emits `([...selectedTokenIds.value], hintRevealed.value)`.
+
+Run both composer test files and expect PASS.
+
+- [ ] **Step 3: Add failing controller tests for persisted entry-local hint use and recap**
+
+Call:
+
+```ts
+controller.chooseOption('scene-03', 'tomorrow-morning', true);
+```
+
+Assert the saved progress has a last history entry containing `hintUsed: true`, then assert:
+
+```ts
+expect(controller.missedPhraseRecap.value.map((item) => item.phraseId)).toContain(
+  'tomorrow-seven',
 );
 ```
 
-Call it again and assert the save call count does not increase. Complete the interaction correctly and assert `controller.missedPhraseRecap.value` contains its target phrase IDs. Also load incorrect non-hinted history and assert recap derives from history without stored missed-phrase data.
+Add equivalent response forwarding, restored-history projection, and restart-empty-history tests.
 
-Expected: FAIL because the controller surface is missing.
+Expected: FAIL because controller signatures/projection are not widened yet.
 
-- [ ] **Step 2: Add the controller computed and transition method**
+- [ ] **Step 4: Widen existing controller methods and add the derived computed**
+
+Import `selectMysteryMissedPhraseRecap` and `MysteryMissedPhraseRecapItem`.
 
 Add:
 
@@ -476,205 +465,142 @@ const missedPhraseRecap = computed(() =>
 );
 ```
 
-Expose:
+Widen controller methods:
 
 ```ts
-markHintUsed: (expectedSceneId: string) =>
-  transition((current) => markMysteryHintUsed(chapter, current, expectedSceneId)),
+chooseOption(expectedSceneId: string, optionId: string, hintUsed?: boolean): void;
+submitResponse(
+  expectedSceneId: string,
+  selectedTokenIds: readonly string[],
+  hintUsed?: boolean,
+): void;
 ```
 
-Return `missedPhraseRecap` with the existing controller fields. Do not call storage directly.
-
-Run `useMysteryMessenger.test.ts` and expect PASS.
-
-- [ ] **Step 3: Add controller resume/restart regressions**
-
-Persist a hinted run, recreate the controller, and assert the same hint-assisted recap is derived. Then call restart and assert:
+Forward through the existing transition seam:
 
 ```ts
-expect(controller.progress.value?.history).toEqual([]);
-expect(controller.progress.value?.hintedSceneIds).toEqual([]);
-expect(controller.missedPhraseRecap.value).toEqual([]);
+chooseOption: (expectedSceneId, optionId, hintUsed = false) =>
+  transition((current) =>
+    chooseMysteryOption(chapter, current, expectedSceneId, optionId, hintUsed),
+  ),
 ```
 
-Run the controller test file and expect PASS.
+and equivalent response logic. Expose `missedPhraseRecap` in the controller return.
 
-- [ ] **Step 4: Add failing first-reveal-only tests to both composers**
+Run focused controller tests and expect PASS.
 
-For each composer: click Hint once and expect one `hintUsed` emission; hide and re-show and keep emission count at one; then exercise the existing choose/submit action and verify its original event is unchanged.
+- [ ] **Step 5: Widen only the page answer handlers**
 
-Expected: FAIL because the composers currently only toggle `showHint`.
-
-- [ ] **Step 5: Replace inline hint toggles with a one-shot helper**
-
-In each composer:
+Change:
 
 ```ts
-const showHint = ref(false);
-const hintUsedEmitted = ref(false);
-
-function toggleHint(): void {
-  showHint.value = !showHint.value;
-  if (!showHint.value || hintUsedEmitted.value) return;
-  hintUsedEmitted.value = true;
-  emit('hintUsed');
+function handleChoose(optionId: string, hintUsed: boolean): void {
+  if (!lockTransition()) return;
+  const scene = messenger.currentScene.value;
+  if (scene?.kind !== 'choice') return;
+  messenger.chooseOption(scene.id, optionId, hintUsed);
 }
 ```
 
-Widen `defineEmits` with `hintUsed: []` and change the Hint button to:
+and:
 
-```vue
-@click="toggleHint"
+```ts
+function handleResponseSubmit(
+  selectedTokenIds: readonly string[],
+  hintUsed: boolean,
+): void {
+  if (!lockTransition()) return;
+  const scene = messenger.currentScene.value;
+  if (scene?.kind !== 'response-build') return;
+  messenger.submitResponse(scene.id, selectedTokenIds, hintUsed);
+}
 ```
 
-Do not persist visual expansion state.
+Do not add a hint-only page handler.
 
-Run both composer test files and expect PASS.
+Update existing page mocks/expectations for the widened event arguments inside this task.
 
-- [ ] **Step 6: Commit Task 3**
+Run:
 
 ```bash
-git add apps/vela-mobile/src/features/mystery-messenger/useMysteryMessenger.ts \
-  apps/vela-mobile/src/features/mystery-messenger/useMysteryMessenger.test.ts \
-  apps/vela-mobile/src/features/mystery-messenger/components/MysteryChoiceComposer.vue \
+bun --filter @vela/mobile test -- \
+  components/MysteryChoiceComposer.test.ts \
+  components/MysteryResponseBuildComposer.test.ts \
+  useMysteryMessenger.test.ts \
+  MysteryMessengerPage.test.ts
+bun --filter @vela/mobile test
+bun --filter @vela/mobile typecheck
+```
+
+Expected: all PASS.
+
+- [ ] **Step 6: Commit Task 2**
+
+```bash
+git add apps/vela-mobile/src/features/mystery-messenger/components/MysteryChoiceComposer.vue \
   apps/vela-mobile/src/features/mystery-messenger/components/MysteryChoiceComposer.test.ts \
   apps/vela-mobile/src/features/mystery-messenger/components/MysteryResponseBuildComposer.vue \
-  apps/vela-mobile/src/features/mystery-messenger/components/MysteryResponseBuildComposer.test.ts
-git commit -m "feat(mobile): record mystery hint use"
+  apps/vela-mobile/src/features/mystery-messenger/components/MysteryResponseBuildComposer.test.ts \
+  apps/vela-mobile/src/features/mystery-messenger/useMysteryMessenger.ts \
+  apps/vela-mobile/src/features/mystery-messenger/useMysteryMessenger.test.ts \
+  apps/vela-mobile/src/features/mystery-messenger/MysteryMessengerPage.vue \
+  apps/vela-mobile/src/features/mystery-messenger/MysteryMessengerPage.test.ts
+git commit -m "feat(mobile): record mystery hint use on answers"
 ```
 
 ---
 
-### Task 4: Add the read-only ending recap component
-
-**Files:**
-- Create: `apps/vela-mobile/src/features/mystery-messenger/components/MysteryMissedPhraseRecap.vue`
-- Create: `apps/vela-mobile/src/features/mystery-messenger/components/MysteryMissedPhraseRecap.test.ts`
-
-**Interfaces:**
-- Consumes `readonly MysteryMissedPhraseRecapItem[]`.
-- Emits `replay: [phraseId: string]` only.
-- Owns no progress, audio, storage, score, or Review-flow state.
-
-- [ ] **Step 1: Write failing empty and multi-row rendering tests**
-
-Mount with no items and assert:
-
-```ts
-expect(wrapper.get('[data-testid="mystery-recap-empty"]').text()).toContain(
-  'No missed phrases this run.',
-);
-```
-
-Mount with two items and assert both phrase texts, readings, meanings, and `From: ${sourcePrompt}` lines render once.
-
-Expected: FAIL because the component does not exist.
-
-- [ ] **Step 2: Implement the minimal component**
-
-Create:
-
-```vue
-<template>
-  <section class="column q-gutter-sm" aria-labelledby="mystery-recap-title">
-    <h2 id="mystery-recap-title" class="text-subtitle1 q-my-none">Review missed phrases</h2>
-
-    <p v-if="items.length === 0" data-testid="mystery-recap-empty" class="q-my-none">
-      No missed phrases this run.
-    </p>
-
-    <template v-else>
-      <article
-        v-for="item in items"
-        :key="item.phraseId"
-        :data-testid="`mystery-recap-row-${item.phraseId}`"
-        class="column q-gutter-xs"
-      >
-        <strong lang="ja">{{ item.text }}</strong>
-        <span lang="ja">{{ item.reading }}</span>
-        <span>{{ item.meaning }}</span>
-        <span class="text-caption">From: {{ item.sourcePrompt }}</span>
-        <q-btn
-          class="mobile-touch-target"
-          outline
-          label="Replay"
-          :data-testid="`mystery-recap-replay-${item.phraseId}`"
-          @click="emit('replay', item.phraseId)"
-        />
-      </article>
-    </template>
-  </section>
-</template>
-
-<script setup lang="ts">
-import type { MysteryMissedPhraseRecapItem } from '../model';
-
-defineProps<{ items: readonly MysteryMissedPhraseRecapItem[] }>();
-const emit = defineEmits<{ replay: [phraseId: string] }>();
-</script>
-```
-
-Run the component test and expect PASS.
-
-- [ ] **Step 3: Add replay-event and no-CTA assertions**
-
-Click Replay and assert:
-
-```ts
-expect(wrapper.emitted('replay')).toEqual([[item.phraseId]]);
-```
-
-Assert the component has no Review navigation action, score, percentage, or save button.
-
-Run the component test and expect PASS.
-
-- [ ] **Step 4: Commit Task 4**
-
-```bash
-git add apps/vela-mobile/src/features/mystery-messenger/components/MysteryMissedPhraseRecap.vue \
-  apps/vela-mobile/src/features/mystery-messenger/components/MysteryMissedPhraseRecap.test.ts
-git commit -m "feat(mobile): add mystery recap component"
-```
-
----
-
-### Task 5: Generalize the existing audio state machine from scene ID to TTS playback ID
+### Task 3: Generalize the existing audio machine to resolved playback IDs
 
 **Files:**
 - Modify: `apps/vela-mobile/src/features/mystery-messenger/useMysteryAudio.ts`
-- Test: `apps/vela-mobile/src/features/mystery-messenger/useMysteryAudio.test.ts`
+- Modify: `apps/vela-mobile/src/features/mystery-messenger/useMysteryAudio.test.ts`
 
 **Interfaces:**
-- Retains `play(scene: MysteryScene): Promise<void>`.
+- Renames `MysteryAudioState.sceneId` to `playbackId`.
 - Adds `playClip(audio: MysterySceneAudio): Promise<void>`.
-- Renames non-idle state payload from `sceneId` to `playbackId`.
-- Uses `audio.ttsId` as the playback ID for both scene and recap clips.
+- Keeps `play(scene)` behavior unchanged.
+- Both entry points use one private path keyed by `audio.ttsId`.
 
-- [ ] **Step 1: Change test expectations first from scene identity to playback identity**
-
-For every existing audio-state assertion, replace `sceneId: scene.id` with the resolved scene audio identity:
-
-```ts
-const sceneAudio = selectMysterySceneAudio(scene)!;
-expect(controller.state.value).toEqual({
-  kind: 'preparing',
-  playbackId: sceneAudio.ttsId,
-});
-```
-
-Apply the same identity change to `ready`, `playing`, and `error` expectations. Do not weaken TTS-call, abort-signal, handle-stop, or invalidation assertions.
-
-Run:
+- [ ] **Step 1: Run the existing audio suite as the pre-refactor baseline**
 
 ```bash
 bun --filter @vela/mobile test -- useMysteryAudio.test.ts
 ```
 
-Expected: FAIL because implementation state still uses `sceneId`.
+Expected: PASS before edits. Do not proceed with an already-red baseline.
 
-- [ ] **Step 2: Rename the state payload and private prepared-play helper**
+- [ ] **Step 2: Add failing `playClip()` success and scene-to-clip switching tests**
 
-Change the state union:
+Add a clip fixture:
+
+```ts
+const RECAP_CLIP = {
+  ttsId: 'mystery-message-tomorrow-v2-recap-tomorrow-seven',
+  text: 'あしたの朝7時',
+};
+```
+
+Pin direct clip preparation:
+
+```ts
+await controller.playClip(RECAP_CLIP);
+expect(tts.preparePronunciation).toHaveBeenCalledWith(
+  expect.objectContaining({
+    vocabularyId: RECAP_CLIP.ttsId,
+    text: RECAP_CLIP.text,
+  }),
+  expect.anything(),
+);
+```
+
+Pin one switching direction: start a pending scene `play(scene)`, then call `playClip(RECAP_CLIP)`. Assert the first request signal is aborted and the controller prepares the recap clip.
+
+Expected: FAIL because `playClip()` does not exist.
+
+- [ ] **Step 3: Refactor state identity to `playbackId` and create one shared resolved-audio path**
+
+Change the state type to:
 
 ```ts
 export type MysteryAudioState =
@@ -685,263 +611,193 @@ export type MysteryAudioState =
   | { kind: 'error'; playbackId: string; message: string };
 ```
 
-Rename the current private `playAudio()` to:
+Refactor the private error/play helpers to receive `audio` plus `playbackId` instead of a `MysteryScene` solely for identity.
 
-```ts
-async function startPreparedPlayback(
-  playbackId: string,
-  audio: MysterySceneAudio,
-  audioUrl: string,
-  userId: string,
-  generation: number,
-): Promise<void>
-```
-
-Make `handlePlaybackError()` accept `playbackId` instead of `MysteryScene` and continue invalidating `audio.ttsId` on `media_unavailable`.
-
-Run the state-shape tests and keep behavior otherwise unchanged.
-
-- [ ] **Step 3: Move the current prepare/retry/switch body into one resolved-audio function**
-
-Add:
+Create one shared entry path conceptually shaped as:
 
 ```ts
 async function playResolvedAudio(audio: MysterySceneAudio): Promise<void> {
-  if (disposed) return;
   const playbackId = audio.ttsId;
-  if (state.value.kind === 'preparing' && state.value.playbackId === playbackId) return;
-
-  const status = sessionStatus.value;
-  if (status.kind !== 'usable') return;
-
-  const current = state.value;
-  if (
-    current.kind === 'ready' &&
-    current.playbackId === playbackId &&
-    preparedUserId === status.userId
-  ) {
-    await startPreparedPlayback(
-      playbackId,
-      audio,
-      current.audioUrl,
-      status.userId,
-      operationGeneration,
-    );
-    return;
-  }
-
-  operationGeneration += 1;
-  requestController?.abort();
-  requestController = null;
-  const previousHandle = activeHandle;
-  activeHandle = null;
-  previousHandle?.stop('dispose');
-  preparedUserId = null;
-  state.value = { kind: 'preparing', playbackId };
-
-  const generation = operationGeneration;
-  const controller = new AbortController();
-  requestController = controller;
-  try {
-    const pronunciation = await options.ttsService.preparePronunciation(
-      { userId: status.userId, vocabularyId: audio.ttsId, text: audio.text },
-      { signal: controller.signal },
-    );
-    if (!isCurrent(generation)) return;
-    preparedUserId = status.userId;
-    state.value = { kind: 'ready', playbackId, audioUrl: pronunciation.audioUrl };
-    await startPreparedPlayback(
-      playbackId,
-      audio,
-      pronunciation.audioUrl,
-      status.userId,
-      generation,
-    );
-  } catch (error) {
-    if (!isCurrent(generation)) return;
-    preparedUserId = null;
-    state.value = { kind: 'error', playbackId, message: errorMessage(error) };
-  } finally {
-    if (requestController === controller) requestController = null;
-  }
+  // existing duplicate-preparing suppression
+  // existing usable-session gate
+  // existing ready/preparedUserId reuse
+  // existing generation increment, request abort, active-handle stop
+  // existing preparePronunciation call
+  // existing playback/error handling
 }
 ```
 
-Keep `play(scene)` as:
+Keep all existing generation, abort, active-handle, prepared-user, media invalidation, lifecycle, and dispose mechanics intact.
+
+Public methods:
 
 ```ts
 async function play(scene: MysteryScene): Promise<void> {
-  const audio = selectMysterySceneAudio(scene);
-  if (!audio) return;
-  await playResolvedAudio(audio);
+  const resolved = selectMysterySceneAudio(scene);
+  if (!resolved) return;
+  await playResolvedAudio(resolved);
 }
-```
 
-Run all pre-existing audio tests and expect PASS before adding the clip API. This is the regression gate for existing scene replay.
-
-- [ ] **Step 4: Add a failing non-scene `playClip()` test**
-
-Use:
-
-```ts
-const clip: MysterySceneAudio = {
-  ttsId: 'mystery-message-tomorrow-v1-v2-recap-tomorrow-seven',
-  text: 'あしたの朝7時',
-};
-```
-
-Call `controller.playClip(clip)` and assert TTS receives:
-
-```ts
-{
-  userId,
-  vocabularyId: clip.ttsId,
-  text: clip.text,
-}
-```
-
-and state uses `playbackId: clip.ttsId`.
-
-Expected: FAIL because `playClip()` is missing.
-
-- [ ] **Step 5: Add `playClip()` as the second public entry into `playResolvedAudio()`**
-
-Widen the controller type:
-
-```ts
-export type MysteryAudioController = {
-  state: Readonly<Ref<MysteryAudioState>>;
-  sessionStatus: ComputedRef<MobileFeatureSessionStatus>;
-  play(scene: MysteryScene): Promise<void>;
-  playClip(audio: MysterySceneAudio): Promise<void>;
-  dispose(): void;
-};
-```
-
-Implement:
-
-```ts
 async function playClip(audio: MysterySceneAudio): Promise<void> {
   await playResolvedAudio(audio);
 }
 ```
 
-Return `playClip` from the controller and run the focused test to PASS.
+Do not expose the old private `playAudio(...)` helper name as a public overload.
 
-- [ ] **Step 6: Pin gesture-required prepared retry for `playClip()`**
+- [ ] **Step 4: Update existing audio assertions from `sceneId` to `playbackId` in this same task**
 
-Make first playback reject with `new MobileAudioError('gesture_required')`. Assert:
+Where the old suite asserts state identity, use the scene's TTS ID, for example:
 
 ```ts
-expect(controller.state.value).toEqual({
-  kind: 'ready',
-  playbackId: clip.ttsId,
-  audioUrl: PREPARED.audioUrl,
+expect(controller.state.value).toMatchObject({
+  kind: 'preparing',
+  playbackId: scene.ttsId,
 });
-expect(tts.preparePronunciation).toHaveBeenCalledTimes(1);
 ```
 
-On the second explicit `playClip(clip)`, return a successful handle and assert TTS is still called once and the prepared URL is reused.
+For a choice with `audioPrompt`, use `scene.audioPrompt.ttsId`.
 
-- [ ] **Step 7: Pin switching between scene and recap playback in both directions**
+Do not defer these fixture/test updates to final cleanup.
 
-Start a deferred `controller.play(scene)`, then call `controller.playClip(recapClip)` before preparation resolves. Assert the first request signal is aborted, the second request uses recap identity/text, and late resolution of the stale first request cannot replace state or auto-play.
-
-Repeat with a deferred recap clip first and `play(scene)` second. Both tests must assert the final `playbackId` belongs to the second request.
-
-- [ ] **Step 8: Re-run all cancellation/invalidation regressions**
-
-Keep explicit tests for same-ID preparing suppression, active playback replacement, `media_unavailable` invalidation, auth user change, background interruption, and `dispose()`.
-
-Run:
+- [ ] **Step 5: Run the complete audio regression suite**
 
 ```bash
 bun --filter @vela/mobile test -- useMysteryAudio.test.ts
 ```
 
-Expected: PASS for the complete file.
+Expected: every pre-existing preparation suppression, gesture-required retry, media-unavailable invalidation, switching, auth change, background, and dispose case still passes, plus the two new clip tests.
 
-- [ ] **Step 9: Commit Task 5**
+No duplicate `playClip()` gesture/background/auth matrix is required because both public entry points now feed the same private path.
+
+- [ ] **Step 6: Run the green-commit gates and commit**
 
 ```bash
+bun --filter @vela/mobile test
+bun --filter @vela/mobile typecheck
 git add apps/vela-mobile/src/features/mystery-messenger/useMysteryAudio.ts \
   apps/vela-mobile/src/features/mystery-messenger/useMysteryAudio.test.ts
-git commit -m "feat(mobile): replay mystery audio clips"
+git commit -m "feat(mobile): support mystery phrase audio clips"
 ```
+
+Expected: tests and typecheck PASS before commit.
 
 ---
 
-### Task 6: Wire hint persistence, ending recap, and read-only phrase replay into the page
+### Task 4: Render the ending recap with row-local replay feedback
 
 **Files:**
+- Create: `apps/vela-mobile/src/features/mystery-messenger/components/MysteryMissedPhraseRecap.vue`
+- Create: `apps/vela-mobile/src/features/mystery-messenger/components/MysteryMissedPhraseRecap.test.ts`
 - Modify: `apps/vela-mobile/src/features/mystery-messenger/MysteryMessengerPage.vue`
-- Test: `apps/vela-mobile/src/features/mystery-messenger/MysteryMessengerPage.test.ts`
+- Modify: `apps/vela-mobile/src/features/mystery-messenger/MysteryMessengerPage.test.ts`
 
 **Interfaces:**
-- Consumes `messenger.markHintUsed()` and `messenger.missedPhraseRecap`.
-- Consumes `selectMysteryPhraseAudio()` and `audio.playClip()`.
-- Renders `MysteryMissedPhraseRecap` only for the ending scene.
+- Component consumes `items`, `activePhraseId`, `playbackKind`, and `playbackError`.
+- Component emits `replay(phraseId)` only.
+- Page maps `MysteryAudioState.playbackId` to a recap phrase by comparing with `selectMysteryPhraseAudio(chapter, phraseId).ttsId`.
 
-- [ ] **Step 1: Add failing page tests for composer hint wiring**
+- [ ] **Step 1: Add the failing isolated recap component tests**
 
-At a choice scene, click Hint and assert stored progress contains that scene ID in `hintedSceneIds`. Repeat at a response-build scene. Hide/re-show and assert no additional persisted state change for the same scene.
-
-Expected: FAIL because the page does not listen to `hintUsed`.
-
-- [ ] **Step 2: Wire both composers to one page handler**
-
-Add:
+Create tests for:
 
 ```ts
-function handleHintUsed(): void {
-  const scene = messenger.currentScene.value;
-  if (scene?.kind !== 'choice' && scene?.kind !== 'response-build') return;
-  messenger.markHintUsed(scene.id);
-}
+// [] -> "No missed phrases this run."
+// one item -> Japanese text, reading, meaning, Japanese source prompt, Replay
+// multiple items -> every phrase once
+// no literal "From:" prefix
+// phrase text, reading, and source prompt have lang="ja"
+// Replay emits the row phraseId
 ```
 
-Update the existing choice component block to:
+Use a fixture shaped as:
 
-```vue
-<MysteryChoiceComposer
-  v-else-if="currentChoice"
-  :key="currentChoice.id"
-  :scene="currentChoice"
-  :disabled="transitionsDisabled"
-  @choose="handleChoose"
-  @hint-used="handleHintUsed"
-/>
+```ts
+const ITEM = {
+  phraseId: 'tomorrow-seven',
+  text: 'あしたの朝7時',
+  reading: 'あしたのあさしちじ',
+  meaning: 'tomorrow at 7 a.m.',
+  sourcePrompt: 'ミナさんは、いつ駅に来てほしいですか？',
+};
 ```
 
-Update the response component block to:
+Expected: FAIL because the component does not exist.
 
-```vue
-<MysteryResponseBuildComposer
-  v-else-if="currentResponseBuild"
-  :key="currentResponseBuild.id"
-  :scene="currentResponseBuild"
-  :disabled="transitionsDisabled"
-  @submit="handleResponseSubmit"
-  @hint-used="handleHintUsed"
-/>
+- [ ] **Step 2: Implement the read-only recap rows**
+
+Create props:
+
+```ts
+type PlaybackKind = 'preparing' | 'ready' | 'playing' | 'error';
+
+defineProps<{
+  items: readonly MysteryMissedPhraseRecapItem[];
+  activePhraseId?: string;
+  playbackKind?: PlaybackKind;
+  playbackError?: string;
+}>();
 ```
 
-Run the page hint tests and expect PASS.
+Emit:
 
-- [ ] **Step 3: Add failing ending recap integration tests**
+```ts
+const emit = defineEmits<{ replay: [phraseId: string] }>();
+```
 
-For an ending run with empty derived recap, assert `mystery-recap-empty` renders and Restart still exists. For ending runs with one and multiple qualifying history interactions, assert expected recap rows/source prompts. For a non-ending run, assert no recap title/row/empty state is rendered.
+For each item render phrase text/reading with `lang="ja"`, English meaning, and the source prompt as its own `lang="ja"` caption with no English `From:` prefix.
 
-Expected: FAIL because the recap component is not wired.
+Keep the empty copy exactly:
 
-- [ ] **Step 4: Render recap and Restart together on the ending branch**
+```text
+No missed phrases this run.
+```
 
-Import `MysteryMissedPhraseRecap` and replace the ending-only Restart button with:
+Run the component tests and expect the static rendering/replay cases PASS.
+
+- [ ] **Step 3: Add failing active-row playback tests**
+
+Pin that only the row matching `activePhraseId` shows feedback:
+
+```ts
+// preparing -> Preparing audio…
+// ready -> Tap Replay again
+// playing -> Playing audio…
+// error -> Audio playback failed: media_unavailable (or fixture message)
+// a different row shows no playback status
+```
+
+Implement row-local status beneath the matching Replay control. Give status copy `role="status"`; use `role="alert"` for the matching error state.
+
+Run component tests and expect PASS.
+
+- [ ] **Step 4: Add failing page integration tests**
+
+Pin:
+
+- recap renders only when current scene is `ending`;
+- Restart remains below the recap;
+- zero/one/multiple derived rows are forwarded from `messenger.missedPhraseRecap`;
+- clicking Replay calls `audio.playClip(selectMysteryPhraseAudio(chapter, phraseId))`;
+- replay does not call `continueMessage`, `chooseOption`, `submitResponse`, or `restart`;
+- an audio state with a recap clip `playbackId` marks that phrase active;
+- a transcript scene playback ID does not mark a recap row active.
+
+Expected: FAIL because the page does not render/wire the component.
+
+- [ ] **Step 5: Wire the ending branch and phrase replay**
+
+Import the component and `selectMysteryPhraseAudio`.
+
+Replace the single ending Restart `q-btn` branch with an ending template containing recap then Restart:
 
 ```vue
-<div v-else-if="currentEnding" class="column q-gutter-md">
+<template v-else-if="currentEnding">
   <MysteryMissedPhraseRecap
     :items="messenger.missedPhraseRecap.value"
+    :active-phrase-id="activeRecapPhraseId"
+    :playback-kind="recapPlaybackKind"
+    :playback-error="recapPlaybackError"
     @replay="handlePhraseReplay"
   />
   <q-btn
@@ -952,98 +808,83 @@ Import `MysteryMissedPhraseRecap` and replace the ending-only Restart button wit
     :disable="transitionsDisabled"
     @click="handleRestart"
   />
-</div>
+</template>
 ```
 
-Keep the existing transcript and page-level audio status/error elements unchanged.
-
-- [ ] **Step 5: Add failing replay test proving no progress/storage mutation**
-
-At an ending with one recap row, capture the current progress object and storage save call count. Click Replay. Assert TTS receives the `selectMysteryPhraseAudio(chapter, phraseId)` ID/text, progress remains the same object, and storage save count does not increase.
-
-Expected: FAIL until replay is wired.
-
-- [ ] **Step 6: Resolve phrase audio in the model and call `playClip()`**
-
-Add:
+Add replay:
 
 ```ts
 function handlePhraseReplay(phraseId: string): void {
-  const clip = selectMysteryPhraseAudio(chapter, phraseId);
-  if (!clip) return;
-  void audio.playClip(clip);
+  void audio.playClip(selectMysteryPhraseAudio(chapter, phraseId));
 }
 ```
 
-Do not construct TTS IDs in the page and do not wrap the phrase in a fake `MysteryScene`.
+Do not add `if (!clip) return` because the selector throws on an impossible unknown ID.
 
-Run `MysteryMessengerPage.test.ts` and expect PASS.
+- [ ] **Step 6: Map active playback to the matching recap row**
 
-- [ ] **Step 7: Update page test audio-state expectations after the `playbackId` rename**
+Add a computed mapping:
 
-Where page tests inspect `MysteryAudioState`, use the selected audio clip's `ttsId` as `playbackId`. Do not change story scene IDs or transcript test IDs.
+```ts
+const activeRecapPhraseId = computed(() => {
+  const state = audio.state.value;
+  if (state.kind === 'idle') return undefined;
+  return messenger.missedPhraseRecap.value.find(
+    (item) => selectMysteryPhraseAudio(chapter, item.phraseId).ttsId === state.playbackId,
+  )?.phraseId;
+});
+```
 
-Run the page test file and expect PASS.
+Then expose row-local state only when a recap phrase is active:
 
-- [ ] **Step 8: Commit Task 6**
+```ts
+const recapPlaybackKind = computed(() => {
+  const state = audio.state.value;
+  return activeRecapPhraseId.value && state.kind !== 'idle' ? state.kind : undefined;
+});
+
+const recapPlaybackError = computed(() => {
+  const state = audio.state.value;
+  return activeRecapPhraseId.value && state.kind === 'error' ? state.message : undefined;
+});
+```
+
+Keep the existing generic page `audioStatusCopy` / `audioErrorCopy` unchanged for transcript replay.
+
+- [ ] **Step 7: Run focused and green-commit gates**
 
 ```bash
-git add apps/vela-mobile/src/features/mystery-messenger/MysteryMessengerPage.vue \
+bun --filter @vela/mobile test -- \
+  components/MysteryMissedPhraseRecap.test.ts \
+  MysteryMessengerPage.test.ts
+bun --filter @vela/mobile test
+bun --filter @vela/mobile typecheck
+```
+
+Expected: all PASS.
+
+- [ ] **Step 8: Commit Task 4**
+
+```bash
+git add apps/vela-mobile/src/features/mystery-messenger/components/MysteryMissedPhraseRecap.vue \
+  apps/vela-mobile/src/features/mystery-messenger/components/MysteryMissedPhraseRecap.test.ts \
+  apps/vela-mobile/src/features/mystery-messenger/MysteryMessengerPage.vue \
   apps/vela-mobile/src/features/mystery-messenger/MysteryMessengerPage.test.ts
-git commit -m "feat(mobile): show mystery missed-phrase recap"
+git commit -m "feat(mobile): show mystery missed phrase recap"
 ```
 
 ---
 
-### Task 7: Close fixture typing, full automated gates, and Simulator smoke acceptance
+### Task 5: Run final gates and Simulator acceptance
 
 **Files:**
-- Modify only feature-local test fixtures that manually construct `MysteryProgress` or assert `MysteryAudioState` and were not already updated by Tasks 1–6.
-- Do not broaden scope into unrelated refactors.
+- Modify only runtime/test files if a gate exposes an HPA-301 regression. Keep fixes on this PR.
 
 **Interfaces:**
 - No new product interfaces.
-- Produces HPA-301 verification evidence; HPA-302 still owns physical-device release acceptance.
+- Produces final HPA-301 verification evidence for the draft PR.
 
-- [ ] **Step 1: Run typecheck and fix only intentional contract fallout**
-
-Run:
-
-```bash
-bun --filter @vela/mobile typecheck
-```
-
-Any fixture manually constructing current `MysteryProgress` must add:
-
-```ts
-hintedSceneIds: [],
-```
-
-Any remaining audio state assertion must use `playbackId` rather than `sceneId`. Do not make `hintedSceneIds` optional in the runtime type merely to silence tests.
-
-Re-run until PASS.
-
-- [ ] **Step 2: Run focused Mystery Messenger tests together**
-
-Run:
-
-```bash
-bun --filter @vela/mobile test -- \
-  model.test.ts \
-  storage.test.ts \
-  useMysteryMessenger.test.ts \
-  useMysteryAudio.test.ts \
-  MysteryChoiceComposer.test.ts \
-  MysteryResponseBuildComposer.test.ts \
-  MysteryMissedPhraseRecap.test.ts \
-  MysteryMessengerPage.test.ts
-```
-
-Expected: PASS.
-
-- [ ] **Step 3: Run coverage, lint, typecheck, and build**
-
-Run:
+- [ ] **Step 1: Run the repository-required mobile gates**
 
 ```bash
 bun --filter @vela/mobile test:coverage
@@ -1052,75 +893,74 @@ bun --filter @vela/mobile typecheck
 bun --filter @vela/mobile build
 ```
 
-Expected: all PASS; CI Codecov patch coverage remains at or above the repository-required threshold.
+Expected: all PASS. Confirm Codecov patch coverage remains at the repository-required threshold once CI reports it.
 
-- [ ] **Step 4: Simulator smoke — clean run**
+- [ ] **Step 2: Launch the iOS development app**
 
-Use the existing iOS Simulator workflow, sign in through the existing development flow, and complete Mystery Messenger correctly without opening a Hint. At the ending verify `No missed phrases this run.`, Restart remains available, no Review CTA/score exists, and route re-entry/relaunch preserves the same completed run and empty recap.
-
-Record Simulator model, iOS version, and result in the PR.
-
-- [ ] **Step 5: Simulator smoke — incorrect + hint-assisted run and replay**
-
-Restart. Complete one interaction incorrectly without a hint and a different interaction correctly after revealing its Hint. At the ending verify each affected phrase appears once with the expected first qualifying source prompt, Replay produces phrase audio through the existing status/error surface, replay does not change recap/completion or write story progress, and force-close/relaunch preserves the same derived recap.
-
-Record the result in the PR.
-
-- [ ] **Step 6: Review the diff against the two named risks**
-
-Confirm all five conditions before marking HPA-301 ready for review:
-
-1. no `missedPhrases` field, storage validator, or write-time accumulation exists;
-2. HPA-300 missing-hint compatibility defaults only `hintedSceneIds` and preserves old incorrect history;
-3. `useMysteryAudio` uses `audio.ttsId` as `playbackId` for both `play(scene)` and `playClip(audio)`;
-4. gesture retry, switch cancellation, invalidation, auth/lifecycle cancellation, and dispose tests remain present and green;
-5. recap replay never calls a messenger transition or storage API.
-
-Fix any violation on this same PR.
-
-- [ ] **Step 7: Commit fixture-only fallout if Step 1 changed files**
-
-If Step 1 changed any uncommitted feature-local fixtures, inspect them first:
+Run:
 
 ```bash
-git status --short apps/vela-mobile/src/features/mystery-messenger
+bun --filter @vela/mobile dev:ios
 ```
 
-Then stage only the Mystery Messenger fixture changes and commit:
+Use the iOS Simulator and the existing authenticated Mystery Messenger route.
+
+- [ ] **Step 3: Smoke-test a clean completion**
+
+Complete all assessed interactions correctly without revealing hints.
+
+Verify at the ending:
+
+- recap is visible;
+- copy says `No missed phrases this run.`;
+- Restart is visible below the recap;
+- replaying ordinary transcript audio still uses the existing generic status/error surface.
+
+- [ ] **Step 4: Smoke-test incorrect and hint-assisted outcomes**
+
+Restart and complete a run containing:
+
+- at least one incorrect choice or response; and
+- at least one correct answer after revealing its Hint.
+
+Verify:
+
+- every affected target phrase appears once;
+- repeated phrase IDs do not duplicate;
+- text/reading/meaning/source prompt are correct;
+- source prompt renders as Japanese text without `From:`;
+- tapping a recap Replay row visibly shows Preparing/Playing (or Ready on gesture requirement) on that same row;
+- an audio failure, if forced through the existing test/debug seam, would render on the active row rather than relying only on off-row page copy; and
+- Replay does not move the story or alter recap contents.
+
+- [ ] **Step 5: Verify persistence semantics intentionally**
+
+For a completed hinted interaction, leave and re-enter the route or relaunch and verify its history-derived recap remains the same.
+
+Also confirm the documented trade-off rather than treating it as a bug: revealing a hint and quitting before submitting that interaction does not persist the hint fact because no history entry was completed.
+
+- [ ] **Step 6: Final full regression run after any smoke fixes**
+
+If Simulator testing caused any code change, rerun:
 
 ```bash
-git add apps/vela-mobile/src/features/mystery-messenger
-git commit -m "test(mobile): align mystery recap fixtures"
+bun --filter @vela/mobile test:coverage
+bun --filter @vela/mobile lint
+bun --filter @vela/mobile typecheck
+bun --filter @vela/mobile build
 ```
 
-If there are no Step-1 file changes, do not create an empty commit.
+Expected: all PASS.
 
----
+- [ ] **Step 7: Update the existing draft PR with verification evidence**
 
-## Completion Gate
+Record:
 
-HPA-301 is implementation-complete on this PR when all of the following are true:
+- coverage/lint/typecheck/build results;
+- Codecov patch status;
+- clean-run recap result;
+- incorrect + hint-assisted recap result;
+- row-local Replay feedback result; and
+- the accepted mid-interaction hint persistence limitation.
 
-- incorrect interactions derive target phrases from persisted history;
-- correct interactions without hints derive no recap row;
-- correct interactions after persisted hint use derive target phrases;
-- phrase IDs deduplicate first-wins across history;
-- HPA-300 snapshots with incorrect history and no hint field recover those incorrect recap rows;
-- historic pre-HPA-301 correct-after-hint behavior is treated as unknowable rather than fabricated;
-- ending UI handles zero, one, and multiple rows and keeps Restart;
-- recap replay uses `selectMysteryPhraseAudio()` + `playClip()` and does not mutate progress;
-- full audio retry/switch/cancel/invalidate regressions remain green;
-- coverage, lint, typecheck, and build pass; and
-- Simulator clean + missed/hint-assisted runs pass.
-
-Physical iPhone/release acceptance remains HPA-302.
-
-## Review Resolution
-
-The post-plan review removed the dual-write recap snapshot and changed the audio extension:
-
-- only `hintedSceneIds` is persisted;
-- the missed-phrase set and rows are derived from `history` + grading + chapter content;
-- HPA-300 compatibility defaults only the historically absent hint field;
-- `useMysteryAudio` is generalized around `audio.ttsId`/`playbackId` and gets `playClip()` while `play(scene)` retains existing behavior;
-- Task 5 explicitly gates scene playback regression behavior before recap replay is considered complete.
+Do not move physical-device/release acceptance into HPA-301; HPA-302 owns it.
