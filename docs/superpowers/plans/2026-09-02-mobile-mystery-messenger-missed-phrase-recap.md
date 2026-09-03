@@ -349,7 +349,7 @@ git commit -m "feat(mobile): derive mystery missed phrases from history"
 ### Task 2: Capture hint use only on interaction submission
 
 **Files:**
-- Modify/Test: `apps/vela-mobile/src/features/mystery-messenger/components/MysteryChoiceComposer.vue`
+- Modify: `apps/vela-mobile/src/features/mystery-messenger/components/MysteryChoiceComposer.vue`
 - Test: `apps/vela-mobile/src/features/mystery-messenger/components/MysteryChoiceComposer.test.ts`
 - Modify: `apps/vela-mobile/src/features/mystery-messenger/components/MysteryResponseBuildComposer.vue`
 - Test: `apps/vela-mobile/src/features/mystery-messenger/components/MysteryResponseBuildComposer.test.ts`
@@ -565,7 +565,7 @@ Pin `controller.playClip(RECAP_CLIP)` prepares the TTS service with that vocabul
 
 Expected: FAIL because `playClip` is missing.
 
-- [ ] **Step 3: Refactor the state payload and shared path**
+- [ ] **Step 3: Refactor the state payload and shared audio functions**
 
 Use:
 
@@ -578,18 +578,134 @@ export type MysteryAudioState =
   | { kind: 'error'; playbackId: string; message: string };
 ```
 
-Refactor private error/play helpers so their identity parameter is `playbackId = audio.ttsId`, not a `MysteryScene` used only for `.id`.
-
-Create one private resolved-audio path containing the existing duplicate suppression, ready reuse, abort/switch, prepare, and play logic:
+Replace the current scene-dependent playback-error helper with:
 
 ```ts
-async function playResolvedAudio(audio: MysterySceneAudio): Promise<void> {
-  const playbackId = audio.ttsId;
-  // existing control flow moves here unchanged except identity comparisons use playbackId
+function handlePlaybackError(
+  playbackId: string,
+  audio: MysterySceneAudio,
+  audioUrl: string,
+  userId: string,
+  generation: number,
+  error: unknown,
+): void {
+  if (!isCurrent(generation)) return;
+
+  if (error instanceof MobileAudioError && error.code === 'media_unavailable') {
+    options.ttsService.invalidatePronunciation(userId, audio.ttsId);
+    preparedUserId = null;
+  }
+
+  state.value =
+    error instanceof MobileAudioError && error.code === 'gesture_required'
+      ? { kind: 'ready', playbackId, audioUrl }
+      : { kind: 'error', playbackId, message: errorMessage(error) };
 }
 ```
 
-Preserve the generation counter, `AbortController`, active-handle stop, prepared-user tracking, media invalidation, lifecycle watcher, auth watcher, and disposal behavior.
+Replace the current prepared-URL player with:
+
+```ts
+async function playPreparedAudio(
+  playbackId: string,
+  audio: MysterySceneAudio,
+  audioUrl: string,
+  userId: string,
+  generation: number,
+): Promise<void> {
+  if (!isCurrent(generation)) return;
+
+  let handle: MobileAudioPlaybackHandle;
+  try {
+    handle = options.audioPlayer.play(audioUrl);
+  } catch (error) {
+    handlePlaybackError(playbackId, audio, audioUrl, userId, generation, error);
+    return;
+  }
+
+  if (!isCurrent(generation)) {
+    handle.stop('dispose');
+    return;
+  }
+  activeHandle = handle;
+  state.value = { kind: 'playing', playbackId };
+
+  try {
+    await handle.finished;
+    if (!isCurrent(generation)) return;
+    if (activeHandle === handle) activeHandle = null;
+    state.value = { kind: 'idle' };
+  } catch (error) {
+    if (!isCurrent(generation)) return;
+    if (activeHandle === handle) activeHandle = null;
+    handlePlaybackError(playbackId, audio, audioUrl, userId, generation, error);
+  }
+}
+```
+
+Then create the shared resolved-audio entry point:
+
+```ts
+async function playResolvedAudio(audio: MysterySceneAudio): Promise<void> {
+  if (disposed) return;
+  const playbackId = audio.ttsId;
+  if (state.value.kind === 'preparing' && state.value.playbackId === playbackId) return;
+
+  const status = sessionStatus.value;
+  if (status.kind !== 'usable') return;
+
+  const current = state.value;
+  if (
+    current.kind === 'ready' &&
+    current.playbackId === playbackId &&
+    preparedUserId === status.userId
+  ) {
+    await playPreparedAudio(
+      playbackId,
+      audio,
+      current.audioUrl,
+      status.userId,
+      operationGeneration,
+    );
+    return;
+  }
+
+  operationGeneration += 1;
+  requestController?.abort();
+  requestController = null;
+  const previousHandle = activeHandle;
+  activeHandle = null;
+  previousHandle?.stop('dispose');
+  preparedUserId = null;
+  state.value = { kind: 'preparing', playbackId };
+
+  const generation = operationGeneration;
+  const controller = new AbortController();
+  requestController = controller;
+  try {
+    const pronunciation = await options.ttsService.preparePronunciation(
+      { userId: status.userId, vocabularyId: audio.ttsId, text: audio.text },
+      { signal: controller.signal },
+    );
+    if (!isCurrent(generation)) return;
+    preparedUserId = status.userId;
+    state.value = { kind: 'ready', playbackId, audioUrl: pronunciation.audioUrl };
+    await playPreparedAudio(
+      playbackId,
+      audio,
+      pronunciation.audioUrl,
+      status.userId,
+      generation,
+    );
+  } catch (error) {
+    if (!isCurrent(generation)) return;
+    preparedUserId = null;
+    state.value = { kind: 'error', playbackId, message: errorMessage(error) };
+  } finally {
+    if (requestController === controller) requestController = null;
+  }
+}
+```
 
 Public methods become:
 
@@ -604,6 +720,8 @@ async function playClip(audio: MysterySceneAudio): Promise<void> {
   await playResolvedAudio(audio);
 }
 ```
+
+Keep auth/lifecycle/dispose watchers unchanged except for state payload field names.
 
 - [ ] **Step 4: Update old state assertions in this same task**
 
@@ -626,7 +744,7 @@ bun --filter @vela/mobile test -- useMysteryAudio.test.ts
 
 Expected: every pre-existing gesture retry, media invalidation, scene switching, auth change, background, and dispose test passes, plus direct clip and scene-to-clip tests.
 
-Do not duplicate the full existing matrix through `playClip`; both entry points feed the same private path.
+Do not duplicate the full existing matrix through `playClip`; both entry points feed `playResolvedAudio()`.
 
 - [ ] **Step 6: Run green-commit gates and commit**
 
