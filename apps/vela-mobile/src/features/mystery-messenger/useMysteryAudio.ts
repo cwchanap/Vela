@@ -22,15 +22,16 @@ export type UseMysteryAudioOptions = {
 
 export type MysteryAudioState =
   | { kind: 'idle' }
-  | { kind: 'preparing'; sceneId: string }
-  | { kind: 'ready'; sceneId: string; audioUrl: string }
-  | { kind: 'playing'; sceneId: string }
-  | { kind: 'error'; sceneId: string; message: string };
+  | { kind: 'preparing'; playbackId: string }
+  | { kind: 'ready'; playbackId: string; audioUrl: string }
+  | { kind: 'playing'; playbackId: string }
+  | { kind: 'error'; playbackId: string; message: string };
 
 export type MysteryAudioController = {
   state: Readonly<Ref<MysteryAudioState>>;
   sessionStatus: ComputedRef<MobileFeatureSessionStatus>;
   play(scene: MysteryScene): Promise<void>;
+  playClip(audio: MysterySceneAudio): Promise<void>;
   dispose(): void;
 };
 
@@ -58,7 +59,7 @@ export function useMysteryAudio(options: UseMysteryAudioOptions): MysteryAudioCo
   }
 
   function handlePlaybackError(
-    scene: MysteryScene,
+    playbackId: string,
     audio: MysterySceneAudio,
     audioUrl: string,
     userId: string,
@@ -74,12 +75,12 @@ export function useMysteryAudio(options: UseMysteryAudioOptions): MysteryAudioCo
 
     state.value =
       error instanceof MobileAudioError && error.code === 'gesture_required'
-        ? { kind: 'ready', sceneId: scene.id, audioUrl }
-        : { kind: 'error', sceneId: scene.id, message: errorMessage(error) };
+        ? { kind: 'ready', playbackId, audioUrl }
+        : { kind: 'error', playbackId, message: errorMessage(error) };
   }
 
-  async function playAudio(
-    scene: MysteryScene,
+  async function playPreparedAudio(
+    playbackId: string,
     audio: MysterySceneAudio,
     audioUrl: string,
     userId: string,
@@ -91,7 +92,7 @@ export function useMysteryAudio(options: UseMysteryAudioOptions): MysteryAudioCo
     try {
       handle = options.audioPlayer.play(audioUrl);
     } catch (error) {
-      handlePlaybackError(scene, audio, audioUrl, userId, generation, error);
+      handlePlaybackError(playbackId, audio, audioUrl, userId, generation, error);
       return;
     }
 
@@ -100,7 +101,7 @@ export function useMysteryAudio(options: UseMysteryAudioOptions): MysteryAudioCo
       return;
     }
     activeHandle = handle;
-    state.value = { kind: 'playing', sceneId: scene.id };
+    state.value = { kind: 'playing', playbackId };
 
     try {
       await handle.finished;
@@ -110,31 +111,31 @@ export function useMysteryAudio(options: UseMysteryAudioOptions): MysteryAudioCo
     } catch (error) {
       if (!isCurrent(generation)) return;
       if (activeHandle === handle) activeHandle = null;
-      handlePlaybackError(scene, audio, audioUrl, userId, generation, error);
+      handlePlaybackError(playbackId, audio, audioUrl, userId, generation, error);
     }
   }
 
-  async function play(scene: MysteryScene): Promise<void> {
+  async function playResolvedAudio(audio: MysterySceneAudio): Promise<void> {
     if (disposed) return;
-    // Suppress only a duplicate tap for the scene currently preparing. A different
-    // scene must fall through so the prepare path below aborts the pending request
-    // and switches to it; otherwise the pending scene's audio would auto-play stale
-    // after the story has advanced.
-    if (state.value.kind === 'preparing' && state.value.sceneId === scene.id) return;
+    const playbackId = audio.ttsId;
+    if (state.value.kind === 'preparing' && state.value.playbackId === playbackId) return;
 
     const status = sessionStatus.value;
     if (status.kind !== 'usable') return;
 
-    const audio = selectMysterySceneAudio(scene);
-    if (!audio) return;
-
     const current = state.value;
     if (
       current.kind === 'ready' &&
-      current.sceneId === scene.id &&
+      current.playbackId === playbackId &&
       preparedUserId === status.userId
     ) {
-      await playAudio(scene, audio, current.audioUrl, status.userId, operationGeneration);
+      await playPreparedAudio(
+        playbackId,
+        audio,
+        current.audioUrl,
+        status.userId,
+        operationGeneration,
+      );
       return;
     }
 
@@ -145,7 +146,7 @@ export function useMysteryAudio(options: UseMysteryAudioOptions): MysteryAudioCo
     activeHandle = null;
     previousHandle?.stop('dispose');
     preparedUserId = null;
-    state.value = { kind: 'preparing', sceneId: scene.id };
+    state.value = { kind: 'preparing', playbackId };
 
     const generation = operationGeneration;
     const controller = new AbortController();
@@ -157,15 +158,25 @@ export function useMysteryAudio(options: UseMysteryAudioOptions): MysteryAudioCo
       );
       if (!isCurrent(generation)) return;
       preparedUserId = status.userId;
-      state.value = { kind: 'ready', sceneId: scene.id, audioUrl: pronunciation.audioUrl };
-      await playAudio(scene, audio, pronunciation.audioUrl, status.userId, generation);
+      state.value = { kind: 'ready', playbackId, audioUrl: pronunciation.audioUrl };
+      await playPreparedAudio(playbackId, audio, pronunciation.audioUrl, status.userId, generation);
     } catch (error) {
       if (!isCurrent(generation)) return;
       preparedUserId = null;
-      state.value = { kind: 'error', sceneId: scene.id, message: errorMessage(error) };
+      state.value = { kind: 'error', playbackId, message: errorMessage(error) };
     } finally {
       if (requestController === controller) requestController = null;
     }
+  }
+
+  async function play(scene: MysteryScene): Promise<void> {
+    const resolved = selectMysterySceneAudio(scene);
+    if (!resolved) return;
+    await playResolvedAudio(resolved);
+  }
+
+  async function playClip(audio: MysterySceneAudio): Promise<void> {
+    await playResolvedAudio(audio);
   }
 
   const stopSessionWatch = watch(sessionStatus, (next, previous) => {
@@ -217,6 +228,7 @@ export function useMysteryAudio(options: UseMysteryAudioOptions): MysteryAudioCo
     state: readonly(state),
     sessionStatus,
     play,
+    playClip,
     dispose,
   };
 }

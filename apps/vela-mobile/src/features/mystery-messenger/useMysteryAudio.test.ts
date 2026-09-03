@@ -30,6 +30,10 @@ const CHOICE_AUDIO = {
   ttsId: 'mystery-message-tomorrow-v2-scene-03-prompt',
   text: 'ミナさんは、いつ駅に来てほしいですか？',
 };
+const RECAP_CLIP = {
+  ttsId: 'mystery-message-tomorrow-v2-recap-tomorrow-seven',
+  text: 'あしたの朝7時',
+};
 const RESPONSE_SCENE: MysteryResponseBuildScene = {
   kind: 'response-build',
   id: 'response-01',
@@ -172,10 +176,10 @@ describe('useMysteryAudio', () => {
 
     expect(controller.state.value).toEqual({ kind: 'idle' });
     const action = controller.play(MESSAGE_SCENE);
-    expect(controller.state.value).toEqual({ kind: 'preparing', sceneId: MESSAGE_SCENE.id });
+    expect(controller.state.value).toEqual({ kind: 'preparing', playbackId: MESSAGE_SCENE.ttsId });
 
     await flushPromises();
-    expect(controller.state.value).toEqual({ kind: 'playing', sceneId: MESSAGE_SCENE.id });
+    expect(controller.state.value).toEqual({ kind: 'playing', playbackId: MESSAGE_SCENE.ttsId });
     expect(tts.preparePronunciation).toHaveBeenCalledWith(
       { userId: 'user-1', vocabularyId: MESSAGE_SCENE.ttsId, text: MESSAGE_SCENE.text },
       { signal: expect.any(AbortSignal) },
@@ -221,6 +225,85 @@ describe('useMysteryAudio', () => {
     );
   });
 
+  it('prepares and plays a direct recap clip by its tts id', async () => {
+    tts.preparePronunciation.mockResolvedValue(PREPARED);
+    const handle = controllablePlaybackHandle();
+    audio.play.mockReturnValue(handle.publicHandle);
+    const controller = createController();
+
+    const action = controller.playClip(RECAP_CLIP);
+    expect(controller.state.value).toEqual({
+      kind: 'preparing',
+      playbackId: RECAP_CLIP.ttsId,
+    });
+
+    await flushPromises();
+    expect(controller.state.value).toEqual({
+      kind: 'playing',
+      playbackId: RECAP_CLIP.ttsId,
+    });
+    expect(tts.preparePronunciation).toHaveBeenCalledWith(
+      { userId: 'user-1', vocabularyId: RECAP_CLIP.ttsId, text: RECAP_CLIP.text },
+      { signal: expect.any(AbortSignal) },
+    );
+    expect(audio.play).toHaveBeenCalledWith(PREPARED.audioUrl);
+
+    handle.resolve({ kind: 'ended' });
+    await action;
+    expect(controller.state.value).toEqual({ kind: 'idle' });
+  });
+
+  it('aborts pending scene preparation when a recap clip is requested and switches to it', async () => {
+    const preparationScene = deferred<PreparedPronunciation>();
+    let signalScene: AbortSignal | null = null;
+    tts.preparePronunciation.mockImplementation(
+      (input: MobilePronunciationInput, options?: { signal?: AbortSignal }) => {
+        if (input.vocabularyId === MESSAGE_SCENE.ttsId) {
+          signalScene = options?.signal ?? null;
+          return preparationScene.promise;
+        }
+        return Promise.resolve(PREPARED);
+      },
+    );
+    const handle = controllablePlaybackHandle();
+    audio.play.mockReturnValue(handle.publicHandle);
+    const controller = createController();
+
+    const actionScene = controller.play(MESSAGE_SCENE);
+    expect(controller.state.value).toEqual({
+      kind: 'preparing',
+      playbackId: MESSAGE_SCENE.ttsId,
+    });
+
+    const actionClip = controller.playClip(RECAP_CLIP);
+    await flushPromises();
+
+    expect(signalAborted(signalScene)).toBe(true);
+    expect(tts.preparePronunciation).toHaveBeenCalledTimes(2);
+    expect(tts.preparePronunciation).toHaveBeenLastCalledWith(
+      { userId: 'user-1', vocabularyId: RECAP_CLIP.ttsId, text: RECAP_CLIP.text },
+      { signal: expect.any(AbortSignal) },
+    );
+    expect(audio.play).toHaveBeenCalledTimes(1);
+    expect(controller.state.value).toEqual({
+      kind: 'playing',
+      playbackId: RECAP_CLIP.ttsId,
+    });
+
+    // The stale scene preparation must not auto-play or mutate state.
+    preparationScene.resolve(PREPARED);
+    await Promise.all([actionScene, flushPromises()]);
+    expect(audio.play).toHaveBeenCalledTimes(1);
+    expect(controller.state.value).toEqual({
+      kind: 'playing',
+      playbackId: RECAP_CLIP.ttsId,
+    });
+
+    handle.resolve({ kind: 'ended' });
+    await actionClip;
+    expect(controller.state.value).toEqual({ kind: 'idle' });
+  });
+
   it('does nothing for a synthetic text-only choice', async () => {
     const scene: MysteryChoiceScene = {
       kind: 'choice',
@@ -260,7 +343,7 @@ describe('useMysteryAudio', () => {
 
     expect(controller.state.value).toEqual({
       kind: 'ready',
-      sceneId: MESSAGE_SCENE.id,
+      playbackId: MESSAGE_SCENE.ttsId,
       audioUrl: PREPARED.audioUrl,
     });
 
@@ -285,7 +368,7 @@ describe('useMysteryAudio', () => {
     expect(tts.preparePronunciation).toHaveBeenCalledTimes(1);
     expect(controller.state.value).toEqual({
       kind: 'error',
-      sceneId: MESSAGE_SCENE.id,
+      playbackId: MESSAGE_SCENE.ttsId,
       message: 'media_unavailable',
     });
   });
@@ -309,7 +392,7 @@ describe('useMysteryAudio', () => {
     expect(tts.preparePronunciation).toHaveBeenCalledTimes(1);
     expect(controller.state.value).toEqual({
       kind: 'error',
-      sceneId: MESSAGE_SCENE.id,
+      playbackId: MESSAGE_SCENE.ttsId,
       message: 'network',
     });
   });
@@ -353,7 +436,7 @@ describe('useMysteryAudio', () => {
     const controller = createController();
 
     const actionA = controller.play(MESSAGE_SCENE);
-    expect(controller.state.value).toEqual({ kind: 'preparing', sceneId: MESSAGE_SCENE.id });
+    expect(controller.state.value).toEqual({ kind: 'preparing', playbackId: MESSAGE_SCENE.ttsId });
 
     // Story advanced to scene B while A is still preparing; user taps replay there.
     const actionB = controller.play(CHOICE_SCENE);
@@ -363,13 +446,13 @@ describe('useMysteryAudio', () => {
     expect(tts.preparePronunciation).toHaveBeenCalledTimes(2);
     expect(audio.play).toHaveBeenCalledWith(preparedB.audioUrl);
     expect(audio.play).not.toHaveBeenCalledWith(PREPARED.audioUrl);
-    expect(controller.state.value).toEqual({ kind: 'playing', sceneId: CHOICE_SCENE.id });
+    expect(controller.state.value).toEqual({ kind: 'playing', playbackId: CHOICE_AUDIO.ttsId });
 
     // A resolves late — must not auto-play stale A audio or mutate state.
     preparationA.resolve(PREPARED);
     await Promise.all([actionA, flushPromises()]);
     expect(audio.play).toHaveBeenCalledTimes(1);
-    expect(controller.state.value).toEqual({ kind: 'playing', sceneId: CHOICE_SCENE.id });
+    expect(controller.state.value).toEqual({ kind: 'playing', playbackId: CHOICE_AUDIO.ttsId });
 
     handleB.resolve({ kind: 'ended' });
     await actionB;
@@ -428,7 +511,10 @@ describe('useMysteryAudio', () => {
 
     expect(audio.interruptActive).toHaveBeenCalledWith('background');
     expect(handle.stop).not.toHaveBeenCalled();
-    expect(controller.state.value).not.toEqual({ kind: 'playing', sceneId: MESSAGE_SCENE.id });
+    expect(controller.state.value).not.toEqual({
+      kind: 'playing',
+      playbackId: MESSAGE_SCENE.ttsId,
+    });
 
     handle.resolve({ kind: 'interrupted', reason: 'background' });
     await action;
