@@ -27,7 +27,7 @@ HPA-299 and HPA-300 already provide the seams this ticket should extend under `a
 - `useMysteryMessenger.ts` owns authenticated run loading, transitions, persistence, restart, and projections.
 - `MysteryChoiceComposer.vue` and `MysteryResponseBuildComposer.vue` own local hint visibility and the final answer/submit event.
 - `useMysteryAudio.ts` owns the authenticated TTS preparation, gesture retry, playback, cancellation, and lifecycle behavior.
-- `MysteryMessengerPage.vue` composes the feature and already has generic audio status/error copy.
+- `MysteryMessengerPage.vue` composes the feature and already has generic audio status/error copy immediately after the transcript.
 
 The run history is already the durable record of completed assessed interactions. Choice correctness is recoverable from `option.result`; response correctness is recoverable from the visible-text comparison currently embedded in `selectMysteryTranscript()`. The recap therefore remains a projection of history instead of a second persisted result collection.
 
@@ -166,7 +166,7 @@ Hiding the hint after revealing it therefore still submits `true`. There is no s
 
 ## Shared Response Grading
 
-Extract the current visible-text comparison from `selectMysteryTranscript()` into one pure helper:
+Response-build grading currently lives inline in `selectMysteryTranscript()`. Extract that exact visible-text comparison into one pure helper:
 
 ```ts
 export function gradeMysteryResponse(
@@ -304,7 +304,7 @@ Empty state copy remains:
 
 Keep Restart below the recap.
 
-The existing generic page audio status/error remains useful for transcript replay, but a recap row can be several rows below it. To avoid a Replay button appearing dead on a phone, the page maps the current audio `playbackId` back to the recap phrase whose `selectMysteryPhraseAudio(...).ttsId` matches and passes row-local state into the recap component:
+The existing generic page audio status/error sits immediately after the transcript, so it remains useful for transcript replay and for the first recap row when nearby. Later recap rows can still scroll that feedback outside the viewport. To avoid a Replay button appearing dead on a phone, the page maps the current audio `playbackId` back to the recap phrase whose `selectMysteryPhraseAudio(...).ttsId` matches and passes row-local state into the recap component:
 
 ```ts
 activePhraseId?: string;
@@ -350,7 +350,7 @@ submitResponse(
 
 They forward the boolean to the pure model transition through existing `transition()` persistence.
 
-The controller may expose the recap projection beside `transcript`:
+The controller exposes the recap projection beside `transcript`:
 
 ```ts
 missedPhraseRecap: ComputedRef<readonly MysteryMissedPhraseRecapItem[]>;
@@ -361,8 +361,7 @@ No new write method is added.
 The page receives `(optionId, hintUsed)` or `(tokenIds, hintUsed)` from the composers and forwards them to those existing controller methods. At ending it renders the recap and handles replay by calling:
 
 ```ts
-const clip = selectMysteryPhraseAudio(chapter, phraseId);
-void audio.playClip(clip);
+void audio.playClip(selectMysteryPhraseAudio(chapter, phraseId));
 ```
 
 There is no unreachable `if (!clip) return` guard because the helper either resolves the checked-in phrase or throws a model error.
@@ -379,7 +378,7 @@ A force-quit after revealing a hint but before submitting loses that abandoned a
 
 ### Audio feedback must remain visible where the learner taps
 
-The generic page status can be outside the viewport for later recap rows. The matching recap row therefore mirrors the current playback state/error while the generic page status remains unchanged for existing transcript replay.
+The generic status is near the recap start, but can be outside the viewport for later rows. The matching recap row therefore mirrors the current playback state/error while the generic page status remains unchanged for existing transcript replay.
 
 ### Audio identity refactor must not regress scene replay
 
@@ -470,7 +469,7 @@ bun --filter @vela/mobile typecheck
 bun --filter @vela/mobile build
 ```
 
-Codecov patch coverage must remain at the repository-required threshold. Simulator smoke acceptance covers one clean run and one run containing both an incorrect answer and a hint-assisted correct answer, including visible recap-row playback feedback.
+Codecov patch coverage must remain at the repository-required threshold. Simulator smoke acceptance covers one clean run and one run containing both an incorrect answer and a completed hint-assisted correct answer, including visible recap-row playback feedback.
 
 Physical-device/release acceptance remains HPA-302.
 
