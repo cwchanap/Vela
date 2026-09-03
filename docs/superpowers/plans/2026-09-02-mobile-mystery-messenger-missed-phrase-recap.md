@@ -163,15 +163,15 @@ Run `model.test.ts` and expect the new transition tests to PASS.
 
 - [ ] **Step 5: Write failing response-grading extraction tests**
 
-Use a response-build scene with valid token IDs:
+Use a response-build scene with valid token IDs. Pick one explicit sequence from that fixture that is neither the canonical answer nor any authored alternate for the incorrect case:
 
 ```ts
 expect(gradeMysteryResponse(scene, scene.correctTokenIds)).toBe('correct');
 expect(gradeMysteryResponse(scene, scene.alternateAnswerTokenIds![0]!)).toBe('correct');
-expect(gradeMysteryResponse(scene, [...scene.correctTokenIds].reverse())).toBe('incorrect');
+expect(gradeMysteryResponse(scene, knownIncorrectTokenIds)).toBe('incorrect');
 ```
 
-Retain the existing invalid-token regression for `mystery_response_token_not_found`.
+Keep `knownIncorrectTokenIds` concrete in the test fixture (for example, swap two non-equivalent authored tokens) rather than generating it with `reverse()`, so a future alternate answer cannot accidentally make the negative case valid. Retain the existing invalid-token regression for `mystery_response_token_not_found`.
 
 Expected: FAIL because correctness still lives inside transcript projection.
 
