@@ -350,13 +350,13 @@ git commit -m "feat(mobile): derive mystery missed phrases from history"
 
 **Files:**
 - Modify/Test: `apps/vela-mobile/src/features/mystery-messenger/components/MysteryChoiceComposer.vue`
-- Modify/Test: `apps/vela-mobile/src/features/mystery-messenger/components/MysteryChoiceComposer.test.ts`
-- Modify/Test: `apps/vela-mobile/src/features/mystery-messenger/components/MysteryResponseBuildComposer.vue`
-- Modify/Test: `apps/vela-mobile/src/features/mystery-messenger/components/MysteryResponseBuildComposer.test.ts`
-- Modify/Test: `apps/vela-mobile/src/features/mystery-messenger/useMysteryMessenger.ts`
-- Modify/Test: `apps/vela-mobile/src/features/mystery-messenger/useMysteryMessenger.test.ts`
-- Modify/Test: `apps/vela-mobile/src/features/mystery-messenger/MysteryMessengerPage.vue`
-- Modify/Test: `apps/vela-mobile/src/features/mystery-messenger/MysteryMessengerPage.test.ts`
+- Test: `apps/vela-mobile/src/features/mystery-messenger/components/MysteryChoiceComposer.test.ts`
+- Modify: `apps/vela-mobile/src/features/mystery-messenger/components/MysteryResponseBuildComposer.vue`
+- Test: `apps/vela-mobile/src/features/mystery-messenger/components/MysteryResponseBuildComposer.test.ts`
+- Modify: `apps/vela-mobile/src/features/mystery-messenger/useMysteryMessenger.ts`
+- Test: `apps/vela-mobile/src/features/mystery-messenger/useMysteryMessenger.test.ts`
+- Modify: `apps/vela-mobile/src/features/mystery-messenger/MysteryMessengerPage.vue`
+- Test: `apps/vela-mobile/src/features/mystery-messenger/MysteryMessengerPage.test.ts`
 
 **Interfaces:**
 - Choice emits `choose(optionId, hintUsed)`.
@@ -533,8 +533,8 @@ git commit -m "feat(mobile): record mystery hint use on answers"
 ### Task 3: Generalize audio identity and add `playClip()`
 
 **Files:**
-- Modify/Test: `apps/vela-mobile/src/features/mystery-messenger/useMysteryAudio.ts`
-- Modify/Test: `apps/vela-mobile/src/features/mystery-messenger/useMysteryAudio.test.ts`
+- Modify: `apps/vela-mobile/src/features/mystery-messenger/useMysteryAudio.ts`
+- Test: `apps/vela-mobile/src/features/mystery-messenger/useMysteryAudio.test.ts`
 
 **Interfaces:**
 - `MysteryAudioState.sceneId` becomes `playbackId`.
@@ -580,16 +580,16 @@ export type MysteryAudioState =
 
 Refactor private error/play helpers so their identity parameter is `playbackId = audio.ttsId`, not a `MysteryScene` used only for `.id`.
 
-Create one private entry path:
+Create one private resolved-audio path containing the existing duplicate suppression, ready reuse, abort/switch, prepare, and play logic:
 
 ```ts
 async function playResolvedAudio(audio: MysterySceneAudio): Promise<void> {
   const playbackId = audio.ttsId;
-  // move the existing duplicate, ready reuse, abort/switch, prepare, and play logic here
+  // existing control flow moves here unchanged except identity comparisons use playbackId
 }
 ```
 
-Preserve the current generation counter, `AbortController`, active-handle stop, prepared-user tracking, media invalidation, lifecycle watcher, auth watcher, and disposal behavior.
+Preserve the generation counter, `AbortController`, active-handle stop, prepared-user tracking, media invalidation, lifecycle watcher, auth watcher, and disposal behavior.
 
 Public methods become:
 
@@ -605,9 +605,9 @@ async function playClip(audio: MysterySceneAudio): Promise<void> {
 }
 ```
 
-- [ ] **Step 4: Update every old state assertion in the same task**
+- [ ] **Step 4: Update old state assertions in this same task**
 
-Replace expected `sceneId` values with the actual audio `ttsId`, e.g.:
+Replace expected `sceneId` with the resolved audio TTS ID, e.g.:
 
 ```ts
 expect(controller.state.value).toMatchObject({
@@ -645,10 +645,10 @@ Expected: all PASS.
 ### Task 4: Render the ending recap with row-local replay status
 
 **Files:**
-- Create/Test: `apps/vela-mobile/src/features/mystery-messenger/components/MysteryMissedPhraseRecap.vue`
-- Create/Test: `apps/vela-mobile/src/features/mystery-messenger/components/MysteryMissedPhraseRecap.test.ts`
-- Modify/Test: `apps/vela-mobile/src/features/mystery-messenger/MysteryMessengerPage.vue`
-- Modify/Test: `apps/vela-mobile/src/features/mystery-messenger/MysteryMessengerPage.test.ts`
+- Create: `apps/vela-mobile/src/features/mystery-messenger/components/MysteryMissedPhraseRecap.vue`
+- Test: `apps/vela-mobile/src/features/mystery-messenger/components/MysteryMissedPhraseRecap.test.ts`
+- Modify: `apps/vela-mobile/src/features/mystery-messenger/MysteryMessengerPage.vue`
+- Test: `apps/vela-mobile/src/features/mystery-messenger/MysteryMessengerPage.test.ts`
 
 **Interfaces:**
 - Recap props: `items`, optional `activePhraseId`, optional `playbackKind`, optional `playbackError`.
@@ -696,7 +696,7 @@ defineProps<{
 const emit = defineEmits<{ replay: [phraseId: string] }>();
 ```
 
-Render phrase/reading/source prompt as separate Japanese elements. Render meaning in English. Keep Replay read-only.
+Render phrase/reading/source prompt as separate Japanese elements, meaning in English, and Replay as a button. Keep exact empty copy `No missed phrases this run.`.
 
 - [ ] **Step 3: Add and implement active-row status tests**
 
@@ -783,7 +783,7 @@ const recapPlaybackError = computed(() => {
 });
 ```
 
-Keep existing generic page audio status/error for transcript replay.
+Keep existing generic page audio status/error immediately after the transcript for existing replay behavior; the row status supplements it for later recap rows.
 
 - [ ] **Step 7: Run focused and green-commit gates**
 
