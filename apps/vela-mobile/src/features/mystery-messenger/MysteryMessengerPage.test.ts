@@ -10,11 +10,13 @@ import { MOBILE_TTS_SERVICE_KEY } from 'src/services/mobile-services';
 import type { MobileTtsService } from 'src/services/mobile-tts';
 import { MESSAGE_THAT_ARRIVED_TOMORROW_CHAPTER as chapter } from './content';
 import type {
+  MysteryMissedPhraseRecapItem,
   MysteryProgress,
   MysteryResponseBuildScene,
   MysteryScene,
   MysteryTranscriptItem,
 } from './model';
+import { selectMysteryPhraseAudio } from './model';
 import type { MysteryProgressStorage } from './storage';
 import type { MysteryAudioState } from './useMysteryAudio';
 import MysteryMessengerPage from './MysteryMessengerPage.vue';
@@ -77,6 +79,7 @@ type MutableMessenger = {
   progress: Ref<MysteryProgress | null>;
   currentScene: Ref<MysteryScene | null>;
   transcript: Ref<readonly MysteryTranscriptItem[]>;
+  missedPhraseRecap: Ref<readonly MysteryMissedPhraseRecapItem[]>;
   sessionStatus: Ref<MobileFeatureSessionStatus>;
   persistenceWarning: Ref<boolean>;
   continueMessage: ReturnType<typeof vi.fn>;
@@ -89,13 +92,41 @@ type MutableAudio = {
   state: Ref<MysteryAudioState>;
   sessionStatus: Ref<MobileFeatureSessionStatus>;
   play: ReturnType<typeof vi.fn>;
+  playClip: ReturnType<typeof vi.fn>;
   dispose: ReturnType<typeof vi.fn>;
 };
+
+const RECAP_ITEM: MysteryMissedPhraseRecapItem = {
+  phraseId: 'tomorrow-seven',
+  text: 'あしたの朝7時',
+  reading: 'あしたのあさしちじ',
+  meaning: 'tomorrow at 7 a.m.',
+  sourcePrompt: 'ミナさんは、いつ駅に来てほしいですか？',
+};
+
+const RECAP_ITEMS: readonly MysteryMissedPhraseRecapItem[] = [
+  RECAP_ITEM,
+  {
+    phraseId: 'mina-possession',
+    text: 'ミナさんのです',
+    reading: 'ミナさんのです',
+    meaning: "it is Mina's",
+    sourcePrompt: '音声を聞いて、青いノートはだれのものか選んでください。',
+  },
+  {
+    phraseId: 'train-station-plan',
+    text: '7時に電車でさくら駅に行きます',
+    reading: 'しちじにでんしゃでさくらえきにいきます',
+    meaning: 'I will go to Sakura Station by train at 7',
+    sourcePrompt: 'ミナさんに、あしたの予定を伝えてください。',
+  },
+];
 
 function messengerFixture(
   options: {
     currentSceneId?: string | null;
     transcript?: readonly MysteryTranscriptItem[];
+    missedPhraseRecap?: readonly MysteryMissedPhraseRecapItem[];
     sessionStatus?: MobileFeatureSessionStatus;
     persistenceWarning?: boolean;
   } = {},
@@ -117,6 +148,9 @@ function messengerFixture(
     progress: ref<MysteryProgress | null>(null),
     currentScene,
     transcript: ref<readonly MysteryTranscriptItem[]>(options.transcript ?? []),
+    missedPhraseRecap: ref<readonly MysteryMissedPhraseRecapItem[]>(
+      options.missedPhraseRecap ?? [],
+    ),
     sessionStatus: ref<MobileFeatureSessionStatus>(
       options.sessionStatus ?? { kind: 'usable', userId: 'user-1' },
     ),
@@ -139,6 +173,7 @@ function audioFixture(
       options.sessionStatus ?? { kind: 'usable', userId: 'user-1' },
     ),
     play: vi.fn().mockResolvedValue(undefined),
+    playClip: vi.fn().mockResolvedValue(undefined),
     dispose: vi.fn(),
   };
 }
@@ -472,5 +507,148 @@ describe('MysteryMessengerPage', () => {
     wrapper.unmount();
 
     expect(audio.dispose).toHaveBeenCalledTimes(1);
+  });
+
+  it('renders the missed-phrase recap only at the ending', () => {
+    const midRun = messengerFixture({ currentSceneId: 'scene-02' });
+    const midWrapper = mountPageWithController(midRun, { audio: audioFixture() });
+    expect(midWrapper.find('[data-testid="mystery-recap"]').exists()).toBe(false);
+    midWrapper.unmount();
+
+    const ending = messengerFixture({ currentSceneId: 'scene-13', missedPhraseRecap: RECAP_ITEMS });
+    const wrapper = mountPageWithController(ending, { audio: audioFixture() });
+    expect(wrapper.find('[data-testid="mystery-recap"]').exists()).toBe(true);
+    expect(wrapper.find('[data-testid="mystery-recap-phrase-tomorrow-seven"]').exists()).toBe(true);
+  });
+
+  it('keeps Restart below the recap at the ending', () => {
+    const messenger = messengerFixture({
+      currentSceneId: 'scene-13',
+      missedPhraseRecap: RECAP_ITEMS,
+    });
+    const wrapper = mountPageWithController(messenger, { audio: audioFixture() });
+
+    const recap = wrapper.get('[data-testid="mystery-recap"]').element;
+    const restart = wrapper.get('[data-testid="mystery-restart"]').element;
+    expect(recap.compareDocumentPosition(restart) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it('passes zero, one, and multiple missed-phrase rows to the recap', () => {
+    const empty = messengerFixture({ currentSceneId: 'scene-13' });
+    const emptyWrapper = mountPageWithController(empty, { audio: audioFixture() });
+    expect(emptyWrapper.get('[data-testid="mystery-recap"]').text()).toBe(
+      'No missed phrases this run.',
+    );
+    expect(emptyWrapper.findAll('[data-testid^="mystery-recap-phrase-"]')).toHaveLength(0);
+    emptyWrapper.unmount();
+
+    const one = messengerFixture({ currentSceneId: 'scene-13', missedPhraseRecap: [RECAP_ITEM] });
+    const oneWrapper = mountPageWithController(one, { audio: audioFixture() });
+    expect(oneWrapper.findAll('[data-testid="mystery-recap-phrase-tomorrow-seven"]')).toHaveLength(
+      1,
+    );
+    expect(oneWrapper.findAll('[data-testid^="mystery-recap-phrase-"]')).toHaveLength(1);
+    oneWrapper.unmount();
+
+    const multiple = messengerFixture({
+      currentSceneId: 'scene-13',
+      missedPhraseRecap: RECAP_ITEMS,
+    });
+    const wrapper = mountPageWithController(multiple, { audio: audioFixture() });
+    for (const phraseId of ['tomorrow-seven', 'mina-possession', 'train-station-plan']) {
+      expect(wrapper.findAll(`[data-testid="mystery-recap-phrase-${phraseId}"]`)).toHaveLength(1);
+    }
+    expect(wrapper.findAll('[data-testid^="mystery-recap-phrase-"]')).toHaveLength(3);
+    expect(wrapper.get('[data-testid="mystery-recap"]').text()).not.toContain('From:');
+  });
+
+  it('replays the missed phrase clip without touching the story or restarting', async () => {
+    const messenger = messengerFixture({
+      currentSceneId: 'scene-13',
+      missedPhraseRecap: RECAP_ITEMS,
+    });
+    const audio = audioFixture();
+    const wrapper = mountPageWithController(messenger, { audio });
+
+    await wrapper.get('[data-testid="mystery-recap-replay-tomorrow-seven"]').trigger('click');
+
+    expect(audio.playClip).toHaveBeenCalledTimes(1);
+    expect(audio.playClip).toHaveBeenCalledWith(
+      selectMysteryPhraseAudio(chapter, 'tomorrow-seven'),
+    );
+    expect(audio.play).not.toHaveBeenCalled();
+    expect(messenger.continueMessage).not.toHaveBeenCalled();
+    expect(messenger.chooseOption).not.toHaveBeenCalled();
+    expect(messenger.submitResponse).not.toHaveBeenCalled();
+    expect(messenger.restart).not.toHaveBeenCalled();
+    expect(wrapper.find('[data-testid="mystery-restart"]').exists()).toBe(true);
+  });
+
+  it('marks the recap row whose clip playbackId matches the audio state', async () => {
+    const messenger = messengerFixture({
+      currentSceneId: 'scene-13',
+      missedPhraseRecap: RECAP_ITEMS,
+    });
+    const audio = audioFixture();
+    const wrapper = mountPageWithController(messenger, { audio });
+
+    audio.state.value = {
+      kind: 'playing',
+      playbackId: selectMysteryPhraseAudio(chapter, 'mina-possession').ttsId,
+    };
+    await nextTick();
+
+    const status = wrapper.get('[data-testid="mystery-recap-status-mina-possession"]');
+    expect(status.text()).toBe('Playing audio…');
+    expect(status.attributes('role')).toBe('status');
+    expect(wrapper.find('[data-testid="mystery-recap-status-tomorrow-seven"]').exists()).toBe(
+      false,
+    );
+    expect(wrapper.find('[data-testid="mystery-recap-status-train-station-plan"]').exists()).toBe(
+      false,
+    );
+  });
+
+  it('alerts the matching recap row when its clip fails and shows the generic error too', async () => {
+    const messenger = messengerFixture({
+      currentSceneId: 'scene-13',
+      missedPhraseRecap: RECAP_ITEMS,
+    });
+    const audio = audioFixture();
+    const wrapper = mountPageWithController(messenger, { audio });
+
+    audio.state.value = {
+      kind: 'error',
+      playbackId: selectMysteryPhraseAudio(chapter, 'tomorrow-seven').ttsId,
+      message: 'audio_sentinel_failure',
+    };
+    await nextTick();
+
+    const rowAlert = wrapper.get('[data-testid="mystery-recap-status-tomorrow-seven"]');
+    expect(rowAlert.text()).toBe('Audio playback failed: audio_sentinel_failure');
+    expect(rowAlert.attributes('role')).toBe('alert');
+    expect(wrapper.get('[data-testid="mystery-audio-error"]').text()).toContain(
+      'audio_sentinel_failure',
+    );
+  });
+
+  it('marks no recap row for a transcript scene playbackId', async () => {
+    const messenger = messengerFixture({
+      currentSceneId: 'scene-13',
+      missedPhraseRecap: RECAP_ITEMS,
+    });
+    const audio = audioFixture();
+    const wrapper = mountPageWithController(messenger, { audio });
+
+    audio.state.value = {
+      kind: 'playing',
+      playbackId: 'mystery-message-tomorrow-v2-scene-01',
+    };
+    await nextTick();
+
+    for (const phraseId of ['tomorrow-seven', 'mina-possession', 'train-station-plan']) {
+      expect(wrapper.find(`[data-testid="mystery-recap-status-${phraseId}"]`).exists()).toBe(false);
+    }
+    expect(wrapper.get('[data-testid="mystery-audio-status"]').text()).toBe('Playing audio…');
   });
 });
