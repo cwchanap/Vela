@@ -20,33 +20,38 @@ Design, implementation plan, implementation, review fixes, and verification stay
 
 HPA-299 and HPA-300 already established the complete feature-local runtime under `apps/vela-mobile/src/features/mystery-messenger`:
 
-- `model.ts` owns the closed scene/history model, immutable progress transitions, response grading, and transcript projection.
+- `model.ts` owns the closed scene/history model, immutable progress transitions, response grading inside transcript projection, and transcript projection itself.
 - `content.ts` owns the chapter and its target-phrase catalog. Interactions already reference phrases through `targetPhraseIds`.
 - `storage.ts` owns one user/chapter local snapshot and validates it against the active chapter version.
 - `useMysteryMessenger.ts` owns authenticated run loading, immutable transitions, persistence, restart, and session gating.
 - `MysteryChoiceComposer.vue` and `MysteryResponseBuildComposer.vue` own local interaction UI, including currently-local hint visibility.
 - `MysteryMessengerPage.vue` owns feature composition and the existing authenticated TTS/audio controller.
-- `useMysteryAudio.ts` already provides the correct authenticated TTS playback path and must be reused for recap replay.
+- `useMysteryAudio.ts` already provides the correct authenticated TTS playback path and must be extended rather than bypassed for recap replay.
 
-The important missing fact is hint usage. Both interaction components currently toggle `showHint` locally and emit only the final answer. HPA-301 therefore cannot infer later whether a correct answer was hint-assisted. That fact must become explicit at the moment the hint is revealed.
+The run history already records each completed assessed interaction and the learner's answer. Choice correctness is recoverable from `option.result`; response-build correctness is recoverable from the same visible-text rule currently used by `selectMysteryTranscript()`. Therefore missed phrases should be a projection of persisted history, not another persisted collection.
+
+The only outcome-relevant fact that cannot be recovered is hint usage. Both interaction components currently toggle `showHint` locally and emit only the final answer. HPA-301 must persist that fact when the hint is first revealed.
 
 ## Scope
 
 HPA-301 adds only:
 
-- one run-local deduplicated missed-phrase collection inside `MysteryProgress`;
-- one small persisted per-interaction hint-use marker so a hint-assisted correct answer is graded for recap correctly even after route re-entry or relaunch;
-- pure model helpers that accumulate missed phrases from interaction outcomes;
-- provenance sufficient to render the source interaction for each missed phrase;
-- one ending-summary component listing phrase, reading, meaning, source scene, and replay action;
+- one persisted `hintedSceneIds` field to the existing run snapshot;
+- one-shot hint-used events from the two existing interaction composers;
+- one pure response grading helper extracted from transcript projection;
+- one pure missed-phrase recap selector that walks history plus `hintedSceneIds` and deduplicates target phrases first-wins;
+- provenance derived from the first qualifying interaction in history;
+- one ending-summary component listing phrase, reading, meaning, source scene prompt, and replay action;
 - one clear empty recap state;
-- focused storage/controller/component/page tests for zero, one, multiple, repeated, incorrect, hint-assisted, restart, and resume behavior; and
+- one narrow extension of the existing audio state machine so it can play a resolved phrase clip without pretending phrases are scenes;
+- focused model/storage/controller/component/audio/page tests for zero, one, multiple, repeated, incorrect, hint-assisted, restart, resume, gesture retry, cancellation, and switching behavior; and
 - the existing mobile unit/coverage/lint/typecheck/build gates.
 
 ## Non-goals
 
 Do not add:
 
+- a persisted `missedPhrases` collection or any other derived recap cache;
 - backend/API/CDK/DynamoDB changes;
 - SRS writes, familiarity scores, review scheduling, or vocabulary-save APIs;
 - a personal dictionary or case-notes subsystem;
@@ -54,7 +59,8 @@ Do not add:
 - cloud sync or cross-device recap persistence;
 - chapter branching or alternate ending logic;
 - a second TTS service or recap-specific audio cache;
-- target-phrase source metadata on every catalog item;
+- target-phrase source metadata on catalog items;
+- a migration registry or versioned snapshot framework;
 - adaptive assistance or repeated authored review slots; or
 - physical-device release acceptance, which remains HPA-302.
 
@@ -64,59 +70,46 @@ A second real consumer remains the extraction gate for shared mistake-review inf
 
 The recap rule is intentionally closed and deterministic:
 
-1. Correct answer without revealing the hint: add nothing.
-2. Incorrect answer: add every `targetPhraseIds` entry from that interaction.
-3. Correct answer after revealing the hint: add every `targetPhraseIds` entry from that interaction.
-4. Incorrect answer after revealing the hint: same result as any incorrect answer; no duplicate phrase entries.
-5. If multiple interactions target the same phrase, the recap still contains one row for that phrase.
-6. Restart creates a fresh run and therefore clears both missed phrases and hint-use state.
-7. Relaunch and route re-entry restore the run-local recap because it is part of the existing chapter-versioned snapshot.
-8. Recap replay is read-only. It must not change `history`, `currentSceneId`, `completed`, missed phrases, hint-use state, or any external learning state.
+1. Correct answer without revealing the hint: add nothing to the derived recap.
+2. Incorrect answer: include every `targetPhraseIds` entry from that interaction.
+3. Correct answer after revealing the hint: include every `targetPhraseIds` entry from that interaction.
+4. Incorrect answer after revealing the hint: same result as any incorrect answer; no duplicate phrase rows.
+5. If multiple qualifying interactions target the same phrase, the first qualifying interaction in history owns recap provenance.
+6. Restart creates a fresh run and therefore clears `history` and `hintedSceneIds`; the derived recap becomes empty automatically.
+7. Relaunch and route re-entry preserve the recap because its inputs are persisted in the existing chapter-versioned snapshot.
+8. HPA-300 snapshots can recover incorrect-answer recap rows from their existing history. Historical correct-after-hint outcomes cannot be reconstructed because HPA-300 did not persist hint usage; missing `hintedSceneIds` therefore means no recorded hint use, not “no mistakes.”
+9. Recap replay is read-only. It must not change `history`, `currentSceneId`, `completed`, `hintedSceneIds`, or any external learning state.
 
 ## Data Model
 
-### Persist the minimum facts needed
-
-Extend `MysteryProgress` with two closed fields:
+Persist only the fact that cannot be derived:
 
 ```ts
-export type MysteryMissedPhrase = {
-  phraseId: string;
-  sourceSceneId: string;
-};
-
 export type MysteryProgress = {
   chapterId: string;
   chapterVersion: number;
   currentSceneId: string;
   history: readonly MysteryHistoryEntry[];
   completed: boolean;
-  missedPhrases: readonly MysteryMissedPhrase[];
   hintedSceneIds: readonly string[];
 };
 ```
 
-`missedPhrases` stores IDs plus the actual interaction where the phrase was first missed. This avoids adding ambiguous reverse metadata such as `sourceSceneId` to `MysteryTargetPhrase`, while still satisfying the recap's source-scene requirement.
+`hintedSceneIds` is a stable-order set of interaction scene IDs. A scene ID appears at most once. It exists because a learner may reveal a hint before answering and that fact must survive route re-entry or relaunch until the interaction is completed.
 
-`hintedSceneIds` is deliberately a small persisted set, not a general interaction-state object. It exists only because a learner may reveal a hint before answering and that fact must survive route re-entry/relaunch until the answer is submitted.
+Do not persist missed phrase IDs or source-scene IDs. Those are recoverable from `history`, each interaction's `targetPhraseIds`, response/choice grading, and first qualifying history order. Avoiding a second source of truth also means a new interaction kind only needs to participate in the recap selector rather than remembering a separate write-time accumulation hook.
 
-Both arrays are treated as sets with stable insertion order:
+### No chapter-version or storage-key bump
 
-- a scene ID appears at most once in `hintedSceneIds`;
-- a phrase ID appears at most once in `missedPhrases`;
-- first-miss provenance wins when the same phrase is targeted by more than one interaction.
+HPA-301 does not change authored chapter content. Keep the existing chapter ID, chapter version, and `:v1` storage-key namespace.
 
-### No snapshot namespace or chapter-version bump
+`storage.ts` accepts a valid HPA-300 snapshot with no `hintedSceneIds` by defaulting that one missing field to `[]`. That is the historically correct representation for a fact HPA-300 never recorded. Explicit malformed values remain invalid and follow the existing reset/delete behavior.
 
-HPA-301 changes the shape of the current version-2 progress payload but does not change authored chapter content. Keep the existing chapter ID, chapter version, and `:v1` storage-key namespace.
-
-`storage.ts` should accept existing HPA-300 snapshots that lack the two new fields by normalizing them to empty arrays on load. This is a narrow additive snapshot compatibility rule, not a general migration framework. Once normalized, subsequent saves use the new shape.
-
-Do not build versioned migrators or schema registries.
+Do not introduce a compatibility constructor, migrator registry, versioned schema pipeline, or any normalization for a derived missed-phrase field because no such field exists.
 
 ## Hint Flow
 
-The components already know the exact moment a hint becomes visible. Keep that ownership and emit one idempotent signal only on the transition from hidden to shown:
+The components already know the exact moment a hint becomes visible. Keep that ownership and emit one idempotent signal only on the first hidden-to-visible transition during that mounted interaction:
 
 ```ts
 const emit = defineEmits<{
@@ -127,40 +120,21 @@ const emit = defineEmits<{
 
 and similarly for the response builder.
 
-Tapping the Hint button again to hide or re-show the same hint must not create duplicate state. The page forwards the current scene ID to the controller:
+A small component-local boolean prevents another `hintUsed` emit when the learner hides and re-shows the same hint. Across remounts, controller/model idempotency remains authoritative: if the scene ID is already in `hintedSceneIds`, marking it again returns the same progress object and causes no persistence write.
+
+The page forwards the active interaction ID:
 
 ```ts
 messenger.markHintUsed(scene.id);
 ```
 
-The controller persists the new progress through its existing `transition()` function. `markMysteryHintUsed()` is a pure model transition that no-ops for stale scene IDs, non-interaction scenes, or an already-marked scene.
+The controller uses its existing `transition()` function. `markMysteryHintUsed()` is a pure model transition that no-ops for stale scene IDs, non-interaction scenes, or an already-marked scene.
 
-Do not persist whether the hint is currently visually expanded. After route re-entry, the hint may render collapsed; only the fact that it was used matters for grading.
+Do not persist whether the hint is currently visually expanded. After route re-entry the hint may render collapsed; only the fact that it was used affects recap grading.
 
-## Missed-Phrase Accumulation
+## Shared Response Grading
 
-Keep outcome calculation in `model.ts`, where the chapter, selected answer, interaction metadata, and immutable progress transitions already live.
-
-Add a pure helper:
-
-```ts
-function addMysteryMissedPhrases(
-  progress: MysteryProgress,
-  sceneId: string,
-  targetPhraseIds: readonly string[],
-): MysteryProgress;
-```
-
-It appends only phrase IDs not already present and uses the current interaction scene as `sourceSceneId`.
-
-`chooseMysteryOption()` should add phrases when either:
-
-- the selected option has `result === 'incorrect'`; or
-- `progress.hintedSceneIds` already contains the choice scene ID.
-
-`submitMysteryResponse()` should determine correctness through the same visible-text semantics used by transcript grading, then apply the same incorrect-or-hinted rule before advancing.
-
-To avoid duplicating response correctness logic, extract the existing response grading into one pure helper used by both submission and transcript projection, for example:
+Response-build grading currently lives inline in `selectMysteryTranscript()`. Extract that exact visible-text comparison into one pure helper:
 
 ```ts
 export function gradeMysteryResponse(
@@ -169,13 +143,19 @@ export function gradeMysteryResponse(
 ): 'correct' | 'incorrect';
 ```
 
-This is a reuse extraction inside the same file, not a new abstraction layer.
+It keeps all existing semantics:
 
-Hint markers do not need removal after answer submission because completed history never returns to the same interaction during one linear run. Keeping them makes resume validation simple and preserves an audit of which interactions were hint-assisted.
+- token IDs resolve through the scene's authored token bank;
+- correctness compares resolved visible token text, not token identity;
+- `correctTokenIds` is accepted;
+- every sequence in `alternateAnswerTokenIds` is accepted; and
+- unknown token IDs retain the existing model error behavior.
+
+`selectMysteryTranscript()` calls `gradeMysteryResponse()` so transcript feedback and recap classification cannot drift.
 
 ## Recap Projection
 
-Do not store duplicated phrase text/reading/meaning in progress. Derive display rows from the snapshot plus the checked-in chapter catalog:
+Add only the display projection type:
 
 ```ts
 export type MysteryMissedPhraseRecapItem = {
@@ -186,25 +166,35 @@ export type MysteryMissedPhraseRecapItem = {
   sourceSceneId: string;
   sourcePrompt: string;
 };
+```
 
+and selector:
+
+```ts
 export function selectMysteryMissedPhraseRecap(
   chapter: MysteryChapter,
   progress: MysteryProgress,
 ): MysteryMissedPhraseRecapItem[];
 ```
 
-`sourcePrompt` is derived from the source interaction:
+The selector walks `progress.history` in order:
 
-- choice: `scene.prompt`;
-- response-build: `scene.prompt`.
+1. Ignore message entries.
+2. For a choice, resolve the scene and selected option. The interaction qualifies when `option.result === 'incorrect'` or `progress.hintedSceneIds` contains the scene ID.
+3. For a response-build entry, resolve the scene and call `gradeMysteryResponse()`. The interaction qualifies when the result is `incorrect` or the scene ID is hinted.
+4. For a qualifying interaction, visit its `targetPhraseIds` in authored order.
+5. Skip phrase IDs already emitted. This makes first qualifying history occurrence own provenance.
+6. Resolve phrase copy from `chapter.targetPhrases` and source prompt from the qualifying interaction's `scene.prompt`.
 
-If stored IDs cannot be resolved against the active chapter, storage validation rejects the snapshot before projection. No runtime placeholder rows are needed.
+The selector does not mutate progress and does not depend on completed state, although the product UI renders it only at the ending.
+
+Authored-content validation already guarantees interaction `targetPhraseIds` resolve to chapter phrases. Existing storage validation guarantees history entries resolve to the proper scene/option/token shape. Direct malformed in-memory calls may keep throwing existing model errors; no placeholder recap rows are needed.
 
 ## Recap UI
 
 Add one feature-local `MysteryMissedPhraseRecap.vue` rendered only when the current scene is the ending.
 
-The component receives recap items and emits one replay event carrying `phraseId`:
+The component receives derived recap items and emits one replay event carrying `phraseId`:
 
 ```ts
 const emit = defineEmits<{ replay: [phraseId: string] }>();
@@ -218,7 +208,7 @@ For each item render:
 - a short `From: <source prompt>` provenance line; and
 - a Replay button.
 
-When the list is empty, render a durable message such as:
+When the list is empty, render durable copy:
 
 > No missed phrases this run.
 
@@ -228,48 +218,82 @@ No score, percentage, mastery badge, save-to-review button, or CTA into the unfi
 
 ## TTS Replay
 
-Target phrases currently have no dedicated `ttsId`. Do not widen the target-phrase content contract or create generated IDs in content for this ticket.
+The existing audio controller is scene-keyed even though its actual TTS/cache identity is `MysterySceneAudio.ttsId`. HPA-301 must generalize that identity without weakening the existing retry/cancellation behavior.
 
-Reuse `MobileTtsService` through the existing `useMysteryAudio` seam by adding a narrow raw-audio play method to that composable/controller:
+Rename the audio state's discriminator payload from `sceneId` to `playbackId` and use `audio.ttsId` as the playback ID:
 
 ```ts
-playAudio(audio: MysterySceneAudio): Promise<void>;
+export type MysteryAudioState =
+  | { kind: 'idle' }
+  | { kind: 'preparing'; playbackId: string }
+  | { kind: 'ready'; playbackId: string; audioUrl: string }
+  | { kind: 'playing'; playbackId: string }
+  | { kind: 'error'; playbackId: string; message: string };
 ```
 
-`play(scene)` remains for transcript/scene replay and delegates to the same internal playback function after `selectMysterySceneAudio(scene)`.
+Keep the scene API and add one clip API:
 
-The recap creates a stable feature-local TTS identity from chapter and phrase IDs at the page boundary:
+```ts
+export type MysteryAudioController = {
+  state: Readonly<Ref<MysteryAudioState>>;
+  sessionStatus: ComputedRef<MobileFeatureSessionStatus>;
+  play(scene: MysteryScene): Promise<void>;
+  playClip(audio: MysterySceneAudio): Promise<void>;
+  dispose(): void;
+};
+```
+
+`play(scene)` remains the transcript/scene entry point: resolve `selectMysterySceneAudio(scene)` and delegate to the same private prepare/play path used by `playClip(audio)`. Do not expose or overload the current private `playAudio(...)` helper name.
+
+The shared path must preserve all current behavior:
+
+- duplicate taps while the same `playbackId` is preparing are suppressed;
+- a different playback ID aborts the pending request and switches cleanly;
+- `gesture_required` keeps the prepared URL in `ready` and a second explicit tap reuses it without another TTS request;
+- switching clips stops active playback;
+- `media_unavailable` invalidates only `(userId, audio.ttsId)`;
+- user changes, app backgrounding, and dispose still abort/interrupt and reset state; and
+- existing generic page audio status/error copy continues to work.
+
+Put phrase audio identity beside the other pure Mystery Messenger audio selectors rather than inventing it in the page:
+
+```ts
+export function selectMysteryPhraseAudio(
+  chapter: MysteryChapter,
+  phraseId: string,
+): MysterySceneAudio | null;
+```
+
+It resolves the phrase from `chapter.targetPhrases` and returns a stable feature-local clip identity. Use the chapter version in that generated identity so a future chapter-versioned phrase copy change cannot reuse stale cached TTS:
 
 ```ts
 {
-  ttsId: `${chapter.id}-recap-${phrase.id}`,
+  ttsId: `${chapter.id}-v${chapter.version}-recap-${phrase.id}`,
   text: phrase.text,
 }
 ```
 
-This keeps TTS behavior centralized and avoids pretending recap phrases are scenes.
-
-Replay must use the same audio status/error surface already shown on `MysteryMessengerPage.vue`.
+The page handles recap replay by resolving `selectMysteryPhraseAudio(chapter, phraseId)` and calling `audio.playClip(clip)`. Recap phrases are never cast or wrapped as fake `MysteryScene` values.
 
 ## Storage Validation
 
-`storage.ts` remains the only snapshot boundary.
+`storage.ts` remains the only persisted snapshot boundary.
 
 On load:
 
-1. Parse the existing progress object and validate its current required HPA-300 fields.
-2. Normalize missing `missedPhrases` and `hintedSceneIds` to empty arrays.
-3. Validate every `hintedSceneId` resolves to a choice or response-build scene and is unique.
-4. Validate every missed phrase ID exists in `chapter.targetPhrases`.
-5. Validate every missed `sourceSceneId` resolves to a choice or response-build scene whose `targetPhraseIds` contains that phrase ID.
-6. Reject duplicate phrase IDs in `missedPhrases`.
-7. Preserve the existing rule that `completed` matches whether the current scene is an ending.
+1. Parse the existing progress object and validate its current HPA-300 required fields.
+2. If `hintedSceneIds` is missing, use `[]` for the in-memory candidate.
+3. If `hintedSceneIds` is present but is not an array, reject the snapshot through the existing invalid-load reset.
+4. Validate every hinted scene ID is unique and resolves to a `choice` or `response-build` scene.
+5. Preserve all existing history, current-scene, chapter ID/version, and completed-state validation.
 
-Malformed new fields still clear the snapshot through the existing invalid-load behavior.
+No missed-phrase validation exists because missed phrases are not persisted.
+
+A valid old completed snapshot containing incorrect interaction history therefore derives those missed rows correctly after load. The only unrecoverable historic fact is pre-HPA-301 hint use.
 
 ## Controller and Restart Behavior
 
-`useMysteryMessenger.ts` should expose:
+`useMysteryMessenger.ts` exposes:
 
 ```ts
 missedPhraseRecap: ComputedRef<readonly MysteryMissedPhraseRecapItem[]>;
@@ -278,9 +302,25 @@ markHintUsed(expectedSceneId: string): void;
 
 The recap computed projection follows the same `progress === null ? [] : ...` pattern as transcript.
 
-Restart keeps using `restartMysteryProgress(chapter)`, which returns both new arrays empty, then saves through the existing transition path.
+`markHintUsed()` goes through existing `transition()`, so hint persistence inherits current auth/session ownership, stale-transition suppression, storage failure warning behavior, and no-write behavior when the pure transition returns the same object.
 
-No additional storage writes occur during recap viewing or replay.
+Restart remains unchanged except that `createMysteryProgress()` now initializes `hintedSceneIds: []`. `restartMysteryProgress(chapter)` therefore clears the only new persisted fact, while the fresh history makes the derived recap empty.
+
+No storage writes occur during recap viewing or replay.
+
+## Risks
+
+### Recap must remain a projection of the run
+
+Persisting a second missed-phrase collection would allow history and recap to diverge and would make old HPA-300 runs falsely appear clean when a new field defaulted empty. The design therefore treats immutable history plus persisted hint use as the only run facts and derives recap on demand.
+
+The regression gate must include an HPA-300-shaped stored run with an incorrect history entry and no `hintedSceneIds`; after load it must still produce the incorrect phrase in recap. The test must also state the historical limitation: a correct answer that used a hint before HPA-301 cannot be identified retroactively.
+
+### Audio generalization must preserve scene playback behavior
+
+`useMysteryAudio` currently keys duplicate suppression, ready-state reuse, and status by `scene.id`. Changing that identity is more than an API rename. The implementation must move those decisions to `audio.ttsId` and prove existing scene playback still preserves preparing suppression, switching cancellation, gesture-required retry, media invalidation, auth/lifecycle cancellation, and disposal before relying on `playClip()` for recap.
+
+Do not accept a page-level replay test as sufficient evidence for this refactor.
 
 ## Testing Strategy
 
@@ -290,27 +330,30 @@ Keep tests at existing ownership boundaries.
 
 Pin pure behavior for:
 
-- correct choice without hint -> no missed phrase;
-- incorrect choice -> all targeted phrases added once;
-- correct choice after `markMysteryHintUsed()` -> phrases added;
-- repeated target phrase across interactions -> one recap entry with first-miss source scene;
-- response-build incorrect grading -> phrases added;
-- response-build accepted canonical/alternate answer without hint -> no phrase;
-- response-build accepted answer after hint -> phrases added;
-- mark-hint idempotency and stale-scene no-op;
-- restart clears missed/hinted state;
-- recap projection resolves phrase metadata and source prompt.
+- `markMysteryHintUsed()` idempotency, stale-scene no-op, and interaction-only marking;
+- `gradeMysteryResponse()` canonical, alternate, incorrect, and invalid-token behavior;
+- correct choice without hint -> no recap row;
+- incorrect choice -> all targeted phrases exactly once;
+- correct choice whose scene is hinted -> targeted phrases included;
+- repeated target phrase across qualifying interactions -> one row with first qualifying source scene;
+- incorrect response-build -> targeted phrases included;
+- canonical/alternate response without hint -> no row;
+- accepted response after hint -> targeted phrases included;
+- restart -> empty history/hint state and therefore empty recap;
+- recap projection resolves phrase metadata and source prompt; and
+- normalized HPA-300-style progress with incorrect history plus empty hint IDs still derives the incorrect phrase.
 
 ### `storage.test.ts`
 
 Pin:
 
-- new snapshot round-trip;
-- HPA-300-shaped snapshot normalizes missing new arrays to empty;
-- recap/hint state survives load;
-- unknown phrase/source/hint IDs are rejected;
-- duplicate missed phrase or hinted scene IDs are rejected;
-- missed phrase whose source interaction does not target it is rejected.
+- new snapshot round-trip with `hintedSceneIds`;
+- valid HPA-300 snapshot with missing `hintedSceneIds` loads with `[]`;
+- explicit non-array hint field is rejected rather than defaulted;
+- hint state survives load;
+- unknown/non-interaction hinted scene IDs are rejected;
+- duplicate hinted scene IDs are rejected; and
+- all existing history/current/completed invalid-load cases remain green.
 
 ### Composer tests
 
@@ -322,15 +365,25 @@ For both choice and response-build:
 
 ### `useMysteryMessenger.test.ts`
 
-Pin controller-level persistence for hint use, incorrect outcomes, resume, restart, and recap computed projection.
+Pin controller-level hint persistence, no duplicate save, resume, derived incorrect/hint-assisted recap, old-snapshot recovery, and restart.
 
 ### `useMysteryAudio.test.ts`
 
-Pin raw recap audio playback through the same prepare/gesture-required/play/cancel/error behavior used by scene audio without duplicating the state machine.
+Update state assertions to `playbackId` and pin both scene and clip entry points across:
+
+- duplicate preparing suppression;
+- switch-to-different-playback cancellation;
+- prepared `gesture_required` retry without a second TTS request;
+- active playback replacement;
+- media-unavailable invalidation;
+- session identity change;
+- background interruption;
+- dispose; and
+- error state identity.
 
 ### Recap component/page tests
 
-Pin zero/one/multiple rows, source prompt, replay emission, ending-only visibility, restart co-existence, and TTS replay not mutating progress.
+Pin zero/one/multiple rows, source prompt, replay emission, ending-only visibility, Restart co-existence, phrase selector + `playClip()` wiring, and no progress/storage mutation from replay.
 
 ## Verification
 
@@ -342,7 +395,7 @@ HPA-301 is complete when:
 - mobile typecheck passes;
 - mobile build passes;
 - Codecov patch coverage remains at the repository-required threshold; and
-- a Simulator smoke run confirms one clean completion and one missed/hint-assisted completion render the expected recap.
+- a Simulator smoke run confirms one clean completion and one missed/hint-assisted completion render the expected recap and replay audio correctly.
 
 Physical-device release acceptance remains HPA-302.
 
@@ -371,4 +424,4 @@ apps/vela-mobile/src/features/mystery-messenger/
   MysteryMessengerPage.test.ts
 ```
 
-No other application layer should need modification.
+No backend, shared package, Review-flow, or other application layer should need modification.
