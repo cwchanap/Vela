@@ -425,3 +425,13 @@ apps/vela-mobile/src/features/mystery-messenger/
 ```
 
 No backend, shared package, Review-flow, or other application layer should need modification.
+
+## Review Resolution
+
+The post-plan review changed three design decisions:
+
+- derive missed phrases from persisted history instead of dual-writing `missedPhrases`;
+- keep only the one-field HPA-300 compatibility default for `hintedSceneIds`;
+- generalize the existing scene-keyed audio machine to `audio.ttsId` plus `playClip()` instead of exposing a scene-less `playAudio(audio)` wrapper.
+
+These changes reduce persisted state and validation while preserving the current model, storage, and audio ownership boundaries.
