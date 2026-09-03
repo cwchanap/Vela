@@ -57,15 +57,23 @@
         @submit="handleResponseSubmit"
       />
 
-      <q-btn
-        v-else-if="currentEnding"
-        data-testid="mystery-restart"
-        class="mobile-touch-target full-width"
-        outline
-        label="Restart"
-        :disable="transitionsDisabled"
-        @click="handleRestart"
-      />
+      <template v-else-if="currentEnding">
+        <MysteryMissedPhraseRecap
+          :items="messenger.missedPhraseRecap.value"
+          :active-phrase-id="activeRecapPhraseId"
+          :playback-kind="recapPlaybackKind"
+          :playback-error="recapPlaybackError"
+          @replay="handlePhraseReplay"
+        />
+        <q-btn
+          data-testid="mystery-restart"
+          class="mobile-touch-target full-width"
+          outline
+          label="Restart"
+          :disable="transitionsDisabled"
+          @click="handleRestart"
+        />
+      </template>
     </main>
   </q-page>
 </template>
@@ -76,10 +84,11 @@ import { HtmlAudioPlayer } from 'src/audio/html-audio-player';
 import { MOBILE_AUTH_KEY } from 'src/services/mobile-auth';
 import { MOBILE_TTS_SERVICE_KEY } from 'src/services/mobile-services';
 import MysteryChoiceComposer from './components/MysteryChoiceComposer.vue';
+import MysteryMissedPhraseRecap from './components/MysteryMissedPhraseRecap.vue';
 import MysteryResponseBuildComposer from './components/MysteryResponseBuildComposer.vue';
 import MysteryTranscript from './components/MysteryTranscript.vue';
 import { MESSAGE_THAT_ARRIVED_TOMORROW_CHAPTER } from './content';
-import { getMysteryScene } from './model';
+import { getMysteryScene, selectMysteryPhraseAudio } from './model';
 import { createBrowserMysteryProgressStorage } from './storage';
 import { useMysteryAudio } from './useMysteryAudio';
 import { useMysteryMessenger } from './useMysteryMessenger';
@@ -164,6 +173,24 @@ const audioErrorCopy = computed(() => {
   return state.kind === 'error' ? `Audio playback failed: ${state.message}` : '';
 });
 
+const activeRecapPhraseId = computed(() => {
+  const state = audio.state.value;
+  if (state.kind === 'idle') return undefined;
+  return messenger.missedPhraseRecap.value.find(
+    (item) => selectMysteryPhraseAudio(chapter, item.phraseId).ttsId === state.playbackId,
+  )?.phraseId;
+});
+
+const recapPlaybackKind = computed(() => {
+  const state = audio.state.value;
+  return activeRecapPhraseId.value && state.kind !== 'idle' ? state.kind : undefined;
+});
+
+const recapPlaybackError = computed(() => {
+  const state = audio.state.value;
+  return activeRecapPhraseId.value && state.kind === 'error' ? state.message : undefined;
+});
+
 function handleContinue(): void {
   if (!lockTransition()) return;
   const scene = messenger.currentScene.value;
@@ -193,6 +220,10 @@ function handleRestart(): void {
 function handleReplay(sceneId: string): void {
   const scene = getMysteryScene(chapter, sceneId);
   void audio.play(scene);
+}
+
+function handlePhraseReplay(phraseId: string): void {
+  void audio.playClip(selectMysteryPhraseAudio(chapter, phraseId));
 }
 
 onBeforeUnmount(() => {
