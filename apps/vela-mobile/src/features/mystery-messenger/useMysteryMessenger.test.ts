@@ -327,6 +327,7 @@ describe('useMysteryMessenger', () => {
       kind: 'response-build',
       sceneId: 'response-01',
       selectedTokenIds: ['time', 'ni'],
+      hintUsed: false,
     });
     expect(vi.mocked(storage.save).mock.calls.length).toBe(savesAfterSetup + 1);
     expect(vi.mocked(storage.save).mock.lastCall?.[1].currentSceneId).toBe('ending');

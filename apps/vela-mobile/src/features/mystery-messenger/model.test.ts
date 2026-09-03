@@ -5,7 +5,10 @@ import {
   continueMysteryMessage,
   createMysteryProgress,
   getMysteryScene,
+  gradeMysteryResponse,
   restartMysteryProgress,
+  selectMysteryMissedPhraseRecap,
+  selectMysteryPhraseAudio,
   selectMysterySceneAudio,
   selectMysteryTranscript,
   submitMysteryResponse,
@@ -120,6 +123,7 @@ describe('mystery messenger model', () => {
       kind: 'choice',
       sceneId: 'scene-03',
       selectedOptionId: 'tomorrow-morning',
+      hintUsed: false,
     });
   });
 
@@ -165,22 +169,39 @@ describe('mystery messenger model', () => {
       history: [
         { kind: 'message', sceneId: 'scene-01' },
         { kind: 'message', sceneId: 'scene-02' },
-        { kind: 'choice', sceneId: 'scene-03', selectedOptionId: 'tomorrow-morning' },
+        {
+          kind: 'choice',
+          sceneId: 'scene-03',
+          selectedOptionId: 'tomorrow-morning',
+          hintUsed: false,
+        },
         { kind: 'message', sceneId: 'scene-04' },
-        { kind: 'choice', sceneId: 'scene-05', selectedOptionId: 'minas-notebook' },
+        {
+          kind: 'choice',
+          sceneId: 'scene-05',
+          selectedOptionId: 'minas-notebook',
+          hintUsed: false,
+        },
         { kind: 'message', sceneId: 'scene-06' },
         {
           kind: 'response-build',
           sceneId: 'scene-07',
           selectedTokenIds: responseSceneOf('scene-07').correctTokenIds,
+          hintUsed: false,
         },
         { kind: 'message', sceneId: 'scene-08' },
-        { kind: 'choice', sceneId: 'scene-09', selectedOptionId: 'ask-when-tomorrow' },
+        {
+          kind: 'choice',
+          sceneId: 'scene-09',
+          selectedOptionId: 'ask-when-tomorrow',
+          hintUsed: false,
+        },
         { kind: 'message', sceneId: 'scene-10' },
         {
           kind: 'response-build',
           sceneId: 'scene-11',
           selectedTokenIds: responseSceneOf('scene-11').correctTokenIds,
+          hintUsed: false,
         },
         { kind: 'message', sceneId: 'scene-12' },
       ],
@@ -265,6 +286,39 @@ function responseResultOf(progress: MysteryProgress) {
   return item;
 }
 
+describe('gradeMysteryResponse', () => {
+  it('grades the canonical token order correct', () => {
+    expect(gradeMysteryResponse(responseScene, responseScene.correctTokenIds)).toBe('correct');
+  });
+
+  it('grades an authored alternate token order correct', () => {
+    expect(gradeMysteryResponse(responseScene, responseScene.alternateAnswerTokenIds![0]!)).toBe(
+      'correct',
+    );
+  });
+
+  it('grades a known-wrong token order incorrect', () => {
+    expect(
+      gradeMysteryResponse(responseScene, [
+        'station',
+        'ni-place',
+        'time',
+        'ni-time',
+        'train',
+        'de',
+        'go',
+        'period',
+      ]),
+    ).toBe('incorrect');
+  });
+
+  it('throws for an unknown token id', () => {
+    expect(() => gradeMysteryResponse(responseScene, ['missing'])).toThrow(
+      'mystery_response_token_not_found',
+    );
+  });
+});
+
 describe('submitMysteryResponse', () => {
   it('accepts the canonical token order and completes at the ending', () => {
     const progress = submitResponse(CANONICAL);
@@ -275,6 +329,7 @@ describe('submitMysteryResponse', () => {
       kind: 'response-build',
       sceneId: 'response-01',
       selectedTokenIds: [...CANONICAL],
+      hintUsed: false,
     });
   });
 
@@ -512,6 +567,247 @@ describe('selectMysteryTranscript', () => {
     const progress = progressAtEnding();
 
     expect(selectMysteryTranscript(chapter, progress)).toHaveLength(progress.history.length + 1);
+  });
+});
+
+describe('assessed-entry hint metadata', () => {
+  it('persists hintUsed: true on a choice history entry', () => {
+    const next = chooseMysteryOption(
+      chapter,
+      progressAtScene03(),
+      'scene-03',
+      'tomorrow-morning',
+      true,
+    );
+
+    expect(next.history.at(-1)).toMatchObject({ kind: 'choice', hintUsed: true });
+  });
+
+  it('persists hintUsed: true on a response-build history entry', () => {
+    const next = submitMysteryResponse(
+      chapter,
+      progressAtScene07(),
+      'scene-07',
+      responseSceneOf('scene-07').correctTokenIds,
+      true,
+    );
+
+    expect(next.history.at(-1)).toMatchObject({ kind: 'response-build', hintUsed: true });
+  });
+});
+
+describe('selectMysteryMissedPhraseRecap', () => {
+  it('returns no row for a correct choice without hintUsed', () => {
+    const progress = chooseMysteryOption(
+      chapter,
+      progressAtScene03(),
+      'scene-03',
+      'tomorrow-morning',
+    );
+
+    expect(selectMysteryMissedPhraseRecap(chapter, progress)).toEqual([]);
+  });
+
+  it('returns the target phrase row for an incorrect choice', () => {
+    const progress = chooseMysteryOption(chapter, progressAtScene03(), 'scene-03', 'today-morning');
+
+    expect(selectMysteryMissedPhraseRecap(chapter, progress)).toEqual([
+      {
+        phraseId: 'tomorrow-seven',
+        text: 'あしたの朝7時',
+        reading: 'あしたのあさしちじ',
+        meaning: 'tomorrow at 7 a.m.',
+        sourcePrompt: 'ミナさんは、いつ駅に来てほしいですか？',
+      },
+    ]);
+  });
+
+  it('returns the target phrase row for a correct choice with hintUsed: true', () => {
+    const progress = chooseMysteryOption(
+      chapter,
+      progressAtScene03(),
+      'scene-03',
+      'tomorrow-morning',
+      true,
+    );
+
+    expect(selectMysteryMissedPhraseRecap(chapter, progress)).toEqual([
+      {
+        phraseId: 'tomorrow-seven',
+        text: 'あしたの朝7時',
+        reading: 'あしたのあさしちじ',
+        meaning: 'tomorrow at 7 a.m.',
+        sourcePrompt: 'ミナさんは、いつ駅に来てほしいですか？',
+      },
+    ]);
+  });
+
+  it('returns no row for a canonical response without hintUsed', () => {
+    const progress = submitMysteryResponse(
+      chapter,
+      progressAtScene07(),
+      'scene-07',
+      responseSceneOf('scene-07').correctTokenIds,
+    );
+
+    expect(selectMysteryMissedPhraseRecap(chapter, progress)).toEqual([]);
+  });
+
+  it('returns no row for an alternate response without hintUsed', () => {
+    const progress = submitMysteryResponse(
+      chapter,
+      progressAtScene07(),
+      'scene-07',
+      responseSceneOf('scene-07').alternateAnswerTokenIds![0]!,
+    );
+
+    expect(selectMysteryMissedPhraseRecap(chapter, progress)).toEqual([]);
+  });
+
+  it('returns the target phrase row for an incorrect response', () => {
+    const progress = submitMysteryResponse(chapter, progressAtScene07(), 'scene-07', [
+      'go',
+      'period',
+      'station',
+      'ni-place',
+      'train',
+      'de',
+      'time',
+      'ni-time',
+    ]);
+
+    expect(selectMysteryMissedPhraseRecap(chapter, progress)).toEqual([
+      {
+        phraseId: 'train-station-plan',
+        text: '7時に電車でさくら駅に行きます',
+        reading: 'しちじにでんしゃでさくらえきにいきます',
+        meaning: 'I will go to Sakura Station by train at 7',
+        sourcePrompt: 'ミナさんに、あしたの予定を伝えてください。',
+      },
+    ]);
+  });
+
+  it('returns the target phrase row for a correct response with hintUsed: true', () => {
+    const progress = submitMysteryResponse(
+      chapter,
+      progressAtScene07(),
+      'scene-07',
+      responseSceneOf('scene-07').correctTokenIds,
+      true,
+    );
+
+    expect(selectMysteryMissedPhraseRecap(chapter, progress)).toEqual([
+      {
+        phraseId: 'train-station-plan',
+        text: '7時に電車でさくら駅に行きます',
+        reading: 'しちじにでんしゃでさくらえきにいきます',
+        meaning: 'I will go to Sakura Station by train at 7',
+        sourcePrompt: 'ミナさんに、あしたの予定を伝えてください。',
+      },
+    ]);
+  });
+
+  it('emits a repeated target phrase once, from the first qualifying prompt', () => {
+    const dedupChapter: MysteryChapter = {
+      id: 'mystery-recap-dedup-v1',
+      version: 1,
+      title: '重複テスト',
+      startSceneId: 'choice-a',
+      targetPhrases: [
+        {
+          id: 'shared-phrase',
+          text: 'もう一度言ってください',
+          reading: 'もういちどいってください',
+          meaning: 'Please say it again',
+        },
+      ],
+      scenes: [
+        {
+          kind: 'choice',
+          id: 'choice-a',
+          speaker: 'mina',
+          prompt: '最初のプロンプト',
+          options: [
+            {
+              id: 'wrong-a',
+              label: 'a',
+              result: 'incorrect',
+              feedback: 'f',
+              nextSceneId: 'choice-b',
+            },
+          ],
+          hint: '',
+          explanation: '',
+          targetPhraseIds: ['shared-phrase'],
+        },
+        {
+          kind: 'choice',
+          id: 'choice-b',
+          speaker: 'haru',
+          prompt: '二番目のプロンプト',
+          options: [
+            {
+              id: 'wrong-b',
+              label: 'b',
+              result: 'incorrect',
+              feedback: 'f',
+              nextSceneId: 'ending',
+            },
+          ],
+          hint: '',
+          explanation: '',
+          targetPhraseIds: ['shared-phrase'],
+        },
+        { kind: 'ending', id: 'ending', title: '終わり', text: '…', ttsId: 't-ending' },
+      ],
+    };
+    const dedupProgress: MysteryProgress = {
+      chapterId: dedupChapter.id,
+      chapterVersion: dedupChapter.version,
+      currentSceneId: 'ending',
+      completed: true,
+      history: [
+        { kind: 'choice', sceneId: 'choice-a', selectedOptionId: 'wrong-a' },
+        { kind: 'choice', sceneId: 'choice-b', selectedOptionId: 'wrong-b' },
+      ],
+    };
+
+    expect(selectMysteryMissedPhraseRecap(dedupChapter, dedupProgress)).toEqual([
+      {
+        phraseId: 'shared-phrase',
+        text: 'もう一度言ってください',
+        reading: 'もういちどいってください',
+        meaning: 'Please say it again',
+        sourcePrompt: '最初のプロンプト',
+      },
+    ]);
+  });
+
+  it('treats an HPA-300 history entry without hintUsed as unhinted', () => {
+    const legacyProgress: MysteryProgress = {
+      chapterId: chapter.id,
+      chapterVersion: chapter.version,
+      currentSceneId: 'scene-04',
+      completed: false,
+      history: [{ kind: 'choice', sceneId: 'scene-03', selectedOptionId: 'tomorrow-morning' }],
+    };
+
+    expect(selectMysteryMissedPhraseRecap(chapter, legacyProgress)).toEqual([]);
+  });
+});
+
+describe('selectMysteryPhraseAudio', () => {
+  it('builds the recap audio identity for a known phrase', () => {
+    expect(selectMysteryPhraseAudio(chapter, 'tomorrow-seven')).toEqual({
+      ttsId: 'mystery-message-tomorrow-v2-recap-tomorrow-seven',
+      text: 'あしたの朝7時',
+    });
+  });
+
+  it('throws for an unknown phrase id', () => {
+    expect(() => selectMysteryPhraseAudio(chapter, 'missing')).toThrow(
+      'mystery_target_phrase_not_found',
+    );
   });
 });
 

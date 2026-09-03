@@ -78,8 +78,13 @@ export type MysteryChapter = {
 
 export type MysteryHistoryEntry =
   | { kind: 'message'; sceneId: string }
-  | { kind: 'choice'; sceneId: string; selectedOptionId: string }
-  | { kind: 'response-build'; sceneId: string; selectedTokenIds: readonly string[] };
+  | { kind: 'choice'; sceneId: string; selectedOptionId: string; hintUsed?: boolean }
+  | {
+      kind: 'response-build';
+      sceneId: string;
+      selectedTokenIds: readonly string[];
+      hintUsed?: boolean;
+    };
 
 export type MysteryProgress = {
   chapterId: string;
@@ -189,6 +194,7 @@ export function chooseMysteryOption(
   progress: MysteryProgress,
   expectedSceneId: string,
   optionId: string,
+  hintUsed = false,
 ): MysteryProgress {
   if (progress.currentSceneId !== expectedSceneId) return progress;
 
@@ -206,7 +212,7 @@ export function chooseMysteryOption(
     currentSceneId: next.id,
     history: [
       ...progress.history,
-      { kind: 'choice', sceneId: scene.id, selectedOptionId: option.id },
+      { kind: 'choice', sceneId: scene.id, selectedOptionId: option.id, hintUsed },
     ],
     completed: next.kind === 'ending',
   };
@@ -217,6 +223,7 @@ export function submitMysteryResponse(
   progress: MysteryProgress,
   expectedSceneId: string,
   selectedTokenIds: readonly string[],
+  hintUsed = false,
 ): MysteryProgress {
   if (progress.currentSceneId !== expectedSceneId) return progress;
 
@@ -240,10 +247,37 @@ export function submitMysteryResponse(
     currentSceneId: next.id,
     history: [
       ...progress.history,
-      { kind: 'response-build', sceneId: scene.id, selectedTokenIds: [...selectedTokenIds] },
+      {
+        kind: 'response-build',
+        sceneId: scene.id,
+        selectedTokenIds: [...selectedTokenIds],
+        hintUsed,
+      },
     ],
     completed: next.kind === 'ending',
   };
+}
+
+export function gradeMysteryResponse(
+  scene: MysteryResponseBuildScene,
+  selectedTokenIds: readonly string[],
+): 'correct' | 'incorrect' {
+  const textById = new Map(scene.tokens.map((token) => [token.id, token.text] as const));
+  const visibleTexts = (tokenIds: readonly string[]): readonly string[] =>
+    tokenIds.map((tokenId) => {
+      const tokenText = textById.get(tokenId);
+      if (tokenText === undefined) throw new Error('mystery_response_token_not_found');
+      return tokenText;
+    });
+  const textsEqual = (a: readonly string[], b: readonly string[]): boolean =>
+    a.length === b.length && a.every((text, index) => text === b[index]);
+
+  const selected = visibleTexts(selectedTokenIds);
+  const canonical = visibleTexts(scene.correctTokenIds);
+  return textsEqual(selected, canonical) ||
+    (scene.alternateAnswerTokenIds ?? []).some((ids) => textsEqual(visibleTexts(ids), selected))
+    ? 'correct'
+    : 'incorrect';
 }
 
 export function selectMysterySceneAudio(scene: MysteryScene): MysterySceneAudio | null {
@@ -318,19 +352,11 @@ export function selectMysteryTranscript(
             }
             return tokenText;
           });
-        const textsEqual = (a: readonly string[], b: readonly string[]): boolean =>
-          a.length === b.length && a.every((text, index) => text === b[index]);
         const selectedTexts = visibleTexts(entry.selectedTokenIds);
         const correctTexts = visibleTexts(scene.correctTokenIds);
         const selectedText = selectedTexts.join('');
         const correctText = correctTexts.join('');
-        const result =
-          textsEqual(selectedTexts, correctTexts) ||
-          (scene.alternateAnswerTokenIds ?? []).some((ids) =>
-            textsEqual(visibleTexts(ids), selectedTexts),
-          )
-            ? ('correct' as const)
-            : ('incorrect' as const);
+        const result = gradeMysteryResponse(scene, entry.selectedTokenIds);
         return {
           kind: 'response-result',
           sceneId: scene.id,
@@ -383,5 +409,77 @@ export function selectMysteryTranscript(
       });
       break;
   }
+  return items;
+}
+
+export function selectMysteryPhraseAudio(
+  chapter: MysteryChapter,
+  phraseId: string,
+): MysterySceneAudio {
+  const phrase = chapter.targetPhrases.find((candidate) => candidate.id === phraseId);
+  if (!phrase) throw new Error('mystery_target_phrase_not_found');
+  const chapterTtsBase = chapter.id.replace(/-v\d+$/, '');
+  return {
+    ttsId: `${chapterTtsBase}-v${chapter.version}-recap-${phrase.id}`,
+    text: phrase.text,
+  };
+}
+
+export type MysteryMissedPhraseRecapItem = {
+  phraseId: string;
+  text: string;
+  reading: string;
+  meaning: string;
+  sourcePrompt: string;
+};
+
+export function selectMysteryMissedPhraseRecap(
+  chapter: MysteryChapter,
+  progress: MysteryProgress,
+): MysteryMissedPhraseRecapItem[] {
+  const emitted = new Set<string>();
+  const items: MysteryMissedPhraseRecapItem[] = [];
+
+  for (const entry of progress.history) {
+    if (entry.kind === 'message') continue;
+
+    let qualifies: boolean;
+    let targetPhraseIds: readonly string[];
+    let sourcePrompt: string;
+
+    if (entry.kind === 'choice') {
+      const scene = getMysteryScene(chapter, entry.sceneId);
+      if (scene.kind !== 'choice') throw new Error('mystery_invalid_transition');
+      const option = scene.options.find((candidate) => candidate.id === entry.selectedOptionId);
+      if (!option) throw new Error('mystery_option_not_found');
+      qualifies = option.result === 'incorrect' || entry.hintUsed === true;
+      targetPhraseIds = scene.targetPhraseIds;
+      sourcePrompt = scene.prompt;
+    } else {
+      const scene = getMysteryScene(chapter, entry.sceneId);
+      if (scene.kind !== 'response-build') throw new Error('mystery_invalid_transition');
+      qualifies =
+        gradeMysteryResponse(scene, entry.selectedTokenIds) === 'incorrect' ||
+        entry.hintUsed === true;
+      targetPhraseIds = scene.targetPhraseIds;
+      sourcePrompt = scene.prompt;
+    }
+
+    if (!qualifies) continue;
+    for (const phraseId of targetPhraseIds) {
+      if (emitted.has(phraseId)) continue;
+      const phrase = chapter.targetPhrases.find((candidate) => candidate.id === phraseId);
+      if (!phrase) throw new Error('mystery_target_phrase_not_found');
+      emitted.add(phraseId);
+      items.push({
+        phraseId,
+        text: phrase.text,
+        reading: phrase.reading,
+        meaning: phrase.meaning,
+        sourcePrompt,
+      });
+    }
+  }
+
   return items;
 }
