@@ -28,7 +28,7 @@ HPA-299 and HPA-300 already established the complete feature-local runtime under
 - `MysteryMessengerPage.vue` owns feature composition and the existing authenticated TTS/audio controller.
 - `useMysteryAudio.ts` already provides the correct authenticated TTS playback path and must be extended rather than bypassed for recap replay.
 
-The run history already records each completed assessed interaction and the learner's answer. Choice correctness is recoverable from `option.result`; response-build correctness is recoverable from the same visible-text rule currently used by `selectMysteryTranscript()`. Therefore missed phrases should be a projection of persisted history, not another persisted collection.
+The run history already records each completed assessed interaction and the learner's answer. Choice correctness is recoverable from `option.result`; response-build correctness is recoverable from the same visible-text rule currently used by `selectMysteryTranscript()`. Therefore the deduplicated missed-phrase set should be derived from persisted run facts, not persisted as a second collection.
 
 The only outcome-relevant fact that cannot be recovered is hint usage. Both interaction components currently toggle `showHint` locally and emit only the final answer. HPA-301 must persist that fact when the hint is first revealed.
 
