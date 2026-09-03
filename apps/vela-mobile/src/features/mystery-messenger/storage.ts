@@ -29,11 +29,18 @@ function isKnownProgress(progress: MysteryProgress, chapter: MysteryChapter): bo
     }
     const scene = scenes.get(entry.sceneId);
     if (!scene || scene.kind !== entry.kind) return false;
+    if (
+      entry.kind !== 'message' &&
+      entry.hintUsed !== undefined &&
+      typeof entry.hintUsed !== 'boolean'
+    ) {
+      return false;
+    }
     if (scene.kind === 'choice') {
       if (!scene.options.some((option) => option.id === entry.selectedOptionId)) return false;
     } else if (scene.kind === 'response-build') {
       // mirrors submitMysteryResponse: known token ids, no repeated identity;
-      // no draft/hint state is persisted alongside the selected ids
+      // hintUsed is optional per-entry metadata
       if (!Array.isArray(entry.selectedTokenIds)) return false;
       const seen = new Set<string>();
       for (const tokenId of entry.selectedTokenIds) {

@@ -219,6 +219,102 @@ describe('response history persistence', () => {
   });
 });
 
+describe('hint metadata persistence', () => {
+  it('loads HPA-300 choice and response history without hintUsed unchanged', () => {
+    const backend = createFakeBackend();
+    const storage = createBrowserMysteryProgressStorage(backend);
+    const legacyChoice = {
+      ...progressAtScene04(),
+      history: [
+        { kind: 'message', sceneId: 'scene-01' },
+        { kind: 'message', sceneId: 'scene-02' },
+        { kind: 'choice', sceneId: 'scene-03', selectedOptionId: 'tomorrow-morning' },
+      ],
+    };
+    const legacyResponse = {
+      ...responseProgress(),
+      history: [
+        { kind: 'message', sceneId: 'scene-01' },
+        {
+          kind: 'response-build',
+          sceneId: 'response-01',
+          selectedTokenIds: ['time', 'ni'],
+        },
+      ],
+    };
+
+    backend.set(key, JSON.stringify(legacyChoice));
+    expect(storage.load(userId, chapter)).toEqual(legacyChoice);
+
+    backend.set(responseKey, JSON.stringify(legacyResponse));
+    expect(storage.load(userId, RESPONSE_STORAGE_CHAPTER)).toEqual(legacyResponse);
+  });
+
+  it('round-trips hintUsed: true on choice and response entries', () => {
+    const backend = createFakeBackend();
+    const storage = createBrowserMysteryProgressStorage(backend);
+    const storageResponse = createBrowserMysteryProgressStorage(backend);
+    let progress = createMysteryProgress(chapter);
+    progress = continueMysteryMessage(chapter, progress, 'scene-01');
+    progress = continueMysteryMessage(chapter, progress, 'scene-02');
+    progress = chooseMysteryOption(chapter, progress, 'scene-03', 'tomorrow-morning', true);
+    let responseProgressHinted = createMysteryProgress(RESPONSE_STORAGE_CHAPTER);
+    responseProgressHinted = continueMysteryMessage(
+      RESPONSE_STORAGE_CHAPTER,
+      responseProgressHinted,
+      'scene-01',
+    );
+    responseProgressHinted = submitMysteryResponse(
+      RESPONSE_STORAGE_CHAPTER,
+      responseProgressHinted,
+      'response-01',
+      ['time', 'ni'],
+      true,
+    );
+
+    expect(storage.save(userId, progress)).toBe(true);
+    expect(storage.load(userId, chapter)).toEqual(progress);
+    expect(storageResponse.save(userId, responseProgressHinted)).toBe(true);
+    expect(storageResponse.load(userId, RESPONSE_STORAGE_CHAPTER)).toEqual(responseProgressHinted);
+  });
+
+  it('round-trips hintUsed: false on choice and response entries', () => {
+    const backend = createFakeBackend();
+    const storage = createBrowserMysteryProgressStorage(backend);
+    const progress = progressAtScene04();
+    const response = responseProgress();
+
+    expect(storage.save(userId, progress)).toBe(true);
+    expect(storage.load(userId, chapter)).toEqual(progress);
+    expect(storage.save(userId, response)).toBe(true);
+    expect(storage.load(userId, RESPONSE_STORAGE_CHAPTER)).toEqual(response);
+  });
+
+  it('rejects a persisted hintUsed that is not a boolean and resets the key', () => {
+    const backend = createFakeBackend();
+    const storage = createBrowserMysteryProgressStorage(backend);
+    const base = progressAtScene04();
+    backend.set(
+      key,
+      JSON.stringify({
+        ...base,
+        history: [
+          ...base.history.slice(0, -1),
+          {
+            kind: 'choice',
+            sceneId: 'scene-03',
+            selectedOptionId: 'tomorrow-morning',
+            hintUsed: 'yes',
+          },
+        ],
+      }),
+    );
+
+    expect(storage.load(userId, chapter)).toBeNull();
+    expect(backend.has(key)).toBe(false);
+  });
+});
+
 describe('mysteryProgressStorageKey', () => {
   it('namespaces, encodes, and versions the key', () => {
     expect(mysteryProgressStorageKey('user:a', 'chapter/1')).toBe(
