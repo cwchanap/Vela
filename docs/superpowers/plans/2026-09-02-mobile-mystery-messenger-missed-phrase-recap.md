@@ -1114,3 +1114,13 @@ HPA-301 is implementation-complete on this PR when all of the following are true
 - Simulator clean + missed/hint-assisted runs pass.
 
 Physical iPhone/release acceptance remains HPA-302.
+
+## Review Resolution
+
+The post-plan review removed the dual-write recap snapshot and changed the audio extension:
+
+- only `hintedSceneIds` is persisted;
+- missed phrase rows are derived from `history` + grading + chapter content;
+- HPA-300 compatibility defaults only the historically absent hint field;
+- `useMysteryAudio` is generalized around `audio.ttsId`/`playbackId` and gets `playClip()` while `play(scene)` retains existing behavior;
+- Task 5 now explicitly gates scene playback regression behavior before recap replay is considered complete.
