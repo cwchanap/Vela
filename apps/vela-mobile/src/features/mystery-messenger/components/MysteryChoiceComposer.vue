@@ -9,7 +9,7 @@
       :data-testid="`mystery-option-${option.id}`"
       :label="option.label"
       :disable="disabled"
-      @click="emit('choose', option.id)"
+      @click="choose(option.id)"
     />
 
     <p
@@ -26,7 +26,7 @@
       label="Hint"
       data-testid="mystery-choice-hint"
       :disable="disabled"
-      @click="showHint = !showHint"
+      @click="toggleHint"
     />
   </div>
 </template>
@@ -36,7 +36,17 @@ import { ref } from 'vue';
 import type { MysteryChoiceScene } from '../model';
 
 defineProps<{ scene: MysteryChoiceScene; disabled: boolean }>();
-const emit = defineEmits<{ choose: [optionId: string] }>();
+const emit = defineEmits<{ choose: [optionId: string, hintUsed: boolean] }>();
 
 const showHint = ref(false);
+const hintRevealed = ref(false);
+
+function toggleHint(): void {
+  showHint.value = !showHint.value;
+  if (showHint.value) hintRevealed.value = true;
+}
+
+function choose(optionId: string): void {
+  emit('choose', optionId, hintRevealed.value);
+}
 </script>

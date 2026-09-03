@@ -228,7 +228,7 @@ describe('MysteryMessengerPage', () => {
     await vi.advanceTimersByTimeAsync(500);
     await wrapper.get('[data-testid="mystery-option-tomorrow-morning"]').trigger('click');
     expect(messenger.chooseOption).toHaveBeenCalledTimes(2);
-    expect(messenger.chooseOption).toHaveBeenLastCalledWith('scene-03', 'tomorrow-morning');
+    expect(messenger.chooseOption).toHaveBeenLastCalledWith('scene-03', 'tomorrow-morning', false);
   });
 
   it('captures the visible scene only after acquiring the transition lock', async () => {
@@ -368,7 +368,7 @@ describe('MysteryMessengerPage', () => {
     await wrapper.get('[data-testid="mystery-response-send"]').trigger('click');
 
     expect(messenger.submitResponse).toHaveBeenCalledTimes(1);
-    expect(messenger.submitResponse).toHaveBeenCalledWith('response-04', ['time', 'ni']);
+    expect(messenger.submitResponse).toHaveBeenCalledWith('response-04', ['time', 'ni'], false);
     expect(wrapper.find('[data-testid="mystery-response-build-composer"]').exists()).toBe(false);
     expect(wrapper.find('[data-testid="mystery-choice-composer"]').exists()).toBe(true);
   });
@@ -383,7 +383,7 @@ describe('MysteryMessengerPage', () => {
     await wrapper.get('[data-testid="mystery-response-send"]').trigger('click');
     await wrapper.get('[data-testid="mystery-response-send"]').trigger('click');
     expect(messenger.submitResponse).toHaveBeenCalledTimes(1);
-    expect(messenger.submitResponse).toHaveBeenCalledWith('response-04', ['time']);
+    expect(messenger.submitResponse).toHaveBeenCalledWith('response-04', ['time'], false);
 
     await vi.advanceTimersByTimeAsync(500);
     await wrapper.get('[data-testid="mystery-response-send"]').trigger('click');
@@ -422,6 +422,7 @@ describe('MysteryMessengerPage', () => {
     await wrapper.get('[data-testid="mystery-response-token-time"]').trigger('click');
     await wrapper.get('[data-testid="mystery-response-send"]').trigger('click');
     expect(messenger.submitResponse).toHaveBeenCalledTimes(1);
+    expect(messenger.submitResponse).toHaveBeenCalledWith('response-04', ['time'], true);
   });
 
   it('supplies the auth coordinator, browser storage, TTS service, and audio player', () => {

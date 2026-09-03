@@ -47,7 +47,7 @@
         label="Send"
         data-testid="mystery-response-send"
         :disable="disabled || selectedTokenIds.length === 0"
-        @click="emit('submit', [...selectedTokenIds])"
+        @click="submit"
       />
     </div>
 
@@ -65,7 +65,7 @@
       label="Hint"
       data-testid="mystery-response-hint"
       :disable="disabled"
-      @click="showHint = !showHint"
+      @click="toggleHint"
     />
   </div>
 </template>
@@ -75,10 +75,20 @@ import { computed, ref } from 'vue';
 import type { MysteryResponseBuildScene } from '../model';
 
 const props = defineProps<{ scene: MysteryResponseBuildScene; disabled: boolean }>();
-const emit = defineEmits<{ submit: [tokenIds: string[]] }>();
+const emit = defineEmits<{ submit: [tokenIds: string[], hintUsed: boolean] }>();
 
 const selectedTokenIds = ref<string[]>([]);
 const showHint = ref(false);
+const hintRevealed = ref(false);
+
+function toggleHint(): void {
+  showHint.value = !showHint.value;
+  if (showHint.value) hintRevealed.value = true;
+}
+
+function submit(): void {
+  emit('submit', [...selectedTokenIds.value], hintRevealed.value);
+}
 
 const selectedTokens = computed(() =>
   selectedTokenIds.value.flatMap((id) => {

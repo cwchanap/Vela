@@ -96,7 +96,7 @@ describe('MysteryResponseBuildComposer', () => {
     expect(wrapper.find('[data-testid="mystery-response-hint-copy"]').exists()).toBe(false);
   });
 
-  it('emits submit with the selected ids in selection order', async () => {
+  it('emits submit with the selected ids in selection order and hintUsed false', async () => {
     const wrapper = mountComposer();
 
     await wrapper.get('[data-testid="mystery-response-token-time"]').trigger('click');
@@ -105,7 +105,28 @@ describe('MysteryResponseBuildComposer', () => {
     await wrapper.get('[data-testid="mystery-response-token-period"]').trigger('click');
     await wrapper.get('[data-testid="mystery-response-send"]').trigger('click');
 
-    expect(wrapper.emitted('submit')).toEqual([[['time', 'ni-time', 'train', 'period']]]);
+    expect(wrapper.emitted('submit')).toEqual([[['time', 'ni-time', 'train', 'period'], false]]);
+  });
+
+  it('emits submit with hintUsed true after the hint was revealed', async () => {
+    const wrapper = mountComposer();
+
+    await wrapper.get('[data-testid="mystery-response-hint"]').trigger('click');
+    await wrapper.get('[data-testid="mystery-response-token-time"]').trigger('click');
+    await wrapper.get('[data-testid="mystery-response-send"]').trigger('click');
+
+    expect(wrapper.emitted('submit')?.[0]).toEqual([['time'], true]);
+  });
+
+  it('keeps hintUsed true after the hint was revealed and hidden again', async () => {
+    const wrapper = mountComposer();
+
+    await wrapper.get('[data-testid="mystery-response-hint"]').trigger('click');
+    await wrapper.get('[data-testid="mystery-response-hint"]').trigger('click');
+    await wrapper.get('[data-testid="mystery-response-token-time"]').trigger('click');
+    await wrapper.get('[data-testid="mystery-response-send"]').trigger('click');
+
+    expect(wrapper.emitted('submit')?.[0]).toEqual([['time'], true]);
   });
 
   it('disables Send while nothing is selected', () => {

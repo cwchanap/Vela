@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { MobileAuthState } from '../../auth/mobile-auth-contract';
 import { MESSAGE_THAT_ARRIVED_TOMORROW_CHAPTER as chapter } from './content';
 import {
+  chooseMysteryOption,
   continueMysteryMessage,
   createMysteryProgress,
   type MysteryChapter,
@@ -390,6 +391,93 @@ describe('useMysteryMessenger', () => {
 
     expect(controller.progress.value?.currentSceneId).toBe('ending');
     expect(controller.persistenceWarning.value).toBe(true);
+  });
+
+  it('forwards choice hint use into persisted history and the missed-phrase recap', () => {
+    const storage = createStorage();
+    const controller = useMysteryMessenger({
+      authState: reactive(authState()),
+      storage,
+      chapter,
+    });
+    controller.continueMessage('scene-01');
+    controller.continueMessage('scene-02');
+
+    controller.chooseOption('scene-03', 'tomorrow-morning', true);
+
+    expect(controller.progress.value?.history.at(-1)).toEqual({
+      kind: 'choice',
+      sceneId: 'scene-03',
+      selectedOptionId: 'tomorrow-morning',
+      hintUsed: true,
+    });
+    expect(vi.mocked(storage.save).mock.lastCall?.[1].history.at(-1)).toMatchObject({
+      kind: 'choice',
+      hintUsed: true,
+    });
+    expect(controller.missedPhraseRecap.value.map((item) => item.phraseId)).toContain(
+      'tomorrow-seven',
+    );
+  });
+
+  it('forwards response hint use into persisted history without a hint-only write', () => {
+    const storage = createStorage();
+    const controller = useMysteryMessenger({
+      authState: reactive(authState()),
+      storage,
+      chapter: RESPONSE_CHAPTER,
+    });
+    controller.continueMessage('scene-01');
+
+    controller.submitResponse('response-01', ['time', 'ni'], true);
+
+    expect(controller.progress.value?.history.at(-1)).toEqual({
+      kind: 'response-build',
+      sceneId: 'response-01',
+      selectedTokenIds: ['time', 'ni'],
+      hintUsed: true,
+    });
+    expect(vi.mocked(storage.save).mock.lastCall?.[1].history.at(-1)).toMatchObject({
+      kind: 'response-build',
+      hintUsed: true,
+    });
+  });
+
+  it('projects the missed-phrase recap from restored history', () => {
+    const answeredWithHint = chooseMysteryOption(
+      chapter,
+      continueMysteryMessage(chapter, progressAtScene02(), 'scene-02'),
+      'scene-03',
+      'tomorrow-morning',
+      true,
+    );
+    const storage = createStorage({ load: vi.fn(() => answeredWithHint) });
+
+    const controller = useMysteryMessenger({
+      authState: reactive(authState()),
+      storage,
+      chapter,
+    });
+
+    expect(controller.missedPhraseRecap.value.map((item) => item.phraseId)).toEqual([
+      'tomorrow-seven',
+    ]);
+  });
+
+  it('empties the missed-phrase recap after restart', () => {
+    const controller = useMysteryMessenger({
+      authState: reactive(authState()),
+      storage: createStorage(),
+      chapter,
+    });
+    controller.continueMessage('scene-01');
+    controller.continueMessage('scene-02');
+    controller.chooseOption('scene-03', 'tomorrow-morning', true);
+    expect(controller.missedPhraseRecap.value).not.toEqual([]);
+
+    controller.restart();
+
+    expect(controller.missedPhraseRecap.value).toEqual([]);
   });
 
   it('does not save or replace progress on a stale transition', () => {
