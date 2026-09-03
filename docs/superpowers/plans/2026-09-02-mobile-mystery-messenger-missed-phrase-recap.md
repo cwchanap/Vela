@@ -13,7 +13,7 @@
 ## Global Constraints
 
 - Keep HPA-301 on one branch and one PR.
-- No persisted `missedPhrases` collection; recap is derived from history + `hintedSceneIds`.
+- No persisted `missedPhrases` collection; the deduplicated missed-phrase set is derived from history + `hintedSceneIds`.
 - No backend/API/CDK/DynamoDB changes.
 - No SRS writes, vocabulary-save APIs, personal dictionary mutation, or Review-flow dependency.
 - No Pinia, generic mistakes/review framework, event bus, migrator registry, or shared package extraction.
@@ -1120,7 +1120,7 @@ Physical iPhone/release acceptance remains HPA-302.
 The post-plan review removed the dual-write recap snapshot and changed the audio extension:
 
 - only `hintedSceneIds` is persisted;
-- missed phrase rows are derived from `history` + grading + chapter content;
+- the missed-phrase set and rows are derived from `history` + grading + chapter content;
 - HPA-300 compatibility defaults only the historically absent hint field;
 - `useMysteryAudio` is generalized around `audio.ttsId`/`playbackId` and gets `playClip()` while `play(scene)` retains existing behavior;
-- Task 5 now explicitly gates scene playback regression behavior before recap replay is considered complete.
+- Task 5 explicitly gates scene playback regression behavior before recap replay is considered complete.
