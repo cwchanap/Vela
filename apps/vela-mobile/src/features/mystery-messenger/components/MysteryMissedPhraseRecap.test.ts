@@ -67,6 +67,8 @@ describe('MysteryMissedPhraseRecap', () => {
     expect(meaning.attributes('lang')).toBeUndefined();
     expect(prompt.text()).toBe('ミナさんは、いつ駅に来てほしいですか？');
     expect(prompt.attributes('lang')).toBe('ja');
+    // Caption treatment, same as the hint copy convention in this feature
+    expect(prompt.classes()).toContain('text-caption');
 
     // Phrase rows and any text may never carry a From: label
     expect(wrapper.text()).not.toContain('From:');
@@ -137,6 +139,17 @@ describe('MysteryMissedPhraseRecap', () => {
     expect(wrapper.find('[data-testid="mystery-recap-status-mina-possession"]').exists()).toBe(
       false,
     );
+  });
+
+  it('alerts with bare copy when audio fails without a message', () => {
+    const wrapper = mountRecap([ITEM], {
+      activePhraseId: 'tomorrow-seven',
+      playbackKind: 'error',
+    });
+
+    const status = wrapper.get('[data-testid="mystery-recap-status-tomorrow-seven"]');
+    expect(status.text()).toBe('Audio playback failed');
+    expect(status.attributes('role')).toBe('alert');
   });
 
   it('renders no row status when no phrase is active', () => {

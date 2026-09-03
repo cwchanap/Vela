@@ -21,7 +21,11 @@
         <p class="q-my-none" :data-testid="`mystery-recap-meaning-${item.phraseId}`">
           {{ item.meaning }}
         </p>
-        <p lang="ja" class="q-my-none" :data-testid="`mystery-recap-prompt-${item.phraseId}`">
+        <p
+          lang="ja"
+          class="q-my-none text-caption"
+          :data-testid="`mystery-recap-prompt-${item.phraseId}`"
+        >
           {{ item.sourcePrompt }}
         </p>
         <div class="row items-center q-gutter-sm">
@@ -70,7 +74,12 @@ function rowStatus(item: MysteryMissedPhraseRecapItem): { role: string; text: st
     case 'playing':
       return { role: 'status', text: 'Playing audio…' };
     case 'error':
-      return { role: 'alert', text: `Audio playback failed: ${props.playbackError ?? ''}` };
+      return {
+        role: 'alert',
+        text: props.playbackError
+          ? `Audio playback failed: ${props.playbackError}`
+          : 'Audio playback failed',
+      };
     default:
       return null;
   }
