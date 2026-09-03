@@ -282,7 +282,7 @@ Both delegate to one private resolved-audio path keyed by `audio.ttsId`. The ref
 - `media_unavailable` invalidates only `(userId, audio.ttsId)`;
 - auth identity change, app backgrounding, and disposal still cancel/interrupt and reset state.
 
-`MysteryAudioState.sceneId` is not a product-facing dependency outside this composable. The primary regression gate is therefore the complete existing `useMysteryAudio.test.ts` suite after the refactor, plus focused new `playClip()` coverage and one scene-to-clip switching case. There is no need to duplicate every gesture/cancellation scenario through both public entry points when both feed the same private path.
+`MysteryAudioState.sceneId` is not a product-facing dependency outside this composable. The primary regression gate is the complete existing `useMysteryAudio.test.ts` suite after the refactor, plus focused new `playClip()` coverage and one scene-to-clip switching case. There is no need to duplicate every gesture/cancellation scenario through both public entry points when both feed the same private path.
 
 ## Recap UI and Row-Local Playback Feedback
 
