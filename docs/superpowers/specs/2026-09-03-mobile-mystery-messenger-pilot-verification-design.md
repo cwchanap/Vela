@@ -45,8 +45,9 @@ HPA-302 should reuse what already ships:
 - `MESSAGE_THAT_ARRIVED_TOMORROW_CHAPTER` is the canonical 13-scene chapter.
 - `useMysteryMessenger()` already owns start/load, transition persistence, resume, restart, transcript, and recap projection.
 - `createBrowserMysteryProgressStorage()` already exercises the same `localStorage` shape used by the Capacitor WebView.
-- model tests already pin canonical/alternate response grading and duplicate-visible `に` token behavior.
-- composer/page tests already pin hint forwarding, transition guards, recap rendering, and replay wiring.
+- model tests already pin the full 13-scene graph, canonical/alternate response content, and duplicate-visible `に` grading behavior.
+- storage tests already pin validation and direct adapter round-trips, while controller tests pin mocked restoration/restart behavior.
+- composer/page tests already pin hint forwarding, repeated-token UI behavior, transition guards, recap rendering, and replay wiring.
 - `useMysteryAudio()` and its tests already own TTS preparation/playback state.
 - `apps/vela-mobile/package.json` already exposes `test:coverage`, `lint`, `typecheck`, `build`, `dev:ios`, and `build:ios:ide`.
 - `apps/vela-mobile/README.md` already documents Simulator and physical-device build/run flows.
@@ -80,7 +81,7 @@ Create exactly one new test file:
 apps/vela-mobile/src/features/mystery-messenger/pilot-acceptance.test.ts
 ```
 
-Do not add a new production helper only for the test. The test imports the existing chapter, browser storage adapter, controller, and a reactive usable auth state.
+Do not add a new production helper only for the test. The test imports the existing chapter, browser storage adapter, controller, and a reactive usable auth state. Any small chapter lookup helper stays local to this test file.
 
 The file contains three cross-seam scenarios.
 
@@ -93,22 +94,22 @@ Drive the real chapter in authored order:
 - continue scene 04;
 - choose `minas-notebook` at scene 05;
 - continue scene 06;
-- submit the scene-07 canonical response using both distinct visible-`に` tokens;
+- resolve scene 07 from the checked-in chapter and submit its own `correctTokenIds` rather than copying the token bank into this acceptance file;
 - continue scene 08;
 - choose `ask-when-tomorrow` at scene 09;
 - continue scene 10;
-- submit the canonical scene-11 response;
+- resolve scene 11 from the checked-in chapter and submit its own `correctTokenIds`;
 - continue scene 12 into scene 13.
 
 Assert:
 
 - `currentScene.id === 'scene-13'`;
 - `completed === true`;
-- all 12 non-ending scenes have one completed history entry;
+- `history.map(entry => entry.sceneId)` is exactly `scene-01` through `scene-12` in order;
 - the recap is empty;
-- storage contains the completed current-version run.
+- `storage.load(...)` returns scene 13 with `completed === true` and `chapterVersion === chapter.version`.
 
-This is the one automated proof that the checked-in content, transition graph, controller, and persistence layer compose into a complete playable run.
+This proves the checked-in content, transition graph, controller, and persistence layer compose into a complete current-version run without duplicating response-token content that the model/content tests already own.
 
 ### 2. Wrong/hint/repeated-visible-token run survives relaunch
 
@@ -119,12 +120,20 @@ Use the real chapter and real browser storage again, but exercise the learning/r
 - at scene 07 submit the visibly correct sentence while swapping the two distinct `に` identities (`ni-time` / `ni-place`) and mark the completed submission hint-assisted;
 - answer scene 09 incorrectly with `ask-notebook-color`;
 - leave the run after a persisted transition;
-- construct a fresh controller for the same user and storage to simulate page/app re-entry;
-- assert it restores the exact next scene and the qualifying recap rows already derivable from stored history;
-- finish scenes 10–13 normally;
-- assert the final recap is deduplicated, ordered by first qualifying interaction, and contains the expected phrase IDs from the wrong/hint-assisted interactions.
+- construct a fresh controller for the same user and `window.localStorage` to simulate page/app re-entry;
+- finish scenes 10–13 normally.
 
-The repeated-visible-token assertion is intentionally about the two unique IDs that both render `に`; the test must not submit the same token identity twice, because production storage correctly rejects repeated identity.
+Before constructing the second controller, and again after restoration, locate the scene-07 `response-build` history entry and assert:
+
+- `selectedTokenIds` is exactly `['time', 'ni-place', 'train', 'de', 'station', 'ni-time', 'go', 'period']`;
+- both distinct `に` IDs occur once through that exact persisted sequence;
+- `hintUsed === true` is preserved as a separate fact;
+- the current scene is scene 10;
+- the ordered recap IDs are exactly `tomorrow-seven`, `mina-possession`, `train-station-plan`, `wrote-yesterday`, `when-is-tomorrow`.
+
+After finishing the chapter, assert the same five recap IDs remain deduplicated and in first-qualifying-interaction order.
+
+The explicit scene-07 identity assertion is the composition gap not already owned by model grading, mocked controller restoration, or direct storage-adapter tests.
 
 ### 3. Restart resets a completed run
 
@@ -132,7 +141,9 @@ From a completed run with a non-empty recap:
 
 - call `restart()`;
 - assert scene 01 is active, `history` is empty, `completed === false`, and recap is empty;
-- construct a fresh controller against the same storage and assert the restarted clean run restores, proving the reset was persisted rather than only held in memory.
+- construct a fresh controller against the same `window.localStorage` and assert the restarted clean run restores, proving the reset was persisted rather than only held in memory.
+
+This fresh-controller restart assertion is the useful composition above the existing same-controller restart coverage.
 
 ## Why not add another page-level happy-path test
 
@@ -142,7 +153,9 @@ The native manual matrix is the correct place to prove the fully mounted route, 
 
 ## Automated verification gates
 
-After the focused acceptance test is green, HPA-302 uses the existing mobile gates without adding scripts:
+After the focused acceptance file passes, run the full existing mobile suite instead of maintaining a hand-picked Mystery Messenger regression subset. The full suite already includes the choice composer, response composer, recap UI, page, controller, storage, model, content validator, and audio tests that Task 3 depends on.
+
+Final HPA-302 automated gates remain:
 
 ```bash
 bun --filter @vela/mobile test:coverage
@@ -154,6 +167,19 @@ bun --filter @vela/mobile build
 The build should use the normal configured mobile environment when available. `MOBILE_SKIP_ENV_VALIDATION=true` may be used only as a local compile/build fallback when real public mobile configuration is unavailable; it is not sufficient evidence for the authenticated Simulator/iPhone acceptance runs.
 
 When the draft PR becomes ready for review, repository CI and Codecov remain the final automated merge gates. No separate HPA-302 coverage threshold is introduced.
+
+## Risks and native prerequisites
+
+The main schedule risk is not Vitest; it is physical-iPhone eligibility. The existing HPA-210 foundation record still shows physical acceptance as deferred and its historical physical preflight as `prerequisite_missing`, so HPA-302 must surface that dependency before beginning native acceptance rather than discovering it late.
+
+Before Task 3 is considered runnable, confirm all of the following on the tester-controlled environment:
+
+- an Xcode development team/signing identity is selected for the app target;
+- the intended iPhone is trusted, has Developer Mode enabled as required, and the development build launches on it;
+- the real app can obtain a usable Google/Cognito session on that device;
+- the signed-in user can reach the real Learn tab/card without a fake-auth or diagnostic runtime seam.
+
+If this preflight fails because the mobile foundation itself is unavailable, keep HPA-302 blocked and return/reopen the existing owning Mobile MVP verification/auth/signing work. Simulator results may still be useful diagnostics, but they do not substitute for the required physical acceptance and must not be used to close HPA-302.
 
 ## iOS Simulator acceptance matrix
 
@@ -176,7 +202,7 @@ A visual/audio defect found here is fixed on the same HPA-302 PR when it is a na
 
 ## Physical development-iPhone acceptance matrix
 
-Prepare the native project using the documented `build:ios:ide` flow, select the tester-controlled development team/device in Xcode, and run the same tested commit.
+After the native preflight above passes, prepare the native project using the documented `build:ios:ide` flow, select the tester-controlled development team/device in Xcode, and run the same tested commit.
 
 Required observations:
 
@@ -229,7 +255,7 @@ This directly satisfies HPA-302 without adding permanent release infrastructure 
 HPA-302 is primarily an acceptance ticket, but discovered defects should not be deferred mechanically.
 
 - **Narrow defect in current Mystery Messenger behavior:** add the smallest focused regression test and fix it on this same HPA-302 PR.
-- **Native shell/audio defect already owned by an existing Mobile MVP ticket:** record the finding, return/reopen the owning ticket, and keep HPA-302 blocked until resolved or explicitly accepted.
+- **Native shell/audio/auth/signing defect already owned by an existing Mobile MVP ticket:** record the finding, return/reopen the owning ticket, and keep HPA-302 blocked until resolved or explicitly accepted.
 - **New feature request or larger redesign:** out of scope; create/reuse the appropriate future ticket rather than folding it into release acceptance.
 
 Do not split HPA-302 itself across multiple PRs.
@@ -241,7 +267,7 @@ HPA-302 may move to Done only when:
 - the new focused acceptance tests pass;
 - current mobile coverage, lint, type-check, build, CI, and Codecov gates pass;
 - the scripted Simulator matrix passes;
-- one development-iPhone matrix passes;
+- the physical-device preflight and one development-iPhone matrix pass;
 - relaunch restores both an in-progress run and the final recap state;
 - the unguided run has no dead end/unclear next action and is approximately 8–12 minutes;
 - HPA-298 contains the final evidence summary and accepted limitations;
