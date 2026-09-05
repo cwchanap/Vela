@@ -2,85 +2,178 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Close HPA-302 by proving the checked-in Mystery Messenger pilot completes and restores through real feature seams, passes the current mobile gates, and is accepted on an iOS Simulator, one development iPhone, and one unguided timed playthrough.
+**Goal:** Close HPA-302 by proving the checked-in Mystery Messenger pilot composes correctly across controller, browser storage, mounted UI, Simulator, and one physical iPhone without adding release infrastructure.
 
-**Architecture:** Add one feature-local Vitest acceptance file that composes the real chapter, `useMysteryMessenger()`, and browser progress storage. Reuse the existing mobile scripts and iOS shell/audio/navigation behavior; do not extend the HPA-210 harness or add native E2E infrastructure. Keep all implementation and release-fix work on this single HPA-302 PR.
+**Architecture:** Repair the shared Vitest browser setup with one guarded `localStorage` polyfill, then add one feature-local acceptance file. The acceptance file covers the two new controller/storage compositions plus one focused real-page DOM path from scene 07 through the ending. Reuse existing mobile gates and HPA-538 for physical-foundation verification; keep all HPA-302 implementation/release fixes on PR #65.
 
-**Tech Stack:** Vue 3, TypeScript, Vitest/jsdom, Quasar + Capacitor iOS, Bun/Turborepo.
+**Tech Stack:** Vue 3, TypeScript, Vitest/jsdom, Vue Test Utils, Quasar, Capacitor iOS, Bun/Turborepo.
 
 **Spec:** `docs/superpowers/specs/2026-09-03-mobile-mystery-messenger-pilot-verification-design.md`
 
 ## Global Constraints
 
-- One ticket / one branch / one PR: `codex/hpa-302-mystery-messenger-pilot-verification`.
-- Planned product-code footprint is zero; planned source change is one acceptance test file.
+- One HPA-302 branch / one PR: `codex/hpa-302-mystery-messenger-pilot-verification` / PR #65.
+- Planned product-code footprint remains zero.
+- Planned source changes are test-only: `src/test/setup.ts` plus `pilot-acceptance.test.ts`.
+- Do not modify the existing mocked `MysteryMessengerPage.test.ts` into a full chapter runner.
+- No HPA-210 harness extension, Appium, Maestro, Playwright-mobile, new evidence schema, fake-auth runtime mode, or test-only product route.
 - No backend/API/CDK/DynamoDB, SRS, Review-flow, cloud sync, analytics, or new product behavior.
-- No Appium, Maestro, Playwright-mobile, new release harness, test-only route, fake-auth runtime mode, or debug page.
-- Reuse the current chapter ID/version and `localStorage` contract; no migration.
-- Scene 07's two visible `に` tokens are distinct IDs; never submit the same ID twice.
-- Do not commit device UDIDs, account identifiers, tokens, email addresses, or other private acceptance data.
-- A narrow current-pilot defect may be fixed on this PR with a focused regression test. A larger redesign returns to its owning ticket.
-- HPA-302 is not Done until automated gates, Simulator, physical iPhone, relaunch/recap restoration, unguided playthrough, and the HPA-298 evidence summary all pass.
+- Reuse the checked-in chapter answers; do not copy canonical response token banks into HPA-302 tests.
+- Keep scene-07 `ni-time` and `ni-place` as distinct stored identities.
+- Do not add an HPA-302-specific coverage threshold.
+- Do not record UDIDs, tokens, emails, account IDs, or other private test data.
+- Physical acceptance remains mandatory. HPA-538 must complete before PR #65 leaves draft.
 
 ---
 
 ## File Map
 
+**Modify**
+
+- `apps/vela-mobile/src/test/setup.ts` — guarded jsdom `localStorage` polyfill.
+
 **Create**
 
-- `apps/vela-mobile/src/features/mystery-messenger/pilot-acceptance.test.ts` — real-chapter/controller/browser-storage acceptance.
+- `apps/vela-mobile/src/features/mystery-messenger/pilot-acceptance.test.ts` — controller/storage and focused mounted-page composition.
 
-**Consume without planned modification**
+**Consume without planned product modification**
 
 - `apps/vela-mobile/src/features/mystery-messenger/content.ts`
+- `apps/vela-mobile/src/features/mystery-messenger/model.ts`
 - `apps/vela-mobile/src/features/mystery-messenger/storage.ts`
 - `apps/vela-mobile/src/features/mystery-messenger/useMysteryMessenger.ts`
 - `apps/vela-mobile/src/features/mystery-messenger/MysteryMessengerPage.vue`
+- `apps/vela-mobile/src/features/mystery-messenger/components/*`
 - `apps/vela-mobile/src/features/mystery-messenger/useMysteryAudio.ts`
-
-**Tracking surfaces**
-
-- HPA-302 PR body — live automated/native/playtest results.
-- Linear HPA-298 — final acceptance summary comment.
-
-## Risks and prerequisites
-
-The critical path is the physical-device gate, not the new Vitest file. The existing HPA-210 foundation record still has physical acceptance deferred and a historical physical preflight marked `prerequisite_missing`.
-
-Before Task 3 native acceptance starts, the tester-controlled environment must have:
-
-- an Xcode development team/signing identity selected for the app target;
-- a trusted iPhone with Developer Mode enabled as required;
-- a development build that launches on that iPhone;
-- a real usable Google/Cognito session on the device;
-- access to the real Learn tab/card while signed in.
-
-If that preflight fails because signing, device trust, launch, or the real auth/session foundation is unavailable, keep HPA-302 blocked and return/reopen the existing owning Mobile MVP work. Do not add a fake-auth runtime seam. Simulator evidence is still useful for diagnosis but is not a substitute for the physical acceptance gate.
 
 ---
 
-### Task 1: Add real-chapter acceptance coverage
+### Task 0: Bootstrap the checkout and record the baseline
 
 **Files:**
+- No repository changes.
+- Update PR #65 body with actual baseline results.
+
+**Interfaces:**
+- Produces a valid dependency/build baseline before HPA-302 changes are judged.
+
+- [ ] **Step 1: Install the complete workspace, including Capacitor dependencies**
+
+From the repository root run:
+
+```bash
+bun install --frozen-lockfile
+```
+
+Expected: PASS. The mobile workspace postinstall must run `bun install --cwd src-capacitor --frozen-lockfile`, so imports such as `@capacitor/keyboard` and `@aparajita/capacitor-secure-storage` resolve from the committed native package tree.
+
+If install fails, fix the checkout/environment before interpreting test failures. Do not file a Mystery Messenger release defect for a missing install.
+
+- [ ] **Step 2: Rebuild the shared package baseline**
+
+Run:
+
+```bash
+bun --filter @vela/common build
+```
+
+Expected: PASS. This removes stale/missing `packages/common/dist` as a typecheck variable.
+
+- [ ] **Step 3: Record the pre-change mobile baseline**
+
+Run separately and record the exact exit status/test counts/type errors in PR #65:
+
+```bash
+bun --filter @vela/mobile test
+bun --filter @vela/mobile typecheck
+```
+
+This is a baseline, not yet an HPA-302 pass gate. Known browser-contract failures involving absent `window.localStorage` are owned by Task 1. Any unrelated failure that remains after a valid install/build is recorded before code changes so later deltas are not misclassified as pilot defects.
+
+No commit is expected.
+
+---
+
+### Task 1: Restore the Vitest browser storage contract and add focused acceptance coverage
+
+**Files:**
+- Modify: `apps/vela-mobile/src/test/setup.ts`
 - Create: `apps/vela-mobile/src/features/mystery-messenger/pilot-acceptance.test.ts`
 
 **Interfaces:**
-- Consumes `MESSAGE_THAT_ARRIVED_TOMORROW_CHAPTER`.
-- Consumes `createBrowserMysteryProgressStorage()`.
-- Consumes `useMysteryMessenger()` and `MysteryMessengerController`.
-- Adds no production interface or shared test utility.
+- Produces guarded jsdom `window.localStorage` / `globalThis.localStorage` only for tests.
+- Consumes the real chapter, `createBrowserMysteryProgressStorage()`, `useMysteryMessenger()`, and real `MysteryMessengerPage`.
+- Adds no production interface or shared feature test helper.
 
-This is acceptance/characterization coverage for behavior already implemented by HPA-299/300/301. Do not create an artificial failing phase; a failure of these assertions is itself an HPA-302 release finding.
+- [ ] **Step 1: Add the guarded in-memory Storage polyfill**
 
-- [ ] **Step 1: Create the focused acceptance test**
-
-Create the file with local helpers and exactly three cases:
+Append this browser-only block to `src/test/setup.ts` after the existing `window` guard and before/alongside the observer polyfills:
 
 ```ts
-import { reactive } from 'vue';
-import { beforeEach, describe, expect, it } from 'vitest';
-import type { MobileAuthState } from '../../auth/mobile-auth-contract';
+if (global.window && typeof global.window.localStorage === 'undefined') {
+  const entries = new Map<string, string>();
+  const localStorage: Storage = {
+    get length() {
+      return entries.size;
+    },
+    clear() {
+      entries.clear();
+    },
+    getItem(key) {
+      return entries.get(String(key)) ?? null;
+    },
+    key(index) {
+      return [...entries.keys()][index] ?? null;
+    },
+    removeItem(key) {
+      entries.delete(String(key));
+    },
+    setItem(key, value) {
+      entries.set(String(key), String(value));
+    },
+  };
+
+  Object.defineProperty(global.window, 'localStorage', {
+    configurable: true,
+    value: localStorage,
+  });
+  if (typeof globalThis.localStorage === 'undefined') {
+    Object.defineProperty(globalThis, 'localStorage', {
+      configurable: true,
+      value: localStorage,
+    });
+  }
+}
+```
+
+Do not move this into Mystery Messenger code. It repairs a browser API already consumed by existing mobile tests.
+
+- [ ] **Step 2: Verify the pre-existing cold-entry storage regression**
+
+Run:
+
+```bash
+bun --filter @vela/mobile test -- diagnostic-cold-entry.test.ts
+```
+
+Expected: PASS. If failures remain, inspect the actual storage error before proceeding; do not add another per-test fake.
+
+- [ ] **Step 3: Create local acceptance helpers**
+
+Create `pilot-acceptance.test.ts` with these imports/helpers. Keep helpers local to this file:
+
+```ts
+import { mount, type VueWrapper } from '@vue/test-utils';
+import { QLayout, QPageContainer, Quasar } from 'quasar';
+import { defineComponent, reactive } from 'vue';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { MobileAuthCoordinator, MobileAuthState } from '../../auth/mobile-auth-contract';
+import { MOBILE_AUTH_KEY } from '../../services/mobile-auth';
+import { MOBILE_TTS_SERVICE_KEY } from '../../services/mobile-services';
+import type { MobileTtsService } from '../../services/mobile-tts';
+import MysteryMessengerPage from './MysteryMessengerPage.vue';
 import { MESSAGE_THAT_ARRIVED_TOMORROW_CHAPTER as chapter } from './content';
+import type { MysteryResponseBuildScene } from './model';
 import {
   createBrowserMysteryProgressStorage,
   type MysteryProgressStorage,
@@ -89,49 +182,6 @@ import {
   useMysteryMessenger,
   type MysteryMessengerController,
 } from './useMysteryMessenger';
-
-function usableAuthState(userId = 'pilot-user'): MobileAuthState {
-  return {
-    phase: 'authenticated',
-    operation: 'idle',
-    sessionUsable: true,
-    errorCode: null,
-    retryAction: null,
-    notice: null,
-    user: { userId, email: null },
-  };
-}
-
-function createPilotController(userId = 'pilot-user'): {
-  controller: MysteryMessengerController;
-  storage: MysteryProgressStorage;
-} {
-  const storage = createBrowserMysteryProgressStorage(window.localStorage);
-  return {
-    controller: useMysteryMessenger({
-      authState: reactive(usableAuthState(userId)),
-      storage,
-      chapter,
-    }),
-    storage,
-  };
-}
-
-function responseSceneOf(sceneId: 'scene-07' | 'scene-11') {
-  const scene = chapter.scenes.find((candidate) => candidate.id === sceneId);
-  if (!scene || scene.kind !== 'response-build') {
-    throw new Error(`missing_response_scene:${sceneId}`);
-  }
-  return scene;
-}
-
-function scene07HistoryOf(controller: MysteryMessengerController) {
-  const entry = controller.progress.value?.history.find((candidate) => candidate.sceneId === 'scene-07');
-  if (!entry || entry.kind !== 'response-build') {
-    throw new Error('missing_scene_07_response_history');
-  }
-  return entry;
-}
 
 const EXPECTED_HISTORY_SCENE_IDS = [
   'scene-01',
@@ -167,28 +217,62 @@ const REVIEW_PHRASE_IDS = [
   'when-is-tomorrow',
 ] as const;
 
-function completeCleanRun(controller: MysteryMessengerController): void {
-  controller.continueMessage('scene-01');
-  controller.continueMessage('scene-02');
-  controller.chooseOption('scene-03', 'tomorrow-morning');
-  controller.continueMessage('scene-04');
-  controller.chooseOption('scene-05', 'minas-notebook');
-  controller.continueMessage('scene-06');
-  controller.submitResponse('scene-07', responseSceneOf('scene-07').correctTokenIds);
-  controller.continueMessage('scene-08');
-  controller.chooseOption('scene-09', 'ask-when-tomorrow');
-  controller.continueMessage('scene-10');
-  controller.submitResponse('scene-11', responseSceneOf('scene-11').correctTokenIds);
-  controller.continueMessage('scene-12');
+function usableAuthState(userId = 'pilot-user'): MobileAuthState {
+  return {
+    phase: 'authenticated',
+    operation: 'idle',
+    sessionUsable: true,
+    errorCode: null,
+    retryAction: null,
+    notice: null,
+    user: { userId, email: null },
+  };
 }
 
-function driveReviewRunToScene10(controller: MysteryMessengerController): void {
+function createPilotController(userId = 'pilot-user'): {
+  controller: MysteryMessengerController;
+  storage: MysteryProgressStorage;
+} {
+  const storage = createBrowserMysteryProgressStorage(window.localStorage);
+  return {
+    controller: useMysteryMessenger({
+      authState: reactive(usableAuthState(userId)),
+      storage,
+      chapter,
+    }),
+    storage,
+  };
+}
+
+function responseSceneOf(sceneId: 'scene-07' | 'scene-11'): MysteryResponseBuildScene {
+  const scene = chapter.scenes.find((candidate) => candidate.id === sceneId);
+  if (!scene || scene.kind !== 'response-build') {
+    throw new Error(`missing_response_scene:${sceneId}`);
+  }
+  return scene;
+}
+
+function scene07HistoryOf(controller: MysteryMessengerController) {
+  const entry = controller.progress.value?.history.find(
+    (candidate) => candidate.sceneId === 'scene-07',
+  );
+  if (!entry || entry.kind !== 'response-build') {
+    throw new Error('missing_scene_07_response_history');
+  }
+  return entry;
+}
+
+function driveReviewRunToScene07(controller: MysteryMessengerController): void {
   controller.continueMessage('scene-01');
   controller.continueMessage('scene-02');
   controller.chooseOption('scene-03', 'today-morning');
   controller.continueMessage('scene-04');
   controller.chooseOption('scene-05', 'minas-notebook', true);
   controller.continueMessage('scene-06');
+}
+
+function driveReviewRunToScene10(controller: MysteryMessengerController): void {
+  driveReviewRunToScene07(controller);
   controller.submitResponse('scene-07', SCENE_07_REVIEW_TOKEN_IDS, true);
   controller.continueMessage('scene-08');
   controller.chooseOption('scene-09', 'ask-notebook-color');
@@ -200,39 +284,34 @@ function finishFromScene10(controller: MysteryMessengerController): void {
   controller.continueMessage('scene-12');
 }
 
+function completeReviewRun(controller: MysteryMessengerController): void {
+  driveReviewRunToScene10(controller);
+  finishFromScene10(controller);
+}
+
 beforeEach(() => {
   window.localStorage.clear();
 });
 
+afterEach(() => {
+  vi.useRealTimers();
+});
+```
+
+- [ ] **Step 4: Add the real controller + browser-storage relaunch case**
+
+Add:
+
+```ts
 describe('Mystery Messenger pilot acceptance', () => {
-  it('completes the checked-in chapter cleanly and persists the current-version ending', () => {
-    const { controller, storage } = createPilotController();
-
-    completeCleanRun(controller);
-
-    expect(controller.currentScene.value?.id).toBe('scene-13');
-    expect(controller.progress.value?.completed).toBe(true);
-    expect(controller.progress.value?.history.map((entry) => entry.sceneId)).toEqual(
-      EXPECTED_HISTORY_SCENE_IDS,
-    );
-    expect(controller.missedPhraseRecap.value).toEqual([]);
-
-    const restored = storage.load('pilot-user', chapter);
-    expect(restored).toMatchObject({
-      chapterId: chapter.id,
-      chapterVersion: chapter.version,
-      currentSceneId: 'scene-13',
-      completed: true,
-    });
-    expect(restored?.history.map((entry) => entry.sceneId)).toEqual(EXPECTED_HISTORY_SCENE_IDS);
-  });
-
-  it('round-trips wrong and hint-assisted scene-07 token identities through browser storage', () => {
+  it('round-trips the review path and swapped scene-07 token identities', () => {
     const first = createPilotController();
     driveReviewRunToScene10(first.controller);
 
     expect(first.controller.currentScene.value?.id).toBe('scene-10');
-    expect(scene07HistoryOf(first.controller).selectedTokenIds).toEqual(SCENE_07_REVIEW_TOKEN_IDS);
+    expect(scene07HistoryOf(first.controller).selectedTokenIds).toEqual(
+      SCENE_07_REVIEW_TOKEN_IDS,
+    );
     expect(scene07HistoryOf(first.controller).hintUsed).toBe(true);
     expect(first.controller.missedPhraseRecap.value.map((item) => item.phraseId)).toEqual(
       REVIEW_PHRASE_IDS,
@@ -250,25 +329,41 @@ describe('Mystery Messenger pilot acceptance', () => {
 
     finishFromScene10(relaunched.controller);
 
-    expect(relaunched.controller.currentScene.value?.id).toBe('scene-13');
-    expect(relaunched.controller.progress.value?.completed).toBe(true);
+    const stored = relaunched.storage.load('pilot-user', chapter);
+    expect(stored).toMatchObject({
+      chapterId: chapter.id,
+      chapterVersion: chapter.version,
+      currentSceneId: 'scene-13',
+      completed: true,
+    });
+    expect(stored?.history.map((entry) => entry.sceneId)).toEqual(EXPECTED_HISTORY_SCENE_IDS);
     expect(relaunched.controller.missedPhraseRecap.value.map((item) => item.phraseId)).toEqual(
       REVIEW_PHRASE_IDS,
     );
   });
+```
 
-  it('persists a clean restarted run across a second controller', () => {
+This is the full controller/storage composition. Do not add a second clean 13-scene walk; `model.test.ts` already owns the literal clean graph traversal.
+
+- [ ] **Step 5: Add the persisted restart case with a direct storage assertion**
+
+Add:
+
+```ts
+  it('persists restart before a fresh controller restores the run', () => {
     const first = createPilotController();
-    driveReviewRunToScene10(first.controller);
-    finishFromScene10(first.controller);
+    completeReviewRun(first.controller);
     expect(first.controller.missedPhraseRecap.value).not.toEqual([]);
 
     first.controller.restart();
 
-    expect(first.controller.currentScene.value?.id).toBe('scene-01');
-    expect(first.controller.progress.value?.history).toEqual([]);
-    expect(first.controller.progress.value?.completed).toBe(false);
-    expect(first.controller.missedPhraseRecap.value).toEqual([]);
+    expect(first.storage.load('pilot-user', chapter)).toMatchObject({
+      chapterId: chapter.id,
+      chapterVersion: chapter.version,
+      currentSceneId: 'scene-01',
+      completed: false,
+      history: [],
+    });
 
     const relaunched = createPilotController();
     expect(relaunched.controller.currentScene.value?.id).toBe('scene-01');
@@ -276,70 +371,143 @@ describe('Mystery Messenger pilot acceptance', () => {
     expect(relaunched.controller.progress.value?.completed).toBe(false);
     expect(relaunched.controller.missedPhraseRecap.value).toEqual([]);
   });
+```
+
+The direct `storage.load()` assertion is required; a fresh controller by itself would also look clean when persistence were missing.
+
+- [ ] **Step 6: Add one focused mounted real-page case**
+
+Continue in the same file with a small host and existing dependency providers:
+
+```ts
+const PageHost = defineComponent({
+  components: { QLayout, QPageContainer, MysteryMessengerPage },
+  template:
+    '<q-layout view="hHh Lpr fFf"><q-page-container><mystery-messenger-page /></q-page-container></q-layout>',
+});
+
+function authCoordinatorFixture(userId: string): MobileAuthCoordinator {
+  return { state: reactive(usableAuthState(userId)) } as MobileAuthCoordinator;
+}
+
+function ttsServiceFixture(): MobileTtsService {
+  return {
+    preparePronunciation: vi.fn(),
+    invalidatePronunciation: vi.fn(),
+    clearUser: vi.fn(),
+    clearAll: vi.fn(),
+  };
+}
+
+function mountRealPage(userId: string): VueWrapper {
+  return mount(PageHost, {
+    global: {
+      plugins: [Quasar],
+      provide: {
+        [MOBILE_AUTH_KEY as symbol]: authCoordinatorFixture(userId),
+        [MOBILE_TTS_SERVICE_KEY as symbol]: ttsServiceFixture(),
+      },
+    },
+  });
+}
+
+async function unlockTransition(): Promise<void> {
+  await vi.advanceTimersByTimeAsync(500);
+}
+```
+
+Then add this integration case:
+
+```ts
+  it('drives the real page from scene 07 through the ending recap', async () => {
+    vi.useFakeTimers();
+    const userId = 'page-user';
+    const seed = createPilotController(userId);
+    driveReviewRunToScene07(seed.controller);
+    expect(seed.controller.currentScene.value?.id).toBe('scene-07');
+
+    const wrapper = mountRealPage(userId);
+    expect(wrapper.find('[data-testid="mystery-response-build-composer"]').exists()).toBe(true);
+
+    for (const tokenId of SCENE_07_REVIEW_TOKEN_IDS) {
+      await wrapper.get(`[data-testid="mystery-response-token-${tokenId}"]`).trigger('click');
+    }
+    expect(wrapper.findAll('[data-testid="mystery-response-selected-ni-place"]')).toHaveLength(1);
+    expect(wrapper.findAll('[data-testid="mystery-response-selected-ni-time"]')).toHaveLength(1);
+
+    await wrapper.get('[data-testid="mystery-response-hint"]').trigger('click');
+    await wrapper.get('[data-testid="mystery-response-send"]').trigger('click');
+    await unlockTransition();
+
+    await wrapper.get('[data-testid="mystery-continue"]').trigger('click');
+    await unlockTransition();
+    await wrapper.get('[data-testid="mystery-option-ask-notebook-color"]').trigger('click');
+    await unlockTransition();
+    await wrapper.get('[data-testid="mystery-continue"]').trigger('click');
+    await unlockTransition();
+
+    for (const tokenId of responseSceneOf('scene-11').correctTokenIds) {
+      await wrapper.get(`[data-testid="mystery-response-token-${tokenId}"]`).trigger('click');
+    }
+    await wrapper.get('[data-testid="mystery-response-send"]').trigger('click');
+    await unlockTransition();
+    await wrapper.get('[data-testid="mystery-continue"]').trigger('click');
+    await unlockTransition();
+
+    expect(wrapper.find('[data-testid="mystery-restart"]').exists()).toBe(true);
+    for (const phraseId of REVIEW_PHRASE_IDS) {
+      expect(wrapper.find(`[data-testid="mystery-recap-phrase-${phraseId}"]`).exists()).toBe(true);
+    }
+
+    wrapper.unmount();
+  });
 });
 ```
 
-The clean path deliberately consumes the chapter's own `correctTokenIds`, so this acceptance file does not become a third owner of canonical response content. The review path deliberately keeps the explicit swapped scene-07 IDs because their controller + real-browser-storage round-trip is the new composition being proved.
+This case uses the real page/controller/storage/composers, but deliberately begins from a real persisted scene-07 state. Do not duplicate scenes 01–06 through DOM and do not add HTML-audio emulation; existing audio tests and physical acceptance own playback.
 
-- [ ] **Step 2: Run the focused acceptance file**
-
-Run:
-
-```bash
-bun --filter @vela/mobile test -- pilot-acceptance.test.ts
-```
-
-Expected: 3/3 PASS. If an assertion fails, keep the task open and treat the exact failure as a release defect; do not weaken the expected path, stored identities, version, or recap to make it green.
-
-- [ ] **Step 3: Run the full task gate and commit**
-
-Do not maintain a hand-picked regression subset here. The full mobile suite already includes the choice composer, response composer, recap UI, page, controller, storage, model, content validator, and audio tests that the native matrix depends on.
+- [ ] **Step 7: Run focused and full mobile verification**
 
 Run:
 
 ```bash
+bun --filter @vela/mobile test -- diagnostic-cold-entry.test.ts pilot-acceptance.test.ts
 bun --filter @vela/mobile test
 bun --filter @vela/mobile typecheck
 git diff --check
 ```
 
-Expected: all PASS.
+Expected after the valid bootstrap and HPA-302 changes: the focused files pass and the full mobile suite/typecheck have no new failures versus the recorded Task-0 baseline. Any remaining pre-existing failure must be explicitly identified rather than relabeled as a pilot defect.
 
-Commit:
+- [ ] **Step 8: Commit the test-only implementation**
 
 ```bash
-git add apps/vela-mobile/src/features/mystery-messenger/pilot-acceptance.test.ts
+git add \
+  apps/vela-mobile/src/test/setup.ts \
+  apps/vela-mobile/src/features/mystery-messenger/pilot-acceptance.test.ts
 git commit -m "test(mobile): add mystery pilot acceptance coverage"
 ```
 
-If Task 1 exposes a real defect, add the smallest failing regression to the existing owning test file and the smallest corresponding fix before this commit. Do not add a new abstraction solely for acceptance testing.
+If these tests expose a narrow Mystery Messenger defect, add the smallest owning regression/fix on the same HPA-302 PR before this task is considered green.
 
 ---
 
 ### Task 2: Run the existing automated release gates
 
 **Files:**
-- No planned repository file changes.
-- Update the HPA-302 PR body with actual results.
-
-**Interfaces:**
-- Consumes existing `@vela/mobile` scripts.
-- Produces the automated evidence used in the final HPA-298 summary.
+- No planned repository changes.
+- Update PR #65 body with actual results.
 
 - [ ] **Step 1: Pin a clean tested revision**
 
-Run:
-
 ```bash
-git rev-parse HEAD
 git status --short
+git rev-parse HEAD
 ```
 
-Expected: a full SHA and no uncommitted tracked implementation changes. Record the SHA in the PR body.
+Expected: no uncommitted tracked implementation changes and one full tested SHA.
 
-- [ ] **Step 2: Run all mobile gates**
-
-Run:
+- [ ] **Step 2: Run the existing mobile gates**
 
 ```bash
 bun --filter @vela/mobile test:coverage
@@ -349,135 +517,119 @@ bun --filter @vela/mobile build
 git diff --check
 ```
 
-Expected: all PASS. Record the exact commands, test count, line coverage, and outcomes in the PR body. Do not introduce an HPA-302-specific coverage threshold.
+Record exact commands, test count, line coverage, and outcomes in PR #65. No new HPA-302 threshold is introduced.
 
-If the checkout lacks the normal public mobile build configuration, `MOBILE_SKIP_ENV_VALIDATION=true bun --filter @vela/mobile build` may be recorded only as a local compile fallback. It does not replace the authenticated native runs in Task 3.
+If normal public mobile build configuration is unavailable, `MOBILE_SKIP_ENV_VALIDATION=true bun --filter @vela/mobile build` is only a local compile fallback and must be labeled as such; it does not replace native acceptance.
 
-No commit is expected for this task.
+No commit is expected.
 
 ---
 
-### Task 3: Complete native preflight, Simulator, and development-iPhone acceptance
+### Task 3: Complete HPA-538 and the native Mystery Messenger matrices
 
 **Files:**
-- No planned repository file changes.
-- Update the HPA-302 PR body with native provenance and results.
+- No planned HPA-302 repository changes.
+- Update PR #65 and Linear evidence.
 
 **Interfaces:**
-- Consumes the real Learn entry, Mystery Messenger route, auth, shell/navigation, browser storage, and TTS/audio integration.
-- Produces the required Simulator and physical-device acceptance results.
+- HPA-538 owns physical foundation eligibility and generic native observations.
+- HPA-302 owns Mystery Messenger-specific Simulator/device acceptance.
 
-- [ ] **Step 1: Pass the physical-device prerequisite before relying on native acceptance**
+- [ ] **Step 1: Treat HPA-538 as the hard physical prerequisite**
 
-Prepare/open the native project:
+HPA-538 must be completed before PR #65 is marked ready for review.
 
-```bash
-cd apps/vela-mobile
-bun run build:ios:ide
-```
+Run HPA-538 against the current HPA-302 tested head/configuration when practical. Its owner/operator must establish:
 
-Before running either acceptance matrix, confirm on the tester-controlled environment:
+- valid Xcode signing/development team;
+- trusted iPhone / Developer Mode as required;
+- install and launch;
+- real Google/Cognito usable session and relaunch restoration;
+- generic TTS playback/recovery and Silent Mode observation;
+- keyboard/safe-area and native-navigation baseline.
 
-1. Xcode has a valid development team/signing identity selected for the app target.
-2. The intended iPhone is trusted, Developer Mode is enabled as required, and Xcode can target it.
-3. The current HPA-302 build launches on that iPhone.
-4. A real Google/Cognito sign-in or restored real session reaches a usable authenticated state.
-5. The signed-in app exposes the real Learn tab and Mystery Messenger card.
+If HPA-538 fails because of a foundation defect, keep PR #65 draft and fix that issue under HPA-538 or its existing owning Mobile MVP ticket. Do not add fake auth or waive the physical criterion.
 
-Record this preflight as PASS/FAIL in the PR body without recording UDID, email, account identifier, token, or other private values.
-
-If any prerequisite is unavailable because of the existing mobile foundation, stop HPA-302 acceptance, keep the ticket blocked, and return/reopen the owning Mobile MVP work. Do not add fake auth or use Simulator evidence as a substitute for the required iPhone gate.
-
-- [ ] **Step 2: Run the iOS Simulator matrix**
-
-Start the documented development flow:
+- [ ] **Step 2: Run the iOS Simulator Mystery Messenger matrix**
 
 ```bash
 cd apps/vela-mobile
 bun run dev:ios
 ```
 
-Keep the dev server running, launch one iPhone Simulator from Xcode, and record only the tested SHA, Simulator model, iOS runtime, Xcode version, and Debug/development mode.
-
-Use one continuous scripted run to verify:
-
-1. Enter from the real Learn card.
-2. Scene controls respect top/bottom safe areas in portrait; rotate once to check obvious horizontal sensor-region clipping.
-3. Advance to scene 02, leave via header/native back, return, and confirm scene 02 restores.
-4. At scene 03 answer `きょうの朝7時` incorrectly and confirm the story continues.
-5. At scene 05 reveal the hint, answer `ミナさんのノートです`, and confirm continuation.
-6. At scene 07, after the transcript is long, confirm the composer remains scrollable/actionable and build `7時に電車でさくら駅に行きます。` using both distinct `に` tokens once each.
-7. Replay one scene or choice-prompt audio item and confirm playback returns to a usable state.
-8. Force-close at scene 08 or later, relaunch, and confirm the exact persisted scene restores.
-9. Finish the chapter, verify the recap contains each actually qualifying phrase once, and replay one recap phrase with visible row-local status.
-10. Restart, confirm scene 01/no recap, leave/re-enter once, and confirm the fresh run persists.
-
-Record PASS/FAIL and any visual/navigation/audio finding in the PR body. A narrow release defect is fixed on this same PR and the affected steps are rerun.
-
-- [ ] **Step 3: Run the physical development-iPhone matrix**
-
-Reuse the Step-1 native build when the tested SHA/configuration has not changed; otherwise rerun `bun run build:ios:ide`, select the same tester-controlled development team/device in Xcode, and Run.
-
-Record tested SHA, iPhone model, iOS version, Xcode version, and build configuration; do not record the UDID or private account data.
+Record tested SHA, Simulator model, iOS runtime, Xcode version, and Debug/development mode.
 
 Verify:
 
-1. Discover/start/leave/resume/complete on the real device.
-2. Header back and supported native swipe/back return to the expected prior route with no blank frame, app exit, or navigation trap.
-3. Safe areas and long-transcript scrolling keep Hint/tokens/selected response/Send reachable.
-4. With nonzero media volume and built-in speaker output, replay authored Japanese and confirm it is audibly understandable.
-5. Repeat replay several times without overlap or a wedged control state.
-6. Complete a run and replay one recap phrase.
-7. Enable system Silent Mode (not Focus mode), perform an explicit replay, record the observed behavior, leave Silent Mode, and confirm replay remains usable. This is an observation of current behavior, not a new audibility policy.
-8. Background/foreground or a normal interruption during playback does not leave playback permanently stuck.
-9. Force-close mid-run and confirm the exact scene restores; after completion force-close/relaunch and confirm the ending recap restores.
-10. Restart, relaunch once more, and confirm scene 01 with an empty run/recap restores.
+1. Enter from the real Learn card.
+2. No obvious safe-area clipping in portrait and one landscape orientation.
+3. Leave/back/return and preserve progress.
+4. Exercise one wrong and one completed hint-assisted answer.
+5. Build scene 07 using both distinct visible `に` tokens.
+6. Long transcript keeps active composer controls reachable.
+7. Replay one authored scene/prompt audio item.
+8. Force-close/relaunch mid-run and restore the exact scene.
+9. Finish, verify expected recap rows, and replay one recap phrase.
+10. Restart and verify scene 01/no recap persists after re-entry.
 
-Unexpected instability, stuck playback, broken resume, obscured controls, or a navigation trap is release-blocking until fixed or routed to the existing owning mobile ticket.
+Record PASS/FAIL and findings in PR #65.
 
-No commit is expected unless a narrow current-pilot defect is fixed.
+- [ ] **Step 3: Run the physical Mystery Messenger matrix**
+
+After HPA-538 is green, use the same tested head where possible:
+
+```bash
+cd apps/vela-mobile
+bun run build:ios:ide
+```
+
+Record iPhone model, iOS version, Xcode version, build configuration, and tested SHA — never UDID/private account data.
+
+Mystery Messenger-specific checks:
+
+1. Discover/start/leave/resume/complete.
+2. Long-transcript choice/response controls remain scrollable/reachable.
+3. Scene-07 duplicate-visible token interaction is usable.
+4. Force-close/relaunch restores the exact in-progress scene.
+5. Completion recap is present and one phrase replay remains usable.
+6. Restart persists; next launch restores scene 01 with no recap.
+
+Reuse HPA-538 generic speaker/Silent Mode/interruption/safe-area/native-navigation evidence only when it was captured against the same HPA-302 head/configuration. Otherwise rerun those generic rows before HPA-302 closes.
+
+No HPA-302 commit is expected unless a narrow feature defect is found.
 
 ---
 
 ### Task 4: Run the unguided playthrough and close the acceptance record
 
 **Files:**
-- No planned repository file changes.
-- Update the HPA-302 PR body.
-- Post one final structured comment on Linear HPA-298.
+- No planned repository changes.
+- Update PR #65.
+- Post one final HPA-298 Linear comment.
 
-**Interfaces:**
-- Consumes Tasks 1–3 results.
-- Produces the final HPA-302/HPA-298 acceptance record.
+- [ ] **Step 1: Run one fresh unguided timed iPhone playthrough**
 
-- [ ] **Step 1: Run one fresh unguided timed playthrough**
+Use the accepted physical build. Start the timer immediately before entering the story and stop at scene 13.
 
-Restart to a fresh run on the accepted iPhone build. Start a timer immediately before entering the story and stop it at scene 13.
+During the run:
 
-During the timed run:
-
-- use only normal product UI and authored hints;
-- do not consult this plan's answer lists, test code, or the scene graph;
-- record any unclear next action;
-- record any unexpectedly ambiguous beginner/N5-adjacent Japanese copy;
-- record any dead end or need to leave the app to recover;
+- use only normal product UI/hints;
+- do not consult the plan/test answers;
+- record unclear next actions;
+- record unexpectedly ambiguous beginner/N5-adjacent Japanese;
+- record dead ends/recovery needs;
 - record minor polish separately from blockers.
 
-Record the real elapsed duration. The product criterion is approximately 8–12 minutes with no dead end or unclear next action; do not alter the result to fit the target.
+Record the real duration. Target is approximately 8–12 minutes with no dead end or unclear next action.
 
-- [ ] **Step 2: Resolve every release finding by ownership**
+- [ ] **Step 2: Resolve findings by ownership**
 
-Use exactly one disposition per finding:
+- narrow Mystery Messenger defect → regression + smallest fix on PR #65;
+- shared test-browser contract → `src/test/setup.ts` only;
+- shell/auth/audio/signing/native-foundation defect → HPA-538 or existing Mobile MVP owner; HPA-302 stays blocked;
+- larger feature request → separate future work.
 
-- narrow Mystery Messenger defect → regression + minimal fix on this PR;
-- existing shell/auth/audio/signing defect → return/reopen the existing owning Mobile MVP ticket and keep HPA-302 blocked until resolved or explicitly accepted;
-- larger feature request/redesign → keep out of HPA-302 and track separately.
-
-A defect that blocks understanding or completion is not an accepted limitation.
-
-- [ ] **Step 3: Re-run final gates after the last code change**
-
-Run from the final branch head:
+- [ ] **Step 3: Re-run final automated gates after the last code change**
 
 ```bash
 bun --filter @vela/mobile test:coverage
@@ -489,40 +641,35 @@ git status --short
 git rev-parse HEAD
 ```
 
-Expected: all gates PASS, no uncommitted tracked changes, and one final tested SHA. Update the PR body so every automated result refers to that final head.
+Update PR #65 so every automated/native result points to the final tested head.
 
-- [ ] **Step 4: Finish the PR through the normal review gate**
+- [ ] **Step 4: Mark PR #65 ready only after HPA-538 + HPA-302 native acceptance**
 
-After automated, native, and unguided acceptance are green:
-
-1. Mark the same PR ready for review.
-2. Require the repository's normal CI and Codecov checks to pass.
-3. Address review findings on the same PR and rerun affected gates after behavior/test changes.
-4. Merge only when review and required checks are green.
+Require normal repository CI/Codecov review gates. Address review findings on the same PR and rerun affected checks after behavior/test changes.
 
 Do not create a second HPA-302 PR.
 
-- [ ] **Step 5: Post the final HPA-298 evidence comment**
+- [ ] **Step 5: Post the HPA-298 final evidence summary**
 
-Post one comment after all actual values are known. Include:
+Include:
 
-- final tested HPA-302 SHA and merged PR link;
-- exact automated commands, PASS outcomes, test count, and coverage figure;
-- native preflight result;
-- Simulator model/iOS/Xcode/build mode, scripted result, relaunch scene, recap/restart result;
-- iPhone model/iOS/Xcode/build mode, navigation/safe-area result, speaker replay result, Silent Mode observation, interruption recovery, relaunch/recap/restart result;
-- unguided elapsed duration and clarity/dead-end result;
-- consciously accepted non-blocking limitations;
-- links to any blocking/reopened work.
+- final tested SHA and PR #65;
+- bootstrap and pre-change baseline results;
+- exact automated commands/test counts/coverage;
+- HPA-538 physical-foundation result;
+- Simulator provenance/result;
+- physical iPhone provenance and Mystery Messenger result;
+- relaunch/recap/restart results;
+- unguided duration and clarity/dead-end result;
+- accepted non-blocking limitations;
+- links to any reopened/blocking issue.
 
-Do not include UDIDs, tokens, emails, or private account details.
+Exclude sensitive device/session values.
 
-- [ ] **Step 6: Close Linear tracking only when acceptance is true**
+- [ ] **Step 6: Close Linear only when acceptance is true**
 
-After the PR is merged and the HPA-298 evidence comment is posted:
+After PR #65 merges and the HPA-298 evidence comment exists:
 
-1. Move HPA-302 to Done if no blocking/reopened issue remains.
-2. Re-check HPA-298 acceptance criteria against the merged pilot.
-3. Move HPA-298 to Done if HPA-302 was the final unsatisfied child gate.
-
-If a blocker remains, leave the tickets open and link the owning issue rather than claiming acceptance.
+1. Move HPA-302 to Done if no blocker remains.
+2. Re-check HPA-298 criteria against the merged pilot.
+3. Move HPA-298 to Done only when its remaining acceptance criteria are truly satisfied.
