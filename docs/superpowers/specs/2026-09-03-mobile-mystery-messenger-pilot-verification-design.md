@@ -19,26 +19,18 @@ The current feature already has strong lower-level ownership:
 
 HPA-302 should add only the compositions those tests do not already prove.
 
-## New constraint discovered during planning review
+## Test-environment storage contract
 
-The planned acceptance test originally assumed `window.localStorage` was available in the mobile Vitest jsdom environment. That premise is unsafe in the current repository setup:
-
-- Vitest uses `jsdom` and loads `src/test/setup.ts`;
-- `src/test/setup.ts` polyfills browser APIs such as `IntersectionObserver` and `ResizeObserver`, but not storage;
-- existing tests such as `diagnostic-cold-entry.test.ts` directly consume `window.localStorage`;
-- the Mystery Messenger page constructs browser progress storage from `window.localStorage`.
-
-HPA-302 therefore owns one test-environment repair before its integration coverage: add a guarded in-memory `Storage` polyfill in `src/test/setup.ts`. This remains test-only infrastructure and fixes the browser contract the current tests already expect; it does not add a product/runtime seam.
+The mobile Vitest `jsdom` environment already provides `window.localStorage`. The Task-0 baseline (head `bc30599`) was fully green before any HPA-302 change, including `diagnostic-cold-entry.test.ts`, which directly consumes `window.localStorage`, and the Mystery Messenger page constructs browser progress storage from that same native API. No shared `src/test/setup.ts` storage polyfill is therefore added or required; an earlier planning premise that jsdom omits storage was disproved by the recorded baseline. HPA-302 adds only feature-local acceptance coverage.
 
 ## Goals
 
-1. Make the mobile Vitest browser environment consistently provide `window.localStorage` without changing production code.
-2. Add focused controller + real-browser-storage acceptance for the wrong/hint/swapped-`に` path and persisted restart.
-3. Add one focused real-page mounted integration that uses the real Mystery Messenger controller/storage/composers from scene 07 through the ending.
-4. Bootstrap dependencies and record the pre-change mobile baseline before interpreting failures as HPA-302 findings.
-5. Run the existing mobile coverage, lint, type-check, and build gates with no new threshold.
-6. Complete one scripted Simulator run and one development-iPhone run.
-7. Complete one unguided timed playthrough and record final evidence on HPA-298.
+1. Add focused controller + real-browser-storage acceptance for the wrong/hint/swapped-`に` path and persisted restart.
+2. Add one focused real-page mounted integration that uses the real Mystery Messenger controller/storage/composers from scene 07 through the ending.
+3. Bootstrap dependencies and record the pre-change mobile baseline before interpreting failures as HPA-302 findings.
+4. Run the existing mobile coverage, lint, type-check, and build gates with no new threshold.
+5. Complete one scripted Simulator run and one development-iPhone run.
+6. Complete one unguided timed playthrough and record final evidence on HPA-298.
 
 ## Non-goals
 
@@ -56,28 +48,12 @@ HPA-302 therefore owns one test-environment repair before its integration covera
 Planned non-product footprint:
 
 ```text
-MODIFY apps/vela-mobile/src/test/setup.ts
 CREATE apps/vela-mobile/src/features/mystery-messenger/pilot-acceptance.test.ts
 ```
 
-No production source file is expected to change unless acceptance exposes a narrow real defect.
+No production source file and no shared test-setup file is expected to change unless acceptance exposes a narrow real defect. The jsdom environment already provides `window.localStorage`, so `src/test/setup.ts` is not modified.
 
-### 1. Guarded localStorage test polyfill
-
-`src/test/setup.ts` gets one guarded in-memory `Storage` implementation when jsdom has no `window.localStorage`.
-
-Requirements:
-
-- install only when `window` exists and `window.localStorage` is absent;
-- support `getItem`, `setItem`, `removeItem`, `clear`, `key`, and `length`;
-- stringify keys/values like browser storage;
-- expose the same object through `window.localStorage` and `globalThis.localStorage` when missing;
-- do not affect node-environment script tests;
-- do not create a feature-specific fake storage abstraction.
-
-Existing `diagnostic-cold-entry.test.ts` plus the new pilot acceptance file are the regression coverage. No dedicated storage-polyfill framework is added.
-
-### 2. Controller + real storage: wrong/hint/swapped-に run
+### 1. Controller + real storage: wrong/hint/swapped-に run
 
 Use the real checked-in chapter, `useMysteryMessenger()`, and `createBrowserMysteryProgressStorage(window.localStorage)`.
 
@@ -123,7 +99,7 @@ This replaces the previous separate clean 13-scene case. The literal clean graph
 
 Do not claim this case tests recap deduplication. Repeated-target deduplication remains owned by the model tests.
 
-### 3. Restart persistence
+### 2. Restart persistence
 
 From a completed run with a non-empty recap:
 
@@ -133,7 +109,7 @@ From a completed run with a non-empty recap:
 
 The direct storage assertion is load-bearing. A second controller alone is insufficient because missing persistence would also fall back to a newly-created scene-01 run.
 
-### 4. Focused mounted real-page integration
+### 3. Focused mounted real-page integration
 
 The existing `MysteryMessengerPage.test.ts` intentionally mocks `useMysteryMessenger()` and `useMysteryAudio()` for focused UI tests. Keep that suite as-is.
 
@@ -172,7 +148,7 @@ bun --filter @vela/mobile test
 bun --filter @vela/mobile typecheck
 ```
 
-Record actual pass/fail counts in the PR before changing test setup. Environment/dependency failures are not Mystery Messenger product defects. After the guarded localStorage repair lands, rerun the baseline commands; any remaining unrelated pre-existing failure is triaged by its owner rather than silently blamed on HPA-302.
+Record actual pass/fail counts in the PR before changing test setup. Environment/dependency failures are not Mystery Messenger product defects. After the acceptance coverage lands, rerun the baseline commands; any remaining unrelated pre-existing failure is triaged by its owner rather than silently blamed on HPA-302.
 
 ## Automated gates
 
@@ -285,7 +261,7 @@ No second PR is created for HPA-302.
 HPA-302 may move to Done only when:
 
 - dependency/bootstrap baseline is recorded;
-- guarded localStorage test setup and focused acceptance tests pass;
+- focused acceptance tests pass;
 - current mobile coverage, lint, type-check, build, CI, and Codecov gates pass;
 - scripted Simulator acceptance passes;
 - HPA-538 physical foundation verification is complete;
