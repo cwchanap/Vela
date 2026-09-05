@@ -4,7 +4,7 @@
 
 **Goal:** Close HPA-302 by proving the checked-in Mystery Messenger pilot composes correctly across controller, browser storage, mounted UI, Simulator, and one physical iPhone without adding release infrastructure.
 
-**Architecture:** Repair the shared Vitest browser setup with one guarded `localStorage` polyfill, then add one feature-local acceptance file. The acceptance file covers the two new controller/storage compositions plus one focused real-page DOM path from scene 07 through the ending. Reuse existing mobile gates and HPA-538 for physical-foundation verification; keep all HPA-302 implementation/release fixes on PR #65.
+**Architecture:** Add one feature-local acceptance file. The acceptance file covers the two new controller/storage compositions plus one focused real-page DOM path from scene 07 through the ending. The mobile Vitest jsdom environment already provides `window.localStorage` (confirmed by the Task-0 baseline, which was fully green including `diagnostic-cold-entry.test.ts`), so no shared test-setup storage polyfill is added. Reuse existing mobile gates and HPA-538 for physical-foundation verification; keep all HPA-302 implementation/release fixes on PR #65.
 
 **Tech Stack:** Vue 3, TypeScript, Vitest/jsdom, Vue Test Utils, Quasar, Capacitor iOS, Bun/Turborepo.
 
@@ -14,7 +14,7 @@
 
 - One HPA-302 branch / one PR: `codex/hpa-302-mystery-messenger-pilot-verification` / PR #65.
 - Planned product-code footprint remains zero.
-- Planned source changes are test-only: `src/test/setup.ts` plus `pilot-acceptance.test.ts`.
+- Planned source changes are test-only: `pilot-acceptance.test.ts`. The shared `src/test/setup.ts` is not modified; the jsdom environment already provides `window.localStorage`.
 - Do not modify the existing mocked `MysteryMessengerPage.test.ts` into a full chapter runner.
 - No HPA-210 harness extension, Appium, Maestro, Playwright-mobile, new evidence schema, fake-auth runtime mode, or test-only product route.
 - No backend/API/CDK/DynamoDB, SRS, Review-flow, cloud sync, analytics, or new product behavior.
@@ -28,16 +28,13 @@
 
 ## File Map
 
-**Modify**
-
-- `apps/vela-mobile/src/test/setup.ts` — guarded jsdom `localStorage` polyfill.
-
 **Create**
 
 - `apps/vela-mobile/src/features/mystery-messenger/pilot-acceptance.test.ts` — controller/storage and focused mounted-page composition.
 
-**Consume without planned product modification**
+**Consume without planned modification**
 
+- `apps/vela-mobile/src/test/setup.ts` — unchanged; the jsdom environment already provides `window.localStorage` (verified by the Task-0 baseline).
 - `apps/vela-mobile/src/features/mystery-messenger/content.ts`
 - `apps/vela-mobile/src/features/mystery-messenger/model.ts`
 - `apps/vela-mobile/src/features/mystery-messenger/storage.ts`
@@ -51,10 +48,12 @@
 ### Task 0: Bootstrap the checkout and record the baseline
 
 **Files:**
+
 - No repository changes.
 - Update PR #65 body with actual baseline results.
 
 **Interfaces:**
+
 - Produces a valid dependency/build baseline before HPA-302 changes are judged.
 
 - [ ] **Step 1: Install the complete workspace, including Capacitor dependencies**
@@ -88,77 +87,25 @@ bun --filter @vela/mobile test
 bun --filter @vela/mobile typecheck
 ```
 
-This is a baseline, not yet an HPA-302 pass gate. Known browser-contract failures involving absent `window.localStorage` are owned by Task 1. Any unrelated failure that remains after a valid install/build is recorded before code changes so later deltas are not misclassified as pilot defects.
+This is a baseline, not yet an HPA-302 pass gate. The jsdom environment already provides `window.localStorage`, so there are no storage-contract failures to attribute to Task 1. Any unrelated failure that remains after a valid install/build is recorded before code changes so later deltas are not misclassified as pilot defects.
 
 No commit is expected.
 
 ---
 
-### Task 1: Restore the Vitest browser storage contract and add focused acceptance coverage
+### Task 1: Add focused acceptance coverage
 
 **Files:**
-- Modify: `apps/vela-mobile/src/test/setup.ts`
+
 - Create: `apps/vela-mobile/src/features/mystery-messenger/pilot-acceptance.test.ts`
 
 **Interfaces:**
-- Produces guarded jsdom `window.localStorage` / `globalThis.localStorage` only for tests.
+
 - Consumes the real chapter, `createBrowserMysteryProgressStorage()`, `useMysteryMessenger()`, and real `MysteryMessengerPage`.
 - Adds no production interface or shared feature test helper.
+- Does not modify `src/test/setup.ts`; the jsdom environment already provides `window.localStorage` (confirmed by the Task-0 baseline).
 
-- [ ] **Step 1: Add the guarded in-memory Storage polyfill**
-
-Append this browser-only block to `src/test/setup.ts` after the existing `window` guard and before/alongside the observer polyfills:
-
-```ts
-if (global.window && typeof global.window.localStorage === 'undefined') {
-  const entries = new Map<string, string>();
-  const localStorage: Storage = {
-    get length() {
-      return entries.size;
-    },
-    clear() {
-      entries.clear();
-    },
-    getItem(key) {
-      return entries.get(String(key)) ?? null;
-    },
-    key(index) {
-      return [...entries.keys()][index] ?? null;
-    },
-    removeItem(key) {
-      entries.delete(String(key));
-    },
-    setItem(key, value) {
-      entries.set(String(key), String(value));
-    },
-  };
-
-  Object.defineProperty(global.window, 'localStorage', {
-    configurable: true,
-    value: localStorage,
-  });
-  if (typeof globalThis.localStorage === 'undefined') {
-    Object.defineProperty(globalThis, 'localStorage', {
-      configurable: true,
-      value: localStorage,
-    });
-  }
-}
-```
-
-Do not move this into Mystery Messenger code. It repairs a browser API already consumed by existing mobile tests.
-
-- [ ] **Step 2: Verify the pre-existing cold-entry storage regression**
-
-Run:
-
-```bash
-bun --filter @vela/mobile test -- diagnostic-cold-entry.test.ts
-```
-
-Expected: PASS. If failures remain, inspect the actual storage error before proceeding; do not add another per-test fake.
-
-- [ ] **Step 3: Create local acceptance helpers**
+- [ ] **Step 1: Create local acceptance helpers**
 
 Create `pilot-acceptance.test.ts` with these imports/helpers. Keep helpers local to this file:
 
@@ -174,14 +121,8 @@ import type { MobileTtsService } from '../../services/mobile-tts';
 import MysteryMessengerPage from './MysteryMessengerPage.vue';
 import { MESSAGE_THAT_ARRIVED_TOMORROW_CHAPTER as chapter } from './content';
 import type { MysteryResponseBuildScene } from './model';
-import {
-  createBrowserMysteryProgressStorage,
-  type MysteryProgressStorage,
-} from './storage';
-import {
-  useMysteryMessenger,
-  type MysteryMessengerController,
-} from './useMysteryMessenger';
+import { createBrowserMysteryProgressStorage, type MysteryProgressStorage } from './storage';
+import { useMysteryMessenger, type MysteryMessengerController } from './useMysteryMessenger';
 
 const EXPECTED_HISTORY_SCENE_IDS = [
   'scene-01',
@@ -298,7 +239,7 @@ afterEach(() => {
 });
 ```
 
-- [ ] **Step 4: Add the real controller + browser-storage relaunch case**
+- [ ] **Step 2: Add the real controller + browser-storage relaunch case**
 
 Add:
 
@@ -345,37 +286,37 @@ describe('Mystery Messenger pilot acceptance', () => {
 
 This is the full controller/storage composition. Do not add a second clean 13-scene walk; `model.test.ts` already owns the literal clean graph traversal.
 
-- [ ] **Step 5: Add the persisted restart case with a direct storage assertion**
+- [ ] **Step 3: Add the persisted restart case with a direct storage assertion**
 
 Add:
 
 ```ts
-  it('persists restart before a fresh controller restores the run', () => {
-    const first = createPilotController();
-    completeReviewRun(first.controller);
-    expect(first.controller.missedPhraseRecap.value).not.toEqual([]);
+it('persists restart before a fresh controller restores the run', () => {
+  const first = createPilotController();
+  completeReviewRun(first.controller);
+  expect(first.controller.missedPhraseRecap.value).not.toEqual([]);
 
-    first.controller.restart();
+  first.controller.restart();
 
-    expect(first.storage.load('pilot-user', chapter)).toMatchObject({
-      chapterId: chapter.id,
-      chapterVersion: chapter.version,
-      currentSceneId: 'scene-01',
-      completed: false,
-      history: [],
-    });
-
-    const relaunched = createPilotController();
-    expect(relaunched.controller.currentScene.value?.id).toBe('scene-01');
-    expect(relaunched.controller.progress.value?.history).toEqual([]);
-    expect(relaunched.controller.progress.value?.completed).toBe(false);
-    expect(relaunched.controller.missedPhraseRecap.value).toEqual([]);
+  expect(first.storage.load('pilot-user', chapter)).toMatchObject({
+    chapterId: chapter.id,
+    chapterVersion: chapter.version,
+    currentSceneId: 'scene-01',
+    completed: false,
+    history: [],
   });
+
+  const relaunched = createPilotController();
+  expect(relaunched.controller.currentScene.value?.id).toBe('scene-01');
+  expect(relaunched.controller.progress.value?.history).toEqual([]);
+  expect(relaunched.controller.progress.value?.completed).toBe(false);
+  expect(relaunched.controller.missedPhraseRecap.value).toEqual([]);
+});
 ```
 
 The direct `storage.load()` assertion is required; a fresh controller by itself would also look clean when persistence were missing.
 
-- [ ] **Step 6: Add one focused mounted real-page case**
+- [ ] **Step 4: Add one focused mounted real-page case**
 
 Continue in the same file with a small host and existing dependency providers:
 
@@ -466,7 +407,7 @@ Then add this integration case:
 
 This case uses the real page/controller/storage/composers, but deliberately begins from a real persisted scene-07 state. Do not duplicate scenes 01–06 through DOM and do not add HTML-audio emulation; existing audio tests and physical acceptance own playback.
 
-- [ ] **Step 7: Run focused and full mobile verification**
+- [ ] **Step 5: Run focused and full mobile verification**
 
 Run:
 
@@ -479,12 +420,10 @@ git diff --check
 
 Expected after the valid bootstrap and HPA-302 changes: the focused files pass and the full mobile suite/typecheck have no new failures versus the recorded Task-0 baseline. Any remaining pre-existing failure must be explicitly identified rather than relabeled as a pilot defect.
 
-- [ ] **Step 8: Commit the test-only implementation**
+- [ ] **Step 6: Commit the test-only implementation**
 
 ```bash
-git add \
-  apps/vela-mobile/src/test/setup.ts \
-  apps/vela-mobile/src/features/mystery-messenger/pilot-acceptance.test.ts
+git add apps/vela-mobile/src/features/mystery-messenger/pilot-acceptance.test.ts
 git commit -m "test(mobile): add mystery pilot acceptance coverage"
 ```
 
@@ -495,6 +434,7 @@ If these tests expose a narrow Mystery Messenger defect, add the smallest owning
 ### Task 2: Run the existing automated release gates
 
 **Files:**
+
 - No planned repository changes.
 - Update PR #65 body with actual results.
 
@@ -528,10 +468,12 @@ No commit is expected.
 ### Task 3: Complete HPA-538 and the native Mystery Messenger matrices
 
 **Files:**
+
 - No planned HPA-302 repository changes.
 - Update PR #65 and Linear evidence.
 
 **Interfaces:**
+
 - HPA-538 owns physical foundation eligibility and generic native observations.
 - HPA-302 owns Mystery Messenger-specific Simulator/device acceptance.
 
@@ -603,6 +545,7 @@ No HPA-302 commit is expected unless a narrow feature defect is found.
 ### Task 4: Run the unguided playthrough and close the acceptance record
 
 **Files:**
+
 - No planned repository changes.
 - Update PR #65.
 - Post one final HPA-298 Linear comment.

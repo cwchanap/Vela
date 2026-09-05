@@ -10,41 +10,6 @@ if (global.window) {
   global.window.scrollTo = vi.fn();
 }
 
-if (global.window && typeof global.window.localStorage === 'undefined') {
-  const entries = new Map<string, string>();
-  const localStorage: Storage = {
-    get length() {
-      return entries.size;
-    },
-    clear() {
-      entries.clear();
-    },
-    getItem(key) {
-      return entries.get(String(key)) ?? null;
-    },
-    key(index) {
-      return [...entries.keys()][index] ?? null;
-    },
-    removeItem(key) {
-      entries.delete(String(key));
-    },
-    setItem(key, value) {
-      entries.set(String(key), String(value));
-    },
-  };
-
-  Object.defineProperty(global.window, 'localStorage', {
-    configurable: true,
-    value: localStorage,
-  });
-  if (typeof globalThis.localStorage === 'undefined') {
-    Object.defineProperty(globalThis, 'localStorage', {
-      configurable: true,
-      value: localStorage,
-    });
-  }
-}
-
 if (typeof global.IntersectionObserver === 'undefined') {
   global.IntersectionObserver = class IntersectionObserver {
     constructor(_callback?: any, _options?: any) {}
