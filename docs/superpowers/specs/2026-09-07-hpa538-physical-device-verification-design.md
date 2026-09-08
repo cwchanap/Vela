@@ -4,260 +4,179 @@
 
 **Parent:** HPA-210 — `[Mobile MVP][M1] Complete the iOS foundation-spike verification and architecture record`
 
-**Delivery:** One branch and one PR for HPA-538. Planning, physical verification, any narrow defect fix, reruns, evidence reconciliation, review fixes, and final ticket closeout stay on this PR.
+**Delivery:** One branch and one PR for HPA-538. Planning, physical verification, any narrow defect fix, reruns, evidence reconciliation, review fixes, and final ticket closeout stay on PR #66.
 
 ## Context
 
-HPA-538 is verification debt, not a new product feature. The repository already contains the HPA-210 verification runner, deployed-config check, production-diagnostic scan, physical-device setup instructions, development diagnostics, stable architecture record, and canonical milestone verification record.
+HPA-538 is verification debt, not a new product subsystem. The repository already owns the HPA-210 automated runner, deployed-config verifier, production-diagnostic scan, physical-device checklist, development diagnostics, architecture record, and canonical verification record.
 
-`apps/vela-mobile/docs/m1-ios-foundation-verification.md` currently records `NO-GO`: the automated phase passed on an older cleanup-head revision, while production smoke, diagnostic observation, and current-revision physical acceptance were deferred. `apps/vela-mobile/docs/ios-foundation-architecture.md` therefore still leaves the audio adapter decision as `Pending physical HPA-210 evidence`.
+`apps/vela-mobile/docs/m1-ios-foundation-verification.md` still records `NO-GO`: the automated phase passed on an older cleanup revision, while production smoke, diagnostic observation, and current-revision physical acceptance were deferred. `apps/vela-mobile/docs/ios-foundation-architecture.md` therefore still leaves the audio decision as `Pending physical HPA-210 evidence`.
 
-Mystery Messenger PR #65 is merged. HPA-538 owns only the generic mobile-foundation physical gate. It does not absorb Mystery Messenger scene/playthrough acceptance, and it does not revive the superseded HPA-210 committed-manifest design.
-
-The planning branch starts from `aeea0f68cc2dde19e372ea8917b7a66cc0948057`. That SHA is only the planning baseline. Execution records the exact tested behavior SHA after the branch is refreshed and before load-bearing device evidence is collected.
+HPA-538 owns only the generic mobile-foundation physical gate. It does not absorb Mystery Messenger acceptance, add device automation, or revive the superseded committed-manifest design.
 
 ## Selected approach
 
-Reuse the existing HPA-210 surfaces:
+Reuse the existing seams:
 
-- `verify:m1-foundation` for the automated freeze gates and local receipt;
-- `verify:deployed-config` for deployed public-identifier consistency;
-- `build:ios:ide` plus Xcode for the production-shaped physical build;
-- `dev:ios` for development diagnostics, but with the already-verified production public identifiers explicitly overlaid into the DEV process;
-- `m1-ios-foundation-verification.md` as the canonical result record;
-- `ios-foundation-architecture.md` only for the evidence-gated audio conclusion or a real implementation-contract change;
+- `verify:m1-foundation` for the same-revision automated freeze and local receipt;
+- `verify:deployed-config` for deployed public API/Cognito identity;
+- `build:ios:ide` plus the canonical physical-run checklist for production-shaped device smoke;
+- `dev:ios` for development diagnostics, with production public identifiers overlaid and a temporary deployed CORS allowance for the physical Mac-hosted DEV origin;
+- `m1-ios-foundation-verification.md` as the only canonical result record;
+- `ios-foundation-architecture.md` only for the evidence-backed audio conclusion or a real contract change;
 - `CLAUDE.md` and `AGENTS.md` only when final physical evidence changes their current “unconfirmed” guidance.
 
-Do not add Maestro, Appium, Playwright-mobile, another native E2E harness, a new evidence schema/store, `--record-manual`, fake auth, or a production diagnostic route. The existing manual physical observations are the source of truth for speaker audibility, Silent Mode, Japanese IME, keyboard/safe areas, and native gestures.
-
-## Goals
-
-1. Re-establish same-revision automated and deployed-config evidence before relying on physical results.
-2. Verify a signed production-shaped build on one tester-controlled physical iPhone.
-3. Verify the existing development diagnostics on the same device against the same deployed API/Cognito identity as the production smoke.
-4. Record the required physical observations as named rows so a missing criterion cannot disappear inside an umbrella paragraph.
-5. Resolve the pending audio decision using the original HPA-210 Silent Mode decision rule.
-6. Produce a clear `GO` or `NO-GO` and synchronize repository guidance and tracker state with that observed result.
+Do not add Maestro, Appium, Playwright-mobile, another native E2E harness, a new evidence schema/store, `--record-manual`, fake auth, or a production diagnostic route. Physical observations remain the source of truth for speaker audibility, Silent Mode, Japanese IME, keyboard/safe areas, and native gestures.
 
 ## Non-goals
 
-- No new device/UI automation framework.
-- No new HPA-538 verification runner, manifest schema, evidence directory format, or committed device-artifact store.
-- No backend/API/CDK/DynamoDB feature work unless a physical run exposes a concrete defect owned there.
+- No new verification runner or manual-recording CLI.
+- No backend feature work; the only planned infrastructure mutation is a temporary CORS allowance needed to reach the existing deployed API from physical `dev:ios`, followed by rollback.
 - No new mobile architecture abstraction merely to make testing easier.
-- No permanent signing team, device identifier, or provisioning material in the repository.
-- No Mystery Messenger scene matrix or pilot replay in HPA-538.
-- No new landscape requirement; use the already-selected HPA-209 inset policy unless a physical defect appears.
-- No Simulator rerun as a substitute for the physical gate. Leave `HPA-210-SIMULATOR-BUILD-INSTALL-LAUNCH` deferred in this ticket.
+- No permanent signing team, device identifier, LAN origin, or provisioning material in the repository/infrastructure.
+- No Mystery Messenger scene matrix or pilot replay.
+- No new landscape requirement; keep the selected HPA-209 inset policy unless a physical defect appears.
+- No Simulator rerun as a substitute for this physical gate. `HPA-210-SIMULATOR-BUILD-INSTALL-LAUNCH` remains deferred.
 
-## Canonical fact ownership
+## Canonical ownership
 
-### Automated evidence
+- **Automated evidence:** existing `verify:m1-foundation`; receipt remains local under `.artifacts/hpa-210/`.
+- **Physical evidence:** named rows in `apps/vela-mobile/docs/m1-ios-foundation-verification.md`.
+- **Audio architecture:** `apps/vela-mobile/docs/ios-foundation-architecture.md` after the physical audio mapping is conclusive.
+- **Operator guidance:** existing `Manual Physical-Run Checklist` in the canonical verification record; the plan references it rather than maintaining a second signing checklist.
+- **Repository guidance:** `CLAUDE.md` / `AGENTS.md` are synchronized only from the final physical decision.
 
-Run the existing `verify:m1-foundation` package script. Its receipt remains local under `.artifacts/hpa-210/` and is not committed.
+## Load-bearing prerequisites
 
-The physical run must not rely only on the historical `97f018c...` automated evidence because executable mobile behavior has changed since that revision. A fresh HPA-538 run pins the device work to the current tested behavior SHA.
+All prerequisites below must be satisfied before their dependent physical rows can pass. Missing prerequisites are `prerequisite_missing`, not inferred failures or passes.
 
-### Physical observations
+### Fresh deployed outputs
 
-Actual production and diagnostic observations are written into:
+`packages/cdk/package.json` separates deployment from output refresh: `cdk:deploy` does not write `cdk-outputs.json`; `get-outputs` does. Therefore `.env.production` must be generated only after a fresh `bun run get-outputs` against `VelaStack`.
 
-`apps/vela-mobile/docs/m1-ios-foundation-verification.md`
+After any HPA-538 CDK deployment, run `get-outputs` again before `inject-env.ts` and `verify:deployed-config`. Comparing an env file to the same stale outputs that generated it is not evidence.
 
-Do not resurrect committed manual manifests or a second verification document. The canonical record stores sanitized observation text plus the tested SHA and run identifiers.
+### Physical DEV CORS origin
 
-### Stable architecture
+Physical `dev:ios` serves the Quasar DEV page from the development Mac’s LAN host, so the WebView origin is `http://<current-mac-lan-ip>:9100`. The deployed API’s default CORS list allows the production website, localhost/127.0.0.1 development origins, and `capacitor://localhost`, but not an arbitrary LAN host.
 
-`apps/vela-mobile/docs/ios-foundation-architecture.md` changes only when physical evidence resolves the current audio decision or a defect fix changes a real implementation contract. It is not a second run log.
+Before authenticated diagnostic rows:
 
-### Developer guidance
+1. determine the current Mac LAN origin;
+2. temporarily redeploy `ApiStack` with the **full existing default origin list plus that one LAN origin**;
+3. preserve `capacitor://localhost` and every existing default origin because `CORS_ALLOWED_ORIGINS` replaces rather than appends;
+4. record the temporary LAN origin as non-secret diagnostic environment context;
+5. after the final diagnostic session, redeploy `ApiStack` with the normal default CORS configuration so the LAN origin does not remain deployed.
 
-`CLAUDE.md` and `AGENTS.md` currently state that HPA-210 physical evidence, Japanese IME candidate selection, and native edge-swipe back are unconfirmed.
+`verify:deployed-config` does not compare CORS; the diagnostic rows still use the same deployed API/Cognito identity as production smoke, with a temporary transport allowance for DEV.
 
-- On `GO`, remove the deferred-physical paragraph and the physical HPA-210 diagnostics closure-gate section after the corresponding rows are recorded.
-- On `NO-GO`, keep those warnings and point the canonical verification record at the failed/prerequisite rows.
-- `apps/vela-mobile/README.md` changes only if executing a documented command proves the instruction stale or incorrect.
+### Tester-account TTS state
+
+`MobileTtsService` returns `not_configured` when `GET tts/settings` reports no user-scoped provider key. The mobile app has no TTS settings editor. Before the phone run, the tester must use the deployed web app with the same Google account to save working TTS settings for the deployed environment.
+
+A missing/invalid provider configuration is `prerequisite_missing` for the authenticated TTS/audio rows; it is not evidence about `HtmlAudioPlayer`.
+
+### Non-zero due-review state
+
+`HPA-210-PROD-DUE-COUNT-ISOLATION` must begin with at least one due item (`due_today >= 1`). A visible non-zero protected value is necessary to observe that sign-out removes prior-session due-review state; a 0 → sign-out → 0 sequence is not sufficient isolation evidence.
+
+Prepare the tester account through existing product data/learning flows before the run and confirm Home shows a non-zero due count.
 
 ## Tested-revision rule
 
-Before the first load-bearing physical observation, record the full behavior SHA. Planning-only markdown commits do not change executable behavior, but any change to application source, native configuration, dependencies, generated build inputs, or verification tooling creates a new tested behavior revision.
+Before the first load-bearing physical observation, record the full behavior SHA. Planning/evidence markdown does not change executable behavior. Any application source, native configuration, dependency, build input, or verification-tooling change creates a new tested behavior revision.
 
-When an executable change occurs:
+If a physical defect is discovered on PR #66:
 
-1. record the new SHA;
-2. rerun deployed-config consistency and the automated freeze;
-3. rerun every physical row that the change could affect;
-4. do not aggregate old and new physical rows into a `GO`.
+1. record the failed observation and provisional `NO-GO` in PR/Linear notes;
+2. do **not** finalize that failed row into the canonical current-run matrix if a fix will be attempted on this PR;
+3. add the narrowest regression test when automatable and the smallest owner-module fix;
+4. freeze a new tested SHA and rerun deployed-config, automated gates, and every affected physical row;
+5. finalize canonical rows only for the final tested SHA; never aggregate pre-fix and post-fix rows into `GO`.
 
-## Execution flow
+This keeps the project’s one-ticket/one-PR rule without weakening same-revision evidence. A genuinely independent defect may be tracked separately, but HPA-538 is not split merely because its acceptance run found a fixable defect.
 
-### 1. Freeze deployed configuration and automated gates
+## Build ordering
 
-Use the repository’s existing production-env sequence explicitly rather than relying on an ambiguous “follow the README” step:
+Production and DEV builds share bundle id `com.vela.app`; the DEV install replaces the production-shaped app on the physical device.
 
-```bash
-cd packages/cdk
-bun cdk:deploy
-bun scripts/inject-env.ts
+Therefore:
 
-cd ../../apps/vela-mobile
-bun run verify:deployed-config -- --cdk-outputs ../../packages/cdk/cdk-outputs.json
-bun run verify:m1-foundation
-```
+1. complete all production-smoke rows first;
+2. install/run DEV diagnostics only after production smoke is complete;
+3. do not interleave the two build classes;
+4. after DEV has been installed, any production-row rerun requires a fresh `build:ios:ide` plus physical Run/install, not a simple relaunch.
 
-If the deployed backend was already deployed and `packages/cdk/cdk-outputs.json` is known-current, execution may skip the deploy itself, but `inject-env.ts`, `verify:deployed-config`, and `verify:m1-foundation` still run before physical evidence.
-
-`MOBILE_SKIP_ENV_VALIDATION=true`, localhost, placeholders, or mismatched API/Cognito identifiers cannot satisfy HPA-538.
-
-### 2. Production-shaped physical build
-
-Use the existing physical-device flow:
-
-```bash
-cd apps/vela-mobile
-bun run build:ios:ide
-```
-
-The operator configures the development team locally in Xcode, confirms trust and Developer Mode, selects the tester-controlled device, and runs the production-shaped assets against the deployed configuration.
-
-Record only generic environment facts useful for reproduction: device model/class, iOS version, Xcode version, tested SHA, build/config class, and outcome. Never record UDID, account email, token, OAuth code/verifier/state/nonce, signing identity, provisioning data, full callback URL, or raw credential-bearing logs.
-
-### 3. Required production-smoke rows
-
-Use these named rows in the canonical record:
+## Required production rows
 
 | ID | Pass criterion |
 | --- | --- |
 | `HPA-210-PROD-INSTALL-LAUNCH` | Signed production-shaped app installs and cleanly launches; production More page exposes no DEV diagnostic entries. |
-| `HPA-210-PROD-AUTH-WARM-CALLBACK` | Fresh Google/Cognito sign-in returns to an already-running app, establishes the verified session once, shows no token/callback material, and does not expose protected content before verification. |
+| `HPA-210-PROD-AUTH-WARM-CALLBACK` | Fresh Google/Cognito sign-in returns to an already-running app, establishes the verified session once, shows no token/callback material, and exposes no protected content before verification. |
 | `HPA-210-PROD-AUTH-COLD-CALLBACK` | Completing sign-in with Vela terminated cold-launches the app, consumes the launch URL once, establishes the verified session, and avoids duplicate/stuck callback state. |
 | `HPA-210-PROD-RELAUNCH-RESTORATION` | Force-close/relaunch restores the authenticated session without interactive sign-in and does not flash protected content before restoration is verified. |
-| `HPA-210-PROD-DUE-COUNT-ISOLATION` | Due count loads/refreshes; sign-out removes the old authenticated state; signing in again does not surface the prior session’s cached protected state. The same Google account is sufficient; no second account is required. |
+| `HPA-210-PROD-DUE-COUNT-ISOLATION` | Starts with `due_today >= 1`; due count loads/refreshes; sign-out removes the visible protected count; subsequent sign-in does not expose prior-session state before the current session settles. The same Google account is sufficient. |
 | `HPA-210-PROD-SIGNOUT-RELAUNCH` | After sign-out and relaunch, no authenticated session or protected due-review content reappears. |
 
-Product-surface security is part of those rows, not a vague extra row: no protected-content flash, no token/provider/callback payload in visible UI, no stale due-count state after sign-out, and no production diagnostic entries.
+Product-surface security is owned by those rows: no protected-content flash, no token/provider/callback payload in visible UI, no stale due-count state after sign-out, and no DEV diagnostic entries in production. There is no vague extra “security/recovery” row.
 
-If a concrete network-recovery observation is useful during diagnosis, use Home’s existing `Retry` control after temporarily disabling connectivity, but do not create a separate required HPA-538 row unless a failure exposes a real acceptance gap.
+## Required diagnostic rows
 
-### 4. Pin the DEV diagnostics to the deployed backend
-
-`dev:ios` runs Quasar in development mode, and normal development env can point at localhost. Therefore running plain `bun run dev:ios` is not sufficient HPA-538 evidence.
-
-Keep DEV mode so diagnostic routes remain compiled, but overlay the five public values from the already-verified `.env.production` into the process:
-
-```bash
-cd apps/vela-mobile
-set -a
-source .env.production
-set +a
-bun run dev:ios
-```
-
-The overlaid values are:
-
-- `VITE_MOBILE_API_URL`
-- `VITE_COGNITO_USER_POOL_ID`
-- `VITE_COGNITO_MOBILE_USER_POOL_CLIENT_ID`
-- `VITE_COGNITO_OAUTH_DOMAIN`
-- `VITE_AWS_REGION`
-
-Record the diagnostic run as `prerequisite_missing` rather than pass if it used localhost, a LAN API, placeholder Cognito values, or any backend identity that does not match Task 1.
-
-### 5. Required diagnostic rows
-
-Use these named rows:
+All diagnostic rows use the checked-in `DIAGNOSTIC_WORD`: `水`, reading `みず`, translation `water`.
 
 | ID | Pass criterion |
 | --- | --- |
-| `HPA-210-DIAG-TTS-CORE` | Using the checked-in diagnostic word `水` (`みず`): authenticated preparation succeeds; first user-gesture playback is correct/audible with Silent Mode off; explicit replay succeeds without overlap/unwanted auto-resume. |
-| `HPA-210-DIAG-AUDIO-SILENT-MODE` | Repeat `水` playback with actual system Silent Mode enabled and record the observed policy. Ring/Silent switch may be used; on Action Button devices configure/use Silent Mode and confirm the system indicator. Focus Mode is not Silent Mode. |
-| `HPA-210-DIAG-AUDIO-INTERRUPTION` | An external/system interruption or inactive transition leaves audio stopped/settled and explicitly replayable after return; it does not unexpectedly auto-resume. |
+| `HPA-210-DIAG-TTS-CORE` | With Silent Mode off and non-zero media volume: authenticated preparation succeeds; first user-gesture playback audibly says `水`; explicit replay succeeds without overlap or unwanted auto-resume. |
+| `HPA-210-DIAG-AUDIO-SILENT-MODE` | With actual system Silent Mode on and non-zero media volume, a foreground user-initiated prepared pronunciation remains audible. Ring/Silent switch or the system Silent Mode control may be used; Focus Mode is not Silent Mode. |
+| `HPA-210-DIAG-AUDIO-INTERRUPTION` | External/system interruption or inactive transition leaves audio stopped/settled, does not auto-resume unexpectedly, and remains explicitly replayable. |
 | `HPA-210-DIAG-IME` | Enter `にほんご`, select `日本語`, no early submit occurs, and draft/committed/model/post-render-native/submitted values all equal `日本語`. |
 | `HPA-210-DIAG-KEYBOARD-SAFE-AREA` | In portrait, focused controls remain reachable and keyboard dismissal leaves no permanent overlap/offset or unsafe inset regression. |
-| `HPA-210-DIAG-NATIVE-SWIPE-BACK` | A real physical edge-swipe exercises native back and decrements/settles the app-owned mobile-depth path rather than acting as a no-op or trapping navigation. |
-| `HPA-210-DIAG-NAVIGATION` | Visible back, tab switching, deep entry, cold entry, resume, scroll restoration, and depth-zero fallback/no-trap behave as the existing diagnostics specify. |
+| `HPA-210-DIAG-NATIVE-SWIPE-BACK` | A real physical edge-swipe executes chronological back and settles/decrements the app-owned mobile-depth path rather than acting as a no-op or navigation trap. |
+| `HPA-210-DIAG-NAV-VISIBLE-BACK` | Existing visible-back diagnostic follows chronological back behavior. |
+| `HPA-210-DIAG-NAV-TABS` | Repeated tab navigation stays usable and preserves the expected app-owned history policy. |
+| `HPA-210-DIAG-NAV-DEEP-ENTRY` | In-session deep entry settles to the expected route/depth without blank frame, exit, or trap. |
+| `HPA-210-DIAG-NAV-COLD-ENTRY` | Cold entry establishes the expected route/depth and remains escapable. |
+| `HPA-210-DIAG-NAV-RESUME` | Resume does not fabricate navigation and leaves the current route usable. |
+| `HPA-210-DIAG-NAV-SCROLL-RESTORATION` | Returning through the existing diagnostic flow restores the expected scroll behavior without trapping input/navigation. |
+| `HPA-210-DIAG-NAV-DEPTH-ZERO` | Depth-zero back fallback remains safe; no blank frame, app exit, or navigation trap occurs. |
 
-The current umbrella `HPA-210-PHYSICAL-ACCEPTANCE` row becomes a rollup that references these production and diagnostic rows. It must not replace them with one prose pass. Update `HPA-210-DEPLOYED-CONFIG-CONSISTENCY` to the new tested SHA. Leave the Simulator row deferred.
+The current `HPA-210-PHYSICAL-ACCEPTANCE` row becomes a rollup referencing the named production and diagnostic rows. It never replaces them with an umbrella pass. Update `HPA-210-DEPLOYED-CONFIG-CONSISTENCY` to the final tested SHA. Leave the Simulator row deferred.
 
-## Audio decision procedure
+## Silent Mode product rule and audio decision
 
-Use the checked-in `DIAGNOSTIC_WORD`: `水`, reading `みず`, translation `water`.
+The product rule is precommitted by the HPA-208 design and is restated here for closure:
 
-After `HPA-210-DIAG-TTS-CORE`, `HPA-210-DIAG-AUDIO-SILENT-MODE`, and `HPA-210-DIAG-AUDIO-INTERRUPTION` are observed, select according to this rule:
+> A prepared, user-initiated pronunciation tap while Vela is foregrounded must remain audible when system Silent Mode is ON and media volume is non-zero.
 
-- **`HTML-only accepted`** — core preparation/playback/audibility/replay and interruption recovery pass, and the physical Silent Mode behavior satisfies the foreground pronunciation product rule.
-- **`native audio-session integration required`** — core preparation/playback/audibility/replay and interruption recovery all pass, and Silent Mode policy is the sole audio failure. This is the one permitted High reclassification: create/retain a High pre-M2 audio-session gate that blocks the first audio-dependent M2 work.
-- **`native player adapter required`** — the physical evidence demonstrates that the current `HtmlAudioPlayer` cannot satisfy core player behavior and requires replacement rather than only audio-session policy. This is hard `NO-GO`.
+The operator confirms this rule; the device run does not invent it.
 
-Do not select `HTML-only accepted` after a Silent-Mode-only failure, and do not select `native player adapter required` merely because Silent Mode policy needs native audio-session configuration.
+After the three audio rows are complete:
 
-If the audio evidence is incomplete or the failure cause is not yet attributable to one of the three outcomes, leave `Pending physical HPA-210 evidence` and record `NO-GO`.
+- **`HTML-only accepted`** — TTS core, interruption/replay, and the Silent Mode audibility rule all pass.
+- **`native audio-session integration required`** — TTS core and interruption/replay pass, and Silent Mode audibility is the sole audio failure. This is the one permitted High reclassification: track a High pre-M2 audio-session gate that blocks the first audio-dependent M2 work.
+- **`native player adapter required`** — core playback/player behavior fails in a way that requires replacing `HtmlAudioPlayer`, not merely configuring native audio-session policy. This is hard `NO-GO`.
 
-## Failure handling
+If evidence is incomplete or failure attribution is unclear, leave `Pending physical HPA-210 evidence` and record `NO-GO`.
 
-Distinguish operator prerequisites from product defects.
-
-A missing eligible phone, trust, Developer Mode, signing/provisioning, deployed configuration, or deployed-env DEV overlay blocks the relevant row but is not a fabricated product failure. Record `prerequisite_missing` and leave HPA-538 open.
-
-For a reproducible product defect:
-
-1. record the failed physical row and `NO-GO` first;
-2. add the narrowest automated regression test that can own the logic, when automatable;
-3. make the smallest correction in the existing owner module;
-4. avoid new abstractions unless the defect demonstrates a missing boundary;
-5. establish a new tested behavior SHA;
-6. rerun deployed-config consistency, the automated freeze, and every affected physical row.
-
-The fix stays on the HPA-538 PR unless the discovered problem is genuinely independent of this acceptance scope.
-
-## Evidence and privacy policy
-
-Allowed in committed/posted results:
-
-- full tested Git SHA;
-- generic device model/class;
-- iOS and Xcode versions;
-- build/config class;
-- named scenario ID;
-- sanitized observed behavior;
-- pass/fail/`prerequisite_missing` outcome;
-- non-sensitive follow-up issue reference.
-
-Do not commit or post:
-
-- UDID or device serial;
-- account email or personal identifier;
-- Cognito tokens, OAuth state/code/verifier/nonce;
-- full presigned URLs or authorization headers;
-- provisioning profiles, certificates, signing identity details;
-- raw device logs containing session/network payloads.
-
-Screenshots or logs are unnecessary unless a defect requires them; if used, sanitize them and keep them out of the repository.
-
-## Execution risks
-
-The plan should explicitly stop rather than infer evidence when any of these occurs:
-
-- no tester-controlled eligible iPhone or unresolved signing/trust/Developer Mode;
-- cold-start callback does not return cleanly to Vela;
-- DEV diagnostics still resolve to localhost/LAN/placeholder configuration instead of the Task 1 deployed identity;
-- Action Button/Focus Mode is mistaken for actual Silent Mode;
-- a runtime defect changes executable behavior after some rows were already recorded.
-
-## Decision and tracker policy
+## Decision policy
 
 `GO` requires:
 
-- fresh automated freeze gates passing for the tested behavior revision;
-- deployed-config consistency passing and `HPA-210-DEPLOYED-CONFIG-CONSISTENCY` updated to that revision;
-- every named production row passing on the physical iPhone;
-- every named diagnostic row passing, except the original narrow Silent-Mode-only High exception described above;
-- a conclusive audio-adapter decision;
+- fresh deployed outputs and `verify:deployed-config` for the final tested SHA;
+- fresh `verify:m1-foundation` on a tracked-clean checkout;
+- all named production rows passing;
+- all named diagnostic rows passing, except the exact Silent-Mode-only High audio-session exception above;
+- a conclusive audio decision;
 - no Critical finding or unresolved credential/protected-content exposure;
-- the physical acceptance rollup referencing the named rows rather than replacing them.
+- the physical rollup referencing the named rows rather than replacing them;
+- the temporary physical-DEV LAN CORS origin removed after diagnostics.
 
-Any required failed, unrun, invalidated, placeholder/local-backend, or prerequisite-blocked row produces `NO-GO` unless it is exactly the permitted Silent-Mode-only audio-session exception after all core audio rows pass.
+Any required failed, unrun, invalidated, local/placeholder-backed, stale-output-backed, or prerequisite-blocked row is `NO-GO` unless it is exactly the permitted Silent-Mode-only audio-session exception after core audio passes.
 
-On `GO`, update the canonical HPA-210 verification/architecture records, synchronize `CLAUDE.md` and `AGENTS.md`, and complete HPA-538. Source Mobile M1 tickets whose only remaining gate was this physical evidence can then be reconciled against the new record.
+On `GO`, update the canonical verification/architecture records, synchronize `CLAUDE.md` and `AGENTS.md`, and complete HPA-538. On `NO-GO`, keep HPA-538 open, retain unresolved-physical guidance, and record only the minimum corrective work supported by the failed row.
 
-On `NO-GO`, record the minimum corrective work, keep HPA-538 open, leave the unresolved-physical guidance in `CLAUDE.md`/`AGENTS.md`, and reopen an owning ticket only when the observed defect proves that implementation is not acceptable. Existing tracker status is never evidence that a physical criterion passed.
+## Privacy
+
+Record only full tested Git SHA, generic device model/class, iOS/Xcode versions, build/config class, named scenario ID, sanitized observation, outcome, temporary LAN **origin** (not device identifiers), and non-sensitive follow-up references.
+
+Do not commit or post UDID/serial, account email, tokens, OAuth state/code/verifier/nonce, authorization headers, full presigned URLs, provisioning profiles/certificates/signing identities, provider API keys, or raw credential-bearing logs/screenshots.
