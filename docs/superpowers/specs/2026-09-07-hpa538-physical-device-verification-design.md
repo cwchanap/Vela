@@ -68,7 +68,7 @@ Before authenticated diagnostic rows:
 4. record the temporary LAN origin as non-secret diagnostic environment context;
 5. after the final diagnostic session, redeploy `ApiStack` with the normal default CORS configuration so the LAN origin does not remain deployed.
 
-`verify:deployed-config` does not compare CORS; the diagnostic rows still use the same deployed API/Cognito identity as production smoke, with a temporary transport allowance for DEV.
+This is a verification prerequisite, not a permanent product change. `verify:deployed-config` does not compare CORS; the diagnostic rows still use the same deployed API/Cognito identity as production smoke, with a temporary transport allowance for DEV.
 
 ### Tester-account TTS state
 
