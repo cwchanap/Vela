@@ -144,7 +144,7 @@ The current `HPA-210-PHYSICAL-ACCEPTANCE` row becomes a rollup referencing the n
 
 ## Silent Mode product rule and audio decision
 
-The product rule is precommitted by the HPA-208 design and is restated here for closure:
+The product rule is precommitted by `docs/superpowers/specs/2026-07-31-mobile-authenticated-tts-pronunciation-design.md` (HPA-208) and is restated here for closure:
 
 > A prepared, user-initiated pronunciation tap while Vela is foregrounded must remain audible when system Silent Mode is ON and media volume is non-zero.
 
