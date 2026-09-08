@@ -19,7 +19,8 @@
 - Missing/stale outputs, local/placeholder config, CORS, TTS settings, due data, device/signing, or other prerequisites are `prerequisite_missing`, never inferred passes.
 - Keep Simulator acceptance deferred and receipts local under `.artifacts/hpa-210/`.
 - Never record UDIDs, account identity, tokens, provider keys, signing material, presigned URLs, or raw sensitive logs.
-- **Every shell block below starts from the repository root unless it explicitly changes directory inside that block. Treat blocks as independent.**
+- Every shell block below starts from the repository root unless it explicitly changes directory inside that block. Treat blocks as independent.
+- Task 1 Steps 3, 7, and Task 3 Step 1 intentionally share `DEV_ORIGIN`; run those steps in one operator shell/session, or re-run Task 1 Step 3 before a later block that needs it.
 
 ---
 
@@ -94,7 +95,7 @@ Expected: SPA assets and Lambda bundle exist so CDK synthesis/deploy does not fa
 
 - [ ] **Step 7: Temporarily add the physical DEV origin to deployed CORS**
 
-Run this in the same shell where `DEV_ORIGIN` from Step 3 is defined:
+Run this in the same shell where `DEV_ORIGIN` from Step 3 is defined; if that shell was closed, repeat Step 3 first.
 
 ```bash
 cd packages/cdk
@@ -176,7 +177,7 @@ Do not start Task 3 with an unrun production row. Installing DEV replaces the pr
 
 - [ ] **Step 1: Start DEV with production public config overlaid**
 
-Run in the same shell where `DEV_ORIGIN` from Task 1 is available:
+Run in the same operator shell where `DEV_ORIGIN` from Task 1 is available; if needed, repeat Task 1 Step 3 before this block.
 
 ```bash
 cd apps/vela-mobile
@@ -184,10 +185,11 @@ set -a
 source .env.production
 set +a
 bun run verify:deployed-config -- --cdk-outputs ../../packages/cdk/cdk-outputs.json
+printf 'DEV origin: %s\n' "$DEV_ORIGIN"
 bun run dev:ios
 ```
 
-Expected: config verification passes; DEV diagnostic entries are present; authenticated requests use the Task-1 deployed API/Cognito identity and the temporary `${DEV_ORIGIN}` CORS allowance.
+Expected: config verification passes; `DEV_ORIGIN` is the temporary allowed LAN origin; DEV diagnostic entries are present; authenticated requests use the Task-1 deployed API/Cognito identity.
 
 If authenticated requests are CORS-blocked or use local/placeholder/different identity, record `prerequisite_missing`, not an audio/product failure.
 
