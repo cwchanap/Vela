@@ -180,3 +180,32 @@ On `GO`, update the canonical verification/architecture records, synchronize `CL
 Record only full tested Git SHA, generic device model/class, iOS/Xcode versions, build/config class, named scenario ID, sanitized observation, outcome, temporary LAN **origin** (not device identifiers), and non-sensitive follow-up references.
 
 Do not commit or post UDID/serial, account email, tokens, OAuth state/code/verifier/nonce, authorization headers, full presigned URLs, provisioning profiles/certificates/signing identities, provider API keys, or raw credential-bearing logs/screenshots.
+
+## Operator amendment (2026-09-09): simulator-class closure
+
+The operator accepted simulator-class evidence as sufficient for HPA-538
+closure and waived the physical rows for this ticket. This amendment changes
+the acceptance basis as follows:
+
+- The `GO` basis is now: the tested-SHA automated freeze
+  (`verify:m1-foundation`), `verify:deployed-config` against fresh
+  `VelaStack` outputs, and the simulator-class build/install/launch row — all
+  on one tested behavior SHA
+  (`97d702d322ce8f35aa0cc5915c9cb0d5e2dc62b6`).
+- All named production-smoke rows, all diagnostic rows, and the temporary
+  physical-DEV CORS prerequisite are **waived by operator decision** — not
+  passed, and never recorded as physical observations.
+- The audio adapter decision remains **pending**: no audio row ran in any
+  evidence class, so no audio conclusion (HTML-only, audio-session
+  integration, or native player adapter) is recorded, and
+  `ios-foundation-architecture.md` keeps its pending audio mapping. The first
+  audio-dependent M2 work still needs that mapping.
+- The same-PR defect rule is unchanged and did not trigger: no defect was
+  observed and no fix was made.
+- No temporary CORS origin was ever deployed, so there is no infrastructure
+  rollback to perform.
+
+Everything else in this spec (privacy rules, evidence discipline,
+one-ticket/one-PR delivery) stands unchanged. The physical rows may be
+executed later under their own evidence class; until then they must not be
+claimed.

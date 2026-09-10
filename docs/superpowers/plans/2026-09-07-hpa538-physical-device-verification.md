@@ -255,6 +255,7 @@ If a production row must be rerun after DEV was installed, run `bun run build:io
 **Owner:** Agent-assisted from operator observations.
 
 **Files:**
+
 - Modify: `apps/vela-mobile/docs/m1-ios-foundation-verification.md`
 - Modify if audio mapping is conclusive: `apps/vela-mobile/docs/ios-foundation-architecture.md`
 - Modify on `GO`: `CLAUDE.md`, `AGENTS.md`
@@ -341,3 +342,15 @@ For `GO`, mark HPA-538 Done and reconcile HPA-210/source M1 tickets supported by
 For `NO-GO`, keep HPA-538 In Progress and record the exact failed/unrun/`prerequisite_missing` row plus minimum corrective work.
 
 - [ ] **Step 4: Mark PR ready only when evidence, CORS cleanup, repository guidance, and Linear all agree**
+
+---
+
+### Operator amendment (2026-09-09): simulator-class closure
+
+The operator accepted simulator-class evidence for HPA-538 closure (see the
+spec's operator amendment). Execution state under that basis: Task 1
+completed (tested SHA `97d702d322ce8f35aa0cc5915c9cb0d5e2dc62b6`, automated
+freeze and deployed-config both green); Task 2 and Task 3 waived — never run;
+Task 4 completed without the audio architecture change (audio mapping stays
+pending) and without any CORS rollback (no temporary origin was deployed);
+Task 5 executed against PR #66 and Linear.
