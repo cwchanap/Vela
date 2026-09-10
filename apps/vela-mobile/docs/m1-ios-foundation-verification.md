@@ -40,12 +40,14 @@ harness manifest-persistence fix with its regression test.
 
 ## Automated Phase Evidence
 
-The automated phase passed on commit
-`97f018c48436b383bd36c81d9eb9a3abd90e4d54`: the eight gates ran in order (install, lint, typecheck,
-compile, build, test, production-diagnostics, mobile-secret-scan), and the
-passing receipt is a local artifact under `.artifacts/hpa-210/` (not
-committed). Receipts are local and ephemeral; this document is the committed
-verification record.
+The canonical automated-phase pass for the current tested behavior SHA
+`97d702d322ce8f35aa0cc5915c9cb0d5e2dc62b6` (HPA-538) is the clean re-run
+noted below. Historically, the automated phase first passed on commit
+`97f018c48436b383bd36c81d9eb9a3abd90e4d54`: the eight gates ran in order
+(install, lint, typecheck, compile, build, test, production-diagnostics,
+mobile-secret-scan), and that passing receipt was a local artifact under
+`.artifacts/hpa-210/` (not committed). Receipts are local and ephemeral; this
+document is the committed verification record.
 
 HPA-209 retains its historical flat evidence layout under
 `docs/evidence/hpa-209/`; do not migrate or reinterpret those files as
@@ -107,10 +109,11 @@ physical matrix row.
 
 ## Security and Secret Scan
 
-The automated phase records a passing `mobile-secret-scan` gate on commit
-`97f018c48436b383bd36c81d9eb9a3abd90e4d54`. Machine
-evidence does not substitute a source
-inspection or a physical acceptance observation.
+The automated freeze records a passing `mobile-secret-scan` gate on the
+current tested behavior SHA `97d702d322ce8f35aa0cc5915c9cb0d5e2dc62b6`
+(historically first passed on `97f018c48436b383bd36c81d9eb9a3abd90e4d54`).
+Machine evidence does not substitute a source inspection or a physical
+acceptance observation.
 
 ## Architecture Decision Summary
 
