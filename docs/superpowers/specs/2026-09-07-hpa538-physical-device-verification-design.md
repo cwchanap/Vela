@@ -36,7 +36,7 @@ Do not add Maestro, Appium, Playwright-mobile, another native E2E harness, a new
 - No permanent signing team, device identifier, LAN origin, or provisioning material in the repository/infrastructure.
 - No Mystery Messenger scene matrix or pilot replay.
 - No new landscape requirement; keep the selected HPA-209 inset policy unless a physical defect appears.
-- No Simulator rerun as a substitute for this physical gate. `HPA-210-SIMULATOR-BUILD-INSTALL-LAUNCH` remains deferred.
+- No Simulator rerun as a substitute for this physical gate. `HPA-210-SIMULATOR-BUILD-INSTALL-LAUNCH` passed in the simulator class only (see the operator amendment); physical rows remain waived.
 
 ## Canonical ownership
 
@@ -140,7 +140,7 @@ All diagnostic rows use the checked-in `DIAGNOSTIC_WORD`: `水`, reading `みず
 | `HPA-210-DIAG-NAV-SCROLL-RESTORATION` | Returning through the existing diagnostic flow restores the expected scroll behavior without trapping input/navigation. |
 | `HPA-210-DIAG-NAV-DEPTH-ZERO` | Depth-zero back fallback remains safe; no blank frame, app exit, or navigation trap occurs. |
 
-The current `HPA-210-PHYSICAL-ACCEPTANCE` row becomes a rollup referencing the named production and diagnostic rows. It never replaces them with an umbrella pass. Update `HPA-210-DEPLOYED-CONFIG-CONSISTENCY` to the final tested SHA. Leave the Simulator row deferred.
+The current `HPA-210-PHYSICAL-ACCEPTANCE` row becomes a rollup referencing the named production and diagnostic rows. It never replaces them with an umbrella pass. Update `HPA-210-DEPLOYED-CONFIG-CONSISTENCY` to the final tested SHA. The Simulator row passed in the simulator class only (see the operator amendment); leave only physical rows waived.
 
 ## Silent Mode product rule and audio decision
 
