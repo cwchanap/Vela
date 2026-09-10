@@ -17,7 +17,7 @@
 - Final canonical evidence uses one tested behavior SHA. Pre-fix failures may be noted in PR/Linear but are not mixed with post-fix rows.
 - Production smoke runs before DEV diagnostics because both installs use `com.vela.app`.
 - Missing/stale outputs, local/placeholder config, CORS, TTS settings, due data, device/signing, or other prerequisites are `prerequisite_missing`, never inferred passes.
-- Keep Simulator acceptance deferred and receipts local under `.artifacts/hpa-210/`.
+- Simulator acceptance passed in the simulator class only (see the operator amendment); receipts remain local under `.artifacts/hpa-210/`.
 - Never record UDIDs, account identity, tokens, provider keys, signing material, presigned URLs, or raw sensitive logs.
 - Every shell block below starts from the repository root unless it explicitly changes directory inside that block. Treat blocks as independent.
 - Task 1 Steps 3, 7, and Task 3 Step 1 intentionally share `DEV_ORIGIN`; run those steps in one operator shell/session, or re-run Task 1 Step 3 before a later block that needs it.
@@ -52,8 +52,12 @@ Expected: both exit `0`.
 - [ ] **Step 3: Resolve the physical DEV origin**
 
 ```bash
+set -euo pipefail
 DEV_IFACE="$(route get default | awk '/interface:/{print $2}')"
+[ -n "$DEV_IFACE" ] || { echo "No default interface found" >&2; exit 1; }
 DEV_LAN_IP="$(ipconfig getifaddr "$DEV_IFACE")"
+[ -n "$DEV_LAN_IP" ] || { echo "No LAN IP for interface $DEV_IFACE" >&2; exit 1; }
+case "$DEV_LAN_IP" in 127.*) echo "LAN IP is loopback" >&2; exit 1 ;; esac
 DEV_ORIGIN="http://${DEV_LAN_IP}:9100"
 printf '%s\n' "$DEV_ORIGIN"
 ```
@@ -99,7 +103,8 @@ Run this in the same shell where `DEV_ORIGIN` from Step 3 is defined; if that sh
 
 ```bash
 cd packages/cdk
-TEMP_CORS_ALLOWED_ORIGINS="https://vela.cwchanap.dev,http://localhost:9000,http://127.0.0.1:9000,http://localhost:9100,http://127.0.0.1:9100,capacitor://localhost,${DEV_ORIGIN}"
+PROD_DOMAIN="${VELA_DOMAIN_NAME:-vela.cwchanap.dev}"
+TEMP_CORS_ALLOWED_ORIGINS="https://${PROD_DOMAIN},http://localhost:9000,http://127.0.0.1:9000,http://localhost:9100,http://127.0.0.1:9100,capacitor://localhost,${DEV_ORIGIN}"
 CORS_ALLOWED_ORIGINS="$TEMP_CORS_ALLOWED_ORIGINS" bunx aws-cdk deploy ApiStack
 ```
 
@@ -288,7 +293,7 @@ Expected: exit `0` for the same final deployed public identity.
 In `apps/vela-mobile/docs/m1-ios-foundation-verification.md`:
 
 - repin `HPA-210-DEPLOYED-CONFIG-CONSISTENCY` to the final SHA/result;
-- keep `HPA-210-SIMULATOR-BUILD-INSTALL-LAUNCH` deferred;
+- record `HPA-210-SIMULATOR-BUILD-INSTALL-LAUNCH` as passed in the simulator class only (already done per the operator amendment);
 - add every named spec row with its actual sanitized observation;
 - convert `HPA-210-PHYSICAL-ACCEPTANCE` to a rollup referencing those rows;
 - update **Final Decision** and **Tested Behavior Commit** from the same revision.
@@ -323,9 +328,10 @@ Expected: only HPA-538-relevant source/docs plus any demonstrated same-PR defect
 - [ ] **Step 1: Confirm no later executable commit invalidated evidence**
 
 ```bash
-git diff origin/main...HEAD --name-only
-git log --oneline --decorate origin/main..HEAD
-git diff --check origin/main...HEAD
+TESTED_SHA="97d702d322ce8f35aa0cc5915c9cb0d5e2dc62b6"  # recorded tested behavior SHA
+git diff --name-only "$TESTED_SHA"..HEAD
+git log --oneline --decorate "$TESTED_SHA"..HEAD
+git diff --check "$TESTED_SHA"..HEAD
 git status --short
 ```
 
