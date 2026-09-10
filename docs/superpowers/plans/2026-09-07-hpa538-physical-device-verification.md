@@ -300,9 +300,9 @@ In `apps/vela-mobile/docs/m1-ios-foundation-verification.md`:
 
 Pre-fix observations may remain only as clearly historical notes, never as part of the final pass set.
 
-- [ ] **Step 4: Reconcile audio architecture and repository guidance**
+- [ ] **Step 4: Reconcile architecture record and repository guidance**
 
-If audio mapping is conclusive, update `ios-foundation-architecture.md` with the exact selected outcome and reference the three named audio rows.
+Update `ios-foundation-architecture.md` verification-status assertions to match the canonical record (simulator-class pass, waived physical rows, amended decision) regardless of the audio outcome. If audio mapping is conclusive, also record the exact selected outcome and reference the three named audio rows; otherwise the audio decision stays pending.
 
 On `GO`, update both `CLAUDE.md` and `AGENTS.md` to remove the deferred-physical paragraph and the physical HPA-210 IME/swipe closure-gate section. On `NO-GO`, leave those warnings intact.
 
