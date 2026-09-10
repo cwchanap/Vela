@@ -10,7 +10,7 @@
 
 HPA-538 is verification debt, not a new product subsystem. The repository already owns the HPA-210 automated runner, deployed-config verifier, production-diagnostic scan, physical-device checklist, development diagnostics, architecture record, and canonical verification record.
 
-`apps/vela-mobile/docs/m1-ios-foundation-verification.md` still records `NO-GO`: the automated phase passed on an older cleanup revision, while production smoke, diagnostic observation, and current-revision physical acceptance were deferred. `apps/vela-mobile/docs/ios-foundation-architecture.md` therefore still leaves the audio decision as `Pending physical HPA-210 evidence`.
+`apps/vela-mobile/docs/m1-ios-foundation-verification.md` recorded `NO-GO`: the automated phase passed on an older cleanup revision, while production smoke, diagnostic observation, and current-revision physical acceptance were deferred. `apps/vela-mobile/docs/ios-foundation-architecture.md` therefore still leaves the audio decision as `Pending physical HPA-210 evidence`.
 
 HPA-538 owns only the generic mobile-foundation physical gate. It does not absorb Mystery Messenger acceptance, add device automation, or revive the superseded committed-manifest design.
 
@@ -44,7 +44,7 @@ Do not add Maestro, Appium, Playwright-mobile, another native E2E harness, a new
 - **Physical evidence:** named rows in `apps/vela-mobile/docs/m1-ios-foundation-verification.md`.
 - **Audio architecture:** `apps/vela-mobile/docs/ios-foundation-architecture.md` after the physical audio mapping is conclusive.
 - **Operator guidance:** existing `Manual Physical-Run Checklist` in the canonical verification record; the plan references it rather than maintaining a second signing checklist.
-- **Repository guidance:** `CLAUDE.md` / `AGENTS.md` are synchronized only from the final physical decision.
+- **Repository guidance:** `CLAUDE.md` / `AGENTS.md` are synchronized only from the final decision.
 
 ## Load-bearing prerequisites
 
@@ -156,9 +156,15 @@ After the three audio rows are complete:
 - **`native audio-session integration required`** — TTS core and interruption/replay pass, and Silent Mode audibility is the sole audio failure. This is the one permitted High reclassification: track a High pre-M2 audio-session gate that blocks the first audio-dependent M2 work.
 - **`native player adapter required`** — core playback/player behavior fails in a way that requires replacing `HtmlAudioPlayer`, not merely configuring native audio-session policy. This is hard `NO-GO`.
 
-If evidence is incomplete or failure attribution is unclear, leave `Pending physical HPA-210 evidence` and record `NO-GO`.
+If evidence is incomplete or failure attribution is unclear, leave `Pending physical HPA-210 evidence` and record `NO-GO` (superseded for HPA-538 by the operator amendment: the ticket closed `GO` with the audio decision still pending).
 
 ## Decision policy
+
+> **Superseded for HPA-538 closure by the operator amendment (2026-09-09)
+> below.** HPA-538 closed `GO` on the amended simulator-class basis with the
+> physical rows waived and the audio decision still pending. This section
+> remains the decision standard for any future run of the waived physical
+> rows under their own evidence class.
 
 `GO` requires:
 

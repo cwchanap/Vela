@@ -3,27 +3,25 @@
 ## Tested Revision
 
 `testedBehaviorCommit`: see [M1 iOS Foundation Verification](m1-ios-foundation-verification.md)
-for the exact cleanup-head SHA
+for the exact tested SHA
 
-The automated phase passed on the cleanup-head commit: the eight gates
+The automated phase passed on the tested behavior commit: the eight gates
 (install, lint, typecheck, compile, build, test, production-diagnostics,
-mobile-secret-scan) ran in order on a clean detached worktree of that
-revision, which contains the verification-tooling fixes for bounded test
-fixture exemptions in the mobile secret policy and provisioning profile
-device eligibility and development entitlement verification. The receipt is a
-local artifact under `.artifacts/hpa-210/` and is not committed.
+mobile-secret-scan) ran in order on a tracked-clean checkout of that
+revision. The receipt is a local artifact under `.artifacts/hpa-210/` and is
+not committed.
 
-The iOS Simulator run is historical: it predates the verification-tooling
-changes that create a new behavior commit under the design's rerun policy, so
-it is not part of the current automated phase. The Simulator run recorded
-sanitized Xcode, Bun, Quasar, and key Capacitor dependency versions without
-retaining raw command output or a device identifier.
+The iOS Simulator build/install/launch row passed on the same tested SHA in
+the simulator class (XcodeBuildMCP build + install + launch; iPhone 16
+simulator class, iOS 26.5, Xcode 26.6). It is simulator-class evidence only
+and establishes no physical-device or human-observed native outcome.
 
-The physical preflight is historical: physical-device testing was explicitly
-deferred, so it is not evidence for the cleanup-head commit and these machine
-results establish neither physical readiness nor any human-observed native
-outcome. See [M1 iOS Foundation Verification](m1-ios-foundation-verification.md)
-for the `NO-GO` decision and deferred physical rows.
+The physical rows are waived by operator decision (2026-09-09
+simulator-class closure), not passed: no physical production-smoke,
+diagnostic, or acceptance observation was made on this revision, and the
+recorded physical preflight remains historical. See
+[M1 iOS Foundation Verification](m1-ios-foundation-verification.md) for the
+operator-amended `GO` decision and the waived physical rows.
 
 ## Authentication and OAuth Callback
 
@@ -133,15 +131,15 @@ record must not rely on a development-only route.
 M1 accepts UserDefaults only for the short-lived, single-use OAuth transaction
 described above; it does not accept it as a session store. Local signing is
 tester-controlled: the iOS project intentionally has no committed development
-team. Only the automated phase passed on the cleanup-head commit recorded in
-[M1 iOS Foundation Verification](m1-ios-foundation-verification.md). The iOS
-Simulator run is historical evidence: it predates verification-tooling
-changes that create a new behavior commit under the design's rerun policy, so
-it is not part of the current automated phase. The physical preflight is
-historical and cannot establish physical status for the cleanup-head
-revision. Physical testing remains deferred. Physical behavior, signing
-readiness, and the audio decision remain evidence-gated and must be recorded
-by actual physical runs.
+team. The automated phase and the simulator-class build/install/launch row
+passed on the tested behavior commit recorded in
+[M1 iOS Foundation Verification](m1-ios-foundation-verification.md); the
+physical rows were waived by operator decision, not passed, and the recorded
+physical preflight remains historical and cannot establish physical status.
+Physical behavior, signing readiness, and the audio decision remain
+evidence-gated: the waived physical rows may be executed later under their
+own evidence class, and the audio decision stays pending until the required
+physical audio evidence is recorded.
 
 ## Change Policy
 
@@ -150,6 +148,6 @@ the associated source and automated coverage changed first. Append results to
 the verification record only from a local HPA-210 run receipt under
 `.artifacts/hpa-210/` or a recorded manual observation; use the full
 tested-behavior SHA and retain the build/config class. Do not create
-placeholder pass or failure rows. A user-directed deferred physical row may
-identify its unrun state without a receipt or observation; all other result
-rows require their actual evidence.
+placeholder pass or failure rows. A user-directed waived or deferred
+physical row may identify its unrun state without a receipt or observation;
+all other result rows require their actual evidence.
