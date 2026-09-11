@@ -354,9 +354,13 @@ For `NO-GO`, keep HPA-538 In Progress and record the exact failed/unrun/`prerequ
 ### Operator amendment (2026-09-09): simulator-class closure
 
 The operator accepted simulator-class evidence for HPA-538 closure (see the
-spec's operator amendment). Execution state under that basis: Task 1
-completed (tested SHA `97d702d322ce8f35aa0cc5915c9cb0d5e2dc62b6`, automated
-freeze and deployed-config both green); Task 2 and Task 3 waived — never run;
-Task 4 completed without the audio architecture change (audio mapping stays
-pending) and without any CORS rollback (no temporary origin was deployed);
-Task 5 executed against PR #66 and Linear.
+spec's operator amendment). Execution state under that basis: the
+closure-relevant portions of Task 1 completed — tested SHA
+`97d702d322ce8f35aa0cc5915c9cb0d5e2dc62b6`, automated freeze and
+deployed-config both green — while the physical-only Task 1 prerequisite
+steps were waived by operator decision and never run (Step 3 DEV-origin
+resolution, Step 5 tester-account TTS/due-count preparation, Step 6 ApiStack
+asset build, and Step 7 temporary CORS deploy — no temporary origin was ever
+deployed); Task 2 and Task 3 waived — never run; Task 4 completed without the
+audio architecture change (audio mapping stays pending) and without any CORS
+rollback; Task 5 executed against PR #66 and Linear.
