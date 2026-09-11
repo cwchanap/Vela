@@ -23,8 +23,8 @@ Reuse the existing seams:
 - `build:ios:ide` plus the canonical physical-run checklist for production-shaped device smoke;
 - `dev:ios` for development diagnostics, with production public identifiers overlaid and a temporary deployed CORS allowance for the physical Mac-hosted DEV origin;
 - `m1-ios-foundation-verification.md` as the only canonical result record;
-- `ios-foundation-architecture.md` only for the evidence-backed audio conclusion or a real contract change;
-- `CLAUDE.md` and `AGENTS.md` only when final physical evidence changes their current “unconfirmed” guidance.
+- `ios-foundation-architecture.md` for the evidence-backed audio conclusion, a real contract change, or verification-status reconciliation when the canonical decision/evidence basis changes (which does not itself resolve the pending audio mapping);
+- `CLAUDE.md` and `AGENTS.md` only when the final decision changes their current physical-verification guidance — rewording status while retaining physical warnings until the waived rows actually run.
 
 Do not add Maestro, Appium, Playwright-mobile, another native E2E harness, a new evidence schema/store, `--record-manual`, fake auth, or a production diagnostic route. Physical observations remain the source of truth for speaker audibility, Silent Mode, Japanese IME, keyboard/safe areas, and native gestures.
 
