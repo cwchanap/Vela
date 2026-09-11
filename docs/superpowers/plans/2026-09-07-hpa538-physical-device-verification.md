@@ -262,7 +262,7 @@ If a production row must be rerun after DEV was installed, run `bun run build:io
 **Files:**
 
 - Modify: `apps/vela-mobile/docs/m1-ios-foundation-verification.md`
-- Modify if audio mapping is conclusive: `apps/vela-mobile/docs/ios-foundation-architecture.md`
+- Modify (verification-status sync is required regardless of the audio outcome; record the audio conclusion only if the mapping is conclusive): `apps/vela-mobile/docs/ios-foundation-architecture.md`
 - Modify on `GO`: `CLAUDE.md`, `AGENTS.md`
 - Modify only if proven stale: `apps/vela-mobile/README.md`
 
@@ -304,7 +304,7 @@ Pre-fix observations may remain only as clearly historical notes, never as part 
 
 Update `ios-foundation-architecture.md` verification-status assertions to match the canonical record (simulator-class pass, waived physical rows, amended decision) regardless of the audio outcome. If audio mapping is conclusive, also record the exact selected outcome and reference the three named audio rows; otherwise the audio decision stays pending.
 
-On `GO`, update both `CLAUDE.md` and `AGENTS.md` to remove the deferred-physical paragraph and the physical HPA-210 IME/swipe closure-gate section. On `NO-GO`, leave those warnings intact.
+On `GO`, update both `CLAUDE.md` and `AGENTS.md` to reconcile the physical-guidance wording/status with the canonical record, retaining the physical warnings while any physical row remains unrun. Remove the deferred-physical paragraph and the physical HPA-210 IME/swipe section only once the rows they describe have actually run; when `GO` rests on waived physical rows (as under the operator amendment), keep the warnings worded as unverified on physical hardware rather than deleting them. On `NO-GO`, leave those warnings intact.
 
 - [ ] **Step 5: Scope/privacy check**
 
