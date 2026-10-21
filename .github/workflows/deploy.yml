@@ -29,7 +29,7 @@ jobs:
       lambda-artifact: ${{ steps.upload-lambda.outputs.artifact-id }}
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
@@ -45,7 +45,7 @@ jobs:
 
       - name: Upload Lambda artifact
         id: upload-lambda
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: lambda-function-${{ github.sha }}
           path: packages/cdk/dist/lambda/
@@ -71,7 +71,7 @@ jobs:
       VELA_DOMAIN_NAME: ${{ vars.VELA_DOMAIN_NAME }}
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
@@ -79,7 +79,7 @@ jobs:
           bun-version: ${{ env.BUN_VERSION }}
 
       - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@v6
         with:
           role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
           role-session-name: github-actions-vela-deploy
@@ -89,7 +89,7 @@ jobs:
         run: bun install --frozen-lockfile
 
       - name: Download Lambda artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: lambda-function-${{ github.sha }}
           path: packages/cdk/dist/lambda/
