@@ -5,6 +5,15 @@ on:
     branches: [main]
   workflow_dispatch:
 
+# Serialize deploys: rapid merges to main must not run parallel `cdk deploy`
+# on the same CloudFormation stacks (concurrent CFN updates get rejected, and
+# out-of-order completion could regress prod to an older SHA). FIFO queue,
+# no cancellation — a cancelled in-flight `cdk deploy` can leave a server-side
+# stack update racing the next run.
+concurrency:
+  group: deploy-main
+  cancel-in-progress: false
+
 permissions:
   id-token: write
   contents: read

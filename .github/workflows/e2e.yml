@@ -7,6 +7,12 @@ on:
     branches: [main]
     types: [opened, synchronize, reopened, ready_for_review]
 
+# Only the latest e2e run per ref matters; superseded runs are safe to cancel
+# (no infrastructure state involved).
+concurrency:
+  group: e2e-${{ github.ref }}
+  cancel-in-progress: true
+
 env:
   BUN_VERSION: "1.3.1"
 
