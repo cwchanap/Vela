@@ -23,8 +23,8 @@
     "postinstall": "quasar prepare"
   },
   "dependencies": {
-    "@aws-sdk/client-dynamodb": "^3.1154.0",
-    "@aws-sdk/lib-dynamodb": "^3.1154.0",
+    "@aws-sdk/client-dynamodb": "^3.1156.0",
+    "@aws-sdk/lib-dynamodb": "^3.1156.0",
     "@quasar/extras": "^1.16.4",
     "@tanstack/vue-query": "^5.104.5",
     "@vela/common": "workspace:*",
@@ -39,7 +39,7 @@
     "vuedraggable": "^4.1.0"
   },
   "devDependencies": {
-    "@aws-sdk/client-cognito-identity-provider": "^3.1154.0",
+    "@aws-sdk/client-cognito-identity-provider": "^3.1156.0",
     "@playwright/test": "^1.64.1",
     "@quasar/app-vite": "^2.1.0",
     "@quasar/vite-plugin": "^1.8.0",
