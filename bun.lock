@@ -46,7 +46,7 @@
         "@playwright/test": "^1.64.1",
         "@quasar/app-vite": "^2.1.0",
         "@quasar/quasar-app-extension-testing": "^2.2.0",
-        "@quasar/vite-plugin": "^1.8.0",
+        "@quasar/vite-plugin": "^2.0.2",
         "@testing-library/jest-dom": "^6.9.1",
         "@testing-library/vue": "^8.1.0",
         "@types/dompurify": "^3.2.0",
@@ -121,7 +121,7 @@
       },
       "devDependencies": {
         "@quasar/app-vite": "^2.4.0",
-        "@quasar/vite-plugin": "^1.8.0",
+        "@quasar/vite-plugin": "^2.0.2",
         "@types/node": "^26.6.5",
         "@vitejs/plugin-vue": "^6.0.10",
         "@vitest/coverage-v8": "^3.2.4",
@@ -466,7 +466,7 @@
 
     "@quasar/ssl-certificate": ["@quasar/ssl-certificate@1.0.0", "", { "dependencies": { "fs-extra": "^11.1.1", "selfsigned": "^2.1.1" } }, "sha512-RhZF7rO76T7Ywer1/5lCe7xl3CIiXxSAH1xgwOj0wcHTityDxJqIN/5YIj6BxMvlFw8XkJDoB1udEQafoVFA4g=="],
 
-    "@quasar/vite-plugin": ["@quasar/vite-plugin@1.10.0", "", { "peerDependencies": { "@vitejs/plugin-vue": "^2.0.0 || ^3.0.0 || ^4.0.0 || ^5.0.0 || ^6.0.0", "quasar": "^2.16.0", "vite": "^2.0.0 || ^3.0.0 || ^4.0.0 || ^5.0.0 || ^6.0.0 || ^7.0.0", "vue": "^3.0.0" } }, "sha512-4PJoTclz4ZjAfyqe0+hlkKcFJt0e2NX3Ac3hy8ILqUPdtZ24nCo5/xEHvTxZGBQMKRPwwePbO8CVs4n9EKJEug=="],
+    "@quasar/vite-plugin": ["@quasar/vite-plugin@2.0.2", "", { "peerDependencies": { "@vitejs/plugin-vue": "^6.0.5", "quasar": "^2.24.0", "vite": "^8.0.0", "vue": "^3.0.0" } }, "sha512-0lLHUu8eMEuWBBecRYZIpBwnyTIH/h4pDoT4bPGD/ba4sydJBa/7nlSvpEopQB5a4nnppeUqW7fpY1tHnwkEJQ=="],
 
     "@rolldown/pluginutils": ["@rolldown/pluginutils@1.0.1", "", {}, "sha512-2j9bGt5Jh8hj+vPtgzPtl72j0yRxHAyumoo6TNfAjsLB04UtpSvPbPcDcBMxz7n+9CYB0c1GxQFxYRg2jimqGw=="],
 
@@ -1979,6 +1979,8 @@
     "@isaacs/cliui/wrap-ansi": ["wrap-ansi@8.1.0", "", { "dependencies": { "ansi-styles": "^6.1.0", "string-width": "^5.0.1", "strip-ansi": "^7.0.1" } }, "sha512-si7QWI6zUMq56bESFvagtmzMdGOtoxfR+Sez11Mobfc7tm+VkUckk9bW2UeffTGVUbOksxmSw0AA2gs8g71NCQ=="],
 
     "@parcel/watcher/picomatch": ["picomatch@4.0.3", "", {}, "sha512-5gTmgEY/sqK6gFXLIsQNH19lWb4ebPDLA4SdLP7dsWkIXHWlG66oPuVvXSGFPppYZz8ZDZq0dYYrbHfBCVUb1Q=="],
+
+    "@quasar/app-vite/@quasar/vite-plugin": ["@quasar/vite-plugin@1.10.0", "", { "peerDependencies": { "@vitejs/plugin-vue": "^2.0.0 || ^3.0.0 || ^4.0.0 || ^5.0.0 || ^6.0.0", "quasar": "^2.16.0", "vite": "^2.0.0 || ^3.0.0 || ^4.0.0 || ^5.0.0 || ^6.0.0 || ^7.0.0", "vue": "^3.0.0" } }, "sha512-4PJoTclz4ZjAfyqe0+hlkKcFJt0e2NX3Ac3hy8ILqUPdtZ24nCo5/xEHvTxZGBQMKRPwwePbO8CVs4n9EKJEug=="],
 
     "@quasar/app-vite/dotenv": ["dotenv@16.6.1", "", {}, "sha512-uBq4egWHTcTt33a72vpSG0z3HnPuIl6NqYcTrKEg2azoEyl2hpW0zqlxysq2pK9HlDIHyHyakeYaYnSAwd8bow=="],
 
