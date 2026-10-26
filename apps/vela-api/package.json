@@ -12,18 +12,18 @@
     "compile": "tsc --noEmit"
   },
   "devDependencies": {
-    "@types/bun": "1.4.3",
+    "@types/bun": "1.4.4",
     "typescript": "^5.6.3"
   },
   "dependencies": {
     "@aws/aurora-dsql-node-postgres-connector": "0.1.9",
-    "@aws-sdk/client-cognito-identity-provider": "^3.1154.0",
-    "@aws-sdk/client-dynamodb": "^3.1154.0",
-    "@aws-sdk/client-s3": "^3.1154.0",
-    "@aws-sdk/credential-providers": "3.1154.0",
-    "@aws-sdk/dsql-signer": "3.1154.0",
-    "@aws-sdk/lib-dynamodb": "^3.1154.0",
-    "@aws-sdk/s3-request-presigner": "^3.1154.0",
+    "@aws-sdk/client-cognito-identity-provider": "^3.1156.0",
+    "@aws-sdk/client-dynamodb": "^3.1156.0",
+    "@aws-sdk/client-s3": "^3.1156.0",
+    "@aws-sdk/credential-providers": "3.1156.0",
+    "@aws-sdk/dsql-signer": "3.1156.0",
+    "@aws-sdk/lib-dynamodb": "^3.1156.0",
+    "@aws-sdk/s3-request-presigner": "^3.1156.0",
     "@hono/zod-validator": "^0.9.1",
     "@vela/common": "workspace:*",
     "aws-jwt-verify": "^5.2.1",
