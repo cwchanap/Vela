@@ -11,7 +11,7 @@ Users can chat and ask AI to analyze saved Japanese sentences using Google Gemin
 
 ## Existing behavior and actual seams (main, 2026-11-03)
 
-- `apps/vela-api/src/routes/llm-chat.ts` is an 8K-linearly-structured (approximately 8 KB) Hono route with direct Google, OpenRouter, and Chutes branches; it returns `{text,raw}`.
+- `apps/vela-api/src/routes/llm-chat.ts` is an approximately 8 KB Hono route with direct Google, OpenRouter, and Chutes branches; it returns `{text,raw}`.
 - `apps/vela-api/src/routes/my-dictionaries.ts` has **another**, authenticated LLM implementation: `POST /my-dictionaries/analyze` streams Google and OpenRouter responses as SSE events (`metadata`, `chunk`, `done`, `error`). This cannot be ignored when replacing the chat bridge.
 - `apps/vela-api/src/validation.ts` already defines `LLMBridgeRequestSchema` but the chat route does not use it. Its provider enum does not currently match every route.
 - `apps/vela/src/services/llm/index.ts` is a stateful `LLMService` with three browser-side provider wrappers, even though all three just call the backend.
