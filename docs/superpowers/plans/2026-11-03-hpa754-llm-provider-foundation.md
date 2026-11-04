@@ -15,7 +15,7 @@
 
 The latest [HPA-754 issue](https://linear.app/cwchanap/issue/HPA-754/llm-providers-add-openai-and-anthropic-drop-chutes-update-gemini) still specifies **Gemini Interactions API via `@google/genai`**, `packages/common/src/llm/models.ts`, and `generate()` on each provider adapter. This reviewed PR plan deliberately uses **GenerateContent REST**, `packages/common/src/contracts/llm.ts`, and one `stream()` per provider plus a public `generate()` collector. These are **intentional deviations, not yet reflected in Linear**; do not claim exact ticket/design alignment. The Interactions conflict is substantive because Vela stores only visible chat text while stateless thinking-based Interactions require preserving thought steps. The location/interface differences are internal implementation choices; all user-facing functionality stays in scope. Recommend synchronizing the Linear implementation notes to the reviewed PR design before implementing rather than silently replacing the review-approved plan.
 
-The ticket also calls for `llmClient.generate({provider,model,thinking,messages})`. Keep `thinking?: string` supported in the request **contract** and forwarded if provided, but the current UI does not select it until HPA-755; the backend supplies the registry default when absent.
+The ticket also calls for `llmClient.generate({provider,model,thinking,messages})`. Keep `thinking?: string` supported in the request **contract** and forwarded if provided, but the current UI does not select it until HPA-755; the backend supplies the registry default when absent. The ticket's Anthropic **default server-side refusal fallback** is explicitly included for supported Opus/Sonnet 5.5 models; Haiku 5.5 has no server-side fallback and remains an exception per Anthropic documentation.
 
 ## Constraints and accepted review decisions
 
@@ -99,7 +99,7 @@ Do not manufacture files that the compiler and tests show unnecessary; avoid opp
 2. **Greeting as model context:** UI inserts fake assistant-first turn; test that shared normalizer removes it while retaining actual subsequent turns.
 3. **Cache arithmetic:** Anthropic separates cached reads/writes from ordinary input; fixtures must show exact totals.
 4. **Gemini text-only signature trade-off:** Text-only replay on GenerateContent works without strict signature validation but may lose reasoning fidelity; verify two-turn context and document limitation.
-5. **Provider SDK/model drift:** Confirm current model IDs, field names, stream terminal events, default thinking/effort and API limits before shipping.
+5. **Provider SDK/model drift:** Confirm current model IDs, field names, stream terminal events, default thinking/effort, Anthropic beta server-side fallback behavior and API limits before shipping.
 6. **Stale saved models:** No migrations. Specific model-not-supported 400 is intentional; avoid silent fallback.
 7. **Cost exposure:** Protect chat with existing auth before enabling costly models; dictionary must not accidentally inherit server-key fallback.
 
@@ -112,7 +112,7 @@ Do not manufacture files that the compiler and tests show unnecessary; avoid opp
 - [ ] Re-read live `main` of chat and dictionary routes, chat page, dictionary page, settings store, auth middleware, CDK API stack, existing unit/E2E fixtures, and `apps/vela-api/README.md`.
 - [ ] Bootstrap `bun install --frozen-lockfile`, `bun --filter @vela/common build`. Record before-change results for targeted tests (no baseline claims in this planning-only commit).
 - [ ] Confirm `gemini-3.8-flash`/`gemini-4-argon` native `generationConfig.thinkingConfig.thinkingLevel`, GenerateContent streaming REST event shape, text-only history, Google finish reasons and usage metadata. No Interactions state or `@google/genai`.
-- [ ] Confirm SDK event formats and terminal error signals for OpenAI Responses and Anthropic Messages, Anthropic Opus/Sonnet/Haiku 5.5 native efforts, model-specific OpenAI 5.6 Sol effort values, cache fields, and model availability. Update the model matrix on this PR if provider docs differ.
+- [ ] Confirm SDK event formats and terminal error signals for OpenAI Responses and Anthropic Messages, Anthropic Opus/Sonnet/Haiku 5.5 native efforts, Anthropic streaming `fallbacks: 'default'` beta support (Haiku exception), model-specific OpenAI 5.6 Sol effort values, cache fields, and model availability. Update the model matrix on this PR if provider docs differ.
 - [ ] Verify actual staging/production API URL, HTTP status on a gateway timeout, and deployed integration/origin timeouts. Credentials can be supplied privately later for the live smoke.
 - [ ] Record exact commands, baseline failures, and feasibility conclusions on PR #80.
 
@@ -140,10 +140,10 @@ Do not manufacture files that the compiler and tests show unnecessary; avoid opp
 - [ ] Implement a single `collectStream` utility: aggregate text, remember last usage, fail on `error`, refusal, incomplete or missing terminal finish; default missing usage to zeros. No duplicated non-stream adapters.
 - [ ] Gemini: REST `:streamGenerateContent?alt=sse` with `generationConfig.thinkingConfig.thinkingLevel`; filter thought output, handle `finishReason: SAFETY/MAX_TOKENS` and usage. No sampling params. No function calling.
 - [ ] OpenAI: Responses streaming SDK; catch `response.failed`, `response.incomplete` and API exceptions; extract text deltas and correct usage.
-- [ ] Anthropic: Messages stream SDK, adaptive thinking + `output_config.effort`, top-level `cache_control: {type:'ephemeral'}`; text only; handle error/refusal; normalize `input_tokens + cache_read_input_tokens + cache_creation_input_tokens` exactly.
+- [ ] Anthropic: Messages stream SDK, adaptive thinking + `output_config.effort`, top-level `cache_control: {type:'ephemeral'}`; text only; normalize `input_tokens + cache_read_input_tokens + cache_creation_input_tokens` exactly. Enable native default **server-side refusal fallback** (`fallbacks: 'default'`, beta `server-side-fallback-2026-07-01`) for Opus/Sonnet 5.5 where supported; test streaming and serving-model identification. Haiku 5.5 has **no server-side fallback**; do not add a hand-coded fallback registry just for it. Surface unresolved refusals as errors. A successful fallback may include non-text control blocks and per-attempt billing metadata; do not display those blocks or falsely add final usage across attempts.
 - [ ] OpenRouter: existing Chat Completions REST stream and referer/app name headers, user-defined model IDs, current sampling behavior; convert finish/errors to normalized events.
 - [ ] Extract `readSseDataLines(body)` as one minimal async generator for the upstream fetch-based Google and OpenRouter adapters, reusing the UTF-8 `TextDecoder` buffering/flush logic from the existing dictionary route; ensure trailing data at EOF is processed. Do **not** duplicate the ~50-line reader in two adapters.
-- [ ] Write a small fixture test per adapter for: one text chunk, final usage, error/aborted/refused/incomplete terminal, empty results, missing usage; include nonzero cached tokens to lock `inputTokens` math.
+- [ ] Write a small fixture test per adapter for: one text chunk, final usage, error/aborted/refused/incomplete terminal, empty results, missing usage; include nonzero cached tokens to lock `inputTokens` math. Add Anthropic streamed fallback success, no-supported-fallback refusal, and Haiku 5.5 no-fallback cases.
 - [ ] Keep limits conservative: chat default ~4096, dictionary ~3072, low dictionary effort if supported; time-bound requests below gateway's ~29-second default. Never leak SDK errors containing keys or unfiltered `raw`.
 
 **Gate:** `bun --filter vela-api test`; `bun --filter vela-api compile`; `bun --filter @vela/common test`; `bun --filter @vela/common build`. **Commit Task 2 on PR #80.**
