@@ -1,6 +1,6 @@
 # HPA-754: Shared LLM Provider Foundation
 
-**Date:** 2026-11-03 · **Revised after PR #80 review:** 2026-11-03  
+**Date:** 2026-11-03 · **Revised after PR #80 and Linear alignment review:** 2026-11-04  
 **Linear:** https://linear.app/cwchanap/issue/HPA-754/llm-providers-add-openai-and-anthropic-drop-chutes-update-gemini  
 **Status:** Design proposal — implementation not started  
 **PR policy:** One HPA-754 branch and **one draft PR** for spec, plan, implementation, tests, and review fixes.
@@ -8,6 +8,14 @@
 ## Goal
 
 Support Google Gemini, OpenAI, Anthropic, and OpenRouter for Vela chat and Japanese sentence analysis, using one stateless browser client and one small backend adapter per provider. Remove Chutes. Centralize model IDs, native thinking capabilities and cache TTL metadata so HPA-755/758 need no duplicate provider rules.
+
+## Latest Linear ticket alignment (2026-11-04)
+
+The latest [HPA-754 ticket](https://linear.app/cwchanap/issue/HPA-754/llm-providers-add-openai-and-anthropic-drop-chutes-update-gemini) still explicitly specifies **Gemini Interactions via `@google/genai`**, registry file `src/llm/models.ts`, and per-adapter `generate()`. This review-approved PR design deliberately differs in three implementation choices: existing **GenerateContent REST**, a pure `src/contracts/llm.ts` subpath, and a common `generate()` collector over one provider `stream()` path. The registry path and adapter interface are internal implementation details; the Gemini API choice is substantive and the ticket should be synchronized before calling the requirements fully aligned.
+
+**Rationale for Gemini deviation:** Vela persists only visible text, while Interactions stateless multi-turn with thinking requires replay of prior model thought steps. The currently supported GenerateContent REST text-only flow is cheaper to integrate with the existing persisted data model; thought signatures are recommended for fidelity in text-only turns, mandatory for function-calling signatures (no tools are in HPA-754). Google documents Interactions as recommended for new projects, and GenerateContent as fully supported. Keep the explicit two-turn smoke gate. Do not silently add provider-side stored interactions or reasoning persistence to satisfy a wording mismatch.
+
+The ticket's `llmClient.generate({provider,model,thinking,messages})` contract remains supported with **optional** `thinking`; the current UI does not set it until HPA-755, so backend registry defaults apply. The user-facing scope and provider/model lists match the ticket.
 
 ## Existing code and deployment constraints
 
@@ -34,7 +42,7 @@ Real production streaming requires a separate deliberately scoped infrastructure
 
 ## Registry and shared contract
 
-File: `packages/common/src/contracts/llm.ts`, using one `LLM_PROVIDERS = ['google','openai','anthropic','openrouter'] as const` source, derived `LlmProvider` type, and registry data. Export via `packages/common/src/index.ts`. Backend Zod uses `z.enum(LLM_PROVIDERS)` and web `UserPreferences` / store use the derived type, not separately maintained literal unions. OpenRouter remains a valid provider with free-form model selection.
+File: `packages/common/src/contracts/llm.ts`, exported through a dedicated `@vela/common/contracts/llm` subpath, using one `LLM_PROVIDERS = ['google','openai','anthropic','openrouter'] as const` source, derived `LlmProvider` type, and registry data. It may also be re-exported through `packages/common/src/index.ts` for web callers, but the **API uses the pure subpath** to avoid importing query-client/Vue code from the root barrel. Backend Zod uses `z.enum(LLM_PROVIDERS)` and web `UserPreferences` / store use the derived type, not separately maintained literal unions. OpenRouter remains a valid provider with free-form model selection.
 
 | Provider | Model IDs | Supported effort/thinking | Cache TTL |
 | --- | --- | --- | --- |
@@ -87,9 +95,13 @@ apps/vela-api/src/routes/
   my-dictionaries.ts                   existing auth/CORS + normalize → stream → existing SSE frames
 ~~~
 
-**One vendor stream per adapter:** `stream(input): AsyncIterable<LlmEvent>`, using tiny vendor-event → `LlmEvent` mappers testable with recorded fixtures. Factory-level `collectStream` concatenates text, retains the latest usage, and throws on `error`/failure/incomplete termination. Do not duplicate `generate` code inside four adapters. For dictionary, translate `text` to `chunk`, surface `error` and keep existing `metadata`/`done` frames; emit `done` **only on successful terminal completion**. Never silently reclassify refusals, `MAX_TOKENS`, `SAFETY`, `response.failed` or `response.incomplete` as success. Distinguish harmless empty output from explicit refusal using the provider's terminal status.
+**CI packaging:** `@vela/common` currently publishes runtime JS through its gitignored `dist/`, while API code imports it only as erased TypeScript types. The new API runtime registry import requires: (a) exporting `./contracts/llm` in `packages/common/package.json`, (b) building common in `api-tests`, and (c) prepending the common build to the existing CDK `lambda:build` script so CDK tests and deployment bundle it consistently. Validate a clean CI checkout and Lambda bundle without accidental Vue/`@tanstack/vue-query` dependency.
+
+**One vendor stream per adapter:** `stream(input): AsyncIterable<LlmEvent>`, using tiny vendor-event → `LlmEvent` mappers testable with recorded fixtures. Factory-level `collectStream` concatenates text, retains the latest usage, and throws on `error`/failure/incomplete termination. Do not duplicate `generate` code inside four adapters. For dictionary, translate `text` to `chunk`, surface `error` and keep existing `metadata`/`done` frames; emit `done` **only on successful terminal completion**. Initial provider failures from a lazy async-generator stream are reported as **HTTP 200 with an SSE `error` frame**, not an old JSON 500; update route tests. Local auth/validation failures before streaming remain JSON 4xx. Never silently reclassify refusals, `MAX_TOKENS`, `SAFETY`, `response.failed` or `response.incomplete` as success. Distinguish harmless empty output from explicit refusal using the provider's terminal status.
 
 **Normalize once before any adapter:** choose the single system instruction from `system` and system-role messages deterministically; do not duplicate it. Drop leading non-user messages including Vela's decorative greeting (not real LLM output), then map the remaining user/assistant turns as text-only conversation. Test a first-send history that begins with the greeting. This is correct prompt hygiene regardless of whether a provider rejects assistant-first input. Current storage still saves only visible text; no thinking/signatures/tool calls are saved.
+
+**Shared SSE reader:** extract a tiny upstream `readSseDataLines(body)` generator from the old dictionary route for Google/OpenRouter fetch streams; do not repeat the UTF-8 decoder/line buffering. The browser dictionary SSE parser also flushes trailing data at EOF so no final event is lost if an upstream line lacks a newline.
 
 **Gemini:** Use the existing REST `:streamGenerateContent?alt=sse` endpoint for `gemini-3.8-flash`/`gemini-4-argon`, not the stateful Interactions API. REST `generationConfig.thinkingConfig.thinkingLevel` sets native `low|medium|high` (not Interactions' `generation_config.thinking_level`); do not set `temperature/top_p/top_k`. Use REST because the repo already does and a new SDK is unnecessary for text-only generation. GenerateContent text-only history **works without** resending thought signatures (they are recommended for reasoning fidelity but strictly required for in-turn function calling, which Vela does not perform). Preserve this explicit quality trade-off; verify a real two-turn chat on the deployed stack and do not claim thought-state continuity. Revisit signature persistence or Interactions only if a future feature actually needs it, not automatically as part of HPA-756.
 
@@ -118,9 +130,9 @@ apps/vela-api/src/routes/
 1. **Registry and validation:** tuple-derived provider types, exact model IDs, native thinking defaults/options and cache lifetimes; OpenRouter free-form; stale `gemini-2.5-flash-lite` returns an explicit model error.
 2. **Backend:** pure event-mapper fixtures for four providers, normalizer strips greeting and merges system, no thought/tool blocks in output, final usage semantics (including Anthropic cache arithmetic), abort/refusal/incomplete/`MAX_TOKENS`/`SAFETY` handling, missing keys and no leaked vendor raw payloads.
 3. **Auth/credentials:** chat requires auth; server key fallback only on authenticated chat; dictionary requires user key; CORS and auth tests still pass; all browser chat requests carry bearer token.
-4. **Dictionary SSE and UI:** locally progressive frames in order; explicit upstream errors and missing-`done` are errors, never a false success or stuck spinner. On production, assert **correct buffered final result**, not progressive chunks.
+4. **Dictionary SSE and UI:** locally progressive frames in order; explicit upstream errors and missing-`done` are errors, never a false success or stuck spinner. Include initial upstream 401/429/500 producing SSE error frames (HTTP 200 after stream start), and a trailing `data:` line without newline. On production, assert **correct buffered final result**, not progressive chunks.
 5. **Deployed smoke:** deploy current branch to supported stack/environment, test one chat and one Japanese dictionary analysis for each of four providers (with user-owned keys), 2-turn Gemini text context, record HTTP status, elapsed time/TTFB, 504s, cache usage availability, and buffering. No real credentials in CI. Missing credentials are reported **not verified**.
-6. **Repo gates:** `bun run test`, `bun run lint`, API compile, common build, web build/typechecks; run targeted tests at **every** implementation task checkpoint before its commit. E2E `apps/vela/e2e/api.spec.ts` and `llm-settings.spec.ts` are updated for auth/provider changes.
+6. **Repo gates:** `bun run test`, `bun run lint`, API compile, common build, web build/typechecks and `bun --cwd packages/cdk run lambda:build && bun --cwd packages/cdk run test:unit`; run targeted tests at **every** implementation task checkpoint before its commit. `api-tests` must succeed from a clean checkout. E2E `apps/vela/e2e/api.spec.ts` and `llm-settings.spec.ts` are updated for auth/provider changes.
 
 **Risks:** buffered production SSE; ~29-second default API budget (especially new thinking models); decorative assistant greeting in history; normalized cache arithmetic; SDK/model parameter drift; intentionally dropped old model settings. Do not claim live performance or test completion in this planning-only PR.
 
