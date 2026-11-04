@@ -11,6 +11,12 @@
 
 **Tech:** Bun, Hono, Zod, TypeScript, Vue/Pinia, Vitest, Bun test, Google/OpenRouter REST, official OpenAI and Anthropic SDKs.
 
+## Ticket alignment note (Linear updated 2026-11-04)
+
+The latest [HPA-754 issue](https://linear.app/cwchanap/issue/HPA-754/llm-providers-add-openai-and-anthropic-drop-chutes-update-gemini) still specifies **Gemini Interactions API via `@google/genai`**, `packages/common/src/llm/models.ts`, and `generate()` on each provider adapter. This reviewed PR plan deliberately uses **GenerateContent REST**, `packages/common/src/contracts/llm.ts`, and one `stream()` per provider plus a public `generate()` collector. These are **intentional deviations, not yet reflected in Linear**; do not claim exact ticket/design alignment. The Interactions conflict is substantive because Vela stores only visible chat text while stateless thinking-based Interactions require preserving thought steps. The location/interface differences are internal implementation choices; all user-facing functionality stays in scope. Recommend synchronizing the Linear implementation notes to the reviewed PR design before implementing rather than silently replacing the review-approved plan.
+
+The ticket also calls for `llmClient.generate({provider,model,thinking,messages})`. Keep `thinking?: string` supported in the request **contract** and forwarded if provided, but the current UI does not select it until HPA-755; the backend supplies the registry default when absent.
+
 ## Constraints and accepted review decisions
 
 - Keep one HPA-754 draft PR for implementation, tests, review fixes and acceptance. Do not open a second PR or mark Linear Done after docs alone.
@@ -23,6 +29,7 @@
 - Chat `/api/llm-chat` gains existing `requireAuth`, and browser uses `httpJsonAuth`. Keep server key fallback **only for authenticated chat** Google/OpenRouter. Dictionary `/analyze` remains user-key-only for all providers. Add focused auth regression tests and E2E adjustment.
 - Server chooses per-model native thinking **defaults** (registry) when omitted; **frontend does not send thinking** in this ticket. Dictionary applies low effort when supported. No temperature/sampling parameters for new models; OpenRouter behavior unchanged. Anthropic effort ≠ disable-thinking; do not create `none`.
 - Derive `LlmProvider` from a single `LLM_PROVIDERS` tuple; derive Zod enum, profile types, store types from it. Do not maintain repeated copies. Registry location is `packages/common/src/contracts/llm.ts`.
+- **Clean-checkout CI/runtime build:** `vela-api` currently imports only types from `@vela/common`; new runtime imports require a built `dist`. Add a dedicated `@vela/common/contracts/llm` subpath so the API/Lambda avoids the root barrel's `@tanstack/vue-query`/Vue imports. Build common before `api-tests` and inside the existing CDK `lambda:build` script, covering `cdk-tests`, `build-lint.yml`, and `deploy.yml`. A blanket `sideEffects:false` alone is not a substitute for using the light subpath and clean CI checks.
 - Define `inputTokens` as **including cached-read and cache-write tokens**; cachedInputTokens subset. Normalize Anthropic's sum, do not double-add cached tokens to OpenAI/Gemini. `outputTokens` includes reported reasoning when counted separately. Zero for absent metadata, never infer hits.
 - Preserve authenticated dictionary CRUD, chat history, TTS, and profile loading. Minimal Settings selector update; HPA-755 owns redesign/keys preference format, HPA-756 owns threads, HPA-758 owns picker/cache chip, HPA-757 owns TTS.
 - Chutes and stale model IDs get clear errors with the **rejected model** value; no old-provider/model migrations or compatibility shims.
@@ -39,6 +46,7 @@ packages/common/src/contracts/llm.test.ts
 apps/vela-api/src/llm/normalize.ts
 apps/vela-api/src/llm/types.ts
 apps/vela-api/src/llm/factory.ts
+apps/vela-api/src/llm/readSseDataLines.ts  # one upstream SSE/UTF-8 reader for Google + OpenRouter
 apps/vela-api/src/llm/providers/{google,openai,anthropic,openrouter}.ts
 apps/vela-api/test/llm/*                    # few focused mapper/normalization/factory tests
 
@@ -50,6 +58,9 @@ apps/vela/src/services/llm/llmClient.test.ts
 
 ~~~text
 packages/common/src/index.ts
+packages/common/package.json             # export pure ./contracts/llm subpath; avoid root barrel in API
+packages/cdk/package.json                # lambda:build first builds @vela/common
+.github/workflows/unit-test.yml          # api-tests builds @vela/common before test
 apps/vela-api/package.json                 # openai + @anthropic-ai/sdk; no @google/genai
 bun.lock
 apps/vela-api/src/validation.ts
@@ -116,6 +127,7 @@ Do not manufacture files that the compiler and tests show unnecessary; avoid opp
 - [ ] Implement normalizer: combine system instructions once, strip leading non-user turns (especially fake `GREETING_MESSAGE`), map history to ordered actual messages, reject unsupported model/effort with specific 400 including model ID, choose registry default if thinking absent.
 - [ ] Include unit fixtures for assistant-first history, multiple system messages, no prompt, mismatched provider/model, stale model, and normal user-assistant-user history.
 - [ ] Make backend Zod enum derive from `LLM_PROVIDERS`. Avoid handwritten provider union in validation.
+- [ ] Export `./contracts/llm` directly from `packages/common/package.json`; API runtime imports use that pure subpath rather than `@vela/common` root barrel. Add a common build step to `unit-test.yml` `api-tests` and prepend it in `packages/cdk/package.json` `lambda:build`; verify the resulting Lambda bundle does not include Vue/query-client dependencies.
 
 **Gate:** `bun --filter @vela/common test`; `bun --filter @vela/common build`; `bun --filter @vela/common lint`; `bun --filter vela-api test`; `bun --filter vela-api compile`. **Commit Task 1 on PR #80.**
 
@@ -130,6 +142,7 @@ Do not manufacture files that the compiler and tests show unnecessary; avoid opp
 - [ ] OpenAI: Responses streaming SDK; catch `response.failed`, `response.incomplete` and API exceptions; extract text deltas and correct usage.
 - [ ] Anthropic: Messages stream SDK, adaptive thinking + `output_config.effort`, top-level `cache_control: {type:'ephemeral'}`; text only; handle error/refusal; normalize `input_tokens + cache_read_input_tokens + cache_creation_input_tokens` exactly.
 - [ ] OpenRouter: existing Chat Completions REST stream and referer/app name headers, user-defined model IDs, current sampling behavior; convert finish/errors to normalized events.
+- [ ] Extract `readSseDataLines(body)` as one minimal async generator for the upstream fetch-based Google and OpenRouter adapters, reusing the UTF-8 `TextDecoder` buffering/flush logic from the existing dictionary route; ensure trailing data at EOF is processed. Do **not** duplicate the ~50-line reader in two adapters.
 - [ ] Write a small fixture test per adapter for: one text chunk, final usage, error/aborted/refused/incomplete terminal, empty results, missing usage; include nonzero cached tokens to lock `inputTokens` math.
 - [ ] Keep limits conservative: chat default ~4096, dictionary ~3072, low dictionary effort if supported; time-bound requests below gateway's ~29-second default. Never leak SDK errors containing keys or unfiltered `raw`.
 
@@ -154,7 +167,8 @@ Do not manufacture files that the compiler and tests show unnecessary; avoid opp
 
 - [ ] Keep dictionary CRUD, authenticated user-ID ownership, current origin/CORS checks and the existing Japanese analysis prompt unchanged.
 - [ ] Use the **same** shared normalizer and adapter stream as chat, but keep dictionary `user key required` (no new fallback). Apply low native effort when the model supports it, without browser-sent `thinking`.
-- [ ] Map internal `LlmEvent` to existing `metadata`/`chunk`/`error`/`done` SSE contract; preserve metadata `{provider,model,sentence}`.
+- [ ] Map internal `LlmEvent` to existing `metadata`/`chunk`/`error`/`done` SSE contract; preserve metadata `{provider,model,sentence}`. Keep only the outgoing SSE serializer here; move upstream byte/line splitting to the shared Google/OpenRouter reader.
+- [ ] **Pick one upstream error HTTP policy:** use **HTTP 200 with an SSE `error` frame** for failures after the SSE response begins (including initial provider 401/429 returned by lazy async generators), and reserve pre-stream JSON 4xx for local authentication/validation errors. Explicitly update old `my-dictionaries.test.ts` assertions that expected JSON 500 for initial upstream 4xx/5xx. Avoid pre-priming the generator solely to preserve old transport status.
 - [ ] Emit `done` only after provider successfully completes, not after malformed upstream data, refusal, canceled stream, `SAFETY`, `MAX_TOKENS` or failed/incomplete generation.
 - [ ] Test valid streaming (under local Bun), upstream errors, stream end without successful finish, cache usage, authentication, and all four providers. Avoid replacing the existing SSE contract with a new protocol.
 - [ ] Document **deployed buffering** and do not claim browser progress until API Gateway response streaming is explicitly delivered outside this ticket.
@@ -168,7 +182,7 @@ Do not manufacture files that the compiler and tests show unnecessary; avoid opp
 - [ ] Replace `LLMService` and three old browser providers with one stateless `llmClient`:
   - `generate({provider,model,apiKey,messages,system,...})` uses existing authenticated `httpJsonAuth`.
   - `analyzeSentenceStream({sentence,provider,model,apiKey},onEvent)` preserves authenticated SSE frames and uses a reusable minimal auth header helper or the same current session pattern. Do not use JSON-only helpers for a stream.
-- [ ] Move dictionary SSE decoding once. Skip/log malformed lines without swallowing valid `error`; reject on error, reject if EOF without `done`, and terminate loading on every outcome. Test split chunks and body end without done. Buffered deployed SSE is still parsed correctly.
+- [ ] Move dictionary SSE decoding once. Skip/log malformed lines without swallowing valid `error`; reject on error, **flush the final pending UTF-8/line buffer at EOF**, reject if EOF without `done`, and terminate loading on every outcome. Test split chunks, trailing `data:` without final newline, and body end without done. Buffered deployed SSE is still parsed correctly.
 - [ ] Chat passes provider/model/key snapshot explicitly per request, removes `syncLLMFromSettings` and stops sending `temperature:0.7`; greeting remains in UI but normalizer strips it from upstream history. Do not send `thinking` from the web yet.
 - [ ] Keep current single active-provider Settings UX, update registry-backed Google/OpenAI/Anthropic choices and OpenRouter custom model input, preserve per-provider keys and the old preference layout pending HPA-755. Remove Chutes references and tests without migration code.
 - [ ] Derive profile/store/provider type unions from `LLM_PROVIDERS`; delete browser provider class tests. Update chat page/service mocks and dictionary streaming tests.
@@ -179,7 +193,7 @@ Do not manufacture files that the compiler and tests show unnecessary; avoid opp
 
 ## Task 6 — Deploy and acceptance on **this** PR
 
-- [ ] Run complete project gates: `bun run test`; `bun run lint`; `bun --filter @vela/common build`; `bun --filter vela-api compile`; `bun --filter @vela/app build`. Capture exact commands, failures and fixes in PR notes.
+- [ ] Run complete project gates: `bun run test`; `bun run lint`; `bun --filter @vela/common build`; `bun --filter vela-api compile`; `bun --filter @vela/app build`; `bun --cwd packages/cdk run lambda:build && bun --cwd packages/cdk run test:unit`. Validate `api-tests`/Lambda builds from a clean checkout without a preexisting `packages/common/dist`. Capture exact commands, failures and fixes in PR notes.
 - [ ] **Deploy the branch to an appropriate development/staging stack** (never assume production). Check that API and CloudFront URLs point at the tested deployment, no real API keys are logged, and the tested commit SHA is recorded.
 - [ ] With private user-owned provider keys, run a chat completion **and** Japanese dictionary analysis for each of Google, OpenAI, Anthropic, OpenRouter. Record HTTP response, elapsed time and TTFB (if measurable), normalized usage where returned, gateway 504s, dictionary result, and whether chunks arrived progressively (they are expected to be buffered on this stack).
 - [ ] Test Gemini 2-turn text conversation and at least one empty/timeout/error case. Explicitly record reasoning-signature preservation as **not implemented**; text-only history acceptance is based on correct user-visible context, not retained internal thoughts.
