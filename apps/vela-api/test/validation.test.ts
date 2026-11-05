@@ -112,21 +112,34 @@ describe('LLMBridgeRequestSchema', () => {
     expect(result.success).toBe(false);
   });
 
-  test('rejects temperature out of range', () => {
+  test('strips the removed temperature field instead of forwarding it', () => {
     const result = LLMBridgeRequestSchema.safeParse({
       provider: 'google',
       prompt: 'Hello',
-      temperature: 3,
+      temperature: 0.7,
     });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect('temperature' in result.data).toBe(false);
+    }
+  });
+
+  test('rejects empty prompt with no messages', () => {
+    const result = LLMBridgeRequestSchema.safeParse({ provider: 'google', prompt: '' });
     expect(result.success).toBe(false);
   });
 
-  test('accepts optional fields', () => {
+  test('rejects an empty messages array with no prompt', () => {
+    const result = LLMBridgeRequestSchema.safeParse({ provider: 'google', messages: [] });
+    expect(result.success).toBe(false);
+  });
+
+  test('accepts optional fields including thinking', () => {
     const result = LLMBridgeRequestSchema.safeParse({
       provider: 'google',
       prompt: 'Hello',
-      model: 'gemini-pro',
-      temperature: 0.7,
+      model: 'gemini-3.8-flash',
+      thinking: 'low',
       maxTokens: 1000,
       appName: 'vela',
     });

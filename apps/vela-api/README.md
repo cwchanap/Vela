@@ -4,7 +4,7 @@ A Hono-based API for the Vela Japanese Learning App, migrated from the original 
 
 ## Features
 
-- **LLM Chat API**: Supports Google Gemini and OpenRouter providers
+- **LLM Chat API**: Google Gemini, OpenAI, Anthropic, and OpenRouter chat generation (requires authentication)
 - **Chat History API**: Save and retrieve chat conversations using DynamoDB
 - **AWS Lambda**: Designed to run as AWS Lambda functions
 - **CORS Support**: Built-in CORS handling for web applications and approved browser extensions
@@ -15,20 +15,29 @@ A Hono-based API for the Vela Japanese Learning App, migrated from the original 
 
 **POST /api/llm-chat**
 
-Send chat requests to LLM providers (Google Gemini or OpenRouter).
+**Requires Authentication**: Valid Cognito ID token in the `Authorization: Bearer <token>` header. Anonymous requests are rejected with 401 before any upstream provider call.
+
+Send chat requests to LLM providers (Google Gemini, OpenAI, Anthropic, or OpenRouter) and receive normalized `{text, usage}` JSON.
 
 ```json
 {
-  "provider": "google" | "openrouter",
-  "model": "gemini-2.5-flash-lite" | "openai/gpt-oss-20b:free",
+  "provider": "google" | "openai" | "anthropic" | "openrouter",
+  "model": "gemini-3.8-flash",
   "messages": [
     {"role": "user", "content": "Hello"},
     {"role": "assistant", "content": "Hi there!"}
   ],
-  "temperature": 0.7,
-  "maxTokens": 1024
+  "thinking": "low",
+  "maxTokens": 4096,
+  "apiKey": "user-provided key (required for OpenAI/Anthropic)"
 }
 ```
+
+- Provider, model, and thinking values are validated against the shared `@vela/common` registry; unsupported values are rejected with 400 naming the rejected model. OpenRouter accepts any model ID. `temperature` is no longer accepted.
+- Leading non-user messages (e.g. the web chat greeting) are stripped and all system instructions are combined server-side.
+- `maxTokens` is capped at the chat budget (4096).
+- Credentials: the user-provided `apiKey` takes precedence; Google and OpenRouter fall back to the server-side key only for authenticated requests. OpenAI and Anthropic always require a user-provided key.
+- Responds with `{ "text": string, "usage": { "inputTokens", "outputTokens", "cachedInputTokens", "cacheWriteTokens" } }`. Vendor payloads, thinking traces, and API keys are never echoed.
 
 ### Chat History API
 

@@ -31,14 +31,15 @@ export const LLMBridgeRequestSchema = z
     messages: z.array(ChatMessageSchema).optional(),
     prompt: z.string().optional(),
     system: z.string().optional(),
-    temperature: z.number().min(0).max(2).optional(),
+    /** Native effort/thinking level; validated against the model registry by the normalizer. */
+    thinking: z.string().optional(),
     maxTokens: z.number().int().positive().optional(),
     appName: z.string().optional(),
     referer: z.string().optional(),
     apiKey: z.string().min(1).optional(),
   })
-  .refine((data) => data.messages || data.prompt, {
-    message: 'Either messages or prompt must be provided',
+  .refine((data) => (data.messages?.length ?? 0) > 0 || (data.prompt?.length ?? 0) > 0, {
+    message: 'Either a nonempty prompt or messages must be provided',
     path: ['messages'],
   });
 
