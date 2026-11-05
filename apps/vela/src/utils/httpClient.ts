@@ -98,7 +98,12 @@ export async function httpJson<T = unknown>(input: RequestInfo, init?: RequestIn
 /**
  * Get Authorization header with JWT token from Cognito
  */
-async function getAuthHeaders(): Promise<Record<string, string>> {
+/**
+ * Get Authorization header with JWT token from Cognito. Reusable by
+ * non-JSON transports (e.g. the SSE dictionary stream) that cannot use
+ * httpJsonAuth because they must read the response body incrementally.
+ */
+export async function getAuthHeaders(): Promise<Record<string, string>> {
   try {
     const session = await fetchAuthSession();
     const idToken = session.tokens?.idToken?.toString();

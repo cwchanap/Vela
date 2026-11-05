@@ -262,10 +262,9 @@ import { ref, onMounted, computed } from 'vue';
 import { useQuasar } from 'quasar';
 import { storeToRefs } from 'pinia';
 import { useQueryClient } from '@tanstack/vue-query';
-import { fetchAuthSession } from 'aws-amplify/auth';
-import { config } from 'src/config';
 import { marked } from 'marked';
 import DOMPurify from 'dompurify';
+import { llmClient, describeLlmError } from 'src/services/llm';
 import {
   getMyDictionaries,
   deleteDictionaryEntry,
@@ -626,88 +625,43 @@ async function handleAskAI(entry: MyDictionaryEntry) {
   analyzing.value = true;
 
   try {
-    const session = await fetchAuthSession();
-    const idToken = session.tokens?.idToken?.toString();
-
-    if (!idToken) {
-      throw new Error('Not authenticated');
-    }
-
-    const response = await fetch(`${config.api.url}my-dictionaries/analyze`, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${idToken}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
+    // SSE decoding lives in the shared llmClient; the page only renders frames.
+    await llmClient.analyzeSentenceStream(
+      {
         sentence: entry.sentence,
         provider: provider.value,
         model: currentModel.value,
         apiKey: currentApiKey.value,
-      }),
-    });
-
-    if (!response.ok) {
-      const error = await response.json();
-      throw new Error(error.error || 'Failed to analyze sentence');
-    }
-
-    // Handle SSE streaming
-    const reader = response.body?.getReader();
-    const decoder = new TextDecoder();
-
-    if (!reader) {
-      throw new Error('No response body');
-    }
-
-    let buffer = '';
-
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split('\n');
-      buffer = lines.pop() || '';
-
-      for (const line of lines) {
-        if (line.startsWith('data: ')) {
-          const jsonStr = line.slice(6).trim();
-          if (!jsonStr) continue;
-
-          try {
-            const data = JSON.parse(jsonStr);
-
-            if (data.type === 'metadata') {
-              analysisResult.value = {
-                sentence: data.sentence,
-                analysis: '',
-                provider: data.provider,
-                model: data.model,
-              };
-            } else if (data.type === 'chunk') {
-              streamingText.value += data.text;
-            } else if (data.type === 'done') {
-              analyzing.value = false;
-              if (analysisResult.value) {
-                analysisResult.value.analysis = streamingText.value;
-              }
-            } else if (data.type === 'error') {
-              throw new Error(data.error);
-            }
-          } catch (e) {
-            console.error('Error parsing SSE data:', e);
-          }
+      },
+      (frame) => {
+        if (frame.type === 'metadata') {
+          analysisResult.value = {
+            sentence: frame.sentence,
+            analysis: '',
+            provider: frame.provider,
+            model: frame.model,
+          };
+        } else {
+          streamingText.value += frame.text;
         }
-      }
+      },
+    );
+    // The metadata frame assigned the ref inside the callback; the cast undoes
+    // control-flow narrowing that cannot see the closure assignment.
+    const result = analysisResult.value as SentenceAnalysis | null;
+    if (result) {
+      result.analysis = streamingText.value;
+      analysisResult.value = result;
     }
   } catch (err) {
-    analysisError.value = err instanceof Error ? err.message : 'Failed to analyze sentence';
+    analysisError.value = describeLlmError(err, 'Failed to analyze sentence');
     $q.notify({
       type: 'negative',
       message: analysisError.value,
       position: 'top',
     });
+  } finally {
+    // Loading is cleared on every outcome: success, error frame, and EOF-without-done.
     analyzing.value = false;
   }
 }

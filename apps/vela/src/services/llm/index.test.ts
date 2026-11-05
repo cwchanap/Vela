@@ -1,327 +1,324 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 
-// Mock config
-vi.mock('../../config', () => ({
-  config: {
-    app: { name: 'TestApp' },
-  },
+vi.mock('aws-amplify/auth', () => ({
+  fetchAuthSession: vi.fn(),
 }));
 
-// Use vi.hoisted to avoid temporal dead zone issues with hoisted vi.mock()
-const {
-  mockGoogleGenerate,
-  mockGoogleSetModel,
-  mockGoogleGetModel,
-  mockOpenRouterGenerate,
-  mockOpenRouterSetModel,
-  mockOpenRouterGetModel,
-  mockChutesGenerate,
-  mockChutesSetModel,
-  mockChutesGetModel,
-  MockGoogleProvider,
-  MockOpenRouterProvider,
-  MockChutesProvider,
-} = vi.hoisted(() => {
-  const mockGoogleGenerate = vi.fn();
-  const mockGoogleSetModel = vi.fn();
-  const mockGoogleGetModel = vi.fn().mockReturnValue('gemini-2.5-flash-lite');
-  const mockOpenRouterGenerate = vi.fn();
-  const mockOpenRouterSetModel = vi.fn();
-  const mockOpenRouterGetModel = vi.fn().mockReturnValue('openrouter-default');
-  const mockChutesGenerate = vi.fn();
-  const mockChutesSetModel = vi.fn();
-  const mockChutesGetModel = vi.fn().mockReturnValue('chutes-default');
+vi.mock('../../config', () => ({
+  config: { api: { url: 'http://localhost:9005/api/' } },
+}));
 
-  const MockGoogleProvider = vi.fn().mockImplementation(() => ({
-    name: 'google',
-    generate: mockGoogleGenerate,
-    setModel: mockGoogleSetModel,
-    getModel: mockGoogleGetModel,
-  }));
+import { fetchAuthSession } from 'aws-amplify/auth';
+import { llmClient, describeLlmError, type AnalysisFrame } from './index';
 
-  const MockOpenRouterProvider = vi.fn().mockImplementation(() => ({
-    name: 'openrouter',
-    generate: mockOpenRouterGenerate,
-    setModel: mockOpenRouterSetModel,
-    getModel: mockOpenRouterGetModel,
-  }));
+const mockFetchAuthSession = vi.mocked(fetchAuthSession);
 
-  const MockChutesProvider = vi.fn().mockImplementation(() => ({
-    name: 'chutes',
-    generate: mockChutesGenerate,
-    setModel: mockChutesSetModel,
-    getModel: mockChutesGetModel,
-  }));
-
+/** Build a mocked SSE Response whose body delivers `chunks` as separate reads. */
+function sseResponse(chunks: string[], ok = true, status = 200) {
+  const encoder = new TextEncoder();
+  let index = 0;
   return {
-    mockGoogleGenerate,
-    mockGoogleSetModel,
-    mockGoogleGetModel,
-    mockOpenRouterGenerate,
-    mockOpenRouterSetModel,
-    mockOpenRouterGetModel,
-    mockChutesGenerate,
-    mockChutesSetModel,
-    mockChutesGetModel,
-    MockGoogleProvider,
-    MockOpenRouterProvider,
-    MockChutesProvider,
+    ok,
+    status,
+    headers: new Headers({ 'content-type': 'text/event-stream' }),
+    body: {
+      getReader: () => ({
+        read: async () =>
+          index < chunks.length
+            ? { done: false, value: encoder.encode(chunks[index++]) }
+            : { done: true, value: undefined },
+        cancel: async () => {},
+      }),
+    },
   };
+}
+
+describe('llmClient.generate', () => {
+  let fetchMock: ReturnType<typeof vi.fn>;
+  let originalFetch: typeof global.fetch;
+
+  beforeEach(() => {
+    originalFetch = global.fetch;
+    fetchMock = vi.fn();
+    global.fetch = fetchMock as unknown as typeof global.fetch;
+    mockFetchAuthSession.mockResolvedValue({
+      tokens: { idToken: { toString: () => 'mock-id-token' } },
+    } as Awaited<ReturnType<typeof fetchAuthSession>>);
+  });
+
+  afterEach(() => {
+    global.fetch = originalFetch;
+    vi.resetAllMocks();
+  });
+
+  it('sends an authenticated JSON POST to the chat endpoint and returns the response', async () => {
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      headers: new Headers({ 'content-type': 'application/json' }),
+      json: async () => ({
+        text: 'こんにちは',
+        usage: { inputTokens: 3, outputTokens: 4, cachedInputTokens: 0, cacheWriteTokens: 0 },
+      }),
+    });
+
+    const result = await llmClient.generate({
+      provider: 'google',
+      model: 'gemini-3.8-flash',
+      apiKey: 'user-key',
+      system: 'You are helpful',
+      messages: [{ role: 'user', content: 'Hello' }],
+    });
+
+    expect(result.text).toBe('こんにちは');
+    expect(result.usage.outputTokens).toBe(4);
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe('http://localhost:9005/api/llm-chat');
+    expect(init.method).toBe('POST');
+    expect(init.headers).toMatchObject({
+      Authorization: 'Bearer mock-id-token',
+      'Content-Type': 'application/json',
+    });
+    expect(JSON.parse(String(init.body))).toEqual({
+      provider: 'google',
+      model: 'gemini-3.8-flash',
+      apiKey: 'user-key',
+      system: 'You are helpful',
+      messages: [{ role: 'user', content: 'Hello' }],
+    });
+  });
+
+  it('rejects with the server error message and status on a non-ok response', async () => {
+    fetchMock.mockResolvedValueOnce({
+      ok: false,
+      status: 400,
+      headers: new Headers({ 'content-type': 'application/json' }),
+      json: async () => ({ error: 'Unsupported model' }),
+    });
+
+    const error = await llmClient
+      .generate({ provider: 'openai', messages: [{ role: 'user', content: 'hi' }] })
+      .catch((e) => e);
+
+    expect(error).toBeInstanceOf(Error);
+    expect(error.message).toBe('Unsupported model');
+    expect(error.status).toBe(400);
+  });
 });
 
-vi.mock('./providers/googleProvider', () => ({
-  GoogleProvider: MockGoogleProvider,
-}));
+describe('llmClient.analyzeSentenceStream', () => {
+  let fetchMock: ReturnType<typeof vi.fn>;
+  let originalFetch: typeof global.fetch;
 
-vi.mock('./providers/openrouterProvider', () => ({
-  OpenRouterProvider: MockOpenRouterProvider,
-}));
-
-vi.mock('./providers/chutesProvider', () => ({
-  ChutesProvider: MockChutesProvider,
-}));
-
-import { LLMService } from './index';
-
-describe('LLMService', () => {
   beforeEach(() => {
-    vi.clearAllMocks();
-    mockGoogleGetModel.mockReturnValue('gemini-2.5-flash-lite');
-    mockOpenRouterGetModel.mockReturnValue('openrouter-default');
-    mockChutesGetModel.mockReturnValue('chutes-default');
-    MockGoogleProvider.mockImplementation(() => ({
-      name: 'google',
-      generate: mockGoogleGenerate,
-      setModel: mockGoogleSetModel,
-      getModel: mockGoogleGetModel,
-    }));
-    MockOpenRouterProvider.mockImplementation(() => ({
-      name: 'openrouter',
-      generate: mockOpenRouterGenerate,
-      setModel: mockOpenRouterSetModel,
-      getModel: mockOpenRouterGetModel,
-    }));
-    MockChutesProvider.mockImplementation(() => ({
-      name: 'chutes',
-      generate: mockChutesGenerate,
-      setModel: mockChutesSetModel,
-      getModel: mockChutesGetModel,
-    }));
+    originalFetch = global.fetch;
+    fetchMock = vi.fn();
+    global.fetch = fetchMock as unknown as typeof global.fetch;
+    mockFetchAuthSession.mockResolvedValue({
+      tokens: { idToken: { toString: () => 'mock-id-token' } },
+    } as Awaited<ReturnType<typeof fetchAuthSession>>);
   });
 
-  describe('constructor', () => {
-    it('initializes with google as default provider', () => {
-      const service = new LLMService();
-      expect(service.getProviderName()).toBe('google');
-    });
+  afterEach(() => {
+    global.fetch = originalFetch;
+    vi.resetAllMocks();
   });
 
-  describe('getProviderName', () => {
-    it('returns the current provider name', () => {
-      const service = new LLMService();
-      expect(service.getProviderName()).toBe('google');
+  const startStream = async (response: unknown) => {
+    fetchMock.mockResolvedValueOnce(response);
+    const events: AnalysisFrame[] = [];
+    await llmClient.analyzeSentenceStream(
+      {
+        sentence: '日本語を勉強しています',
+        provider: 'google',
+        model: 'gemini-3.8-flash',
+        apiKey: 'user-key',
+      },
+      (frame) => events.push(frame),
+    );
+    return events;
+  };
+
+  it('sends an authenticated POST with the provider snapshot', async () => {
+    await startStream(sseResponse(['data: {"type":"done"}\n\n']));
+
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe('http://localhost:9005/api/my-dictionaries/analyze');
+    expect(init.method).toBe('POST');
+    expect(init.headers).toMatchObject({
+      Authorization: 'Bearer mock-id-token',
+      'Content-Type': 'application/json',
     });
-  });
-
-  describe('setProvider', () => {
-    it('switches to openrouter provider', () => {
-      const service = new LLMService();
-      service.setProvider('openrouter');
-      expect(service.getProviderName()).toBe('openrouter');
-    });
-
-    it('switches to chutes provider', () => {
-      const service = new LLMService();
-      service.setProvider('chutes');
-      expect(service.getProviderName()).toBe('chutes');
-    });
-
-    it('switches back to google provider', () => {
-      const service = new LLMService();
-      service.setProvider('openrouter');
-      service.setProvider('google');
-      expect(service.getProviderName()).toBe('google');
-    });
-
-    it('accepts optional model parameter', () => {
-      const service = new LLMService();
-      service.setProvider('google', 'gemini-pro');
-      expect(service.getProviderName()).toBe('google');
-    });
-
-    it('reuses cached provider instance when switching back', () => {
-      const service = new LLMService();
-      const initialCallCount = MockGoogleProvider.mock.calls.length;
-      service.setProvider('openrouter');
-      service.setProvider('google'); // switch back to already-initialized google
-
-      // GoogleProvider should not have been called again
-      expect(MockGoogleProvider.mock.calls.length).toBe(initialCallCount);
-    });
-
-    it('falls back to google when an unsupported provider name is forced in', () => {
-      const service = new LLMService();
-      const initialCallCount = MockGoogleProvider.mock.calls.length;
-
-      service.setProvider('unsupported-provider' as never);
-
-      expect(MockGoogleProvider).toHaveBeenCalledTimes(initialCallCount + 1);
-      expect(service.getProviderName()).toBe('google');
+    expect(JSON.parse(String(init.body))).toEqual({
+      sentence: '日本語を勉強しています',
+      provider: 'google',
+      model: 'gemini-3.8-flash',
+      apiKey: 'user-key',
     });
   });
 
-  describe('setModel', () => {
-    it('sets model on current provider', () => {
-      const service = new LLMService();
-      service.setModel('gemini-pro');
-      expect(mockGoogleSetModel).toHaveBeenCalledWith('gemini-pro');
-    });
+  it('delivers frames in order and resolves on done (buffered single-chunk body)', async () => {
+    // Deployed API Gateway/CloudFront buffer the whole response into one body
+    // chunk; the same line-splitting logic must parse it.
+    const events = await startStream(
+      sseResponse([
+        'data: {"type":"metadata","sentence":"日本語を勉強しています","provider":"google","model":"gemini-3.8-flash"}\n\n' +
+          'data: {"type":"chunk","text":"This means "}\n\n' +
+          'data: {"type":"chunk","text":"studying Japanese."}\n\n' +
+          'data: {"type":"done"}\n\n',
+      ]),
+    );
 
-    it('sets model on openrouter when that provider is active', () => {
-      const service = new LLMService();
-      service.setProvider('openrouter');
-      service.setModel('gpt-4');
-      expect(mockOpenRouterSetModel).toHaveBeenCalledWith('gpt-4');
-    });
+    expect(events).toEqual([
+      {
+        type: 'metadata',
+        sentence: '日本語を勉強しています',
+        provider: 'google',
+        model: 'gemini-3.8-flash',
+      },
+      { type: 'chunk', text: 'This means ' },
+      { type: 'chunk', text: 'studying Japanese.' },
+    ]);
   });
 
-  describe('getModel', () => {
-    it('returns model from current provider', () => {
-      const service = new LLMService();
-      const model = service.getModel();
-      expect(mockGoogleGetModel).toHaveBeenCalled();
-      expect(model).toBe('gemini-2.5-flash-lite');
-    });
+  it('reassembles frames split across reads, including a UTF-8 character split mid-stream', async () => {
+    const whole = 'data: {"type":"chunk","text":"日本語"}\n\n' + 'data: {"type":"done"}\n\n';
+    // Split at byte offsets that cut mid-frame and inside a multi-byte char
+    // (日 at bytes 27..29 of the encoded whole).
+    const bytes = new TextEncoder().encode(whole);
+    const reads = [bytes.slice(0, 24), bytes.slice(24, 28), bytes.slice(28)];
 
-    it('returns model from openrouter when that provider is active', () => {
-      const service = new LLMService();
-      service.setProvider('openrouter');
-      const model = service.getModel();
-      expect(model).toBe('openrouter-default');
+    const events: AnalysisFrame[] = [];
+    let index = 0;
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      headers: new Headers({ 'content-type': 'text/event-stream' }),
+      body: {
+        getReader: () => ({
+          read: async () =>
+            index < reads.length
+              ? { done: false, value: reads[index++] }
+              : { done: true, value: undefined },
+          cancel: async () => {},
+        }),
+      },
     });
+    await llmClient.analyzeSentenceStream({ sentence: '日本語', provider: 'google' }, (frame) =>
+      events.push(frame),
+    );
+
+    expect(events).toEqual([{ type: 'chunk', text: '日本語' }]);
   });
 
-  describe('setApiKey', () => {
-    it('stores api key for use in generate', async () => {
-      const service = new LLMService();
-      service.setApiKey('my-api-key');
-      mockGoogleGenerate.mockResolvedValue({ text: 'response', raw: {} });
+  it('flushes a trailing data: line that has no final newline', async () => {
+    const events: AnalysisFrame[] = [];
+    fetchMock.mockResolvedValueOnce(sseResponse(['data: {"type":"chunk","text":"tail text"}']));
+    // Direct call without provider snapshot fields to keep the test focused.
+    await llmClient
+      .analyzeSentenceStream({ sentence: 's', provider: 'google' }, (f) => events.push(f))
+      .catch(() => events.push({ type: 'chunk', text: '__rejected__' }));
 
-      await service.generate({ prompt: 'test' });
-
-      expect(mockGoogleGenerate).toHaveBeenCalledWith(
-        expect.objectContaining({ apiKey: 'my-api-key' }),
-      );
-    });
-
-    it('trims whitespace from api key', async () => {
-      const service = new LLMService();
-      service.setApiKey('  my-key  ');
-      mockGoogleGenerate.mockResolvedValue({ text: 'response', raw: {} });
-
-      await service.generate({ prompt: 'test' });
-
-      expect(mockGoogleGenerate).toHaveBeenCalledWith(
-        expect.objectContaining({ apiKey: 'my-key' }),
-      );
-    });
-
-    it('clears a previously set key when called with undefined', async () => {
-      const service = new LLMService();
-      service.setApiKey('stale-key');
-      service.setApiKey(undefined);
-      mockGoogleGenerate.mockResolvedValue({ text: 'response', raw: {} });
-
-      await service.generate({ prompt: 'test' });
-
-      const callArg = mockGoogleGenerate.mock.calls[0][0];
-      expect(callArg.apiKey).toBeUndefined();
-    });
+    // No done frame follows the flushed chunk, so the stream must reject —
+    // but only AFTER the trailing frame was delivered.
+    expect(events[0]).toEqual({ type: 'chunk', text: 'tail text' });
+    expect(events[events.length - 1]).toEqual({ type: 'chunk', text: '__rejected__' });
   });
 
-  describe('generate', () => {
-    it('calls provider generate with request', async () => {
-      const service = new LLMService();
-      const mockResponse = { text: 'Hello!', raw: {} };
-      mockGoogleGenerate.mockResolvedValue(mockResponse);
+  it('rejects when the body ends without a done frame', async () => {
+    fetchMock.mockResolvedValueOnce(
+      sseResponse(['data: {"type":"metadata","sentence":"s","provider":"google","model":"m"}\n\n']),
+    );
 
-      const result = await service.generate({ prompt: 'Say hello' });
-
-      expect(mockGoogleGenerate).toHaveBeenCalledWith({ prompt: 'Say hello' });
-      expect(result).toEqual(mockResponse);
-    });
-
-    it('passes apiKey from service to request when set', async () => {
-      const service = new LLMService();
-      service.setApiKey('test-key');
-      const mockResponse = { text: 'Response', raw: {} };
-      mockGoogleGenerate.mockResolvedValue(mockResponse);
-
-      await service.generate({ prompt: 'test' });
-
-      expect(mockGoogleGenerate).toHaveBeenCalledWith(
-        expect.objectContaining({ apiKey: 'test-key' }),
-      );
-    });
-
-    it('preserves existing apiKey in request when service key not set', async () => {
-      const service = new LLMService();
-      const mockResponse = { text: 'Response', raw: {} };
-      mockGoogleGenerate.mockResolvedValue(mockResponse);
-
-      await service.generate({ prompt: 'test', apiKey: 'request-key' });
-
-      // apiKey from the original request should be present
-      const callArg = mockGoogleGenerate.mock.calls[0][0];
-      expect(callArg.apiKey).toBe('request-key');
-    });
-
-    it('delegates to openrouter when that provider is active', async () => {
-      const service = new LLMService();
-      service.setProvider('openrouter');
-      const mockResponse = { text: 'OpenRouter response', raw: {} };
-      mockOpenRouterGenerate.mockResolvedValue(mockResponse);
-
-      const result = await service.generate({ prompt: 'test' });
-
-      expect(mockOpenRouterGenerate).toHaveBeenCalled();
-      expect(result).toEqual(mockResponse);
-    });
-
-    it('delegates to chutes when that provider is active', async () => {
-      const service = new LLMService();
-      service.setProvider('chutes');
-      const mockResponse = { text: 'Chutes response', raw: {} };
-      mockChutesGenerate.mockResolvedValue(mockResponse);
-
-      const result = await service.generate({ prompt: 'test' });
-
-      expect(mockChutesGenerate).toHaveBeenCalled();
-      expect(result).toEqual(mockResponse);
-    });
-
-    it('does not mutate the original request object', async () => {
-      const service = new LLMService();
-      service.setApiKey('service-key');
-      mockGoogleGenerate.mockResolvedValue({ text: 'Response', raw: {} });
-
-      const originalRequest = { prompt: 'test' };
-      await service.generate(originalRequest);
-
-      // Original request should not have apiKey added
-      expect(Object.keys(originalRequest)).not.toContain('apiKey');
-    });
+    await expect(
+      llmClient.analyzeSentenceStream({ sentence: 's', provider: 'google' }, () => {}),
+    ).rejects.toThrow(/ended without completion/i);
   });
 
-  describe('singleton llmService export', () => {
-    it('exports llmService singleton', async () => {
-      const { llmService } = await import('./index');
-      expect(llmService).toBeDefined();
-      expect(typeof llmService.generate).toBe('function');
-      expect(typeof llmService.setProvider).toBe('function');
-      expect(typeof llmService.setModel).toBe('function');
-      expect(typeof llmService.getModel).toBe('function');
-      expect(typeof llmService.setApiKey).toBe('function');
+  it('rejects with the error frame message', async () => {
+    fetchMock.mockResolvedValueOnce(
+      sseResponse(['data: {"type":"error","error":"Gemini request failed (401)"}\n\n']),
+    );
+
+    await expect(
+      llmClient.analyzeSentenceStream({ sentence: 's', provider: 'google' }, () => {}),
+    ).rejects.toThrow('Gemini request failed (401)');
+  });
+
+  it('skips malformed lines without swallowing later valid frames', async () => {
+    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const events = await startStream(
+      sseResponse([
+        'data: {"type":"metadata","sentence":"s","provider":"google","model":"m"}\n\n',
+        'data: {invalid-json}\n\n',
+        'data: {"type":"chunk","text":"still valid"}\n\n',
+        'data: {"type":"done"}\n\n',
+      ]),
+    );
+
+    expect(consoleErrorSpy).toHaveBeenCalled();
+    expect(events).toEqual([
+      { type: 'metadata', sentence: 's', provider: 'google', model: 'm' },
+      { type: 'chunk', text: 'still valid' },
+    ]);
+    consoleErrorSpy.mockRestore();
+  });
+
+  it('rejects with the JSON error message on a non-ok response', async () => {
+    fetchMock.mockResolvedValueOnce({
+      ok: false,
+      status: 400,
+      headers: new Headers({ 'content-type': 'application/json' }),
+      json: async () => ({ error: 'Missing API key for Anthropic provider.' }),
     });
+
+    await expect(
+      llmClient.analyzeSentenceStream(
+        { sentence: 's', provider: 'anthropic', apiKey: '' },
+        () => {},
+      ),
+    ).rejects.toThrow('Missing API key for Anthropic provider.');
+  });
+
+  it('rejects when there is no response body', async () => {
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      headers: new Headers({ 'content-type': 'text/event-stream' }),
+      body: null,
+    });
+
+    await expect(
+      llmClient.analyzeSentenceStream({ sentence: 's', provider: 'google' }, () => {}),
+    ).rejects.toThrow('No response body');
+  });
+
+  it('rejects when no auth token is available', async () => {
+    mockFetchAuthSession.mockResolvedValue({
+      tokens: {},
+    } as Awaited<ReturnType<typeof fetchAuthSession>>);
+
+    await expect(
+      llmClient.analyzeSentenceStream({ sentence: 's', provider: 'google' }, () => {}),
+    ).rejects.toThrow('Authentication required');
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
+describe('describeLlmError', () => {
+  it('maps a 504 gateway timeout to a helpful message', () => {
+    const error = Object.assign(new Error('Gateway Timeout'), { status: 504 });
+    expect(describeLlmError(error)).toBe(
+      'The AI provider timed out before responding. Try a shorter request or a lighter model.',
+    );
+  });
+
+  it('passes through ordinary error messages', () => {
+    expect(describeLlmError(new Error('Unsupported model'))).toBe('Unsupported model');
+  });
+
+  it('falls back for non-Error values', () => {
+    expect(describeLlmError(undefined, 'Failed to get AI response')).toBe(
+      'Failed to get AI response',
+    );
   });
 });

@@ -1,6 +1,54 @@
 import { test, expect } from '@playwright/test';
+import {
+  CognitoIdentityProviderClient,
+  AdminInitiateAuthCommand,
+} from '@aws-sdk/client-cognito-identity-provider';
 
 const API_BASE_URL = process.env.VITE_API_URL || 'http://localhost:9005';
+
+const COGNITO_TEST_ENV = {
+  email: process.env.TEST_EMAIL,
+  password: process.env.TEST_PASSWORD,
+  userPoolId: process.env.VITE_COGNITO_USER_POOL_ID,
+  clientId: process.env.VITE_COGNITO_TEST_CLIENT_ID,
+  region: process.env.VITE_AWS_REGION,
+};
+
+const hasCognitoTestEnv = Object.values(COGNITO_TEST_ENV).every(Boolean);
+
+let cachedIdToken: string | undefined;
+
+/** Obtain a valid Cognito ID token for raw authenticated API calls, mirroring e2e/fixtures/auth.ts. */
+async function getIdToken(): Promise<string> {
+  if (cachedIdToken) return cachedIdToken;
+
+  const client = new CognitoIdentityProviderClient({
+    region: COGNITO_TEST_ENV.region,
+  });
+  const response = await client.send(
+    new AdminInitiateAuthCommand({
+      UserPoolId: COGNITO_TEST_ENV.userPoolId,
+      ClientId: COGNITO_TEST_ENV.clientId,
+      AuthFlow: 'ADMIN_USER_PASSWORD_AUTH',
+      AuthParameters: {
+        USERNAME: COGNITO_TEST_ENV.email!,
+        PASSWORD: COGNITO_TEST_ENV.password!,
+      },
+    }),
+  );
+
+  const idToken = response.AuthenticationResult?.IdToken;
+  if (!idToken) {
+    throw new Error('AdminInitiateAuth did not return an ID token');
+  }
+  cachedIdToken = idToken;
+  return idToken;
+}
+
+const authHeaders = async (): Promise<Record<string, string>> => ({
+  'Content-Type': 'application/json',
+  Authorization: `Bearer ${await getIdToken()}`,
+});
 
 test.describe('Vela API E2E Tests', () => {
   test.beforeAll(async () => {
@@ -154,40 +202,23 @@ test.describe('Vela API E2E Tests', () => {
   });
 
   test.describe('LLM Chat API', () => {
-    test.describe('POST /api/llm-chat/', () => {
-      test('should reject invalid JSON', async () => {
-        const response = await fetch(`${API_BASE_URL}/api/llm-chat/`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: 'invalid json {',
-        });
-
-        expect(response.status).toBe(400);
-        const data = await response.json();
-        expect(data.error).toBeDefined();
+    test('should reject unauthenticated requests with 401 before validation', async () => {
+      const response = await fetch(`${API_BASE_URL}/api/llm-chat/`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: 'invalid json {',
       });
 
-      test('should reject missing provider', async () => {
-        const requestBody = {
-          model: 'test-model',
-          messages: [{ role: 'user', content: 'Hello' }],
-        };
+      // Authentication precedes validation and every upstream provider call.
+      expect(response.status).toBe(401);
+      const data = await response.json();
+      expect(data.error).toBeDefined();
+    });
 
-        const response = await fetch(`${API_BASE_URL}/api/llm-chat/`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify(requestBody),
-        });
-
-        expect(response.status).toBe(400);
-        const data = await response.json();
-        expect(data.error).toBeDefined();
-        expect(data.error).toContain('ZodError');
-      });
+    test.describe('authenticated', () => {
+      test.skip(!hasCognitoTestEnv, 'Cognito test credentials not configured');
 
       test('should reject invalid provider', async () => {
         const requestBody = {
@@ -198,9 +229,7 @@ test.describe('Vela API E2E Tests', () => {
 
         const response = await fetch(`${API_BASE_URL}/api/llm-chat/`, {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
+          headers: await authHeaders(),
           body: JSON.stringify(requestBody),
         });
 
@@ -218,9 +247,7 @@ test.describe('Vela API E2E Tests', () => {
 
         const response = await fetch(`${API_BASE_URL}/api/llm-chat/`, {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
+          headers: await authHeaders(),
           body: JSON.stringify(requestBody),
         });
 
@@ -238,9 +265,7 @@ test.describe('Vela API E2E Tests', () => {
 
         const response = await fetch(`${API_BASE_URL}/api/llm-chat/`, {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
+          headers: await authHeaders(),
           body: JSON.stringify(requestBody),
         });
 
@@ -250,75 +275,42 @@ test.describe('Vela API E2E Tests', () => {
         expect(data.error).toContain('ZodError');
       });
 
-      test('should reject invalid temperature range', async () => {
-        const requestBody = {
-          provider: 'google',
-          messages: [{ role: 'user', content: 'Hello' }],
-          temperature: 5, // Invalid: should be 0-2
-        };
-
-        const response = await fetch(`${API_BASE_URL}/api/llm-chat/`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify(requestBody),
-        });
-
-        expect(response.status).toBe(400);
-        const data = await response.json();
-        expect(data.error).toBeDefined();
-        expect(data.error).toContain('ZodError');
-      });
-
-      test('should accept valid Google provider request', async () => {
+      test('should reject stale model ids with the rejected model in the message', async () => {
         const requestBody = {
           provider: 'google',
           model: 'gemini-2.5-flash-lite',
           messages: [{ role: 'user', content: 'Hello, test message' }],
-          temperature: 0.7,
         };
 
         const response = await fetch(`${API_BASE_URL}/api/llm-chat/`, {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
+          headers: await authHeaders(),
           body: JSON.stringify(requestBody),
         });
 
-        // This might return 500 if API keys are not configured, but validation should pass
-        expect([200, 500]).toContain(response.status);
-
-        if (response.status === 200) {
-          const data = await response.json();
-          expect(data).toHaveProperty('text');
-        }
+        expect(response.status).toBe(400);
+        const data = await response.json();
+        expect(data.error).toContain('Unsupported model');
+        expect(data.error).toContain('gemini-2.5-flash-lite');
       });
 
-      test('should accept valid OpenRouter provider request', async () => {
+      test('should require a user API key for Anthropic chat', async () => {
+        // OpenAI/Anthropic have no server-key fallback, so this stays a local
+        // validation failure regardless of server environment configuration.
         const requestBody = {
-          provider: 'openrouter',
-          model: 'openai/gpt-oss-20b:free',
-          prompt: 'Hello, test message',
-          temperature: 0.7,
+          provider: 'anthropic',
+          messages: [{ role: 'user', content: 'Hello, test message' }],
         };
 
         const response = await fetch(`${API_BASE_URL}/api/llm-chat/`, {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
+          headers: await authHeaders(),
           body: JSON.stringify(requestBody),
         });
 
-        // This might return 500 if API keys are not configured, but validation should pass
-        expect([200, 500]).toContain(response.status);
-
-        if (response.status === 200) {
-          const data = await response.json();
-          expect(data).toHaveProperty('text');
-        }
+        expect(response.status).toBe(400);
+        const data = await response.json();
+        expect(data.error).toContain('Missing API key for Anthropic provider');
       });
     });
   });

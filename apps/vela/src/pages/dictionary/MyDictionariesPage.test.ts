@@ -91,6 +91,13 @@ vi.mock('src/services/myDictionariesService', () => ({
   deleteDictionaryEntry: vi.fn().mockResolvedValue(undefined),
 }));
 
+// The SSE decoding contract is covered by services/llm/index.test.ts; here the
+// client is mocked so the page tests assert page behavior per frame/outcome.
+vi.mock('src/services/llm', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('src/services/llm')>();
+  return { ...actual, llmClient: { analyzeSentenceStream: vi.fn() } };
+});
+
 vi.mock('src/services/ttsService', () => ({
   generatePronunciation: vi.fn().mockResolvedValue({ audioUrl: 'http://example.com/audio.mp3' }),
   playAudio: vi.fn().mockResolvedValue(undefined),
@@ -587,40 +594,45 @@ describe('MyDictionariesPage', () => {
   });
 
   describe('AI analysis functionality', () => {
-    it('streams sentence analysis and stores the final result', async () => {
-      const encoder = new TextEncoder();
-      const chunks = [
-        'data: {"type":"metadata","sentence":"日本語を勉強しています","provider":"google","model":"gemini-2.5-flash-lite"}\n',
-        'data: {"type":"chunk","text":"This sentence means "}\n',
-        'data: {"type":"chunk","text":"studying Japanese."}\n',
-        'data: {"type":"done"}\n',
-      ];
-      let index = 0;
-      fetchMock.mockResolvedValue({
-        ok: true,
-        body: {
-          getReader: () => ({
-            read: async () =>
-              index < chunks.length
-                ? { done: false, value: encoder.encode(chunks[index++]) }
-                : { done: true, value: undefined },
-          }),
-        },
+    const streamFrames = async (
+      frames: Array<
+        | { type: 'metadata'; sentence: string; provider: string; model: string }
+        | { type: 'chunk'; text: string }
+      >,
+    ) => {
+      const { llmClient } = await import('src/services/llm');
+      vi.mocked(llmClient.analyzeSentenceStream).mockImplementation(async (_input, onEvent) => {
+        for (const frame of frames) onEvent(frame);
       });
+    };
+
+    it('renders streamed frames and stores the final result on done', async () => {
+      await streamFrames([
+        {
+          type: 'metadata',
+          sentence: '日本語を勉強しています',
+          provider: 'google',
+          model: 'gemini-3.8-flash',
+        },
+        { type: 'chunk', text: 'This sentence means ' },
+        { type: 'chunk', text: 'studying Japanese.' },
+      ]);
+      const { llmClient } = await import('src/services/llm');
+      const { useLLMSettingsStore } = await import('src/stores/llmSettings');
+      useLLMSettingsStore().setApiKey('dict-key');
       wrapper = mountComponent();
 
       await wrapper.vm.handleAskAI(mockEntry);
       await flushPromises();
 
-      expect(fetchMock).toHaveBeenCalledWith(
-        'http://localhost:9005/api/my-dictionaries/analyze',
-        expect.objectContaining({
-          method: 'POST',
-          headers: expect.objectContaining({
-            Authorization: 'Bearer mock-token',
-            'Content-Type': 'application/json',
-          }),
-        }),
+      expect(llmClient.analyzeSentenceStream).toHaveBeenCalledWith(
+        {
+          sentence: mockEntry.sentence,
+          provider: 'google',
+          model: 'gemini-3.8-flash',
+          apiKey: 'dict-key',
+        },
+        expect.any(Function),
       );
       expect(wrapper.vm.aiDialog).toBe(true);
       expect(wrapper.vm.analyzing).toBe(false);
@@ -629,129 +641,77 @@ describe('MyDictionariesPage', () => {
         sentence: '日本語を勉強しています',
         analysis: 'This sentence means studying Japanese.',
         provider: 'google',
-        model: 'gemini-2.5-flash-lite',
+        model: 'gemini-3.8-flash',
       });
-    });
-
-    it('shows an authentication error when analysis starts without an id token', async () => {
-      vi.mocked(fetchAuthSession).mockResolvedValue({
-        tokens: {},
-      } as Awaited<ReturnType<typeof fetchAuthSession>>);
-      wrapper = mountComponent();
-
-      await wrapper.vm.handleAskAI(mockEntry);
-      await flushPromises();
-
-      expect(fetchMock).not.toHaveBeenCalled();
-      expect(wrapper.vm.analysisError).toBe('Not authenticated');
-      expect(wrapper.vm.analyzing).toBe(false);
-      expect(notifyCreateSpy).toHaveBeenCalledWith({
-        type: 'negative',
-        message: 'Not authenticated',
-        position: 'top',
-      });
-    });
-
-    it('shows the API error returned by the analysis endpoint', async () => {
-      fetchMock.mockResolvedValue({
-        ok: false,
-        json: vi.fn().mockResolvedValue({ error: 'Analysis failed' }),
-      });
-      wrapper = mountComponent();
-
-      await wrapper.vm.handleAskAI(mockEntry);
-      await flushPromises();
-
-      expect(wrapper.vm.analysisError).toBe('Analysis failed');
-      expect(wrapper.vm.analyzing).toBe(false);
-      expect(notifyCreateSpy).toHaveBeenCalledWith({
-        type: 'negative',
-        message: 'Analysis failed',
-        position: 'top',
-      });
-    });
-
-    it('shows an error when the analysis response has no readable body', async () => {
-      fetchMock.mockResolvedValue({
-        ok: true,
-        body: null,
-      });
-      wrapper = mountComponent();
-
-      await wrapper.vm.handleAskAI(mockEntry);
-      await flushPromises();
-
-      expect(wrapper.vm.analysisError).toBe('No response body');
-      expect(wrapper.vm.analyzing).toBe(false);
-      expect(notifyCreateSpy).toHaveBeenCalledWith({
-        type: 'negative',
-        message: 'No response body',
-        position: 'top',
-      });
-    });
-
-    it('logs SSE error events without crashing the analysis flow', async () => {
-      const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
-      const encoder = new TextEncoder();
-      const chunks = [
-        'data: {"type":"metadata","sentence":"日本語を勉強しています","provider":"google","model":"gemini-2.5-flash-lite"}\n',
-        'data: {"type":"error","error":"SSE failure"}\n',
-        'data: {"type":"done"}\n',
-      ];
-      let index = 0;
-      fetchMock.mockResolvedValue({
-        ok: true,
-        body: {
-          getReader: () => ({
-            read: async () =>
-              index < chunks.length
-                ? { done: false, value: encoder.encode(chunks[index++]) }
-                : { done: true, value: undefined },
-          }),
-        },
-      });
-      wrapper = mountComponent();
-
-      await wrapper.vm.handleAskAI(mockEntry);
-      await flushPromises();
-
-      expect(consoleErrorSpy).toHaveBeenCalledWith('Error parsing SSE data:', expect.any(Error));
       expect(wrapper.vm.analysisError).toBe('');
-      expect(wrapper.vm.analyzing).toBe(false);
     });
 
-    it('logs malformed SSE payloads and continues streaming', async () => {
-      const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
-      const encoder = new TextEncoder();
-      const chunks = [
-        'data: {"type":"metadata","sentence":"日本語を勉強しています","provider":"google","model":"gemini-2.5-flash-lite"}\n',
-        'data: {invalid-json}\n',
-        'data: {"type":"chunk","text":"Recovered output"}\n',
-        'data: {"type":"done"}\n',
-      ];
-      let index = 0;
-      fetchMock.mockResolvedValue({
-        ok: true,
-        body: {
-          getReader: () => ({
-            read: async () =>
-              index < chunks.length
-                ? { done: false, value: encoder.encode(chunks[index++]) }
-                : { done: true, value: undefined },
-          }),
-        },
+    it('keeps partial text visible but flags an error when the stream ends without done', async () => {
+      const { llmClient } = await import('src/services/llm');
+      vi.mocked(llmClient.analyzeSentenceStream).mockImplementation(async (_input, onEvent) => {
+        onEvent({ type: 'chunk', text: 'Partial output' });
+        throw new Error('Analysis stream ended without completion');
       });
       wrapper = mountComponent();
 
       await wrapper.vm.handleAskAI(mockEntry);
       await flushPromises();
 
-      expect(consoleErrorSpy).toHaveBeenCalledWith(
-        'Error parsing SSE data:',
-        expect.any(SyntaxError),
+      expect(wrapper.vm.analysisError).toBe('Analysis stream ended without completion');
+      expect(wrapper.vm.analyzing).toBe(false);
+      expect(notifyCreateSpy).toHaveBeenCalledWith({
+        type: 'negative',
+        message: 'Analysis stream ended without completion',
+        position: 'top',
+      });
+    });
+
+    it('shows the error frame message and clears loading', async () => {
+      const { llmClient } = await import('src/services/llm');
+      vi.mocked(llmClient.analyzeSentenceStream).mockRejectedValue(
+        new Error('Gemini request failed (401)'),
       );
-      expect(wrapper.vm.streamingText).toBe('Recovered output');
-      expect(wrapper.vm.analysisResult?.analysis).toBe('Recovered output');
+      wrapper = mountComponent();
+
+      await wrapper.vm.handleAskAI(mockEntry);
+      await flushPromises();
+
+      expect(wrapper.vm.analysisError).toBe('Gemini request failed (401)');
+      expect(wrapper.vm.analyzing).toBe(false);
+      expect(notifyCreateSpy).toHaveBeenCalledWith({
+        type: 'negative',
+        message: 'Gemini request failed (401)',
+        position: 'top',
+      });
+    });
+
+    it('shows an authentication error when no token is available', async () => {
+      const { llmClient } = await import('src/services/llm');
+      vi.mocked(llmClient.analyzeSentenceStream).mockRejectedValue(
+        new Error('Authentication required. Please sign in.'),
+      );
+      wrapper = mountComponent();
+
+      await wrapper.vm.handleAskAI(mockEntry);
+      await flushPromises();
+
+      expect(wrapper.vm.analysisError).toBe('Authentication required. Please sign in.');
+      expect(wrapper.vm.analyzing).toBe(false);
+    });
+
+    it('maps a gateway timeout to a helpful message', async () => {
+      const { llmClient } = await import('src/services/llm');
+      vi.mocked(llmClient.analyzeSentenceStream).mockRejectedValue(
+        Object.assign(new Error('Gateway Timeout'), { status: 504 }),
+      );
+      wrapper = mountComponent();
+
+      await wrapper.vm.handleAskAI(mockEntry);
+      await flushPromises();
+
+      expect(wrapper.vm.analysisError).toBe(
+        'The AI provider timed out before responding. Try a shorter request or a lighter model.',
+      );
       expect(wrapper.vm.analyzing).toBe(false);
     });
   });
