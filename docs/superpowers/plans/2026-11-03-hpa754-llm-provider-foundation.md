@@ -11,11 +11,11 @@
 
 **Tech:** Bun, Hono, Zod, TypeScript, Vue/Pinia, Vitest, Bun test, Google/OpenRouter REST, official OpenAI and Anthropic SDKs.
 
-## Ticket alignment note (Linear updated 2026-11-04)
+## Ticket alignment (reconciled 2026-11-04)
 
-The latest [HPA-754 issue](https://linear.app/cwchanap/issue/HPA-754/llm-providers-add-openai-and-anthropic-drop-chutes-update-gemini) still specifies **Gemini Interactions API via `@google/genai`**, `packages/common/src/llm/models.ts`, and `generate()` on each provider adapter. This reviewed PR plan deliberately uses **GenerateContent REST**, `packages/common/src/contracts/llm.ts`, and one `stream()` per provider plus a public `generate()` collector. These are **intentional deviations, not yet reflected in Linear**; do not claim exact ticket/design alignment. The Interactions conflict is substantive because Vela stores only visible chat text while stateless thinking-based Interactions require preserving thought steps. The location/interface differences are internal implementation choices; all user-facing functionality stays in scope. Recommend synchronizing the Linear implementation notes to the reviewed PR design before implementing rather than silently replacing the review-approved plan.
+[Linear HPA-754](https://linear.app/cwchanap/issue/HPA-754/llm-providers-add-openai-and-anthropic-drop-chutes-update-gemini) now explicitly matches this review-approved implementation: **GenerateContent REST** for Gemini, one pure registry in `packages/common/src/contracts/llm.ts`, and one provider `stream()` each with a shared `generate()` collector. The revised ticket retains original product scope and model list, plus Anthropic native default server-side fallback.
 
-The ticket also calls for `llmClient.generate({provider,model,thinking,messages})`. Keep `thinking?: string` supported in the request **contract** and forwarded if provided, but the current UI does not select it until HPA-755; the backend supplies the registry default when absent. The ticket's Anthropic **default server-side refusal fallback** is explicitly included for supported Opus/Sonnet 5.5 models; Haiku 5.5 has no server-side fallback and remains an exception per Anthropic documentation.
+**No API architecture change is required to honor ticket wording.** `llmClient.generate({provider,model,thinking?,messages})` supports optional `thinking` in the request contract; the current HPA-754 UI does not choose effort until HPA-755, so the backend uses registry defaults. Existing text-only conversation history remains unchanged; the deployed Gemini two-turn smoke checks user-visible context, not internal thought-state replay.
 
 ## Constraints and accepted review decisions
 
