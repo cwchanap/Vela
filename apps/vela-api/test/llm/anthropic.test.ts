@@ -147,6 +147,14 @@ describe('anthropic mapper', () => {
     ]);
   });
 
+  test('attacker-controlled stop reasons never reach the error message', () => {
+    const events = mapperEvents(createAnthropicMapper, [messageDelta('sk-ant-ATTACKERSECRET')]);
+    expect(events).toEqual([
+      { type: 'error', message: 'Anthropic stream finished early (unknown)' },
+    ]);
+    expect(JSON.stringify(events)).not.toContain('ATTACKERSECRET');
+  });
+
   test('thinking deltas are never surfaced as text', () => {
     expect(
       mapperEvents(createAnthropicMapper, [

@@ -76,6 +76,26 @@ describe('openrouter mapper', () => {
     ).toEqual([{ type: 'error', message: 'OpenRouter stream error (429)' }]);
   });
 
+  test('attacker-controlled error codes never reach the error message', () => {
+    const events = mapperEvents(createOpenRouterMapper, [
+      {
+        error: { code: 'sk-or-v1-ATTACKERSECRET', message: 'key sk-or-v1-ATTACKERSECRET rejected' },
+      },
+    ]);
+    expect(events).toEqual([{ type: 'error', message: 'OpenRouter stream error (unknown)' }]);
+    expect(JSON.stringify(events)).not.toContain('ATTACKERSECRET');
+  });
+
+  test('attacker-controlled finish reasons never reach the error message', () => {
+    const events = mapperEvents(createOpenRouterMapper, [
+      { choices: [{ delta: {}, finish_reason: 'sk-or-v1-ATTACKERSECRET' }] },
+    ]);
+    expect(events).toEqual([
+      { type: 'error', message: 'OpenRouter stream finished early (unknown)' },
+    ]);
+    expect(JSON.stringify(events)).not.toContain('ATTACKERSECRET');
+  });
+
   test('empty but stopped stream is a harmless empty result', () => {
     expect(
       mapperEvents(createOpenRouterMapper, [{ choices: [{ delta: {}, finish_reason: 'stop' }] }]),

@@ -2,6 +2,7 @@ import Anthropic from '@anthropic-ai/sdk';
 import type { LlmEvent } from '@vela/common/contracts/llm';
 import {
   REQUEST_TIMEOUT_MS,
+  safeVendorCode,
   sanitizeProviderError,
   withRequestTimeout,
   type LlmProviderAdapter,
@@ -40,6 +41,10 @@ export type AnthropicStreamEvent =
   | { type: 'message_stop' };
 
 const SUCCESS_STOP_REASONS = new Set(['end_turn', 'stop_sequence']);
+
+// Documented failure stop reasons ('end_turn'/'stop_sequence' succeed,
+// 'refusal' has its own fixed message).
+const ANTHROPIC_FAILURE_STOP_REASONS = new Set(['max_tokens', 'pause_turn', 'tool_use']);
 
 const ANTHROPIC_FALLBACK_BETA = 'server-side-fallback-2026-07-01';
 
@@ -122,7 +127,7 @@ export function createAnthropicMapper(): VendorEventMapper<AnthropicStreamEvent>
                 message:
                   stopReason === 'refusal'
                     ? 'Anthropic response was refused'
-                    : `Anthropic stream finished early (${stopReason})`,
+                    : `Anthropic stream finished early (${safeVendorCode(stopReason, ANTHROPIC_FAILURE_STOP_REASONS)})`,
               });
             }
           }

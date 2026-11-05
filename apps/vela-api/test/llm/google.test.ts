@@ -78,6 +78,22 @@ describe('gemini mapper', () => {
     ).toEqual([{ type: 'error', message: 'Gemini request blocked (SAFETY)' }]);
   });
 
+  test('attacker-controlled finish reasons never reach the error message', () => {
+    const events = mapperEvents(createGeminiMapper, [
+      { candidates: [{ finishReason: 'ATTACKERSECRET-CODE' }] },
+    ]);
+    expect(events).toEqual([{ type: 'error', message: 'Gemini stream finished early (unknown)' }]);
+    expect(JSON.stringify(events)).not.toContain('ATTACKERSECRET');
+  });
+
+  test('attacker-controlled block reasons never reach the error message', () => {
+    const events = mapperEvents(createGeminiMapper, [
+      { promptFeedback: { blockReason: 'ATTACKERSECRET-CODE' } },
+    ]);
+    expect(events).toEqual([{ type: 'error', message: 'Gemini request blocked (unknown)' }]);
+    expect(JSON.stringify(events)).not.toContain('ATTACKERSECRET');
+  });
+
   test('empty but successfully finished stream is a harmless empty result', () => {
     expect(
       mapperEvents(createGeminiMapper, [

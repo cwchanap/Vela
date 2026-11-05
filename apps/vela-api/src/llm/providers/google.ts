@@ -1,6 +1,7 @@
 import type { LlmEvent } from '@vela/common/contracts/llm';
 import { readSseDataLines } from '../sse';
 import {
+  safeVendorCode,
   sanitizeProviderError,
   withRequestTimeout,
   type LlmProviderAdapter,
@@ -27,6 +28,32 @@ const GEMINI_ENDPOINT = 'https://generativelanguage.googleapis.com/v1beta/models
 
 // REST thinkingConfig takes proto3 enum names, not the lowercase guide values.
 const THINKING_LEVELS: Record<string, string> = { low: 'LOW', medium: 'MEDIUM', high: 'HIGH' };
+
+// Documented GenerateContent enums; 'STOP' is the success terminal.
+const GEMINI_FINISH_REASONS = new Set([
+  'MAX_TOKENS',
+  'SAFETY',
+  'RECITATION',
+  'PROHIBITED_CONTENT',
+  'BLOCKLIST',
+  'SPII',
+  'MALFORMED_FUNCTION_CALL',
+  'IMAGE_SAFETY',
+  'UNEXPECTED_TOOL_CALL',
+  'TOO_MANY_TOOL_CALLS',
+  'FINISH_REASON_UNSPECIFIED',
+  'OTHER',
+]);
+const GEMINI_BLOCK_REASONS = new Set([
+  'BLOCK_REASON_UNSPECIFIED',
+  'SAFETY',
+  'OTHER',
+  'BLOCKLIST',
+  'PROHIBITED_CONTENT',
+  'IMAGE_SAFETY',
+  'SPII',
+  'EMPTY',
+]);
 
 /**
  * Pure Google `:streamGenerateContent?alt=sse` chunk mapper. Success terminal
@@ -58,7 +85,10 @@ export function createGeminiMapper(): VendorEventMapper<GeminiStreamChunk> {
       const blockReason = chunk.promptFeedback?.blockReason;
       if (blockReason && status === 'pending') {
         status = 'failed';
-        events.push({ type: 'error', message: `Gemini request blocked (${blockReason})` });
+        events.push({
+          type: 'error',
+          message: `Gemini request blocked (${safeVendorCode(blockReason, GEMINI_BLOCK_REASONS)})`,
+        });
       }
       const finishReason = chunk.candidates?.[0]?.finishReason;
       if (finishReason && status === 'pending') {
@@ -66,7 +96,10 @@ export function createGeminiMapper(): VendorEventMapper<GeminiStreamChunk> {
           status = 'succeeded';
         } else {
           status = 'failed';
-          events.push({ type: 'error', message: `Gemini stream finished early (${finishReason})` });
+          events.push({
+            type: 'error',
+            message: `Gemini stream finished early (${safeVendorCode(finishReason, GEMINI_FINISH_REASONS)})`,
+          });
         }
       }
       return events;
