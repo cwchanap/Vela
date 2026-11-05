@@ -305,9 +305,12 @@ watch(
 
 // Registry-backed model choices for Google/OpenAI/Anthropic; OpenRouter stays
 // free-form, seeded with the current model so a saved custom ID remains visible.
+// A legacy persisted provider (e.g. removed 'chutes') has no registry entry:
+// render free-form instead of crashing. Guard only — saved preferences are
+// never rewritten here.
 const modelOptions = computed<string[]>(() => {
   const registry = LLM_PROVIDER_REGISTRY[selectedProvider.value];
-  return registry.models ? registry.models.map((entry) => entry.id) : [store.currentModel];
+  return registry?.models ? registry.models.map((entry) => entry.id) : [store.currentModel];
 });
 
 const save = async () => {

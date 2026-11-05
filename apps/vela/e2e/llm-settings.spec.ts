@@ -54,14 +54,23 @@ test.describe('LLM Settings - API Keys', () => {
     await page.goto('/settings');
     await waitForPageLoad(page);
 
-    // Save a key for Google only
+    const providerSelect = page.getByTestId('llm-provider-select');
     const apiKeyInput = page.getByTestId('llm-api-key-input');
-    await apiKeyInput.click();
+
+    // The auth fixture uses a real shared account whose profile may carry
+    // provider/key preferences from earlier runs. Explicitly establish the
+    // starting state: active provider Google, no OpenAI key.
+    await providerSelect.click();
+    await page.getByRole('option', { name: 'OpenAI' }).click();
+    await apiKeyInput.fill('');
+    await page.getByTestId('llm-save').click();
+
+    await providerSelect.click();
+    await page.getByRole('option', { name: 'Google (Gemini API)' }).click();
     await apiKeyInput.fill('google-only-key');
     await page.getByTestId('llm-save').click();
 
     // Switching to OpenAI must not show or reuse the Google key
-    const providerSelect = page.getByTestId('llm-provider-select');
     await providerSelect.click();
     await page.getByRole('option', { name: 'OpenAI' }).click();
     await expect(apiKeyInput).toHaveValue('');
@@ -88,7 +97,14 @@ test.describe('LLM Settings - API Keys', () => {
     const apiKeyInput = page.getByTestId('llm-api-key-input');
     await apiKeyInput.click();
     await apiKeyInput.fill(customKey);
-    await page.getByTestId('llm-save').click();
+    // Wait for the profile PUT so the /chat reload below cannot read a stale
+    // server-side profile without the Anthropic key.
+    await Promise.all([
+      page.waitForResponse(
+        (r) => r.url().includes('/api/profiles/update') && r.request().method() === 'PUT',
+      ),
+      page.getByTestId('llm-save').click(),
+    ]);
 
     // Navigate to Chat and send a message
     const [llmRequest] = await Promise.all([
