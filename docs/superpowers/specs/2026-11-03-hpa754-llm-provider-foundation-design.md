@@ -2,7 +2,7 @@
 
 **Date:** 2026-11-03 · **Revised after PR #80 and Linear alignment review:** 2026-11-04  
 **Linear:** https://linear.app/cwchanap/issue/HPA-754/llm-providers-add-openai-and-anthropic-drop-chutes-update-gemini  
-**Status:** Design proposal — implementation not started  
+**Status:** Implemented on PR #80 (tasks 0–6); all local gates pass. Deployed staging acceptance is **not** claimed — blocked on a staging stack and provider credentials.  
 **PR policy:** One HPA-754 branch and **one draft PR** for spec, plan, implementation, tests, and review fixes.
 
 ## Goal

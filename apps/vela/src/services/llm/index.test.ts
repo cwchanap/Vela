@@ -87,6 +87,26 @@ describe('llmClient.generate', () => {
     });
   });
 
+  it('forwards the optional thinking field when provided', async () => {
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      headers: new Headers({ 'content-type': 'application/json' }),
+      json: async () => ({
+        text: 'ok',
+        usage: { inputTokens: 1, outputTokens: 1, cachedInputTokens: 0, cacheWriteTokens: 0 },
+      }),
+    });
+
+    await llmClient.generate({
+      provider: 'anthropic',
+      messages: [{ role: 'user', content: 'hi' }],
+      thinking: 'low',
+    });
+
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(JSON.parse(String(init.body)).thinking).toBe('low');
+  });
+
   it('rejects with the server error message and status on a non-ok response', async () => {
     fetchMock.mockResolvedValueOnce({
       ok: false,

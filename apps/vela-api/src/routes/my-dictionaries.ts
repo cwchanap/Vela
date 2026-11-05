@@ -6,7 +6,7 @@ import { requireAuth, type AuthContext } from '../middleware/auth';
 import { isAllowedOrigin } from '../middleware/cors';
 import { createLlmProvider } from '../llm/factory';
 import { normalizeLlmRequest } from '../llm/normalize';
-import { DICTIONARY_MAX_TOKENS } from '../llm/types';
+import { DICTIONARY_MAX_TOKENS, PROVIDER_LABELS } from '../llm/types';
 
 const app = new Hono<{ Bindings: Env } & AuthContext>();
 
@@ -15,13 +15,6 @@ let corsConfigWarningLogged = false;
 
 // Apply auth middleware to all routes in this router.
 app.use('*', requireAuth);
-
-const PROVIDER_LABELS: Record<LlmProvider, string> = {
-  google: 'Google',
-  openai: 'OpenAI',
-  anthropic: 'Anthropic',
-  openrouter: 'OpenRouter',
-};
 
 // Japanese sentence analysis prompt — unchanged from the previous route.
 const ANALYSIS_SYSTEM_PROMPT = `You are a Japanese language expert. Analyze the provided Japanese sentence and provide:
@@ -39,8 +32,8 @@ type AnalysisSseFrame =
   | { type: 'error'; error: string }
   | { type: 'done' };
 
-function analysisFrame(frame: AnalysisSseFrame): string {
-  return `data: ${JSON.stringify(frame)}\n\n`;
+function analysisFrame(frame: AnalysisSseFrame): Uint8Array {
+  return new TextEncoder().encode(`data: ${JSON.stringify(frame)}\n\n`);
 }
 
 /** SSE response headers with the already-validated CORS origin attached. */
@@ -71,12 +64,16 @@ function analysisSseHeaders(
  * current stack has no response streaming), so browsers receive all frames at
  * once in production; only local Bun delivers them progressively. Do not
  * claim browser progress until response streaming is delivered separately.
+ *
+ * Exported for the real-Node Lambda adapter regression test; the deployed
+ * Node 20 runtime requires byte chunks here (string chunks throw
+ * "Received non-Uint8Array chunk" inside the adapter's `res.text()`).
  */
-function createAnalysisSseStream(
+export function createAnalysisSseStream(
   upstream: AsyncIterable<LlmEvent>,
   metadata: { provider: LlmProvider; model: string; sentence: string },
-): ReadableStream<string> {
-  return new ReadableStream<string>({
+): ReadableStream<Uint8Array> {
+  return new ReadableStream<Uint8Array>({
     async start(controller) {
       controller.enqueue(analysisFrame({ type: 'metadata', ...metadata }));
       try {

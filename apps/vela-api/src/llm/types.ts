@@ -1,4 +1,12 @@
-import type { LlmEffort, LlmEvent, LlmMessage } from '@vela/common/contracts/llm';
+import type { LlmEffort, LlmEvent, LlmMessage, LlmProvider } from '@vela/common/contracts/llm';
+
+/** Display labels for error messages; single source for the API routes. */
+export const PROVIDER_LABELS: Record<LlmProvider, string> = {
+  google: 'Google',
+  openai: 'OpenAI',
+  anthropic: 'Anthropic',
+  openrouter: 'OpenRouter',
+};
 
 /** Chat output-token default; conservative for thinking models. */
 export const CHAT_MAX_TOKENS = 4096;
@@ -50,11 +58,40 @@ export interface VendorEventMapper<T> {
 }
 
 /**
+ * Deadline/abort error classes across transports: DOM fetch/AbortSignal
+ * ('TimeoutError'/'AbortError' — Node's AbortSignal.timeout aborts fetch with
+ * TimeoutError) and the SDKs ('APIUserAbortError' from a signal abort,
+ * 'APIConnectionTimeoutError' from the SDK's own `timeout`). SDK error
+ * classes carry `name === 'Error'`, so the constructor name is checked too.
+ * Fixed class names only — never vendor data.
+ */
+const TIMEOUT_ERROR_CLASSES = new Set([
+  'TimeoutError',
+  'AbortError',
+  'APIUserAbortError',
+  'APIConnectionTimeoutError',
+]);
+
+function isTimeoutFailure(error: unknown): boolean {
+  const candidate = error as { name?: unknown; constructor?: { name?: unknown } } | null;
+  return (
+    (typeof candidate?.name === 'string' && TIMEOUT_ERROR_CLASSES.has(candidate.name)) ||
+    (typeof candidate?.constructor?.name === 'string' &&
+      TIMEOUT_ERROR_CLASSES.has(candidate.constructor.name))
+  );
+}
+
+/**
  * Sanitize any provider failure into a safe error event: HTTP status or error
  * name only. Vendor bodies and messages can echo request material (including
- * API keys) and must never reach the browser.
+ * API keys) and must never reach the browser. Deadline/abort failures get a
+ * fixed timeout message so the browser can surface its deadline hint (the
+ * status stays a plain 502/SSE error, never a gateway 504).
  */
 export function sanitizeProviderError(provider: string, error: unknown): LlmEvent {
+  if (isTimeoutFailure(error)) {
+    return { type: 'error', message: `${provider} request timed out` };
+  }
   const candidate = error as { status?: unknown; name?: unknown } | null;
   const detail =
     typeof candidate?.status === 'number'

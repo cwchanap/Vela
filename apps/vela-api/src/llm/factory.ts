@@ -23,8 +23,12 @@ export function createLlmProvider(provider: LlmProvider): LlmProviderAdapter {
       return anthropicProvider;
     case 'openrouter':
       return openrouterProvider;
-    default:
-      throw new Error(`Unsupported provider '${String(provider)}'`);
+    default: {
+      // Compile-time exhaustiveness: adding a provider without a case fails
+      // here. Runtime still guards untyped JS callers.
+      const _exhaustive: never = provider;
+      throw new Error(`Unsupported provider '${String(_exhaustive)}'`);
+    }
   }
 }
 

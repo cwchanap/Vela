@@ -461,6 +461,24 @@ describe('AIChatPage', () => {
       );
     });
 
+    it('should reject an empty AI response instead of storing an invalid empty turn', async () => {
+      // A successful-but-empty reply stored as an assistant turn would make
+      // the next request fail server-side validation (content min 1).
+      mockLLMResponse('   ');
+      mockSuccessfulSaveResponse(); // User message save only
+
+      const wrapper = mountComponent();
+      const chatStore = useChatStore();
+      const input = wrapper.find('[data-testid="llm-chat-input"]');
+
+      await input.setValue('Test message');
+      await wrapper.find('[data-testid="llm-chat-send"]').trigger('click');
+      await flushPromises();
+
+      expect(chatStore.error).toContain('empty');
+      expect(chatStore.messages.some((m) => m.type === 'ai' && !m.content.trim())).toBe(false);
+    });
+
     it('should handle API errors gracefully', async () => {
       vi.spyOn(llmModule.llmClient, 'generate').mockRejectedValue(
         new Error('API connection failed'),

@@ -433,6 +433,12 @@ const onSend = async () => {
       messages: history,
     });
 
+    // A successful-but-empty reply must not be stored: an empty assistant
+    // turn would make the next request fail content min(1) validation.
+    if (!resp.text.trim()) {
+      throw new Error('The AI returned an empty response. Please try again.');
+    }
+
     chat.addMessage({ type: 'ai', content: resp.text });
     void saveToHistory(cid, resp.text, false);
   } catch (e: unknown) {

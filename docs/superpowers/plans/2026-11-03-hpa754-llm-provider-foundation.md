@@ -1,6 +1,6 @@
 # HPA-754: Shared LLM Provider Foundation Implementation Plan
 
-> **Implementation status:** Planning only. Every task is unchecked: no product code, test execution, credentials smoke, or deployment is claimed.
+> **Implementation status:** Implemented on PR #80 (tasks 0–6 complete; unit/compile gates green at the review HEAD). Deployed acceptance is **not** claimed: staging deployment and provider-credential smokes remain blocked and must be supplied before merge.
 >
 > **Agent handoff:** Implement **on existing draft PR #80**, commit at each task boundary, and handle review fixes there. **One ticket / one PR.**
 
@@ -39,7 +39,7 @@
 
 ### Add
 
-~~~text
+```text
 packages/common/src/contracts/llm.ts
 packages/common/src/contracts/llm.test.ts
 
@@ -52,11 +52,11 @@ apps/vela-api/test/llm/*                    # few focused mapper/normalization/f
 
 apps/vela/src/services/llm/llmClient.ts
 apps/vela/src/services/llm/llmClient.test.ts
-~~~
+```
 
 ### Modify
 
-~~~text
+```text
 packages/common/src/index.ts
 packages/common/package.json             # export pure ./contracts/llm subpath; avoid root barrel in API
 packages/cdk/package.json                # lambda:build first builds @vela/common
@@ -80,16 +80,16 @@ apps/vela/src/pages/dictionary/MyDictionariesPage.vue
 apps/vela/src/pages/dictionary/MyDictionariesPage.test.ts
 apps/vela/e2e/api.spec.ts                  # authenticated LLM request contract
 apps/vela/e2e/llm-settings.spec.ts         # remove Chutes cases
-~~~
+```
 
 ### Remove or replace
 
-~~~text
+```text
 apps/vela/src/services/llm/index.ts             # re-export stateless client only if needed
 apps/vela/src/services/llm/types.ts             # obsolete browser-provider class interface
 apps/vela/src/services/llm/index.test.ts        # replace singleton tests
 apps/vela/src/services/llm/providers/*          # remove all three bridge wrappers/tests
-~~~
+```
 
 Do not manufacture files that the compiler and tests show unnecessary; avoid opportunistic refactors. Keep `@vela/common` dependency light and frontend SDK-free.
 
@@ -153,7 +153,7 @@ Do not manufacture files that the compiler and tests show unnecessary; avoid opp
 **Files:** `apps/vela-api/src/routes/llm-chat.ts`, `src/validation.ts`, `test/routes/llm-chat.test.ts`, `test/validation.test.ts`, `apps/vela-api/README.md`.
 
 - [ ] Reuse `LLMBridgeRequestSchema` with `z.enum(LLM_PROVIDERS)`; remove `temperature` from schema; require nonempty prompt or messages; reject Chutes and unsupported model IDs with 400 naming rejected model.
-- [ ] Add the existing `requireAuth` middleware to `/api/llm-chat`; reject anonymous requests (401) *before* calling upstream. Update the API README route description.
+- [ ] Add the existing `requireAuth` middleware to `/api/llm-chat`; reject anonymous requests (401) _before_ calling upstream. Update the API README route description.
 - [ ] Select user-key over server-key for authenticated chat on Google/OpenRouter. OpenAI/Anthropic require user-provided key; server secrets never supply those.
 - [ ] Route: parse/validate → normalize → credential resolution → factory's `collectStream` → `{text,usage}`. No `raw` or thinking traces.
 - [ ] Test 401 anonymous; 400 missing/invalid keys, provider/model/thinking/prompt; Google/OpenRouter server fallback only with auth; user-key priority; default 4 usage fields; missing/upstream errors and no vendor data leakage.
@@ -204,19 +204,19 @@ Do not manufacture files that the compiler and tests show unnecessary; avoid opp
 
 ## Acceptance matrix
 
-| Scenario | Expected |
-| --- | --- |
-| Shared provider list | Exactly one tuple-derived union, correct model registry/native effort/cache TTL |
-| Browser generation | Stateless per-call model/key, authenticated, response `{text,usage}` |
-| Auth | Anonymous chat 401, authenticated chat server fallback only Google/OpenRouter; dictionary always user key |
-| History | Display greeting omitted from model request; user/assistant context preserved |
-| Provider execution | One streaming adapter each, collector for JSON response; correct termination/error/usage |
-| Token usage | `inputTokens` includes cached read/write tokens, no double count on Google/OpenAI |
-| Dictionary UX | Local SSE progressively parsed, 4 existing frame types; errors/EOF clear spinner; **production buffered** |
-| Deployment | Four-provider deployed smoke with latency / timeout record, no false progressive streaming claims |
-| Gemini | GenerateContent REST native thinking config and two-turn text history verified |
-| Tests | Focused tests at each task; full Bun test/lint and API compile/web build |
-| Process | One HPA-754 PR, all changes/review fixes there, no premature Done |
+| Scenario             | Expected                                                                                                  |
+| -------------------- | --------------------------------------------------------------------------------------------------------- |
+| Shared provider list | Exactly one tuple-derived union, correct model registry/native effort/cache TTL                           |
+| Browser generation   | Stateless per-call model/key, authenticated, response `{text,usage}`                                      |
+| Auth                 | Anonymous chat 401, authenticated chat server fallback only Google/OpenRouter; dictionary always user key |
+| History              | Display greeting omitted from model request; user/assistant context preserved                             |
+| Provider execution   | One streaming adapter each, collector for JSON response; correct termination/error/usage                  |
+| Token usage          | `inputTokens` includes cached read/write tokens, no double count on Google/OpenAI                         |
+| Dictionary UX        | Local SSE progressively parsed, 4 existing frame types; errors/EOF clear spinner; **production buffered** |
+| Deployment           | Four-provider deployed smoke with latency / timeout record, no false progressive streaming claims         |
+| Gemini               | GenerateContent REST native thinking config and two-turn text history verified                            |
+| Tests                | Focused tests at each task; full Bun test/lint and API compile/web build                                  |
+| Process              | One HPA-754 PR, all changes/review fixes there, no premature Done                                         |
 
 ## Deferred concerns
 
@@ -226,4 +226,4 @@ Do not manufacture files that the compiler and tests show unnecessary; avoid opp
 - HPA-758: chat model picker/cache expiry chip, using correctly normalized usage.
 - HPA-757: TTS changes.
 
-Do not create extra tickets or PRs as a side effect of executing this plan. 
+Do not create extra tickets or PRs as a side effect of executing this plan.
