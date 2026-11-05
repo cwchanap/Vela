@@ -13,6 +13,10 @@
     "./tokenizer": {
       "types": "./dist/tokenizer.d.ts",
       "import": "./dist/tokenizer.js"
+    },
+    "./contracts/llm": {
+      "types": "./dist/contracts/llm.d.ts",
+      "import": "./dist/contracts/llm.js"
     }
   },
   "files": [

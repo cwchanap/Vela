@@ -6,7 +6,7 @@
   "private": true,
   "scripts": {
     "build": "bun run lambda:build",
-    "lambda:build": "esbuild ../../apps/vela-api/src/index.ts --bundle --outfile=dist/lambda/index.js --platform=node --target=node20 --format=cjs --external:@aws-sdk/*",
+    "lambda:build": "bun --cwd ../../packages/common run build && esbuild ../../apps/vela-api/src/index.ts --bundle --outfile=dist/lambda/index.js --platform=node --target=node20 --format=cjs --external:@aws-sdk/*",
     "test:unit": "bun test test",
     "cdk:synth": "ALLOW_LOCAL_OAUTH_PLACEHOLDERS=true bunx aws-cdk synth",
     "cdk:deploy": "bunx aws-cdk deploy",
