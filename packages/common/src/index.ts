@@ -28,6 +28,20 @@ export { DEFAULT_DAILY_LESSON_GOAL, DEFAULT_LESSON_DURATION_MINUTES } from './co
 // Export shared domain contracts
 export { parseSrsStats, type SRSStats } from './contracts/srs';
 
+// Export shared LLM provider contract
+export {
+  LLM_PROVIDER_REGISTRY,
+  LLM_PROVIDERS,
+  type LlmEffort,
+  type LlmEvent,
+  type LlmMessage,
+  type LlmModelInfo,
+  type LlmProvider,
+  type LlmProviderInfo,
+  type LlmResponse,
+  type LlmUsage,
+} from './contracts/llm';
+
 // Export shared TTS contracts
 export {
   effectiveSettingsMatch,

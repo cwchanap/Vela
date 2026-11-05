@@ -8,6 +8,7 @@ import {
   ThreadIdQuerySchema,
 } from '../src/validation';
 import { z } from 'zod';
+import { LLM_PROVIDERS } from '@vela/common/contracts/llm';
 
 describe('ChatHistoryItemSchema', () => {
   test('accepts valid chat history item', () => {
@@ -96,9 +97,16 @@ describe('LLMBridgeRequestSchema', () => {
     expect(result.success).toBe(false);
   });
 
+  test('accepts every provider in the shared tuple', () => {
+    for (const provider of LLM_PROVIDERS) {
+      const result = LLMBridgeRequestSchema.safeParse({ provider, prompt: 'Hello' });
+      expect(result.success).toBe(true);
+    }
+  });
+
   test('rejects invalid provider', () => {
     const result = LLMBridgeRequestSchema.safeParse({
-      provider: 'anthropic',
+      provider: 'chutes',
       prompt: 'Hello',
     });
     expect(result.success).toBe(false);

@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { LLM_PROVIDERS } from '@vela/common/contracts/llm';
 
 // Chat History Schemas
 export const ChatHistoryItemSchema = z.object({
@@ -25,7 +26,7 @@ export const ChatMessageSchema = z.object({
 // LLM Bridge Request Schema
 export const LLMBridgeRequestSchema = z
   .object({
-    provider: z.enum(['google', 'openrouter']),
+    provider: z.enum(LLM_PROVIDERS),
     model: z.string().optional(),
     messages: z.array(ChatMessageSchema).optional(),
     prompt: z.string().optional(),
