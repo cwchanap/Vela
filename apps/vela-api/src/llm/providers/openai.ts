@@ -3,6 +3,7 @@ import type { LlmEvent } from '@vela/common/contracts/llm';
 import {
   REQUEST_TIMEOUT_MS,
   sanitizeProviderError,
+  withRequestTimeout,
   type LlmProviderAdapter,
   type LlmStreamInput,
   type VendorEventMapper,
@@ -120,7 +121,13 @@ export async function* streamOpenAiResponses(
         stream: true,
       },
       // Retries disabled: SDK retries could exceed the gateway's ~29 s budget.
-      { maxRetries: 0, timeout: REQUEST_TIMEOUT_MS, signal: input.signal ?? undefined },
+      // The SDK's `timeout` only bounds time-to-headers, so the combined
+      // deadline/caller signal bounds stream consumption too.
+      {
+        maxRetries: 0,
+        timeout: REQUEST_TIMEOUT_MS,
+        signal: withRequestTimeout(input.signal),
+      },
     );
     for await (const event of stream) yield* mapper.push(event);
     yield* mapper.end();

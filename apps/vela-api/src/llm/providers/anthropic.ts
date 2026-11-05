@@ -3,6 +3,7 @@ import type { LlmEvent } from '@vela/common/contracts/llm';
 import {
   REQUEST_TIMEOUT_MS,
   sanitizeProviderError,
+  withRequestTimeout,
   type LlmProviderAdapter,
   type LlmStreamInput,
   type VendorEventMapper,
@@ -13,12 +14,22 @@ export interface AnthropicUsageSnapshot {
   cache_read_input_tokens?: number | null;
   cache_creation_input_tokens?: number | null;
   output_tokens?: number | null;
+  /** Per-attempt billing breakdown; carried for identification only — never summed. */
+  iterations?: readonly unknown[] | null;
 }
 
 /** Minimal Messages streaming-event shape the mapper consumes. */
 export type AnthropicStreamEvent =
   | { type: 'message_start'; message: { usage?: AnthropicUsageSnapshot } }
-  | { type: 'content_block_start'; index: number; content_block: { type: string } }
+  | {
+      type: 'content_block_start';
+      index: number;
+      content_block: {
+        type: string;
+        from?: { model?: string | null } | null;
+        to?: { model?: string | null } | null;
+      };
+    }
   | { type: 'content_block_delta'; index: number; delta: { type: string; text?: string } }
   | { type: 'content_block_stop'; index: number }
   | {
@@ -36,54 +47,74 @@ const ANTHROPIC_FALLBACK_BETA = 'server-side-fallback-2026-07-01';
 type SdkClientFactory<C> = (apiKey: string) => C;
 /* eslint-enable no-unused-vars */
 
-function usageEvents(usage?: AnthropicUsageSnapshot | null): LlmEvent[] {
-  if (!usage) return [];
-  return [
-    {
-      type: 'usage',
-      // Anthropic's documented total: input + cache reads + cache writes.
-      usage: {
-        inputTokens:
-          (usage.input_tokens ?? 0) +
-          (usage.cache_read_input_tokens ?? 0) +
-          (usage.cache_creation_input_tokens ?? 0),
-        outputTokens: usage.output_tokens ?? 0,
-        cachedInputTokens: usage.cache_read_input_tokens ?? 0,
-        cacheWriteTokens: usage.cache_creation_input_tokens ?? 0,
-      },
-    },
-  ];
-}
-
 /**
- * Pure Anthropic Messages event mapper. Success terminal is an `end_turn` /
- * `stop_sequence` stop reason; `refusal`, `max_tokens`, and any other stop
- * reason are failures, and `end()` flags a stream that never stopped
- * successfully.
+ * Pure Anthropic Messages event mapper. Success requires BOTH a successful
+ * stop reason (`end_turn` / `stop_sequence`) AND the terminal `message_stop`;
+ * `refusal`, `max_tokens`, and any other stop reason are failures, and `end()`
+ * flags a stream truncated anywhere short of that pair.
  *
- * Server-side fallback: `fallback` control blocks (which carry the serving
- * model) are invisible, and only the final reported usage is surfaced —
- * per-attempt `usage.iterations` billing is never summed across attempts.
+ * Server-side fallback: `fallback` control blocks are invisible as events but
+ * identify the serving model (`to.model`, matching the SDK's own relabeling);
+ * `servingModel()` exposes it without expanding the browser contract. Usage
+ * snapshots are cumulative whole-message totals whose fields are omitted (or
+ * null) when they don't apply, so counters merge field-by-field and never add
+ * across snapshots or per-attempt `usage.iterations` entries.
  */
-export function createAnthropicMapper(): VendorEventMapper<AnthropicStreamEvent> {
+export function createAnthropicMapper(): VendorEventMapper<AnthropicStreamEvent> & {
+  servingModel(): string | null;
+} {
   let status: 'pending' | 'succeeded' | 'failed' = 'pending';
+  let sawSuccessfulStop = false;
+  let serving: string | null = null;
+  let inputTokens = 0;
+  let cacheReadTokens = 0;
+  let cacheWriteTokens = 0;
+  let outputTokens = 0;
+  const mergeUsage = (usage?: AnthropicUsageSnapshot | null): void => {
+    if (usage?.input_tokens != null) inputTokens = usage.input_tokens;
+    if (usage?.cache_read_input_tokens != null) cacheReadTokens = usage.cache_read_input_tokens;
+    if (usage?.cache_creation_input_tokens != null) {
+      cacheWriteTokens = usage.cache_creation_input_tokens;
+    }
+    if (usage?.output_tokens != null) outputTokens = usage.output_tokens;
+  };
+  const usageEvent = (): LlmEvent => ({
+    type: 'usage',
+    usage: {
+      inputTokens: inputTokens + cacheReadTokens + cacheWriteTokens,
+      outputTokens: outputTokens,
+      cachedInputTokens: cacheReadTokens,
+      cacheWriteTokens: cacheWriteTokens,
+    },
+  });
   return {
     push(event) {
       switch (event.type) {
-        case 'message_start':
-          return usageEvents(event.message?.usage);
-        case 'content_block_delta':
+        case 'message_start': {
+          mergeUsage(event.message?.usage);
+          return event.message?.usage ? [usageEvent()] : [];
+        }
+        case 'content_block_start': {
+          // The final hop's fallback block names the model that served the response.
+          if (event.content_block?.type === 'fallback' && event.content_block.to?.model) {
+            serving = event.content_block.to.model;
+          }
+          return [];
+        }
+        case 'content_block_delta': {
           // Thinking deltas and tool input never reach the UI.
           if (event.delta?.type === 'text_delta' && event.delta.text) {
             return [{ type: 'text', text: event.delta.text }];
           }
           return [];
+        }
         case 'message_delta': {
-          const events = usageEvents(event.usage);
+          mergeUsage(event.usage);
+          const events = event.usage ? [usageEvent()] : [];
           const stopReason = event.delta?.stop_reason;
           if (stopReason && status === 'pending') {
             if (SUCCESS_STOP_REASONS.has(stopReason)) {
-              status = 'succeeded';
+              sawSuccessfulStop = true;
             } else {
               status = 'failed';
               events.push({
@@ -97,14 +128,21 @@ export function createAnthropicMapper(): VendorEventMapper<AnthropicStreamEvent>
           }
           return events;
         }
+        case 'message_stop': {
+          if (status === 'pending' && sawSuccessfulStop) status = 'succeeded';
+          return [];
+        }
         default:
-          // content_block_start (incl. fallback control blocks), content_block_stop, message_stop
+          // content_block_stop
           return [];
       }
     },
     end() {
       if (status !== 'pending') return [];
       return [{ type: 'error', message: 'Anthropic stream ended without a successful stop' }];
+    },
+    servingModel() {
+      return serving;
     },
   };
 }
@@ -135,7 +173,13 @@ export async function* streamAnthropicMessages(
         betas: [ANTHROPIC_FALLBACK_BETA],
       },
       // Retries disabled: SDK retries could exceed the gateway's ~29 s budget.
-      { maxRetries: 0, timeout: REQUEST_TIMEOUT_MS, signal: input.signal ?? undefined },
+      // The SDK's `timeout` only bounds time-to-headers, so the combined
+      // deadline/caller signal bounds stream consumption too.
+      {
+        maxRetries: 0,
+        timeout: REQUEST_TIMEOUT_MS,
+        signal: withRequestTimeout(input.signal),
+      },
     );
     for await (const event of stream) yield* mapper.push(event as AnthropicStreamEvent);
     yield* mapper.end();

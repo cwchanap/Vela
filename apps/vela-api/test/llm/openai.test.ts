@@ -167,6 +167,34 @@ describe('openai adapter', () => {
     });
   });
 
+  test('SDK request carries a deadline signal combined with the caller signal', async () => {
+    let capturedOptions: Record<string, unknown> = {};
+    const client = fakeClient((_body, options) => {
+      capturedOptions = options as Record<string, unknown>;
+      return eventsOf([completed()]);
+    });
+    const caller = new AbortController();
+    await collectEvents(
+      streamOpenAiResponses({ ...baseInput, signal: caller.signal }, () => client),
+    );
+    const signal = capturedOptions.signal;
+    expect(signal).toBeInstanceOf(AbortSignal);
+    expect(signal).not.toBe(caller.signal); // timeout combined in, not the raw caller signal
+    expect((signal as AbortSignal).aborted).toBe(false);
+    caller.abort();
+    expect((signal as AbortSignal).aborted).toBe(true); // caller cancellation still reaches the SDK
+  });
+
+  test('SDK request carries a deadline signal even without a caller signal', async () => {
+    let capturedOptions: Record<string, unknown> = {};
+    const client = fakeClient((_body, options) => {
+      capturedOptions = options as Record<string, unknown>;
+      return eventsOf([completed()]);
+    });
+    await collectEvents(streamOpenAiResponses(baseInput, () => client));
+    expect(capturedOptions.signal).toBeInstanceOf(AbortSignal);
+  });
+
   test('API exception from create() yields one sanitized error', async () => {
     const apiError = Object.assign(new Error('Incorrect API key provided: sk-SECRET'), {
       status: 401,
