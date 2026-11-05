@@ -70,8 +70,9 @@ export function sanitizeProviderError(provider: string, error: unknown): LlmEven
 
 /**
  * Abort signal that fires on the shared request timeout, or earlier when the
- * caller's own signal aborts. Used by the fetch-based adapters; the SDK
- * adapters receive `timeout` and `signal` as separate request options.
+ * caller's own signal aborts. Used by the fetch-based adapters directly and
+ * passed as the SDK adapters' request signal — the SDK's own `timeout` only
+ * bounds time-to-headers, so this signal is what bounds stream consumption.
  */
 export function withRequestTimeout(callerSignal?: AbortSignal): AbortSignal {
   const timeout = AbortSignal.timeout(REQUEST_TIMEOUT_MS);

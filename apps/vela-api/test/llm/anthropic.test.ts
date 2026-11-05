@@ -1,11 +1,12 @@
 import { describe, expect, test } from 'bun:test';
-import type { Anthropic } from '@anthropic-ai/sdk';
+import { Anthropic } from '@anthropic-ai/sdk';
+import type { LlmEvent } from '@vela/common/contracts/llm';
 import {
   createAnthropicMapper,
   streamAnthropicMessages,
   type AnthropicStreamEvent,
 } from '../../src/llm/providers/anthropic';
-import { collectEvents, mapperEvents } from './helpers';
+import { collectEvents, mapperEvents, sseBody } from './helpers';
 
 const baseInput = {
   model: 'claude-opus-5-5',
@@ -16,7 +17,7 @@ const baseInput = {
   maxTokens: 4096,
 };
 
-const messageStart = (usage?: Record<string, number>): AnthropicStreamEvent => ({
+const messageStart = (usage?: Record<string, number | null>): AnthropicStreamEvent => ({
   type: 'message_start',
   message: { usage },
 });
@@ -35,7 +36,7 @@ const blockStart = (blockType: string, index = 0): AnthropicStreamEvent => ({
 
 const messageDelta = (
   stopReason: string | null,
-  usage?: Record<string, number>,
+  usage?: Record<string, number | null>,
 ): AnthropicStreamEvent => ({ type: 'message_delta', delta: { stop_reason: stopReason }, usage });
 
 const FINAL_USAGE = {
@@ -172,8 +173,153 @@ describe('anthropic mapper', () => {
 
   test('missing usage emits no usage events', () => {
     expect(
-      mapperEvents(createAnthropicMapper, [messageStart(undefined), messageDelta('end_turn')]),
+      mapperEvents(createAnthropicMapper, [
+        messageStart(undefined),
+        messageDelta('end_turn'),
+        { type: 'message_stop' },
+      ]),
     ).toEqual([]);
+  });
+
+  test('output-only usage delta preserves previously reported input and cache counts', () => {
+    expect(
+      mapperEvents(createAnthropicMapper, [
+        messageStart({
+          input_tokens: 12,
+          cache_read_input_tokens: 200,
+          cache_creation_input_tokens: 8,
+        }),
+        // Output-only delta: input fields omitted, must not zero the counts.
+        messageDelta('end_turn', { output_tokens: 42 }),
+        { type: 'message_stop' },
+      ]),
+    ).toEqual([
+      {
+        type: 'usage',
+        usage: { inputTokens: 220, outputTokens: 0, cachedInputTokens: 200, cacheWriteTokens: 8 },
+      },
+      {
+        type: 'usage',
+        usage: { inputTokens: 220, outputTokens: 42, cachedInputTokens: 200, cacheWriteTokens: 8 },
+      },
+    ]);
+  });
+
+  test('null-valued usage fields do not erase known counts', () => {
+    expect(
+      mapperEvents(createAnthropicMapper, [
+        messageStart({
+          input_tokens: 12,
+          cache_read_input_tokens: 200,
+          cache_creation_input_tokens: 8,
+          output_tokens: 1,
+        }),
+        messageDelta('end_turn', {
+          input_tokens: null,
+          cache_read_input_tokens: null,
+          cache_creation_input_tokens: null,
+          output_tokens: 42,
+        }),
+        { type: 'message_stop' },
+      ]),
+    ).toEqual([
+      {
+        type: 'usage',
+        usage: { inputTokens: 220, outputTokens: 1, cachedInputTokens: 200, cacheWriteTokens: 8 },
+      },
+      {
+        type: 'usage',
+        usage: { inputTokens: 220, outputTokens: 42, cachedInputTokens: 200, cacheWriteTokens: 8 },
+      },
+    ]);
+  });
+
+  test('stream truncated right before message_stop is an error despite a success stop reason', () => {
+    expect(
+      mapperEvents(createAnthropicMapper, [
+        messageStart({ input_tokens: 5 }),
+        messageDelta('end_turn'),
+      ]),
+    ).toEqual([
+      {
+        type: 'usage',
+        usage: { inputTokens: 5, outputTokens: 0, cachedInputTokens: 0, cacheWriteTokens: 0 },
+      },
+      { type: 'error', message: 'Anthropic stream ended without a successful stop' },
+    ]);
+  });
+
+  test('message_stop without a preceding success stop reason is a missing-terminal error', () => {
+    expect(mapperEvents(createAnthropicMapper, [messageStart(), { type: 'message_stop' }])).toEqual(
+      [{ type: 'error', message: 'Anthropic stream ended without a successful stop' }],
+    );
+  });
+
+  test('fallback block identifies the serving model and per-attempt iterations never inflate usage', () => {
+    const mapper = createAnthropicMapper();
+    const events: LlmEvent[] = [];
+    const fixture: AnthropicStreamEvent[] = [
+      messageStart({
+        input_tokens: 12,
+        cache_read_input_tokens: 200,
+        cache_creation_input_tokens: 8,
+        output_tokens: 2,
+      }),
+      blockStart('text', 0),
+      textDelta('I can', 0),
+      { type: 'content_block_stop', index: 0 },
+      {
+        type: 'content_block_start',
+        index: 1,
+        content_block: {
+          type: 'fallback',
+          from: { model: 'claude-opus-5-5' },
+          to: { model: 'claude-sonnet-5-5' },
+        },
+      },
+      { type: 'content_block_stop', index: 1 },
+      blockStart('text', 2),
+      textDelta(' help.', 2),
+      { type: 'content_block_stop', index: 2 },
+      {
+        type: 'message_delta',
+        delta: { stop_reason: 'end_turn' },
+        usage: {
+          input_tokens: 12,
+          cache_read_input_tokens: 200,
+          cache_creation_input_tokens: 8,
+          output_tokens: 9,
+          // Per-attempt billing breakdown: carried but never summed into usage.
+          iterations: [
+            { type: 'message', model: 'claude-opus-5-5', input_tokens: 12, output_tokens: 2 },
+            {
+              type: 'fallback_message',
+              model: 'claude-sonnet-5-5',
+              input_tokens: 12,
+              output_tokens: 7,
+            },
+          ],
+        },
+      },
+      { type: 'message_stop' },
+    ];
+    for (const vendorEvent of fixture) events.push(...mapper.push(vendorEvent));
+    events.push(...mapper.end());
+    // The fallback block's `to` model is the model that served the response.
+    expect(mapper.servingModel()).toBe('claude-sonnet-5-5');
+    expect(events).toEqual([
+      {
+        type: 'usage',
+        usage: { inputTokens: 220, outputTokens: 2, cachedInputTokens: 200, cacheWriteTokens: 8 },
+      },
+      { type: 'text', text: 'I can' },
+      { type: 'text', text: ' help.' },
+      // Top-level cumulative totals only (220/9) — iteration entries never add in.
+      {
+        type: 'usage',
+        usage: { inputTokens: 220, outputTokens: 9, cachedInputTokens: 200, cacheWriteTokens: 8 },
+      },
+    ]);
   });
 
   test('stream ending without a successful stop yields a missing-terminal error', () => {
@@ -254,6 +400,98 @@ describe('anthropic adapter', () => {
     );
     expect(capturedBody.fallbacks).toBe('default');
     expect(events).toEqual([{ type: 'error', message: 'Anthropic response was refused' }]);
+  });
+
+  test('SDK request carries a deadline signal combined with the caller signal', async () => {
+    let capturedOptions: Record<string, unknown> = {};
+    const client = fakeClient((_body, options) => {
+      capturedOptions = options as Record<string, unknown>;
+      return eventsOf([messageDelta('end_turn'), { type: 'message_stop' }]);
+    });
+    const caller = new AbortController();
+    await collectEvents(
+      streamAnthropicMessages({ ...baseInput, signal: caller.signal }, () => client),
+    );
+    const signal = capturedOptions.signal;
+    expect(signal).toBeInstanceOf(AbortSignal);
+    expect(signal).not.toBe(caller.signal); // timeout combined in, not the raw caller signal
+    expect((signal as AbortSignal).aborted).toBe(false);
+    caller.abort();
+    expect((signal as AbortSignal).aborted).toBe(true); // caller cancellation still reaches the SDK
+  });
+
+  test('SDK request carries a deadline signal even without a caller signal', async () => {
+    let capturedOptions: Record<string, unknown> = {};
+    const client = fakeClient((_body, options) => {
+      capturedOptions = options as Record<string, unknown>;
+      return eventsOf([messageDelta('end_turn'), { type: 'message_stop' }]);
+    });
+    await collectEvents(streamAnthropicMessages(baseInput, () => client));
+    expect(capturedOptions.signal).toBeInstanceOf(AbortSignal);
+  });
+
+  test('fallback stream through the installed SDK: iterations never inflate normalized usage', async () => {
+    // Mocked transport, real @anthropic-ai/sdk: exercises its SSE parsing and
+    // BetaMessageStream path, not a hand-rolled client double.
+    const sse =
+      [
+        'event: message_start',
+        'data: {"type":"message_start","message":{"id":"msg_fb1","type":"message","role":"assistant","model":"claude-opus-5-5","content":[],"stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":12,"cache_read_input_tokens":200,"cache_creation_input_tokens":8,"output_tokens":2}}}',
+        '',
+        'event: content_block_start',
+        'data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}',
+        '',
+        'event: content_block_delta',
+        'data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"I can"}}',
+        '',
+        'event: content_block_stop',
+        'data: {"type":"content_block_stop","index":0}',
+        '',
+        'event: content_block_start',
+        'data: {"type":"content_block_start","index":1,"content_block":{"type":"fallback","from":{"model":"claude-opus-5-5"},"to":{"model":"claude-sonnet-5-5"},"trigger":"refusal"}}',
+        '',
+        'event: content_block_stop',
+        'data: {"type":"content_block_stop","index":1}',
+        '',
+        'event: content_block_start',
+        'data: {"type":"content_block_start","index":2,"content_block":{"type":"text","text":""}}',
+        '',
+        'event: content_block_delta',
+        'data: {"type":"content_block_delta","index":2,"delta":{"type":"text_delta","text":" help."}}',
+        '',
+        'event: content_block_stop',
+        'data: {"type":"content_block_stop","index":2}',
+        '',
+        'event: message_delta',
+        'data: {"type":"message_delta","delta":{"stop_reason":"end_turn","stop_sequence":null},"usage":{"input_tokens":12,"cache_read_input_tokens":200,"cache_creation_input_tokens":8,"output_tokens":9,"iterations":[{"type":"message","model":"claude-opus-5-5","input_tokens":12,"cache_read_input_tokens":200,"cache_creation_input_tokens":8,"output_tokens":2},{"type":"fallback_message","model":"claude-sonnet-5-5","input_tokens":12,"cache_read_input_tokens":200,"cache_creation_input_tokens":8,"output_tokens":7}]}}',
+        '',
+        'event: message_stop',
+        'data: {"type":"message_stop"}',
+        '',
+      ].join('\n') + '\n';
+    const client = new Anthropic({
+      apiKey: 'a-key',
+      maxRetries: 0,
+      fetch: async () =>
+        new Response(sseBody([sse]), {
+          status: 200,
+          headers: { 'content-type': 'text/event-stream' },
+        }),
+    });
+    const events = await collectEvents(streamAnthropicMessages(baseInput, () => client));
+    expect(events).toEqual([
+      {
+        type: 'usage',
+        usage: { inputTokens: 220, outputTokens: 2, cachedInputTokens: 200, cacheWriteTokens: 8 },
+      },
+      { type: 'text', text: 'I can' },
+      { type: 'text', text: ' help.' },
+      // Cumulative top-level totals only; the two iteration entries never add in.
+      {
+        type: 'usage',
+        usage: { inputTokens: 220, outputTokens: 9, cachedInputTokens: 200, cacheWriteTokens: 8 },
+      },
+    ]);
   });
 
   test('SDK exception yields one sanitized error without vendor payload', async () => {
