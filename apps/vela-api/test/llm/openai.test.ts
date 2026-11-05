@@ -92,6 +92,25 @@ describe('openai mapper', () => {
     ).toEqual([{ type: 'error', message: 'OpenAI response incomplete (max_output_tokens)' }]);
   });
 
+  test('attacker-controlled failure codes never reach the error message', () => {
+    const events = mapperEvents(createOpenAiMapper, [
+      { type: 'response.failed', response: { error: { code: 'sk-ATTACKERSECRET' } } },
+    ]);
+    expect(events).toEqual([{ type: 'error', message: 'OpenAI response failed (unknown)' }]);
+    expect(JSON.stringify(events)).not.toContain('ATTACKERSECRET');
+  });
+
+  test('attacker-controlled incomplete reasons never reach the error message', () => {
+    const events = mapperEvents(createOpenAiMapper, [
+      {
+        type: 'response.incomplete',
+        response: { incomplete_details: { reason: 'ATTACKERSECRET-reason' } },
+      },
+    ]);
+    expect(events).toEqual([{ type: 'error', message: 'OpenAI response incomplete (unknown)' }]);
+    expect(JSON.stringify(events)).not.toContain('ATTACKERSECRET');
+  });
+
   test('refusal deltas become an error terminal', () => {
     expect(
       mapperEvents(createOpenAiMapper, [{ type: 'response.refusal.delta', delta: 'cannot help' }]),

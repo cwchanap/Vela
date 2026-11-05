@@ -2,6 +2,7 @@ import OpenAI from 'openai';
 import type { LlmEvent } from '@vela/common/contracts/llm';
 import {
   REQUEST_TIMEOUT_MS,
+  safeVendorCode,
   sanitizeProviderError,
   withRequestTimeout,
   type LlmProviderAdapter,
@@ -31,6 +32,15 @@ export interface OpenAiStreamEvent {
 }
 
 type OpenAiUsage = NonNullable<NonNullable<OpenAiStreamEvent['response']>['usage']>;
+
+// Documented Responses API failure codes and incomplete-detail reasons.
+const OPENAI_ERROR_CODES = new Set([
+  'server_error',
+  'rate_limit_exceeded',
+  'context_length_exceeded',
+  'invalid_prompt',
+]);
+const OPENAI_INCOMPLETE_REASONS = new Set(['max_output_tokens', 'content_filter']);
 
 function usageEvents(usage?: OpenAiUsage | null): LlmEvent[] {
   if (!usage) return [];
@@ -70,7 +80,7 @@ export function createOpenAiMapper(): VendorEventMapper<OpenAiStreamEvent> {
           return [
             {
               type: 'error',
-              message: `OpenAI response failed (${event.response?.error?.code ?? 'unknown'})`,
+              message: `OpenAI response failed (${safeVendorCode(event.response?.error?.code, OPENAI_ERROR_CODES)})`,
             },
           ];
         }
@@ -79,7 +89,7 @@ export function createOpenAiMapper(): VendorEventMapper<OpenAiStreamEvent> {
           return [
             {
               type: 'error',
-              message: `OpenAI response incomplete (${event.response?.incomplete_details?.reason ?? 'unknown'})`,
+              message: `OpenAI response incomplete (${safeVendorCode(event.response?.incomplete_details?.reason, OPENAI_INCOMPLETE_REASONS)})`,
             },
           ];
         }

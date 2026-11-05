@@ -498,6 +498,35 @@ describe('LLM Chat Route', () => {
       expect(json.error).toBe('OpenRouter stream error (429)');
       expect(JSON.stringify(json)).not.toContain('sk-or-SECRET');
     });
+
+    test('returns 502 without echoing attacker-controlled error codes or finish reasons', async () => {
+      (global.fetch as any).mockResolvedValueOnce(
+        sseResponse([
+          'data: {"error":{"code":"sk-or-v1-ATTACKERSECRET","message":"key sk-or-v1-ATTACKERSECRET rejected"}}\n\n',
+        ]),
+      );
+      const app = createTestApp();
+      const res = await app.request(
+        chatRequest({ provider: 'openrouter', apiKey: 'k', prompt: 'Hello' }),
+      );
+      const json = await res.json();
+
+      expect(res.status).toBe(502);
+      expect(json.error).toBe('OpenRouter stream error (unknown)');
+      expect(JSON.stringify(json)).not.toContain('ATTACKERSECRET');
+
+      (global.fetch as any).mockResolvedValueOnce(
+        sseResponse(['data: {"candidates":[{"finishReason":"ATTACKERSECRET-CODE"}]}\n\n']),
+      );
+      const res2 = await app.request(
+        chatRequest({ provider: 'google', apiKey: 'k', prompt: 'Hello' }),
+      );
+      const json2 = await res2.json();
+
+      expect(res2.status).toBe(502);
+      expect(json2.error).toBe('Gemini stream finished early (unknown)');
+      expect(JSON.stringify(json2)).not.toContain('ATTACKERSECRET');
+    });
   });
 
   describe('CORS handling (unchanged, centralized)', () => {

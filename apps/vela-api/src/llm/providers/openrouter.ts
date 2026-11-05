@@ -1,6 +1,7 @@
 import type { LlmEvent } from '@vela/common/contracts/llm';
 import { readSseDataLines } from '../sse';
 import {
+  safeVendorCode,
   sanitizeProviderError,
   withRequestTimeout,
   type LlmProviderAdapter,
@@ -24,6 +25,11 @@ export interface OpenRouterStreamChunk {
 
 const OPENROUTER_ENDPOINT = 'https://openrouter.ai/api/v1/chat/completions';
 
+// Documented string codes in this stream shape: Chat Completions failure
+// finish reasons ('stop' is the success terminal). Error `code` is documented
+// as numeric, so numbers pass as-is via the number branch.
+const OPENROUTER_KNOWN_CODES = new Set(['length', 'content_filter', 'tool_calls', 'function_call']);
+
 /**
  * Pure OpenRouter Chat Completions chunk mapper. Success terminal is
  * `finish_reason: 'stop'`; OpenRouter puts the finish reason on a
@@ -38,7 +44,10 @@ export function createOpenRouterMapper(): VendorEventMapper<OpenRouterStreamChun
       if (chunk.error) {
         if (status === 'pending') status = 'failed';
         return [
-          { type: 'error', message: `OpenRouter stream error (${chunk.error.code ?? 'unknown'})` },
+          {
+            type: 'error',
+            message: `OpenRouter stream error (${safeVendorCode(chunk.error.code, OPENROUTER_KNOWN_CODES)})`,
+          },
         ];
       }
       const events: LlmEvent[] = [];
@@ -62,7 +71,10 @@ export function createOpenRouterMapper(): VendorEventMapper<OpenRouterStreamChun
           status = 'succeeded';
         } else {
           status = 'failed';
-          events.push({ type: 'error', message: `OpenRouter stream finished early (${finish})` });
+          events.push({
+            type: 'error',
+            message: `OpenRouter stream finished early (${safeVendorCode(finish, OPENROUTER_KNOWN_CODES)})`,
+          });
         }
       }
       return events;

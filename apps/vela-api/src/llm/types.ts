@@ -69,6 +69,20 @@ export function sanitizeProviderError(provider: string, error: unknown): LlmEven
 }
 
 /**
+ * Vendor event codes and finish reasons are untrusted: a compromised or
+ * intercepted upstream can put any string there (including echoed API keys),
+ * and every consumer of these events (chat route and dictionary SSE) exposes
+ * error messages to the browser. Only finite numbers and explicitly
+ * allowlisted enum names may be interpolated; anything else degrades to a
+ * fixed label. Unknown-but-legitimate future codes also degrade safely.
+ */
+export function safeVendorCode(code: unknown, allowed: ReadonlySet<string>): string {
+  if (typeof code === 'number' && Number.isFinite(code)) return String(code);
+  if (typeof code === 'string' && allowed.has(code)) return code;
+  return 'unknown';
+}
+
+/**
  * Abort signal that fires on the shared request timeout, or earlier when the
  * caller's own signal aborts. Used by the fetch-based adapters directly and
  * passed as the SDK adapters' request signal — the SDK's own `timeout` only
