@@ -1,33 +1,31 @@
 import { defineStore } from 'pinia';
 import { ref, computed, watch } from 'vue';
 import { LocalStorage, Notify } from 'quasar';
-import type { LLMProviderName } from '../services/llm';
-import { llmService } from '../services/llm';
+import { LLM_PROVIDER_REGISTRY, LLM_PROVIDERS, type LlmProvider } from '@vela/common';
 import { useAuthStore } from './auth';
 import type { UserPreferences } from '../types/shared';
 
-export type ProviderModelMap = Partial<Record<LLMProviderName, string>>;
-export type ProviderKeyMap = Partial<Record<LLMProviderName, string>>;
+export type ProviderModelMap = Partial<Record<LlmProvider, string>>;
+export type ProviderKeyMap = Partial<Record<LlmProvider, string>>;
 
 interface PersistedSettings {
-  provider: LLMProviderName;
+  provider: LlmProvider;
   models: ProviderModelMap;
   keys?: ProviderKeyMap;
 }
 
 const STORAGE_KEY = 'llm_settings_v1';
 
-export const useLLMSettingsStore = defineStore('llmSettings', () => {
-  // Internal defaults (no env)
-  const DEFAULT_PROVIDER: LLMProviderName = 'google';
-  const DEFAULT_MODELS: ProviderModelMap = {
-    google: 'gemini-2.5-flash-lite',
-    openrouter: 'openai/gpt-oss-20b:free',
-    chutes: 'openai/gpt-oss-120b',
-  };
+// Default models come from the shared registry; the store keeps no provider
+// state of its own beyond the active selection.
+const DEFAULT_PROVIDER: LlmProvider = 'google';
+const DEFAULT_MODELS: ProviderModelMap = Object.fromEntries(
+  LLM_PROVIDERS.map((p) => [p, LLM_PROVIDER_REGISTRY[p].defaultModel]),
+);
 
+export const useLLMSettingsStore = defineStore('llmSettings', () => {
   // State
-  const provider = ref<LLMProviderName>(DEFAULT_PROVIDER);
+  const provider = ref<LlmProvider>(DEFAULT_PROVIDER);
   const models = ref<ProviderModelMap>({ ...DEFAULT_MODELS });
   const keys = ref<ProviderKeyMap>({});
 
@@ -42,21 +40,17 @@ export const useLLMSettingsStore = defineStore('llmSettings', () => {
   const currentApiKey = computed(() => keys.value[provider.value]);
 
   // Actions
-  const setProvider = (name: LLMProviderName) => {
+  const setProvider = (name: LlmProvider) => {
     provider.value = name;
     // ensure model exists for provider
     if (!models.value[name]) {
       models.value[name] = DEFAULT_MODELS[name] ?? DEFAULT_MODELS.google!;
     }
-    // apply to service
-    llmService.setProvider(name, models.value[name]);
-    llmService.setApiKey(keys.value[name]);
     persist();
   };
 
   const setModel = (model: string) => {
     models.value[provider.value] = model;
-    llmService.setModel(model);
     persist();
   };
 
@@ -72,16 +66,9 @@ export const useLLMSettingsStore = defineStore('llmSettings', () => {
   // Profile integration
   const auth = useAuthStore();
 
-  const applyToService = () => {
-    llmService.setProvider(provider.value, currentModel.value);
-    llmService.setModel(currentModel.value);
-    llmService.setApiKey(currentApiKey.value);
-  };
-
   const loadFromProfile = () => {
     const prefs: UserPreferences | undefined = auth.user?.preferences as
-      | UserPreferences
-      | undefined;
+      UserPreferences | undefined;
     if (!prefs) return false;
     const p = prefs.llm_provider;
     const m = prefs.llm_models;
@@ -89,7 +76,6 @@ export const useLLMSettingsStore = defineStore('llmSettings', () => {
     if (p) provider.value = p;
     if (m) models.value = { ...models.value, ...m };
     if (k) keys.value = { ...keys.value, ...k };
-    applyToService();
     return !!p || !!m || !!k;
   };
 
@@ -119,30 +105,11 @@ export const useLLMSettingsStore = defineStore('llmSettings', () => {
         models.value = data.models || {};
         keys.value = data.keys || {};
       }
-      applyToService();
     }
   };
 
   // Auto-load once store is created
   load();
-
-  // Keep service in sync on changes (defensive)
-  watch(provider, (p) => {
-    llmService.setProvider(p, currentModel.value);
-    llmService.setApiKey(currentApiKey.value);
-  });
-  watch(
-    () => currentModel.value,
-    (m) => {
-      llmService.setModel(m);
-    },
-  );
-  watch(
-    () => currentApiKey.value,
-    (k) => {
-      llmService.setApiKey(k);
-    },
-  );
 
   // React to auth user availability to load profile-backed settings
   watch(
@@ -160,7 +127,6 @@ export const useLLMSettingsStore = defineStore('llmSettings', () => {
     provider.value = DEFAULT_PROVIDER;
     models.value = { ...DEFAULT_MODELS };
     keys.value = {};
-    applyToService();
     persist();
     await saveToProfile();
   };
@@ -177,7 +143,6 @@ export const useLLMSettingsStore = defineStore('llmSettings', () => {
     } else {
       keys.value[provider.value] = trimmed;
     }
-    applyToService();
     persist();
   };
 

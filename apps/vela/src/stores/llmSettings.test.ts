@@ -1,15 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { setActivePinia, createPinia } from 'pinia';
-
-const mockLlmService = {
-  setProvider: vi.fn(),
-  setModel: vi.fn(),
-  setApiKey: vi.fn(),
-};
-
-vi.mock('../services/llm', () => ({
-  llmService: mockLlmService,
-}));
+import { LLM_PROVIDER_REGISTRY } from '@vela/common';
 
 const mockLocalStorage = {
   set: vi.fn(),
@@ -49,12 +40,13 @@ describe('useLLMSettingsStore', () => {
       expect(store.provider).toBe('google');
     });
 
-    it('has default models configured', async () => {
+    it('has registry-backed default models for every provider', async () => {
       const { useLLMSettingsStore } = await import('./llmSettings');
       const store = useLLMSettingsStore();
-      expect(store.models.google).toBe('gemini-2.5-flash-lite');
-      expect(store.models.openrouter).toBeDefined();
-      expect(store.models.chutes).toBeDefined();
+      expect(store.models.google).toBe(LLM_PROVIDER_REGISTRY.google.defaultModel);
+      expect(store.models.openai).toBe(LLM_PROVIDER_REGISTRY.openai.defaultModel);
+      expect(store.models.anthropic).toBe(LLM_PROVIDER_REGISTRY.anthropic.defaultModel);
+      expect(store.models.openrouter).toBe(LLM_PROVIDER_REGISTRY.openrouter.defaultModel);
     });
 
     it('has empty keys', async () => {
@@ -65,10 +57,10 @@ describe('useLLMSettingsStore', () => {
   });
 
   describe('computed: currentModel', () => {
-    it('returns model for current provider', async () => {
+    it('has default model from the registry', async () => {
       const { useLLMSettingsStore } = await import('./llmSettings');
       const store = useLLMSettingsStore();
-      expect(store.currentModel).toBe('gemini-2.5-flash-lite');
+      expect(store.currentModel).toBe(LLM_PROVIDER_REGISTRY.google.defaultModel);
     });
 
     it('falls back to the default provider model for unexpected runtime providers', async () => {
@@ -78,7 +70,7 @@ describe('useLLMSettingsStore', () => {
       store.models = {} as any;
       store.provider = 'unexpected-provider' as any;
 
-      expect(store.currentModel).toBe('gemini-2.5-flash-lite');
+      expect(store.currentModel).toBe(LLM_PROVIDER_REGISTRY.google.defaultModel);
     });
   });
 
@@ -98,21 +90,30 @@ describe('useLLMSettingsStore', () => {
   });
 
   describe('setProvider', () => {
-    it('changes provider and updates service', async () => {
+    it('changes provider and persists', async () => {
       const { useLLMSettingsStore } = await import('./llmSettings');
       const store = useLLMSettingsStore();
       store.setProvider('openrouter');
       expect(store.provider).toBe('openrouter');
-      expect(mockLlmService.setProvider).toHaveBeenCalledWith('openrouter', expect.any(String));
       expect(mockLocalStorage.set).toHaveBeenCalled();
     });
 
     it('ensures model is set for new provider', async () => {
       const { useLLMSettingsStore } = await import('./llmSettings');
       const store = useLLMSettingsStore();
-      store.models = { google: 'gemini-2.5-flash-lite' } as any; // clear other models
-      store.setProvider('openrouter');
-      expect(store.models.openrouter).toBeDefined();
+      store.models = { google: LLM_PROVIDER_REGISTRY.google.defaultModel } as any; // clear other models
+      store.setProvider('anthropic');
+      expect(store.models.anthropic).toBe(LLM_PROVIDER_REGISTRY.anthropic.defaultModel);
+    });
+
+    it('keeps per-provider keys isolated when switching providers', async () => {
+      const { useLLMSettingsStore } = await import('./llmSettings');
+      const store = useLLMSettingsStore();
+      store.setApiKey('google-key');
+      store.setProvider('openai');
+      expect(store.currentApiKey).toBeUndefined();
+      store.setProvider('google');
+      expect(store.currentApiKey).toBe('google-key');
     });
   });
 
@@ -122,7 +123,6 @@ describe('useLLMSettingsStore', () => {
       const store = useLLMSettingsStore();
       store.setModel('gemini-pro');
       expect(store.models.google).toBe('gemini-pro');
-      expect(mockLlmService.setModel).toHaveBeenCalledWith('gemini-pro');
       expect(mockLocalStorage.set).toHaveBeenCalled();
     });
   });
@@ -133,7 +133,6 @@ describe('useLLMSettingsStore', () => {
       const store = useLLMSettingsStore();
       store.setApiKey('my-key-123');
       expect(store.keys.google).toBe('my-key-123');
-      expect(mockLlmService.setApiKey).toHaveBeenCalledWith('my-key-123');
     });
 
     it('removes key when empty string', async () => {
@@ -191,13 +190,13 @@ describe('useLLMSettingsStore', () => {
       mockAuthStore.user = {
         id: 'user-1',
         preferences: {
-          llm_provider: 'chutes',
-          llm_models: { chutes: 'gpt-120b' },
+          llm_provider: 'anthropic',
+          llm_models: { anthropic: 'claude-opus-5-5' },
         },
       };
       const store = useLLMSettingsStore();
       store.load();
-      expect(store.provider).toBe('chutes');
+      expect(store.provider).toBe('anthropic');
     });
   });
 
@@ -220,7 +219,6 @@ describe('useLLMSettingsStore', () => {
       await store.resetToDefaults();
       expect(store.provider).toBe('google');
       expect(store.keys).toEqual({});
-      expect(mockLlmService.setProvider).toHaveBeenCalledWith('google', expect.any(String));
     });
   });
 

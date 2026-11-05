@@ -294,7 +294,7 @@ describe('SettingsPage', () => {
   });
 
   describe('LLM settings actions', () => {
-    it('syncs local model fields and options when the provider changes', async () => {
+    it('syncs local model and key fields when the provider changes', async () => {
       llmStore.$patch({
         models: {
           ...llmStore.models,
@@ -305,14 +305,29 @@ describe('SettingsPage', () => {
           openrouter: 'openrouter-key',
         },
       });
-      wrapper.vm.modelOptions = [llmStore.currentModel];
 
       wrapper.vm.selectedProvider = 'openrouter';
       await flushPromises();
 
       expect(wrapper.vm.model).toBe('openrouter/custom-model');
       expect(wrapper.vm.apiKeyInput).toBe('openrouter-key');
-      expect(wrapper.vm.modelOptions[0]).toBe('openrouter/custom-model');
+    });
+
+    it('offers registry model choices for fixed providers and stays free-form for OpenRouter', () => {
+      wrapper.vm.selectedProvider = 'openai';
+      expect(wrapper.vm.modelOptions).toEqual([
+        'gpt-6.1-sol',
+        'gpt-6.1-terra',
+        'gpt-6-luna',
+        'gpt-6-astra',
+        'gpt-5.6-sol',
+        'gpt-5.6-terra',
+        'gpt-5.6-luna',
+      ]);
+
+      llmStore.setProvider('openrouter');
+      llmStore.setModel('openrouter/typed-model');
+      expect(wrapper.vm.modelOptions).toEqual(['openrouter/typed-model']);
     });
 
     it('saves trimmed model and API key changes through the store', async () => {

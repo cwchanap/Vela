@@ -8,7 +8,7 @@ import { useChatStore } from '../../stores/chat';
 import { useLLMSettingsStore } from '../../stores/llmSettings';
 import { useAuthStore } from '../../stores/auth';
 import * as llmModule from '../../services/llm';
-import type { LLMResponse } from '../../services/llm/types';
+import type { LlmResponse } from '@vela/common';
 import * as awsAmplify from 'aws-amplify/auth';
 
 // Mock modules
@@ -17,12 +17,13 @@ vi.mock('aws-amplify/auth', () => ({
 }));
 
 vi.mock('../../services/llm', () => ({
-  llmService: {
+  llmClient: {
     generate: vi.fn(),
-    setProvider: vi.fn(),
-    setModel: vi.fn(),
-    setApiKey: vi.fn(),
+    analyzeSentenceStream: vi.fn(),
   },
+  describeLlmError: vi.fn((error: unknown, fallback: string) =>
+    error instanceof Error && error.message ? error.message : fallback,
+  ),
 }));
 
 vi.mock('../../utils/api', () => ({
@@ -67,7 +68,7 @@ describe('AIChatPage', () => {
     chatStore.setError(null);
 
     llmSettingsStore.setProvider('google');
-    llmSettingsStore.setModel('gemini-2.5-flash-lite');
+    llmSettingsStore.setModel('gemini-3.8-flash');
 
     authStore.user = null;
 
@@ -177,11 +178,9 @@ describe('AIChatPage', () => {
     ...overrides,
   });
 
-  // Helper to mock LLM service response
-  const mockLLMServiceResponse = (text = 'AI response') => {
-    vi.spyOn(llmModule.llmService, 'generate').mockResolvedValue({
-      text,
-    });
+  // Helper to mock LLM client response
+  const mockLLMResponse = (text = 'AI response') => {
+    vi.spyOn(llmModule.llmClient, 'generate').mockResolvedValue({ text } as LlmResponse);
   };
 
   // Helper to mock successful save operations (chat history, etc.)
@@ -372,7 +371,7 @@ describe('AIChatPage', () => {
   describe('Sending Messages', () => {
     it('should send message when send button is clicked', async () => {
       const chatStore = useChatStore();
-      mockLLMServiceResponse();
+      mockLLMResponse();
       mockChatMessageSaves();
 
       const wrapper = mountComponent();
@@ -402,7 +401,7 @@ describe('AIChatPage', () => {
     });
 
     it('should clear input after sending message', async () => {
-      mockLLMServiceResponse();
+      mockLLMResponse();
       mockChatMessageSaves();
 
       const wrapper = mountComponent();
@@ -417,12 +416,12 @@ describe('AIChatPage', () => {
 
     it('should show typing indicator while AI is responding', async () => {
       // Create a controlled promise to test the typing indicator
-      let resolveLLM: (_value: LLMResponse) => void = () => {};
-      const llmPromise = new Promise<LLMResponse>((resolve) => {
+      let resolveLLM: (_value: LlmResponse) => void = () => {};
+      const llmPromise = new Promise<LlmResponse>((resolve) => {
         resolveLLM = resolve;
       });
 
-      vi.spyOn(llmModule.llmService, 'generate').mockReturnValueOnce(llmPromise);
+      vi.spyOn(llmModule.llmClient, 'generate').mockReturnValueOnce(llmPromise);
       mockChatMessageSaves();
 
       const wrapper = mountComponent();
@@ -445,7 +444,7 @@ describe('AIChatPage', () => {
     });
 
     it('should add AI response to messages', async () => {
-      mockLLMServiceResponse('This is AI response');
+      mockLLMResponse('This is AI response');
       mockChatMessageSaves();
 
       const wrapper = mountComponent();
@@ -463,7 +462,7 @@ describe('AIChatPage', () => {
     });
 
     it('should handle API errors gracefully', async () => {
-      vi.spyOn(llmModule.llmService, 'generate').mockRejectedValue(
+      vi.spyOn(llmModule.llmClient, 'generate').mockRejectedValue(
         new Error('API connection failed'),
       );
       mockSuccessfulSaveResponse(); // User message save succeeds
@@ -896,17 +895,33 @@ describe('AIChatPage', () => {
       expect(authStore).toBeDefined();
     });
 
-    it('should sync LLM service with settings on mount', async () => {
+    it('should pass the current provider/model/key snapshot explicitly on send', async () => {
       const llmSettings = useLLMSettingsStore();
       llmSettings.setProvider('google');
-      llmSettings.setModel('gemini-2.5-flash-lite');
+      llmSettings.setModel('gemini-3.8-flash');
+      llmSettings.setApiKey('snapshot-key');
+      mockLLMResponse();
+      mockChatMessageSaves();
 
-      mountComponent();
+      const wrapper = mountComponent();
       await flushPromises();
 
-      expect(llmModule.llmService.setProvider).toHaveBeenCalled();
-      expect(llmModule.llmService.setModel).toHaveBeenCalled();
-      expect(llmModule.llmService.setApiKey).toHaveBeenCalled();
+      const input = wrapper.find('[data-testid="llm-chat-input"]');
+      await input.setValue('Snapshot test');
+      await wrapper.find('[data-testid="llm-chat-send"]').trigger('click');
+      await flushPromises();
+
+      expect(llmModule.llmClient.generate).toHaveBeenCalledWith({
+        provider: 'google',
+        model: 'gemini-3.8-flash',
+        apiKey: 'snapshot-key',
+        system: expect.stringContaining('Japanese learning assistant'),
+        messages: expect.arrayContaining([{ role: 'user', content: 'Snapshot test' }]),
+      });
+      // temperature is no longer part of the request contract
+      const call = vi.mocked(llmModule.llmClient.generate).mock.calls[0]![0];
+      expect(call).not.toHaveProperty('temperature');
+      expect(call).not.toHaveProperty('thinking');
     });
   });
 
@@ -988,7 +1003,7 @@ describe('AIChatPage', () => {
 
   describe('Keyboard Shortcuts', () => {
     it('should send message on Enter key', async () => {
-      mockLLMServiceResponse();
+      mockLLMResponse();
       mockChatMessageSaves();
 
       const wrapper = mountComponent();
@@ -1082,7 +1097,7 @@ describe('AIChatPage', () => {
       const chatStore = useChatStore();
       chatStore.setChatId(null);
 
-      mockLLMServiceResponse();
+      mockLLMResponse();
       mockChatMessageSaves();
 
       const wrapper = mountComponent();
@@ -1096,7 +1111,7 @@ describe('AIChatPage', () => {
     });
 
     it('should save messages to history', async () => {
-      mockLLMServiceResponse();
+      mockLLMResponse();
       mockChatMessageSaves();
 
       const wrapper = mountComponent();

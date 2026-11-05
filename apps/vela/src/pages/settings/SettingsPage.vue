@@ -240,7 +240,7 @@
 
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue';
-import type { LLMProviderName } from '../../services/llm';
+import { LLM_PROVIDER_REGISTRY, LLM_PROVIDERS, type LlmProvider } from '@vela/common';
 import { useLLMSettingsStore } from '../../stores/llmSettings';
 import { useThemeStore } from '../../stores/theme';
 import { useAuthStore } from '../../stores/auth';
@@ -273,14 +273,20 @@ const saveThemeToProfile = async () => {
   });
 };
 
-const providerOptions = [
-  { label: 'Google (Gemini API)', value: 'google' },
-  { label: 'OpenRouter', value: 'openrouter' },
-  { label: 'Chutes.ai', value: 'chutes' },
-] as { label: string; value: LLMProviderName }[];
+const PROVIDER_LABELS: Record<LlmProvider, string> = {
+  google: 'Google (Gemini API)',
+  openai: 'OpenAI',
+  anthropic: 'Anthropic',
+  openrouter: 'OpenRouter',
+};
+
+const providerOptions = LLM_PROVIDERS.map((provider) => ({
+  label: PROVIDER_LABELS[provider],
+  value: provider,
+}));
 
 // Bind provider via computed to store; model uses local buffer and commits on save
-const selectedProvider = computed<LLMProviderName>({
+const selectedProvider = computed<LlmProvider>({
   get: () => store.provider,
   set: (v) => store.setProvider(v),
 });
@@ -297,19 +303,12 @@ watch(
   },
 );
 
-// Free-form dropdown options; start with the current model and allow user-typed entries
-const modelOptions = ref<string[]>([store.currentModel]);
-
-// Keep options including the current model when provider (and thus currentModel) changes
-watch(
-  () => selectedProvider.value,
-  () => {
-    model.value = store.currentModel;
-    if (!modelOptions.value.includes(store.currentModel)) {
-      modelOptions.value.unshift(store.currentModel);
-    }
-  },
-);
+// Registry-backed model choices for Google/OpenAI/Anthropic; OpenRouter stays
+// free-form, seeded with the current model so a saved custom ID remains visible.
+const modelOptions = computed<string[]>(() => {
+  const registry = LLM_PROVIDER_REGISTRY[selectedProvider.value];
+  return registry.models ? registry.models.map((entry) => entry.id) : [store.currentModel];
+});
 
 const save = async () => {
   store.setModel(model.value.trim());

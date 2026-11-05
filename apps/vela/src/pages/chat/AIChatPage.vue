@@ -204,7 +204,8 @@ interface ChatThreadSummaryDTO {
   title: string;
   messageCount: number;
 }
-import { llmService, type ChatMessage as LLMChatMessage } from '../../services/llm';
+import { llmClient, describeLlmError } from '../../services/llm';
+import type { LlmMessage } from '@vela/common';
 
 const $q = useQuasar();
 const chat = useChatStore();
@@ -303,13 +304,6 @@ const scrollToBottom = async () => {
   if (messagesEl.value) {
     messagesEl.value.scrollTop = messagesEl.value.scrollHeight;
   }
-};
-
-const syncLLMFromSettings = () => {
-  // Ensure llmService matches current settings (store also sets this when settings change)
-  llmService.setProvider(provider.value, currentModel.value);
-  llmService.setModel(currentModel.value);
-  llmService.setApiKey(currentApiKey.value);
 };
 
 const getUserId = () => auth.user?.id || auth.session?.user?.id || 'anonymous';
@@ -421,28 +415,29 @@ const onSend = async () => {
     chat.setLoading(true);
     chat.setTyping(true);
 
-    // Keep service in sync with settings
-    syncLLMFromSettings();
-
     const systemPrompt =
       'You are a helpful Japanese learning assistant. Keep responses concise and friendly. When relevant, include romaji for Japanese text.';
 
-    const history: LLMChatMessage[] = chat.messages.map((m) => ({
+    const history: LlmMessage[] = chat.messages.map((m) => ({
       role: m.type === 'user' ? 'user' : 'assistant',
       content: m.content,
     }));
 
-    const resp = await llmService.generate({
+    // Explicit per-request snapshot of the active provider/model/key; there is
+    // no global service state to keep in sync.
+    const resp = await llmClient.generate({
+      provider: provider.value,
+      model: currentModel.value,
+      apiKey: currentApiKey.value,
       system: systemPrompt,
       messages: history,
-      temperature: 0.7,
     });
 
     chat.addMessage({ type: 'ai', content: resp.text });
     void saveToHistory(cid, resp.text, false);
   } catch (e: unknown) {
     console.error(e);
-    const message = e instanceof Error ? e.message : 'Failed to get AI response';
+    const message = describeLlmError(e, 'Failed to get AI response');
     chat.setError(message);
     $q.notify({ type: 'negative', message });
   } finally {
@@ -512,7 +507,6 @@ onMounted(() => {
       content: GREETING_MESSAGE,
     });
   }
-  syncLLMFromSettings();
   void scrollToBottom();
 });
 </script>

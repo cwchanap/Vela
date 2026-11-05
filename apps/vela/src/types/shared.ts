@@ -2,6 +2,8 @@
 // Canonical defaults for optional UserPreferences fields
 export { DEFAULT_DAILY_LESSON_GOAL, DEFAULT_LESSON_DURATION_MINUTES } from '@vela/common';
 
+import type { LlmProvider } from '@vela/common';
+
 export interface UserPreferences {
   dailyGoal: number;
   /**
@@ -19,11 +21,11 @@ export interface UserPreferences {
   todayStudyTime?: number;
   // Theme preferences
   darkMode?: boolean;
-  // Per-user LLM preferences
-  llm_provider?: 'google' | 'openrouter' | 'chutes';
-  llm_models?: Partial<Record<'google' | 'openrouter' | 'chutes', string>>;
+  // Per-user LLM preferences; the provider union is the shared LLM_PROVIDERS tuple
+  llm_provider?: LlmProvider;
+  llm_models?: Partial<Record<LlmProvider, string>>;
   // Optional per-provider API keys saved by the user
-  llm_keys?: Partial<Record<'google' | 'openrouter' | 'chutes', string>>;
+  llm_keys?: Partial<Record<LlmProvider, string>>;
 }
 
 export interface ChatContext {
