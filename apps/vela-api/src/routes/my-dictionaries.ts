@@ -258,7 +258,10 @@ app.post('/analyze', async (c) => {
       return c.json({ error: 'Sentence is required' }, 400);
     }
 
-    if (!provider) {
+    // The normalizer interpolates the provider into its unsupported-provider
+    // error; a non-string provider (e.g. {"toString":null}) throws there and
+    // surfaced as a 500. Keep it a local validation 4xx.
+    if (!provider || typeof provider !== 'string') {
       return c.json({ error: 'LLM provider is required' }, 400);
     }
 
