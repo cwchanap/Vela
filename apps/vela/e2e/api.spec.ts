@@ -236,7 +236,8 @@ test.describe('Vela API E2E Tests', () => {
         expect(response.status).toBe(400);
         const data = await response.json();
         expect(data.error).toBeDefined();
-        expect(data.error).toContain('ZodError');
+        // The route returns the first Zod issue as "<path>: <message>".
+        expect(data.error).toContain('provider:');
       });
 
       test('should reject missing prompt and messages', async () => {
@@ -254,7 +255,7 @@ test.describe('Vela API E2E Tests', () => {
         expect(response.status).toBe(400);
         const data = await response.json();
         expect(data.error).toBeDefined();
-        expect(data.error).toContain('Either messages or prompt must be provided');
+        expect(data.error).toContain('Either a nonempty prompt or messages must be provided');
       });
 
       test('should reject invalid message role', async () => {
@@ -272,7 +273,8 @@ test.describe('Vela API E2E Tests', () => {
         expect(response.status).toBe(400);
         const data = await response.json();
         expect(data.error).toBeDefined();
-        expect(data.error).toContain('ZodError');
+        // The route returns the first Zod issue as "<path>: <message>".
+        expect(data.error).toContain('messages.0.role:');
       });
 
       test('should reject stale model ids with the rejected model in the message', async () => {

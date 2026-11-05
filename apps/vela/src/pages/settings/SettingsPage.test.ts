@@ -330,6 +330,21 @@ describe('SettingsPage', () => {
       expect(wrapper.vm.modelOptions).toEqual(['openrouter/typed-model']);
     });
 
+    it('renders a legacy persisted provider (removed Chutes) without crashing', async () => {
+      // A pre-HPA-754 install can still hold 'chutes' in storage/profile; the
+      // page must render free-form instead of dereferencing a missing
+      // registry entry, and must not rewrite the saved preference.
+      llmStore.$patch({
+        provider: 'chutes' as any,
+        models: { ...llmStore.models, chutes: 'chutes/old-model' },
+      });
+      await flushPromises();
+
+      expect(wrapper.exists()).toBe(true);
+      expect(wrapper.vm.modelOptions).toEqual(['chutes/old-model']);
+      expect(llmStore.provider).toBe('chutes');
+    });
+
     it('saves trimmed model and API key changes through the store', async () => {
       const saveSpy = vi.spyOn(llmStore, 'save').mockResolvedValue(undefined);
       const notifySpy = vi.spyOn(llmStore, 'notifySaved').mockImplementation(() => {});
