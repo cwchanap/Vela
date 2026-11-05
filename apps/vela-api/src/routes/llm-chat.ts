@@ -1,254 +1,90 @@
 import { Hono } from 'hono';
+import type { LlmProvider } from '@vela/common/contracts/llm';
+import { collectStream, createLlmProvider } from '../llm/factory';
+import { normalizeLlmRequest } from '../llm/normalize';
+import { CHAT_MAX_TOKENS } from '../llm/types';
+import { requireAuth, type AuthContext } from '../middleware/auth';
 import type { Env } from '../types';
+import { LLMBridgeRequestSchema } from '../validation';
 
-type ChutesChatCompletionResponse = {
-  choices?: Array<{
-    message?: {
-      content?: string;
-    };
-  }>;
+const llmChat = new Hono<{ Bindings: Env } & AuthContext>();
+
+// Authentication precedes validation and every upstream call: this endpoint
+// spends real provider quota, so anonymous requests must never reach a vendor.
+llmChat.use('*', requireAuth);
+
+/** Providers whose authenticated chat may fall back to a server-side key. OpenAI/Anthropic are deliberately absent: no server secret can ever supply them. */
+const SERVER_KEY_ENV: Partial<Record<LlmProvider, keyof Env>> = {
+  google: 'GOOGLE_API_KEY',
+  openrouter: 'OPENROUTER_API_KEY',
 };
 
-const truncateForError = (txt: string, max = 1000) =>
-  txt.length > max ? `${txt.slice(0, max)}...` : txt;
-
-const llmChat = new Hono<{ Bindings: Env }>();
+const PROVIDER_LABELS: Record<LlmProvider, string> = {
+  google: 'Google',
+  openai: 'OpenAI',
+  anthropic: 'Anthropic',
+  openrouter: 'OpenRouter',
+};
 
 llmChat.post('/', async (c) => {
-  let input;
+  let body: unknown;
   try {
-    input = await c.req.json();
-  } catch (e) {
-    console.error('JSON parse error:', e);
+    body = await c.req.json();
+  } catch {
     return c.json({ error: 'Invalid JSON' }, 400);
   }
 
-  const provider = input.provider;
-  if (!provider) {
-    return c.json({ error: 'Missing provider' }, 400);
+  const parsed = LLMBridgeRequestSchema.safeParse(body);
+  if (!parsed.success) {
+    const issue = parsed.error.issues[0];
+    return c.json(
+      { error: issue ? `${issue.path.join('.')}: ${issue.message}` : 'Invalid request' },
+      400,
+    );
   }
 
-  if (!input.messages && !input.prompt) {
-    return c.json({ error: 'Missing prompt or messages' }, 400);
+  const normalized = normalizeLlmRequest(parsed.data);
+  if (!normalized.ok) {
+    return c.json({ error: normalized.error }, 400);
+  }
+  const { provider, model, effort, system, messages } = normalized.value;
+
+  // User key takes precedence; only Google/OpenRouter may fall back to a
+  // server key, and only for authenticated chat (requireAuth above).
+  const serverKeyEnv = SERVER_KEY_ENV[provider];
+  const apiKey = parsed.data.apiKey || (serverKeyEnv ? c.env[serverKeyEnv] : undefined);
+  if (!apiKey) {
+    const label = PROVIDER_LABELS[provider];
+    return c.json(
+      {
+        error: serverKeyEnv
+          ? `Missing API key for ${label} provider. Configure ${String(serverKeyEnv)} on server or provide your own API key.`
+          : `Missing API key for ${label} provider. Please provide your own API key.`,
+      },
+      400,
+    );
   }
 
   try {
-    if (provider === 'google') {
-      // Prefer user-provided API key, fall back to server-side key
-      const apiKey: string | undefined = input.apiKey || c.env.GOOGLE_API_KEY;
-      if (!apiKey) {
-        return c.json(
-          {
-            error:
-              'Missing API key for Google provider. Configure GOOGLE_API_KEY on server or provide your own API key.',
-          },
-          400,
-        );
-      }
-
-      const model = input.model || 'gemini-2.5-flash-lite';
-      const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
-
-      type Part = { text: string };
-      type Content = { role?: 'user' | 'model'; parts: Part[] };
-      const contents: Content[] = [];
-      let systemInstruction: { role?: 'system'; parts: Part[] } | undefined;
-
-      if (input.messages && input.messages.length > 0) {
-        for (const m of input.messages) {
-          if (m.role === 'system') {
-            systemInstruction = { role: 'system', parts: [{ text: m.content }] };
-          } else {
-            contents.push({
-              role: m.role === 'assistant' ? 'model' : 'user',
-              parts: [{ text: m.content }],
-            });
-          }
-        }
-      } else if (input.prompt) {
-        contents.push({ role: 'user', parts: [{ text: input.prompt }] });
-      } else {
-        return c.json({ error: 'Missing prompt or messages' }, 400);
-      }
-
-      const body: {
-        contents: Content[];
-        generationConfig: { temperature: number; maxOutputTokens: number };
-        systemInstruction?: { role?: 'system'; parts: Part[] };
-      } = {
-        contents,
-        generationConfig: {
-          temperature: input.temperature ?? 0.7,
-          maxOutputTokens: input.maxTokens ?? 1024,
-        },
-      };
-
-      if (input.system) {
-        body.systemInstruction = { role: 'system', parts: [{ text: input.system }] };
-      } else if (systemInstruction) {
-        body.systemInstruction = systemInstruction;
-      }
-
-      const res = await fetch(endpoint, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-goog-api-key': apiKey,
-        },
-        body: JSON.stringify(body),
-      });
-
-      const txt = await res.text();
-      if (!res.ok) {
-        return c.json({ error: `Google error ${res.status}: ${txt}` }, 500);
-      }
-
-      let data: any;
-      try {
-        data = JSON.parse(txt);
-      } catch (e) {
-        const truncated = truncateForError(txt);
-        console.error('Google JSON parse error:', e, truncated);
-        return c.json({ error: `Google JSON parse error: ${String(e)}: ${truncated}` }, 500);
-      }
-      const text: string = data?.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
-      return c.json({ text, raw: data });
-    }
-
-    if (provider === 'openrouter') {
-      // Prefer user-provided API key, fall back to server-side key
-      const apiKey: string | undefined = input.apiKey || c.env.OPENROUTER_API_KEY;
-      if (!apiKey) {
-        return c.json(
-          {
-            error:
-              'Missing API key for OpenRouter provider. Configure OPENROUTER_API_KEY on server or provide your own API key.',
-          },
-          400,
-        );
-      }
-
-      const model = input.model || 'openai/gpt-oss-20b:free';
-      const endpoint = 'https://openrouter.ai/api/v1/chat/completions';
-
-      const messages: { role: 'system' | 'user' | 'assistant'; content: string }[] = [];
-      const pushMsg = (m: { role: 'system' | 'user' | 'assistant'; content: string }) =>
-        messages.push({ role: m.role, content: m.content });
-
-      if (input.system) messages.push({ role: 'system', content: input.system });
-      if (input.messages && input.messages.length > 0) {
-        for (const m of input.messages) pushMsg(m);
-      } else if (input.prompt) {
-        messages.push({ role: 'user', content: input.prompt });
-      } else {
-        return c.json({ error: 'Missing prompt or messages' }, 400);
-      }
-
-      const body = {
+    const response = await collectStream(
+      createLlmProvider(provider).stream({
         model,
+        effort,
+        system,
         messages,
-        temperature: input.temperature ?? 0.7,
-        max_tokens: input.maxTokens ?? 1024,
-      };
-
-      const headers: Record<string, string> = {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${apiKey}`,
-        'HTTP-Referer': input.referer || c.req.url,
-        'X-Title': input.appName || c.env.APP_NAME || 'Vela Japanese Learning App',
-      };
-
-      const res = await fetch(endpoint, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify(body),
-      });
-
-      const txt = await res.text();
-      if (!res.ok) {
-        return c.json({ error: `OpenRouter error ${res.status}: ${txt}` }, 500);
-      }
-
-      let data: any;
-      try {
-        data = JSON.parse(txt);
-      } catch (e) {
-        const truncated = truncateForError(txt);
-        console.error('OpenRouter JSON parse error:', e, truncated);
-        return c.json({ error: `OpenRouter JSON parse error: ${String(e)}: ${truncated}` }, 500);
-      }
-      const text: string = data?.choices?.[0]?.message?.content ?? '';
-      return c.json({ text, raw: data });
-    }
-
-    if (provider === 'chutes') {
-      // Chutes.ai requires user-provided API key (no server-side key)
-      const apiKey: string | undefined = input.apiKey;
-      if (!apiKey) {
-        return c.json(
-          {
-            error:
-              'Missing API key for Chutes.ai provider. Please provide your own API key in settings.',
-          },
-          400,
-        );
-      }
-
-      const model = input.model || 'openai/gpt-oss-120b';
-      const endpoint = 'https://llm.chutes.ai/v1/chat/completions';
-
-      const messages: { role: 'system' | 'user' | 'assistant'; content: string }[] = [];
-      const pushMsg = (m: { role: 'system' | 'user' | 'assistant'; content: string }) =>
-        messages.push({ role: m.role, content: m.content });
-
-      if (input.system) messages.push({ role: 'system', content: input.system });
-      if (input.messages && input.messages.length > 0) {
-        for (const m of input.messages) pushMsg(m);
-      } else if (input.prompt) {
-        messages.push({ role: 'user', content: input.prompt });
-      } else {
-        return c.json({ error: 'Missing prompt or messages' }, 400);
-      }
-
-      const body = {
-        model,
-        messages,
-        temperature: input.temperature ?? 0.7,
-        max_tokens: input.maxTokens ?? 1024,
-        stream: false,
-      };
-
-      const headers: Record<string, string> = {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${apiKey}`,
-      };
-
-      const res = await fetch(endpoint, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify(body),
-      });
-
-      const txt = await res.text();
-      if (!res.ok) {
-        return c.json({ error: `Chutes.ai error ${res.status}: ${txt}` }, 500);
-      }
-
-      let data: ChutesChatCompletionResponse;
-      try {
-        data = JSON.parse(txt) as ChutesChatCompletionResponse;
-      } catch (e) {
-        const truncated = truncateForError(txt);
-        console.error('Chutes.ai JSON parse error:', e, truncated);
-        return c.json({ error: `Chutes.ai JSON parse error: ${String(e)}: ${truncated}` }, 500);
-      }
-      const text: string = data?.choices?.[0]?.message?.content ?? '';
-      return c.json({ text, raw: data });
-    }
-
-    return c.json({ error: 'Unsupported provider' }, 400);
-  } catch (e) {
-    return c.json({ error: String(e) }, 500);
+        apiKey,
+        // Caller values above the chat budget are capped, never forwarded.
+        maxTokens: Math.min(parsed.data.maxTokens ?? CHAT_MAX_TOKENS, CHAT_MAX_TOKENS),
+        signal: c.req.raw.signal,
+        referer: parsed.data.referer,
+        appName: parsed.data.appName,
+      }),
+    );
+    return c.json(response);
+  } catch (error) {
+    // Adapters sanitize every failure to provider + status before it becomes
+    // an error event, so this message carries no vendor data or keys.
+    return c.json({ error: error instanceof Error ? error.message : 'LLM request failed' }, 502);
   }
 });
 
