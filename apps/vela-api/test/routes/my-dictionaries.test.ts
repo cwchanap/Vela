@@ -776,6 +776,21 @@ describe('My Dictionaries Route', () => {
       expect(mockFetch).not.toHaveBeenCalled();
     });
 
+    test('returns 400 when provider is not a string and never calls upstream', async () => {
+      const app = createTestApp();
+      // { toString: null } throws when the normalizer interpolates the
+      // unsupported-provider error; it must not escape as a 500.
+      for (const provider of [123, true, { toString: null }]) {
+        const res = await app.request(
+          analyzeRequest({ sentence: '日本語', provider, apiKey: 'user-key' }),
+        );
+        expect(res.status).toBe(400);
+        const body = (await res.json()) as { error: string };
+        expect(body.error).toBe('LLM provider is required');
+      }
+      expect(mockFetch).not.toHaveBeenCalled();
+    });
+
     test('returns 400 naming the rejected model and never calls upstream', async () => {
       const app = createTestApp();
       const res = await app.request(
