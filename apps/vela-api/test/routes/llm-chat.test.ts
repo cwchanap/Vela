@@ -446,9 +446,66 @@ describe('LLM Chat Route', () => {
         }),
       );
     });
+
+    test('preserves previous referer/appName defaults when the caller omits them', async () => {
+      // The pre-HPA-754 route fell back to the request URL and the deployed
+      // APP_NAME before the adapter's built-in title default.
+      (global.fetch as any).mockResolvedValueOnce(sseResponse(OPENROUTER_OK));
+
+      const app = createTestApp({ APP_NAME: 'Deployed Vela' });
+      const res = await app.request(
+        chatRequest({ provider: 'openrouter', apiKey: 'k', prompt: 'Hello' }),
+      );
+      expect(res.status).toBe(200);
+      expect(global.fetch).toHaveBeenCalledWith(
+        'https://openrouter.ai/api/v1/chat/completions',
+        expect.objectContaining({
+          headers: expect.objectContaining({
+            'HTTP-Referer': 'http://localhost/',
+            'X-Title': 'Deployed Vela',
+          }),
+        }),
+      );
+
+      // Without APP_NAME configured, the adapter's fixed title default applies.
+      (global.fetch as any).mockResolvedValueOnce(sseResponse(OPENROUTER_OK));
+      const app2 = createTestApp();
+      const res2 = await app2.request(
+        chatRequest({ provider: 'openrouter', apiKey: 'k', prompt: 'Hello' }),
+      );
+      expect(res2.status).toBe(200);
+      expect(global.fetch).toHaveBeenCalledWith(
+        'https://openrouter.ai/api/v1/chat/completions',
+        expect.objectContaining({
+          headers: expect.objectContaining({
+            'X-Title': 'Vela Japanese Learning App',
+          }),
+        }),
+      );
+    });
   });
 
   describe('Upstream errors', () => {
+    test('returns 502 with the timeout-specific message for a non-504 provider deadline', async () => {
+      // The 25 s provider deadline fires well before the gateway's ~29 s 504,
+      // so the browser sees a 502 (chat) or SSE error frame — the fixed
+      // timeout marker in the message is what lets the UI show its deadline
+      // hint without a gateway 504.
+      const deadlineError = Object.assign(new Error('The operation was aborted due to timeout'), {
+        name: 'TimeoutError',
+      });
+      (global.fetch as any).mockRejectedValueOnce(deadlineError);
+
+      const app = createTestApp();
+      const res = await app.request(
+        chatRequest({ provider: 'google', apiKey: 'k', prompt: 'Hello' }),
+      );
+      const json = await res.json();
+
+      expect(res.status).toBe(502);
+      expect(json.error).toBe('Gemini request timed out');
+    });
+
     test('returns 502 with a sanitized message and no vendor data on HTTP failure', async () => {
       (global.fetch as any).mockResolvedValueOnce(
         new Response('{"error":{"message":"invalid key sk-SECRET-VALUE"}}', { status: 401 }),

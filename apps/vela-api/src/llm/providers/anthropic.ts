@@ -155,7 +155,10 @@ export function createAnthropicMapper(): VendorEventMapper<AnthropicStreamEvent>
 export async function* streamAnthropicMessages(
   input: LlmStreamInput,
   createClient: SdkClientFactory<Anthropic> = (apiKey) =>
-    new Anthropic({ apiKey: apiKey, maxRetries: 0 }),
+    // Payload logging off: the SDK's default 'warn' level enables
+    // `logger.error`, which prints raw malformed SSE data/chunks (and the
+    // fallback middleware stringifies error bodies) straight to server logs.
+    new Anthropic({ apiKey: apiKey, maxRetries: 0, logLevel: 'off' }),
 ): AsyncIterable<LlmEvent> {
   const mapper = createAnthropicMapper();
   try {

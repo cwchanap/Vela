@@ -2,7 +2,7 @@ import { Hono } from 'hono';
 import type { LlmProvider } from '@vela/common/contracts/llm';
 import { collectStream, createLlmProvider } from '../llm/factory';
 import { normalizeLlmRequest } from '../llm/normalize';
-import { CHAT_MAX_TOKENS } from '../llm/types';
+import { CHAT_MAX_TOKENS, PROVIDER_LABELS } from '../llm/types';
 import { requireAuth, type AuthContext } from '../middleware/auth';
 import type { Env } from '../types';
 import { LLMBridgeRequestSchema } from '../validation';
@@ -17,13 +17,6 @@ llmChat.use('*', requireAuth);
 const SERVER_KEY_ENV: Partial<Record<LlmProvider, keyof Env>> = {
   google: 'GOOGLE_API_KEY',
   openrouter: 'OPENROUTER_API_KEY',
-};
-
-const PROVIDER_LABELS: Record<LlmProvider, string> = {
-  google: 'Google',
-  openai: 'OpenAI',
-  anthropic: 'Anthropic',
-  openrouter: 'OpenRouter',
 };
 
 llmChat.post('/', async (c) => {
@@ -76,8 +69,10 @@ llmChat.post('/', async (c) => {
         // Caller values above the chat budget are capped, never forwarded.
         maxTokens: Math.min(parsed.data.maxTokens ?? CHAT_MAX_TOKENS, CHAT_MAX_TOKENS),
         signal: c.req.raw.signal,
-        referer: parsed.data.referer,
-        appName: parsed.data.appName,
+        // Previous OpenRouter attribution defaults preserved: request URL and
+        // the deployed APP_NAME when the caller omits them.
+        referer: parsed.data.referer || c.req.url,
+        appName: parsed.data.appName || c.env.APP_NAME,
       }),
     );
     return c.json(response);

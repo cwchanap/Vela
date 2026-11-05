@@ -212,7 +212,10 @@ describe('gemini adapter', () => {
     expect(events).toEqual([{ type: 'error', message: 'Gemini request failed (400)' }]);
   });
 
-  test('aborted upstream stream yields a sanitized abort error', async () => {
+  test('aborted upstream stream yields a sanitized timeout error', async () => {
+    // Node's AbortSignal.timeout aborts fetch with a TimeoutError DOMException;
+    // Bun and the SDKs surface AbortError/APIUserAbortError — all must map to
+    // the fixed timeout message so the browser can show its deadline hint.
     const abortError = Object.assign(new Error('The operation was aborted'), {
       name: 'AbortError',
     });
@@ -227,7 +230,26 @@ describe('gemini adapter', () => {
         fakeFetch(() => new Response(failingBody)),
       ),
     );
-    expect(events).toEqual([{ type: 'error', message: 'Gemini request failed (AbortError)' }]);
+    expect(events).toEqual([{ type: 'error', message: 'Gemini request timed out' }]);
+  });
+
+  test('Node TimeoutError deadline and SDK APIConnectionTimeoutError map to the timeout message', async () => {
+    // SDK error classes carry name === 'Error' (inherited); a local subclass
+    // reproduces that shape without mutating the global Error class.
+    class APIConnectionTimeoutError extends Error {}
+    const timeoutError = Object.assign(new Error('The operation was aborted due to timeout'), {
+      name: 'TimeoutError',
+    });
+    const sdkTimeout = new APIConnectionTimeoutError('Request timed out.');
+    for (const error of [timeoutError, sdkTimeout]) {
+      const events = await collectEvents(
+        streamGemini(
+          baseInput,
+          fakeFetch(() => Promise.reject(error)),
+        ),
+      );
+      expect(events).toEqual([{ type: 'error', message: 'Gemini request timed out' }]);
+    }
   });
 
   test('truncated stream without terminal yields the missing-terminal error', async () => {

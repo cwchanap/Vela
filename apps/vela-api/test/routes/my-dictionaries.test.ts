@@ -585,6 +585,29 @@ describe('My Dictionaries Route', () => {
       });
     });
 
+    test('google provider: initial upstream 500 becomes HTTP 200 with an SSE error frame and no done', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: false,
+        status: 500,
+        text: async () => 'upstream exploded',
+      });
+
+      const app = createTestApp();
+      const res = await app.request(
+        analyzeRequest({ sentence: '日本語', provider: 'google', apiKey: 'user-key' }),
+      );
+
+      // A lazy initial upstream 5xx is an SSE error frame, never done — the
+      // browser must not mistake a failed analysis for a successful one.
+      expect(res.status).toBe(200);
+      const frames = await sseFrames(res);
+      expect(frames).toEqual([
+        { type: 'metadata', provider: 'google', model: 'gemini-3.8-flash', sentence: '日本語' },
+        { type: 'error', error: 'Gemini request failed (500)' },
+      ]);
+      expect(frames.some((frame) => frame.type === 'done')).toBe(false);
+    });
+
     test('openrouter provider: initial upstream 429 becomes HTTP 200 with an SSE error frame', async () => {
       mockFetch.mockResolvedValueOnce({
         ok: false,
@@ -982,7 +1005,13 @@ describe('My Dictionaries Route', () => {
         { type: 'done' },
       ]);
 
-      expect(mockAnthropicOptions.at(-1)).toEqual({ apiKey: 'user-key', maxRetries: 0 });
+      // Payload logging disabled at construction — the SDK's default 'warn'
+      // level logs raw malformed SSE chunks to server logs.
+      expect(mockAnthropicOptions.at(-1)).toEqual({
+        apiKey: 'user-key',
+        maxRetries: 0,
+        logLevel: 'off',
+      });
       const [params] = mockAnthropicStream.mock.calls[0];
       expect(params).toMatchObject({
         model: 'claude-opus-5-5',
@@ -1115,7 +1144,7 @@ describe('My Dictionaries Route', () => {
       expect(res.status).toBe(200);
       expect(await sseFrames(res)).toEqual([
         { type: 'metadata', provider: 'google', model: 'gemini-3.8-flash', sentence: '日本語' },
-        { type: 'error', error: 'Gemini request failed (AbortError)' },
+        { type: 'error', error: 'Gemini request timed out' },
       ]);
     });
   });

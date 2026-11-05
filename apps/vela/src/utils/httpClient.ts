@@ -96,9 +96,6 @@ export async function httpJson<T = unknown>(input: RequestInfo, init?: RequestIn
 }
 
 /**
- * Get Authorization header with JWT token from Cognito
- */
-/**
  * Get Authorization header with JWT token from Cognito. Reusable by
  * non-JSON transports (e.g. the SSE dictionary stream) that cannot use
  * httpJsonAuth because they must read the response body incrementally.

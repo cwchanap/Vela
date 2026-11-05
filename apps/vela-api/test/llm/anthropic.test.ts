@@ -511,7 +511,7 @@ describe('anthropic adapter', () => {
     expect(events).toEqual([{ type: 'error', message: 'Anthropic request failed (529)' }]);
   });
 
-  test('user abort yields a sanitized abort error', async () => {
+  test('user abort (deadline or caller cancel) yields a sanitized timeout error', async () => {
     async function* aborted(): AsyncIterable<AnthropicStreamEvent> {
       yield messageStart({ input_tokens: 2 });
       const abortError = new Error('Request was aborted.');
@@ -525,7 +525,54 @@ describe('anthropic adapter', () => {
         type: 'usage',
         usage: { inputTokens: 2, outputTokens: 0, cachedInputTokens: 0, cacheWriteTokens: 0 },
       },
-      { type: 'error', message: 'Anthropic request failed (APIUserAbortError)' },
+      { type: 'error', message: 'Anthropic request timed out' },
     ]);
+  });
+
+  test('real SDK logs no raw payload on malformed SSE data (payload logging disabled)', async () => {
+    // Real @anthropic-ai/sdk with a mocked transport: its default 'warn' log
+    // level enables `logger.error`, which prints the raw `sse.data` and
+    // `sse.raw` chunks on malformed data. Unique logger objects avoid the
+    // SDK's module-global console WeakMap cache (which binds `console.error`
+    // once and would bypass a property spy).
+    const makeClient = (options: Record<string, unknown>) => {
+      const logged: unknown[][] = [];
+      const logger = {
+        error: (...args: unknown[]) => logged.push(args),
+        warn: (...args: unknown[]) => logged.push(args),
+        info: (...args: unknown[]) => logged.push(args),
+        debug: (...args: unknown[]) => logged.push(args),
+      };
+      const client = new Anthropic({
+        apiKey: 'a-key',
+        maxRetries: 0,
+        fetch: async () =>
+          // A named event whose data payload is not JSON reaches the SDK's
+          // JSON.parse failure path (unnamed data lines are skipped entirely).
+          new Response(sseBody(['event: content_block_delta\ndata: {not-json\n\n']), {
+            status: 200,
+            headers: { 'content-type': 'text/event-stream' },
+          }),
+        ...options,
+        logger,
+      });
+      return { client, logged };
+    };
+
+    // SDK default log level ('warn'): malformed data IS logged raw — the
+    // reason the adapter must disable payload logging.
+    const sdkDefault = makeClient({});
+    await collectEvents(streamAnthropicMessages(baseInput, () => sdkDefault.client));
+    expect(JSON.stringify(sdkDefault.logged)).toContain('not-json');
+
+    // Adapter's construction (logLevel 'off'): nothing raw is logged and the
+    // failure still surfaces as one sanitized error event.
+    const silenced = makeClient({ logLevel: 'off' });
+    const events = await collectEvents(streamAnthropicMessages(baseInput, () => silenced.client));
+    // The SDK rethrows the parse failure wrapped as a plain Error: sanitized
+    // to a fixed message, never the raw chunk.
+    expect(events).toEqual([{ type: 'error', message: 'Anthropic request failed' }]);
+    expect(JSON.stringify(silenced.logged)).not.toContain('not-json');
+    expect(JSON.stringify(silenced.logged)).not.toContain('Could not parse message into JSON');
   });
 });
