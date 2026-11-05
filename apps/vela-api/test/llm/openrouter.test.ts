@@ -197,7 +197,7 @@ describe('openrouter adapter', () => {
     expect(events).toEqual([{ type: 'error', message: 'OpenRouter request failed (401)' }]);
   });
 
-  test('skips malformed upstream lines and still completes on a valid terminal', async () => {
+  test('malformed upstream data yields a sanitized error, never a success', async () => {
     const events = await collectEvents(
       streamOpenRouterChat(
         baseInput,
@@ -205,14 +205,17 @@ describe('openrouter adapter', () => {
           () =>
             new Response(
               sseBody([
-                'data: {not json\n\n',
                 ...sse([{ choices: [{ delta: { content: 'ok' } }] }]),
+                'data: {not json\n\n',
                 ...sse([{ choices: [{ delta: {}, finish_reason: 'stop' }] }]),
               ]),
             ),
         ),
       ),
     );
-    expect(events).toEqual([{ type: 'text', text: 'ok' }]);
+    expect(events).toEqual([
+      { type: 'text', text: 'ok' },
+      { type: 'error', message: 'OpenRouter stream failed (malformed data)' },
+    ]);
   });
 });
