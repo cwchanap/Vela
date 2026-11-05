@@ -127,7 +127,10 @@ export async function* streamOpenRouterChat(
       try {
         chunk = JSON.parse(line);
       } catch {
-        continue; // skip malformed upstream lines; end() still guards truncation
+        // Malformed upstream data is a failed stream, never a success: emit
+        // a sanitized error and stop, so no later terminal can yield done.
+        yield { type: 'error', message: 'OpenRouter stream failed (malformed data)' };
+        return;
       }
       yield* mapper.push(chunk as OpenRouterStreamChunk);
     }

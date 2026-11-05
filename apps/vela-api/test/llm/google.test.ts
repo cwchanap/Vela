@@ -247,4 +247,26 @@ describe('gemini adapter', () => {
       { type: 'error', message: 'Gemini stream ended without a successful finish' },
     ]);
   });
+
+  test('malformed upstream data yields a sanitized error, never a success', async () => {
+    const events = await collectEvents(
+      streamGemini(
+        baseInput,
+        fakeFetch(
+          () =>
+            new Response(
+              sseBody([
+                ...sse([{ candidates: [{ content: { parts: [{ text: 'partial' }] } }] }]),
+                'data: {not json\n\n',
+                ...sse([{ candidates: [{ finishReason: 'STOP' }] }]),
+              ]),
+            ),
+        ),
+      ),
+    );
+    expect(events).toEqual([
+      { type: 'text', text: 'partial' },
+      { type: 'error', message: 'Gemini stream failed (malformed data)' },
+    ]);
+  });
 });

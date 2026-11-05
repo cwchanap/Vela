@@ -224,6 +224,11 @@ app.post('/analyze', async (c) => {
     } catch {
       return c.json({ error: 'Invalid JSON' }, 400);
     }
+    // JSON can parse to non-objects (null, numbers, strings); destructuring
+    // those used to throw a 500. Malformed shapes are local validation 4xx.
+    if (typeof body !== 'object' || body === null) {
+      return c.json({ error: 'Invalid request body' }, 400);
+    }
     const { sentence, provider, model, apiKey } = body;
     const requestOrigin = c.req.header('Origin');
 
@@ -255,6 +260,12 @@ app.post('/analyze', async (c) => {
 
     if (!provider) {
       return c.json({ error: 'LLM provider is required' }, 400);
+    }
+
+    // The normalizer assumes string fields; a non-string model used to throw
+    // inside `trim()` and surface as a 500. Keep it a local validation 4xx.
+    if (model !== undefined && typeof model !== 'string') {
+      return c.json({ error: 'Invalid model' }, 400);
     }
 
     // Same shared normalizer as chat: registry provider/model validation and a

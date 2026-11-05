@@ -648,11 +648,60 @@ describe('My Dictionaries Route', () => {
 
       expect(res.status).toBe(200);
       // The trailing data: line is flushed and parsed, but the malformed JSON
-      // leaves the stream without a successful finish — so no done frame.
+      // fails the stream immediately — so no done frame.
       expect(await sseFrames(res)).toEqual([
         { type: 'metadata', provider: 'google', model: 'gemini-3.8-flash', sentence: '日本語' },
         { type: 'chunk', text: '日' },
-        { type: 'error', error: 'Gemini stream ended without a successful finish' },
+        { type: 'error', error: 'Gemini stream failed (malformed data)' },
+      ]);
+    });
+
+    test('google provider: malformed data followed by a valid STOP terminal never yields done', async () => {
+      const sseLines = [
+        `data: ${JSON.stringify({ candidates: [{ content: { parts: [{ text: 'partial' }] } }] })}`,
+        'data: {not json',
+        `data: ${JSON.stringify({ candidates: [{ finishReason: 'STOP' }] })}`,
+      ];
+      mockFetch.mockResolvedValueOnce({ ok: true, body: makeSseStream(sseLines) });
+
+      const app = createTestApp();
+      const res = await app.request(
+        analyzeRequest({ sentence: '日本語', provider: 'google', apiKey: 'user-key' }),
+      );
+
+      expect(res.status).toBe(200);
+      // A malformed data line fails the stream; the later valid terminal must
+      // not rehabilitate it into a done frame.
+      expect(await sseFrames(res)).toEqual([
+        { type: 'metadata', provider: 'google', model: 'gemini-3.8-flash', sentence: '日本語' },
+        { type: 'chunk', text: 'partial' },
+        { type: 'error', error: 'Gemini stream failed (malformed data)' },
+      ]);
+    });
+
+    test('openrouter provider: malformed data followed by a valid stop terminal never yields done', async () => {
+      const sseLines = [
+        `data: ${JSON.stringify({ choices: [{ delta: { content: 'partial' } }] })}`,
+        'data: {not json',
+        `data: ${JSON.stringify({ choices: [{ delta: {}, finish_reason: 'stop' }] })}`,
+      ];
+      mockFetch.mockResolvedValueOnce({ ok: true, body: makeSseStream(sseLines) });
+
+      const app = createTestApp();
+      const res = await app.request(
+        analyzeRequest({ sentence: '日本語', provider: 'openrouter', apiKey: 'user-key' }),
+      );
+
+      expect(res.status).toBe(200);
+      expect(await sseFrames(res)).toEqual([
+        {
+          type: 'metadata',
+          provider: 'openrouter',
+          model: 'openai/gpt-oss-20b:free',
+          sentence: '日本語',
+        },
+        { type: 'chunk', text: 'partial' },
+        { type: 'error', error: 'OpenRouter stream failed (malformed data)' },
       ]);
     });
 
@@ -701,6 +750,30 @@ describe('My Dictionaries Route', () => {
       expect(res.status).toBe(400);
       const body = (await res.json()) as { error: string };
       expect(body.error).toBe('Invalid JSON');
+    });
+
+    test('returns 400 for non-object analyze bodies instead of a 500', async () => {
+      const app = createTestApp();
+      for (const raw of ['null', '"a string"', '123']) {
+        const res = await app.request(analyzeRequest(raw));
+        expect(res.status).toBe(400);
+        const body = (await res.json()) as { error: string };
+        expect(body.error).toBe('Invalid request body');
+      }
+      expect(mockFetch).not.toHaveBeenCalled();
+    });
+
+    test('returns 400 when model is not a string and never calls upstream', async () => {
+      const app = createTestApp();
+      for (const model of [123, true, {}]) {
+        const res = await app.request(
+          analyzeRequest({ sentence: '日本語', provider: 'google', apiKey: 'user-key', model }),
+        );
+        expect(res.status).toBe(400);
+        const body = (await res.json()) as { error: string };
+        expect(body.error).toBe('Invalid model');
+      }
+      expect(mockFetch).not.toHaveBeenCalled();
     });
 
     test('returns 400 naming the rejected model and never calls upstream', async () => {
@@ -931,6 +1004,76 @@ describe('My Dictionaries Route', () => {
       expect(JSON.parse(init.body).generationConfig.thinkingConfig).toEqual({
         thinkingLevel: 'LOW',
       });
+    });
+
+    test('delivers metadata and chunk frames before the upstream stream completes', async () => {
+      // Deferred upstream: the terminal chunk is held back behind a gate so
+      // the test can prove frames leave the route while the upstream is
+      // still mid-stream (local Bun progressive delivery).
+      const encoder = new TextEncoder();
+      let releaseUpstream!: () => void;
+      const gate = new Promise<void>((resolve) => {
+        releaseUpstream = resolve;
+      });
+      let upstreamCompleted = false;
+      const deferredBody = new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(
+            encoder.encode(
+              `data: ${JSON.stringify({ candidates: [{ content: { parts: [{ text: '日' }] } }] })}\n\n`,
+            ),
+          );
+          gate.then(() => {
+            controller.enqueue(
+              encoder.encode(
+                `data: ${JSON.stringify({ candidates: [{ finishReason: 'STOP' }] })}\n\n`,
+              ),
+            );
+            controller.close();
+            upstreamCompleted = true;
+          });
+        },
+      });
+      mockFetch.mockResolvedValueOnce({ ok: true, body: deferredBody });
+
+      const app = createTestApp();
+      const res = await app.request(
+        analyzeRequest({ sentence: '日本語', provider: 'google', apiKey: 'user-key' }),
+      );
+      expect(res.status).toBe(200);
+
+      // Read single frames from the undrained response body. Bun passes the
+      // route's string frames through as string reads; decode defensively.
+      const reader = res.body!.getReader();
+      const decoder = new TextDecoder();
+      let pending = '';
+      const readFrame = async (): Promise<Record<string, any>> => {
+        for (;;) {
+          const boundary = pending.indexOf('\n\n');
+          if (boundary !== -1) {
+            const line = pending.slice(0, boundary);
+            pending = pending.slice(boundary + 2);
+            return JSON.parse(line.slice('data: '.length));
+          }
+          const { done, value } = await reader.read();
+          if (done) throw new Error('SSE stream ended before a frame arrived');
+          pending += typeof value === 'string' ? value : decoder.decode(value, { stream: true });
+        }
+      };
+
+      expect(await readFrame()).toEqual({
+        type: 'metadata',
+        provider: 'google',
+        model: 'gemini-3.8-flash',
+        sentence: '日本語',
+      });
+      expect(await readFrame()).toEqual({ type: 'chunk', text: '日' });
+      // Both frames arrived while the upstream was still mid-stream.
+      expect(upstreamCompleted).toBe(false);
+
+      releaseUpstream();
+      expect(await readFrame()).toEqual({ type: 'done' });
+      expect(upstreamCompleted).toBe(true);
     });
 
     test('canceled upstream stream surfaces as an SSE error frame, never done', async () => {
