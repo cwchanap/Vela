@@ -1,8 +1,12 @@
 import { Hono } from 'hono';
+import { LLM_PROVIDER_REGISTRY, type LlmEvent, type LlmProvider } from '@vela/common/contracts/llm';
 import { myDictionaries } from '../dynamodb';
 import type { Env } from '../types';
 import { requireAuth, type AuthContext } from '../middleware/auth';
 import { isAllowedOrigin } from '../middleware/cors';
+import { createLlmProvider } from '../llm/factory';
+import { normalizeLlmRequest } from '../llm/normalize';
+import { DICTIONARY_MAX_TOKENS } from '../llm/types';
 
 const app = new Hono<{ Bindings: Env } & AuthContext>();
 
@@ -12,88 +16,85 @@ let corsConfigWarningLogged = false;
 // Apply auth middleware to all routes in this router.
 app.use('*', requireAuth);
 
-// eslint-disable-next-line no-unused-vars
-type TextExtractor = (jsonStr: string) => string | undefined;
+const PROVIDER_LABELS: Record<LlmProvider, string> = {
+  google: 'Google',
+  openai: 'OpenAI',
+  anthropic: 'Anthropic',
+  openrouter: 'OpenRouter',
+};
 
-function createSSEStream(
-  upstreamBody: ReadableStream<Uint8Array> | null,
-  extractText: TextExtractor,
-  metadata: { provider: string; model: string; sentence: string },
-  skipDoneMarker?: string,
+// Japanese sentence analysis prompt — unchanged from the previous route.
+const ANALYSIS_SYSTEM_PROMPT = `You are a Japanese language expert. Analyze the provided Japanese sentence and provide:
+1. English translation
+2. Grammar breakdown (key grammar points)
+3. Vocabulary notes (important words with readings)
+4. Usage context (when/how to use this sentence)
+
+Keep it concise and educational.`;
+
+/** Outgoing SSE frames; this is the existing browser dictionary contract. */
+type AnalysisSseFrame =
+  | { type: 'metadata'; provider: LlmProvider; model: string; sentence: string }
+  | { type: 'chunk'; text: string }
+  | { type: 'error'; error: string }
+  | { type: 'done' };
+
+function analysisFrame(frame: AnalysisSseFrame): string {
+  return `data: ${JSON.stringify(frame)}\n\n`;
+}
+
+/** SSE response headers with the already-validated CORS origin attached. */
+function analysisSseHeaders(
+  originCheck: ReturnType<typeof isAllowedOrigin>,
+): Record<string, string> {
+  return {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache',
+    Connection: 'keep-alive',
+    ...(originCheck.allowedOrigin
+      ? { 'Access-Control-Allow-Origin': originCheck.allowedOrigin }
+      : {}),
+    ...(originCheck.allowedOrigin && originCheck.isWebOrigin
+      ? { 'Access-Control-Allow-Credentials': 'true' }
+      : {}),
+  };
+}
+
+/**
+ * Serialize the shared adapter stream into the existing dictionary SSE
+ * contract: text → chunk, error → error frame then stop, `done` only when the
+ * provider stream finishes cleanly. Adapters convert refusal, SAFETY/
+ * MAX_TOKENS, malformed upstream data and missing-terminal failures into
+ * error events, so clean exhaustion is exactly a successful terminal.
+ *
+ * Deployed buffering: API Gateway and CloudFront buffer this response (the
+ * current stack has no response streaming), so browsers receive all frames at
+ * once in production; only local Bun delivers them progressively. Do not
+ * claim browser progress until response streaming is delivered separately.
+ */
+function createAnalysisSseStream(
+  upstream: AsyncIterable<LlmEvent>,
+  metadata: { provider: LlmProvider; model: string; sentence: string },
 ): ReadableStream<string> {
-  return new ReadableStream({
+  return new ReadableStream<string>({
     async start(controller) {
+      controller.enqueue(analysisFrame({ type: 'metadata', ...metadata }));
       try {
-        const reader = upstreamBody?.getReader();
-        const decoder = new TextDecoder();
-
-        if (!reader) {
-          controller.enqueue(
-            `data: ${JSON.stringify({ type: 'error', error: 'No response body from upstream API' })}\n\n`,
-          );
-          controller.close();
-          return;
-        }
-
-        // Send initial metadata
-        controller.enqueue(`data: ${JSON.stringify({ type: 'metadata', ...metadata })}\n\n`);
-
-        let buffer = '';
-
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-
-          buffer += decoder.decode(value, { stream: true });
-          const lines = buffer.split('\n');
-          buffer = lines.pop() || '';
-
-          for (const line of lines) {
-            if (line.startsWith('data: ')) {
-              const jsonStr = line.slice(6).trim();
-              if (jsonStr === '' || (skipDoneMarker && jsonStr === skipDoneMarker)) continue;
-
-              try {
-                const text = extractText(jsonStr);
-                if (text) {
-                  controller.enqueue(`data: ${JSON.stringify({ type: 'chunk', text })}\n\n`);
-                }
-              } catch (e) {
-                console.debug('Skipping invalid JSON chunk:', e);
-              }
-            }
+        for await (const event of upstream) {
+          if (event.type === 'text') {
+            controller.enqueue(analysisFrame({ type: 'chunk', text: event.text }));
+          } else if (event.type === 'error') {
+            // Adapter messages are sanitized to provider + status/code only.
+            controller.enqueue(analysisFrame({ type: 'error', error: event.message }));
+            controller.close();
+            return;
           }
+          // usage events carry no frame in the existing browser contract
         }
-
-        // Flush the TextDecoder and process any remaining buffered text
-        const remaining = decoder.decode(); // Decode without {stream: true} to flush
-        buffer += remaining;
-
-        // Process any final lines from the buffer
-        if (buffer.trim().length > 0) {
-          const finalLines = buffer.split('\n');
-          for (const line of finalLines) {
-            const trimmedLine = line.trim();
-            if (trimmedLine.length > 0 && trimmedLine.startsWith('data: ')) {
-              const jsonStr = trimmedLine.slice(6).trim();
-              if (jsonStr !== '' && !(skipDoneMarker && jsonStr === skipDoneMarker)) {
-                try {
-                  const text = extractText(jsonStr);
-                  if (text) {
-                    controller.enqueue(`data: ${JSON.stringify({ type: 'chunk', text })}\n\n`);
-                  }
-                } catch (e) {
-                  console.debug('Skipping invalid JSON chunk in flush:', e);
-                }
-              }
-            }
-          }
-        }
-
-        controller.enqueue(`data: ${JSON.stringify({ type: 'done' })}\n\n`);
+        controller.enqueue(analysisFrame({ type: 'done' }));
         controller.close();
-      } catch (error) {
-        controller.enqueue(`data: ${JSON.stringify({ type: 'error', error: String(error) })}\n\n`);
+      } catch {
+        controller.enqueue(analysisFrame({ type: 'error', error: 'Analysis failed' }));
         controller.close();
       }
     },
@@ -217,7 +218,12 @@ app.post('/analyze', async (c) => {
       return c.json({ error: 'Unauthorized' }, 401);
     }
 
-    const body = await c.req.json();
+    let body: any;
+    try {
+      body = await c.req.json();
+    } catch {
+      return c.json({ error: 'Invalid JSON' }, 400);
+    }
     const { sentence, provider, model, apiKey } = body;
     const requestOrigin = c.req.header('Origin');
 
@@ -243,9 +249,6 @@ app.post('/analyze', async (c) => {
       return c.json({ error: 'Origin not allowed' }, 403);
     }
 
-    // Set validated origin for CORS header (only set if origin is allowed)
-    const validatedOrigin = originCheck.allowedOrigin;
-
     if (!sentence || typeof sentence !== 'string' || sentence.trim().length === 0) {
       return c.json({ error: 'Sentence is required' }, 400);
     }
@@ -254,139 +257,62 @@ app.post('/analyze', async (c) => {
       return c.json({ error: 'LLM provider is required' }, 400);
     }
 
-    const systemPrompt = `You are a Japanese language expert. Analyze the provided Japanese sentence and provide:
-1. English translation
-2. Grammar breakdown (key grammar points)
-3. Vocabulary notes (important words with readings)
-4. Usage context (when/how to use this sentence)
+    // Same shared normalizer as chat: registry provider/model validation and a
+    // single system + user turn. The analysis prompt itself is unchanged.
+    const normalized = normalizeLlmRequest({
+      provider,
+      model,
+      system: ANALYSIS_SYSTEM_PROMPT,
+      prompt: `Analyze this Japanese sentence: "${sentence.trim()}"`,
+    });
+    if (!normalized.ok) {
+      return c.json({ error: normalized.error }, 400);
+    }
+    const {
+      provider: llmProvider,
+      model: llmModel,
+      effort: defaultEffort,
+      system,
+      messages,
+    } = normalized.value;
 
-Keep it concise and educational.`;
+    // Dictionary analysis keeps its stricter credential policy: a user key is
+    // required on every provider; there is no server-key fallback (unlike chat).
+    if (typeof apiKey !== 'string' || apiKey.length === 0) {
+      return c.json({ error: `Missing API key for ${PROVIDER_LABELS[llmProvider]} provider` }, 400);
+    }
 
-    const userPrompt = `Analyze this Japanese sentence: "${sentence.trim()}"`;
+    // Analysis deliberately runs at low native effort where the model supports
+    // it; the browser never sends `thinking` for dictionary analysis.
+    const modelInfo = LLM_PROVIDER_REGISTRY[llmProvider].models?.find(
+      (entry) => entry.id === llmModel,
+    );
+    const effort = modelInfo?.efforts.includes('low') ? ('low' as const) : defaultEffort;
 
-    // Call the appropriate LLM provider with streaming support
-    if (provider === 'google') {
-      const key: string | undefined = apiKey;
-      if (!key) {
-        return c.json({ error: 'Missing API key for Google provider' }, 400);
-      }
+    // Shared adapter stream, lazy: the first read performs the upstream call,
+    // so initial provider 401/429/5xx failures surface inside the SSE body as
+    // error frames rather than a pre-stream JSON status.
+    const upstream = createLlmProvider(llmProvider).stream({
+      model: llmModel,
+      effort,
+      system,
+      messages,
+      apiKey,
+      // Fixed dictionary budget; callers cannot raise it.
+      maxTokens: DICTIONARY_MAX_TOKENS,
+      signal: c.req.raw.signal,
+      referer: c.req.url,
+      appName: c.env.APP_NAME,
+    });
 
-      const llmModel = model || 'gemini-2.5-flash-lite';
-      const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${llmModel}:streamGenerateContent?alt=sse`;
-
-      const requestBody = {
-        contents: [{ role: 'user', parts: [{ text: userPrompt }] }],
-        systemInstruction: { role: 'system', parts: [{ text: systemPrompt }] },
-        generationConfig: {
-          temperature: 0.7,
-          maxOutputTokens: 1024,
-        },
-      };
-
-      const res = await fetch(endpoint, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-goog-api-key': key,
-        },
-        body: JSON.stringify(requestBody),
-      });
-
-      if (!res.ok) {
-        const txt = await res.text();
-        return c.json({ error: `Google API error ${res.status}: ${txt}` }, 500);
-      }
-
-      const extractGoogleText: TextExtractor = (jsonStr) => {
-        const data = JSON.parse(jsonStr);
-        return data?.candidates?.[0]?.content?.parts?.[0]?.text;
-      };
-
-      const stream = createSSEStream(res.body, extractGoogleText, {
-        provider,
+    return new Response(
+      createAnalysisSseStream(upstream, {
+        provider: llmProvider,
         model: llmModel,
         sentence: sentence.trim(),
-      });
-
-      return new Response(stream, {
-        headers: {
-          'Content-Type': 'text/event-stream',
-          'Cache-Control': 'no-cache',
-          Connection: 'keep-alive',
-          ...(validatedOrigin ? { 'Access-Control-Allow-Origin': validatedOrigin } : {}),
-          ...(validatedOrigin && originCheck.isWebOrigin
-            ? { 'Access-Control-Allow-Credentials': 'true' }
-            : {}),
-        },
-      });
-    }
-
-    if (provider === 'openrouter') {
-      const key: string | undefined = apiKey;
-      if (!key) {
-        return c.json({ error: 'Missing API key for OpenRouter provider' }, 400);
-      }
-
-      const llmModel = model || 'openai/gpt-oss-20b:free';
-      const endpoint = 'https://openrouter.ai/api/v1/chat/completions';
-
-      const messages: { role: 'system' | 'user' | 'assistant'; content: string }[] = [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: userPrompt },
-      ];
-
-      const requestBody = {
-        model: llmModel,
-        messages,
-        temperature: 0.7,
-        max_tokens: 1024,
-        stream: true,
-      };
-
-      const headers: Record<string, string> = {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${key}`,
-        'HTTP-Referer': c.req.url,
-        'X-Title': c.env.APP_NAME || 'Vela Japanese Learning App',
-      };
-
-      const res = await fetch(endpoint, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify(requestBody),
-      });
-
-      if (!res.ok) {
-        const txt = await res.text();
-        return c.json({ error: `OpenRouter API error ${res.status}: ${txt}` }, 500);
-      }
-
-      const extractOpenRouterText: TextExtractor = (jsonStr) => {
-        const data = JSON.parse(jsonStr);
-        return data?.choices?.[0]?.delta?.content;
-      };
-
-      const stream = createSSEStream(
-        res.body,
-        extractOpenRouterText,
-        { provider, model: llmModel, sentence: sentence.trim() },
-        '[DONE]',
-      );
-
-      return new Response(stream, {
-        headers: {
-          'Content-Type': 'text/event-stream',
-          'Cache-Control': 'no-cache',
-          Connection: 'keep-alive',
-          ...(validatedOrigin ? { 'Access-Control-Allow-Origin': validatedOrigin } : {}),
-          ...(validatedOrigin && originCheck.isWebOrigin
-            ? { 'Access-Control-Allow-Credentials': 'true' }
-            : {}),
-        },
-      });
-    }
-
-    return c.json({ error: 'Unsupported provider' }, 400);
+      }),
+      { headers: analysisSseHeaders(originCheck) },
+    );
   } catch (error: any) {
     console.error('Error analyzing sentence:', error);
     return c.json({ error: 'Failed to analyze sentence' }, 500);

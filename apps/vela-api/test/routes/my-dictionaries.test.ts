@@ -28,6 +28,31 @@ vi.mock('../../src/middleware/auth', () => ({
   AuthContext: {},
 }));
 
+// OpenAI / Anthropic SDK doubles: the dictionary route reaches these
+// adapters through the shared factory, so the vendor SDK boundary is mocked
+// (not the factory) to keep normalize → adapter → SSE mapping under test.
+const mockOpenAiCreate = vi.fn();
+const mockOpenAiOptions: Array<Record<string, unknown>> = [];
+vi.mock('openai', () => ({
+  default: class MockOpenAI {
+    constructor(options: Record<string, unknown>) {
+      mockOpenAiOptions.push(options);
+    }
+    responses = { create: (...args: unknown[]) => mockOpenAiCreate(...args) };
+  },
+}));
+
+const mockAnthropicStream = vi.fn();
+const mockAnthropicOptions: Array<Record<string, unknown>> = [];
+vi.mock('@anthropic-ai/sdk', () => ({
+  default: class MockAnthropic {
+    constructor(options: Record<string, unknown>) {
+      mockAnthropicOptions.push(options);
+    }
+    beta = { messages: { stream: (...args: unknown[]) => mockAnthropicStream(...args) } };
+  },
+}));
+
 // Import AFTER mocks are declared
 const { default: myDictionariesRouter } = await import('../../src/routes/my-dictionaries');
 
@@ -54,6 +79,34 @@ function makeSseStream(lines: string[]): ReadableStream<Uint8Array> {
   });
 }
 
+// Drain a route SSE response into its parsed JSON frames.
+async function sseFrames(res: Response): Promise<Array<Record<string, any>>> {
+  const text = await res.text();
+  return text
+    .split('\n')
+    .filter((line) => line.startsWith('data: '))
+    .map((line) => JSON.parse(line.slice(6)));
+}
+
+function analyzeRequest(body: unknown, headers: Record<string, string> = {}) {
+  return new Request('http://localhost/analyze', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...headers },
+    body: typeof body === 'string' ? body : JSON.stringify(body),
+  });
+}
+
+// The Japanese analysis prompt, locked verbatim: the route must not change it.
+const ANALYSIS_SYSTEM_PROMPT = `You are a Japanese language expert. Analyze the provided Japanese sentence and provide:
+1. English translation
+2. Grammar breakdown (key grammar points)
+3. Vocabulary notes (important words with readings)
+4. Usage context (when/how to use this sentence)
+
+Keep it concise and educational.`;
+
+const USER_PROMPT = (sentence: string) => `Analyze this Japanese sentence: "${sentence}"`;
+
 describe('My Dictionaries Route', () => {
   let mockFetch: ReturnType<typeof vi.fn>;
 
@@ -63,6 +116,8 @@ describe('My Dictionaries Route', () => {
     mockAuthConfig.userEmail = 'test@example.com';
     mockFetch = vi.fn();
     globalThis.fetch = mockFetch as any;
+    mockOpenAiOptions.length = 0;
+    mockAnthropicOptions.length = 0;
   });
 
   afterEach(() => {
@@ -346,7 +401,7 @@ describe('My Dictionaries Route', () => {
     });
   });
 
-  describe('POST /analyze - Analyze sentence with LLM (error cases)', () => {
+  describe('POST /analyze - Analyze sentence with LLM', () => {
     test('returns 400 when sentence is missing', async () => {
       const app = createTestApp();
       const res = await app.request('/analyze', {
@@ -412,116 +467,125 @@ describe('My Dictionaries Route', () => {
       expect(body.error).toContain('Unsupported provider');
     });
 
-    test('google provider: returns SSE stream on success', async () => {
+    test('google provider: streams metadata, chunks, and done with the registry default model', async () => {
       const sseLines = [
         `data: ${JSON.stringify({ candidates: [{ content: { parts: [{ text: '日' }] } }] })}`,
         `data: ${JSON.stringify({ candidates: [{ content: { parts: [{ text: '本' }] } }] })}`,
+        `data: ${JSON.stringify({
+          candidates: [{ finishReason: 'STOP' }],
+          usageMetadata: {
+            promptTokenCount: 10,
+            candidatesTokenCount: 6,
+            cachedContentTokenCount: 3,
+          },
+        })}`,
       ];
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        body: makeSseStream(sseLines),
-      });
+      mockFetch.mockResolvedValueOnce({ ok: true, body: makeSseStream(sseLines) });
 
       const app = createTestApp();
-      const res = await app.request('/analyze', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sentence: '日本語', provider: 'google', apiKey: 'test-key' }),
-      });
+      const res = await app.request(
+        analyzeRequest({ sentence: '日本語', provider: 'google', apiKey: 'user-key' }),
+      );
 
       expect(res.status).toBe(200);
       expect(res.headers.get('content-type')).toContain('text/event-stream');
 
-      // Drain and verify SSE payload
-      const reader = res.body?.getReader();
-      const decoder = new TextDecoder();
-      let sseText = '';
-      if (reader) {
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          sseText += typeof value === 'string' ? value : decoder.decode(value);
-        }
-      }
-      const events = sseText
-        .split('\n')
-        .filter((l) => l.startsWith('data: '))
-        .map((l) => JSON.parse(l.slice(6)));
-      const chunkEvents = events.filter((e) => e.type === 'chunk');
-      expect(chunkEvents.length).toBeGreaterThan(0);
-      expect(chunkEvents[0].text).toBe('日');
+      // Exact frame contract: upstream usage events (including cache hits)
+      // never add an SSE frame and no raw payload leaks.
+      expect(await sseFrames(res)).toEqual([
+        { type: 'metadata', provider: 'google', model: 'gemini-3.8-flash', sentence: '日本語' },
+        { type: 'chunk', text: '日' },
+        { type: 'chunk', text: '本' },
+        { type: 'done' },
+      ]);
+
+      const [url, init] = mockFetch.mock.calls[0];
+      expect(url).toContain('/models/gemini-3.8-flash:streamGenerateContent');
+      expect(init.headers['x-goog-api-key']).toBe('user-key');
+      expect(JSON.parse(init.body)).toEqual({
+        contents: [{ role: 'user', parts: [{ text: USER_PROMPT('日本語') }] }],
+        systemInstruction: { parts: [{ text: ANALYSIS_SYSTEM_PROMPT }] },
+        generationConfig: { maxOutputTokens: 3072, thinkingConfig: { thinkingLevel: 'LOW' } },
+      });
     });
 
-    test('google provider: returns 500 when API returns error', async () => {
+    test('google provider: initial upstream 401 becomes HTTP 200 with an SSE error frame', async () => {
       mockFetch.mockResolvedValueOnce({
         ok: false,
-        status: 500,
-        text: async () => 'Internal Server Error',
+        status: 401,
+        text: async () => 'invalid key sk-SECRET-VALUE',
       });
 
       const app = createTestApp();
-      const res = await app.request('/analyze', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          sentence: '日本語',
-          provider: 'google',
-          apiKey: 'test-key',
-          model: 'gemini-2.0-flash',
-        }),
-      });
+      const res = await app.request(
+        analyzeRequest({ sentence: '日本語', provider: 'google', apiKey: 'bad-key' }),
+      );
 
-      expect(res.status).toBe(500);
-      const body = (await res.json()) as { error: string };
-      expect(body.error).toContain('Google API error 500');
+      // Failures after the SSE response begins (including lazy initial
+      // upstream 4xx/5xx) are SSE error frames, never a pre-stream JSON 500.
+      expect(res.status).toBe(200);
+      expect(res.headers.get('content-type')).toContain('text/event-stream');
+      const frames = await sseFrames(res);
+      expect(frames).toEqual([
+        { type: 'metadata', provider: 'google', model: 'gemini-3.8-flash', sentence: '日本語' },
+        { type: 'error', error: 'Gemini request failed (401)' },
+      ]);
+      expect(JSON.stringify(frames)).not.toContain('sk-SECRET-VALUE');
     });
 
-    test('openrouter provider: returns SSE stream on success', async () => {
+    test('openrouter provider: streams chunks with attribution headers and existing sampling', async () => {
       const sseLines = [
         `data: ${JSON.stringify({ choices: [{ delta: { content: 'Translation: Hello' } }] })}`,
+        `data: ${JSON.stringify({
+          choices: [{ delta: {}, finish_reason: 'stop' }],
+          usage: {
+            prompt_tokens: 7,
+            completion_tokens: 3,
+            prompt_tokens_details: { cached_tokens: 2 },
+          },
+        })}`,
         'data: [DONE]',
       ];
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        body: makeSseStream(sseLines),
-      });
+      mockFetch.mockResolvedValueOnce({ ok: true, body: makeSseStream(sseLines) });
 
-      const app = createTestApp();
-      const res = await app.request('/analyze', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+      const app = createTestApp({ APP_NAME: 'Vela App' });
+      const res = await app.request(
+        analyzeRequest({
           sentence: '日本語',
           provider: 'openrouter',
-          apiKey: 'test-key',
+          apiKey: 'user-key',
           model: 'openai/gpt-4o',
         }),
-      });
+      );
 
       expect(res.status).toBe(200);
       expect(res.headers.get('content-type')).toContain('text/event-stream');
+      expect(await sseFrames(res)).toEqual([
+        { type: 'metadata', provider: 'openrouter', model: 'openai/gpt-4o', sentence: '日本語' },
+        { type: 'chunk', text: 'Translation: Hello' },
+        { type: 'done' },
+      ]);
 
-      // Drain and verify SSE payload
-      const reader = res.body?.getReader();
-      const decoder = new TextDecoder();
-      let sseText = '';
-      if (reader) {
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          sseText += typeof value === 'string' ? value : decoder.decode(value);
-        }
-      }
-      const events = sseText
-        .split('\n')
-        .filter((l) => l.startsWith('data: '))
-        .map((l) => JSON.parse(l.slice(6)));
-      const chunkEvents = events.filter((e) => e.type === 'chunk');
-      expect(chunkEvents.length).toBeGreaterThan(0);
-      expect(chunkEvents[0].text).toBe('Translation: Hello');
+      const [url, init] = mockFetch.mock.calls[0];
+      expect(url).toBe('https://openrouter.ai/api/v1/chat/completions');
+      expect(init.headers).toMatchObject({
+        Authorization: 'Bearer user-key',
+        'HTTP-Referer': 'http://localhost/analyze',
+        'X-Title': 'Vela App',
+      });
+      expect(JSON.parse(init.body)).toEqual({
+        model: 'openai/gpt-4o',
+        messages: [
+          { role: 'system', content: ANALYSIS_SYSTEM_PROMPT },
+          { role: 'user', content: USER_PROMPT('日本語') },
+        ],
+        temperature: 0.7,
+        max_tokens: 3072,
+        stream: true,
+      });
     });
 
-    test('openrouter provider: returns 500 when API returns error', async () => {
+    test('openrouter provider: initial upstream 429 becomes HTTP 200 with an SSE error frame', async () => {
       mockFetch.mockResolvedValueOnce({
         ok: false,
         status: 429,
@@ -529,51 +593,43 @@ describe('My Dictionaries Route', () => {
       });
 
       const app = createTestApp();
-      const res = await app.request('/analyze', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sentence: '日本語', provider: 'openrouter', apiKey: 'test-key' }),
-      });
+      const res = await app.request(
+        analyzeRequest({ sentence: '日本語', provider: 'openrouter', apiKey: 'user-key' }),
+      );
 
-      expect(res.status).toBe(500);
-      const body = (await res.json()) as { error: string };
-      expect(body.error).toContain('OpenRouter API error 429');
+      expect(res.status).toBe(200);
+      expect(res.headers.get('content-type')).toContain('text/event-stream');
+      expect(await sseFrames(res)).toEqual([
+        {
+          type: 'metadata',
+          provider: 'openrouter',
+          model: 'openai/gpt-oss-20b:free',
+          sentence: '日本語',
+        },
+        { type: 'error', error: 'OpenRouter request failed (429)' },
+      ]);
     });
 
-    test('google provider: SSE stream with null body uses error handler', async () => {
+    test('google provider: null upstream body becomes an SSE error frame, never done', async () => {
       mockFetch.mockResolvedValueOnce({
         ok: true,
         body: null,
       });
 
       const app = createTestApp();
-      const res = await app.request('/analyze', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sentence: '日本語', provider: 'google', apiKey: 'test-key' }),
-      });
+      const res = await app.request(
+        analyzeRequest({ sentence: '日本語', provider: 'google', apiKey: 'user-key' }),
+      );
 
       expect(res.status).toBe(200);
       expect(res.headers.get('content-type')).toContain('text/event-stream');
-      // Read the stream to verify error event was sent
-      const reader = res.body?.getReader();
-      const decoder = new TextDecoder();
-      let fullText = '';
-      if (reader) {
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          if (typeof value === 'string') {
-            fullText += value;
-          } else if (value instanceof Uint8Array) {
-            fullText += decoder.decode(value);
-          }
-        }
-      }
-      expect(fullText).toContain('error');
+      expect(await sseFrames(res)).toEqual([
+        { type: 'metadata', provider: 'google', model: 'gemini-3.8-flash', sentence: '日本語' },
+        { type: 'error', error: 'Gemini request failed (empty body)' },
+      ]);
     });
 
-    test('google provider: SSE stream processes remaining buffer on flush', async () => {
+    test('trailing data: line without newline is flushed; malformed data never yields done', async () => {
       const encoder = new TextEncoder();
       const validChunk = JSON.stringify({ candidates: [{ content: { parts: [{ text: '日' }] } }] });
       const sseData = `data: ${validChunk}\ndata: {invalid-json`;
@@ -586,61 +642,41 @@ describe('My Dictionaries Route', () => {
       mockFetch.mockResolvedValueOnce({ ok: true, body: stream });
 
       const app = createTestApp();
-      const res = await app.request('/analyze', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sentence: '日本語', provider: 'google', apiKey: 'test-key' }),
-      });
+      const res = await app.request(
+        analyzeRequest({ sentence: '日本語', provider: 'google', apiKey: 'user-key' }),
+      );
 
       expect(res.status).toBe(200);
-      const reader = res.body?.getReader();
-      const decoder = new TextDecoder();
-      let sseText = '';
-      if (reader) {
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          sseText += typeof value === 'string' ? value : decoder.decode(value);
-        }
-      }
-      const events = sseText
-        .split('\n')
-        .filter((l) => l.startsWith('data: '))
-        .map((l) => JSON.parse(l.slice(6)));
-      const chunkEvents = events.filter((e) => e.type === 'chunk');
-      expect(chunkEvents.length).toBe(1);
-      expect(chunkEvents[0].text).toBe('日');
-      expect(events.some((e) => e.type === 'done')).toBe(true);
+      // The trailing data: line is flushed and parsed, but the malformed JSON
+      // leaves the stream without a successful finish — so no done frame.
+      expect(await sseFrames(res)).toEqual([
+        { type: 'metadata', provider: 'google', model: 'gemini-3.8-flash', sentence: '日本語' },
+        { type: 'chunk', text: '日' },
+        { type: 'error', error: 'Gemini stream ended without a successful finish' },
+      ]);
     });
 
-    test('google provider: SSE stream handles upstream read error', async () => {
+    test('upstream read error becomes a sanitized SSE error frame, never done', async () => {
       const errorStream = new ReadableStream({
         start(controller) {
-          controller.error(new Error('Connection lost'));
+          controller.error(new Error('Connection lost with secret sk-KEY'));
         },
       });
       mockFetch.mockResolvedValueOnce({ ok: true, body: errorStream });
 
       const app = createTestApp();
-      const res = await app.request('/analyze', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sentence: '日本語', provider: 'google', apiKey: 'test-key' }),
-      });
+      const res = await app.request(
+        analyzeRequest({ sentence: '日本語', provider: 'google', apiKey: 'user-key' }),
+      );
 
       expect(res.status).toBe(200);
       expect(res.headers.get('content-type')).toContain('text/event-stream');
-      const reader = res.body?.getReader();
-      const decoder = new TextDecoder();
-      let fullText = '';
-      if (reader) {
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          fullText += typeof value === 'string' ? value : decoder.decode(value);
-        }
-      }
-      expect(fullText).toContain('error');
+      const frames = await sseFrames(res);
+      expect(frames).toEqual([
+        { type: 'metadata', provider: 'google', model: 'gemini-3.8-flash', sentence: '日本語' },
+        { type: 'error', error: 'Gemini request failed' },
+      ]);
+      expect(JSON.stringify(frames)).not.toContain('Connection lost');
     });
 
     test('returns 403 when origin is not allowed with configured origins', async () => {
@@ -658,17 +694,271 @@ describe('My Dictionaries Route', () => {
       expect(body.error).toContain('Origin not allowed');
     });
 
-    test('returns 500 when analyze request body is invalid JSON', async () => {
+    test('returns 400 when analyze request body is invalid JSON', async () => {
       const app = createTestApp();
-      const res = await app.request('/analyze', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: 'not-valid-json',
+      const res = await app.request(analyzeRequest('not-valid-json'));
+
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as { error: string };
+      expect(body.error).toBe('Invalid JSON');
+    });
+
+    test('returns 400 naming the rejected model and never calls upstream', async () => {
+      const app = createTestApp();
+      const res = await app.request(
+        analyzeRequest({
+          sentence: '日本語',
+          provider: 'google',
+          apiKey: 'user-key',
+          model: 'gemini-2.5-flash-lite',
+        }),
+      );
+
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as { error: string };
+      expect(body.error).toContain('gemini-2.5-flash-lite');
+      expect(mockFetch).not.toHaveBeenCalled();
+    });
+
+    test('returns 400 when openai provider has no api key', async () => {
+      const app = createTestApp();
+      const res = await app.request(analyzeRequest({ sentence: '日本語', provider: 'openai' }));
+
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as { error: string };
+      expect(body.error).toContain('Missing API key for OpenAI provider');
+      expect(mockOpenAiCreate).not.toHaveBeenCalled();
+    });
+
+    test('returns 400 when anthropic provider has no api key', async () => {
+      const app = createTestApp();
+      const res = await app.request(analyzeRequest({ sentence: '日本語', provider: 'anthropic' }));
+
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as { error: string };
+      expect(body.error).toContain('Missing API key for Anthropic provider');
+      expect(mockAnthropicStream).not.toHaveBeenCalled();
+    });
+
+    test('never falls back to a server key: dictionary analysis requires a user key', async () => {
+      const app = createTestApp({
+        GOOGLE_API_KEY: 'server-side-key',
+        OPENROUTER_API_KEY: 'server-side-key',
       });
 
-      expect(res.status).toBe(500);
+      for (const provider of ['google', 'openrouter'] as const) {
+        const res = await app.request(analyzeRequest({ sentence: '日本語', provider }));
+        expect(res.status).toBe(400);
+        const body = (await res.json()) as { error: string };
+        expect(body.error).toContain('Missing API key');
+      }
+      expect(mockFetch).not.toHaveBeenCalled();
+    });
+
+    test('returns 401 before any upstream call when unauthenticated', async () => {
+      mockAuthConfig.userId = '';
+      mockAuthConfig.userEmail = '';
+
+      const app = createTestApp();
+      const res = await app.request(
+        analyzeRequest({ sentence: '日本語', provider: 'google', apiKey: 'user-key' }),
+      );
+
+      expect(res.status).toBe(401);
       const body = (await res.json()) as { error: string };
-      expect(body.error).toBe('Failed to analyze sentence');
+      expect(body.error).toBe('Unauthorized');
+      expect(mockFetch).not.toHaveBeenCalled();
+    });
+
+    test('SAFETY finish after partial text emits an error frame, never done', async () => {
+      const sseLines = [
+        `data: ${JSON.stringify({
+          candidates: [{ content: { parts: [{ text: 'partial' }] }, finishReason: 'SAFETY' }],
+        })}`,
+      ];
+      mockFetch.mockResolvedValueOnce({ ok: true, body: makeSseStream(sseLines) });
+
+      const app = createTestApp();
+      const res = await app.request(
+        analyzeRequest({ sentence: '日本語', provider: 'google', apiKey: 'user-key' }),
+      );
+
+      expect(res.status).toBe(200);
+      expect(await sseFrames(res)).toEqual([
+        { type: 'metadata', provider: 'google', model: 'gemini-3.8-flash', sentence: '日本語' },
+        { type: 'chunk', text: 'partial' },
+        { type: 'error', error: 'Gemini stream finished early (SAFETY)' },
+      ]);
+    });
+
+    test('stream end without a successful finish emits an error frame, never done', async () => {
+      const sseLines = [
+        `data: ${JSON.stringify({ candidates: [{ content: { parts: [{ text: 'partial' }] } }] })}`,
+      ];
+      mockFetch.mockResolvedValueOnce({ ok: true, body: makeSseStream(sseLines) });
+
+      const app = createTestApp();
+      const res = await app.request(
+        analyzeRequest({ sentence: '日本語', provider: 'google', apiKey: 'user-key' }),
+      );
+
+      expect(res.status).toBe(200);
+      expect(await sseFrames(res)).toEqual([
+        { type: 'metadata', provider: 'google', model: 'gemini-3.8-flash', sentence: '日本語' },
+        { type: 'chunk', text: 'partial' },
+        { type: 'error', error: 'Gemini stream ended without a successful finish' },
+      ]);
+    });
+
+    test('openai provider: streams through the SDK with low effort and the user key', async () => {
+      mockOpenAiCreate.mockResolvedValueOnce(
+        (async function* () {
+          yield { type: 'response.output_text.delta', delta: 'Tra' };
+          yield { type: 'response.output_text.delta', delta: 'nslated.' };
+          yield {
+            type: 'response.completed',
+            response: {
+              usage: {
+                input_tokens: 900,
+                output_tokens: 12,
+                input_tokens_details: { cached_tokens: 400 },
+              },
+            },
+          };
+        })(),
+      );
+
+      const app = createTestApp();
+      const res = await app.request(
+        analyzeRequest({ sentence: '日本語', provider: 'openai', apiKey: 'user-key' }),
+      );
+
+      expect(res.status).toBe(200);
+      expect(res.headers.get('content-type')).toContain('text/event-stream');
+      expect(await sseFrames(res)).toEqual([
+        { type: 'metadata', provider: 'openai', model: 'gpt-6.1-sol', sentence: '日本語' },
+        { type: 'chunk', text: 'Tra' },
+        { type: 'chunk', text: 'nslated.' },
+        { type: 'done' },
+      ]);
+
+      expect(mockOpenAiOptions.at(-1)).toEqual({ apiKey: 'user-key', maxRetries: 0 });
+      const [params] = mockOpenAiCreate.mock.calls[0];
+      expect(params).toMatchObject({
+        model: 'gpt-6.1-sol',
+        max_output_tokens: 3072,
+        reasoning: { effort: 'low' },
+        instructions: ANALYSIS_SYSTEM_PROMPT,
+        input: [{ role: 'user', content: USER_PROMPT('日本語') }],
+        stream: true,
+      });
+    });
+
+    test('anthropic provider: streams through the SDK with low effort and cache control', async () => {
+      mockAnthropicStream.mockReturnValueOnce(
+        (async function* () {
+          yield {
+            type: 'message_start',
+            message: { usage: { input_tokens: 10, output_tokens: 1 } },
+          };
+          yield { type: 'content_block_start', index: 0, content_block: { type: 'text' } };
+          yield {
+            type: 'content_block_delta',
+            index: 0,
+            delta: { type: 'text_delta', text: 'Translation.' },
+          };
+          yield {
+            type: 'message_delta',
+            delta: { stop_reason: 'end_turn' },
+            usage: {
+              input_tokens: 12,
+              cache_read_input_tokens: 200,
+              cache_creation_input_tokens: 8,
+              output_tokens: 42,
+            },
+          };
+          yield { type: 'message_stop' };
+        })(),
+      );
+
+      const app = createTestApp();
+      const res = await app.request(
+        analyzeRequest({ sentence: '日本語', provider: 'anthropic', apiKey: 'user-key' }),
+      );
+
+      expect(res.status).toBe(200);
+      expect(res.headers.get('content-type')).toContain('text/event-stream');
+      expect(await sseFrames(res)).toEqual([
+        { type: 'metadata', provider: 'anthropic', model: 'claude-opus-5-5', sentence: '日本語' },
+        { type: 'chunk', text: 'Translation.' },
+        { type: 'done' },
+      ]);
+
+      expect(mockAnthropicOptions.at(-1)).toEqual({ apiKey: 'user-key', maxRetries: 0 });
+      const [params] = mockAnthropicStream.mock.calls[0];
+      expect(params).toMatchObject({
+        model: 'claude-opus-5-5',
+        max_tokens: 3072,
+        output_config: { effort: 'low' },
+        system: ANALYSIS_SYSTEM_PROMPT,
+        cache_control: { type: 'ephemeral' },
+        fallbacks: 'default',
+        betas: ['server-side-fallback-2026-07-01'],
+        messages: [{ role: 'user', content: USER_PROMPT('日本語') }],
+      });
+    });
+
+    test('browser-sent thinking is ignored; effort stays low server-side', async () => {
+      const sseLines = [`data: ${JSON.stringify({ candidates: [{ finishReason: 'STOP' }] })}`];
+      mockFetch.mockResolvedValueOnce({ ok: true, body: makeSseStream(sseLines) });
+
+      const app = createTestApp();
+      const res = await app.request(
+        analyzeRequest({
+          sentence: '日本語',
+          provider: 'google',
+          apiKey: 'user-key',
+          thinking: 'high',
+        }),
+      );
+
+      expect(res.status).toBe(200);
+      expect(await sseFrames(res)).toEqual([
+        { type: 'metadata', provider: 'google', model: 'gemini-3.8-flash', sentence: '日本語' },
+        { type: 'done' },
+      ]);
+      const [, init] = mockFetch.mock.calls[0];
+      expect(JSON.parse(init.body).generationConfig.thinkingConfig).toEqual({
+        thinkingLevel: 'LOW',
+      });
+    });
+
+    test('canceled upstream stream surfaces as an SSE error frame, never done', async () => {
+      // A client disconnect propagates through the request signal, and the
+      // vendor body read rejects with an AbortError — the real fetch abort
+      // shape (Bun's mocked fetch ignores signals, so the body models it).
+      // Queued upstream chunks are discarded on error, so only metadata and
+      // the sanitized error frame are observable.
+      const abortError = Object.assign(new Error('The operation was aborted'), {
+        name: 'AbortError',
+      });
+      const canceledStream = new ReadableStream({
+        start(controller) {
+          controller.error(abortError);
+        },
+      });
+      mockFetch.mockResolvedValueOnce({ ok: true, body: canceledStream });
+
+      const app = createTestApp();
+      const res = await app.request(
+        analyzeRequest({ sentence: '日本語', provider: 'google', apiKey: 'user-key' }),
+      );
+
+      expect(res.status).toBe(200);
+      expect(await sseFrames(res)).toEqual([
+        { type: 'metadata', provider: 'google', model: 'gemini-3.8-flash', sentence: '日本語' },
+        { type: 'error', error: 'Gemini request failed (AbortError)' },
+      ]);
     });
   });
 
