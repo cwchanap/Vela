@@ -23,10 +23,10 @@
     "postinstall": "quasar prepare"
   },
   "dependencies": {
-    "@aws-sdk/client-dynamodb": "^3.1154.0",
-    "@aws-sdk/lib-dynamodb": "^3.1154.0",
+    "@aws-sdk/client-dynamodb": "^3.1161.0",
+    "@aws-sdk/lib-dynamodb": "^3.1161.0",
     "@quasar/extras": "^1.16.4",
-    "@tanstack/vue-query": "^5.104.5",
+    "@tanstack/vue-query": "^5.105.3",
     "@vela/common": "workspace:*",
     "aws-amplify": "^6.22.2",
     "dompurify": "^3.4.17",
@@ -39,7 +39,7 @@
     "vuedraggable": "^4.1.0"
   },
   "devDependencies": {
-    "@aws-sdk/client-cognito-identity-provider": "^3.1154.0",
+    "@aws-sdk/client-cognito-identity-provider": "^3.1161.0",
     "@playwright/test": "^1.64.1",
     "@quasar/app-vite": "^2.1.0",
     "@quasar/vite-plugin": "^1.8.0",
@@ -47,17 +47,17 @@
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/vue": "^8.1.0",
     "@types/dompurify": "^3.2.0",
-    "@types/node": "^26.6.5",
+    "@types/node": "^26.6.6",
     "@vitejs/plugin-vue": "^6.0.10",
     "@vitest/coverage-v8": "^3.2.4",
     "@vue/test-utils": "^2.5.1",
-    "autoprefixer": "^10.6.1",
+    "autoprefixer": "^10.6.2",
     "happy-dom": "^20.0.10",
     "jsdom": "^26.1.0",
     "typescript": "~5.6.3",
     "vite-plugin-checker": "^0.14.5",
     "vitest": "^3.2.4",
-    "vue-tsc": "^3.3.13"
+    "vue-tsc": "^3.3.14"
   },
   "engines": {
     "node": "^28 || ^26 || ^24 || ^22 || ^20 || ^18",

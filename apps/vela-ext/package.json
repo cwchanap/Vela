@@ -22,7 +22,7 @@
     "postinstall": "wxt prepare"
   },
   "dependencies": {
-    "@tanstack/vue-query": "^5.104.5",
+    "@tanstack/vue-query": "^5.105.3",
     "@vela/common": "workspace:*",
     "vue": "^3.5.44"
   },
@@ -36,7 +36,7 @@
     "prettier": "^3.9.10",
     "typescript": "^5.9.2",
     "vitest": "^3.2.4",
-    "vue-tsc": "^3.3.13",
-    "wxt": "^0.21.4"
+    "vue-tsc": "^3.3.14",
+    "wxt": "^0.21.5"
   }
 }
