@@ -39,7 +39,7 @@ const sanitizedModels = (models: ProviderModelMap | undefined): ProviderModelMap
       saved.length > 0 &&
       (registry.models === null || registry.models.some((entry) => entry.id === saved))
         ? saved
-        : DEFAULT_MODELS[p];
+        : registry.defaultModel;
   }
   return next;
 };
