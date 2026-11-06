@@ -226,6 +226,16 @@ describe('openai adapter', () => {
     expect(events).toEqual([{ type: 'error', message: 'OpenAI request failed (401)' }]);
   });
 
+  test('error with secret-shaped name never leaks into sanitized error', async () => {
+    const secretError = { name: 'sk-SECRET-ATTACKER-KEY' };
+    const client = fakeClient(() => {
+      throw secretError;
+    });
+    const events = await collectEvents(streamOpenAiResponses(baseInput, () => client));
+    expect(events).toEqual([{ type: 'error', message: 'OpenAI request failed' }]);
+    expect(JSON.stringify(events)).not.toContain('sk-SECRET');
+  });
+
   test('error thrown mid-iteration yields a sanitized error after prior text', async () => {
     async function* failing(): AsyncIterable<OpenAiStreamEvent> {
       yield delta('partial');

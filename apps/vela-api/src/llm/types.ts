@@ -101,23 +101,22 @@ function isTimeoutFailure(error: unknown): boolean {
 }
 
 /**
- * Sanitize any provider failure into a safe error event: HTTP status or error
- * name only. Vendor bodies and messages can echo request material (including
- * API keys) and must never reach the browser. Deadline/abort failures get a
+ * Sanitize any provider failure into a safe error event: HTTP status only.
+ * Vendor bodies, names, and messages can echo request material (including API
+ * keys) and must never reach the browser. Deadline/abort failures get a
  * fixed timeout message so the browser can surface its deadline hint (the
- * status stays a plain 502/SSE error, never a gateway 504).
+ * status stays a plain 502/SSE error, never a gateway 504). Non-numeric
+ * failures produce an unadorned failure message.
  */
 export function sanitizeProviderError(provider: string, error: unknown): LlmEvent {
   if (isTimeoutFailure(error)) {
     return { type: 'error', message: `${provider} request timed out` };
   }
-  const candidate = error as { status?: unknown; name?: unknown } | null;
+  const candidate = error as { status?: unknown } | null;
   const detail =
-    typeof candidate?.status === 'number'
+    typeof candidate?.status === 'number' && Number.isFinite(candidate.status)
       ? String(candidate.status)
-      : typeof candidate?.name === 'string' && candidate.name && candidate.name !== 'Error'
-        ? candidate.name
-        : null;
+      : null;
   return {
     type: 'error',
     message: detail ? `${provider} request failed (${detail})` : `${provider} request failed`,
