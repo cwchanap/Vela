@@ -1,6 +1,7 @@
-import type { LlmEvent } from '@vela/common/contracts/llm';
+import { LLM_PROVIDER_REGISTRY, type LlmEvent } from '@vela/common/contracts/llm';
 import { readSseDataLines } from '../sse';
 import {
+  providerMaxTokens,
   safeVendorCode,
   sanitizeProviderError,
   withRequestTimeout,
@@ -25,6 +26,7 @@ export interface GeminiStreamChunk {
 }
 
 const GEMINI_ENDPOINT = 'https://generativelanguage.googleapis.com/v1beta/models';
+const PROVIDER = LLM_PROVIDER_REGISTRY.google.label;
 
 // REST thinkingConfig takes proto3 enum names, not the lowercase guide values.
 const THINKING_LEVELS: Record<string, string> = { low: 'LOW', medium: 'MEDIUM', high: 'HIGH' };
@@ -87,7 +89,7 @@ export function createGeminiMapper(): VendorEventMapper<GeminiStreamChunk> {
         status = 'failed';
         events.push({
           type: 'error',
-          message: `Gemini request blocked (${safeVendorCode(blockReason, GEMINI_BLOCK_REASONS)})`,
+          message: `${PROVIDER} request blocked (${safeVendorCode(blockReason, GEMINI_BLOCK_REASONS)})`,
         });
       }
       const finishReason = chunk.candidates?.[0]?.finishReason;
@@ -98,7 +100,7 @@ export function createGeminiMapper(): VendorEventMapper<GeminiStreamChunk> {
           status = 'failed';
           events.push({
             type: 'error',
-            message: `Gemini stream finished early (${safeVendorCode(finishReason, GEMINI_FINISH_REASONS)})`,
+            message: `${PROVIDER} stream finished early (${safeVendorCode(finishReason, GEMINI_FINISH_REASONS)})`,
           });
         }
       }
@@ -106,7 +108,7 @@ export function createGeminiMapper(): VendorEventMapper<GeminiStreamChunk> {
     },
     end() {
       if (status !== 'pending') return [];
-      return [{ type: 'error', message: 'Gemini stream ended without a successful finish' }];
+      return [{ type: 'error', message: `${PROVIDER} stream ended without a successful finish` }];
     },
   };
 }
@@ -124,7 +126,7 @@ export async function* streamGemini(
       })),
       ...(input.system ? { systemInstruction: { parts: [{ text: input.system }] } } : {}),
       generationConfig: {
-        maxOutputTokens: input.maxTokens,
+        maxOutputTokens: providerMaxTokens(input),
         ...(input.effort && THINKING_LEVELS[input.effort]
           ? { thinkingConfig: { thinkingLevel: THINKING_LEVELS[input.effort] } }
           : {}),
@@ -137,11 +139,11 @@ export async function* streamGemini(
       signal: withRequestTimeout(input.signal),
     });
     if (!res.ok) {
-      yield sanitizeProviderError('Gemini', { status: res.status });
+      yield sanitizeProviderError(PROVIDER, { status: res.status });
       return;
     }
     if (!res.body) {
-      yield { type: 'error', message: 'Gemini request failed (empty body)' };
+      yield { type: 'error', message: `${PROVIDER} request failed (empty body)` };
       return;
     }
     for await (const line of readSseDataLines(res.body)) {
@@ -151,14 +153,14 @@ export async function* streamGemini(
       } catch {
         // Malformed upstream data is a failed stream, never a success: emit
         // a sanitized error and stop, so no later terminal can yield done.
-        yield { type: 'error', message: 'Gemini stream failed (malformed data)' };
+        yield { type: 'error', message: `${PROVIDER} stream failed (malformed data)` };
         return;
       }
       yield* mapper.push(chunk as GeminiStreamChunk);
     }
     yield* mapper.end();
   } catch (error) {
-    yield sanitizeProviderError('Gemini', error);
+    yield sanitizeProviderError(PROVIDER, error);
   }
 }
 

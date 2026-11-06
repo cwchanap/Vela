@@ -19,6 +19,8 @@ export interface AnalyzeSentenceInput {
   provider: LlmProvider;
   model?: string | undefined;
   apiKey?: string | undefined;
+  /** Cancels the upstream stream; superseded asks abort the previous one. */
+  signal?: AbortSignal | undefined;
 }
 
 /** Frames a dictionary analysis consumer observes; `error` rejects and `done` resolves the promise instead. */
@@ -49,10 +51,12 @@ export const llmClient = {
     onEvent: (_frame: AnalysisFrame) => void,
   ): Promise<void> {
     const headers = await getAuthHeaders();
+    const { signal, ...body } = input;
     const response = await fetch(getApiUrl('my-dictionaries/analyze'), {
       method: 'POST',
       headers,
-      body: JSON.stringify(input),
+      body: JSON.stringify(body),
+      signal,
     });
 
     if (!response.ok) {
@@ -139,12 +143,18 @@ export const llmClient = {
 const GATEWAY_TIMEOUT_MESSAGE =
   'The AI provider timed out before responding. Try a shorter request or a lighter model.';
 
-/** Map transport errors (e.g. gateway 504) to a user-facing message. */
+/**
+ * Map transport errors to a user-facing message. Provider deadline failures
+ * never surface as a gateway 504 — they arrive as a 502 or an SSE error frame
+ * carrying the API's fixed '<provider> request timed out' suffix
+ * (sanitizeProviderError contract), so match that suffix too.
+ */
 export function describeLlmError(error: unknown, fallback: string): string {
   if (error instanceof Error) {
-    return (error as Error & { status?: number }).status === 504
-      ? GATEWAY_TIMEOUT_MESSAGE
-      : error.message || fallback;
+    const isTimeout =
+      (error as Error & { status?: number }).status === 504 ||
+      error.message.endsWith('request timed out');
+    return isTimeout ? GATEWAY_TIMEOUT_MESSAGE : error.message || fallback;
   }
   return fallback;
 }

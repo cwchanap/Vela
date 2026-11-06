@@ -43,6 +43,21 @@ export const LLMBridgeRequestSchema = z
     path: ['messages'],
   });
 
+// Dictionary Analyze Request Schema — field validation for the SSE route; the
+// route still applies its own credential policy afterward. Enum/string error
+// params preserve the exact messages the hand-rolled checks returned.
+export const AnalyzeSentenceRequestSchema = z.object({
+  sentence: z.string('Sentence is required').trim().min(1, 'Sentence is required'),
+  provider: z.enum(LLM_PROVIDERS, {
+    error: (issue) =>
+      typeof issue.input === 'string'
+        ? `Unsupported provider '${issue.input}'. Supported providers: ${LLM_PROVIDERS.join(', ')}.`
+        : 'LLM provider is required',
+  }),
+  model: z.string('Invalid model').optional(),
+  apiKey: z.string('Invalid API key').optional(),
+});
+
 // Shared JLPT field definition with validation
 export const jlptField = z
   .string()

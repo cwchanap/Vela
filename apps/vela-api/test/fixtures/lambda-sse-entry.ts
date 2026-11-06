@@ -9,6 +9,7 @@
 import { Hono } from 'hono';
 import { handle } from 'hono/aws-lambda';
 import type { LlmEvent } from '@vela/common/contracts/llm';
+import { isLambdaContentTypeBinary } from '../../src/lambda-adapter';
 import { createAnalysisSseStream } from '../../src/routes/my-dictionaries';
 
 async function* upstream(): AsyncIterable<LlmEvent> {
@@ -27,4 +28,4 @@ app.post('/analyze', () => {
   );
 });
 
-export const handler = handle(app);
+export const handler = handle(app, { isContentTypeBinary: isLambdaContentTypeBinary });

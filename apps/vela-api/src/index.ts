@@ -18,6 +18,7 @@ import { readFileSync, existsSync } from 'fs';
 import { resolve } from 'path';
 import { Context, Next } from 'hono';
 import { initializeAuthFromEnv } from './auth-initialization';
+import { isLambdaContentTypeBinary } from './lambda-adapter';
 import { corsMiddleware } from './middleware/cors';
 
 const app = new Hono<{ Bindings: Env }>();
@@ -85,6 +86,8 @@ if (process.env.NODE_ENV === 'development') {
     bunRuntime.serve({
       fetch: app.fetch,
       port,
+      // Bun's 10 s default would cut slow provider streams (25 s deadline).
+      idleTimeout: 30,
     });
     console.log(`🚀 Vela API development server running on port ${port}`);
   } else {
@@ -140,4 +143,6 @@ app.route('/api/dictionary', dictionaryRouter);
 // Mount the vocabulary routes (flashcard creation)
 app.route('/api/vocabulary', vocabularyRouter);
 
-export const handler = handle(app);
+export const handler = handle(app, {
+  isContentTypeBinary: isLambdaContentTypeBinary,
+});

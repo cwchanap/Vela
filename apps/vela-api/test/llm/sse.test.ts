@@ -44,4 +44,25 @@ describe('readSseDataLines', () => {
   test('empty body yields nothing', async () => {
     expect(await readAll([''])).toEqual([]);
   });
+
+  test('a consumer that stops early cancels the upstream stream', async () => {
+    let cancelled = false;
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode('data: {"a":1}\n\n'));
+      },
+      cancel() {
+        cancelled = true;
+      },
+    });
+    for await (const line of readSseDataLines(body)) {
+      expect(line).toBe('{"a":1}');
+      break;
+    }
+    expect(cancelled).toBe(true);
+  });
+
+  test('normal EOF still completes without a cancel error', async () => {
+    await expect(readAll(['data: {"a":1}\n\n'])).resolves.toEqual(['{"a":1}']);
+  });
 });

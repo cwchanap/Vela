@@ -43,6 +43,8 @@ export interface LlmModelInfo {
 }
 
 export interface LlmProviderInfo {
+  /** Single display label for the provider — UI selects, API error messages. */
+  label: string;
   /** Model used when a request omits `model`. */
   defaultModel: string;
   /** Server-side prompt cache TTL in seconds; null when the provider has none. */
@@ -76,6 +78,7 @@ const NONE_TO_MAX = [
 // .superpowers/sdd/2026-11-03-hpa754-llm-provider-foundation/.
 export const LLM_PROVIDER_REGISTRY: Readonly<Record<LlmProvider, LlmProviderInfo>> = {
   google: {
+    label: 'Google',
     defaultModel: 'gemini-3.8-flash',
     cacheTtlSeconds: null,
     models: [
@@ -84,6 +87,7 @@ export const LLM_PROVIDER_REGISTRY: Readonly<Record<LlmProvider, LlmProviderInfo
     ],
   },
   openai: {
+    label: 'OpenAI',
     defaultModel: 'gpt-6.1-sol',
     cacheTtlSeconds: 1800,
     models: [
@@ -97,6 +101,7 @@ export const LLM_PROVIDER_REGISTRY: Readonly<Record<LlmProvider, LlmProviderInfo
     ],
   },
   anthropic: {
+    label: 'Anthropic',
     defaultModel: 'claude-opus-5-5',
     cacheTtlSeconds: 300,
     models: [
@@ -106,6 +111,7 @@ export const LLM_PROVIDER_REGISTRY: Readonly<Record<LlmProvider, LlmProviderInfo
     ],
   },
   openrouter: {
+    label: 'OpenRouter',
     defaultModel: 'openai/gpt-oss-20b:free',
     cacheTtlSeconds: null,
     models: null,

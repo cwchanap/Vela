@@ -39,6 +39,14 @@ export async function* readSseDataLines(body: ReadableStream<Uint8Array>): Async
       if (payload !== null) yield payload;
     }
   } finally {
+    // Consumers that stop early (error event, disconnect) would otherwise
+    // leave the upstream request generating — and billing — until the
+    // request timeout. Cancel propagates the abort to fetch.
+    try {
+      await reader.cancel();
+    } catch {
+      // Already errored or closed — nothing to cancel.
+    }
     reader.releaseLock();
   }
 }

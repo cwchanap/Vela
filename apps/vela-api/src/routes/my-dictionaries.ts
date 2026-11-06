@@ -6,7 +6,8 @@ import { requireAuth, type AuthContext } from '../middleware/auth';
 import { isAllowedOrigin } from '../middleware/cors';
 import { createLlmProvider } from '../llm/factory';
 import { normalizeLlmRequest } from '../llm/normalize';
-import { DICTIONARY_MAX_TOKENS, PROVIDER_LABELS } from '../llm/types';
+import { DICTIONARY_MAX_TOKENS } from '../llm/types';
+import { AnalyzeSentenceRequestSchema } from '../validation';
 
 const app = new Hono<{ Bindings: Env } & AuthContext>();
 
@@ -215,7 +216,7 @@ app.post('/analyze', async (c) => {
       return c.json({ error: 'Unauthorized' }, 401);
     }
 
-    let body: any;
+    let body: unknown;
     try {
       body = await c.req.json();
     } catch {
@@ -226,7 +227,6 @@ app.post('/analyze', async (c) => {
     if (typeof body !== 'object' || body === null) {
       return c.json({ error: 'Invalid request body' }, 400);
     }
-    const { sentence, provider, model, apiKey } = body;
     const requestOrigin = c.req.header('Origin');
 
     // Use shared utility to check if origin is allowed (includes both web and extension origins)
@@ -251,22 +251,12 @@ app.post('/analyze', async (c) => {
       return c.json({ error: 'Origin not allowed' }, 403);
     }
 
-    if (!sentence || typeof sentence !== 'string' || sentence.trim().length === 0) {
-      return c.json({ error: 'Sentence is required' }, 400);
+    const parsed = AnalyzeSentenceRequestSchema.safeParse(body);
+    if (!parsed.success) {
+      const issue = parsed.error.issues[0];
+      return c.json({ error: issue?.message ?? 'Invalid request' }, 400);
     }
-
-    // The normalizer interpolates the provider into its unsupported-provider
-    // error; a non-string provider (e.g. {"toString":null}) throws there and
-    // surfaced as a 500. Keep it a local validation 4xx.
-    if (!provider || typeof provider !== 'string') {
-      return c.json({ error: 'LLM provider is required' }, 400);
-    }
-
-    // The normalizer assumes string fields; a non-string model used to throw
-    // inside `trim()` and surface as a 500. Keep it a local validation 4xx.
-    if (model !== undefined && typeof model !== 'string') {
-      return c.json({ error: 'Invalid model' }, 400);
-    }
+    const { sentence, provider, model, apiKey } = parsed.data;
 
     // Same shared normalizer as chat: registry provider/model validation and a
     // single system + user turn. The analysis prompt itself is unchanged.
@@ -274,7 +264,7 @@ app.post('/analyze', async (c) => {
       provider,
       model,
       system: ANALYSIS_SYSTEM_PROMPT,
-      prompt: `Analyze this Japanese sentence: "${sentence.trim()}"`,
+      prompt: `Analyze this Japanese sentence: "${sentence}"`,
     });
     if (!normalized.ok) {
       return c.json({ error: normalized.error }, 400);
@@ -282,6 +272,7 @@ app.post('/analyze', async (c) => {
     const {
       provider: llmProvider,
       model: llmModel,
+      modelInfo,
       effort: defaultEffort,
       system,
       messages,
@@ -290,14 +281,14 @@ app.post('/analyze', async (c) => {
     // Dictionary analysis keeps its stricter credential policy: a user key is
     // required on every provider; there is no server-key fallback (unlike chat).
     if (typeof apiKey !== 'string' || apiKey.length === 0) {
-      return c.json({ error: `Missing API key for ${PROVIDER_LABELS[llmProvider]} provider` }, 400);
+      return c.json(
+        { error: `Missing API key for ${LLM_PROVIDER_REGISTRY[llmProvider].label} provider` },
+        400,
+      );
     }
 
     // Analysis deliberately runs at low native effort where the model supports
     // it; the browser never sends `thinking` for dictionary analysis.
-    const modelInfo = LLM_PROVIDER_REGISTRY[llmProvider].models?.find(
-      (entry) => entry.id === llmModel,
-    );
     const effort = modelInfo?.efforts.includes('low') ? ('low' as const) : defaultEffort;
 
     // Shared adapter stream, lazy: the first read performs the upstream call,
@@ -320,7 +311,7 @@ app.post('/analyze', async (c) => {
       createAnalysisSseStream(upstream, {
         provider: llmProvider,
         model: llmModel,
-        sentence: sentence.trim(),
+        sentence,
       }),
       { headers: analysisSseHeaders(originCheck) },
     );

@@ -258,7 +258,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, computed } from 'vue';
+import { ref, onMounted, onUnmounted, computed, watch } from 'vue';
 import { useQuasar } from 'quasar';
 import { storeToRefs } from 'pinia';
 import { useQueryClient } from '@tanstack/vue-query';
@@ -616,7 +616,15 @@ function formatUrl(url: string): string {
   }
 }
 
+// In-flight analysis request; a new ask or a closed dialog aborts it so two
+// streams can never write into the same streamingText/analysisResult.
+let analysisAbort: AbortController | null = null;
+
 async function handleAskAI(entry: MyDictionaryEntry) {
+  analysisAbort?.abort();
+  const controller = new AbortController();
+  analysisAbort = controller;
+
   analyzingSentence.value = entry;
   analysisResult.value = null;
   analysisError.value = '';
@@ -632,8 +640,12 @@ async function handleAskAI(entry: MyDictionaryEntry) {
         provider: provider.value,
         model: currentModel.value,
         apiKey: currentApiKey.value,
+        signal: controller.signal,
       },
       (frame) => {
+        // Frames already buffered when a newer ask aborted this stream must
+        // not bleed into the new request's output.
+        if (controller.signal.aborted) return;
         if (frame.type === 'metadata') {
           analysisResult.value = {
             sentence: frame.sentence,
@@ -646,6 +658,7 @@ async function handleAskAI(entry: MyDictionaryEntry) {
         }
       },
     );
+    if (controller.signal.aborted) return;
     // The metadata frame assigned the ref inside the callback; the cast undoes
     // control-flow narrowing that cannot see the closure assignment.
     const result = analysisResult.value as SentenceAnalysis | null;
@@ -654,6 +667,7 @@ async function handleAskAI(entry: MyDictionaryEntry) {
       analysisResult.value = result;
     }
   } catch (err) {
+    if (controller.signal.aborted) return;
     analysisError.value = describeLlmError(err, 'Failed to analyze sentence');
     $q.notify({
       type: 'negative',
@@ -661,10 +675,20 @@ async function handleAskAI(entry: MyDictionaryEntry) {
       position: 'top',
     });
   } finally {
-    // Loading is cleared on every outcome: success, error frame, and EOF-without-done.
-    analyzing.value = false;
+    // Only the latest request clears loading; a superseded stream's finally
+    // must not spin down the indicator while the new request still streams.
+    if (analysisAbort === controller) {
+      analyzing.value = false;
+    }
   }
 }
+
+// Closing the dialog or leaving the page abandons the visible result, so the
+// upstream stream should not keep generating (and billing) unseen.
+watch(aiDialog, (open) => {
+  if (!open) analysisAbort?.abort();
+});
+onUnmounted(() => analysisAbort?.abort());
 
 async function handlePronounce(entry: MyDictionaryEntry) {
   // Check if authenticated and has a valid session

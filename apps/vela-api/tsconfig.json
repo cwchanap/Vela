@@ -7,6 +7,13 @@
     "skipLibCheck": true,
     "types": ["node", "bun"],
     "jsx": "react-jsx",
-    "jsxImportSource": "hono/jsx"
+    "jsxImportSource": "hono/jsx",
+    // Resolve the workspace contract to source: Bun (dev/test), esbuild
+    // (lambda:build), and tsc (compile) all honor paths, so no common dist/
+    // build step is needed anywhere this package consumes it.
+    "paths": {
+      "@vela/common/contracts/llm": ["../../packages/common/src/contracts/llm.ts"],
+      "@vela/common": ["../../packages/common/src/index.ts"]
+    }
   }
 }
