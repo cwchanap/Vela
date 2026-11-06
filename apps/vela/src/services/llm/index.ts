@@ -56,7 +56,7 @@ export const llmClient = {
       method: 'POST',
       headers,
       body: JSON.stringify(body),
-      signal,
+      signal: signal ?? null,
     });
 
     if (!response.ok) {
