@@ -1,78 +1,104 @@
 # HPA-755 — Per-provider LLM Settings and Thinking Defaults (Design)
 
-**Status:** Draft for review; planning only (2026-11-06)  
+**Status:** Draft for review; planning only (reconciled 2026-11-06 after [review](https://github.com/cwchanap/Vela/pull/81#issuecomment-6690108759))  
 **Linear:** https://linear.app/cwchanap/issue/HPA-755/redesign-settings-page-with-per-provider-llm-keys-and-thinking  
-**Dependency:** HPA-754 is Done; registry/provider adapters landed on `main`.  
-**Delivery rule:** one HPA-755 PR for these documents, future implementation, tests, and review fixes. Do not treat the documentation commit as completed functionality.
+**Dependency:** HPA-754 is Done; reuse the provider registry and backend adapters already on `main`.  
+**Delivery:** One HPA-755 draft PR for design, implementation, tests and review fixes. No feature is implemented by this documentation commit.
 
-## Goal and user journey
+## Objective and scope
 
-Users configure Google, OpenAI, Anthropic, and OpenRouter independently from one Settings page. Entering or editing an API key in one card must not alter an unsaved key in any other card. A configured badge makes saved state clear. Every registered model can have a saved native thinking-effort default. A single default model is used for **new** chat messages and My Dictionaries analysis, until a later ticket adds per-thread model selection.
+Configure Google, OpenAI, Anthropic and OpenRouter independently on the Settings page. Every provider card holds a local unsaved API key draft and a Save button; committing one card cannot change another's saved key, thinking defaults or unfinished draft. Render registry-native thinking choices per fixed model and one global **Default model** selection for new chat requests and My Dictionaries. Keep theme/TTS functionality the same.
 
-The page has three focused, feature-owned sections: `ThemeSection`, `LlmProvidersSection`, and `TtsSection`. Keep theme and existing TTS behavior unchanged. HPA-757 owns TTS model/voice updates; HPA-756 owns chat sidebar/thread metadata; HPA-758 owns the in-chat picker and cache timer.
+Section components are `ThemeSection`, `LlmProvidersSection` and `TtsSection`. Use a tiny reusable `LlmProviderCard` for the four card instances. HPA-757 owns TTS model updates; HPA-756 owns chat sidebar/thread state; HPA-758 owns per-thread switching and cache reminders.
 
-## Current code and actual gaps
+## Verified implementation seams
 
-- `packages/common/src/contracts/llm.ts` already owns `LLM_PROVIDERS` and `LLM_PROVIDER_REGISTRY`. Fixed-model providers have `models: LlmModelInfo[]` with `efforts`/`defaultEffort`; OpenRouter intentionally has `models: null`, a free-form model ID, and no thinking control.
-- `apps/vela/src/pages/settings/SettingsPage.vue` has a provider-switching form with one draft key. Its watcher overwrites unsaved input on provider switch.
-- `apps/vela/src/stores/llmSettings.ts` already holds a per-provider key map, but persists the old `provider/models/keys` shape (`llm_settings_v1`, `llm_provider`, `llm_models`, `llm_keys`).
-- **Blocking bug:** `apps/vela-api/src/routes/profiles.ts` has a `PreferencesShape` whose read/write Zod schemas `.strip()` unrecognized fields. It does not include `llm` (nor the existing `darkMode` field); a frontend-only change would appear to save but lose profile-backed settings on GET. Extend the same read/write shape and test the actual round trip.
-- Chat in `apps/vela/src/pages/chat/AIChatPage.vue` currently sends `provider/currentModel/currentApiKey`. The stateless `llmClient.generate` and authenticated `/llm-chat` route **already accept optional `thinking`**; only the caller needs to supply it.
-- Dictionary in `apps/vela/src/pages/dictionary/MyDictionariesPage.vue` and `llmClient.analyzeSentenceStream` lacks a thinking parameter; `apps/vela-api/src/routes/my-dictionaries.ts` forces `low` when supported. Add optional `thinking` through the existing request schema and shared normalizer to honor the user default, without changing SSE frames or its required user API key.
-- `/llm-chat` allows an authenticated Google server-key fallback; dictionary analysis **does not**. The UI cannot currently detect whether the Google server key is configured.
+- `packages/common/src/contracts/llm.ts` defines `LLM_PROVIDERS`, `LLM_PROVIDER_REGISTRY` and `LlmEffort`; each fixed-model entry already includes `efforts` and `defaultEffort`. OpenRouter has `models: null` and accepts a custom model ID with **no** thinking dropdown.
+- `apps/vela/src/pages/settings/SettingsPage.vue` currently overwrites an unsaved API-key draft on provider switch.
+- `apps/vela/src/stores/llmSettings.ts` currently persists `provider/models/keys` and merges profile key maps across account changes.
+- `apps/vela-api/src/routes/profiles.ts` has GET and PUT preference Zod schemas that strip `llm` **and existing `darkMode`**. A front-end-only Settings change cannot persist them to the profile.
+- `apps/vela/src/stores/auth.ts` already has `updatePreferences(partial)`, which merges into existing preferences and updates the local auth user when the write succeeds. Authenticated Settings/Chat/Dictionary routes load a profile: a separate localStorage mirror provides no useful second source of truth and risks keys leaking across account changes.
+- Chat's `llmClient.generate` and `/llm-chat` already support optional `thinking`; `normalizeLlmRequest` already validates it and applies the registry default if absent.
+- Dictionary's `/my-dictionaries/analyze` requires a **user key** and defaults to `low` effort where supported. It buffers SSE when deployed and has a ~25-second provider deadline; do not silently replace low with a more expensive/slower registry default.
+- The authenticated chat route's `SERVER_KEY_ENV` allows server key fallback for **Google and OpenRouter** only; dictionary does not share either fallback.
 
-## State and persistence contract
+## Profile contract and validation
 
-Use exactly one new optional profile preference:
+Store exactly one optional LLM preference, with an explicit provider/model pair (no runtime model-ID-to-provider resolver):
 
 ```ts
+interface LlmPreferences {
+  keys: Partial<Record<LlmProvider, string>>;
+  thinking: Record<string /* modelId */, LlmEffort>; // overrides only
+  defaultModel: { provider: LlmProvider; model: string };
+}
 interface UserPreferences {
-  // existing non-LLM fields remain
-  llm?: {
-    keys: Partial<Record<LlmProvider, string>>;
-    thinking: Record<string, string>; // modelId -> native effort override
-    defaultModel: string;              // exact registry ID or OpenRouter ID
-  };
+  // unchanged learning and theme fields
+  llm?: LlmPreferences;
 }
 ```
 
-- Retire `llm_provider`, `llm_models`, and `llm_keys` from the application type and save/read code; do not migrate them. Use a new `llm_settings_v2` localStorage mirror (do not consume v1).
-- A shared `llmSettings` Pinia store owns only `keys`, `thinking`, `defaultModel`, and derived selectors. No duplicate provider/model registry or general-purpose settings framework.
-- Persist the complete `llm` object by merging it into existing profile preferences (do not drop theme/learning preferences). The API's **read and write** Zod preference schemas must accept this nested object and `darkMode`; continue stripping unrelated fields.
-- Authenticated profile data is authoritative on load; localStorage is a fast local mirror and bootstrap fallback, not a second independent source of truth. On profile change/account switch, replace the LLM snapshot instead of merging stale keys from another account. Do not leak keys in logs or test fixtures.
-- Implement store methods that target a **provider ID** rather than a mutable active-provider field: e.g. `saveProviderSettings(provider, key, modelEfforts)`, `saveDefaultModel(modelId)`, `getModelSelection(modelId)`, `getThinking(modelId)`. Commit a card's buffer only on Save. Return success/failure and do not show “saved” when the profile request fails. Keep the key deletion action explicit (clearing and saving that card removes that provider's key only).
-- The `thinking` map stores only **overrides**; absent entries use `model.defaultEffort` from the registry. Ignore invalid/unknown persisted overrides in-memory and let dropdowns select valid native `model.efforts`; do not invent a universal thinking-level mapper. OpenRouter has no thinking dropdown.
-- For registered model IDs, resolve their provider from the fixed registry. Otherwise resolve to OpenRouter only when the user configured OpenRouter and supplied a nonempty free-form ID. Do not introduce a model catalog API. Only the current custom OpenRouter **defaultModel** needs to be retained; no per-provider “last model” map.
+- The pair is required because OpenRouter's free-form ID can collide with a fixed registry model ID, and a removed fixed model should not accidentally resolve to OpenRouter. Wire requests already carry provider+model together.
+- Remove all legacy `llm_provider`, `llm_models`, `llm_keys` usage. No migration or backwards-compatibility branch. **No `llm_settings_v2` localStorage mirror**; do not read the old `llm_settings_v1`.
+- Extend the existing profile `PreferencesShape` with `darkMode?: boolean` and an optional nested `llm`. Strictly validate writes so malformed data returns 400, preserving other preference fields. Use Zod 4 `z.partialRecord(z.enum(LLM_PROVIDERS), z.string())` for partial provider keys (not exhaustive `z.record(z.enum(...))`). Use the existing native `LlmEffort` values for the thinking map; define the small Zod enum alongside the profile schema rather than adding another registry.
+- **Reads must be resilient:** configure `llm: LlmPreferencesSchema.optional().catch(undefined)` in the read shape. A stale/malformed `llm` subtree is ignored rather than returning profile GET 500 and locking the user out of Settings. This is not a legacy preference migration. Keep the current handling of other preference fields unchanged.
+- On sign-in/profile load or user-ID change, **replace** the LLM state with that user's validated profile snapshot or a fresh registry-backed default; never merge previous users' keys.
+- Keep keys in the existing profile preference mechanism (security hardening and a server key vault are explicitly outside this hobby-stage ticket). Avoid logging secrets.
 
-## Settings UI
+## Store and save behavior
 
-1. `ThemeSection.vue`: existing dark-mode toggle and profile-save UI, moved without a redesign.
-2. `LlmProvidersSection.vue`: top “Default model” select, then four expandable Quasar cards in `LLM_PROVIDERS` order. Each card keeps its own unsaved key draft, show/hide control, Save, saved-key badge, and fixed provider model rows with native thinking dropdowns. A Save on that card commits **only** that provider's key and effort overrides; another card's drafts and persisted keys are untouched. Render a useful failure message and preserve drafts on an unsuccessful save. The top default selection saves through an explicit store action, with failure feedback.
-3. `TtsSection.vue`: extract existing TTS selection, voice, key and mutation behavior verbatim. Do not update voice lists or TTS models in HPA-755.
+One `llm` ref in `useLLMSettingsStore` and one derived `selection`, shaped as:
 
-The default-model selector lists fixed registered models only for providers with saved user keys, plus the Google models when an authenticated server Google key is actually available. OpenRouter is special: show a free-text ID (seeded by the registry default or the current custom default), and allow setting that ID as the global default only when OpenRouter has a saved key. Avoid a new OpenRouter model-list service.
+```ts
+selection: {
+  provider: LlmProvider;
+  model: string;
+  apiKey?: string;
+  thinking?: LlmEffort; // explicitly saved override only
+}
+```
 
-To detect Google chat fallback **without assuming client env state**, add a tiny authenticated `GET /api/llm-chat/capabilities` returning `{ googleServerKeyAvailable: boolean }` from `c.env.GOOGLE_API_KEY`. Return no key value and reuse existing auth. If this check fails, show only locally keyed models, with no speculative server availability. Google chosen via server fallback can work in **chat**, but dictionary analysis still requires a **user-provided** Google key; display an actionable “add a Google key” message rather than introducing dictionary server-key fallback or silently switching models.
+- Default selection starts from the registry's Google default model; do not infer provider from model ID or maintain redundant per-provider model selections.
+- `saveProvider(provider, key, thinkingPatch)` updates just that provider's key and its fixed models' explicit effort overrides; `saveDefault({provider,model})` updates only the global default. Both reuse `auth.updatePreferences({ llm: next })` and commit locally **only if it returns true**. Failures preserve the UI drafts and never toast “saved.”
+- `thinking` is an **overrides-only** map. A row has an explicit “Default” option (no override) plus only its model's allowed native `efforts`. Choosing Default deletes that entry. Initial draft rows must not be filled with registry values and then all persisted on Save. Use registry values for *display* and the backend for default execution.
+- `selection.thinking` is just `llm.thinking[selection.model]` (or undefined); no client-side default resolution/getThinking helper. Chat's backend uses the registry default on omission; dictionary's backend keeps low on omission.
+- Removing a key **never auto-selects another model or rewrites the default pair**. Keep the selection visible with a “No key for <Provider>” warning; the existing routes also return actionable missing-key errors.
+- Only the global default selection persists an OpenRouter custom ID. There is no separate per-provider last-model map.
 
-If the configured default model is no longer usable after removing a key, choose a valid available registry default in deterministic provider order during that save. If none is usable, keep a registry default as the initial placeholder but surface “configure an API key” to the user; never silently send a different provider than the visible selection.
+## Settings UI and capability query
 
-## Request behavior
+- `SettingsPage.vue` becomes a small composition of `ThemeSection`, `LlmProvidersSection` and `TtsSection`. Extract the existing theme toggle/save UI and TTS provider/voice/key/mutation behavior verbatim, including their tests.
+- `LlmProvidersSection` hosts the global Default model select and four permanently mounted (collapsed/expanded) `LlmProviderCard.vue` instances in `LLM_PROVIDERS` order. Every card owns its own `draftKey` and `draftEfforts` local refs, so opening another card cannot discard edits. Each has key show/hide, Save, “Key saved” badge and clear-key behavior. Do not instantiate a generic settings framework.
+- Fixed-model cards render each `model.efforts` directly from the shared registry with a “Default” option that clears the stored override. Add a small note: **“High and above may time out in My Dictionaries.”** OpenRouter's card contains **only** its key with “Free-form model IDs; no thinking controls.”
+- The Default model selector lists models whose provider has a user key or an available authenticated **chat** server fallback. For OpenRouter choose “OpenRouter (custom ID)” and show the reusable free-text model input **beside the Default select**, not inside the provider card. Validate a nonempty ID on save. An existing default pair remains visible even if it is no longer eligible; show the missing-key warning and do not silently switch it.
+- Add `GET /llm-chat/capabilities` under existing authentication, returning `{ serverKeyProviders: LlmProvider[] }`. Derive the array by iterating existing `SERVER_KEY_ENV` and checking whether each corresponding env key is configured. Do not hard-code “Google only,” expose the keys, or add a new credential path. Both Google and OpenRouter server-key-backed models may appear as eligible **chat** defaults.
+- Read capabilities through a small TanStack Query composable under `src/composables/queries/`, following the existing query/key conventions. If the request fails, do not assume server availability. **My Dictionaries still requires the user's own key** for both providers: let its existing explicit missing-key error surface, preferably with a Settings hint. Do not add a separate dictionary-only client pre-check or a silent fallback.
+- Existing request-time snapshots continue to include `provider`/`model`/`apiKey`. Saving one card does not change other cards, global selection or their unsaved drafts.
 
-- New chat sends a request-time snapshot of `{provider, model, apiKey, thinking}` derived from `defaultModel` and `thinking[modelId] ?? registryDefault`. The backend keeps its own model/effort validation. Do not change history storage, thread table, or chat navigation.
-- My Dictionaries uses that same model/provider/key/effort snapshot. Add optional `thinking` to `AnalyzeSentenceInput`, `AnalyzeSentenceRequestSchema`, and the call to `normalizeLlmRequest`; remove the dictionary route's unconditional forced-low override **when thinking is provided**. Keep low as a compatibility-free internal default only for clients that omit thinking if needed, otherwise use the model's registry default; document and test the chosen fallback. Keep its SSE schema, auth, input budget and **user-key-only** rule.
-- `/llm-chat` already accepts `thinking`; no new provider SDK work or backend adapter refactor.
+## LLM request semantics
 
-## Acceptance criteria
+| Consumer | `thinking` provided? | Server behavior |
+| --- | --- | --- |
+| Chat | Explicit saved override | Validate with the existing normalizer, run the chosen native effort |
+| Chat | Missing/undefined | Existing normalizer chooses registry `defaultEffort` |
+| My Dictionaries | Explicit saved override | New optional `thinking` schema field passed to the normalizer; honor it |
+| My Dictionaries | Missing/undefined | Preserve current `low` effort if supported, otherwise registry default |
 
-- Four cards render with isolated drafts; saving/clearing one key never overwrites another, including a temporarily unsaved draft.
-- Keys, per-model effort, and global default survive profile PUT → GET, browser reload, and provider-card switching. Save failures never report success; existing theme preferences remain intact.
-- Dropdowns come from `LLM_PROVIDER_REGISTRY`; unsupported efforts cannot be selected; OpenRouter remains free-form without an invented effort control.
-- Chat and dictionary requests include the selected provider/model/key/native thinking effort; dictionary preserves its user-key requirement and SSE completion/error semantics.
-- Google fallback is only advertised when the authenticated capability check succeeds. In the no-user-key Google case, chat may use the server key, while dictionary shows a clear setup error.
-- Existing TTS interactions and theme behavior remain unchanged; focused store, page, profile-route, dictionary-route, chat/dictionary and E2E tests pass.
+- Chat only needs to switch to the store's `selection` getter (existing client/bridge accept optional thinking).
+- Extend `AnalyzeSentenceInput`, `AnalyzeSentenceRequestSchema`, and `normalizeLlmRequest` call in `routes/my-dictionaries.ts` with optional `thinking`. When provided, use the normalizer's validated effort; when omitted, preserve existing low-effort fallback. Do not touch SSE frame names, authentication, usage normalization, response budgets or provider adapters.
+- No client-side mapping of provider effort vocabularies. No chat thread database or cache timer.
 
-## Explicit non-goals and trade-offs
+## Acceptance
 
-No server-side encrypted key vault, key sharing with TTS, provider registry rework, new DB tables, general settings schema service, legacy preference migration, backwards compatibility layer, chat thread model persistence, cache reminder, in-chat picker or TTS model upgrade. Do not make unrelated CORS or infrastructure changes.
+1. Strict PUT then GET retains `llm`, `darkMode` and unrelated preferences; malformed `llm` write returns 400, malformed/stale `llm` read does not 500 the profile; no user account can inherit another's stored keys.
+2. All four provider cards preserve other cards' pending drafts while saving only their own key/effort overrides. “Default” clears overrides; a save failure does not show a success state.
+3. Global `{provider,model}` persists across reload, including a custom OpenRouter ID, and does not auto-change when a key is cleared. Missing-key state is visible.
+4. Chat/dictionary send only explicit stored effort overrides; absent thinking means registry default for chat and low for dictionary. Dictionary preserves its user-key requirement and SSE completion/error semantics.
+5. Capabilities show **only** authenticated configured server-key provider identifiers (Google/OpenRouter), and their absence/fetch failure never fabricates availability.
+6. Existing theme and TTS behaviors remain unchanged; store, profile route, capability route, chat/dictionary, Settings component and affected E2E tests pass.
 
-**Risk watch:** profile schema stripping; asynchronous profile load overwriting local drafts; one provider save accidentally replacing other provider keys; Google-only chat fallback vs user-key-only dictionary; OpenRouter `models: null`. These are covered by focused tests, not extra abstractions.
+## Risks and exclusions
+
+**Primary risks:** ~25-second dictionary provider deadline with buffered SSE (especially explicit high effort); malformed LLM profile data causing a global authenticated-page lockout if `.catch(undefined)` is forgotten; profile update result ignored and keys from another user retained on switch. Test these directly.
+
+Out of scope: server-side vault/encryption, TTS key sharing, migrations, localStorage mirror, hidden model auto-selection, new data services, provider adapters, chat sidebar/per-thread picker/cache reminder, TTS model/voice changes and unrelated API infrastructure work. Keep all implementation/review changes on this one draft PR.
