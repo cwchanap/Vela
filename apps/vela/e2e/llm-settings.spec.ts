@@ -14,7 +14,7 @@ test.describe('LLM Settings - Provider Selection', () => {
     const providerSelect = page.getByTestId('llm-provider-select');
     await providerSelect.click();
 
-    await expect(page.getByRole('option', { name: 'Google (Gemini API)' })).toBeVisible();
+    await expect(page.getByRole('option', { name: 'Google' })).toBeVisible();
     await expect(page.getByRole('option', { name: 'OpenAI' })).toBeVisible();
     await expect(page.getByRole('option', { name: 'Anthropic' })).toBeVisible();
     await expect(page.getByRole('option', { name: 'OpenRouter' })).toBeVisible();
@@ -66,7 +66,7 @@ test.describe('LLM Settings - API Keys', () => {
     await page.getByTestId('llm-save').click();
 
     await providerSelect.click();
-    await page.getByRole('option', { name: 'Google (Gemini API)' }).click();
+    await page.getByRole('option', { name: 'Google' }).click();
     await apiKeyInput.fill('google-only-key');
     await page.getByTestId('llm-save').click();
 
@@ -77,7 +77,7 @@ test.describe('LLM Settings - API Keys', () => {
 
     // Switching back restores the Google key
     await providerSelect.click();
-    await page.getByRole('option', { name: 'Google (Gemini API)' }).click();
+    await page.getByRole('option', { name: 'Google' }).click();
     await expect(apiKeyInput).toHaveValue('google-only-key');
   });
 

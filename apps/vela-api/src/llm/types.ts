@@ -1,17 +1,36 @@
-import type { LlmEffort, LlmEvent, LlmMessage, LlmProvider } from '@vela/common/contracts/llm';
-
-/** Display labels for error messages; single source for the API routes. */
-export const PROVIDER_LABELS: Record<LlmProvider, string> = {
-  google: 'Google',
-  openai: 'OpenAI',
-  anthropic: 'Anthropic',
-  openrouter: 'OpenRouter',
-};
+import type { LlmEffort, LlmEvent, LlmMessage } from '@vela/common/contracts/llm';
 
 /** Chat output-token default; conservative for thinking models. */
 export const CHAT_MAX_TOKENS = 4096;
 /** Dictionary analysis output-token default, deliberately below chat. */
 export const DICTIONARY_MAX_TOKENS = 3072;
+
+/**
+ * Per-effort reasoning headroom added on top of the caller's output budget:
+ * every supported provider counts thinking/reasoning tokens against the same
+ * cap as visible text, so an unadjusted cap lets reasoning starve the answer
+ * (Sonnet at high effort could consume the entire budget and fail). The cap
+ * passed to providers is `maxTokens + allowance`; exhausting it still
+ * reports the token-cap error truthfully.
+ */
+const REASONING_ALLOWANCE_TOKENS: Readonly<Record<LlmEffort, number>> = {
+  none: 0,
+  low: 1024,
+  medium: 2048,
+  high: 4096,
+  xhigh: 6144,
+  max: 8192,
+};
+
+/**
+ * The provider-side cap: the caller's user-visible output budget plus the
+ * resolved effort's reasoning headroom. Null effort (OpenRouter) declares no
+ * thinking level, so the caller's cap passes through unchanged.
+ */
+export function providerMaxTokens(input: LlmStreamInput): number {
+  return input.maxTokens + (input.effort ? REASONING_ALLOWANCE_TOKENS[input.effort] : 0);
+}
+
 /**
  * Hard ceiling on any single provider request, strictly below the API
  * gateway's ~29-second integration timeout (deployed at 29000 ms).

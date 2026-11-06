@@ -3,6 +3,7 @@ import {
   LLM_PROVIDERS,
   type LlmEffort,
   type LlmMessage,
+  type LlmModelInfo,
   type LlmProvider,
 } from '@vela/common/contracts/llm';
 
@@ -19,6 +20,8 @@ export interface NormalizeLlmInput {
 export interface NormalizedLlmRequest {
   provider: LlmProvider;
   model: string;
+  /** Resolved registry entry; null for free-form providers (OpenRouter). */
+  modelInfo: LlmModelInfo | null;
   /** Resolved native effort; null when the provider has no effort concept (OpenRouter). */
   effort: LlmEffort | null;
   /** Single combined system instruction, or null when none was supplied. */
@@ -110,6 +113,7 @@ export function normalizeLlmRequest(input: NormalizeLlmInput): NormalizeLlmResul
     value: {
       provider,
       model: modelId,
+      modelInfo: model,
       effort,
       system: systemParts.length > 0 ? systemParts.join('\n\n') : null,
       messages: turns.slice(firstUser),

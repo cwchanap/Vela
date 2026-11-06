@@ -505,7 +505,8 @@ describe('My Dictionaries Route', () => {
       expect(JSON.parse(init.body)).toEqual({
         contents: [{ role: 'user', parts: [{ text: USER_PROMPT('日本語') }] }],
         systemInstruction: { parts: [{ text: ANALYSIS_SYSTEM_PROMPT }] },
-        generationConfig: { maxOutputTokens: 3072, thinkingConfig: { thinkingLevel: 'LOW' } },
+        // 3072 caller budget + 1024 low-effort reasoning headroom.
+        generationConfig: { maxOutputTokens: 4096, thinkingConfig: { thinkingLevel: 'LOW' } },
       });
     });
 
@@ -528,7 +529,7 @@ describe('My Dictionaries Route', () => {
       const frames = await sseFrames(res);
       expect(frames).toEqual([
         { type: 'metadata', provider: 'google', model: 'gemini-3.8-flash', sentence: '日本語' },
-        { type: 'error', error: 'Gemini request failed (401)' },
+        { type: 'error', error: 'Google request failed (401)' },
       ]);
       expect(JSON.stringify(frames)).not.toContain('sk-SECRET-VALUE');
     });
@@ -603,7 +604,7 @@ describe('My Dictionaries Route', () => {
       const frames = await sseFrames(res);
       expect(frames).toEqual([
         { type: 'metadata', provider: 'google', model: 'gemini-3.8-flash', sentence: '日本語' },
-        { type: 'error', error: 'Gemini request failed (500)' },
+        { type: 'error', error: 'Google request failed (500)' },
       ]);
       expect(frames.some((frame) => frame.type === 'done')).toBe(false);
     });
@@ -648,7 +649,7 @@ describe('My Dictionaries Route', () => {
       expect(res.headers.get('content-type')).toContain('text/event-stream');
       expect(await sseFrames(res)).toEqual([
         { type: 'metadata', provider: 'google', model: 'gemini-3.8-flash', sentence: '日本語' },
-        { type: 'error', error: 'Gemini request failed (empty body)' },
+        { type: 'error', error: 'Google request failed (empty body)' },
       ]);
     });
 
@@ -675,7 +676,7 @@ describe('My Dictionaries Route', () => {
       expect(await sseFrames(res)).toEqual([
         { type: 'metadata', provider: 'google', model: 'gemini-3.8-flash', sentence: '日本語' },
         { type: 'chunk', text: '日' },
-        { type: 'error', error: 'Gemini stream failed (malformed data)' },
+        { type: 'error', error: 'Google stream failed (malformed data)' },
       ]);
     });
 
@@ -698,7 +699,7 @@ describe('My Dictionaries Route', () => {
       expect(await sseFrames(res)).toEqual([
         { type: 'metadata', provider: 'google', model: 'gemini-3.8-flash', sentence: '日本語' },
         { type: 'chunk', text: 'partial' },
-        { type: 'error', error: 'Gemini stream failed (malformed data)' },
+        { type: 'error', error: 'Google stream failed (malformed data)' },
       ]);
     });
 
@@ -746,7 +747,7 @@ describe('My Dictionaries Route', () => {
       const frames = await sseFrames(res);
       expect(frames).toEqual([
         { type: 'metadata', provider: 'google', model: 'gemini-3.8-flash', sentence: '日本語' },
-        { type: 'error', error: 'Gemini request failed' },
+        { type: 'error', error: 'Google request failed' },
       ]);
       expect(JSON.stringify(frames)).not.toContain('Connection lost');
     });
@@ -898,7 +899,7 @@ describe('My Dictionaries Route', () => {
       expect(await sseFrames(res)).toEqual([
         { type: 'metadata', provider: 'google', model: 'gemini-3.8-flash', sentence: '日本語' },
         { type: 'chunk', text: 'partial' },
-        { type: 'error', error: 'Gemini stream finished early (SAFETY)' },
+        { type: 'error', error: 'Google stream finished early (SAFETY)' },
       ]);
     });
 
@@ -917,7 +918,7 @@ describe('My Dictionaries Route', () => {
       expect(await sseFrames(res)).toEqual([
         { type: 'metadata', provider: 'google', model: 'gemini-3.8-flash', sentence: '日本語' },
         { type: 'chunk', text: 'partial' },
-        { type: 'error', error: 'Gemini stream ended without a successful finish' },
+        { type: 'error', error: 'Google stream ended without a successful finish' },
       ]);
     });
 
@@ -957,7 +958,8 @@ describe('My Dictionaries Route', () => {
       const [params] = mockOpenAiCreate.mock.calls[0];
       expect(params).toMatchObject({
         model: 'gpt-6.1-sol',
-        max_output_tokens: 3072,
+        // 3072 caller budget + 1024 low-effort reasoning headroom.
+        max_output_tokens: 4096,
         reasoning: { effort: 'low' },
         instructions: ANALYSIS_SYSTEM_PROMPT,
         input: [{ role: 'user', content: USER_PROMPT('日本語') }],
@@ -1015,7 +1017,8 @@ describe('My Dictionaries Route', () => {
       const [params] = mockAnthropicStream.mock.calls[0];
       expect(params).toMatchObject({
         model: 'claude-opus-5-5',
-        max_tokens: 3072,
+        // 3072 caller budget + 1024 low-effort reasoning headroom.
+        max_tokens: 4096,
         output_config: { effort: 'low' },
         system: ANALYSIS_SYSTEM_PROMPT,
         cache_control: { type: 'ephemeral' },
@@ -1144,7 +1147,7 @@ describe('My Dictionaries Route', () => {
       expect(res.status).toBe(200);
       expect(await sseFrames(res)).toEqual([
         { type: 'metadata', provider: 'google', model: 'gemini-3.8-flash', sentence: '日本語' },
-        { type: 'error', error: 'Gemini request timed out' },
+        { type: 'error', error: 'Google request timed out' },
       ]);
     });
   });

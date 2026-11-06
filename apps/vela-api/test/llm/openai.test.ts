@@ -159,7 +159,8 @@ describe('openai adapter', () => {
     ]);
     expect(capturedBody).toEqual({
       model: 'gpt-6.1-sol',
-      max_output_tokens: 4096,
+      // 4096 caller budget + 2048 medium-effort reasoning headroom.
+      max_output_tokens: 6144,
       reasoning: { effort: 'medium' },
       instructions: 'Be terse.',
       input: [{ role: 'user', content: 'こんにちは' }],
@@ -235,6 +236,26 @@ describe('openai adapter', () => {
     expect(events).toEqual([
       { type: 'text', text: 'partial' },
       { type: 'error', message: 'OpenAI request failed' },
+    ]);
+  });
+
+  test('an iteration ended by a swallowed abort reports a timeout, not a truncated stream', async () => {
+    // The real SDK ends the async iterator WITHOUT throwing when the request
+    // signal aborts mid-stream (see openai/core/streaming abort handling) —
+    // the deadline then looks like an ordinary early end. The adapter must
+    // check the combined signal before mapper.end() and label it a timeout.
+    const caller = new AbortController();
+    async function* silentEnd(): AsyncIterable<OpenAiStreamEvent> {
+      yield delta('partial');
+      caller.abort();
+    }
+    const client = fakeClient(() => silentEnd());
+    const events = await collectEvents(
+      streamOpenAiResponses({ ...baseInput, signal: caller.signal }, () => client),
+    );
+    expect(events).toEqual([
+      { type: 'text', text: 'partial' },
+      { type: 'error', message: 'OpenAI request timed out' },
     ]);
   });
 });

@@ -631,6 +631,7 @@ describe('MyDictionariesPage', () => {
           provider: 'google',
           model: 'gemini-3.8-flash',
           apiKey: 'dict-key',
+          signal: expect.any(AbortSignal),
         },
         expect.any(Function),
       );
@@ -669,18 +670,18 @@ describe('MyDictionariesPage', () => {
     it('shows the error frame message and clears loading', async () => {
       const { llmClient } = await import('src/services/llm');
       vi.mocked(llmClient.analyzeSentenceStream).mockRejectedValue(
-        new Error('Gemini request failed (401)'),
+        new Error('Google request failed (401)'),
       );
       wrapper = mountComponent();
 
       await wrapper.vm.handleAskAI(mockEntry);
       await flushPromises();
 
-      expect(wrapper.vm.analysisError).toBe('Gemini request failed (401)');
+      expect(wrapper.vm.analysisError).toBe('Google request failed (401)');
       expect(wrapper.vm.analyzing).toBe(false);
       expect(notifyCreateSpy).toHaveBeenCalledWith({
         type: 'negative',
-        message: 'Gemini request failed (401)',
+        message: 'Google request failed (401)',
         position: 'top',
       });
     });
@@ -713,6 +714,74 @@ describe('MyDictionariesPage', () => {
         'The AI provider timed out before responding. Try a shorter request or a lighter model.',
       );
       expect(wrapper.vm.analyzing).toBe(false);
+    });
+
+    it('supersedes an in-flight ask: aborts the old stream, drops its frames, keeps loading', async () => {
+      const { llmClient } = await import('src/services/llm');
+      const calls: Array<{
+        input: { signal: AbortSignal };
+        onEvent: (_frame: unknown) => void;
+      }> = [];
+      const resolvers: Array<() => void> = [];
+      vi.mocked(llmClient.analyzeSentenceStream).mockImplementation((input, onEvent) => {
+        calls.push({ input, onEvent });
+        return new Promise<void>((resolve) => resolvers.push(resolve));
+      });
+      wrapper = mountComponent();
+
+      const first = wrapper.vm.handleAskAI(mockEntry);
+      const second = wrapper.vm.handleAskAI({ ...mockEntry, sentence: '違う文' });
+
+      expect(calls).toHaveLength(2);
+      expect(calls[0].input.signal.aborted).toBe(true);
+      expect(calls[1].input.signal.aborted).toBe(false);
+
+      // A frame already buffered on the superseded stream must not bleed
+      // into the newer request's output.
+      calls[0].onEvent({ type: 'chunk', text: 'STALE' });
+      calls[1].onEvent({
+        type: 'metadata',
+        sentence: '違う文',
+        provider: 'google',
+        model: 'gemini-3.8-flash',
+      });
+      calls[1].onEvent({ type: 'chunk', text: 'fresh' });
+      expect(wrapper.vm.streamingText).toBe('fresh');
+
+      // The superseded promise resolving must not clear the spinner while
+      // the newer stream is still running.
+      resolvers[0]();
+      await flushPromises();
+      expect(wrapper.vm.analyzing).toBe(true);
+
+      resolvers[1]();
+      await flushPromises();
+      await Promise.all([first, second]);
+      expect(wrapper.vm.analyzing).toBe(false);
+      expect(wrapper.vm.analysisResult).toEqual({
+        sentence: '違う文',
+        analysis: 'fresh',
+        provider: 'google',
+        model: 'gemini-3.8-flash',
+      });
+    });
+
+    it('aborts the in-flight ask when the page unmounts', async () => {
+      const { llmClient } = await import('src/services/llm');
+      const signals: AbortSignal[] = [];
+      vi.mocked(llmClient.analyzeSentenceStream).mockImplementation((input) => {
+        signals.push(input.signal as AbortSignal);
+        return new Promise<void>(() => {});
+      });
+      wrapper = mountComponent();
+
+      void wrapper.vm.handleAskAI(mockEntry);
+      expect(signals[0].aborted).toBe(false);
+
+      // Leaving the page abandons the result — the upstream stream must not
+      // keep generating unseen.
+      wrapper.unmount();
+      expect(signals[0].aborted).toBe(true);
     });
   });
 

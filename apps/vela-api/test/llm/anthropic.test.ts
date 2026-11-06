@@ -1,6 +1,5 @@
 import { describe, expect, test } from 'bun:test';
 import { Anthropic } from '@anthropic-ai/sdk';
-import type { LlmEvent } from '@vela/common/contracts/llm';
 import {
   createAnthropicMapper,
   streamAnthropicMessages,
@@ -263,9 +262,7 @@ describe('anthropic mapper', () => {
     );
   });
 
-  test('fallback block identifies the serving model and per-attempt iterations never inflate usage', () => {
-    const mapper = createAnthropicMapper();
-    const events: LlmEvent[] = [];
+  test('fallback blocks are invisible and per-attempt iterations never inflate usage', () => {
     const fixture: AnthropicStreamEvent[] = [
       messageStart({
         input_tokens: 12,
@@ -279,11 +276,7 @@ describe('anthropic mapper', () => {
       {
         type: 'content_block_start',
         index: 1,
-        content_block: {
-          type: 'fallback',
-          from: { model: 'claude-opus-5-5' },
-          to: { model: 'claude-sonnet-5-5' },
-        },
+        content_block: { type: 'fallback' },
       },
       { type: 'content_block_stop', index: 1 },
       blockStart('text', 2),
@@ -311,11 +304,7 @@ describe('anthropic mapper', () => {
       },
       { type: 'message_stop' },
     ];
-    for (const vendorEvent of fixture) events.push(...mapper.push(vendorEvent));
-    events.push(...mapper.end());
-    // The fallback block's `to` model is the model that served the response.
-    expect(mapper.servingModel()).toBe('claude-sonnet-5-5');
-    expect(events).toEqual([
+    expect(mapperEvents(createAnthropicMapper, fixture)).toEqual([
       {
         type: 'usage',
         usage: { inputTokens: 220, outputTokens: 2, cachedInputTokens: 200, cacheWriteTokens: 8 },
@@ -383,7 +372,8 @@ describe('anthropic adapter', () => {
     ]);
     expect(capturedBody).toEqual({
       model: 'claude-opus-5-5',
-      max_tokens: 4096,
+      // 4096 caller budget + 2048 medium-effort reasoning headroom.
+      max_tokens: 6144,
       messages: [{ role: 'user', content: 'こんにちは' }],
       system: 'Be terse.',
       output_config: { effort: 'medium' },

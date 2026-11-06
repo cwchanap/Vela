@@ -23,6 +23,27 @@ const DEFAULT_MODELS: ProviderModelMap = Object.fromEntries(
   LLM_PROVIDERS.map((p) => [p, LLM_PROVIDER_REGISTRY[p].defaultModel]),
 );
 
+// Persisted provider/model values can predate the current registry (e.g.
+// 'chutes', 'gemini-2.5-flash-lite'); the API 400s them on every request.
+// Sanitize on load — in memory only; saved preferences are never rewritten.
+const isKnownProvider = (p: unknown): p is LlmProvider =>
+  typeof p === 'string' && (LLM_PROVIDERS as readonly string[]).includes(p);
+
+const sanitizedModels = (models: ProviderModelMap | undefined): ProviderModelMap => {
+  const next: ProviderModelMap = {};
+  for (const p of LLM_PROVIDERS) {
+    const saved = models?.[p];
+    const registry = LLM_PROVIDER_REGISTRY[p];
+    next[p] =
+      typeof saved === 'string' &&
+      saved.length > 0 &&
+      (registry.models === null || registry.models.some((entry) => entry.id === saved))
+        ? saved
+        : DEFAULT_MODELS[p];
+  }
+  return next;
+};
+
 export const useLLMSettingsStore = defineStore('llmSettings', () => {
   // State
   const provider = ref<LlmProvider>(DEFAULT_PROVIDER);
@@ -73,8 +94,8 @@ export const useLLMSettingsStore = defineStore('llmSettings', () => {
     const p = prefs.llm_provider;
     const m = prefs.llm_models;
     const k = (prefs as any).llm_keys as ProviderKeyMap | undefined;
-    if (p) provider.value = p;
-    if (m) models.value = { ...models.value, ...m };
+    if (p) provider.value = isKnownProvider(p) ? p : DEFAULT_PROVIDER;
+    if (m) models.value = sanitizedModels({ ...models.value, ...m });
     if (k) keys.value = { ...keys.value, ...k };
     return !!p || !!m || !!k;
   };
@@ -101,8 +122,8 @@ export const useLLMSettingsStore = defineStore('llmSettings', () => {
     if (!loadedFromDb) {
       const data = LocalStorage.getItem<PersistedSettings>(STORAGE_KEY) || null;
       if (data && data.provider) {
-        provider.value = data.provider;
-        models.value = data.models || {};
+        provider.value = isKnownProvider(data.provider) ? data.provider : DEFAULT_PROVIDER;
+        models.value = sanitizedModels(data.models);
         keys.value = data.keys || {};
       }
     }

@@ -1,6 +1,7 @@
-import type { LlmEvent } from '@vela/common/contracts/llm';
+import { LLM_PROVIDER_REGISTRY, type LlmEvent } from '@vela/common/contracts/llm';
 import { readSseDataLines } from '../sse';
 import {
+  providerMaxTokens,
   safeVendorCode,
   sanitizeProviderError,
   withRequestTimeout,
@@ -24,6 +25,7 @@ export interface OpenRouterStreamChunk {
 }
 
 const OPENROUTER_ENDPOINT = 'https://openrouter.ai/api/v1/chat/completions';
+const PROVIDER = LLM_PROVIDER_REGISTRY.openrouter.label;
 
 // Documented string codes in this stream shape: Chat Completions failure
 // finish reasons ('stop' is the success terminal). Error `code` is documented
@@ -46,7 +48,7 @@ export function createOpenRouterMapper(): VendorEventMapper<OpenRouterStreamChun
         return [
           {
             type: 'error',
-            message: `OpenRouter stream error (${safeVendorCode(chunk.error.code, OPENROUTER_KNOWN_CODES)})`,
+            message: `${PROVIDER} stream error (${safeVendorCode(chunk.error.code, OPENROUTER_KNOWN_CODES)})`,
           },
         ];
       }
@@ -73,7 +75,7 @@ export function createOpenRouterMapper(): VendorEventMapper<OpenRouterStreamChun
           status = 'failed';
           events.push({
             type: 'error',
-            message: `OpenRouter stream finished early (${safeVendorCode(finish, OPENROUTER_KNOWN_CODES)})`,
+            message: `${PROVIDER} stream finished early (${safeVendorCode(finish, OPENROUTER_KNOWN_CODES)})`,
           });
         }
       }
@@ -81,7 +83,7 @@ export function createOpenRouterMapper(): VendorEventMapper<OpenRouterStreamChun
     },
     end() {
       if (status !== 'pending') return [];
-      return [{ type: 'error', message: 'OpenRouter stream ended without a successful finish' }];
+      return [{ type: 'error', message: `${PROVIDER} stream ended without a successful finish` }];
     },
   };
 }
@@ -108,17 +110,17 @@ export async function* streamOpenRouterChat(
         ],
         // Current sampling behavior, unchanged from the existing route.
         temperature: 0.7,
-        max_tokens: input.maxTokens,
+        max_tokens: providerMaxTokens(input),
         stream: true,
       }),
       signal: withRequestTimeout(input.signal),
     });
     if (!res.ok) {
-      yield sanitizeProviderError('OpenRouter', { status: res.status });
+      yield sanitizeProviderError(PROVIDER, { status: res.status });
       return;
     }
     if (!res.body) {
-      yield { type: 'error', message: 'OpenRouter request failed (empty body)' };
+      yield { type: 'error', message: `${PROVIDER} request failed (empty body)` };
       return;
     }
     for await (const line of readSseDataLines(res.body)) {
@@ -129,14 +131,14 @@ export async function* streamOpenRouterChat(
       } catch {
         // Malformed upstream data is a failed stream, never a success: emit
         // a sanitized error and stop, so no later terminal can yield done.
-        yield { type: 'error', message: 'OpenRouter stream failed (malformed data)' };
+        yield { type: 'error', message: `${PROVIDER} stream failed (malformed data)` };
         return;
       }
       yield* mapper.push(chunk as OpenRouterStreamChunk);
     }
     yield* mapper.end();
   } catch (error) {
-    yield sanitizeProviderError('OpenRouter', error);
+    yield sanitizeProviderError(PROVIDER, error);
   }
 }
 

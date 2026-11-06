@@ -67,10 +67,10 @@
             label="Model"
             dense
             options-dense
-            use-input
+            :use-input="freeFormModel"
             fill-input
             input-debounce="0"
-            new-value-mode="add-unique"
+            :new-value-mode="freeFormModel ? 'add-unique' : undefined"
             data-testid="llm-model-input"
             :hint="`Current provider: ${selectedProvider}`"
           />
@@ -273,15 +273,8 @@ const saveThemeToProfile = async () => {
   });
 };
 
-const PROVIDER_LABELS: Record<LlmProvider, string> = {
-  google: 'Google (Gemini API)',
-  openai: 'OpenAI',
-  anthropic: 'Anthropic',
-  openrouter: 'OpenRouter',
-};
-
 const providerOptions = LLM_PROVIDERS.map((provider) => ({
-  label: PROVIDER_LABELS[provider],
+  label: LLM_PROVIDER_REGISTRY[provider].label,
   value: provider,
 }));
 
@@ -311,6 +304,13 @@ watch(
 const modelOptions = computed<string[]>(() => {
   const registry = LLM_PROVIDER_REGISTRY[selectedProvider.value];
   return registry?.models ? registry.models.map((entry) => entry.id) : [store.currentModel];
+});
+
+// Free-text model entry only for free-form providers (OpenRouter) and
+// unregistered legacy providers; the API 400s any other typed model ID.
+const freeFormModel = computed<boolean>(() => {
+  const registry = LLM_PROVIDER_REGISTRY[selectedProvider.value];
+  return !registry || registry.models === null;
 });
 
 const save = async () => {

@@ -1,6 +1,7 @@
 import Anthropic from '@anthropic-ai/sdk';
-import type { LlmEvent } from '@vela/common/contracts/llm';
+import { LLM_PROVIDER_REGISTRY, type LlmEvent } from '@vela/common/contracts/llm';
 import {
+  providerMaxTokens,
   REQUEST_TIMEOUT_MS,
   safeVendorCode,
   sanitizeProviderError,
@@ -25,11 +26,7 @@ export type AnthropicStreamEvent =
   | {
       type: 'content_block_start';
       index: number;
-      content_block: {
-        type: string;
-        from?: { model?: string | null } | null;
-        to?: { model?: string | null } | null;
-      };
+      content_block: { type: string };
     }
   | { type: 'content_block_delta'; index: number; delta: { type: string; text?: string } }
   | { type: 'content_block_stop'; index: number }
@@ -52,25 +49,22 @@ const ANTHROPIC_FALLBACK_BETA = 'server-side-fallback-2026-07-01';
 type SdkClientFactory<C> = (apiKey: string) => C;
 /* eslint-enable no-unused-vars */
 
+const PROVIDER = LLM_PROVIDER_REGISTRY.anthropic.label;
+
 /**
  * Pure Anthropic Messages event mapper. Success requires BOTH a successful
  * stop reason (`end_turn` / `stop_sequence`) AND the terminal `message_stop`;
  * `refusal`, `max_tokens`, and any other stop reason are failures, and `end()`
  * flags a stream truncated anywhere short of that pair.
  *
- * Server-side fallback: `fallback` control blocks are invisible as events but
- * identify the serving model (`to.model`, matching the SDK's own relabeling);
- * `servingModel()` exposes it without expanding the browser contract. Usage
+ * Server-side `fallback` control blocks are invisible as events. Usage
  * snapshots are cumulative whole-message totals whose fields are omitted (or
  * null) when they don't apply, so counters merge field-by-field and never add
  * across snapshots or per-attempt `usage.iterations` entries.
  */
-export function createAnthropicMapper(): VendorEventMapper<AnthropicStreamEvent> & {
-  servingModel(): string | null;
-} {
+export function createAnthropicMapper(): VendorEventMapper<AnthropicStreamEvent> {
   let status: 'pending' | 'succeeded' | 'failed' = 'pending';
   let sawSuccessfulStop = false;
-  let serving: string | null = null;
   let inputTokens = 0;
   let cacheReadTokens = 0;
   let cacheWriteTokens = 0;
@@ -99,13 +93,6 @@ export function createAnthropicMapper(): VendorEventMapper<AnthropicStreamEvent>
           mergeUsage(event.message?.usage);
           return event.message?.usage ? [usageEvent()] : [];
         }
-        case 'content_block_start': {
-          // The final hop's fallback block names the model that served the response.
-          if (event.content_block?.type === 'fallback' && event.content_block.to?.model) {
-            serving = event.content_block.to.model;
-          }
-          return [];
-        }
         case 'content_block_delta': {
           // Thinking deltas and tool input never reach the UI.
           if (event.delta?.type === 'text_delta' && event.delta.text) {
@@ -126,8 +113,8 @@ export function createAnthropicMapper(): VendorEventMapper<AnthropicStreamEvent>
                 type: 'error',
                 message:
                   stopReason === 'refusal'
-                    ? 'Anthropic response was refused'
-                    : `Anthropic stream finished early (${safeVendorCode(stopReason, ANTHROPIC_FAILURE_STOP_REASONS)})`,
+                    ? `${PROVIDER} response was refused`
+                    : `${PROVIDER} stream finished early (${safeVendorCode(stopReason, ANTHROPIC_FAILURE_STOP_REASONS)})`,
               });
             }
           }
@@ -144,10 +131,7 @@ export function createAnthropicMapper(): VendorEventMapper<AnthropicStreamEvent>
     },
     end() {
       if (status !== 'pending') return [];
-      return [{ type: 'error', message: 'Anthropic stream ended without a successful stop' }];
-    },
-    servingModel() {
-      return serving;
+      return [{ type: 'error', message: `${PROVIDER} stream ended without a successful stop` }];
     },
   };
 }
@@ -166,7 +150,7 @@ export async function* streamAnthropicMessages(
     const stream = createClient(input.apiKey).beta.messages.stream(
       {
         model: input.model,
-        max_tokens: input.maxTokens,
+        max_tokens: providerMaxTokens(input),
         messages: input.messages.map((message) => ({
           role: message.role,
           content: message.content,
@@ -192,7 +176,7 @@ export async function* streamAnthropicMessages(
     for await (const event of stream) yield* mapper.push(event as AnthropicStreamEvent);
     yield* mapper.end();
   } catch (error) {
-    yield sanitizeProviderError('Anthropic', error);
+    yield sanitizeProviderError(PROVIDER, error);
   }
 }
 

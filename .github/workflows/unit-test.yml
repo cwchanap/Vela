@@ -88,11 +88,6 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
-      - name: Build shared packages
-        # vela-api imports the @vela/common/contracts/llm runtime subpath,
-        # which resolves to common's gitignored dist/ output.
-        run: bun run --cwd packages/common build
-
       - name: Run API unit tests with coverage
         shell: bash
         run: |

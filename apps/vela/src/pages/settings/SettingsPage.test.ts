@@ -324,10 +324,17 @@ describe('SettingsPage', () => {
         'gpt-5.6-terra',
         'gpt-5.6-luna',
       ]);
+      // Fixed providers must not allow typing arbitrary IDs — the API 400s them.
+      expect(wrapper.vm.freeFormModel).toBe(false);
+      wrapper.vm.selectedProvider = 'google';
+      expect(wrapper.vm.freeFormModel).toBe(false);
+      wrapper.vm.selectedProvider = 'anthropic';
+      expect(wrapper.vm.freeFormModel).toBe(false);
 
       llmStore.setProvider('openrouter');
       llmStore.setModel('openrouter/typed-model');
       expect(wrapper.vm.modelOptions).toEqual(['openrouter/typed-model']);
+      expect(wrapper.vm.freeFormModel).toBe(true);
     });
 
     it('renders a legacy persisted provider (removed Chutes) without crashing', async () => {
@@ -342,6 +349,7 @@ describe('SettingsPage', () => {
 
       expect(wrapper.exists()).toBe(true);
       expect(wrapper.vm.modelOptions).toEqual(['chutes/old-model']);
+      expect(wrapper.vm.freeFormModel).toBe(true);
       expect(llmStore.provider).toBe('chutes');
     });
 

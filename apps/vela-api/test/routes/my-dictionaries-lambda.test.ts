@@ -78,16 +78,17 @@ describe('dictionary SSE through the real Node Lambda adapter', () => {
       const line = run.stdout.split('\n').find((l) => l.startsWith('RESULT:'));
       expect(line).toBeTruthy();
       const result = JSON.parse(line!.slice('RESULT:'.length));
-      // hono/aws-lambda marks text/event-stream as binary content and returns
-      // a base64 body (API Gateway decodes it for clients) — decode to assert
-      // the real frame bytes.
+      // text/event-stream is exempted from the adapter's default binary
+      // check (the REST API declares no binaryMediaTypes, so a base64 body
+      // would reach the browser undecoded) — assert the raw frame text.
+      expect(result.isBase64Encoded).toBe(false);
       const body = result.isBase64Encoded
         ? Buffer.from(result.body, 'base64').toString('utf8')
         : result.body;
       expect(result.statusCode).toBe(200);
       expect(body).toContain('"type":"metadata"');
       expect(body).toContain('"type":"chunk","text":"こんにちは"');
-      expect(body.trimEnd().endsWith('"type":"done"}'));
+      expect(body.trimEnd().endsWith('"type":"done"}')).toBe(true);
       // Sanity: no error frame reached the serialized body.
       expect(body).not.toContain('"type":"error"');
     } finally {

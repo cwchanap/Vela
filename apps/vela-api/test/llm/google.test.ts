@@ -63,26 +63,26 @@ describe('gemini mapper', () => {
   test('SAFETY finish becomes an error terminal', () => {
     expect(
       mapperEvents(createGeminiMapper, [{ candidates: [{ finishReason: 'SAFETY' }] }]),
-    ).toEqual([{ type: 'error', message: 'Gemini stream finished early (SAFETY)' }]);
+    ).toEqual([{ type: 'error', message: 'Google stream finished early (SAFETY)' }]);
   });
 
   test('MAX_TOKENS finish becomes an error terminal', () => {
     expect(
       mapperEvents(createGeminiMapper, [{ candidates: [{ finishReason: 'MAX_TOKENS' }] }]),
-    ).toEqual([{ type: 'error', message: 'Gemini stream finished early (MAX_TOKENS)' }]);
+    ).toEqual([{ type: 'error', message: 'Google stream finished early (MAX_TOKENS)' }]);
   });
 
   test('blocked prompt feedback becomes an error', () => {
     expect(
       mapperEvents(createGeminiMapper, [{ promptFeedback: { blockReason: 'SAFETY' } }]),
-    ).toEqual([{ type: 'error', message: 'Gemini request blocked (SAFETY)' }]);
+    ).toEqual([{ type: 'error', message: 'Google request blocked (SAFETY)' }]);
   });
 
   test('attacker-controlled finish reasons never reach the error message', () => {
     const events = mapperEvents(createGeminiMapper, [
       { candidates: [{ finishReason: 'ATTACKERSECRET-CODE' }] },
     ]);
-    expect(events).toEqual([{ type: 'error', message: 'Gemini stream finished early (unknown)' }]);
+    expect(events).toEqual([{ type: 'error', message: 'Google stream finished early (unknown)' }]);
     expect(JSON.stringify(events)).not.toContain('ATTACKERSECRET');
   });
 
@@ -90,7 +90,7 @@ describe('gemini mapper', () => {
     const events = mapperEvents(createGeminiMapper, [
       { promptFeedback: { blockReason: 'ATTACKERSECRET-CODE' } },
     ]);
-    expect(events).toEqual([{ type: 'error', message: 'Gemini request blocked (unknown)' }]);
+    expect(events).toEqual([{ type: 'error', message: 'Google request blocked (unknown)' }]);
     expect(JSON.stringify(events)).not.toContain('ATTACKERSECRET');
   });
 
@@ -115,7 +115,7 @@ describe('gemini mapper', () => {
       ]),
     ).toEqual([
       { type: 'text', text: 'hi' },
-      { type: 'error', message: 'Gemini stream ended without a successful finish' },
+      { type: 'error', message: 'Google stream ended without a successful finish' },
     ]);
   });
 });
@@ -166,7 +166,8 @@ describe('gemini adapter', () => {
     ).toBe('g-key');
     const body = JSON.parse(String(capturedInit.body));
     expect(body.generationConfig).toEqual({
-      maxOutputTokens: 4096,
+      // 4096 caller budget + 2048 medium-effort reasoning headroom.
+      maxOutputTokens: 6144,
       thinkingConfig: { thinkingLevel: 'MEDIUM' },
     });
     expect(body.contents).toEqual([{ role: 'user', parts: [{ text: 'こんにちは' }] }]);
@@ -209,7 +210,7 @@ describe('gemini adapter', () => {
         fakeFetch(() => new Response('{"error":{"message":"API key not valid"}}', { status: 400 })),
       ),
     );
-    expect(events).toEqual([{ type: 'error', message: 'Gemini request failed (400)' }]);
+    expect(events).toEqual([{ type: 'error', message: 'Google request failed (400)' }]);
   });
 
   test('aborted upstream stream yields a sanitized timeout error', async () => {
@@ -230,7 +231,7 @@ describe('gemini adapter', () => {
         fakeFetch(() => new Response(failingBody)),
       ),
     );
-    expect(events).toEqual([{ type: 'error', message: 'Gemini request timed out' }]);
+    expect(events).toEqual([{ type: 'error', message: 'Google request timed out' }]);
   });
 
   test('Node TimeoutError deadline and SDK APIConnectionTimeoutError map to the timeout message', async () => {
@@ -248,7 +249,7 @@ describe('gemini adapter', () => {
           fakeFetch(() => Promise.reject(error)),
         ),
       );
-      expect(events).toEqual([{ type: 'error', message: 'Gemini request timed out' }]);
+      expect(events).toEqual([{ type: 'error', message: 'Google request timed out' }]);
     }
   });
 
@@ -266,7 +267,7 @@ describe('gemini adapter', () => {
     );
     expect(events).toEqual([
       { type: 'text', text: 'partial' },
-      { type: 'error', message: 'Gemini stream ended without a successful finish' },
+      { type: 'error', message: 'Google stream ended without a successful finish' },
     ]);
   });
 
@@ -288,7 +289,7 @@ describe('gemini adapter', () => {
     );
     expect(events).toEqual([
       { type: 'text', text: 'partial' },
-      { type: 'error', message: 'Gemini stream failed (malformed data)' },
+      { type: 'error', message: 'Google stream failed (malformed data)' },
     ]);
   });
 });

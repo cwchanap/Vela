@@ -1,8 +1,8 @@
 import { Hono } from 'hono';
-import type { LlmProvider } from '@vela/common/contracts/llm';
+import { LLM_PROVIDER_REGISTRY, type LlmProvider } from '@vela/common/contracts/llm';
 import { collectStream, createLlmProvider } from '../llm/factory';
 import { normalizeLlmRequest } from '../llm/normalize';
-import { CHAT_MAX_TOKENS, PROVIDER_LABELS } from '../llm/types';
+import { CHAT_MAX_TOKENS } from '../llm/types';
 import { requireAuth, type AuthContext } from '../middleware/auth';
 import type { Env } from '../types';
 import { LLMBridgeRequestSchema } from '../validation';
@@ -47,7 +47,7 @@ llmChat.post('/', async (c) => {
   const serverKeyEnv = SERVER_KEY_ENV[provider];
   const apiKey = parsed.data.apiKey || (serverKeyEnv ? c.env[serverKeyEnv] : undefined);
   if (!apiKey) {
-    const label = PROVIDER_LABELS[provider];
+    const label = LLM_PROVIDER_REGISTRY[provider].label;
     return c.json(
       {
         error: serverKeyEnv

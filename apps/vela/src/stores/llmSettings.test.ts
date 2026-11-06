@@ -198,6 +198,59 @@ describe('useLLMSettingsStore', () => {
       store.load();
       expect(store.provider).toBe('anthropic');
     });
+
+    it('falls back to the default provider for a removed provider value', async () => {
+      const { useLLMSettingsStore } = await import('./llmSettings');
+      // 'chutes' was a selectable provider before the registry migration;
+      // leaving it in place would 400 every request.
+      mockLocalStorage.getItem.mockReturnValue({
+        provider: 'chutes',
+        models: { google: 'gemini-3.8-flash' },
+      });
+      const store = useLLMSettingsStore();
+      store.load();
+      expect(store.provider).toBe('google');
+    });
+
+    it('falls back to the registry default for a removed model', async () => {
+      const { useLLMSettingsStore } = await import('./llmSettings');
+      // 'gemini-2.5-flash-lite' was the pre-registry Google default.
+      mockLocalStorage.getItem.mockReturnValue({
+        provider: 'google',
+        models: { google: 'gemini-2.5-flash-lite' },
+      });
+      const store = useLLMSettingsStore();
+      store.load();
+      expect(store.models.google).toBe(LLM_PROVIDER_REGISTRY.google.defaultModel);
+    });
+
+    it('keeps a custom OpenRouter model ID from persisted settings', async () => {
+      const { useLLMSettingsStore } = await import('./llmSettings');
+      mockLocalStorage.getItem.mockReturnValue({
+        provider: 'openrouter',
+        models: { openrouter: 'acme/custom-model:free' },
+      });
+      const store = useLLMSettingsStore();
+      store.load();
+      expect(store.models.openrouter).toBe('acme/custom-model:free');
+    });
+
+    it('sanitizes profile-loaded values without rewriting persisted preferences', async () => {
+      const { useLLMSettingsStore } = await import('./llmSettings');
+      mockAuthStore.user = {
+        id: 'user-1',
+        preferences: {
+          llm_provider: 'chutes',
+          llm_models: { google: 'gemini-2.5-flash-lite' },
+        },
+      };
+      const store = useLLMSettingsStore();
+      store.load();
+      expect(store.provider).toBe('google');
+      expect(store.models.google).toBe(LLM_PROVIDER_REGISTRY.google.defaultModel);
+      // Sanitization is in-memory only — load must never persist.
+      expect(mockLocalStorage.set).not.toHaveBeenCalled();
+    });
   });
 
   describe('notifySaved', () => {

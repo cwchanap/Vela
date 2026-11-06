@@ -256,12 +256,12 @@ describe('llmClient.analyzeSentenceStream', () => {
 
   it('rejects with the error frame message', async () => {
     fetchMock.mockResolvedValueOnce(
-      sseResponse(['data: {"type":"error","error":"Gemini request failed (401)"}\n\n']),
+      sseResponse(['data: {"type":"error","error":"Google request failed (401)"}\n\n']),
     );
 
     await expect(
       llmClient.analyzeSentenceStream({ sentence: 's', provider: 'google' }, () => {}),
-    ).rejects.toThrow('Gemini request failed (401)');
+    ).rejects.toThrow('Google request failed (401)');
   });
 
   it('skips malformed lines without swallowing later valid frames', async () => {
@@ -329,6 +329,20 @@ describe('describeLlmError', () => {
     const error = Object.assign(new Error('Gateway Timeout'), { status: 504 });
     expect(describeLlmError(error)).toBe(
       'The AI provider timed out before responding. Try a shorter request or a lighter model.',
+    );
+  });
+
+  it('maps a provider timeout carried in an SSE error frame to the hint', () => {
+    // Provider deadline failures surface as sanitized '<provider> request
+    // timed out' errors (HTTP 502 or SSE error frames), never a gateway 504.
+    expect(describeLlmError(new Error('Google request timed out'))).toBe(
+      'The AI provider timed out before responding. Try a shorter request or a lighter model.',
+    );
+  });
+
+  it('does not mistake an ordinary provider failure for a timeout', () => {
+    expect(describeLlmError(new Error('OpenAI request failed (502)'))).toBe(
+      'OpenAI request failed (502)',
     );
   });
 

@@ -1,6 +1,7 @@
 import OpenAI from 'openai';
-import type { LlmEvent } from '@vela/common/contracts/llm';
+import { LLM_PROVIDER_REGISTRY, type LlmEvent } from '@vela/common/contracts/llm';
 import {
+  providerMaxTokens,
   REQUEST_TIMEOUT_MS,
   safeVendorCode,
   sanitizeProviderError,
@@ -32,6 +33,8 @@ export interface OpenAiStreamEvent {
 }
 
 type OpenAiUsage = NonNullable<NonNullable<OpenAiStreamEvent['response']>['usage']>;
+
+const PROVIDER = LLM_PROVIDER_REGISTRY.openai.label;
 
 // Documented Responses API failure codes and incomplete-detail reasons.
 const OPENAI_ERROR_CODES = new Set([
@@ -80,7 +83,7 @@ export function createOpenAiMapper(): VendorEventMapper<OpenAiStreamEvent> {
           return [
             {
               type: 'error',
-              message: `OpenAI response failed (${safeVendorCode(event.response?.error?.code, OPENAI_ERROR_CODES)})`,
+              message: `${PROVIDER} response failed (${safeVendorCode(event.response?.error?.code, OPENAI_ERROR_CODES)})`,
             },
           ];
         }
@@ -89,7 +92,7 @@ export function createOpenAiMapper(): VendorEventMapper<OpenAiStreamEvent> {
           return [
             {
               type: 'error',
-              message: `OpenAI response incomplete (${safeVendorCode(event.response?.incomplete_details?.reason, OPENAI_INCOMPLETE_REASONS)})`,
+              message: `${PROVIDER} response incomplete (${safeVendorCode(event.response?.incomplete_details?.reason, OPENAI_INCOMPLETE_REASONS)})`,
             },
           ];
         }
@@ -97,19 +100,19 @@ export function createOpenAiMapper(): VendorEventMapper<OpenAiStreamEvent> {
         case 'response.refusal.done':
           if (status === 'pending') {
             status = 'failed';
-            return [{ type: 'error', message: 'OpenAI response was refused' }];
+            return [{ type: 'error', message: `${PROVIDER} response was refused` }];
           }
           return [];
         case 'error':
           status = 'failed';
-          return [{ type: 'error', message: 'OpenAI stream error' }];
+          return [{ type: 'error', message: `${PROVIDER} stream error` }];
         default:
           return [];
       }
     },
     end() {
       if (status !== 'pending') return [];
-      return [{ type: 'error', message: 'OpenAI stream ended without a completed response' }];
+      return [{ type: 'error', message: `${PROVIDER} stream ended without a completed response` }];
     },
   };
 }
@@ -120,11 +123,12 @@ export async function* streamOpenAiResponses(
     new OpenAI({ apiKey: apiKey, maxRetries: 0 }),
 ): AsyncIterable<LlmEvent> {
   const mapper = createOpenAiMapper();
+  const signal = withRequestTimeout(input.signal);
   try {
     const stream = await createClient(input.apiKey).responses.create(
       {
         model: input.model,
-        max_output_tokens: input.maxTokens,
+        max_output_tokens: providerMaxTokens(input),
         ...(input.effort ? { reasoning: { effort: input.effort } } : {}),
         ...(input.system ? { instructions: input.system } : {}),
         input: input.messages.map((message) => ({ role: message.role, content: message.content })),
@@ -136,13 +140,19 @@ export async function* streamOpenAiResponses(
       {
         maxRetries: 0,
         timeout: REQUEST_TIMEOUT_MS,
-        signal: withRequestTimeout(input.signal),
+        signal,
       },
     );
     for await (const event of stream) yield* mapper.push(event);
+    // The SDK ends a signal-aborted iteration WITHOUT throwing, so check the
+    // signal before reporting a truncated stream as an ordinary early end.
+    if (signal.aborted) {
+      yield sanitizeProviderError(PROVIDER, signal.reason);
+      return;
+    }
     yield* mapper.end();
   } catch (error) {
-    yield sanitizeProviderError('OpenAI', error);
+    yield sanitizeProviderError(PROVIDER, error);
   }
 }
 

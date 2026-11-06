@@ -363,12 +363,13 @@ describe('LLM Chat Route', () => {
       expect(res.status).toBe(200);
       const [, init] = (global.fetch as any).mock.calls[0];
       const body = JSON.parse(init.body);
-      expect(body.generationConfig.maxOutputTokens).toBe(4096);
+      // 4096 chat budget + 2048 medium-effort reasoning headroom.
+      expect(body.generationConfig.maxOutputTokens).toBe(6144);
       // The removed temperature field must never reach the adapter.
       expect(body.generationConfig).not.toHaveProperty('temperature');
     });
 
-    test('forwards smaller caller maxTokens unchanged', async () => {
+    test('forwards smaller caller maxTokens plus effort headroom', async () => {
       (global.fetch as any).mockResolvedValueOnce(sseResponse(GEMINI_OK));
 
       const app = createTestApp();
@@ -377,7 +378,8 @@ describe('LLM Chat Route', () => {
       );
 
       const [, init] = (global.fetch as any).mock.calls[0];
-      expect(JSON.parse(init.body).generationConfig.maxOutputTokens).toBe(512);
+      // 512 caller budget + 2048 medium-effort reasoning headroom.
+      expect(JSON.parse(init.body).generationConfig.maxOutputTokens).toBe(2560);
     });
 
     test('normalizes history: combines system once, strips leading greeting turn', async () => {
@@ -503,7 +505,7 @@ describe('LLM Chat Route', () => {
       const json = await res.json();
 
       expect(res.status).toBe(502);
-      expect(json.error).toBe('Gemini request timed out');
+      expect(json.error).toBe('Google request timed out');
     });
 
     test('returns 502 with a sanitized message and no vendor data on HTTP failure', async () => {
@@ -518,7 +520,7 @@ describe('LLM Chat Route', () => {
       const json = await res.json();
 
       expect(res.status).toBe(502);
-      expect(json.error).toBe('Gemini request failed (401)');
+      expect(json.error).toBe('Google request failed (401)');
       expect(JSON.stringify(json)).not.toContain('sk-SECRET-VALUE');
       expect(JSON.stringify(json)).not.toContain('invalid key');
     });
@@ -581,7 +583,7 @@ describe('LLM Chat Route', () => {
       const json2 = await res2.json();
 
       expect(res2.status).toBe(502);
-      expect(json2.error).toBe('Gemini stream finished early (unknown)');
+      expect(json2.error).toBe('Google stream finished early (unknown)');
       expect(JSON.stringify(json2)).not.toContain('ATTACKERSECRET');
     });
   });
