@@ -1,38 +1,51 @@
 # HPA-755 — LLM Settings Redesign (Single-PR Implementation Plan)
 
 **Ticket:** https://linear.app/cwchanap/issue/HPA-755/redesign-settings-page-with-per-provider-llm-keys-and-thinking  
-**Design:** [2026-11-06-hpa755-llm-settings-redesign-design.md](../specs/2026-11-06-hpa755-llm-settings-redesign-design.md)  
-**Based on:** `main` after HPA-754 (completed).  
-**Status:** Draft implementation plan. **Do not mark the issue Done or mark this PR ready until implementation and acceptance are complete.**
+**Spec:** [2026-11-06-hpa755-llm-settings-redesign-design.md](../specs/2026-11-06-hpa755-llm-settings-redesign-design.md)  
+**Design review:** https://github.com/cwchanap/Vela/pull/81#issuecomment-6690108759  
+**Base:** `main` with completed HPA-754.
 
-## Delivery and scope guard
+**Delivery rule: exactly one HPA-755 draft PR.** These checkpoints are tasks *within this PR*, not separate tickets or PRs. Documentation-only commits do not complete the issue. Keep any review corrections and implementation on this same branch/PR; do not prematurely mark the PR ready or the ticket Done.
 
-**Exactly one HPA-755 PR.** This documentation starts the draft; implementation, tests, review corrections, and sign-off continue on the **same branch and PR**. Each task below is an internal commit/checkpoint, **not a separate ticket/PR**. HPA-757, HPA-756 and HPA-758 remain separate future work. Prefer local helpers in existing files; do not add an abstraction unless a second real consumer needs it. No legacy preference migration or user-data backfill.
+## Decisions incorporated from the review
 
-Current checked code: `apps/vela/src/pages/settings/SettingsPage.vue`, `src/stores/llmSettings.ts`, `src/types/shared.ts`, `pages/chat/AIChatPage.vue`, `pages/dictionary/MyDictionariesPage.vue`, `services/llm/index.ts`, `apps/vela-api/src/routes/{profiles,my-dictionaries,llm-chat}.ts`, `src/validation.ts`, `packages/common/src/contracts/llm.ts`. Registry is already complete. Do not reimplement HPA-754.
+1. The **client sends only explicit per-model `thinking` overrides**, not registry defaults. Chat's backend uses default efforts and dictionary analysis keeps its latency-safe low default if omitted. A model row's “Default” choice removes its override; high+ effort may exceed dictionary's ~25-second provider deadline with deployed buffered SSE.
+2. `llm.defaultModel` is `{provider,model}`, matching the existing request contract. Remove any model-ID-to-provider resolver and avoid OpenRouter misrouting.
+3. Profile validation is strict on PUT (400), with **`llm: LlmPreferencesSchema.optional().catch(undefined)` on GET** so an invalid LLM subtree cannot lock users out. Use **Zod 4 `z.partialRecord`** for provider key maps. Include existing `darkMode`.
+4. No localStorage mirror and no reconciliation or account-crossing fallbacks. Use existing `auth.updatePreferences({ llm })`. After an authenticated profile change, replace the entire store snapshot, not merge keys.
+5. Capability GET returns `{serverKeyProviders: LlmProvider[]}` derived from the existing `SERVER_KEY_ENV` (Google and OpenRouter), not a hard-coded Google boolean. Consume through a conventional query composable. Dictionary remains user-key-only.
+6. Removing a provider key does not auto-select another model. Keep the default pair visible and show a warning; reuse the backend's actionable error. No dictionary-specific model rewrite or pre-check.
+7. The free-form OpenRouter ID belongs beside the global Default model selector, not in the provider card. Its card manages only the key; no OpenRouter effort dropdown.
+8. Render `LlmProviderCard.vue` four times; each component owns its own draft refs. No keyed parent-level draft map.
+9. Store and all dependent components must change **in one green checkpoint**; merely removing `provider/currentModel/currentApiKey` from the store breaks Settings, Chat, Dictionary and their tests.
+10. Reuse existing normalizer effort-validation tests. Add only dictionary-specific request forwarding and omitted-low tests, plus end-to-end request assertions.
 
 ## Minimal file map
 
 **Add**
 ```text
 apps/vela/src/pages/settings/components/ThemeSection.vue
-apps/vela/src/pages/settings/components/LlmProvidersSection.vue
 apps/vela/src/pages/settings/components/TtsSection.vue
+apps/vela/src/pages/settings/components/LlmProvidersSection.vue
+apps/vela/src/pages/settings/components/LlmProviderCard.vue
 apps/vela/src/pages/settings/components/LlmProvidersSection.test.ts
+apps/vela/src/pages/settings/components/LlmProviderCard.test.ts
+apps/vela/src/composables/queries/useLlmCapabilitiesQuery.ts
 ```
 
-**Modify (only as necessary)**
+**Modify if required**
 ```text
 apps/vela/src/pages/settings/SettingsPage.vue
 apps/vela/src/pages/settings/SettingsPage.test.ts
 apps/vela/src/stores/llmSettings.ts
 apps/vela/src/stores/llmSettings.test.ts
 apps/vela/src/types/shared.ts
-apps/vela/src/services/llm/index.ts
 apps/vela/src/pages/chat/AIChatPage.vue
 apps/vela/src/pages/chat/AIChatPage.test.ts
 apps/vela/src/pages/dictionary/MyDictionariesPage.vue
 apps/vela/src/pages/dictionary/MyDictionariesPage.test.ts
+apps/vela/src/services/llm/index.ts
+apps/vela/e2e/llm-settings.spec.ts
 apps/vela-api/src/routes/profiles.ts
 apps/vela-api/test/routes/profiles.test.ts
 apps/vela-api/src/routes/llm-chat.ts
@@ -40,81 +53,85 @@ apps/vela-api/test/routes/llm-chat.test.ts
 apps/vela-api/src/routes/my-dictionaries.ts
 apps/vela-api/test/routes/my-dictionaries.test.ts
 apps/vela-api/src/validation.ts
-apps/vela-api/test/validation.test.ts
-apps/vela/e2e/llm-settings.spec.ts
+packages/common/src/keys.ts                 # only if needed for existing query-key convention
 ```
 
-Avoid modifying the pure model registry or any provider adapter unless a failing focused test proves it necessary. No new CDK resources, database schema, separate package, or backend key service.
+No registry change, new DB, CDK table, backend provider adapter, key vault or new general settings service. Avoid opportunistic unrelated refactors.
 
-## Task 0 — Baseline and design reconciliation (no implementation yet)
+## Task 0 — Confirm baseline and ticket alignment
 
-1. Verify HPA-754 registry exists on target branch; check actual `LLM_PROVIDER_REGISTRY` efforts and provider defaults, particularly `openrouter.models === null`.
-2. Confirm HPA-755 latest Linear description and dependencies before coding. Its scope is per-provider keys + per-model thinking + global default + Settings sections. Use the design file above as the technical contract; flag any future ticket change in this PR.
-3. Capture baseline for focused app/API tests; do not describe baseline failures as introduced by this task. No vendor API calls or secrets required.
+- Confirm HPA-754 registry, native `LlmEffort` and the provider fallback policy are on the current base revision. Confirm HPA-755's **latest** description and review-approved amendments.
+- Run focused existing store, Settings, Chat, Dictionary, API profile and dictionary route tests before altering files, and record failures. Do not assume a passing baseline.
+- Observe the actual `LLM_PROVIDER_REGISTRY.openrouter.models === null` and existing Settings `q-select`/TTS components for direct reuse.
 
-## Task 1 — Fix profile preference round-trip before UI work
+**Gate:** Record baseline, no incomplete compatibility layer or unrelated changes.
 
-**Files:** `apps/vela-api/src/routes/profiles.ts`, its tests; `apps/vela/src/types/shared.ts`.
+## Task 1 — Profile write/read contract (green, independently testable)
 
-1. Add optional `llm` preference validation to the existing `PreferencesShape` used by both GET and PUT: `keys` keyed only by `LLM_PROVIDERS`, `thinking` string map, `defaultModel` string. Keep this a nested Zod object in the existing route, not a new profile validation framework. Also recognize existing `darkMode?: boolean` so theme preferences are not stripped during LLM saves.
-2. Update frontend `UserPreferences` with exactly the nested `llm` shape. Remove old `llm_provider`, `llm_models`, `llm_keys` references as part of replacing store and tests; no compatibility aliases.
-3. Write API tests: PUT keeps `llm` + `darkMode` + learning prefs, strips unknown fields, GET from the updated profile returns the exact nested settings, GET does not write; malformed `llm` input is a 400.
+**Files:** `apps/vela-api/src/routes/profiles.ts`, `test/routes/profiles.test.ts`; optionally add the **new** frontend `UserPreferences.llm` type while temporarily retaining old type fields until Task 2.
 
-**Gate:** `bun --filter vela-api test`, `bun --filter vela-api compile`; target the profiles route test first.
+1. Add the nested schema to the existing `PreferencesShape`: `keys` via `z.partialRecord(z.enum(LLM_PROVIDERS), z.string())`; `thinking` values typed from the native effort values; `defaultModel` as an explicit `{provider,model}` object. Also add `darkMode`.
+2. Writes: reject invalid nested settings (400). Reads: use `LlmPreferencesSchema.optional().catch(undefined)` to drop malformed LLM settings **only**. Preserve other preferences and no-write semantics on GET.
+3. Tests: PUT→GET round trip of all keys, effort overrides, explicit model pair, darkMode and learning prefs; partial provider key map; invalid write 400; malformed read `llm` omitted without 500; authenticated ownership unchanged. Keep existing legacy-field stripping test.
 
-## Task 2 — One store, isolated save semantics
+**Gate:** `bun --filter vela-api test` and `bun --filter vela-api compile` (target the profile test first).
 
-**Files:** `apps/vela/src/stores/llmSettings.ts`, `llmSettings.test.ts`, `types/shared.ts`.
+## Task 2 — Atomic store + consumers + Settings UI migration (one green checkpoint)
 
-1. Replace old `provider/models/keys` state with `keys/thinking/defaultModel`; derive the provider from the single shared registry using a small local pure helper. Preserve only the current custom OpenRouter model ID when it is the global default, not another per-provider model map.
-2. Use `llm_settings_v2` local mirror and the new `preferences.llm` profile shape, never load legacy keys. On a successful authenticated save, merge the complete `llm` value into `auth.user.preferences` and update local mirror. Profile replaces local state when available; keep auth-user changes from mixing key maps. A failed save returns failure (or throws) and retains the editing buffer; no false success toast.
-3. Expose provider-explicit actions. Card Save updates only that provider's key and its models' effort overrides, keeping the rest of the committed snapshot; default-model save is independent. Resolve effort by override or registry default. No stateful singleton or new store.
-4. Test independent saves/deletes, unsaved provider drafts (component later), per-model effort valid/invalid defaults, free-form OpenRouter resolution, local mirror/profile priority, account/profile refresh and save failures.
+**Files:** Store, type, Settings page and section/card components/tests; Chat and Dictionary pages/tests, and the existing LLM client as needed.
 
-**Gate:** targeted Vitest store tests, then `bun --filter @vela/app test`.
+**Do not commit a half-refactor that removes store getters while their consumers still use them.** Prepare the following as one coherent checkpoint, then run the full app suite:
 
-## Task 3 — Present three Settings sections and truthful availability
+1. Replace the store's old state with a single authenticated `llm` snapshot and derived `selection = {provider,model,apiKey,thinking?:LlmEffort}`. Never infer provider from model ID, load old localStorage fields or add a new mirror. Replace state on user/profile switch. Keep a pair-based registry Google default when no stored `llm`.
+2. For `saveProvider(provider,key,thinkingPatch)` and `saveDefault(pair)`, construct the updated snapshot from the latest authenticated preferences, call existing `auth.updatePreferences({llm:next})`, and commit only on `true`. Preserve other cards, other preferences and global selection. No false success toast. Clearing a key does **not** change the model. Test failed saves and account switches.
+3. Move current theme UI and current TTS UI into `ThemeSection` and `TtsSection` without behavior changes. Make `SettingsPage.vue` compose those plus `LlmProvidersSection`.
+4. Render four `LlmProviderCard` instances keyed by provider with **per-instance draft refs** for key and model overrides. Each card's Save affects only itself; the “Default” effort option deletes the override. Other native effort options are drawn from the shared registry. Display the dictionary-timeout note. OpenRouter's card has key only, no effort/model input.
+5. Place Default model picker atop `LlmProvidersSection`. Fixed models are registry IDs; selecting “OpenRouter (custom ID)” shows free-form text **at the global selector**. Persist a `{provider,model}` pair. Do not reselect on key deletion; show missing-key status. Until Task 3, base eligible choices only on user keys and keep existing selection visible (capability-backed models are added next).
+6. Switch **both** Chat and Dictionary read paths to the store's single `selection` getter. Chat sends explicit `thinking` override to the existing `llmClient.generate`. Dictionary switches its provider/model/key read to the selection but does not yet send `thinking` until Task 4 adds backend support. Preserve chat history and dictionary SSE behavior.
+7. Update all old Settings/store/Chat/Dictionary tests that used `selectedProvider`, `currentModel`, `currentApiKey`, `setApiKey` etc. Write isolated provider-card tests: draft never disappears on another card expansion, save only one, failed save stays editable, registry choices and “Default” remove overrides.
 
-**Files:** `pages/settings/SettingsPage.vue`, new section components and tests, `apps/vela-api/src/routes/llm-chat.ts` and its route test, `apps/vela/e2e/llm-settings.spec.ts`.
+**Gate:** `bun --filter @vela/app test`, `bun --filter @vela/app build`, and `bun --filter @vela/app lint`. No intentionally red suite between committed checkpoints.
 
-1. Extract `ThemeSection` and `TtsSection` from the existing Settings page with behavior unchanged and no TTS voice/model upgrade. Keep the top-level page as a simple composition.
-2. In `LlmProvidersSection`, show four expandable provider cards. Each owns a `draftKey[provider]` and `draftEffort[modelId]` buffer; switching/expanding a different card never discards pending edits. Save commits only the target card, provides visible loading/error/success state, and renders “Key saved” from committed state. Key clearing is local to that card.
-3. Populate fixed model rows + native effort options directly from `LLM_PROVIDER_REGISTRY`. No arbitrary model text for Google/OpenAI/Anthropic. OpenRouter has a free-form model ID input seeded with its registry default or current custom default; never show an effort selector for it.
-4. Add a small authenticated `GET /api/llm-chat/capabilities` handler returning only `googleServerKeyAvailable`, based on already-injected `c.env.GOOGLE_API_KEY`. Test auth and true/false cases. Fetch it once on the Settings page (simple existing HTTP helper; no new global cache subsystem). On unavailable/failed lookup, only show user-keyed providers.
-5. Default select lists eligible models; selecting one persists the global model independently. When removing the current provider key, choose a deterministic remaining available default or show “configure a key” if none. A server-key-backed Google default is explicitly marked **chat only** unless the user also supplied a Google key for dictionary analysis.
-6. Update old Settings unit and Playwright selectors/expectations; **do not leave old component tests asserting removed `selectedProvider`, `model`, or `apiKeyHint` view-model fields**. Test four cards, Save per card, preserved other draft, effort rows, fallback condition and unchanged theme/TTS.
+## Task 3 — Server-key capability discovery (green)
 
-**Gate:** focused Settings component tests, route tests, `bun --filter @vela/app test`.
+**Files:** `apps/vela-api/src/routes/llm-chat.ts` and its tests; query composable (and existing query key factory if helpful); `LlmProvidersSection.vue` and focused tests.
 
-## Task 4 — Wire actual LLM requests, including dictionary thinking
+1. Add authenticated `GET /llm-chat/capabilities` using existing `SERVER_KEY_ENV` as the single source for `serverKeyProviders`; return provider IDs, not secrets. Google and OpenRouter are eligible when their env keys are truly configured.
+2. Use a small TanStack Query hook under `src/composables/queries/`, following current project conventions. A failed/missing response means no assumed server fallback.
+3. Allow server-fallback providers in the **chat** Default selector, including OpenRouter's custom model. Label server-key availability and the dictionary user-key-only limitation; do not expose server keys to the browser. Preserve the selected model on key deletion.
 
-**Files:** `pages/chat/AIChatPage.vue`, `pages/dictionary/MyDictionariesPage.vue`, `services/llm/index.ts`, `apps/vela-api/src/{validation.ts,routes/my-dictionaries.ts}` and focused tests.
+**Gate:** targeted capability endpoint auth/availability tests and Settings UI tests; `bun --filter vela-api test` and `bun --filter @vela/app test`.
 
-1. Chat uses `llmSettings`' resolved global default on each send (including existing threads until HPA-758), deriving provider, model, matching key and effective effort. Pass `thinking` to the existing `llmClient.generate`; the bridge already validates it. No thread schema or history changes.
-2. Dictionary builds the same snapshot. Add `thinking?: string` to `AnalyzeSentenceInput` and `AnalyzeSentenceRequestSchema`; forward `thinking` into `normalizeLlmRequest` and provider stream. **When supplied**, it overrides dictionary's current forced-low rule. **When omitted**, preserve the existing low-when-supported dictionary behavior; this is only a backend default for callers that do not supply a choice, not a new migration. Preserve user-key-only auth, fixed output token budget and SSE frame/abort/error/done semantics.
-3. In dictionary UI, if global Google default depends solely on chat's server key, show a precise missing-user-key message; do not pass the server key to the browser or add dictionary fallback. Avoid silently substituting another provider.
-4. Test request snapshots on both pages and validation of allowed/disallowed effort at API boundary, plus dictionary SSE completion and missing-key regression. Use mocks, not billed live provider requests.
+## Task 4 — Optional dictionary thinking override with low fallback (green)
 
-**Gate:** `bun --filter vela-api test`, `bun --filter vela-api compile`, `bun --filter @vela/app test`.
+**Files:** `apps/vela/src/services/llm/index.ts`, `pages/dictionary/MyDictionariesPage.vue` and tests; `apps/vela-api/src/validation.ts`, `routes/my-dictionaries.ts` and route tests.
 
-## Task 5 — End-to-end regression and acceptance on this same PR
+1. Extend `AnalyzeSentenceInput` and `AnalyzeSentenceRequestSchema` with optional `thinking`. The page forwards **only** `selection.thinking`, so ordinary users still omit it.
+2. Pass the explicit value to `normalizeLlmRequest`. When provided, use its validated native effort; when absent, keep the current low-if-supported choice, falling back to the registry default. No client-side effort-default computation, cross-provider mapper or new provider adapter work.
+3. Preserve dictionary user-key requirement, unchanged SSE metadata/chunk/error/done frames, fixed output budget, abort handling and existing timeout semantics. Rely on existing missing-key UI rather than adding a duplicate dictionary-only key check.
+4. Add **two specific route tests**: explicit supported override forwarded; omitted effort runs at low. Reuse existing `normalize.test.ts` for invalid thinking/unsupported-model validation; do not duplicate the same normalizer unit matrix.
 
-- Update `apps/vela/e2e/llm-settings.spec.ts` to the four-card UI. Assert one provider's unsaved input survives expanding another; save/reload each provider's key; effort/default selections survive a profile round-trip; chat POST contains `thinking`; dictionary POST contains `thinking`; OpenRouter remains free-form. Mock provider responses and use non-secret test strings. Do not rely on the external vendor responding.
-- Run root `bun run test` and `bun run lint`, app build (`bun --filter @vela/app build`), API compile (`bun --filter vela-api compile`) and affected E2E tests where credentials/fixtures are available. Report any skipped gated E2E honestly.
-- Manual browser smoke: all four cards; provider-key save, reset, reload; default model chat, dictionary with a user key; Google server fallback indication; unchanged theme/TTS. Never put real keys/screenshots of keys into PR text.
-- Verify all HPA-755 acceptance criteria in the design and **latest** Linear ticket, including its explicit dependencies and non-goals. Keep PR draft if implementation or acceptance is incomplete; no second PR for review fixes.
+**Gate:** `bun --filter vela-api test`, `bun --filter vela-api compile`, `bun --filter @vela/app test` and `bun --filter @vela/app build`.
+
+## Task 5 — End-to-end acceptance on this PR (not a new PR)
+
+- Update `apps/vela/e2e/llm-settings.spec.ts` for the new cards, provider-key isolation, unsaved drafts, an explicit “Default” thinking reset, model pair persistence and default selection that **stays put when a key is removed**.
+- Assert Chat POST sends the correct provider/model/key with **only** explicit thinking. Assert Dictionary POST sends the chosen override only when configured; without override backend low remains. Mock LLM responses; do not bill real providers in tests.
+- Verify authenticated GET capabilities (Google/OpenRouter), lack of fallback on failed lookup, and truthful missing-key messages. Profile round-trip includes theme/TTS regression observation.
+- Run `bun run test`, `bun run lint`, `bun --filter @vela/app build`, `bun --filter vela-api compile`, and affected Playwright E2E where fixtures/credentials exist. Note skipped E2E explicitly; do not claim they passed.
+- Manually confirm four cards, Save/clear/reload, default model, Chat and My Dictionaries, TTS and Theme. Never include real keys in logs, tests, screenshots or PR text.
+- Check the **latest** HPA-755 ticket description before final acceptance. Stay on **this** PR for all fixes and leave draft/Todo until all requirements are met.
 
 ## Acceptance checklist
 
-- [ ] Profile PUT/GET retains nested `llm` and current `darkMode` while retaining other preferences.
-- [ ] Four per-provider keys are independently saved, loaded and deleted; unrelated card drafts remain.
-- [ ] Every fixed model exposes registry-native effort values; effective effort sent in chat + dictionary.
-- [ ] Global default model persists and drives chat + dictionary; valid free-form OpenRouter default works.
-- [ ] Google server key availability is truthful; dictionary still requires its user-owned key.
-- [ ] Theme/TTS untouched functionally; existing Chat and Dictionary error/SSE tests remain green.
-- [ ] Unit, API, lint/build and available E2E gates recorded, with failures explained.
-- [ ] One PR only; move out of draft and mark HPA-755 Done **after**, not before, acceptance.
+- [ ] Profile PUT/GET round-trip of `llm`, `darkMode`, and unrelated fields; a bad LLM read cannot make profile GET fail.
+- [ ] Per-provider cards isolate saved keys and unsaved drafts; “Default” removes a model's thinking override.
+- [ ] Single explicit `{provider,model}` default drives Chat and Dictionary; no ambiguous OpenRouter resolution and no silent auto-reselection.
+- [ ] Chat backend uses registry effort if override absent; dictionary defaults low unless explicitly overridden, respecting its ~25-second budget.
+- [ ] Capability API accurately advertises **both** server-key providers, but no server key is used in dictionary analysis.
+- [ ] Full affected tests/build/lint and available E2E results recorded; Theme/TTS behavior unchanged.
+- [ ] All changes and review fixes belong to **this one HPA-755 PR**; do not mark ticket Done for documentation alone.
 
-## Deliberate deferrals
+## Deliberate exclusions and risks
 
-HPA-756 chat sidebar/thread table; HPA-757 TTS model/realtime API upgrade; HPA-758 chat picker/cache timer and per-thread model. Keys remain in existing profile/localStorage for this hobby-stage feature; stronger key storage is deferred per ticket. No backward compatibility or migration and no further package abstraction.
+No persistence migration, localStorage mirror, server-key vault, new database, provider SDK changes, new generic settings framework, chat-thread picker/sidebar/cache reminder, TTS model update or speculative error handling. Main risks to verify are **buffered dictionary SSE with 25-second provider deadline** under user-selected high effort, and **global profile GET lockout** if LLM read parsing is not tolerant. Both receive direct tests/checks.
