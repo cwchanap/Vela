@@ -212,12 +212,24 @@ describe('useLLMSettingsStore', () => {
       expect(store.provider).toBe('google');
     });
 
-    it('falls back to the registry default for a removed model', async () => {
+    it('preserves an unsupported saved model ID so the API can reject it', async () => {
       const { useLLMSettingsStore } = await import('./llmSettings');
       // 'gemini-2.5-flash-lite' was the pre-registry Google default.
+      // Retain it so the API produces a 400 rather than silently switching models.
       mockLocalStorage.getItem.mockReturnValue({
         provider: 'google',
         models: { google: 'gemini-2.5-flash-lite' },
+      });
+      const store = useLLMSettingsStore();
+      store.load();
+      expect(store.models.google).toBe('gemini-2.5-flash-lite');
+    });
+
+    it('falls back to the registry default when saved model is empty or whitespace', async () => {
+      const { useLLMSettingsStore } = await import('./llmSettings');
+      mockLocalStorage.getItem.mockReturnValue({
+        provider: 'google',
+        models: { google: '   ' },
       });
       const store = useLLMSettingsStore();
       store.load();
@@ -247,7 +259,7 @@ describe('useLLMSettingsStore', () => {
       const store = useLLMSettingsStore();
       store.load();
       expect(store.provider).toBe('google');
-      expect(store.models.google).toBe(LLM_PROVIDER_REGISTRY.google.defaultModel);
+      expect(store.models.google).toBe('gemini-2.5-flash-lite');
       // Sanitization is in-memory only — load must never persist.
       expect(mockLocalStorage.set).not.toHaveBeenCalled();
     });

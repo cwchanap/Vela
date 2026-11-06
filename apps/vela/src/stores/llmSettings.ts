@@ -25,7 +25,8 @@ const DEFAULT_MODELS: ProviderModelMap = Object.fromEntries(
 
 // Persisted provider/model values can predate the current registry (e.g.
 // 'chutes', 'gemini-2.5-flash-lite'); the API 400s them on every request.
-// Sanitize on load — in memory only; saved preferences are never rewritten.
+// Retain saved nonempty model IDs in memory so the API rejects them with
+// the specified 400 rather than silently switching models.
 const isKnownProvider = (p: unknown): p is LlmProvider =>
   typeof p === 'string' && (LLM_PROVIDERS as readonly string[]).includes(p);
 
@@ -34,12 +35,7 @@ const sanitizedModels = (models: ProviderModelMap | undefined): ProviderModelMap
   for (const p of LLM_PROVIDERS) {
     const saved = models?.[p];
     const registry = LLM_PROVIDER_REGISTRY[p];
-    next[p] =
-      typeof saved === 'string' &&
-      saved.length > 0 &&
-      (registry.models === null || registry.models.some((entry) => entry.id === saved))
-        ? saved
-        : registry.defaultModel;
+    next[p] = typeof saved === 'string' && saved.trim().length > 0 ? saved : registry.defaultModel;
   }
   return next;
 };
