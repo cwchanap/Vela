@@ -289,6 +289,24 @@ export const useAuthStore = defineStore('auth', () => {
     }
   };
 
+  let preferenceMutationQueue: Promise<void> = Promise.resolve();
+  let pendingPreferenceMutations = 0;
+
+  const enqueuePreferenceMutation = <T>(task: () => Promise<T>): Promise<T> => {
+    pendingPreferenceMutations += 1;
+    const runTask = () =>
+      task().finally(() => {
+        pendingPreferenceMutations -= 1;
+      });
+    const run =
+      pendingPreferenceMutations === 1 ? runTask() : preferenceMutationQueue.then(runTask);
+    preferenceMutationQueue = run.then(
+      () => undefined,
+      () => undefined,
+    );
+    return run;
+  };
+
   /**
    * Update user profile
    */
@@ -301,32 +319,50 @@ export const useAuthStore = defineStore('auth', () => {
     const userId = initiator.id;
     const generation = sessionGeneration.value;
 
-    setLoading(true);
-    setError(null);
-
-    try {
-      const response = await authService.updateUserProfile(userId, profileData);
-
-      if (!response.success) {
-        setError(response.error || 'Profile update failed');
+    return enqueuePreferenceMutation(async () => {
+      const current = user.value;
+      if (!current || current.id !== userId || sessionGeneration.value !== generation) {
         return false;
       }
 
-      // Invalidate profile query to refetch fresh data
-      queryClient.invalidateQueries({ queryKey: authKeys.profile(userId) });
+      const mergedProfileData: ProfileData =
+        profileData.preferences === undefined
+          ? profileData
+          : {
+              ...profileData,
+              preferences: {
+                ...(current.preferences as Record<string, unknown>),
+                ...profileData.preferences,
+              },
+            };
 
-      // Reload user profile to get updated data
-      if (sessionGeneration.value === generation && user.value?.id === userId) {
-        await loadUserProfile(userId);
+      setLoading(true);
+      setError(null);
+
+      try {
+        const response = await authService.updateUserProfile(userId, mergedProfileData);
+
+        if (!response.success) {
+          setError(response.error || 'Profile update failed');
+          return false;
+        }
+
+        // Invalidate profile query to refetch fresh data
+        queryClient.invalidateQueries({ queryKey: authKeys.profile(userId) });
+
+        // Reload user profile to get updated data
+        if (sessionGeneration.value === generation && user.value?.id === userId) {
+          await loadUserProfile(userId);
+        }
+        return sessionGeneration.value === generation && user.value?.id === userId;
+      } catch (err) {
+        console.error('Profile update error:', err);
+        setError('An unexpected error occurred during profile update');
+        return false;
+      } finally {
+        setLoading(false);
       }
-      return sessionGeneration.value === generation && user.value?.id === userId;
-    } catch (err) {
-      console.error('Profile update error:', err);
-      setError('An unexpected error occurred during profile update');
-      return false;
-    } finally {
-      setLoading(false);
-    }
+    });
   };
 
   /**
@@ -343,7 +379,6 @@ export const useAuthStore = defineStore('auth', () => {
     try {
       const success = await updateProfile({
         preferences: {
-          ...(initiator.preferences as UserPreferences),
           last_experience_gain: experienceGained,
         },
       });
@@ -376,7 +411,6 @@ export const useAuthStore = defineStore('auth', () => {
     try {
       const success = await updateProfile({
         preferences: {
-          ...(initiator.preferences as UserPreferences),
           last_activity_date: new Date().toISOString().split('T')[0],
         },
       });
@@ -404,10 +438,7 @@ export const useAuthStore = defineStore('auth', () => {
 
     try {
       const success = await updateProfile({
-        preferences: {
-          ...(initiator.preferences as UserPreferences),
-          ...preferences,
-        },
+        preferences: { ...preferences },
       });
 
       const stillCurrent =

@@ -405,6 +405,37 @@ describe('LlmProvidersSection', () => {
     });
   });
 
+  describe('default-model draft sync', () => {
+    it('keeps an unsaved default-model draft across a provider save', async () => {
+      setUser(authStore, llmFor({ keys: { google: 'saved-google', openai: 'openai-key' } }));
+      wrapper = mountSection();
+      await flushPromises();
+
+      await defaultSelect().setValue('openai::gpt-6-luna');
+
+      const googleCard = cardFor('google');
+      await googleCard.find('[data-testid="llm-key-input-google"]').setValue('google-updated');
+      await googleCard.find('[data-testid="llm-save-google"]').trigger('click');
+      await flushPromises();
+
+      expect((defaultSelect().element as HTMLSelectElement).value).toBe('openai::gpt-6-luna');
+    });
+
+    it('resets the draft on an account switch even when the saved pair is unchanged', async () => {
+      setUser(authStore, llmFor({ keys: { openai: 'openai-key' } }), 'user-a');
+      wrapper = mountSection();
+      await flushPromises();
+      await defaultSelect().setValue('openai::gpt-6-luna');
+
+      setUser(authStore, llmFor({ keys: { openai: 'openai-key' } }), 'user-b');
+      await flushPromises();
+
+      expect((defaultSelect().element as HTMLSelectElement).value).toBe(
+        `google::${GOOGLE_DEFAULT}`,
+      );
+    });
+  });
+
   describe('account switching', () => {
     it('resets the section when a different user without llm preferences signs in', async () => {
       setUser(

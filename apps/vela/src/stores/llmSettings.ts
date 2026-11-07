@@ -110,7 +110,11 @@ export const useLLMSettingsStore = defineStore('llmSettings', () => {
       } else {
         delete next.keys[provider];
       }
+      const allowedModelIds = new Set(
+        LLM_PROVIDER_REGISTRY[provider].models?.map((model) => model.id) ?? [],
+      );
       for (const [modelId, effort] of Object.entries(thinkingPatch)) {
+        if (!allowedModelIds.has(modelId)) continue;
         if (effort) {
           next.thinking[modelId] = effort;
         } else {

@@ -8,6 +8,7 @@ import {
 } from './syntheticEnv';
 
 const AUTH_KEY_PREFIX = 'CognitoIdentityServiceProvider';
+const SESSION_BOOTSTRAP_KEY = 'e2e.syntheticSessionEntries';
 const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '::1', '[::1]']);
 const KNOWN_PROVIDERS = ['google', 'openai', 'anthropic', 'openrouter'] as const;
 const PROVIDER_LABELS: Record<string, string> = {
@@ -77,28 +78,21 @@ export const buildSessionEntries = (
   return entries;
 };
 
-export const seedSessionFor = async (
-  context: BrowserContext,
+export const stageSessionFor = async (
+  page: Page,
   user: SyntheticUser,
   tokens: SyntheticTokens = makeSyntheticTokens(user),
 ): Promise<void> => {
   const entries = buildSessionEntries(user, tokens);
-  await context.addInitScript(
-    ({ items }) => {
-      try {
-        for (const [key, value] of items) {
-          window.localStorage.setItem(key, value);
-        }
-      } catch {
-        return;
-      }
+  await page.evaluate(
+    ({ key, items }) => {
+      window.localStorage.setItem(key, JSON.stringify(items));
     },
-    { items: entries },
+    { key: SESSION_BOOTSTRAP_KEY, items: entries },
   );
 };
 
 export interface MockProfile {
-  id: string;
   user_id: string;
   email: string | null;
   username: string | null;
@@ -107,7 +101,6 @@ export interface MockProfile {
   current_level: number;
   total_experience: number;
   learning_streak: number;
-  last_activity: string | null;
   preferences: Record<string, unknown>;
   created_at: string;
   updated_at: string;
@@ -158,7 +151,6 @@ const defaultPreferences = (): Record<string, unknown> => ({
 });
 
 const makeProfile = (user: SyntheticUser, preferences?: Record<string, unknown>): MockProfile => ({
-  id: user.userId,
   user_id: user.userId,
   email: user.email,
   username: user.username,
@@ -167,7 +159,6 @@ const makeProfile = (user: SyntheticUser, preferences?: Record<string, unknown>)
   current_level: 1,
   total_experience: 0,
   learning_streak: 0,
-  last_activity: null,
   preferences: { ...defaultPreferences(), ...(preferences ?? {}) },
   created_at: '2026-01-01T00:00:00.000Z',
   updated_at: '2026-01-01T00:00:00.000Z',
@@ -440,16 +431,30 @@ export const test = base.extend<SyntheticAuthFixtures>({
     const tokens = makeSyntheticTokens(SYNTHETIC_USER_A);
     apiMock.expectedAuthorization = `Bearer ${tokens.idToken}`;
     await context.addInitScript(
-      ({ entries }) => {
+      ({ bootstrapKey, authKeyPrefix, entries }) => {
         try {
-          for (const [key, value] of entries) {
+          const staged = window.localStorage.getItem(bootstrapKey);
+          const sessionEntries = staged ? (JSON.parse(staged) as Array<[string, string]>) : entries;
+          const staleKeys: string[] = [];
+          for (let i = 0; i < window.localStorage.length; i += 1) {
+            const key = window.localStorage.key(i);
+            if (key && key.startsWith(authKeyPrefix)) staleKeys.push(key);
+          }
+          for (const key of staleKeys) {
+            window.localStorage.removeItem(key);
+          }
+          for (const [key, value] of sessionEntries) {
             window.localStorage.setItem(key, value);
           }
         } catch {
           return;
         }
       },
-      { entries: buildSessionEntries(SYNTHETIC_USER_A, tokens) },
+      {
+        bootstrapKey: SESSION_BOOTSTRAP_KEY,
+        authKeyPrefix: AUTH_KEY_PREFIX,
+        entries: buildSessionEntries(SYNTHETIC_USER_A, tokens),
+      },
     );
     await installMocks(context, apiMock);
     await use(page);
