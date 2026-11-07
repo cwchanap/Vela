@@ -920,3 +920,287 @@ describe('acknowledged writes survive missing or stale profile reads', () => {
     expect(llmStore.llm.keys).toEqual({});
   });
 });
+
+describe('session-scoped acknowledged writes', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia());
+    vi.clearAllMocks();
+    pendingWrites.length = 0;
+    serverProfiles.clear();
+    queryCache.clear();
+    mockAuthService.getUserProfile.mockImplementation((userId: string) =>
+      Promise.resolve(serverProfiles.get(userId) ?? null),
+    );
+  });
+
+  const stores = async () => {
+    const { useAuthStore } = await import('./auth');
+    const { useLLMSettingsStore } = await import('./llmSettings');
+    const { useThemeStore } = await import('./theme');
+    const authStore = useAuthStore();
+    const llmStore = useLLMSettingsStore();
+    const themeStore = useThemeStore();
+    return { authStore, llmStore, themeStore };
+  };
+
+  const signIn = async (
+    authStore: ReturnType<(typeof import('./auth'))['useAuthStore']>,
+    id: string,
+    llm?: LlmPreferences,
+  ) => {
+    const user = makeUser(id, llm);
+    serverProfiles.set(id, makeProfile(user));
+    authStore.setSession(makeSession(id));
+    authStore.setUser(user);
+    await flushPromises();
+  };
+
+  const signInWithBasePrefs = async (
+    authStore: ReturnType<(typeof import('./auth'))['useAuthStore']>,
+  ) => {
+    const user = makeUser('user-a', makeLlm());
+    (user.preferences as Record<string, unknown>).dailyGoal = 30;
+    serverProfiles.set('user-a', makeProfile(user));
+    authStore.setSession(makeSession('user-a'));
+    authStore.setUser(user);
+    await flushPromises();
+  };
+
+  const acknowledgeLlmSave = async (key: string) => {
+    const { authStore, llmStore } = await stores();
+    await signInWithBasePrefs(authStore);
+    const save = llmStore.saveProvider('google', key);
+    await flushPromises();
+    await drainWrites();
+    await save;
+    await flushPromises();
+    return { authStore, llmStore };
+  };
+
+  const expectNewSnapshot = (
+    authStore: ReturnType<(typeof import('./auth'))['useAuthStore']>,
+    llmStore: ReturnType<(typeof import('./llmSettings'))['useLLMSettingsStore']>,
+    snapshot: Profile,
+  ) => {
+    const localPrefs = authStore.user?.preferences as Record<string, unknown>;
+    expect(localPrefs.dailyGoal).toBe(15);
+    expect((localPrefs.llm as LlmPreferences).keys.openai).toBe('new-openai-key');
+    expect((localPrefs.llm as LlmPreferences).keys.google).toBeUndefined();
+    const cached = queryCache.get(cacheKey(authKeys.profile('user-a')))?.data as Profile;
+    expect(cached?.preferences).toEqual(snapshot.preferences);
+    expect(llmStore.llm.keys.openai).toBe('new-openai-key');
+    expect(llmStore.llm.keys.google).toBeUndefined();
+  };
+
+  it('does not substitute a previous-session acknowledgment after switching back to the same account', async () => {
+    const { authStore, llmStore } = await acknowledgeLlmSave('old-key');
+    const acknowledgedStamp = serverProfiles.get('user-a')!.updated_at;
+
+    authStore.setSession(makeSession('user-b'));
+    authStore.setUser(makeUser('user-b'));
+    await flushPromises();
+    authStore.setSession(makeSession('user-a'));
+    authStore.setUser(makeUser('user-a'));
+    await flushPromises();
+
+    const snapshot: Profile = {
+      ...makeProfile(makeUser('user-a')),
+      preferences: {
+        dailyGoal: 15,
+        llm: makeLlm({ keys: { openai: 'new-openai-key' } }),
+      } as UserPreferences,
+      updated_at: acknowledgedStamp,
+    };
+    serverProfiles.set('user-a', snapshot);
+
+    await authStore.loadUserProfile('user-a');
+    await flushPromises();
+
+    expectNewSnapshot(authStore, llmStore, snapshot);
+  });
+
+  it('does not substitute a previous-session acknowledgment after same-account re-authentication', async () => {
+    const { authStore, llmStore } = await acknowledgeLlmSave('old-key');
+    const acknowledgedStamp = serverProfiles.get('user-a')!.updated_at;
+
+    authStore.setSession(null);
+    authStore.setUser(null);
+    await flushPromises();
+    authStore.setSession(makeSession('user-a'));
+    authStore.setUser(makeUser('user-a'));
+    await flushPromises();
+
+    const snapshot: Profile = {
+      ...makeProfile(makeUser('user-a')),
+      preferences: {
+        dailyGoal: 15,
+        llm: makeLlm({ keys: { openai: 'new-openai-key' } }),
+      } as UserPreferences,
+      updated_at: acknowledgedStamp,
+    };
+    serverProfiles.set('user-a', snapshot);
+
+    await authStore.loadUserProfile('user-a');
+    await flushPromises();
+
+    expectNewSnapshot(authStore, llmStore, snapshot);
+  });
+
+  it('does not let an old same-account cache entry defeat the session reset', async () => {
+    const { authStore, llmStore } = await acknowledgeLlmSave('old-key');
+    const acknowledgedStamp = serverProfiles.get('user-a')!.updated_at;
+
+    await signIn(authStore, 'user-b');
+    await signIn(authStore, 'user-a');
+
+    const snapshot: Profile = {
+      ...makeProfile(makeUser('user-a')),
+      preferences: {
+        dailyGoal: 15,
+        llm: makeLlm({ keys: { openai: 'new-openai-key' } }),
+      } as UserPreferences,
+      updated_at: acknowledgedStamp,
+    };
+    serverProfiles.set('user-a', snapshot);
+
+    await authStore.loadUserProfile('user-a');
+    await flushPromises();
+
+    expectNewSnapshot(authStore, llmStore, snapshot);
+  });
+
+  it('trusts a strictly newer read within the same session', async () => {
+    const { authStore, llmStore } = await acknowledgeLlmSave('g-key');
+
+    const newer: Profile = {
+      ...serverProfiles.get('user-a')!,
+      preferences: {
+        ...(serverProfiles.get('user-a')!.preferences as Record<string, unknown>),
+        dailyGoal: 42,
+      } as UserPreferences,
+      updated_at: nextWriteStamp(),
+    };
+    serverProfiles.set('user-a', newer);
+    const entry = queryCache.get(cacheKey(authKeys.profile('user-a')));
+    if (entry) entry.isInvalidated = true;
+
+    await authStore.loadUserProfile('user-a');
+    await flushPromises();
+
+    expect((authStore.user?.preferences as Record<string, unknown>).dailyGoal).toBe(42);
+    expect(llmStore.llm.keys.google as string | undefined).toBe('g-key');
+
+    const stale = staleRead('user-a');
+    serverProfiles.set('user-a', stale);
+    const entry2 = queryCache.get(cacheKey(authKeys.profile('user-a')));
+    if (entry2) entry2.isInvalidated = true;
+    await authStore.loadUserProfile('user-a');
+    await flushPromises();
+
+    expect((authStore.user?.preferences as Record<string, unknown>).dailyGoal).toBe(42);
+    expect(llmStore.llm.keys.google as string | undefined).toBe('g-key');
+  });
+
+  it('keeps a strictly newer accepted read when reconciling the acknowledged write (llm -> theme)', async () => {
+    const { authStore, llmStore, themeStore } = await stores();
+    await signInWithBasePrefs(authStore);
+
+    const llmSave = llmStore.saveProvider('google', 'g-key');
+    await flushPromises();
+    expect(pendingWrites).toHaveLength(1);
+
+    themeStore.setDarkMode(true);
+    const themeSave = themeStore.saveToUserPreferences();
+    await flushPromises();
+    expect(pendingWrites).toHaveLength(1);
+
+    mockAuthService.getUserProfile.mockImplementationOnce((userId: string) => {
+      const server = serverProfiles.get(userId)!;
+      return Promise.resolve({
+        ...server,
+        preferences: {
+          ...(server.preferences as Record<string, unknown>),
+          dailyGoal: 60,
+        } as UserPreferences,
+        updated_at: nextWriteStamp(),
+      });
+    });
+
+    applyWrite(0);
+    pendingWrites.splice(0, 1);
+    await flushPromises();
+
+    expect(pendingWrites).toHaveLength(1);
+    const themePrefs = pendingWrites[0]!.data.preferences as Record<string, unknown>;
+    expect(themePrefs.darkMode).toBe(true);
+    expect(themePrefs.dailyGoal).toBe(60);
+    applyWrite(0);
+    pendingWrites.splice(0, 1);
+    await flushPromises();
+
+    await Promise.all([llmSave, themeSave]);
+    await flushPromises();
+
+    const serverPrefs = serverProfiles.get('user-a')!.preferences as Record<string, unknown>;
+    expect(serverPrefs.dailyGoal).toBe(60);
+    expect(serverPrefs.darkMode).toBe(true);
+    expect((serverPrefs.llm as LlmPreferences).keys.google).toBe('g-key');
+    const localPrefs = authStore.user?.preferences as Record<string, unknown>;
+    expect(localPrefs.dailyGoal).toBe(60);
+    expect(localPrefs.darkMode).toBe(true);
+    expect((localPrefs.llm as LlmPreferences).keys.google).toBe('g-key');
+    expect(llmStore.llm.keys.google).toBe('g-key');
+  });
+
+  it('keeps a strictly newer accepted read when reconciling the acknowledged write (theme -> llm)', async () => {
+    const { authStore, llmStore, themeStore } = await stores();
+    await signInWithBasePrefs(authStore);
+
+    themeStore.setDarkMode(true);
+    const themeSave = themeStore.saveToUserPreferences();
+    await flushPromises();
+    expect(pendingWrites).toHaveLength(1);
+
+    const llmSave = llmStore.saveProvider('google', 'g-key');
+    await flushPromises();
+    expect(pendingWrites).toHaveLength(1);
+
+    mockAuthService.getUserProfile.mockImplementationOnce((userId: string) => {
+      const server = serverProfiles.get(userId)!;
+      return Promise.resolve({
+        ...server,
+        preferences: {
+          ...(server.preferences as Record<string, unknown>),
+          dailyGoal: 60,
+        } as UserPreferences,
+        updated_at: nextWriteStamp(),
+      });
+    });
+
+    applyWrite(0);
+    pendingWrites.splice(0, 1);
+    await flushPromises();
+
+    expect(pendingWrites).toHaveLength(1);
+    const llmPrefs = pendingWrites[0]!.data.preferences as Record<string, unknown>;
+    expect((llmPrefs.llm as LlmPreferences).keys.google).toBe('g-key');
+    expect(llmPrefs.dailyGoal).toBe(60);
+    expect(llmPrefs.darkMode).toBe(true);
+    applyWrite(0);
+    pendingWrites.splice(0, 1);
+    await flushPromises();
+
+    await Promise.all([llmSave, themeSave]);
+    await flushPromises();
+
+    const serverPrefs = serverProfiles.get('user-a')!.preferences as Record<string, unknown>;
+    expect(serverPrefs.dailyGoal).toBe(60);
+    expect(serverPrefs.darkMode).toBe(true);
+    expect((serverPrefs.llm as LlmPreferences).keys.google).toBe('g-key');
+    const localPrefs = authStore.user?.preferences as Record<string, unknown>;
+    expect(localPrefs.dailyGoal).toBe(60);
+    expect(localPrefs.darkMode).toBe(true);
+    expect((localPrefs.llm as LlmPreferences).keys.google).toBe('g-key');
+    expect(llmStore.llm.keys.google).toBe('g-key');
+  });
+});

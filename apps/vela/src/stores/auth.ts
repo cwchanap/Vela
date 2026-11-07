@@ -101,8 +101,16 @@ export const useAuthStore = defineStore('auth', () => {
   };
 
   const setSession = (sessionData: AppSession | null) => {
-    if ((session.value?.user?.id ?? null) !== (sessionData?.user?.id ?? null)) {
+    const previousUserId = session.value?.user?.id ?? null;
+    const nextUserId = sessionData?.user?.id ?? null;
+    if (previousUserId !== nextUserId) {
       sessionGeneration.value += 1;
+      if (previousUserId) {
+        queryClient.invalidateQueries({ queryKey: authKeys.profile(previousUserId) });
+      }
+      if (nextUserId) {
+        queryClient.invalidateQueries({ queryKey: authKeys.profile(nextUserId) });
+      }
     }
     session.value = sessionData;
   };
@@ -120,8 +128,10 @@ export const useAuthStore = defineStore('auth', () => {
   };
 
   const clearAuth = () => {
-    if (session.value?.user) {
+    const previousUserId = session.value?.user?.id ?? null;
+    if (previousUserId) {
       sessionGeneration.value += 1;
+      queryClient.invalidateQueries({ queryKey: authKeys.profile(previousUserId) });
     }
     user.value = null;
     session.value = null;
@@ -145,7 +155,30 @@ export const useAuthStore = defineStore('auth', () => {
     updated_at: profile.updated_at,
   });
 
-  let lastAcknowledgedProfile: Profile | null = null;
+  const profileFromUser = (source: User): Profile => ({
+    id: source.id,
+    username: source.username ?? null,
+    email: source.email || null,
+    avatar_url: source.avatar_url ?? null,
+    native_language: source.native_language,
+    current_level: source.current_level,
+    total_experience: source.total_experience,
+    learning_streak: source.learning_streak,
+    last_activity: source.last_activity ?? null,
+    preferences: source.preferences,
+    created_at: source.created_at,
+    updated_at: source.updated_at,
+  });
+
+  const applyProfileData = (base: Profile, data: ProfileData): Profile => ({
+    ...base,
+    username: data.username ?? base.username,
+    avatar_url: data.avatar_url ?? base.avatar_url,
+    native_language: data.native_language ?? base.native_language,
+    preferences: (data.preferences ?? base.preferences) as unknown as Profile['preferences'],
+  });
+
+  let lastAcknowledgedProfile: { profile: Profile; generation: number } | null = null;
 
   /**
    * Initialize authentication state
@@ -218,11 +251,16 @@ export const useAuthStore = defineStore('auth', () => {
       const profile = cachedProfile || (await authService.getUserProfile(userId));
 
       if (profile && session.value?.user?.id === userId && sessionGeneration.value === generation) {
-        const effectiveProfile =
-          lastAcknowledgedProfile?.id === userId &&
-          profile.updated_at <= lastAcknowledgedProfile.updated_at
-            ? lastAcknowledgedProfile
-            : profile;
+        const acknowledged = lastAcknowledgedProfile;
+        const superseded =
+          acknowledged !== null &&
+          acknowledged.generation === generation &&
+          acknowledged.profile.id === userId &&
+          profile.updated_at <= acknowledged.profile.updated_at;
+        const effectiveProfile = superseded ? acknowledged.profile : profile;
+        if (!superseded) {
+          lastAcknowledgedProfile = { profile, generation };
+        }
 
         // Update query cache with fresh data
         queryClient.setQueryData(queryKey, effectiveProfile);
@@ -363,28 +401,24 @@ export const useAuthStore = defineStore('auth', () => {
 
         // Reload user profile to get updated data
         if (sessionGeneration.value === generation && user.value?.id === userId) {
+          const acknowledged: Profile =
+            response.profile ?? applyProfileData(profileFromUser(current), mergedProfileData);
+          lastAcknowledgedProfile = { profile: acknowledged, generation };
+
           await loadUserProfile(userId);
 
           const latest = user.value;
           if (latest && latest.id === userId && sessionGeneration.value === generation) {
-            const acknowledged: Profile = response.profile ?? {
-              id: userId,
-              username: mergedProfileData.username ?? latest.username ?? null,
-              email: latest.email || null,
-              avatar_url: mergedProfileData.avatar_url ?? latest.avatar_url ?? null,
-              native_language: mergedProfileData.native_language ?? latest.native_language,
-              current_level: latest.current_level,
-              total_experience: latest.total_experience,
-              learning_streak: latest.learning_streak,
-              last_activity: latest.last_activity ?? null,
-              preferences: (mergedProfileData.preferences ??
-                latest.preferences) as unknown as Profile['preferences'],
-              created_at: latest.created_at,
-              updated_at: latest.updated_at,
-            };
-            lastAcknowledgedProfile = acknowledged;
-            queryClient.setQueryData(authKeys.profile(userId), acknowledged);
-            setUser(userFromProfile(acknowledged));
+            const effective: Profile =
+              latest.updated_at > acknowledged.updated_at
+                ? applyProfileData(
+                    profileFromUser(latest),
+                    response.profile ? {} : mergedProfileData,
+                  )
+                : acknowledged;
+            lastAcknowledgedProfile = { profile: effective, generation };
+            queryClient.setQueryData(authKeys.profile(userId), effective);
+            setUser(userFromProfile(effective));
           }
         }
         return sessionGeneration.value === generation && user.value?.id === userId;
