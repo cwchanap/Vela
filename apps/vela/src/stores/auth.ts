@@ -381,6 +381,12 @@ export const useAuthStore = defineStore('auth', () => {
   // captures it to reject completions that land in a different session.
   const sessionGeneration = ref(0);
 
+  let lastAcknowledgedProfile: {
+    profile: Profile;
+    fingerprint: ProfileFingerprint | null;
+    generation: number;
+  } | null = null;
+
   // Getters
   const isAuthenticated = computed(() => !!user.value && !!session.value);
   const userLevel = computed(() => user.value?.current_level ?? 1);
@@ -403,6 +409,8 @@ export const useAuthStore = defineStore('auth', () => {
     const nextUserId = sessionData?.user?.id ?? null;
     if (previousUserId !== nextUserId) {
       sessionGeneration.value += 1;
+      isLoading.value = false;
+      lastAcknowledgedProfile = null;
       if (previousUserId) {
         queryClient.invalidateQueries({ queryKey: authKeys.profile(previousUserId) });
       }
@@ -475,12 +483,6 @@ export const useAuthStore = defineStore('auth', () => {
     native_language: data.native_language ?? base.native_language,
     preferences: (data.preferences ?? base.preferences) as unknown as Profile['preferences'],
   });
-
-  let lastAcknowledgedProfile: {
-    profile: Profile;
-    fingerprint: ProfileFingerprint | null;
-    generation: number;
-  } | null = null;
 
   const registerAcknowledgedProfile = (
     acknowledged: Profile,
