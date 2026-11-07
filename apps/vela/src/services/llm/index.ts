@@ -8,7 +8,7 @@ export interface GenerateInput {
   model?: string | undefined;
   apiKey?: string | undefined;
   system?: string | undefined;
-  /** Native effort/thinking level; registry defaults apply when omitted. The HPA-754 UI never sends it. */
+  /** Native effort/thinking level; registry defaults apply when omitted. Only an explicit saved override is sent. */
   thinking?: string | undefined;
   messages: LlmMessage[];
 }

@@ -211,7 +211,7 @@ const $q = useQuasar();
 const chat = useChatStore();
 const llmSettings = useLLMSettingsStore();
 const auth = useAuthStore();
-const { provider, currentModel, currentApiKey } = storeToRefs(llmSettings);
+const { selection } = storeToRefs(llmSettings);
 
 // Greeting message constant
 const GREETING_MESSAGE =
@@ -424,11 +424,13 @@ const onSend = async () => {
     }));
 
     // Explicit per-request snapshot of the active provider/model/key; there is
-    // no global service state to keep in sync.
+    // no global service state to keep in sync. Only a saved thinking override
+    // is sent — the backend applies the registry default when it is absent.
     const resp = await llmClient.generate({
-      provider: provider.value,
-      model: currentModel.value,
-      apiKey: currentApiKey.value,
+      provider: selection.value.provider,
+      model: selection.value.model,
+      apiKey: selection.value.apiKey,
+      ...(selection.value.thinking ? { thinking: selection.value.thinking } : {}),
       system: systemPrompt,
       messages: history,
     });

@@ -619,7 +619,11 @@ describe('MyDictionariesPage', () => {
       ]);
       const { llmClient } = await import('src/services/llm');
       const { useLLMSettingsStore } = await import('src/stores/llmSettings');
-      useLLMSettingsStore().setApiKey('dict-key');
+      useLLMSettingsStore().llm = {
+        keys: { google: 'dict-key' },
+        thinking: { 'gemini-3.8-flash': 'max' },
+        defaultModel: { provider: 'google', model: 'gemini-3.8-flash' },
+      };
       wrapper = mountComponent();
 
       await wrapper.vm.handleAskAI(mockEntry);
@@ -635,6 +639,9 @@ describe('MyDictionariesPage', () => {
         },
         expect.any(Function),
       );
+      // Dictionary forwards no thinking until the backend contract adds it.
+      const analyzeInput = vi.mocked(llmClient.analyzeSentenceStream).mock.calls[0]![0];
+      expect(analyzeInput).not.toHaveProperty('thinking');
       expect(wrapper.vm.aiDialog).toBe(true);
       expect(wrapper.vm.analyzing).toBe(false);
       expect(wrapper.vm.streamingText).toBe('This sentence means studying Japanese.');
