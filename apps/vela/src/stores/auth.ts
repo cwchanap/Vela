@@ -199,26 +199,24 @@ export const useAuthStore = defineStore('auth', () => {
 
       const profile = cachedProfile || (await authService.getUserProfile(userId));
 
-      if (profile) {
+      if (profile && session.value?.user?.id === userId && sessionGeneration.value === generation) {
         // Update query cache with fresh data
         queryClient.setQueryData(queryKey, profile);
 
-        if (session.value?.user?.id === userId && sessionGeneration.value === generation) {
-          setUser({
-            id: profile.id,
-            email: profile.email || '',
-            username: profile.username || undefined,
-            avatar_url: profile.avatar_url || undefined,
-            current_level: profile.current_level,
-            total_experience: profile.total_experience,
-            learning_streak: profile.learning_streak,
-            native_language: profile.native_language,
-            preferences: profile.preferences as unknown as UserPreferences,
-            last_activity: profile.last_activity || undefined,
-            created_at: profile.created_at,
-            updated_at: profile.updated_at,
-          });
-        }
+        setUser({
+          id: profile.id,
+          email: profile.email || '',
+          username: profile.username || undefined,
+          avatar_url: profile.avatar_url || undefined,
+          current_level: profile.current_level,
+          total_experience: profile.total_experience,
+          learning_streak: profile.learning_streak,
+          native_language: profile.native_language,
+          preferences: profile.preferences as unknown as UserPreferences,
+          last_activity: profile.last_activity || undefined,
+          created_at: profile.created_at,
+          updated_at: profile.updated_at,
+        });
       }
     } catch (err) {
       console.error('Error loading user profile:', err);
@@ -321,7 +319,7 @@ export const useAuthStore = defineStore('auth', () => {
       if (sessionGeneration.value === generation && user.value?.id === userId) {
         await loadUserProfile(userId);
       }
-      return true;
+      return sessionGeneration.value === generation && user.value?.id === userId;
     } catch (err) {
       console.error('Profile update error:', err);
       setError('An unexpected error occurred during profile update');

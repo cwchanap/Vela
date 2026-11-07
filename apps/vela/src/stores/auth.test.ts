@@ -766,5 +766,64 @@ describe('useAuthStore', () => {
       await pending;
       expect(store.user?.preferences).toMatchObject({ dailyGoal: 7 });
     });
+
+    it('returns false when updateProfile completes after same-account re-authentication', async () => {
+      let resolveUpdate!: (_v: { success: boolean }) => void;
+      mockAuthService.updateUserProfile.mockImplementationOnce(
+        () =>
+          new Promise((res) => {
+            resolveUpdate = res;
+          }),
+      );
+      const { useAuthStore } = await import('./auth');
+      const store = useAuthStore();
+      store.setSession({ user: { id: 'user-a', email: 'a@example.com' }, provider: 'cognito' });
+      store.setUser(makeUser({ id: 'user-a', preferences: { dailyGoal: 30 } }));
+
+      const pending = store.updateProfile({ preferences: { dailyGoal: 60 } });
+      store.setSession(null);
+      store.setUser(null);
+      store.setSession({ user: { id: 'user-a', email: 'a@example.com' }, provider: 'cognito' });
+      store.setUser(makeUser({ id: 'user-a', preferences: { dailyGoal: 5 } }));
+      resolveUpdate({ success: true });
+
+      const result = await pending;
+      expect(result).toBe(false);
+      expect(store.user?.id).toBe('user-a');
+      expect(store.user?.preferences).toMatchObject({ dailyGoal: 5 });
+    });
+
+    it('returns false when the session changes during the updateProfile reload', async () => {
+      let resolveUpdate!: (_v: { success: boolean }) => void;
+      mockAuthService.updateUserProfile.mockImplementationOnce(
+        () =>
+          new Promise((res) => {
+            resolveUpdate = res;
+          }),
+      );
+      let resolveGet!: (_v: unknown) => void;
+      const pendingProfile = new Promise((res) => {
+        resolveGet = res;
+      });
+      mockAuthService.getUserProfile.mockImplementationOnce(() => pendingProfile);
+      const { useAuthStore } = await import('./auth');
+      const store = useAuthStore();
+      store.setSession({ user: { id: 'user-a', email: 'a@example.com' }, provider: 'cognito' });
+      store.setUser(makeUser({ id: 'user-a', preferences: { dailyGoal: 30 } }));
+
+      const pending = store.updateProfile({ preferences: { dailyGoal: 60 } });
+      resolveUpdate({ success: true });
+      await Promise.resolve();
+
+      void pendingProfile.then(() => {
+        store.setSession(null);
+        store.setUser(null);
+      });
+      resolveGet({ ...mockProfile, id: 'user-a' });
+
+      const result = await pending;
+      expect(result).toBe(false);
+      expect(store.user).toBeNull();
+    });
   });
 });

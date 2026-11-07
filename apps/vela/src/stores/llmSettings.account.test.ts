@@ -39,12 +39,26 @@ vi.mock('../services/authService', () => ({
   authService: mockAuthService,
 }));
 
+const queryCache = new Map<
+  string,
+  { data: unknown; dataUpdatedAt: number; isInvalidated: boolean }
+>();
+
+const cacheKey = (key: unknown) => JSON.stringify(key);
+
 const mockQueryClient = {
-  getQueryState: vi.fn(() => null),
-  getQueryData: vi.fn(() => null),
-  setQueryData: vi.fn(),
-  invalidateQueries: vi.fn(),
-  clear: vi.fn(),
+  getQueryState: vi.fn((key: unknown) => queryCache.get(cacheKey(key)) ?? null),
+  getQueryData: vi.fn((key: unknown) => queryCache.get(cacheKey(key))?.data),
+  setQueryData: vi.fn((key: unknown, data: unknown) => {
+    queryCache.set(cacheKey(key), { data, dataUpdatedAt: Date.now(), isInvalidated: false });
+  }),
+  invalidateQueries: vi.fn(({ queryKey }: { queryKey: unknown }) => {
+    const entry = queryCache.get(cacheKey(queryKey));
+    if (entry) entry.isInvalidated = true;
+  }),
+  clear: vi.fn(() => {
+    queryCache.clear();
+  }),
 };
 
 vi.mock('../boot/query', () => ({
@@ -111,6 +125,7 @@ describe('llmSettings + auth account transitions (real stores)', () => {
     vi.clearAllMocks();
     pendingWrites.length = 0;
     serverProfiles.clear();
+    queryCache.clear();
   });
 
   const stores = async () => {
@@ -352,5 +367,74 @@ describe('llmSettings + auth account transitions (real stores)', () => {
     const aLlm = authStore.user?.preferences.llm as LlmPreferences | undefined;
     expect(aLlm?.keys).toEqual({ openai: 'fresh-key' });
     expect(llmStore.llm.keys).toEqual({ openai: 'fresh-key' });
+  });
+
+  it('does not repopulate the profile cache from a stale response that later hydrates a new session', async () => {
+    const { authStore, llmStore } = await stores();
+    await signIn(authStore, 'user-a', makeLlm({ keys: { google: 'stale-key' } }));
+
+    let resolveGet!: (_v: Profile | null) => void;
+    mockAuthService.getUserProfile.mockImplementationOnce(
+      () =>
+        new Promise<Profile | null>((res) => {
+          resolveGet = res;
+        }),
+    );
+    const staleRead = authStore.loadUserProfile('user-a');
+
+    mockAuthService.signOut.mockResolvedValueOnce({ success: true });
+    await authStore.signOut();
+    await flushPromises();
+    await signIn(authStore, 'user-a', makeLlm({ keys: { openai: 'fresh-key' } }));
+
+    resolveGet(makeProfile(makeUser('user-a', makeLlm({ keys: { google: 'stale-key' } }))));
+    await staleRead;
+    await flushPromises();
+
+    mockAuthService.getUserProfile.mockResolvedValueOnce(
+      makeProfile(makeUser('user-a', makeLlm({ keys: { openai: 'fresh-key' } }))),
+    );
+    await authStore.loadUserProfile('user-a');
+    await flushPromises();
+
+    expect(mockAuthService.getUserProfile).toHaveBeenCalledTimes(2);
+    const aLlm = authStore.user?.preferences.llm as LlmPreferences | undefined;
+    expect(aLlm?.keys).toEqual({ openai: 'fresh-key' });
+    expect(llmStore.llm.keys).toEqual({ openai: 'fresh-key' });
+  });
+
+  it('returns false when the session changes after the write resolves but before the save completes', async () => {
+    const { authStore, llmStore } = await stores();
+    await signIn(authStore, 'user-a', makeLlm());
+
+    let resolveGet!: (_v: Profile | null) => void;
+    const pendingProfile = new Promise<Profile | null>((res) => {
+      resolveGet = res;
+    });
+    mockAuthService.getUserProfile.mockImplementationOnce(() => pendingProfile);
+
+    const pending = llmStore.saveProvider('google', 'boundary-key');
+    await flushPromises();
+    expect(pendingWrites).toHaveLength(1);
+
+    applyWrite(0);
+    await flushPromises();
+
+    void pendingProfile.then(() => {
+      void Promise.resolve().then(() => {
+        void Promise.resolve().then(() => {
+          authStore.setSession(null);
+          authStore.setUser(null);
+        });
+      });
+    });
+    resolveGet(makeProfile(makeUser('user-a', makeLlm({ keys: { google: 'boundary-key' } }))));
+
+    const result = await pending;
+    await flushPromises();
+
+    expect(result).toBe(false);
+    expect(authStore.user).toBeNull();
+    expect(llmStore.llm.keys).toEqual({});
   });
 });
