@@ -1902,4 +1902,219 @@ describe('acknowledged writes reconcile at preference path granularity', () => {
     expect((cachedPreferences()?.llm as LlmPreferences | undefined)?.keys.google).toBeUndefined();
     expect(llmStore.llm.keys.google).toBeUndefined();
   });
+
+  it('keeps a newer deletion of the same provider when an older rotation acknowledgment resolves', async () => {
+    const { authStore, llmStore, themeStore } = await stores();
+    await signInWithBasePrefs(authStore, makeLlm({ keys: { google: 'old-key' } }));
+
+    const llmSave = llmStore.saveProvider('google', 'rotated-key');
+    await flushPromises();
+    expect(pendingWrites).toHaveLength(1);
+
+    themeStore.setDarkMode(true);
+    const themeSave = themeStore.saveToUserPreferences();
+    await flushPromises();
+    expect(pendingWrites).toHaveLength(1);
+
+    const base = serverProfiles.get('user-a')!;
+    const newerRead: Profile = {
+      ...base,
+      preferences: {
+        ...(base.preferences as Record<string, unknown>),
+        llm: makeLlm(),
+      } as UserPreferences,
+      updated_at: '2030-06-01T00:00:00.000Z',
+    };
+    mockAuthService.getUserProfile.mockResolvedValue(newerRead);
+    await authStore.loadUserProfile('user-a');
+    await flushPromises();
+
+    const olderAck: Profile = {
+      ...base,
+      preferences: {
+        ...(base.preferences as Record<string, unknown>),
+        llm: makeLlm({ keys: { google: 'rotated-key' } }),
+      } as UserPreferences,
+      updated_at: '2030-01-01T00:00:00.000Z',
+    };
+    resolveWrite(0, { success: true, profile: olderAck });
+    pendingWrites.splice(0, 1);
+    await flushPromises();
+
+    expect(pendingWrites).toHaveLength(1);
+    const themeBody = pendingWrites[0]!.data.preferences as Record<string, unknown>;
+    expect((themeBody.llm as LlmPreferences).keys.google).toBeUndefined();
+    applyWrite(0);
+    pendingWrites.splice(0, 1);
+    await flushPromises();
+
+    await Promise.all([llmSave, themeSave]);
+    await flushPromises();
+
+    const serverPrefs = serverProfiles.get('user-a')!.preferences as Record<string, unknown>;
+    expect((serverPrefs.llm as LlmPreferences).keys.google).toBeUndefined();
+    const localLlm = (authStore.user?.preferences as Record<string, unknown>).llm as LlmPreferences;
+    expect(localLlm.keys.google).toBeUndefined();
+    expect(llmStore.llm.keys.google).toBeUndefined();
+  });
+
+  it('applies a queued provider save onto a newer accepted profile', async () => {
+    const { authStore, llmStore, themeStore } = await stores();
+    await signInWithBasePrefs(authStore);
+
+    themeStore.setDarkMode(true);
+    const themeSave = themeStore.saveToUserPreferences();
+    await flushPromises();
+    expect(pendingWrites).toHaveLength(1);
+
+    const providerSave = llmStore.saveProvider('google', 'g-key');
+    await flushPromises();
+    expect(pendingWrites).toHaveLength(1);
+
+    const base = serverProfiles.get('user-a')!;
+    const newerRead: Profile = {
+      ...base,
+      preferences: {
+        ...(base.preferences as Record<string, unknown>),
+        llm: makeLlm({
+          keys: { openai: 'o-key' },
+          defaultModel: { provider: 'openai', model: 'gpt-6.1-sol' },
+        }),
+      } as UserPreferences,
+      updated_at: '2030-06-01T00:00:00.000Z',
+    };
+    mockAuthService.getUserProfile.mockResolvedValue(newerRead);
+    await authStore.loadUserProfile('user-a');
+    await flushPromises();
+
+    applyWrite(0);
+    pendingWrites.splice(0, 1);
+    await flushPromises();
+
+    expect(pendingWrites).toHaveLength(1);
+    const providerBody = pendingWrites[0]!.data.preferences as Record<string, unknown>;
+    const providerLlm = providerBody.llm as LlmPreferences;
+    expect(providerLlm.keys.openai).toBe('o-key');
+    expect(providerLlm.keys.google).toBe('g-key');
+    expect(providerLlm.defaultModel).toEqual({ provider: 'openai', model: 'gpt-6.1-sol' });
+    expect(providerBody.darkMode).toBe(true);
+    applyWrite(0);
+    pendingWrites.splice(0, 1);
+    await flushPromises();
+
+    await Promise.all([themeSave, providerSave]);
+    await flushPromises();
+
+    const localLlm = (authStore.user?.preferences as Record<string, unknown>).llm as LlmPreferences;
+    expect(localLlm.keys.openai).toBe('o-key');
+    expect(localLlm.keys.google).toBe('g-key');
+    expect(llmStore.llm.keys.openai).toBe('o-key');
+  });
+
+  it('keeps a newer profile accepted during a provider save after the save resolves', async () => {
+    const { authStore, llmStore } = await stores();
+    await signInWithBasePrefs(authStore, makeLlm({ keys: { google: 'old-key' } }));
+
+    const googleSave = llmStore.saveProvider('google', 'g-key');
+    await flushPromises();
+    expect(pendingWrites).toHaveLength(1);
+
+    const base = serverProfiles.get('user-a')!;
+    const newerRead: Profile = {
+      ...base,
+      preferences: {
+        ...(base.preferences as Record<string, unknown>),
+        llm: makeLlm({ keys: { google: 'rotated-newer', openai: 'o-key' } }),
+      } as UserPreferences,
+      updated_at: '2030-06-01T00:00:00.000Z',
+    };
+    mockAuthService.getUserProfile.mockResolvedValue(newerRead);
+    await authStore.loadUserProfile('user-a');
+    await flushPromises();
+
+    const olderAck: Profile = {
+      ...base,
+      preferences: {
+        ...(base.preferences as Record<string, unknown>),
+        llm: makeLlm({ keys: { google: 'g-key' } }),
+      } as UserPreferences,
+      updated_at: '2030-01-01T00:00:00.000Z',
+    };
+    resolveWrite(0, { success: true, profile: olderAck });
+    pendingWrites.splice(0, 1);
+    await flushPromises();
+
+    expect(await googleSave).toBe(true);
+    await flushPromises();
+
+    let localLlm = (authStore.user?.preferences as Record<string, unknown>).llm as LlmPreferences;
+    expect(localLlm.keys.google).toBe('rotated-newer');
+    expect(localLlm.keys.openai).toBe('o-key');
+    expect(llmStore.llm.keys.google).toBe('rotated-newer');
+    expect(llmStore.llm.keys.openai).toBe('o-key');
+
+    const nextSave = llmStore.saveProvider('anthropic', 'a-key');
+    await flushPromises();
+    expect(pendingWrites).toHaveLength(1);
+    const nextBody = pendingWrites[0]!.data.preferences as Record<string, unknown>;
+    const nextLlm = nextBody.llm as LlmPreferences;
+    expect(nextLlm.keys.google).toBe('rotated-newer');
+    expect(nextLlm.keys.openai).toBe('o-key');
+    expect(nextLlm.keys.anthropic).toBe('a-key');
+    applyWrite(0);
+    pendingWrites.splice(0, 1);
+    await flushPromises();
+
+    expect(await nextSave).toBe(true);
+    await flushPromises();
+
+    localLlm = (authStore.user?.preferences as Record<string, unknown>).llm as LlmPreferences;
+    expect(localLlm.keys.google).toBe('rotated-newer');
+    expect(localLlm.keys.openai).toBe('o-key');
+    expect(localLlm.keys.anthropic).toBe('a-key');
+  });
+
+  it('applies a queued default-model save onto a newer accepted profile', async () => {
+    const { authStore, llmStore, themeStore } = await stores();
+    await signInWithBasePrefs(authStore, makeLlm({ keys: { google: 'g-key' } }));
+
+    themeStore.setDarkMode(true);
+    const themeSave = themeStore.saveToUserPreferences();
+    await flushPromises();
+    expect(pendingWrites).toHaveLength(1);
+
+    const defaultSave = llmStore.saveDefault({ provider: 'openai', model: 'gpt-6.1-sol' });
+    await flushPromises();
+    expect(pendingWrites).toHaveLength(1);
+
+    const base = serverProfiles.get('user-a')!;
+    const newerRead: Profile = {
+      ...base,
+      preferences: {
+        ...(base.preferences as Record<string, unknown>),
+        llm: makeLlm({ keys: { google: 'g-key', anthropic: 'a-key' } }),
+      } as UserPreferences,
+      updated_at: '2030-06-01T00:00:00.000Z',
+    };
+    mockAuthService.getUserProfile.mockResolvedValue(newerRead);
+    await authStore.loadUserProfile('user-a');
+    await flushPromises();
+
+    applyWrite(0);
+    pendingWrites.splice(0, 1);
+    await flushPromises();
+
+    expect(pendingWrites).toHaveLength(1);
+    const defaultBody = pendingWrites[0]!.data.preferences as Record<string, unknown>;
+    const defaultLlm = defaultBody.llm as LlmPreferences;
+    expect(defaultLlm.keys.google).toBe('g-key');
+    expect(defaultLlm.keys.anthropic).toBe('a-key');
+    expect(defaultLlm.defaultModel).toEqual({ provider: 'openai', model: 'gpt-6.1-sol' });
+    applyWrite(0);
+    pendingWrites.splice(0, 1);
+    await flushPromises();
+
+    await Promise.all([themeSave, defaultSave]);
+    await flushPromises();
+  });
 });

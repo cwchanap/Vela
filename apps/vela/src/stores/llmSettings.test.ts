@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { setActivePinia, createPinia } from 'pinia';
 import { nextTick, reactive } from 'vue';
 import { LLM_PROVIDER_REGISTRY } from '@vela/common';
-import type { LlmPreferences } from '../types/shared';
+import type { LlmPreferences, UserPreferences } from '../types/shared';
 
 const GOOGLE_DEFAULT = LLM_PROVIDER_REGISTRY.google.defaultModel;
 
@@ -32,12 +32,21 @@ const makeLlm = (overrides: Partial<LlmPreferences> = {}): LlmPreferences => ({
   ...overrides,
 });
 
+const resolvePatch = (partial: unknown): Partial<UserPreferences> =>
+  typeof partial === 'function'
+    ? (partial as (_current: UserPreferences) => Partial<UserPreferences>)(
+        (mockAuthStore.user?.preferences ?? {}) as UserPreferences,
+      )
+    : (partial as Partial<UserPreferences>);
+
+const lastPatch = () => resolvePatch(mockAuthStore.updatePreferences.mock.calls.at(-1)![0]);
+
 const mockUpdateSuccess = () => {
-  mockAuthStore.updatePreferences.mockImplementation(async (partial: Record<string, unknown>) => {
+  mockAuthStore.updatePreferences.mockImplementation(async (partial: unknown) => {
     if (!mockAuthStore.user) return false;
     mockAuthStore.user.preferences = {
       ...(mockAuthStore.user.preferences ?? {}),
-      ...partial,
+      ...resolvePatch(partial),
     };
     return true;
   });
@@ -237,7 +246,7 @@ describe('useLLMSettingsStore', () => {
       });
 
       expect(ok).toBe(true);
-      expect(mockAuthStore.updatePreferences).toHaveBeenCalledWith({
+      expect(lastPatch()).toEqual({
         llm: {
           keys: { google: 'saved-google-key', openai: 'new-openai-key' },
           thinking: { 'gemini-3.8-flash': 'low', 'gpt-6.1-sol': 'high' },
@@ -262,7 +271,7 @@ describe('useLLMSettingsStore', () => {
       const ok = await store.saveProvider('google', '');
 
       expect(ok).toBe(true);
-      expect(mockAuthStore.updatePreferences).toHaveBeenCalledWith({
+      expect(lastPatch()).toEqual({
         llm: expect.objectContaining({
           keys: {},
           defaultModel: { provider: 'google', model: GOOGLE_DEFAULT },
@@ -280,7 +289,7 @@ describe('useLLMSettingsStore', () => {
 
       await store.saveProvider('openai', 'k', { 'gpt-6.1-sol': null });
 
-      expect(mockAuthStore.updatePreferences).toHaveBeenCalledWith({
+      expect(lastPatch()).toEqual({
         llm: expect.objectContaining({ thinking: {} }),
       });
       expect(store.llm.thinking['gpt-6.1-sol']).toBeUndefined();
@@ -297,7 +306,7 @@ describe('useLLMSettingsStore', () => {
       });
 
       expect(ok).toBe(true);
-      expect(mockAuthStore.updatePreferences).toHaveBeenCalledWith({
+      expect(lastPatch()).toEqual({
         llm: expect.objectContaining({
           thinking: { 'gpt-6.1-sol': 'low', 'gemini-3.8-flash': 'low' },
         }),
@@ -317,7 +326,7 @@ describe('useLLMSettingsStore', () => {
       });
 
       expect(ok).toBe(true);
-      expect(mockAuthStore.updatePreferences).toHaveBeenCalledWith({
+      expect(lastPatch()).toEqual({
         llm: expect.objectContaining({
           keys: { openrouter: 'or-key' },
           thinking: { 'gemini-3.8-flash': 'low' },
@@ -362,7 +371,7 @@ describe('useLLMSettingsStore', () => {
       const ok = await store.saveDefault({ provider: 'anthropic', model: 'claude-opus-5-5' });
 
       expect(ok).toBe(true);
-      expect(mockAuthStore.updatePreferences).toHaveBeenCalledWith({
+      expect(lastPatch()).toEqual({
         llm: {
           keys: { google: 'saved-google-key' },
           thinking: { 'claude-opus-5-5': 'low' },
@@ -382,7 +391,7 @@ describe('useLLMSettingsStore', () => {
 
       await store.saveDefault({ provider: 'openrouter', model: 'acme/custom:free' });
 
-      expect(mockAuthStore.updatePreferences).toHaveBeenCalledWith({
+      expect(lastPatch()).toEqual({
         llm: expect.objectContaining({
           defaultModel: { provider: 'openrouter', model: 'acme/custom:free' },
         }),

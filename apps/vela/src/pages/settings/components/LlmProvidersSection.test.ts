@@ -92,6 +92,13 @@ describe('LlmProvidersSection', () => {
   let authStore: ReturnType<typeof useAuthStore>;
   let updatePreferencesSpy: ReturnType<typeof vi.spyOn>;
 
+  const resolvePatchArg = (partial: unknown): Partial<UserPreferences> =>
+    typeof partial === 'function'
+      ? (partial as (_current: UserPreferences) => Partial<UserPreferences>)(
+          authStore.user?.preferences as UserPreferences,
+        )
+      : (partial as Partial<UserPreferences>);
+
   const mountSection = () =>
     mount(LlmProvidersSection, {
       global: { plugins: [Quasar], stubs },
@@ -111,7 +118,7 @@ describe('LlmProvidersSection', () => {
         if (!authStore.user) return false;
         authStore.user.preferences = {
           ...(authStore.user.preferences as UserPreferences),
-          ...partial,
+          ...resolvePatchArg(partial),
         };
         return true;
       });
@@ -197,7 +204,7 @@ describe('LlmProvidersSection', () => {
       await wrapper.find('[data-testid="llm-default-save"]').trigger('click');
       await flushPromises();
 
-      const llm = updatePreferencesSpy.mock.calls[0]![0].llm as LlmPreferences;
+      const llm = resolvePatchArg(updatePreferencesSpy.mock.calls[0]![0]).llm as LlmPreferences;
       expect(llm.defaultModel).toEqual({ provider: 'openai', model: 'gpt-6-luna' });
       expect(llmStore.selection.model).toBe('gpt-6-luna');
       expect(Notify.create).toHaveBeenCalledWith(expect.objectContaining({ type: 'positive' }));
@@ -217,7 +224,7 @@ describe('LlmProvidersSection', () => {
       await wrapper.find('[data-testid="llm-default-save"]').trigger('click');
       await flushPromises();
 
-      const llm = updatePreferencesSpy.mock.calls[0]![0].llm as LlmPreferences;
+      const llm = resolvePatchArg(updatePreferencesSpy.mock.calls[0]![0]).llm as LlmPreferences;
       expect(llm.defaultModel).toEqual({
         provider: 'openrouter',
         model: 'acme/custom-model:free',
@@ -288,7 +295,7 @@ describe('LlmProvidersSection', () => {
       await googleCard.find('[data-testid="llm-save-google"]').trigger('click');
       await flushPromises();
 
-      const llm = updatePreferencesSpy.mock.calls[0]![0].llm as LlmPreferences;
+      const llm = resolvePatchArg(updatePreferencesSpy.mock.calls[0]![0]).llm as LlmPreferences;
       expect(llm.keys).toEqual({ google: 'google-updated', openai: 'saved-openai' });
       const openaiInput = openaiCard.find('[data-testid="llm-key-input-openai"]');
       expect((openaiInput.element as HTMLInputElement).value).toBe('openai-draft-unsaved');
@@ -400,7 +407,7 @@ describe('LlmProvidersSection', () => {
       await wrapper.find('[data-testid="llm-default-save"]').trigger('click');
       await flushPromises();
 
-      const llm = updatePreferencesSpy.mock.calls[0]![0].llm as LlmPreferences;
+      const llm = resolvePatchArg(updatePreferencesSpy.mock.calls[0]![0]).llm as LlmPreferences;
       expect(llm.defaultModel).toEqual({ provider: 'openrouter', model: 'acme/model:free' });
     });
   });
