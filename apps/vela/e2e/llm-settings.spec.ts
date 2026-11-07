@@ -61,6 +61,36 @@ const dictionaryEntry = (userId: string) => ({
 });
 
 test.describe('LLM Settings - Provider cards', () => {
+  test('rebases a stale tab save without losing another tab’s provider key', async ({
+    authedPage: page,
+    apiMock,
+  }) => {
+    apiMock.seedProfile(SYNTHETIC_USER_A);
+    const secondTab = await page.context().newPage();
+    await gotoSettings(page);
+    await gotoSettings(secondTab);
+
+    await openCard(page, 'google');
+    await keyInput(page, 'google').fill(GOOGLE_KEY);
+    const firstSave = waitForProfilePut(page);
+    await page.getByTestId('llm-save-google').click();
+    expect((await firstSave).status()).toBe(200);
+
+    await openCard(secondTab, 'openai');
+    await keyInput(secondTab, 'openai').fill(OPENAI_KEY);
+    const conflict = secondTab.waitForResponse(
+      (response) => response.url().includes('/api/profiles/update') && response.status() === 409,
+    );
+    const retried = secondTab.waitForResponse(
+      (response) => response.url().includes('/api/profiles/update') && response.status() === 200,
+    );
+    await secondTab.getByTestId('llm-save-openai').click();
+    await conflict;
+    await retried;
+    expect(llmOf(apiMock.lastPut()).keys).toEqual({ google: GOOGLE_KEY, openai: OPENAI_KEY });
+    await secondTab.close();
+  });
+
   test('should render all four provider cards', async ({ authedPage: page }) => {
     await gotoSettings(page);
 
@@ -455,7 +485,7 @@ test.describe('LLM Settings - Request contract', () => {
     expect(body.provider).toBe('google');
     expect(body.model).toBe('gemini-3.8-flash');
     expect(body.apiKey).toBe(GOOGLE_KEY);
-    // The browser never selects thinking in HPA-754
+    // This profile has no saved override, so the request omits thinking.
     expect(body).not.toHaveProperty('thinking');
   });
 

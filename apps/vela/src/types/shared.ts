@@ -2,14 +2,8 @@
 // Canonical defaults for optional UserPreferences fields
 export { DEFAULT_DAILY_LESSON_GOAL, DEFAULT_LESSON_DURATION_MINUTES } from '@vela/common';
 
-import type { LlmProvider, LlmEffort } from '@vela/common';
-
-export interface LlmPreferences {
-  // Optional per-provider API keys saved by the user
-  keys: Partial<Record<LlmProvider, string>>;
-  thinking: Record<string, LlmEffort>;
-  defaultModel: { provider: LlmProvider; model: string };
-}
+import type { LlmPreferences } from '@vela/common';
+export type { LlmPreferences } from '@vela/common';
 
 export interface UserPreferences {
   dailyGoal: number;
@@ -47,6 +41,7 @@ export interface Profile {
   learning_streak: number;
   last_activity: string | null;
   preferences: UserPreferences;
+  preferences_version?: string | null;
   created_at: string;
   updated_at: string;
 }

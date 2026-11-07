@@ -1472,6 +1472,71 @@ describe('acknowledged writes reconcile at preference path granularity', () => {
     (queryCache.get(cacheKey(authKeys.profile('user-a')))?.data as Profile | undefined)
       ?.preferences as Record<string, unknown> | undefined;
 
+  it('treats a default provider and model as one acknowledged selection', async () => {
+    const { authStore, llmStore } = await stores();
+    await signInWithBasePrefs(authStore);
+    const save = llmStore.saveDefault({ provider: 'openrouter', model: GOOGLE_DEFAULT });
+    await flushPromises();
+    const base = serverProfiles.get('user-a')!;
+    const stamp = '2030-01-01T00:00:00.000Z';
+    const read: Profile = {
+      ...base,
+      updated_at: stamp,
+      preferences: {
+        ...base.preferences,
+        llm: makeLlm({ defaultModel: { provider: 'openrouter', model: 'different-model' } }),
+      },
+    };
+    mockAuthService.getUserProfile.mockResolvedValue(read);
+    await authStore.loadUserProfile('user-a');
+    resolveWrite(0, {
+      success: true,
+      profile: {
+        ...base,
+        updated_at: stamp,
+        preferences: {
+          ...base.preferences,
+          llm: makeLlm({ defaultModel: { provider: 'openrouter', model: GOOGLE_DEFAULT } }),
+        },
+      },
+    });
+    pendingWrites.splice(0, 1);
+    expect(await save).toBe(true);
+    expect(llmStore.llm.defaultModel).toEqual({ provider: 'openrouter', model: GOOGLE_DEFAULT });
+  });
+
+  it('keeps a newer unrelated thinking override when an older save is acknowledged', async () => {
+    const { authStore, llmStore } = await stores();
+    await signInWithBasePrefs(authStore);
+    const save = llmStore.saveProvider('google', null, { [GOOGLE_DEFAULT]: 'high' });
+    await flushPromises();
+    const base = serverProfiles.get('user-a')!;
+    const newer: Profile = {
+      ...base,
+      updated_at: '2030-06-01T00:00:00.000Z',
+      preferences: {
+        ...base.preferences,
+        llm: makeLlm({ thinking: { [GOOGLE_DEFAULT]: 'high', 'gpt-6.1-sol': 'low' } }),
+      },
+    };
+    mockAuthService.getUserProfile.mockResolvedValue(newer);
+    await authStore.loadUserProfile('user-a');
+    resolveWrite(0, {
+      success: true,
+      profile: {
+        ...base,
+        updated_at: '2030-01-01T00:00:00.000Z',
+        preferences: {
+          ...base.preferences,
+          llm: makeLlm({ thinking: { [GOOGLE_DEFAULT]: 'high' } }),
+        },
+      },
+    });
+    pendingWrites.splice(0, 1);
+    expect(await save).toBe(true);
+    expect(llmStore.llm.thinking).toEqual({ [GOOGLE_DEFAULT]: 'high', 'gpt-6.1-sol': 'low' });
+  });
+
   it('keeps a newer unrelated provider key when an older llm acknowledgment resolves', async () => {
     const { authStore, llmStore, themeStore } = await stores();
     await signInWithBasePrefs(authStore);

@@ -388,6 +388,49 @@ describe('useAuthStore', () => {
   });
 
   describe('updateProfile', () => {
+    it('does not report a committed save as failed when local bookkeeping throws', async () => {
+      const { useAuthStore } = await import('./auth');
+      const store = useAuthStore();
+      store.setSession(mockSession);
+      store.setUser(makeUser());
+      mockAuthService.updateUserProfile.mockResolvedValueOnce({
+        success: true,
+        profile: mockProfile,
+      });
+      mockQueryClient.invalidateQueries.mockImplementationOnce(() => {
+        throw new Error('cache unavailable');
+      });
+      expect(await store.updatePreferences({ darkMode: true })).toBe(true);
+    });
+    it('reloads after a preference conflict and reapplies the updater to the newer profile', async () => {
+      const { useAuthStore } = await import('./auth');
+      const store = useAuthStore();
+      store.setSession(mockSession);
+      store.setUser(makeUser({ preferences: { darkMode: false }, preferences_version: 'old' }));
+      const remote = {
+        ...mockProfile,
+        preferences: { darkMode: false, dailyGoal: 90 },
+        preferences_version: 'new',
+      };
+      mockAuthService.getUserProfile.mockResolvedValue(remote);
+      mockAuthService.updateUserProfile
+        .mockResolvedValueOnce({ success: false, status: 409 })
+        .mockResolvedValueOnce({
+          success: true,
+          profile: {
+            ...remote,
+            preferences: { darkMode: true, dailyGoal: 90 },
+            preferences_version: 'next',
+          },
+        });
+
+      expect(await store.updatePreferences(() => ({ darkMode: true }))).toBe(true);
+      expect(mockAuthService.updateUserProfile.mock.calls[1][1]).toMatchObject({
+        preferences: { darkMode: true, dailyGoal: 90 },
+        expected_preferences_version: 'new',
+      });
+      expect(store.user?.preferences).toMatchObject({ darkMode: true, dailyGoal: 90 });
+    });
     it('returns false and sets error when no user is logged in', async () => {
       const { useAuthStore } = await import('./auth');
       const store = useAuthStore();

@@ -13,6 +13,7 @@
     "test": "bun run test:unit",
     "test:unit": "vitest run",
     "test:e2e": "playwright test",
+    "test:e2e:mocked": "playwright test --config playwright.mocked.config.ts",
     "test:headed": "playwright test --headed",
     "test:ui": "playwright test --ui",
     "test:debug": "playwright test --debug",

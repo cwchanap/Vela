@@ -19,6 +19,12 @@ export const LLM_PROVIDERS = ['google', 'openai', 'anthropic', 'openrouter'] as 
 
 export type LlmProvider = (typeof LLM_PROVIDERS)[number];
 
+export interface LlmPreferences {
+  keys: Partial<Record<LlmProvider, string>>;
+  thinking: Record<string, LlmEffort>;
+  defaultModel: { provider: LlmProvider; model: string };
+}
+
 export type LlmMessage = { role: 'system' | 'user' | 'assistant'; content: string };
 
 export type LlmUsage = {

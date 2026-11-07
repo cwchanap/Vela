@@ -103,6 +103,19 @@ describe('Profiles Route', () => {
     expect(mockProfilesDb.create).toHaveBeenCalledTimes(1);
   });
 
+  test('GET / returns the existing profile when concurrent creation wins', async () => {
+    mockProfilesDb.get.mockResolvedValueOnce(null).mockResolvedValueOnce({
+      user_id: 'test-user',
+      preferences: { darkMode: true },
+    });
+    mockProfilesDb.create.mockRejectedValueOnce(
+      Object.assign(new Error('exists'), { name: 'ConditionalCheckFailedException' }),
+    );
+    const res = await createTestApp().request('/?user_id=test-user');
+    expect(res.status).toBe(200);
+    expect((await res.json()).profile.preferences.darkMode).toBe(true);
+  });
+
   test('GET / returns 500 on DynamoDB error', async () => {
     mockProfilesDb.get.mockRejectedValueOnce(new Error('DDB error'));
     const app = createTestApp();
@@ -135,6 +148,24 @@ describe('Profiles Route', () => {
       body: JSON.stringify({ user_id: 'other-user', username: 'hacker' }),
     });
     expect(res.status).toBe(403);
+  });
+
+  test('PUT /update rejects unversioned and conflicting preference writes', async () => {
+    const app = createTestApp();
+    const request = (body: object) =>
+      app.request('/update', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+    expect((await request({ user_id: 'test-user', preferences: {} })).status).toBe(428);
+    mockProfilesDb.update.mockRejectedValueOnce(
+      Object.assign(new Error('conflict'), { name: 'ConditionalCheckFailedException' }),
+    );
+    expect(
+      (await request({ user_id: 'test-user', preferences: {}, expected_preferences_version: null }))
+        .status,
+    ).toBe(409);
   });
 
   test('POST /create creates a new profile', async () => {
@@ -237,7 +268,11 @@ describe('Profiles Route', () => {
     const res = await app.request('/update', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ user_id: 'test-user', preferences: { dailyGoal: 30 } }),
+      body: JSON.stringify({
+        user_id: 'test-user',
+        expected_preferences_version: null,
+        preferences: { dailyGoal: 30 },
+      }),
     });
     expect(res.status).toBe(200);
     expect(mockProfilesDb.update).toHaveBeenCalledWith(
@@ -245,6 +280,7 @@ describe('Profiles Route', () => {
       expect.objectContaining({
         preferences: expect.objectContaining({ dailyGoal: 30 }),
       }),
+      null,
     );
   });
 
@@ -296,6 +332,7 @@ describe('Profiles Route', () => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         user_id: 'test-user',
+        expected_preferences_version: null,
         preferences: { dailyGoal: 45, darkMode: true, llm },
       }),
     });
@@ -341,7 +378,11 @@ describe('Profiles Route', () => {
     const res = await app.request('/update', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ user_id: 'test-user', preferences: { llm } }),
+      body: JSON.stringify({
+        user_id: 'test-user',
+        expected_preferences_version: null,
+        preferences: { llm },
+      }),
     });
     expect(res.status).toBe(200);
     expect(mockProfilesDb.update).toHaveBeenCalledWith(
@@ -349,6 +390,7 @@ describe('Profiles Route', () => {
       expect.objectContaining({
         preferences: expect.objectContaining({ llm }),
       }),
+      null,
     );
   });
 
@@ -422,7 +464,7 @@ describe('Profiles Route', () => {
         llm: {
           keys: { google: 'k', 'not-a-provider': 'bad' },
           thinking: { 'gemini-3.8-flash': 'high', 'bad-model': 'not-an-effort' },
-          defaultModel: { provider: 'unknown-provider', model: 'x' },
+          defaultModel: { provider: 'anthropic', model: '' },
         },
       },
       created_at: new Date().toISOString(),
@@ -435,10 +477,116 @@ describe('Profiles Route', () => {
     expect(json.profile.preferences.llm.keys).toEqual({ google: 'k' });
     expect(json.profile.preferences.llm.thinking).toEqual({ 'gemini-3.8-flash': 'high' });
     expect(json.profile.preferences.llm.defaultModel).toEqual({
-      provider: 'google',
-      model: LLM_PROVIDER_REGISTRY.google.defaultModel,
+      provider: 'anthropic',
+      model: LLM_PROVIDER_REGISTRY.anthropic.defaultModel,
     });
     expect(mockProfilesDb.update).not.toHaveBeenCalled();
+  });
+
+  test('bounds writes and sanitizes stored entries without losing valid keys', async () => {
+    const app = createTestApp();
+    const valid = {
+      keys: { openai: 'valid' },
+      thinking: { 'future-model': 'high' },
+      defaultModel: { provider: 'openai', model: 'future-model' },
+    };
+    for (const llm of [
+      { ...valid, keys: { openai: '' } },
+      { ...valid, keys: { openai: 'x'.repeat(4097) } },
+      { ...valid, thinking: { ['x'.repeat(513)]: 'high' } },
+      { ...valid, defaultModel: { provider: 'openai', model: '' } },
+    ]) {
+      const response = await app.request('/update', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          user_id: 'test-user',
+          expected_preferences_version: null,
+          preferences: { llm },
+        }),
+      });
+      expect(response.status).toBe(400);
+    }
+    mockProfilesDb.get.mockResolvedValueOnce({
+      user_id: 'test-user',
+      preferences: {
+        llm: {
+          ...valid,
+          keys: { ...valid.keys, google: 'x'.repeat(4097) },
+          thinking: { ...valid.thinking, ['x'.repeat(513)]: 'high' },
+        },
+      },
+    });
+    const read = await app.request('/?user_id=test-user');
+    const cleaned = (await read.json()).profile.preferences.llm;
+    expect(cleaned).toEqual(valid);
+    mockProfilesDb.update.mockResolvedValueOnce({ user_id: 'test-user' });
+    const write = await app.request('/update', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        user_id: 'test-user',
+        expected_preferences_version: null,
+        preferences: { llm: cleaned },
+      }),
+    });
+    expect(write.status).toBe(200);
+  });
+
+  test('preserves an unreadable llm subtree during an unrelated preference save', async () => {
+    const llm = {
+      keys: { openai: 'keep-me' },
+      thinking: {},
+      defaultModel: { provider: 'unknown', model: 'x' },
+    };
+    mockProfilesDb.get.mockImplementation(() =>
+      Promise.resolve(structuredClone({ user_id: 'test-user', preferences: { llm } })),
+    );
+    mockProfilesDb.update.mockResolvedValueOnce({ user_id: 'test-user' });
+    const app = createTestApp();
+    const read = await app.request('/?user_id=test-user');
+    expect((await read.json()).profile.preferences.llm).toBeUndefined();
+    const write = await app.request('/update', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        user_id: 'test-user',
+        expected_preferences_version: null,
+        preferences: { darkMode: true },
+      }),
+    });
+    expect(write.status).toBe(200);
+    expect(mockProfilesDb.update.mock.calls[0][1].preferences.llm).toEqual(llm);
+  });
+
+  test('retains valid saved keys when a new default repairs an unreadable llm subtree', async () => {
+    const llm = {
+      keys: { openai: 'keep-me' },
+      thinking: { 'gpt-6.1-sol': 'high' },
+      defaultModel: { provider: 'unknown', model: 'x' },
+    };
+    mockProfilesDb.get.mockResolvedValueOnce({ user_id: 'test-user', preferences: { llm } });
+    mockProfilesDb.update.mockResolvedValueOnce({ user_id: 'test-user' });
+    const replacement = {
+      keys: {},
+      thinking: {},
+      defaultModel: { provider: 'google', model: 'gemini-3.8-flash' },
+    };
+    const response = await createTestApp().request('/update', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        user_id: 'test-user',
+        expected_preferences_version: null,
+        preferences: { llm: replacement },
+      }),
+    });
+    expect(response.status).toBe(200);
+    expect(mockProfilesDb.update.mock.calls[0][1].preferences.llm).toEqual({
+      ...replacement,
+      keys: { openai: 'keep-me' },
+      thinking: { 'gpt-6.1-sol': 'high' },
+    });
   });
 
   test('GET / drops invalid darkMode values from stored profiles without 500', async () => {

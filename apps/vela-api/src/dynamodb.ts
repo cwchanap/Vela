@@ -21,6 +21,7 @@ export interface Profile {
   total_experience?: number;
   learning_streak?: number;
   preferences?: Record<string, unknown>;
+  preferences_version?: string;
   last_activity?: string;
   created_at?: string;
   updated_at?: string;
@@ -235,6 +236,7 @@ export const profiles = {
       const command = new GetCommand({
         TableName: TABLE_NAMES.PROFILES,
         Key: { user_id: userId },
+        ConsistentRead: true,
       });
       const response = await docClient.send(command);
       return response.Item;
@@ -248,16 +250,25 @@ export const profiles = {
       const command = new PutCommand({
         TableName: TABLE_NAMES.PROFILES,
         Item: profile,
+        ConditionExpression: 'attribute_not_exists(user_id)',
       });
       await docClient.send(command);
       return profile;
     } catch (error) {
+      if (isConditionalCheckFailedError(error)) throw error;
       handleDynamoError(error);
     }
   },
 
-  async update(userId: string, updates: Partial<Omit<Profile, 'user_id'>>) {
+  async update(
+    userId: string,
+    updates: Partial<Omit<Profile, 'user_id'>>,
+    expectedPreferencesVersion?: string | null,
+  ) {
     try {
+      if (expectedPreferencesVersion !== undefined) {
+        updates = { ...updates, preferences_version: randomUUID() };
+      }
       const updateExpression =
         'SET ' +
         Object.keys(updates)
@@ -278,17 +289,33 @@ export const profiles = {
         {} as Record<string, unknown>,
       );
 
+      if (expectedPreferencesVersion !== undefined) {
+        expressionAttributeNames['#preferencesVersion'] = 'preferences_version';
+        if (expectedPreferencesVersion !== null) {
+          expressionAttributeValues[':expectedPreferencesVersion'] = expectedPreferencesVersion;
+        }
+      }
+
       const command = new UpdateCommand({
         TableName: TABLE_NAMES.PROFILES,
         Key: { user_id: userId },
         UpdateExpression: updateExpression,
         ExpressionAttributeNames: expressionAttributeNames,
         ExpressionAttributeValues: expressionAttributeValues,
+        ...(expectedPreferencesVersion !== undefined && {
+          ConditionExpression:
+            expectedPreferencesVersion === null
+              ? 'attribute_not_exists(#preferencesVersion)'
+              : '#preferencesVersion = :expectedPreferencesVersion',
+        }),
         ReturnValues: 'ALL_NEW',
       });
       const response = await docClient.send(command);
       return response.Attributes;
     } catch (error) {
+      if (expectedPreferencesVersion !== undefined && isConditionalCheckFailedError(error)) {
+        throw error;
+      }
       handleDynamoError(error);
     }
   },

@@ -1054,6 +1054,35 @@ describe('My Dictionaries Route', () => {
       });
     });
 
+    test('rejects malformed and unsupported dictionary thinking before contacting the provider', async () => {
+      const app = createTestApp();
+      for (const thinking of ['ultra', 'max', 4]) {
+        const res = await app.request(
+          analyzeRequest({ sentence: '日本語', provider: 'google', apiKey: 'user-key', thinking }),
+        );
+        expect(res.status).toBe(400);
+      }
+      expect(mockFetch).not.toHaveBeenCalled();
+    });
+
+    test('ignores thinking for a free-form OpenRouter model', async () => {
+      mockFetch.mockResolvedValueOnce({ ok: true, body: makeSseStream(['data: [DONE]']) });
+      const res = await createTestApp().request(
+        analyzeRequest({
+          sentence: '日本語',
+          provider: 'openrouter',
+          apiKey: 'user-key',
+          model: 'gpt-6.1-sol',
+          thinking: 'high',
+        }),
+      );
+      expect(res.status).toBe(200);
+      await sseFrames(res);
+      const [, init] = mockFetch.mock.calls[0];
+      expect(JSON.parse(init.body)).not.toHaveProperty('reasoning');
+      expect(JSON.parse(init.body)).not.toHaveProperty('thinking');
+    });
+
     test('omitted thinking runs at low effort where the model supports it', async () => {
       for (const extra of [{}, { thinking: '   ' }]) {
         const sseLines = [`data: ${JSON.stringify({ candidates: [{ finishReason: 'STOP' }] })}`];

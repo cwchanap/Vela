@@ -355,6 +355,7 @@ describe('AuthService', () => {
         total_experience: 150,
         learning_streak: 3,
         preferences: { dailyGoal: 30 },
+        preferences_version: null,
         created_at: '2024-01-01T00:00:00Z',
         updated_at: '2024-01-02T00:00:00Z',
       };
@@ -383,13 +384,14 @@ describe('AuthService', () => {
         learning_streak: 3,
         last_activity: null,
         preferences: { dailyGoal: 30 },
+        preferences_version: null,
         created_at: '2024-01-01T00:00:00Z',
         updated_at: '2024-01-02T00:00:00Z',
       });
       expect(result).not.toHaveProperty('user_id');
     });
 
-    it('should return null when profile fetch fails', async () => {
+    it('propagates a failed profile fetch so the session can offer a retry', async () => {
       vi.mocked(fetchAuthSession).mockResolvedValue({
         tokens: {
           idToken: { toString: () => 'id-token' } as any,
@@ -398,13 +400,26 @@ describe('AuthService', () => {
       } as any);
       mockFetch.mockRejectedValue(new Error('Not found'));
 
-      const result = await authService.getUserProfile('user-123');
-
-      expect(result).toBeNull();
+      await expect(authService.getUserProfile('user-123')).rejects.toThrow('Not found');
     });
   });
 
   describe('updateUserProfile', () => {
+    it('retains the HTTP status when a save is rejected', async () => {
+      vi.mocked(fetchAuthSession).mockResolvedValue({
+        tokens: { idToken: { toString: () => 'id-token' } },
+      } as any);
+      mockFetch.mockResolvedValue({
+        ok: false,
+        status: 409,
+        statusText: 'Conflict',
+        json: vi.fn().mockResolvedValue({ error: 'Conflict' }),
+      });
+      expect(await authService.updateUserProfile('user-123', {})).toMatchObject({
+        success: false,
+        status: 409,
+      });
+    });
     it('should update user profile successfully', async () => {
       vi.mocked(fetchAuthSession).mockResolvedValue({
         tokens: {

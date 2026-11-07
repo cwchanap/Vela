@@ -75,6 +75,32 @@ describe('MainLayout', () => {
     });
   };
 
+  it('offers a retry when a signed-in profile cannot be loaded', async () => {
+    const auth = useAuthStore();
+    auth.setSession({ user: { id: 'user-1' }, provider: 'cognito' });
+    auth.setError('Failed to load user profile');
+    auth.setLoading(false);
+    const retry = vi.spyOn(auth, 'loadUserProfile').mockResolvedValue();
+    const wrapper = mount(MainLayout, {
+      global: {
+        plugins: [Quasar, router],
+        stubs: {
+          ...ALL_STUBS,
+          'q-layout': { template: '<div><slot /></div>' },
+          'q-page-container': { template: '<div><slot /></div>' },
+          'q-page': { template: '<div><slot /></div>' },
+          'q-btn': {
+            template: '<button @click="$emit(\'click\')"><slot /></button>',
+            emits: ['click'],
+          },
+        },
+      },
+    });
+    expect(wrapper.text()).toContain('Failed to load user profile');
+    await wrapper.get('[data-testid="retry-profile"]').trigger('click');
+    expect(retry).toHaveBeenCalledWith('user-1');
+  });
+
   it('shows notification when dailyGoal is missing', async () => {
     const authStore = useAuthStore();
     authStore.user = {

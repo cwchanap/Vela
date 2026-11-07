@@ -434,6 +434,9 @@ describe('DynamoDB Operations', () => {
         }),
       );
       expect(result).toEqual(newProfile);
+      expect(mockPutCommand.mock.calls[0][0].ConditionExpression).toBe(
+        'attribute_not_exists(user_id)',
+      );
     });
 
     test('should update a profile', async () => {
@@ -449,6 +452,23 @@ describe('DynamoDB Operations', () => {
         }),
       );
       expect(result).toEqual({ user_id: mockUserId, ...updatedAttrs });
+    });
+
+    test('guards preference replacement with its version and rotates the version', async () => {
+      mockSend.mockResolvedValueOnce({ Attributes: { user_id: mockUserId } });
+      await profiles.update(mockUserId, { preferences: { darkMode: true } }, 'old-version');
+      const command = mockUpdateCommand.mock.calls[0][0];
+      expect(command.ConditionExpression).toBe('#preferencesVersion = :expectedPreferencesVersion');
+      expect(command.ExpressionAttributeValues[':expectedPreferencesVersion']).toBe('old-version');
+      expect(command.ExpressionAttributeValues[':preferences_version']).not.toBe('old-version');
+    });
+
+    test('allows a first preference write only when no version exists', async () => {
+      mockSend.mockResolvedValueOnce({ Attributes: { user_id: mockUserId } });
+      await profiles.update(mockUserId, { preferences: {} }, null);
+      expect(mockUpdateCommand.mock.calls[0][0].ConditionExpression).toBe(
+        'attribute_not_exists(#preferencesVersion)',
+      );
     });
 
     test('should throw on DynamoDB error', async () => {

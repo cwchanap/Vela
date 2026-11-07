@@ -12,9 +12,16 @@ import type { LlmPreferences, UserPreferences } from 'src/types/shared';
 
 const mockCapabilitiesData = ref<{ serverKeyProviders: LlmProvider[] } | undefined>(undefined);
 const mockCapabilitiesError = ref(false);
+const mockCapabilitiesPending = ref(false);
+const mockCapabilitiesRefetch = vi.fn();
 
 vi.mock('src/composables/queries/useLlmCapabilitiesQuery', () => ({
-  useLlmCapabilitiesQuery: () => ({ data: mockCapabilitiesData, isError: mockCapabilitiesError }),
+  useLlmCapabilitiesQuery: () => ({
+    data: mockCapabilitiesData,
+    isError: mockCapabilitiesError,
+    isPending: mockCapabilitiesPending,
+    refetch: mockCapabilitiesRefetch,
+  }),
 }));
 
 const stubs = {
@@ -196,6 +203,32 @@ describe('LlmProvidersSection', () => {
   });
 
   describe('default model save', () => {
+    it('preserves a default-model draft when a conflicting profile arrives and the retry fails', async () => {
+      setUser(authStore, llmFor({ keys: { openrouter: 'key' } }));
+      let finish!: (_value: boolean) => void;
+      updatePreferencesSpy.mockImplementation(
+        () =>
+          new Promise<boolean>((resolve) => {
+            finish = resolve;
+          }),
+      );
+      wrapper = mountSection();
+      await flushPromises();
+      await defaultSelect().setValue('openrouter::__custom__');
+      const input = wrapper.find('[data-testid="llm-default-model-input"]');
+      await input.setValue('my-model');
+      await wrapper.find('[data-testid="llm-default-save"]').trigger('click');
+      authStore.user!.preferences.llm = llmFor({
+        defaultModel: { provider: 'openai', model: 'gpt-6.1-sol' },
+      });
+      await flushPromises();
+      finish(false);
+      await flushPromises();
+      expect((defaultSelect().element as HTMLSelectElement).value).toBe('openrouter::__custom__');
+      expect(
+        (wrapper.find('[data-testid="llm-default-model-input"]').element as HTMLInputElement).value,
+      ).toBe('my-model');
+    });
     it('persists a fixed provider/model pair', async () => {
       setUser(authStore, llmFor({ keys: { openai: 'openai-key' } }));
       wrapper = mountSection();
@@ -304,6 +337,24 @@ describe('LlmProvidersSection', () => {
   });
 
   describe('server-key capabilities', () => {
+    it('explains a capabilities failure and lets the user retry', async () => {
+      mockCapabilitiesError.value = true;
+      setUser(authStore, llmFor());
+      wrapper = mountSection();
+      expect(wrapper.text()).toContain('Server key availability could not be checked');
+      await wrapper.get('[data-testid="retry-capabilities"]').trigger('click');
+      expect(mockCapabilitiesRefetch).toHaveBeenCalled();
+    });
+
+    it('shows a pending check rather than claiming no server key', async () => {
+      mockCapabilitiesError.value = false;
+      mockCapabilitiesPending.value = true;
+      setUser(authStore, llmFor());
+      wrapper = mountSection();
+      expect(wrapper.text()).toContain('Checking server key availability');
+      expect(wrapper.text()).not.toContain('No API key saved for Google');
+      mockCapabilitiesPending.value = false;
+    });
     const optionValues = () =>
       defaultSelect()
         .findAll('option')
@@ -413,6 +464,22 @@ describe('LlmProvidersSection', () => {
   });
 
   describe('default-model draft sync', () => {
+    it('keeps an unsaved custom model when a remote default is loaded', async () => {
+      setUser(authStore, llmFor({ keys: { openrouter: 'key' } }));
+      wrapper = mountSection();
+      await flushPromises();
+      await defaultSelect().setValue('openrouter::__custom__');
+      await wrapper.find('[data-testid="llm-default-model-input"]').setValue('my-draft');
+      authStore.user!.preferences.llm = llmFor({
+        keys: { openrouter: 'key' },
+        defaultModel: { provider: 'openai', model: 'gpt-6.1-sol' },
+      });
+      await flushPromises();
+      expect((defaultSelect().element as HTMLSelectElement).value).toBe('openrouter::__custom__');
+      expect(
+        (wrapper.find('[data-testid="llm-default-model-input"]').element as HTMLInputElement).value,
+      ).toBe('my-draft');
+    });
     it('keeps an unsaved default-model draft across a provider save', async () => {
       setUser(authStore, llmFor({ keys: { google: 'saved-google', openai: 'openai-key' } }));
       wrapper = mountSection();

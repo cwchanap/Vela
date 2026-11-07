@@ -1,4 +1,11 @@
 import { test as base, expect } from '@playwright/test';
+import { randomUUID } from 'node:crypto';
+import {
+  normalizePreferences,
+  PreferencesReadSchema,
+  PreferencesSchema,
+  preserveStoredLlm,
+} from '../../../vela-api/src/profile-preferences';
 import type { BrowserContext, Page, Route } from '@playwright/test';
 import {
   SYNTHETIC_COGNITO_ENV,
@@ -10,7 +17,6 @@ import {
 const AUTH_KEY_PREFIX = 'CognitoIdentityServiceProvider';
 const SESSION_BOOTSTRAP_KEY = 'e2e.syntheticSessionEntries';
 const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '::1', '[::1]']);
-const KNOWN_PROVIDERS = ['google', 'openai', 'anthropic', 'openrouter'] as const;
 const PROVIDER_LABELS: Record<string, string> = {
   google: 'Google',
   openai: 'OpenAI',
@@ -102,6 +108,7 @@ export interface MockProfile {
   total_experience: number;
   learning_streak: number;
   preferences: Record<string, unknown>;
+  preferences_version?: string;
   created_at: string;
   updated_at: string;
 }
@@ -189,32 +196,8 @@ const createMockApi = (): MockApi => {
   return state;
 };
 
-const normalizePreferencesForRead = (
-  preferences: Record<string, unknown>,
-): Record<string, unknown> => {
-  const out = { ...defaultPreferences(), ...preferences };
-  const llm = out.llm;
-  if (llm !== undefined) {
-    const candidate = llm as Partial<MockLlmPreferences> | null;
-    const dm = candidate?.defaultModel;
-    const valid =
-      !!candidate &&
-      typeof candidate === 'object' &&
-      !!candidate.keys &&
-      typeof candidate.keys === 'object' &&
-      !!candidate.thinking &&
-      typeof candidate.thinking === 'object' &&
-      !!dm &&
-      typeof dm === 'object' &&
-      typeof dm.provider === 'string' &&
-      (KNOWN_PROVIDERS as readonly string[]).includes(dm.provider) &&
-      typeof dm.model === 'string';
-    if (!valid) {
-      delete out.llm;
-    }
-  }
-  return out;
-};
+const normalizePreferencesForRead = (preferences: Record<string, unknown>) =>
+  PreferencesReadSchema.parse(normalizePreferences(preferences));
 
 const jsonResponse = (route: Route, body: unknown, status = 200) =>
   route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
@@ -327,11 +310,21 @@ const handleApiRoute = async (state: MockApi, route: Route): Promise<void> => {
       return jsonResponse(route, { error: "Forbidden: Cannot update another user's profile" }, 403);
     }
     const profile = getOrCreateProfile(userId);
+    if (body.preferences !== undefined) {
+      const parsed = PreferencesSchema.safeParse(body.preferences);
+      if (!parsed.success) return jsonResponse(route, { error: 'Invalid preferences' }, 400);
+      if (body.expected_preferences_version === undefined)
+        return jsonResponse(route, { error: 'Reload your profile' }, 428);
+      if (body.expected_preferences_version !== (profile.preferences_version ?? null))
+        return jsonResponse(route, { error: 'Preferences changed elsewhere' }, 409);
+      const next: Record<string, unknown> = normalizePreferences(parsed.data);
+      preserveStoredLlm(next, profile.preferences);
+      profile.preferences = next;
+      profile.preferences_version = randomUUID();
+    }
     if (body.username !== undefined) profile.username = body.username as string | null;
     if (body.avatar_url !== undefined) profile.avatar_url = body.avatar_url as string | null;
     if (body.native_language !== undefined) profile.native_language = String(body.native_language);
-    if (body.preferences !== undefined)
-      profile.preferences = { ...(body.preferences as Record<string, unknown>) };
     profile.updated_at = new Date().toISOString();
     return jsonResponse(route, {
       success: true,
