@@ -286,6 +286,46 @@ describe('useLLMSettingsStore', () => {
       expect(store.llm.thinking['gpt-6.1-sol']).toBeUndefined();
     });
 
+    it('ignores thinking patch entries for models that belong to other providers', async () => {
+      const { useLLMSettingsStore } = await import('./llmSettings');
+      mockAuthStore.user = makeUser('user-1', makeLlm({ thinking: { 'gpt-6.1-sol': 'low' } }));
+      const store = useLLMSettingsStore();
+
+      const ok = await store.saveProvider('google', 'google-key', {
+        'gpt-6.1-sol': 'high',
+        'gemini-3.8-flash': 'low',
+      });
+
+      expect(ok).toBe(true);
+      expect(mockAuthStore.updatePreferences).toHaveBeenCalledWith({
+        llm: expect.objectContaining({
+          thinking: { 'gpt-6.1-sol': 'low', 'gemini-3.8-flash': 'low' },
+        }),
+      });
+      expect(store.llm.thinking['gpt-6.1-sol']).toBe('low');
+      expect(store.llm.thinking['gemini-3.8-flash']).toBe('low');
+    });
+
+    it('applies no thinking entries for an openrouter save', async () => {
+      const { useLLMSettingsStore } = await import('./llmSettings');
+      mockAuthStore.user = makeUser('user-1', makeLlm({ thinking: { 'gemini-3.8-flash': 'low' } }));
+      const store = useLLMSettingsStore();
+
+      const ok = await store.saveProvider('openrouter', 'or-key', {
+        'acme/custom:free': 'high',
+        'gpt-6.1-sol': 'high',
+      });
+
+      expect(ok).toBe(true);
+      expect(mockAuthStore.updatePreferences).toHaveBeenCalledWith({
+        llm: expect.objectContaining({
+          keys: { openrouter: 'or-key' },
+          thinking: { 'gemini-3.8-flash': 'low' },
+        }),
+      });
+      expect(store.llm.thinking).toEqual({ 'gemini-3.8-flash': 'low' });
+    });
+
     it('does not commit locally and reports failure when the profile write fails', async () => {
       const { useLLMSettingsStore } = await import('./llmSettings');
       mockAuthStore.user = makeUser('user-1', makeLlm({ keys: { google: 'before' } }));

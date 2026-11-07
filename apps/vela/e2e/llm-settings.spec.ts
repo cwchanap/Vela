@@ -4,7 +4,7 @@ import {
   expect,
   buildSessionEntries,
   makeSyntheticTokens,
-  seedSessionFor,
+  stageSessionFor,
 } from './fixtures/syntheticAuth';
 import { SYNTHETIC_USER_A, SYNTHETIC_USER_B } from './fixtures/syntheticEnv';
 import { waitForPageLoad } from './utils/helpers';
@@ -567,7 +567,6 @@ test.describe('LLM Settings - Session and profile integrity', () => {
   test('should reset LLM state for a new user after sign-out', async ({
     authedPage: page,
     apiMock,
-    context,
   }) => {
     apiMock.seedProfile(SYNTHETIC_USER_A, {
       llm: {
@@ -710,13 +709,20 @@ test.describe('LLM Settings - Session and profile integrity', () => {
     expect(bAuthCalls.some((h) => h.authorization === `Bearer ${tokensB.idToken}`)).toBe(true);
     expect(apiMock.profiles.get(SYNTHETIC_USER_B.userId)).toBeTruthy();
 
-    await seedSessionFor(context, SYNTHETIC_USER_B, tokensB);
+    const callCountBeforeReload = apiMock.authHeaders.length;
+    await stageSessionFor(page, SYNTHETIC_USER_B, tokensB);
     await page.reload();
     await waitForPageLoad(page);
     await expect(page.getByText('Active: Google • gemini-3.8-flash')).toBeVisible();
     await openCard(page, 'google');
     await expect(keyInput(page, 'google')).toHaveValue('');
     await expect(page.getByTestId('llm-card-google').getByText('No key saved')).toBeVisible();
+
+    const reloadedCalls = apiMock.authHeaders.slice(callCountBeforeReload);
+    expect(reloadedCalls.length).toBeGreaterThan(0);
+    for (const call of reloadedCalls) {
+      expect(call.authorization).toBe(`Bearer ${tokensB.idToken}`);
+    }
   });
 });
 

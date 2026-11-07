@@ -135,12 +135,13 @@ const customModelId = ref(
 const savingDefault = ref(false);
 
 watch(
-  () => store.llm.defaultModel,
-  (dm) => {
+  () => [store.llm.defaultModel, authStore.user?.id, authStore.sessionGeneration] as const,
+  ([dm, userId, generation], [prevDm, prevUserId, prevGeneration]) => {
+    const sessionChanged = userId !== prevUserId || generation !== prevGeneration;
+    const pairChanged = dm.provider !== prevDm.provider || dm.model !== prevDm.model;
+    if (!sessionChanged && !pairChanged) return;
     draftPairValue.value = pairToValue(dm.provider, dm.model);
-    if (dm.provider === 'openrouter') {
-      customModelId.value = dm.model;
-    }
+    customModelId.value = dm.provider === 'openrouter' ? dm.model : '';
   },
   { deep: true },
 );
