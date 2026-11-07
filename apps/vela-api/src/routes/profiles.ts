@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import { zValidator } from '@hono/zod-validator';
 import { z } from 'zod';
+import { LLM_PROVIDERS, type LlmEffort } from '@vela/common/contracts/llm';
 import type { Env } from '../types';
 import { profiles as profilesDB, type Profile } from '../dynamodb';
 import { requireAuth, type AuthContext } from '../middleware/auth';
@@ -10,6 +11,25 @@ const DEFAULT_DAILY_LESSON_GOAL = 5;
 const DEFAULT_LESSON_DURATION_MINUTES = 6;
 const DEFAULT_DAILY_GOAL = 30;
 
+const llmEffortValues = [
+  'none',
+  'low',
+  'medium',
+  'high',
+  'xhigh',
+  'max',
+] as const satisfies readonly LlmEffort[];
+const LlmEffortSchema = z.enum(llmEffortValues);
+
+const LlmPreferencesSchema = z.object({
+  keys: z.partialRecord(z.enum(LLM_PROVIDERS), z.string()),
+  thinking: z.record(z.string(), LlmEffortSchema),
+  defaultModel: z.object({
+    provider: z.enum(LLM_PROVIDERS),
+    model: z.string(),
+  }),
+});
+
 const PreferencesShape = {
   dailyGoal: z.coerce.number().int().min(1).max(1440).optional(),
   dailyLessonGoal: z.coerce.number().int().min(1).max(50).optional(),
@@ -17,6 +37,8 @@ const PreferencesShape = {
   difficulty: z.enum(['Beginner', 'Intermediate', 'Advanced']).optional(),
   notifications: z.boolean().optional(),
   todayStudyTime: z.coerce.number().optional(),
+  darkMode: z.boolean().optional(),
+  llm: LlmPreferencesSchema.optional(),
 } satisfies z.ZodRawShape;
 
 // Strip unknown keys on writes (PUT) to prevent arbitrary/unexpected keys being stored
@@ -25,7 +47,12 @@ const PreferencesSchema = z.object(PreferencesShape).strip();
 
 // Lenient on reads (GET) to prevent legacy keys in DynamoDB from causing 500s.
 // This strips unknown keys while still validating known keys.
-const PreferencesReadSchema = z.object(PreferencesShape).strip();
+const PreferencesReadSchema = z
+  .object({
+    ...PreferencesShape,
+    llm: LlmPreferencesSchema.optional().catch(undefined),
+  })
+  .strip();
 
 // Validation schemas
 const UpdateProfileSchema = z.object({

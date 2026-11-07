@@ -273,4 +273,149 @@ describe('Profiles Route', () => {
     const body = (await res.json()) as { error: string };
     expect(body.error).toBe('DDB create failed');
   });
+
+  test('PUT→GET round-trips llm settings, darkMode, and learning preferences', async () => {
+    const llm = {
+      keys: {
+        google: 'google-key',
+        openai: 'openai-key',
+        anthropic: 'anthropic-key',
+        openrouter: 'openrouter-key',
+      },
+      thinking: { 'gemini-3.8-flash': 'high', 'claude-opus-5-5': 'xhigh' },
+      defaultModel: { provider: 'anthropic', model: 'claude-sonnet-5-5' },
+    };
+    mockProfilesDb.update.mockResolvedValueOnce({
+      user_id: 'test-user',
+      updated_at: new Date().toISOString(),
+    });
+    const app = createTestApp();
+    const putRes = await app.request('/update', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        user_id: 'test-user',
+        preferences: { dailyGoal: 45, darkMode: true, llm },
+      }),
+    });
+    expect(putRes.status).toBe(200);
+    const persistedPreferences = mockProfilesDb.update.mock.calls[0][1].preferences;
+    expect(persistedPreferences).toEqual(
+      expect.objectContaining({ dailyGoal: 45, darkMode: true, llm }),
+    );
+
+    mockProfilesDb.get.mockResolvedValueOnce({
+      user_id: 'test-user',
+      email: 'user@example.com',
+      username: 'u1',
+      avatar_url: null,
+      native_language: 'en',
+      current_level: 1,
+      total_experience: 0,
+      learning_streak: 0,
+      preferences: persistedPreferences,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    });
+    const getRes = await app.request('/?user_id=test-user');
+    expect(getRes.status).toBe(200);
+    const json = await getRes.json();
+    expect(json.profile.preferences.llm).toEqual(llm);
+    expect(json.profile.preferences.darkMode).toBe(true);
+    expect(json.profile.preferences.dailyGoal).toBe(45);
+    expect(mockProfilesDb.update).toHaveBeenCalledTimes(1);
+  });
+
+  test('PUT /update persists a partial provider key map', async () => {
+    const llm = {
+      keys: { openai: 'only-openai-key' },
+      thinking: {},
+      defaultModel: { provider: 'openai', model: 'gpt-6.1-sol' },
+    };
+    mockProfilesDb.update.mockResolvedValueOnce({
+      user_id: 'test-user',
+      updated_at: new Date().toISOString(),
+    });
+    const app = createTestApp();
+    const res = await app.request('/update', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ user_id: 'test-user', preferences: { llm } }),
+    });
+    expect(res.status).toBe(200);
+    expect(mockProfilesDb.update).toHaveBeenCalledWith(
+      'test-user',
+      expect.objectContaining({
+        preferences: expect.objectContaining({ llm }),
+      }),
+    );
+  });
+
+  test('PUT /update rejects malformed llm preferences with 400', async () => {
+    const app = createTestApp();
+    const invalidPreferences = [
+      {
+        llm: {
+          keys: { google: 'k' },
+          thinking: { 'model-x': 'ultra' },
+          defaultModel: { provider: 'google', model: 'x' },
+        },
+      },
+      {
+        llm: {
+          keys: { 'not-a-provider': 'k' },
+          thinking: {},
+          defaultModel: { provider: 'google', model: 'x' },
+        },
+      },
+      { llm: { keys: {}, thinking: {} } },
+      {
+        llm: {
+          keys: {},
+          thinking: {},
+          defaultModel: { provider: 'bogus', model: 'x' },
+        },
+      },
+      { llm: 'not-an-object' },
+      { darkMode: 'yes' },
+    ];
+    for (const preferences of invalidPreferences) {
+      const res = await app.request('/update', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ user_id: 'test-user', preferences }),
+      });
+      expect(res.status).toBe(400);
+    }
+    expect(mockProfilesDb.update).not.toHaveBeenCalled();
+  });
+
+  test('GET / drops a malformed llm subtree without failing', async () => {
+    const malformedLlmVariants = [
+      'corrupted-llm',
+      {
+        keys: { google: 'k' },
+        thinking: {},
+        defaultModel: { provider: 'unknown-provider', model: 'x' },
+      },
+    ];
+    const app = createTestApp();
+    for (const llm of malformedLlmVariants) {
+      mockProfilesDb.get.mockResolvedValueOnce({
+        user_id: 'test-user',
+        email: null,
+        username: null,
+        preferences: { dailyLessonGoal: 7, darkMode: true, llm },
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      });
+      const res = await app.request('/?user_id=test-user');
+      expect(res.status).toBe(200);
+      const json = await res.json();
+      expect(json.profile.preferences.llm).toBeUndefined();
+      expect(json.profile.preferences.dailyLessonGoal).toBe(7);
+      expect(json.profile.preferences.darkMode).toBe(true);
+    }
+    expect(mockProfilesDb.update).not.toHaveBeenCalled();
+  });
 });
