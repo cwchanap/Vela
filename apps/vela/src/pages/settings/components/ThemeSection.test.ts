@@ -47,21 +47,20 @@ describe('ThemeSection', () => {
     if (wrapper) wrapper.unmount();
   });
 
-  describe('toggleDarkMode', () => {
-    it('calls themeStore.toggle when dark mode is toggled', () => {
-      const toggleSpy = vi.spyOn(themeStore, 'toggle').mockImplementation(() => {});
-      wrapper.vm.toggleDarkMode();
-      expect(toggleSpy).toHaveBeenCalled();
+  describe('dark mode toggle', () => {
+    it('sets dark mode directly when toggle emits update:modelValue', async () => {
+      const setDarkSpy = vi.spyOn(themeStore, 'setDarkMode');
+      const toggle = wrapper.find('input[type="checkbox"]');
+      await toggle.setValue(true);
+      expect(setDarkSpy).toHaveBeenCalledWith(true);
     });
 
-    it('updates darkModeEnabled to reflect themeStore.isDark after toggle', () => {
-      // Mock toggle to use $patch to properly update pinia state
-      vi.spyOn(themeStore, 'toggle').mockImplementation(() => {
-        themeStore.$patch({ darkMode: !themeStore.darkMode });
-      });
-      const initialDark = themeStore.isDark;
-      wrapper.vm.toggleDarkMode();
-      expect(wrapper.vm.darkModeEnabled).toBe(!initialDark);
+    it('updates darkModeEnabled to reflect themeStore.isDark', () => {
+      themeStore.$patch({ darkMode: true });
+      expect(wrapper.vm.darkModeEnabled).toBe(true);
+
+      themeStore.$patch({ darkMode: false });
+      expect(wrapper.vm.darkModeEnabled).toBe(false);
     });
   });
 

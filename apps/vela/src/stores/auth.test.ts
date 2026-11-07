@@ -852,5 +852,32 @@ describe('useAuthStore', () => {
       expect(store.error).toBeNull();
       expect(store.isLoading).toBe(true);
     });
+
+    it('resets isLoading when switching directly to another account during pending updateProfile', async () => {
+      let resolveUpdate!: (_v: { success: boolean }) => void;
+      mockAuthService.updateUserProfile.mockImplementationOnce(
+        () =>
+          new Promise((res) => {
+            resolveUpdate = res;
+          }),
+      );
+      const { useAuthStore } = await import('./auth');
+      const store = useAuthStore();
+      store.setSession({ user: { id: 'user-a', email: 'a@example.com' }, provider: 'cognito' });
+      store.setUser(makeUser({ id: 'user-a', preferences: { dailyGoal: 30 } }));
+
+      const pending = store.updateProfile({ preferences: { dailyGoal: 60 } });
+      expect(store.isLoading).toBe(true);
+
+      // Account switches directly to user-b while update is in flight
+      store.setSession({ user: { id: 'user-b', email: 'b@example.com' }, provider: 'cognito' });
+      expect(store.isLoading).toBe(false);
+
+      resolveUpdate({ success: true });
+      const result = await pending;
+
+      expect(result).toBe(false);
+      expect(store.isLoading).toBe(false);
+    });
   });
 });

@@ -9,12 +9,7 @@
         </div>
       </div>
       <div class="col-auto">
-        <q-toggle
-          :model-value="darkModeEnabled"
-          color="primary"
-          data-testid="dark-mode-toggle"
-          @update:model-value="toggleDarkMode"
-        />
+        <q-toggle v-model="darkModeEnabled" color="primary" data-testid="dark-mode-toggle" />
       </div>
     </div>
     <q-separator class="q-my-md" />
@@ -57,10 +52,6 @@ const darkModeEnabled = computed({
     themeStore.setDarkMode(val);
   },
 });
-
-const toggleDarkMode = () => {
-  themeStore.toggle();
-};
 
 const saveThemeToProfile = async () => {
   const ok = await themeStore.saveToUserPreferences();
