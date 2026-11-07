@@ -256,13 +256,14 @@ app.post('/analyze', async (c) => {
       const issue = parsed.error.issues[0];
       return c.json({ error: issue?.message ?? 'Invalid request' }, 400);
     }
-    const { sentence, provider, model, apiKey } = parsed.data;
+    const { sentence, provider, model, apiKey, thinking } = parsed.data;
 
     // Same shared normalizer as chat: registry provider/model validation and a
     // single system + user turn. The analysis prompt itself is unchanged.
     const normalized = normalizeLlmRequest({
       provider,
       model,
+      thinking,
       system: ANALYSIS_SYSTEM_PROMPT,
       prompt: `Analyze this Japanese sentence: "${sentence}"`,
     });
@@ -273,7 +274,7 @@ app.post('/analyze', async (c) => {
       provider: llmProvider,
       model: llmModel,
       modelInfo,
-      effort: defaultEffort,
+      effort: normalizedEffort,
       system,
       messages,
     } = normalized.value;
@@ -289,7 +290,11 @@ app.post('/analyze', async (c) => {
 
     // Analysis deliberately runs at low native effort where the model supports
     // it; the browser never sends `thinking` for dictionary analysis.
-    const effort = modelInfo?.efforts.includes('low') ? ('low' as const) : defaultEffort;
+    const effort = thinking?.trim()
+      ? normalizedEffort
+      : modelInfo?.efforts.includes('low')
+        ? ('low' as const)
+        : normalizedEffort;
 
     // Shared adapter stream, lazy: the first read performs the upstream call,
     // so initial provider 401/429/5xx failures surface inside the SSE body as

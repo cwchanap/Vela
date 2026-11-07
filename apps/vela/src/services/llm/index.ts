@@ -23,6 +23,7 @@ export interface AnalyzeSentenceInput {
   provider: LlmProvider;
   model?: string | undefined;
   apiKey?: string | undefined;
+  thinking?: string | undefined;
   /** Cancels the upstream stream; superseded asks abort the previous one. */
   signal?: AbortSignal | undefined;
 }

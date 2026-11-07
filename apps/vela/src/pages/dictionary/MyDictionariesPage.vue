@@ -640,6 +640,7 @@ async function handleAskAI(entry: MyDictionaryEntry) {
         provider: selection.value.provider,
         model: selection.value.model,
         apiKey: selection.value.apiKey,
+        ...(selection.value.thinking ? { thinking: selection.value.thinking } : {}),
         signal: controller.signal,
       },
       (frame) => {
