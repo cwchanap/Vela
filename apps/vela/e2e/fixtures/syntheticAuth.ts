@@ -1,6 +1,11 @@
 import { test as base, expect } from '@playwright/test';
 import type { BrowserContext, Page, Route } from '@playwright/test';
-import { SYNTHETIC_COGNITO_ENV, SYNTHETIC_USER_A, type SyntheticUser } from './syntheticEnv';
+import {
+  SYNTHETIC_COGNITO_ENV,
+  SYNTHETIC_USER_A,
+  SYNTHETIC_USER_B,
+  type SyntheticUser,
+} from './syntheticEnv';
 
 /**
  * Fully self-contained Playwright fixture for the LLM-settings acceptance
@@ -13,9 +18,12 @@ import { SYNTHETIC_COGNITO_ENV, SYNTHETIC_USER_A, type SyntheticUser } from './s
  *  - Every /api/* request is intercepted in the browser and answered by an
  *    in-memory per-test mock that mirrors the real route contracts
  *    (profile auto-create, strict PUT + lenient llm read, capabilities,
- *    chat, SSE dictionary analysis, TTS settings).
+ *    chat, SSE dictionary analysis, TTS settings). Requests without a
+ *    valid synthetic bearer token are rejected like the real API.
  *  - Every non-loopback request (fonts, Cognito endpoints, provider APIs,
- *    CDN images) is aborted, so nothing can leak off-machine.
+ *    CDN images) is aborted, so nothing can leak off-machine. Routes are
+ *    installed at browser-context level so popups and later-opened pages
+ *    are covered too, and service workers are disabled by the config.
  *  - /api paths with no registered mock return a 500 so unmocked surfaces
  *    fail closed instead of silently hitting a dead proxy.
  */
@@ -51,8 +59,13 @@ const clientIdCandidates = (): string[] => {
   return [...new Set(ids.filter((id): id is string => typeof id === 'string' && id.length > 0))];
 };
 
-/** localStorage entries equivalent to a real Cognito session (no refresh token → refresh is impossible → zero Cognito network). */
-export const buildSessionEntries = (user: SyntheticUser): Array<[string, string]> => {
+export interface SyntheticTokens {
+  accessToken: string;
+  idToken: string;
+}
+
+/** Synthetic unexpired token pair; the id token is what the app's API client sends as the bearer. */
+export const makeSyntheticTokens = (user: SyntheticUser): SyntheticTokens => {
   const now = Math.floor(Date.now() / 1000);
   const exp = now + 60 * 60;
   const idToken = makeSyntheticJwt({
@@ -72,13 +85,20 @@ export const buildSessionEntries = (user: SyntheticUser): Array<[string, string]
     iat: now,
     exp,
   });
+  return { accessToken, idToken };
+};
 
+/** localStorage entries equivalent to a real Cognito session (no refresh token → refresh is impossible → zero Cognito network). */
+export const buildSessionEntries = (
+  user: SyntheticUser,
+  tokens: SyntheticTokens = makeSyntheticTokens(user),
+): Array<[string, string]> => {
   const entries: Array<[string, string]> = [];
   for (const clientId of clientIdCandidates()) {
     const keyPrefix = `${AUTH_KEY_PREFIX}.${clientId}`;
     entries.push(
-      [`${keyPrefix}.${user.username}.accessToken`, accessToken],
-      [`${keyPrefix}.${user.username}.idToken`, idToken],
+      [`${keyPrefix}.${user.username}.accessToken`, tokens.accessToken],
+      [`${keyPrefix}.${user.username}.idToken`, tokens.idToken],
       [`${keyPrefix}.${user.username}.clockDrift`, '0'],
       [`${keyPrefix}.LastAuthUser`, user.username],
     );
@@ -94,8 +114,9 @@ export const buildSessionEntries = (user: SyntheticUser): Array<[string, string]
 export const seedSessionFor = async (
   context: BrowserContext,
   user: SyntheticUser,
+  tokens: SyntheticTokens = makeSyntheticTokens(user),
 ): Promise<void> => {
-  const entries = buildSessionEntries(user);
+  const entries = buildSessionEntries(user, tokens);
   await context.addInitScript(
     ({ items }) => {
       try {
@@ -147,6 +168,10 @@ export interface MockApi {
   profiles: Map<string, MockProfile>;
   /** null = the capabilities endpoint answers 500 (failed lookup). */
   serverKeyProviders: string[] | null;
+  /** 'Bearer <idToken>' the authedPage fixture seeded for the primary user; asserted against recorded request auth. */
+  expectedAuthorization: string | null;
+  /** Raw Authorization header of every request that reached the mock (validated before dispatch). */
+  authHeaders: Array<{ method: string; path: string; authorization: string | null }>;
   profilePuts: Array<Record<string, unknown>>;
   chatBodies: Array<Record<string, unknown>>;
   analyzeBodies: Array<Record<string, unknown>>;
@@ -190,6 +215,8 @@ const createMockApi = (): MockApi => {
   const state: MockApi = {
     profiles: new Map(),
     serverKeyProviders: ['google', 'openrouter'],
+    expectedAuthorization: null,
+    authHeaders: [],
     profilePuts: [],
     chatBodies: [],
     analyzeBodies: [],
@@ -267,11 +294,38 @@ const analyzeSseBody = (body: Record<string, unknown>): string => {
   return frames.map((frame) => `data: ${JSON.stringify(frame)}\n\n`).join('');
 };
 
+const KNOWN_USERS = [SYNTHETIC_USER_A, SYNTHETIC_USER_B];
+
+const authenticateRequest = (authorization: string | null): SyntheticUser | null => {
+  const token = /^Bearer (.+)$/.exec(authorization ?? '')?.[1];
+  if (!token) return null;
+  const segments = token.split('.');
+  if (segments.length !== 3) return null;
+  try {
+    const payload = JSON.parse(
+      Buffer.from(segments[1] ?? '', 'base64url').toString('utf8'),
+    ) as Record<string, unknown>;
+    if (payload.token_use !== 'id' || typeof payload.sub !== 'string') return null;
+    return (
+      KNOWN_USERS.find(
+        (user) => user.userId === payload.sub && user.username === payload['cognito:username'],
+      ) ?? null
+    );
+  } catch {
+    return null;
+  }
+};
+
 const handleApiRoute = async (state: MockApi, route: Route): Promise<void> => {
   const request = route.request();
   const url = new URL(request.url());
   const path = url.pathname;
   const method = request.method();
+  const authorization = request.headers()['authorization'] ?? null;
+  state.authHeaders.push({ method, path, authorization });
+  if (!authenticateRequest(authorization)) {
+    return jsonResponse(route, { error: 'Unauthorized' }, 401);
+  }
 
   const getOrCreateProfile = (userId: string): MockProfile => {
     let profile = state.profiles.get(userId);
@@ -394,8 +448,8 @@ const handleApiRoute = async (state: MockApi, route: Route): Promise<void> => {
   return jsonResponse(route, { error: `unmocked API request: ${method} ${path}` }, 500);
 };
 
-const installNetworkGuard = async (page: Page): Promise<void> => {
-  await page.route('**/*', async (route) => {
+const installNetworkGuard = async (context: BrowserContext): Promise<void> => {
+  await context.route('**/*', async (route) => {
     const url = route.request().url();
     const scheme = url.split(':', 1)[0];
     if (scheme === 'data' || scheme === 'blob' || scheme === 'about') {
@@ -412,10 +466,10 @@ const installNetworkGuard = async (page: Page): Promise<void> => {
   });
 };
 
-const installMocks = async (page: Page, state: MockApi): Promise<void> => {
+const installMocks = async (context: BrowserContext, state: MockApi): Promise<void> => {
   // Registered first so the API mocks (below) take precedence for /api paths.
-  await installNetworkGuard(page);
-  await page.route('**/api/**', (route) => handleApiRoute(state, route));
+  await installNetworkGuard(context);
+  await context.route('**/api/**', (route) => handleApiRoute(state, route));
 };
 
 export interface SyntheticAuthFixtures {
@@ -429,6 +483,8 @@ export const test = base.extend<SyntheticAuthFixtures>({
     await use(createMockApi());
   },
   authedPage: async ({ context, page, apiMock }, use) => {
+    const tokens = makeSyntheticTokens(SYNTHETIC_USER_A);
+    apiMock.expectedAuthorization = `Bearer ${tokens.idToken}`;
     await context.addInitScript(
       ({ entries }) => {
         try {
@@ -439,9 +495,9 @@ export const test = base.extend<SyntheticAuthFixtures>({
           // Retry-safe: later navigations re-run this init script.
         }
       },
-      { entries: buildSessionEntries(SYNTHETIC_USER_A) },
+      { entries: buildSessionEntries(SYNTHETIC_USER_A, tokens) },
     );
-    await installMocks(page, apiMock);
+    await installMocks(context, apiMock);
     await use(page);
   },
 });
