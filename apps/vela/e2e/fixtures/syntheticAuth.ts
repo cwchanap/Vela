@@ -7,27 +7,6 @@ import {
   type SyntheticUser,
 } from './syntheticEnv';
 
-/**
- * Fully self-contained Playwright fixture for the LLM-settings acceptance
- * suite. Unlike e2e/fixtures/auth.ts it never touches real Cognito, AWS, or
- * provider APIs:
- *
- *  - A synthetic, unsigned-but-unexpired JWT pair is seeded into localStorage
- *    in Amplify v6's storage layout, so fetchAuthSession/getCurrentUser take
- *    their pure-localStorage path and report a valid session.
- *  - Every /api/* request is intercepted in the browser and answered by an
- *    in-memory per-test mock that mirrors the real route contracts
- *    (profile auto-create, strict PUT + lenient llm read, capabilities,
- *    chat, SSE dictionary analysis, TTS settings). Requests without a
- *    valid synthetic bearer token are rejected like the real API.
- *  - Every non-loopback request (fonts, Cognito endpoints, provider APIs,
- *    CDN images) is aborted, so nothing can leak off-machine. Routes are
- *    installed at browser-context level so popups and later-opened pages
- *    are covered too, and service workers are disabled by the config.
- *  - /api paths with no registered mock return a 500 so unmocked surfaces
- *    fail closed instead of silently hitting a dead proxy.
- */
-
 const AUTH_KEY_PREFIX = 'CognitoIdentityServiceProvider';
 const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '::1', '[::1]']);
 const KNOWN_PROVIDERS = ['google', 'openai', 'anthropic', 'openrouter'] as const;
@@ -41,15 +20,9 @@ const PROVIDER_LABELS: Record<string, string> = {
 const base64url = (value: unknown): string =>
   Buffer.from(JSON.stringify(value)).toString('base64url');
 
-/** Unsigned JWT carrying only the claims Amplify decodes client-side. */
 const makeSyntheticJwt = (payload: Record<string, unknown>): string =>
   `${base64url({ alg: 'none', typ: 'JWT' })}.${base64url(payload)}.e2esyntheticsig`;
 
-/**
- * Amplify keys its token storage by the configured user-pool client id.
- * Seed every plausible id — the synthetic one from the mocked config plus
- * any real env ids — so this spec stays hermetic under either config.
- */
 const clientIdCandidates = (): string[] => {
   const ids = [
     SYNTHETIC_COGNITO_ENV.VITE_COGNITO_USER_POOL_CLIENT_ID,
@@ -64,7 +37,6 @@ export interface SyntheticTokens {
   idToken: string;
 }
 
-/** Synthetic unexpired token pair; the id token is what the app's API client sends as the bearer. */
 export const makeSyntheticTokens = (user: SyntheticUser): SyntheticTokens => {
   const now = Math.floor(Date.now() / 1000);
   const exp = now + 60 * 60;
@@ -88,7 +60,6 @@ export const makeSyntheticTokens = (user: SyntheticUser): SyntheticTokens => {
   return { accessToken, idToken };
 };
 
-/** localStorage entries equivalent to a real Cognito session (no refresh token → refresh is impossible → zero Cognito network). */
 export const buildSessionEntries = (
   user: SyntheticUser,
   tokens: SyntheticTokens = makeSyntheticTokens(user),
@@ -106,11 +77,6 @@ export const buildSessionEntries = (
   return entries;
 };
 
-/**
- * Register an additional session-seeding init script for a different user.
- * Runs after the fixture's own script on the next navigation, so its
- * LastAuthUser entry wins — this is how a mid-test account switch works.
- */
 export const seedSessionFor = async (
   context: BrowserContext,
   user: SyntheticUser,
@@ -124,7 +90,7 @@ export const seedSessionFor = async (
           window.localStorage.setItem(key, value);
         }
       } catch {
-        // Retry-safe: later navigations re-run this init script.
+        return;
       }
     },
     { items: entries },
@@ -163,14 +129,10 @@ export interface MockLlmPreferences {
   defaultModel?: { provider: string; model: string };
 }
 
-/** Per-test mutable state backing every route mock. */
 export interface MockApi {
   profiles: Map<string, MockProfile>;
-  /** null = the capabilities endpoint answers 500 (failed lookup). */
   serverKeyProviders: string[] | null;
-  /** 'Bearer <idToken>' the authedPage fixture seeded for the primary user; asserted against recorded request auth. */
   expectedAuthorization: string | null;
-  /** Raw Authorization header of every request that reached the mock (validated before dispatch). */
   authHeaders: Array<{ method: string; path: string; authorization: string | null }>;
   profilePuts: Array<Record<string, unknown>>;
   chatBodies: Array<Record<string, unknown>>;
@@ -236,11 +198,6 @@ const createMockApi = (): MockApi => {
   return state;
 };
 
-/**
- * Mirrors the API's lenient read path (PreferencesReadSchema): unknown keys
- * are stripped and a malformed `llm` subtree drops to undefined instead of
- * failing the whole profile GET.
- */
 const normalizePreferencesForRead = (
   preferences: Record<string, unknown>,
 ): Record<string, unknown> => {
@@ -444,7 +401,6 @@ const handleApiRoute = async (state: MockApi, route: Route): Promise<void> => {
     return jsonResponse(route, { error: 'Not found' }, 404);
   }
 
-  // Fail closed: anything not explicitly mocked must not silently succeed.
   return jsonResponse(route, { error: `unmocked API request: ${method} ${path}` }, 500);
 };
 
@@ -460,21 +416,19 @@ const installNetworkGuard = async (context: BrowserContext): Promise<void> => {
         return route.continue();
       }
     } catch {
-      // Unparseable URL — abort below.
+      return route.abort('blockedbyclient');
     }
     return route.abort('blockedbyclient');
   });
 };
 
 const installMocks = async (context: BrowserContext, state: MockApi): Promise<void> => {
-  // Registered first so the API mocks (below) take precedence for /api paths.
   await installNetworkGuard(context);
   await context.route('**/api/**', (route) => handleApiRoute(state, route));
 };
 
 export interface SyntheticAuthFixtures {
   apiMock: MockApi;
-  /** Page with a synthetic Amplify session + fully mocked API installed. */
   authedPage: Page;
 }
 
@@ -492,7 +446,7 @@ export const test = base.extend<SyntheticAuthFixtures>({
             window.localStorage.setItem(key, value);
           }
         } catch {
-          // Retry-safe: later navigations re-run this init script.
+          return;
         }
       },
       { entries: buildSessionEntries(SYNTHETIC_USER_A, tokens) },
