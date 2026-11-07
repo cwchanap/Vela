@@ -1,20 +1,17 @@
 import type { Page } from '@playwright/test';
-import { test, expect, seedSessionFor } from './fixtures/syntheticAuth';
+import { test, expect, makeSyntheticTokens, seedSessionFor } from './fixtures/syntheticAuth';
 import { SYNTHETIC_USER_A, SYNTHETIC_USER_B } from './fixtures/syntheticEnv';
 import { waitForPageLoad } from './utils/helpers';
 
 /**
- * HPA-755 acceptance E2E: per-provider cards, isolated keys/drafts,
- * explicit-vs-default thinking, default model persistence, capabilities,
- * and the request contract for chat + dictionary analysis.
- *
- * Runs against the fully-mocked syntheticAuth fixture — synthetic Amplify
- * session, in-memory per-test API mocks, no real Cognito/AWS/provider
- * traffic (non-loopback requests are aborted by the fixture).
+ * E2E tests for registry-backed provider selection, per-provider API keys,
+ * and the explicit provider/model/key snapshot sent on every chat request.
  */
 
 const GOOGLE_KEY = 'e2e-google-key-0001';
 const OPENAI_KEY = 'e2e-openai-key-0001';
+const ANTHROPIC_KEY = 'e2e-anthropic-key-0001';
+const OPENROUTER_KEY = 'e2e-openrouter-key-0001';
 
 const cardHeader = (page: Page, provider: string) =>
   page.getByTestId(`llm-card-${provider}`).locator('.q-expansion-item__container > .q-item');
@@ -49,6 +46,14 @@ const llmOf = (body: Record<string, unknown> | undefined) => {
   };
 };
 
+const dictionaryEntry = (userId: string) => ({
+  user_id: userId,
+  sentence_id: 'e2e-sentence-1',
+  sentence: '猫が好きです。',
+  created_at: 1_700_000_000_000,
+  updated_at: 1_700_000_000_000,
+});
+
 test.describe('LLM Settings - Provider cards', () => {
   test('should render all four provider cards', async ({ authedPage: page }) => {
     await gotoSettings(page);
@@ -56,7 +61,6 @@ test.describe('LLM Settings - Provider cards', () => {
     for (const provider of ['google', 'openai', 'anthropic', 'openrouter']) {
       await expect(page.getByTestId(`llm-card-${provider}`)).toBeVisible();
     }
-    // OpenRouter card is free-form: no thinking controls
     await openCard(page, 'openrouter');
     await expect(page.getByText('Free-form model IDs; no thinking controls.')).toBeVisible();
   });
@@ -65,6 +69,9 @@ test.describe('LLM Settings - Provider cards', () => {
     authedPage: page,
     apiMock,
   }) => {
+    // The auth fixture uses a real shared account whose profile may carry
+    // provider/key preferences from earlier runs. Explicitly establish the
+    // starting state: active provider Google, no OpenAI key.
     apiMock.seedProfile(SYNTHETIC_USER_A, {
       llm: {
         keys: { google: GOOGLE_KEY },
@@ -74,24 +81,35 @@ test.describe('LLM Settings - Provider cards', () => {
     });
     await gotoSettings(page);
 
-    // Google card shows its saved key; other cards never see it
     await openCard(page, 'google');
     await expect(keyInput(page, 'google')).toHaveValue(GOOGLE_KEY);
 
+    // Switching to OpenAI must not show or reuse the Google key
     await openCard(page, 'openai');
     await expect(keyInput(page, 'openai')).toHaveValue('');
     await openCard(page, 'anthropic');
     await expect(keyInput(page, 'anthropic')).toHaveValue('');
 
-    // An unsaved draft belongs to its own card only
     await keyInput(page, 'anthropic').fill('e2e-unsaved-anthropic-draft');
+
+    // Switching back restores the Google key
     await openCard(page, 'google');
     await expect(keyInput(page, 'google')).toHaveValue(GOOGLE_KEY);
     await openCard(page, 'anthropic');
     await expect(keyInput(page, 'anthropic')).toHaveValue('e2e-unsaved-anthropic-draft');
 
-    // Nothing was persisted — no PUT carried the draft
-    expect(apiMock.profilePuts).toHaveLength(0);
+    await openCard(page, 'openai');
+    await keyInput(page, 'openai').fill(OPENAI_KEY);
+    const putResponse = waitForProfilePut(page);
+    await page.getByTestId('llm-save-openai').click();
+    await putResponse;
+
+    const keys = llmOf(apiMock.lastPut()).keys ?? {};
+    expect(keys.openai).toBe(OPENAI_KEY);
+    expect(keys.google).toBe(GOOGLE_KEY);
+    expect('anthropic' in keys).toBe(false);
+    await openCard(page, 'anthropic');
+    await expect(keyInput(page, 'anthropic')).toHaveValue('e2e-unsaved-anthropic-draft');
   });
 
   test('should save a provider key through profile PUT and survive reload', async ({
@@ -107,14 +125,12 @@ test.describe('LLM Settings - Provider cards', () => {
     await page.getByTestId('llm-save-google').click();
     await putResponse;
 
-    // PUT round-trip: llm written, unrelated preferences untouched
     const llm = llmOf(apiMock.lastPut());
     expect(llm.keys?.google).toBe(GOOGLE_KEY);
     const prefs = apiMock.lastPut()?.preferences as Record<string, unknown>;
     expect(prefs.dailyGoal).toBe(45);
     expect(prefs.darkMode).toBe(true);
 
-    // After reload the saved key is read back from the profile
     await page.reload();
     await waitForPageLoad(page);
     await openCard(page, 'google');
@@ -137,7 +153,6 @@ test.describe('LLM Settings - Provider cards', () => {
 
     await openCard(page, 'openai');
 
-    // Set an explicit override for one model and save
     await page.getByTestId('llm-effort-gpt-6.1-sol').click();
     await page.getByRole('option', { name: 'high', exact: true }).click();
     let putResponse = waitForProfilePut(page);
@@ -147,7 +162,6 @@ test.describe('LLM Settings - Provider cards', () => {
     let thinking = llmOf(apiMock.lastPut()).thinking ?? {};
     expect(thinking['gpt-6.1-sol']).toBe('high');
 
-    // Re-select Default and save again — the override is deleted, not blanked
     await page.getByTestId('llm-effort-gpt-6.1-sol').click();
     await page.getByRole('option', { name: 'Default', exact: true }).click();
     putResponse = waitForProfilePut(page);
@@ -174,20 +188,17 @@ test.describe('LLM Settings - Provider cards', () => {
 
     await expect(page.getByText('Active: Google • gemini-4-argon')).toBeVisible();
 
-    // Remove the saved key
     await openCard(page, 'google');
     await keyInput(page, 'google').fill('');
     const putResponse = waitForProfilePut(page);
     await page.getByTestId('llm-save-google').click();
     await putResponse;
 
-    // Default stays put — no silent re-selection — with truthful missing-key state
     const llm = llmOf(apiMock.lastPut());
     expect('google' in (llm.keys ?? {})).toBe(false);
     await expect(page.getByText('Active: Google • gemini-4-argon')).toBeVisible();
     await expect(page.getByText('No API key saved for Google')).toBeVisible();
 
-    // And it stays that way after a reload
     await page.reload();
     await waitForPageLoad(page);
     await expect(page.getByText('Active: Google • gemini-4-argon')).toBeVisible();
@@ -195,23 +206,143 @@ test.describe('LLM Settings - Provider cards', () => {
   });
 });
 
+test.describe('LLM Settings - Default model pair', () => {
+  test('should persist a selected default pair and send it on chat and dictionary', async ({
+    authedPage: page,
+    apiMock,
+  }) => {
+    apiMock.seedProfile(SYNTHETIC_USER_A, {
+      llm: {
+        keys: {},
+        thinking: {},
+        defaultModel: { provider: 'google', model: 'gemini-3.8-flash' },
+      },
+    });
+    apiMock.dictionaryEntries = [dictionaryEntry(SYNTHETIC_USER_A.userId)];
+    await gotoSettings(page);
+
+    // Select Anthropic, fill its key, and save
+    await openCard(page, 'anthropic');
+    await keyInput(page, 'anthropic').fill(ANTHROPIC_KEY);
+    let putResponse = waitForProfilePut(page);
+    await page.getByTestId('llm-save-anthropic').click();
+    await putResponse;
+    expect(llmOf(apiMock.lastPut()).keys?.anthropic).toBe(ANTHROPIC_KEY);
+
+    await page.getByTestId('llm-default-model-select').click();
+    await page.getByRole('option', { name: 'Anthropic — claude-opus-5-5', exact: true }).click();
+    // Wait for the profile PUT so the /chat reload below cannot read a stale
+    // server-side profile without the Anthropic key.
+    putResponse = waitForProfilePut(page);
+    await page.getByTestId('llm-default-save').click();
+    await putResponse;
+    expect(llmOf(apiMock.lastPut()).defaultModel).toEqual({
+      provider: 'anthropic',
+      model: 'claude-opus-5-5',
+    });
+    await expect(page.getByText('Active: Anthropic • claude-opus-5-5')).toBeVisible();
+
+    await page.reload();
+    await waitForPageLoad(page);
+    await expect(page.getByText('Active: Anthropic • claude-opus-5-5')).toBeVisible();
+
+    // Navigate to Chat and send a message
+    await page.goto('/chat');
+    await waitForPageLoad(page);
+    const chatRequest = page.waitForRequest(
+      (r) => r.url().includes('/api/llm-chat') && r.method() === 'POST',
+    );
+    await page.getByTestId('llm-chat-input').fill('Hello from default pair test');
+    await page.getByTestId('llm-chat-send').click();
+    const chatBody = (await chatRequest).postDataJSON() as Record<string, unknown>;
+    expect(chatBody.provider).toBe('anthropic');
+    expect(chatBody.model).toBe('claude-opus-5-5');
+    expect(chatBody.apiKey).toBe(ANTHROPIC_KEY);
+    expect(chatBody).not.toHaveProperty('thinking');
+
+    await page.goto('/my-dictionaries');
+    await waitForPageLoad(page);
+    const analyzeRequest = page.waitForRequest(
+      (r) => r.url().includes('/api/my-dictionaries/analyze') && r.method() === 'POST',
+    );
+    await page.getByRole('button', { name: 'Ask AI' }).click();
+    const analyzeBody = (await analyzeRequest).postDataJSON() as Record<string, unknown>;
+    expect(analyzeBody.provider).toBe('anthropic');
+    expect(analyzeBody.model).toBe('claude-opus-5-5');
+    expect(analyzeBody.apiKey).toBe(ANTHROPIC_KEY);
+    await expect(page.getByText('Mock streamed analysis of the sentence.')).toBeVisible();
+  });
+
+  test('should resolve an OpenRouter custom model ID without provider ambiguity', async ({
+    authedPage: page,
+    apiMock,
+  }) => {
+    apiMock.seedProfile(SYNTHETIC_USER_A, {
+      llm: {
+        keys: { openrouter: OPENROUTER_KEY },
+        thinking: {},
+        defaultModel: { provider: 'google', model: 'gemini-3.8-flash' },
+      },
+    });
+    apiMock.dictionaryEntries = [dictionaryEntry(SYNTHETIC_USER_A.userId)];
+    await gotoSettings(page);
+
+    await page.getByTestId('llm-default-model-select').click();
+    await page.getByRole('option', { name: 'OpenRouter (custom ID)', exact: true }).click();
+    await page.getByTestId('llm-default-model-input').fill('openai/gpt-4o-mini');
+    const putResponse = waitForProfilePut(page);
+    await page.getByTestId('llm-default-save').click();
+    await putResponse;
+    expect(llmOf(apiMock.lastPut()).defaultModel).toEqual({
+      provider: 'openrouter',
+      model: 'openai/gpt-4o-mini',
+    });
+    await expect(page.getByText('Active: OpenRouter • openai/gpt-4o-mini')).toBeVisible();
+
+    await page.reload();
+    await waitForPageLoad(page);
+    await expect(page.getByText('Active: OpenRouter • openai/gpt-4o-mini')).toBeVisible();
+
+    await page.goto('/chat');
+    await waitForPageLoad(page);
+    const chatRequest = page.waitForRequest(
+      (r) => r.url().includes('/api/llm-chat') && r.method() === 'POST',
+    );
+    await page.getByTestId('llm-chat-input').fill('Hello from OpenRouter test');
+    await page.getByTestId('llm-chat-send').click();
+    const chatBody = (await chatRequest).postDataJSON() as Record<string, unknown>;
+    expect(chatBody.provider).toBe('openrouter');
+    expect(chatBody.model).toBe('openai/gpt-4o-mini');
+    expect(chatBody.apiKey).toBe(OPENROUTER_KEY);
+
+    await page.goto('/my-dictionaries');
+    await waitForPageLoad(page);
+    const analyzeRequest = page.waitForRequest(
+      (r) => r.url().includes('/api/my-dictionaries/analyze') && r.method() === 'POST',
+    );
+    await page.getByRole('button', { name: 'Ask AI' }).click();
+    const analyzeBody = (await analyzeRequest).postDataJSON() as Record<string, unknown>;
+    expect(analyzeBody.provider).toBe('openrouter');
+    expect(analyzeBody.model).toBe('openai/gpt-4o-mini');
+    expect(analyzeBody.apiKey).toBe(OPENROUTER_KEY);
+    await expect(page.getByText('Mock streamed analysis of the sentence.')).toBeVisible();
+  });
+});
+
 test.describe('LLM Settings - Server-key capabilities', () => {
   test('should advertise authenticated server-key providers for chat defaults', async ({
     authedPage: page,
+    apiMock,
   }) => {
-    // Default profile (no llm preferences) + default capabilities mock
-    // (['google', 'openrouter']) — the user saved no keys at all.
     await gotoSettings(page);
 
     await expect(
       page.getByText('Server key available for chat: Google, OpenRouter.'),
     ).toBeVisible();
-    // No user key for the active Google default → chat-only fallback note
     await expect(
       page.getByText('Chat uses the server key; My Dictionaries requires your own Google API key'),
     ).toBeVisible();
 
-    // The default selector lists server-key options with the suffix
     await page.getByTestId('llm-default-model-select').click();
     await expect(
       page.getByRole('option', { name: 'Google — gemini-3.8-flash (server key)' }),
@@ -219,23 +350,45 @@ test.describe('LLM Settings - Server-key capabilities', () => {
     await expect(
       page.getByRole('option', { name: 'OpenRouter (custom ID, server key)' }),
     ).toBeVisible();
+
+    const capabilityCalls = apiMock.authHeaders.filter(
+      (h) => h.method === 'GET' && h.path === '/api/llm-chat/capabilities',
+    );
+    expect(capabilityCalls.length).toBeGreaterThan(0);
+    for (const call of capabilityCalls) {
+      expect(call.authorization).toBe(apiMock.expectedAuthorization);
+    }
   });
 
   test('should offer no server-key fallback when the capabilities lookup fails', async ({
     authedPage: page,
     apiMock,
   }) => {
-    apiMock.serverKeyProviders = null; // simulate a failed authenticated lookup
+    apiMock.serverKeyProviders = null;
     await gotoSettings(page);
 
     await expect(page.getByText('Server key available for chat:')).toBeHidden();
 
-    // Only the current pair remains selectable — no stale advertised fallback
     await page.getByTestId('llm-default-model-select').click();
     await expect(page.getByRole('option', { name: /\(server key\)/ })).toHaveCount(0);
     await expect(
       page.getByRole('option', { name: 'Google — gemini-3.8-flash', exact: true }),
     ).toBeVisible();
+  });
+
+  test('should reject API requests without a valid synthetic bearer token', async ({
+    authedPage: page,
+  }) => {
+    await gotoSettings(page);
+
+    const statuses = await page.evaluate(async () => {
+      const anonymous = await fetch('/api/llm-chat/capabilities');
+      const wrongToken = await fetch('/api/llm-chat/capabilities', {
+        headers: { Authorization: 'Bearer e2e-bogus-token' },
+      });
+      return [anonymous.status, wrongToken.status];
+    });
+    expect(statuses).toEqual([401, 401]);
   });
 });
 
@@ -266,9 +419,9 @@ test.describe('LLM Settings - Request contract', () => {
     expect(body.model).toBe('gemini-4-argon');
     expect(body.apiKey).toBe(GOOGLE_KEY);
     expect(body.thinking).toBe('high');
+    // temperature is no longer part of the request contract
     expect(body).not.toHaveProperty('temperature');
 
-    // The mocked reply renders in the chat
     await expect(page.getByText('Mock AI reply (synthetic)')).toBeVisible();
   });
 
@@ -297,7 +450,7 @@ test.describe('LLM Settings - Request contract', () => {
     expect(body.provider).toBe('google');
     expect(body.model).toBe('gemini-3.8-flash');
     expect(body.apiKey).toBe(GOOGLE_KEY);
-    // Explicit-vs-omitted: absent override means the key is not sent at all
+    // The browser never selects thinking in HPA-754
     expect(body).not.toHaveProperty('thinking');
   });
 
@@ -312,15 +465,7 @@ test.describe('LLM Settings - Request contract', () => {
         defaultModel: { provider: 'google', model: 'gemini-3.8-flash' },
       },
     });
-    apiMock.dictionaryEntries = [
-      {
-        user_id: SYNTHETIC_USER_A.userId,
-        sentence_id: 'e2e-sentence-1',
-        sentence: '猫が好きです。',
-        created_at: 1_700_000_000_000,
-        updated_at: 1_700_000_000_000,
-      },
-    ];
+    apiMock.dictionaryEntries = [dictionaryEntry(SYNTHETIC_USER_A.userId)];
     await page.goto('/my-dictionaries');
     await waitForPageLoad(page);
     await expect(page.getByRole('button', { name: 'Ask AI' })).toBeVisible();
@@ -337,7 +482,6 @@ test.describe('LLM Settings - Request contract', () => {
     expect(body.thinking).toBe('high');
     expect(body.sentence).toBe('猫が好きです。');
 
-    // The mocked SSE stream renders into the dialog
     await expect(page.getByText('Mock streamed analysis of the sentence.')).toBeVisible();
   });
 
@@ -352,15 +496,7 @@ test.describe('LLM Settings - Request contract', () => {
         defaultModel: { provider: 'google', model: 'gemini-3.8-flash' },
       },
     });
-    apiMock.dictionaryEntries = [
-      {
-        user_id: SYNTHETIC_USER_A.userId,
-        sentence_id: 'e2e-sentence-1',
-        sentence: '猫が好きです。',
-        created_at: 1_700_000_000_000,
-        updated_at: 1_700_000_000_000,
-      },
-    ];
+    apiMock.dictionaryEntries = [dictionaryEntry(SYNTHETIC_USER_A.userId)];
     await page.goto('/my-dictionaries');
     await waitForPageLoad(page);
     await expect(page.getByRole('button', { name: 'Ask AI' })).toBeVisible();
@@ -371,8 +507,6 @@ test.describe('LLM Settings - Request contract', () => {
     await page.getByRole('button', { name: 'Ask AI' }).click();
 
     const body = (await analyzeRequest).postDataJSON() as Record<string, unknown>;
-    // No override → the request omits thinking so the backend applies its
-    // latency-safe low default
     expect(body).not.toHaveProperty('thinking');
     expect(body.provider).toBe('google');
   });
@@ -381,20 +515,9 @@ test.describe('LLM Settings - Request contract', () => {
     authedPage: page,
     apiMock,
   }) => {
-    // Google is advertised as a server-key provider but the user saved no key:
-    // chat may fall back server-side, dictionary analysis must not.
     apiMock.seedProfile(SYNTHETIC_USER_A, {});
-    apiMock.dictionaryEntries = [
-      {
-        user_id: SYNTHETIC_USER_A.userId,
-        sentence_id: 'e2e-sentence-1',
-        sentence: '猫が好きです。',
-        created_at: 1_700_000_000_000,
-        updated_at: 1_700_000_000_000,
-      },
-    ];
+    apiMock.dictionaryEntries = [dictionaryEntry(SYNTHETIC_USER_A.userId)];
 
-    // Chat still works without a user key (request carries none)
     await page.goto('/chat');
     await waitForPageLoad(page);
     const chatRequest = page.waitForRequest(
@@ -407,7 +530,6 @@ test.describe('LLM Settings - Request contract', () => {
     expect(chatBody).not.toHaveProperty('apiKey');
     await expect(page.getByText('Mock AI reply (synthetic)')).toBeVisible();
 
-    // Dictionary sends no key either and surfaces the truthful error
     await page.goto('/my-dictionaries');
     await waitForPageLoad(page);
     const analyzeRequest = page.waitForRequest(
@@ -431,7 +553,6 @@ test.describe('LLM Settings - Session and profile integrity', () => {
     apiMock.seedProfile(SYNTHETIC_USER_A, { llm: 'corrupted-non-object' });
     await gotoSettings(page);
 
-    // Lenient read: profile loads, defaults apply, settings is usable
     await expect(page.getByText('Active: Google • gemini-3.8-flash')).toBeVisible();
     await openCard(page, 'google');
     await expect(keyInput(page, 'google')).toHaveValue('');
@@ -453,15 +574,57 @@ test.describe('LLM Settings - Session and profile integrity', () => {
     await openCard(page, 'google');
     await expect(keyInput(page, 'google')).toHaveValue(GOOGLE_KEY);
 
-    // Sign out via the account menu; the synthetic session has no refresh
-    // token and no OAuth metadata, so sign-out is purely local.
     await page.locator('.avatar-btn').click();
     await page.locator('.account-menu').getByText('Logout', { exact: true }).click();
     await expect(page).toHaveURL(/\/auth\/login/);
 
-    // A different user with no llm preferences gets clean defaults
-    await seedSessionFor(context, SYNTHETIC_USER_B);
+    const signedOut = await page.evaluate(() => {
+      const app = (
+        document.getElementById('q-app') as unknown as {
+          __vue_app__?: { _context?: { provides?: Record<symbol, unknown> } };
+        }
+      ).__vue_app__;
+      const provides = app?._context?.provides ?? {};
+      const pinia = Object.getOwnPropertySymbols(provides)
+        .map((key) => provides[key])
+        .find(
+          (value): value is { state: { value: Record<string, unknown> } } =>
+            !!value && typeof value === 'object' && '_s' in value && 'state' in value,
+        );
+      const state = pinia?.state.value ?? {};
+      return {
+        piniaFound: !!pinia,
+        user: (state.auth as { user?: unknown } | undefined)?.user ?? null,
+        session: (state.auth as { session?: unknown } | undefined)?.session ?? null,
+        llm: (state.llmSettings as { llm?: unknown } | undefined)?.llm ?? null,
+      };
+    });
+    expect(signedOut.piniaFound).toBe(true);
+    expect(signedOut.user).toBeNull();
+    expect(signedOut.session).toBeNull();
+    expect(signedOut.llm).toEqual({
+      keys: {},
+      thinking: {},
+      defaultModel: { provider: 'google', model: 'gemini-3.8-flash' },
+    });
+
+    const tokensB = makeSyntheticTokens(SYNTHETIC_USER_B);
+    await seedSessionFor(context, SYNTHETIC_USER_B, tokensB);
     await page.goto('/settings');
+
+    await waitForPageLoad(page);
+    await expect(page.getByTestId('settings-page')).toBeVisible();
+    await expect(page.getByText('Active: Google • gemini-3.8-flash')).toBeVisible();
+    await openCard(page, 'google');
+    await expect(keyInput(page, 'google')).toHaveValue('');
+
+    const bAuthCalls = apiMock.authHeaders.filter(
+      (h) => h.path === '/api/profiles/create' || h.path === '/api/profiles',
+    );
+    expect(bAuthCalls.some((h) => h.authorization === `Bearer ${tokensB.idToken}`)).toBe(true);
+    expect(apiMock.profiles.get(SYNTHETIC_USER_B.userId)).toBeTruthy();
+
+    await page.reload();
     await waitForPageLoad(page);
     await expect(page.getByText('Active: Google • gemini-3.8-flash')).toBeVisible();
     await openCard(page, 'google');
@@ -493,7 +656,6 @@ test.describe('LLM Settings - Theme and TTS regression', () => {
 
     const prefs = apiMock.lastPut()?.preferences as Record<string, unknown>;
     expect(prefs.darkMode).toBe(true);
-    // LLM preferences ride along untouched in the same write
     expect(llmOf(apiMock.lastPut()).keys?.google).toBe(GOOGLE_KEY);
   });
 

@@ -1,6 +1,7 @@
 import { defineConfig, devices } from '@playwright/test';
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { SYNTHETIC_COGNITO_ENV } from './e2e/fixtures/syntheticEnv';
 
 // Surface the synthetic Cognito values to test code that reads process.env
@@ -18,11 +19,13 @@ Object.assign(process.env, SYNTHETIC_COGNITO_ENV);
  * services.
  */
 
-// Fresh per-run artifact directory under the already-gitignored
-// test-results/ tree, so Playwright's startup cleanup only ever removes
-// directories it created itself.
+// Fresh per-run artifact directory under the repo-root .artifacts/ tree
+// (gitignored), deliberately OUTSIDE test-results/ — the ordinary suite
+// owns that directory and may delete it on any run. This path is created
+// new every time and nothing existing is ever removed.
 const runId = `${Date.now().toString(36)}-${process.pid}`;
-const runDir = join('test-results', `mocked-${runId}`);
+const configDir = fileURLToPath(new URL('.', import.meta.url));
+const runDir = join(configDir, '..', '..', '.artifacts', `pw-mocked-${runId}`);
 const artifactsDir = join(runDir, 'results');
 mkdirSync(artifactsDir, { recursive: true });
 
@@ -44,6 +47,7 @@ export default defineConfig({
     trace: 'on-first-retry',
     screenshot: 'only-on-failure',
     video: 'retain-on-failure',
+    serviceWorkers: 'block',
   },
   projects: [
     {
