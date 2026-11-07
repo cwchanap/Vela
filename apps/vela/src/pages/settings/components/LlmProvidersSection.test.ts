@@ -11,9 +11,10 @@ import { LLM_PROVIDER_REGISTRY, LLM_PROVIDERS, type LlmProvider } from '@vela/co
 import type { LlmPreferences, UserPreferences } from 'src/types/shared';
 
 const mockCapabilitiesData = ref<{ serverKeyProviders: LlmProvider[] } | undefined>(undefined);
+const mockCapabilitiesError = ref(false);
 
 vi.mock('src/composables/queries/useLlmCapabilitiesQuery', () => ({
-  useLlmCapabilitiesQuery: () => ({ data: mockCapabilitiesData }),
+  useLlmCapabilitiesQuery: () => ({ data: mockCapabilitiesData, isError: mockCapabilitiesError }),
 }));
 
 const stubs = {
@@ -102,6 +103,7 @@ describe('LlmProvidersSection', () => {
     authStore = useAuthStore();
     vi.clearAllMocks();
     mockCapabilitiesData.value = undefined;
+    mockCapabilitiesError.value = false;
     Notify.create = vi.fn() as never;
     updatePreferencesSpy = vi
       .spyOn(authStore, 'updatePreferences')
@@ -361,6 +363,18 @@ describe('LlmProvidersSection', () => {
 
       expect(wrapper.text()).not.toContain('server key');
       expect(optionLabels().every((l) => !l.includes('server key'))).toBe(true);
+    });
+
+    it('does not fabricate availability when the capabilities query is errored', async () => {
+      mockCapabilitiesData.value = { serverKeyProviders: ['google', 'openrouter'] };
+      mockCapabilitiesError.value = true;
+      setUser(authStore, llmFor({ keys: { openai: 'openai-key' } }));
+      wrapper = mountSection();
+      await flushPromises();
+
+      expect(optionValues()).not.toContain('openrouter::__custom__');
+      expect(optionLabels().every((l) => !l.includes('server key'))).toBe(true);
+      expect(wrapper.text()).not.toContain('Server key available for chat');
     });
 
     it('does not fabricate availability when unauthenticated', async () => {
