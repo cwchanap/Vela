@@ -89,6 +89,13 @@ describe('LlmProviderCard', () => {
   let authStore: ReturnType<typeof useAuthStore>;
   let updatePreferencesSpy: ReturnType<typeof vi.spyOn>;
 
+  const resolvePatchArg = (partial: unknown): Partial<UserPreferences> =>
+    typeof partial === 'function'
+      ? (partial as (_current: UserPreferences) => Partial<UserPreferences>)(
+          authStore.user?.preferences as UserPreferences,
+        )
+      : (partial as Partial<UserPreferences>);
+
   const mountCard = (provider: LlmProvider) =>
     mount(LlmProviderCard, {
       props: { provider },
@@ -107,7 +114,7 @@ describe('LlmProviderCard', () => {
         if (!authStore.user) return false;
         authStore.user.preferences = {
           ...(authStore.user.preferences as UserPreferences),
-          ...partial,
+          ...resolvePatchArg(partial),
         };
         return true;
       });
@@ -216,7 +223,7 @@ describe('LlmProviderCard', () => {
       await flushPromises();
 
       expect(updatePreferencesSpy).toHaveBeenCalledTimes(1);
-      const llm = updatePreferencesSpy.mock.calls[0]![0].llm as LlmPreferences;
+      const llm = resolvePatchArg(updatePreferencesSpy.mock.calls[0]![0]).llm as LlmPreferences;
       expect(llm.keys).toEqual({ google: 'keep-google', openai: 'openai-new' });
       expect(llmStore.llm.keys.openai).toBe('openai-new');
       expect(Notify.create).toHaveBeenCalledWith(expect.objectContaining({ type: 'positive' }));
@@ -237,7 +244,7 @@ describe('LlmProviderCard', () => {
       await wrapper.find('[data-testid="llm-save-google"]').trigger('click');
       await flushPromises();
 
-      const llm = updatePreferencesSpy.mock.calls[0]![0].llm as LlmPreferences;
+      const llm = resolvePatchArg(updatePreferencesSpy.mock.calls[0]![0]).llm as LlmPreferences;
       expect(llm.thinking['gemini-3.8-flash']).toBeUndefined();
       expect(llm.thinking['gemini-4-argon']).toBe('medium');
       expect(Notify.create).toHaveBeenCalledWith(expect.objectContaining({ type: 'positive' }));
@@ -257,7 +264,7 @@ describe('LlmProviderCard', () => {
       await wrapper.find('[data-testid="llm-save-openai"]').trigger('click');
       await flushPromises();
 
-      const llm = updatePreferencesSpy.mock.calls[0]![0].llm as LlmPreferences;
+      const llm = resolvePatchArg(updatePreferencesSpy.mock.calls[0]![0]).llm as LlmPreferences;
       expect(llm.keys).toEqual({});
       expect(llm.thinking).toEqual({ 'gpt-6.1-sol': 'max' });
     });

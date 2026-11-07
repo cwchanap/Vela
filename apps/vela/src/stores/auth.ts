@@ -78,6 +78,14 @@ interface ProfileFingerprint {
   preferences?: Record<string, unknown>;
 }
 
+type PreferencesUpdater = (_current: UserPreferences) => Partial<UserPreferences>;
+
+type PreferencesPatch = Record<string, unknown> | PreferencesUpdater;
+
+type ProfilePatch = Omit<ProfileData, 'preferences'> & {
+  preferences?: PreferencesPatch | undefined;
+};
+
 const REMOVED_VALUE: unique symbol = Symbol('removed');
 
 const isPlainRecord = (value: unknown): value is Record<string, unknown> =>
@@ -235,17 +243,19 @@ const retainedFingerprint = (
 const reconcileFingerprintNode = (
   tracked: unknown,
   node: unknown,
+  baseline: unknown,
 ): { applied: unknown; resolved: unknown } => {
   if (isPlainRecord(node)) {
     if (tracked !== undefined && !isPlainRecord(tracked)) {
       return { applied: tracked, resolved: tracked };
     }
     const base = isPlainRecord(tracked) ? tracked : {};
+    const baselineBase = isPlainRecord(baseline) ? baseline : {};
     const applied: Record<string, unknown> = { ...base };
     const resolved: Record<string, unknown> = {};
     let hasResolved = false;
     for (const [key, child] of Object.entries(node)) {
-      const childResult = reconcileFingerprintNode(base[key], child);
+      const childResult = reconcileFingerprintNode(base[key], child, baselineBase[key]);
       if (childResult.applied === REMOVED_VALUE) {
         delete applied[key];
       } else {
@@ -263,31 +273,44 @@ const reconcileFingerprintNode = (
       ? { applied: REMOVED_VALUE, resolved: REMOVED_VALUE }
       : { applied: tracked, resolved: tracked };
   }
-  if (tracked === undefined || isSameJsonValue(tracked, node)) {
+  if (tracked === undefined) {
+    return baseline === undefined
+      ? { applied: node, resolved: node }
+      : { applied: REMOVED_VALUE, resolved: REMOVED_VALUE };
+  }
+  if (isSameJsonValue(tracked, node)) {
     return { applied: node, resolved: node };
   }
   return { applied: tracked, resolved: tracked };
 };
 
+const reconcileScalar = (applied: unknown, fallback: unknown): unknown =>
+  applied === REMOVED_VALUE ? fallback : applied;
+
 const reconcileAcknowledgedProfile = (
   tracked: Profile,
   fingerprint: ProfileFingerprint,
+  baseline: Profile,
 ): { profile: Profile; fingerprint: ProfileFingerprint | null } => {
   const username =
     fingerprint.username !== undefined
-      ? reconcileFingerprintNode(tracked.username, fingerprint.username)
+      ? reconcileFingerprintNode(tracked.username, fingerprint.username, baseline.username)
       : { applied: tracked.username, resolved: undefined };
   const avatarUrl =
     fingerprint.avatar_url !== undefined
-      ? reconcileFingerprintNode(tracked.avatar_url, fingerprint.avatar_url)
+      ? reconcileFingerprintNode(tracked.avatar_url, fingerprint.avatar_url, baseline.avatar_url)
       : { applied: tracked.avatar_url, resolved: undefined };
   const nativeLanguage =
     fingerprint.native_language !== undefined
-      ? reconcileFingerprintNode(tracked.native_language, fingerprint.native_language)
+      ? reconcileFingerprintNode(
+          tracked.native_language,
+          fingerprint.native_language,
+          baseline.native_language,
+        )
       : { applied: tracked.native_language, resolved: undefined };
   const preferences =
     fingerprint.preferences !== undefined
-      ? reconcileFingerprintNode(tracked.preferences, fingerprint.preferences)
+      ? reconcileFingerprintNode(tracked.preferences, fingerprint.preferences, baseline.preferences)
       : { applied: tracked.preferences, resolved: undefined };
   const resolvedFingerprint: ProfileFingerprint = {};
   if (username.resolved !== undefined) {
@@ -305,9 +328,9 @@ const reconcileAcknowledgedProfile = (
   return {
     profile: {
       ...tracked,
-      username: username.applied as string | null,
-      avatar_url: avatarUrl.applied as string | null,
-      native_language: nativeLanguage.applied as string,
+      username: reconcileScalar(username.applied, tracked.username) as string | null,
+      avatar_url: reconcileScalar(avatarUrl.applied, tracked.avatar_url) as string | null,
+      native_language: reconcileScalar(nativeLanguage.applied, tracked.native_language) as string,
       preferences: preferences.applied as Profile['preferences'],
     },
     fingerprint: Object.keys(resolvedFingerprint).length > 0 ? resolvedFingerprint : null,
@@ -477,7 +500,7 @@ export const useAuthStore = defineStore('auth', () => {
         (tracked.profile.updated_at === acknowledged.updated_at &&
           recordCoversFingerprint(tracked.profile, fingerprint)))
     ) {
-      const reconciled = reconcileAcknowledgedProfile(tracked.profile, fingerprint);
+      const reconciled = reconcileAcknowledgedProfile(tracked.profile, fingerprint, baseline);
       lastAcknowledgedProfile = {
         profile: reconciled.profile,
         fingerprint: mergeFingerprints(tracked.fingerprint, reconciled.fingerprint),
@@ -688,7 +711,7 @@ export const useAuthStore = defineStore('auth', () => {
   /**
    * Update user profile
    */
-  const updateProfile = async (profileData: ProfileData) => {
+  const updateProfile = async (profileData: ProfilePatch) => {
     const initiator = user.value;
     if (!initiator) {
       setError('No user logged in');
@@ -703,14 +726,23 @@ export const useAuthStore = defineStore('auth', () => {
         return false;
       }
 
+      const { preferences: preferencesPatch, ...profileFields } = profileData;
+      const resolvedPreferences: Record<string, unknown> | undefined =
+        typeof preferencesPatch === 'function'
+          ? ({ ...preferencesPatch(current.preferences) } as Record<string, unknown>)
+          : preferencesPatch;
+      const resolvedProfileData: ProfileData =
+        resolvedPreferences === undefined
+          ? profileFields
+          : { ...profileFields, preferences: resolvedPreferences };
       const mergedProfileData: ProfileData =
-        profileData.preferences === undefined
-          ? profileData
+        resolvedPreferences === undefined
+          ? resolvedProfileData
           : {
-              ...profileData,
+              ...resolvedProfileData,
               preferences: {
                 ...(current.preferences as Record<string, unknown>),
-                ...profileData.preferences,
+                ...resolvedPreferences,
               },
             };
 
@@ -734,7 +766,7 @@ export const useAuthStore = defineStore('auth', () => {
             response.profile ?? applyProfileData(profileFromUser(current), mergedProfileData);
           registerAcknowledgedProfile(
             acknowledged,
-            profileData,
+            resolvedProfileData,
             profileFromUser(current),
             generation,
           );
@@ -818,25 +850,18 @@ export const useAuthStore = defineStore('auth', () => {
   /**
    * Update user preferences
    */
-  const updatePreferences = async (preferences: Partial<UserPreferences>) => {
+  const updatePreferences = async (preferences: Partial<UserPreferences> | PreferencesUpdater) => {
     const initiator = user.value;
     if (!initiator) return false;
     const generation = sessionGeneration.value;
 
     try {
       const success = await updateProfile({
-        preferences: { ...preferences },
+        preferences: typeof preferences === 'function' ? preferences : { ...preferences },
       });
 
       const stillCurrent =
         user.value?.id === initiator.id && sessionGeneration.value === generation;
-      if (success && stillCurrent && user.value) {
-        // Update local state immediately
-        user.value.preferences = {
-          ...(user.value.preferences as UserPreferences),
-          ...preferences,
-        };
-      }
 
       return success && stillCurrent;
     } catch (err) {

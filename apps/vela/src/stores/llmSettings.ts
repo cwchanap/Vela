@@ -76,11 +76,6 @@ export const useLLMSettingsStore = defineStore('llmSettings', () => {
 
   watch(() => auth.user, syncFromAuth, { deep: true, immediate: true });
 
-  const currentSnapshot = (): LlmPreferences => {
-    const prefs = auth.user?.preferences?.llm;
-    return isLlmPreferences(prefs) ? cloneLlm(prefs) : emptyLlm();
-  };
-
   let mutationQueue: Promise<void> = Promise.resolve();
 
   const enqueueMutation = <T>(task: () => Promise<T>): Promise<T> => {
@@ -103,29 +98,28 @@ export const useLLMSettingsStore = defineStore('llmSettings', () => {
       if (!initiatorId || auth.user?.id !== initiatorId || auth.sessionGeneration !== generation) {
         return false;
       }
-      const next = currentSnapshot();
       const trimmed = (key ?? '').trim();
-      if (trimmed) {
-        next.keys[provider] = trimmed;
-      } else {
-        delete next.keys[provider];
-      }
       const allowedModelIds = new Set(
         LLM_PROVIDER_REGISTRY[provider].models?.map((model) => model.id) ?? [],
       );
-      for (const [modelId, effort] of Object.entries(thinkingPatch)) {
-        if (!allowedModelIds.has(modelId)) continue;
-        if (effort) {
-          next.thinking[modelId] = effort;
+      const ok = await auth.updatePreferences((current) => {
+        const next = isLlmPreferences(current.llm) ? cloneLlm(current.llm) : emptyLlm();
+        if (trimmed) {
+          next.keys[provider] = trimmed;
         } else {
-          delete next.thinking[modelId];
+          delete next.keys[provider];
         }
-      }
-      const ok = await auth.updatePreferences({ llm: next });
+        for (const [modelId, effort] of Object.entries(thinkingPatch)) {
+          if (!allowedModelIds.has(modelId)) continue;
+          if (effort) {
+            next.thinking[modelId] = effort;
+          } else {
+            delete next.thinking[modelId];
+          }
+        }
+        return { llm: next };
+      });
       const stillCurrent = auth.user?.id === initiatorId && auth.sessionGeneration === generation;
-      if (ok && stillCurrent) {
-        llm.value = cloneLlm(next);
-      }
       return ok && stillCurrent;
     });
   };
@@ -137,13 +131,12 @@ export const useLLMSettingsStore = defineStore('llmSettings', () => {
       if (!initiatorId || auth.user?.id !== initiatorId || auth.sessionGeneration !== generation) {
         return false;
       }
-      const next = currentSnapshot();
-      next.defaultModel = { provider: pair.provider, model: pair.model };
-      const ok = await auth.updatePreferences({ llm: next });
+      const ok = await auth.updatePreferences((current) => {
+        const next = isLlmPreferences(current.llm) ? cloneLlm(current.llm) : emptyLlm();
+        next.defaultModel = { provider: pair.provider, model: pair.model };
+        return { llm: next };
+      });
       const stillCurrent = auth.user?.id === initiatorId && auth.sessionGeneration === generation;
-      if (ok && stillCurrent) {
-        llm.value = cloneLlm(next);
-      }
       return ok && stillCurrent;
     });
   };
