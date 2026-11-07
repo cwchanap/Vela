@@ -127,7 +127,25 @@ export const useAuthStore = defineStore('auth', () => {
     session.value = null;
     error.value = null;
     isLoading.value = false;
+    lastAcknowledgedProfile = null;
   };
+
+  const userFromProfile = (profile: Profile): User => ({
+    id: profile.id,
+    email: profile.email || '',
+    username: profile.username || undefined,
+    avatar_url: profile.avatar_url || undefined,
+    current_level: profile.current_level,
+    total_experience: profile.total_experience,
+    learning_streak: profile.learning_streak,
+    native_language: profile.native_language,
+    preferences: profile.preferences as unknown as UserPreferences,
+    last_activity: profile.last_activity || undefined,
+    created_at: profile.created_at,
+    updated_at: profile.updated_at,
+  });
+
+  let lastAcknowledgedProfile: Profile | null = null;
 
   /**
    * Initialize authentication state
@@ -200,23 +218,16 @@ export const useAuthStore = defineStore('auth', () => {
       const profile = cachedProfile || (await authService.getUserProfile(userId));
 
       if (profile && session.value?.user?.id === userId && sessionGeneration.value === generation) {
-        // Update query cache with fresh data
-        queryClient.setQueryData(queryKey, profile);
+        const effectiveProfile =
+          lastAcknowledgedProfile?.id === userId &&
+          profile.updated_at <= lastAcknowledgedProfile.updated_at
+            ? lastAcknowledgedProfile
+            : profile;
 
-        setUser({
-          id: profile.id,
-          email: profile.email || '',
-          username: profile.username || undefined,
-          avatar_url: profile.avatar_url || undefined,
-          current_level: profile.current_level,
-          total_experience: profile.total_experience,
-          learning_streak: profile.learning_streak,
-          native_language: profile.native_language,
-          preferences: profile.preferences as unknown as UserPreferences,
-          last_activity: profile.last_activity || undefined,
-          created_at: profile.created_at,
-          updated_at: profile.updated_at,
-        });
+        // Update query cache with fresh data
+        queryClient.setQueryData(queryKey, effectiveProfile);
+
+        setUser(userFromProfile(effectiveProfile));
       }
     } catch (err) {
       console.error('Error loading user profile:', err);
@@ -353,6 +364,28 @@ export const useAuthStore = defineStore('auth', () => {
         // Reload user profile to get updated data
         if (sessionGeneration.value === generation && user.value?.id === userId) {
           await loadUserProfile(userId);
+
+          const latest = user.value;
+          if (latest && latest.id === userId && sessionGeneration.value === generation) {
+            const acknowledged: Profile = response.profile ?? {
+              id: userId,
+              username: mergedProfileData.username ?? latest.username ?? null,
+              email: latest.email || null,
+              avatar_url: mergedProfileData.avatar_url ?? latest.avatar_url ?? null,
+              native_language: mergedProfileData.native_language ?? latest.native_language,
+              current_level: latest.current_level,
+              total_experience: latest.total_experience,
+              learning_streak: latest.learning_streak,
+              last_activity: latest.last_activity ?? null,
+              preferences: (mergedProfileData.preferences ??
+                latest.preferences) as unknown as Profile['preferences'],
+              created_at: latest.created_at,
+              updated_at: latest.updated_at,
+            };
+            lastAcknowledgedProfile = acknowledged;
+            queryClient.setQueryData(authKeys.profile(userId), acknowledged);
+            setUser(userFromProfile(acknowledged));
+          }
         }
         return sessionGeneration.value === generation && user.value?.id === userId;
       } catch (err) {
