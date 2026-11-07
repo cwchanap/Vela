@@ -83,4 +83,11 @@ llmChat.post('/', async (c) => {
   }
 });
 
+llmChat.get('/capabilities', (c) => {
+  const serverKeyProviders = (Object.entries(SERVER_KEY_ENV) as [LlmProvider, keyof Env][])
+    .filter(([, envKey]) => Boolean(c.env[envKey]))
+    .map(([provider]) => provider);
+  return c.json({ serverKeyProviders });
+});
+
 export { llmChat };
