@@ -78,6 +78,11 @@ interface ProfileFingerprint {
   preferences?: Record<string, unknown>;
 }
 
+const REMOVED_VALUE: unique symbol = Symbol('removed');
+
+const isPlainRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value);
+
 const isSameJsonValue = (a: unknown, b: unknown): boolean => {
   if (a === b) return true;
   if (typeof a !== 'object' || a === null || typeof b !== 'object' || b === null) {
@@ -99,19 +104,59 @@ const isSameJsonValue = (a: unknown, b: unknown): boolean => {
   );
 };
 
-const fingerprintFromPatch = (source: Profile, patch: ProfileData): ProfileFingerprint => {
+const diffToFingerprint = (
+  baseline: unknown,
+  committed: unknown,
+  path: readonly string[],
+): unknown => {
+  const isAtomic = path.length === 2 && path[0] === 'llm' && path[1] === 'defaultModel';
+  if (!isAtomic && isPlainRecord(committed)) {
+    const base = isPlainRecord(baseline) ? baseline : {};
+    const node: Record<string, unknown> = {};
+    let changed = false;
+    for (const key of new Set([...Object.keys(base), ...Object.keys(committed)])) {
+      const child = diffToFingerprint(base[key], committed[key], [...path, key]);
+      if (child !== undefined) {
+        node[key] = child;
+        changed = true;
+      }
+    }
+    return changed ? node : undefined;
+  }
+  if (isSameJsonValue(baseline, committed)) return undefined;
+  return committed === undefined ? REMOVED_VALUE : committed;
+};
+
+const fingerprintFromPatch = (
+  source: Profile,
+  patch: ProfileData,
+  baseline: Profile,
+): ProfileFingerprint => {
   const fingerprint: ProfileFingerprint = {};
   if (patch.username !== undefined) fingerprint.username = source.username;
   if (patch.avatar_url !== undefined) fingerprint.avatar_url = source.avatar_url;
   if (patch.native_language !== undefined) fingerprint.native_language = source.native_language;
   if (patch.preferences) {
+    const baselinePreferences = baseline.preferences as unknown as
+      Record<string, unknown> | undefined;
     const sourcePreferences = source.preferences as unknown as Record<string, unknown> | undefined;
-    fingerprint.preferences = {};
+    const preferences: Record<string, unknown> = {};
     for (const key of Object.keys(patch.preferences)) {
-      fingerprint.preferences[key] = sourcePreferences?.[key];
+      const child = diffToFingerprint(baselinePreferences?.[key], sourcePreferences?.[key], [key]);
+      if (child !== undefined) preferences[key] = child;
     }
+    if (Object.keys(preferences).length > 0) fingerprint.preferences = preferences;
   }
   return fingerprint;
+};
+
+const coversFingerprintNode = (recordValue: unknown, node: unknown): boolean => {
+  if (node === REMOVED_VALUE) return recordValue === undefined;
+  if (isPlainRecord(node)) {
+    const record = isPlainRecord(recordValue) ? recordValue : {};
+    return Object.entries(node).every(([key, child]) => coversFingerprintNode(record[key], child));
+  }
+  return isSameJsonValue(recordValue, node);
 };
 
 const recordCoversFingerprint = (record: Profile, fingerprint: ProfileFingerprint): boolean => {
@@ -134,45 +179,171 @@ const recordCoversFingerprint = (record: Profile, fingerprint: ProfileFingerprin
     return false;
   }
   if (fingerprint.preferences) {
-    const recordPreferences = record.preferences as unknown as Record<string, unknown> | undefined;
-    for (const [key, value] of Object.entries(fingerprint.preferences)) {
-      if (!isSameJsonValue(recordPreferences?.[key], value)) {
-        return false;
-      }
-    }
+    return coversFingerprintNode(record.preferences, fingerprint.preferences);
   }
   return true;
 };
 
-const applyFingerprint = (base: Profile, fingerprint: ProfileFingerprint): Profile => ({
-  ...base,
-  username: fingerprint.username !== undefined ? fingerprint.username : base.username,
-  avatar_url: fingerprint.avatar_url !== undefined ? fingerprint.avatar_url : base.avatar_url,
-  native_language:
-    fingerprint.native_language !== undefined ? fingerprint.native_language : base.native_language,
-  preferences: fingerprint.preferences
-    ? ({
-        ...(base.preferences as unknown as Record<string, unknown> | undefined),
-        ...fingerprint.preferences,
-      } as unknown as Profile['preferences'])
-    : base.preferences,
-});
+const retainFingerprintNode = (recordValue: unknown, node: unknown): unknown => {
+  if (isPlainRecord(node)) {
+    const record = isPlainRecord(recordValue) ? recordValue : {};
+    const retained: Record<string, unknown> = {};
+    let kept = false;
+    for (const [key, child] of Object.entries(node)) {
+      const retainedChild = retainFingerprintNode(record[key], child);
+      if (retainedChild !== undefined) {
+        retained[key] = retainedChild;
+        kept = true;
+      }
+    }
+    return kept ? retained : undefined;
+  }
+  return coversFingerprintNode(recordValue, node) ? node : undefined;
+};
+
+const retainedFingerprint = (
+  record: Profile,
+  fingerprint: ProfileFingerprint | null,
+): ProfileFingerprint | null => {
+  if (!fingerprint) return null;
+  const retained: ProfileFingerprint = {};
+  if (
+    fingerprint.username !== undefined &&
+    isSameJsonValue(record.username, fingerprint.username)
+  ) {
+    retained.username = fingerprint.username;
+  }
+  if (
+    fingerprint.avatar_url !== undefined &&
+    isSameJsonValue(record.avatar_url, fingerprint.avatar_url)
+  ) {
+    retained.avatar_url = fingerprint.avatar_url;
+  }
+  if (
+    fingerprint.native_language !== undefined &&
+    isSameJsonValue(record.native_language, fingerprint.native_language)
+  ) {
+    retained.native_language = fingerprint.native_language;
+  }
+  if (fingerprint.preferences) {
+    const kept = retainFingerprintNode(record.preferences, fingerprint.preferences);
+    if (kept !== undefined) retained.preferences = kept as Record<string, unknown>;
+  }
+  return Object.keys(retained).length > 0 ? retained : null;
+};
+
+const reconcileFingerprintNode = (
+  tracked: unknown,
+  node: unknown,
+): { applied: unknown; resolved: unknown } => {
+  if (isPlainRecord(node)) {
+    if (tracked !== undefined && !isPlainRecord(tracked)) {
+      return { applied: tracked, resolved: tracked };
+    }
+    const base = isPlainRecord(tracked) ? tracked : {};
+    const applied: Record<string, unknown> = { ...base };
+    const resolved: Record<string, unknown> = {};
+    let hasResolved = false;
+    for (const [key, child] of Object.entries(node)) {
+      const childResult = reconcileFingerprintNode(base[key], child);
+      if (childResult.applied === REMOVED_VALUE) {
+        delete applied[key];
+      } else {
+        applied[key] = childResult.applied;
+      }
+      if (childResult.resolved !== undefined) {
+        resolved[key] = childResult.resolved;
+        hasResolved = true;
+      }
+    }
+    return { applied, resolved: hasResolved ? resolved : undefined };
+  }
+  if (node === REMOVED_VALUE) {
+    return tracked === undefined
+      ? { applied: REMOVED_VALUE, resolved: REMOVED_VALUE }
+      : { applied: tracked, resolved: tracked };
+  }
+  if (tracked === undefined || isSameJsonValue(tracked, node)) {
+    return { applied: node, resolved: node };
+  }
+  return { applied: tracked, resolved: tracked };
+};
+
+const reconcileAcknowledgedProfile = (
+  tracked: Profile,
+  fingerprint: ProfileFingerprint,
+): { profile: Profile; fingerprint: ProfileFingerprint | null } => {
+  const username =
+    fingerprint.username !== undefined
+      ? reconcileFingerprintNode(tracked.username, fingerprint.username)
+      : { applied: tracked.username, resolved: undefined };
+  const avatarUrl =
+    fingerprint.avatar_url !== undefined
+      ? reconcileFingerprintNode(tracked.avatar_url, fingerprint.avatar_url)
+      : { applied: tracked.avatar_url, resolved: undefined };
+  const nativeLanguage =
+    fingerprint.native_language !== undefined
+      ? reconcileFingerprintNode(tracked.native_language, fingerprint.native_language)
+      : { applied: tracked.native_language, resolved: undefined };
+  const preferences =
+    fingerprint.preferences !== undefined
+      ? reconcileFingerprintNode(tracked.preferences, fingerprint.preferences)
+      : { applied: tracked.preferences, resolved: undefined };
+  const resolvedFingerprint: ProfileFingerprint = {};
+  if (username.resolved !== undefined) {
+    resolvedFingerprint.username = username.resolved as string | null;
+  }
+  if (avatarUrl.resolved !== undefined) {
+    resolvedFingerprint.avatar_url = avatarUrl.resolved as string | null;
+  }
+  if (nativeLanguage.resolved !== undefined) {
+    resolvedFingerprint.native_language = nativeLanguage.resolved as string;
+  }
+  if (preferences.resolved !== undefined) {
+    resolvedFingerprint.preferences = preferences.resolved as Record<string, unknown>;
+  }
+  return {
+    profile: {
+      ...tracked,
+      username: username.applied as string | null,
+      avatar_url: avatarUrl.applied as string | null,
+      native_language: nativeLanguage.applied as string,
+      preferences: preferences.applied as Profile['preferences'],
+    },
+    fingerprint: Object.keys(resolvedFingerprint).length > 0 ? resolvedFingerprint : null,
+  };
+};
+
+const mergeFingerprintNodes = (base: unknown, next: unknown): unknown => {
+  if (isPlainRecord(base) && isPlainRecord(next)) {
+    const merged: Record<string, unknown> = { ...base };
+    for (const [key, value] of Object.entries(next)) {
+      merged[key] = Object.prototype.hasOwnProperty.call(merged, key)
+        ? mergeFingerprintNodes(merged[key], value)
+        : value;
+    }
+    return merged;
+  }
+  return next !== undefined ? next : base;
+};
 
 const mergeFingerprints = (
   base: ProfileFingerprint | null,
-  next: ProfileFingerprint,
-): ProfileFingerprint => {
+  next: ProfileFingerprint | null,
+): ProfileFingerprint | null => {
   const merged: ProfileFingerprint = {};
-  const username = next.username !== undefined ? next.username : base?.username;
+  const username = next?.username !== undefined ? next.username : base?.username;
   if (username !== undefined) merged.username = username;
-  const avatarUrl = next.avatar_url !== undefined ? next.avatar_url : base?.avatar_url;
+  const avatarUrl = next?.avatar_url !== undefined ? next.avatar_url : base?.avatar_url;
   if (avatarUrl !== undefined) merged.avatar_url = avatarUrl;
   const nativeLanguage =
-    next.native_language !== undefined ? next.native_language : base?.native_language;
+    next?.native_language !== undefined ? next.native_language : base?.native_language;
   if (nativeLanguage !== undefined) merged.native_language = nativeLanguage;
-  const preferences = { ...base?.preferences, ...next.preferences };
-  if (Object.keys(preferences).length > 0) merged.preferences = preferences;
-  return merged;
+  const preferences = mergeFingerprintNodes(base?.preferences, next?.preferences);
+  if (isPlainRecord(preferences) && Object.keys(preferences).length > 0) {
+    merged.preferences = preferences;
+  }
+  return Object.keys(merged).length > 0 ? merged : null;
 };
 
 export const useAuthStore = defineStore('auth', () => {
@@ -291,28 +462,38 @@ export const useAuthStore = defineStore('auth', () => {
   const registerAcknowledgedProfile = (
     acknowledged: Profile,
     patch: ProfileData,
+    baseline: Profile,
     generation: number,
   ) => {
-    const fingerprint = fingerprintFromPatch(acknowledged, patch);
+    const fingerprint = fingerprintFromPatch(acknowledged, patch, baseline);
     const tracked = lastAcknowledgedProfile;
-    if (
-      tracked &&
+    const trackedApplies =
+      tracked !== null &&
       tracked.generation === generation &&
-      tracked.profile.id === acknowledged.id &&
+      tracked.profile.id === acknowledged.id;
+    if (
+      trackedApplies &&
       (tracked.profile.updated_at > acknowledged.updated_at ||
         (tracked.profile.updated_at === acknowledged.updated_at &&
           recordCoversFingerprint(tracked.profile, fingerprint)))
     ) {
-      const merged = applyFingerprint(tracked.profile, fingerprint);
+      const reconciled = reconcileAcknowledgedProfile(tracked.profile, fingerprint);
       lastAcknowledgedProfile = {
-        profile: merged,
-        fingerprint: mergeFingerprints(tracked.fingerprint, fingerprint),
+        profile: reconciled.profile,
+        fingerprint: mergeFingerprints(tracked.fingerprint, reconciled.fingerprint),
         generation,
       };
-      setUser(userFromProfile(merged));
+      setUser(userFromProfile(reconciled.profile));
       return;
     }
-    lastAcknowledgedProfile = { profile: acknowledged, fingerprint, generation };
+    lastAcknowledgedProfile = {
+      profile: acknowledged,
+      fingerprint: mergeFingerprints(
+        trackedApplies ? retainedFingerprint(acknowledged, tracked.fingerprint) : null,
+        fingerprint,
+      ),
+      generation,
+    };
     setUser(userFromProfile(acknowledged));
   };
 
@@ -405,10 +586,7 @@ export const useAuthStore = defineStore('auth', () => {
         } else {
           lastAcknowledgedProfile = {
             profile,
-            fingerprint:
-              tracked.fingerprint !== null && recordCoversFingerprint(profile, tracked.fingerprint)
-                ? tracked.fingerprint
-                : null,
+            fingerprint: retainedFingerprint(profile, tracked.fingerprint),
             generation,
           };
         }
@@ -554,7 +732,12 @@ export const useAuthStore = defineStore('auth', () => {
         if (sessionGeneration.value === generation && user.value?.id === userId) {
           const acknowledged: Profile =
             response.profile ?? applyProfileData(profileFromUser(current), mergedProfileData);
-          registerAcknowledgedProfile(acknowledged, profileData, generation);
+          registerAcknowledgedProfile(
+            acknowledged,
+            profileData,
+            profileFromUser(current),
+            generation,
+          );
 
           await loadUserProfile(userId);
         }
