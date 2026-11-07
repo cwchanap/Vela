@@ -226,6 +226,24 @@ describe('llmClient.analyzeSentenceStream', () => {
     });
   });
 
+  it('forwards an explicit thinking override in the request body', async () => {
+    fetchMock.mockResolvedValueOnce(sseResponse(['data: {"type":"done"}\n\n']));
+
+    await llmClient.analyzeSentenceStream(
+      {
+        sentence: '日本語',
+        provider: 'google',
+        model: 'gemini-3.8-flash',
+        apiKey: 'user-key',
+        thinking: 'high',
+      },
+      () => {},
+    );
+
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(JSON.parse(String(init.body)).thinking).toBe('high');
+  });
+
   it('delivers frames in order and resolves on done (buffered single-chunk body)', async () => {
     // Deployed API Gateway/CloudFront buffer the whole response into one body
     // chunk; the same line-splitting logic must parse it.

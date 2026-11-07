@@ -56,6 +56,7 @@ export const AnalyzeSentenceRequestSchema = z.object({
   }),
   model: z.string('Invalid model').optional(),
   apiKey: z.string('Invalid API key').optional(),
+  thinking: z.string('Invalid thinking').optional(),
 });
 
 // Shared JLPT field definition with validation

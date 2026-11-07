@@ -1028,7 +1028,7 @@ describe('My Dictionaries Route', () => {
       });
     });
 
-    test('browser-sent thinking is ignored; effort stays low server-side', async () => {
+    test('browser-sent thinking is forwarded as the validated native effort', async () => {
       const sseLines = [`data: ${JSON.stringify({ candidates: [{ finishReason: 'STOP' }] })}`];
       mockFetch.mockResolvedValueOnce({ ok: true, body: makeSseStream(sseLines) });
 
@@ -1048,9 +1048,33 @@ describe('My Dictionaries Route', () => {
         { type: 'done' },
       ]);
       const [, init] = mockFetch.mock.calls[0];
-      expect(JSON.parse(init.body).generationConfig.thinkingConfig).toEqual({
-        thinkingLevel: 'LOW',
+      expect(JSON.parse(init.body).generationConfig).toEqual({
+        maxOutputTokens: 7168,
+        thinkingConfig: { thinkingLevel: 'HIGH' },
       });
+    });
+
+    test('omitted thinking runs at low effort where the model supports it', async () => {
+      for (const extra of [{}, { thinking: '   ' }]) {
+        const sseLines = [`data: ${JSON.stringify({ candidates: [{ finishReason: 'STOP' }] })}`];
+        mockFetch.mockResolvedValueOnce({ ok: true, body: makeSseStream(sseLines) });
+
+        const app = createTestApp();
+        const res = await app.request(
+          analyzeRequest({
+            sentence: '日本語',
+            provider: 'google',
+            apiKey: 'user-key',
+            ...extra,
+          }),
+        );
+
+        expect(res.status).toBe(200);
+        const [, init] = mockFetch.mock.calls.at(-1)!;
+        expect(JSON.parse(init.body).generationConfig.thinkingConfig).toEqual({
+          thinkingLevel: 'LOW',
+        });
+      }
     });
 
     test('delivers metadata and chunk frames before the upstream stream completes', async () => {
