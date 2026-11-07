@@ -58,6 +58,11 @@ bun run test:ui                                  # Playwright UI mode
 bun run build                                    # Production build
 ```
 
+The isolated LLM Settings browser suite runs with
+`bunx playwright test --config playwright.mocked.config.ts`. It starts its own
+local web server, uses synthetic sessions and mocked APIs, and writes artifacts
+under `.artifacts/`; it does not verify live Cognito or provider integration.
+
 ### Vela API (from apps/vela-api/)
 
 ```bash
@@ -88,6 +93,9 @@ bun cdk:diff     # Diff deployed vs local
 bun cdk:deploy   # Deploy to AWS
 bun lambda:build # Build Lambda bundle via esbuild
 ```
+
+CDK unit tests also require the local Lambda asset. In a fresh checkout, run
+`bun run lambda:build` from `packages/cdk/` before `bun run test` at the root.
 
 `CDK_SPA_DIST_PATH` env var overrides the SPA dist path that `StaticWebStack`
 deploys. `Source.asset` stats the directory at synth time, so a fresh checkout
