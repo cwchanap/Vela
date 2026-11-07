@@ -97,7 +97,6 @@ const expanded = ref(false);
 const showKey = ref(false);
 const saving = ref(false);
 
-// '' is the "Default" effort sentinel — no stored override.
 type EffortDraft = LlmEffort | '';
 
 const readSavedSlice = () => ({
@@ -105,17 +104,19 @@ const readSavedSlice = () => ({
   efforts: providerModels.value.map((m) => (store.llm.thinking[m.id] ?? '') as EffortDraft),
 });
 
-// Drafts initialize from the saved slice; rows with no override stay on
-// "Default" rather than being prefilled with registry defaults.
+const resetDrafts = (slice: ReturnType<typeof readSavedSlice>) => {
+  draftKey.value = slice.key;
+  draftEfforts.value = Object.fromEntries(
+    providerModels.value.map((m, i) => [m.id, slice.efforts[i] ?? '']),
+  );
+};
+
 let lastSlice = readSavedSlice();
 const draftKey = ref(lastSlice.key);
 const draftEfforts = ref<Record<string, EffortDraft>>(
   Object.fromEntries(providerModels.value.map((m, i) => [m.id, lastSlice.efforts[i] ?? ''])),
 );
 
-// Resync a draft field only when its own saved value changed: another card's
-// save or expansion never touches this card's unsaved drafts, while sign-out,
-// account switch, and preference hydration still refresh them.
 watch(
   () => store.llm,
   () => {
@@ -128,6 +129,14 @@ watch(
     lastSlice = next;
   },
   { deep: true },
+);
+
+watch(
+  () => authStore.user?.id,
+  () => {
+    lastSlice = readSavedSlice();
+    resetDrafts(lastSlice);
+  },
 );
 
 const effortOptions = (model: LlmModelInfo) => [

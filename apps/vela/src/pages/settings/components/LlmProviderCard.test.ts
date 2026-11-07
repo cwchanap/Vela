@@ -63,9 +63,13 @@ const llmFor = (overrides: Partial<LlmPreferences> = {}): LlmPreferences => ({
   ...overrides,
 });
 
-const setUser = (authStore: ReturnType<typeof useAuthStore>, llm: LlmPreferences | undefined) => {
+const setUser = (
+  authStore: ReturnType<typeof useAuthStore>,
+  llm: LlmPreferences | undefined,
+  id = 'user-1',
+) => {
   authStore.user = {
-    id: 'user-1',
+    id,
     email: 'test@example.com',
     username: 'testuser',
     current_level: 1,
@@ -184,6 +188,22 @@ describe('LlmProviderCard', () => {
       const keyInput = wrapper.find('[data-testid="llm-key-input-google"]');
       expect((keyInput.element as HTMLInputElement).value).toBe('');
     });
+
+    it('clears unsaved key and effort drafts when the account changes with identical saved values', async () => {
+      setUser(authStore, llmFor(), 'user-a');
+      wrapper = mountCard('google');
+      await flushPromises();
+      await wrapper.find('[data-testid="llm-key-input-google"]').setValue('draft-key');
+      await wrapper.find('[data-testid="llm-effort-gemini-3.8-flash"]').setValue('high');
+
+      setUser(authStore, llmFor(), 'user-b');
+      await flushPromises();
+
+      const keyInput = wrapper.find('[data-testid="llm-key-input-google"]');
+      expect((keyInput.element as HTMLInputElement).value).toBe('');
+      const effort = wrapper.find('[data-testid="llm-effort-gemini-3.8-flash"]');
+      expect((effort.element as HTMLSelectElement).value).toBe('');
+    });
   });
 
   describe('save', () => {
@@ -212,7 +232,6 @@ describe('LlmProviderCard', () => {
       wrapper = mountCard('google');
       await flushPromises();
 
-      // Reset gemini-3.8-flash to Default and set gemini-4-argon to medium.
       await wrapper.find('[data-testid="llm-effort-gemini-3.8-flash"]').setValue('');
       await wrapper.find('[data-testid="llm-effort-gemini-4-argon"]').setValue('medium');
       await wrapper.find('[data-testid="llm-save-google"]').trigger('click');

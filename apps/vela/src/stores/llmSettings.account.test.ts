@@ -1,0 +1,277 @@
+import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { setActivePinia, createPinia } from 'pinia';
+import { flushPromises } from '@vue/test-utils';
+import { LLM_PROVIDER_REGISTRY } from '@vela/common';
+import type { LlmPreferences, Profile, UserPreferences } from '../types/shared';
+import type { User } from './auth';
+import type { AppSession, AuthResponse, ProfileData } from '../services/authService';
+
+const GOOGLE_DEFAULT = LLM_PROVIDER_REGISTRY.google.defaultModel;
+
+const pendingWrites: {
+  userId: string;
+  data: ProfileData;
+  resolve: (_v: AuthResponse) => void;
+  reject: (_e: unknown) => void;
+}[] = [];
+
+const serverProfiles = new Map<string, Profile>();
+
+const mockAuthService = {
+  getCurrentSession: vi.fn(),
+  onAuthStateChange: vi.fn(),
+  getUserProfile: vi.fn((userId: string) => Promise.resolve(serverProfiles.get(userId) ?? null)),
+  signInWithGoogle: vi.fn(),
+  signOut: vi.fn(),
+  updateUserProfile: vi.fn((userId: string, profileData: ProfileData) => {
+    let resolve!: (_v: AuthResponse) => void;
+    let reject!: (_e: unknown) => void;
+    const promise = new Promise<AuthResponse>((res, rej) => {
+      resolve = res;
+      reject = rej;
+    });
+    pendingWrites.push({ userId, data: profileData, resolve, reject });
+    return promise;
+  }),
+};
+
+vi.mock('../services/authService', () => ({
+  authService: mockAuthService,
+}));
+
+const mockQueryClient = {
+  getQueryState: vi.fn(() => null),
+  getQueryData: vi.fn(() => null),
+  setQueryData: vi.fn(),
+  invalidateQueries: vi.fn(),
+  clear: vi.fn(),
+};
+
+vi.mock('../boot/query', () => ({
+  queryClient: mockQueryClient,
+  QUERY_STALE_TIME: 300000,
+}));
+
+vi.mock('../services/ttsService', () => ({
+  clearAudioUrlCache: vi.fn(),
+}));
+
+const makeLlm = (overrides: Partial<LlmPreferences> = {}): LlmPreferences => ({
+  keys: {},
+  thinking: {},
+  defaultModel: { provider: 'google', model: GOOGLE_DEFAULT },
+  ...overrides,
+});
+
+const makeUser = (id: string, llm?: LlmPreferences): User => ({
+  id,
+  email: `${id}@example.com`,
+  username: id,
+  current_level: 1,
+  total_experience: 0,
+  learning_streak: 0,
+  native_language: 'en',
+  preferences: (llm ? { llm } : {}) as UserPreferences,
+  created_at: '2024-01-01T00:00:00.000Z',
+  updated_at: '2024-01-01T00:00:00.000Z',
+});
+
+const makeSession = (id: string): AppSession => ({
+  user: { id, email: `${id}@example.com` },
+  provider: 'cognito',
+});
+
+const makeProfile = (user: User): Profile => ({
+  id: user.id,
+  username: user.username ?? null,
+  email: user.email ?? null,
+  avatar_url: null,
+  native_language: user.native_language,
+  current_level: user.current_level,
+  total_experience: user.total_experience,
+  learning_streak: user.learning_streak,
+  last_activity: null,
+  preferences: user.preferences,
+  created_at: user.created_at,
+  updated_at: user.updated_at,
+});
+
+const applyWrite = (index: number) => {
+  const write = pendingWrites[index]!;
+  const existing = serverProfiles.get(write.userId);
+  if (existing) {
+    Object.assign(existing, write.data);
+  }
+  write.resolve({ success: true });
+};
+
+describe('llmSettings + auth account transitions (real stores)', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia());
+    vi.clearAllMocks();
+    pendingWrites.length = 0;
+    serverProfiles.clear();
+  });
+
+  const stores = async () => {
+    const { useAuthStore } = await import('./auth');
+    const { useLLMSettingsStore } = await import('./llmSettings');
+    const authStore = useAuthStore();
+    const llmStore = useLLMSettingsStore();
+    return { authStore, llmStore };
+  };
+
+  const signIn = async (
+    authStore: ReturnType<(typeof import('./auth'))['useAuthStore']>,
+    id: string,
+    llm?: LlmPreferences,
+  ) => {
+    const user = makeUser(id, llm);
+    serverProfiles.set(id, makeProfile(user));
+    authStore.setSession(makeSession(id));
+    authStore.setUser(user);
+    await flushPromises();
+  };
+
+  it('does not commit an in-flight save to a different account after an account switch', async () => {
+    const { authStore, llmStore } = await stores();
+    await signIn(authStore, 'user-a');
+
+    const pending = llmStore.saveProvider('google', 'a-secret-key');
+    await flushPromises();
+    expect(pendingWrites).toHaveLength(1);
+    expect(pendingWrites[0]!.userId).toBe('user-a');
+
+    await signIn(authStore, 'user-b');
+    applyWrite(0);
+
+    const result = await pending;
+    await flushPromises();
+
+    expect(result).toBe(false);
+    expect(authStore.user?.id).toBe('user-b');
+    const bLlm = authStore.user?.preferences.llm as LlmPreferences | undefined;
+    expect(bLlm?.keys.google).toBeUndefined();
+    expect(llmStore.llm.keys.google).toBeUndefined();
+    expect(llmStore.llm.keys).toEqual({});
+  });
+
+  it('does not commit an in-flight save after sign-out', async () => {
+    const { authStore, llmStore } = await stores();
+    await signIn(authStore, 'user-a');
+
+    const pending = llmStore.saveProvider('google', 'a-secret-key');
+    await flushPromises();
+    expect(pendingWrites).toHaveLength(1);
+
+    authStore.setSession(null);
+    authStore.setUser(null);
+    await flushPromises();
+
+    applyWrite(0);
+    const result = await pending;
+    await flushPromises();
+
+    expect(result).toBe(false);
+    expect(authStore.user).toBeNull();
+    expect(authStore.error).toBeNull();
+    expect(llmStore.llm.keys).toEqual({});
+  });
+
+  it('does not let a save queued under user A write into user B', async () => {
+    const { authStore, llmStore } = await stores();
+    await signIn(authStore, 'user-a');
+
+    const first = llmStore.saveProvider('google', 'a-google-key');
+    const second = llmStore.saveProvider('openai', 'a-openai-key');
+    await flushPromises();
+    expect(pendingWrites.length).toBeGreaterThan(0);
+
+    await signIn(authStore, 'user-b');
+    applyWrite(0);
+    if (pendingWrites[1]) applyWrite(1);
+
+    const [firstResult, secondResult] = await Promise.all([first, second]);
+    await flushPromises();
+
+    expect(firstResult).toBe(false);
+    expect(secondResult).toBe(false);
+    expect(authStore.user?.id).toBe('user-b');
+    const bLlm = authStore.user?.preferences.llm as LlmPreferences | undefined;
+    expect(bLlm?.keys.google).toBeUndefined();
+    expect(bLlm?.keys.openai).toBeUndefined();
+    expect(llmStore.llm.keys).toEqual({});
+    for (const write of pendingWrites.slice(1)) {
+      expect(write.userId).not.toBe('user-b');
+    }
+  });
+
+  it('merges overlapping provider saves so neither key is lost', async () => {
+    const { authStore, llmStore } = await stores();
+    await signIn(authStore, 'user-a');
+
+    const first = llmStore.saveProvider('google', 'google-key');
+    const second = llmStore.saveProvider('openai', 'openai-key');
+    await flushPromises();
+
+    while (pendingWrites.length) {
+      applyWrite(0);
+      pendingWrites.splice(0, 1);
+      await flushPromises();
+    }
+    const [firstResult, secondResult] = await Promise.all([first, second]);
+    await flushPromises();
+
+    expect(firstResult).toBe(true);
+    expect(secondResult).toBe(true);
+    expect(llmStore.llm.keys).toEqual({ google: 'google-key', openai: 'openai-key' });
+    const aLlm = authStore.user?.preferences.llm as LlmPreferences | undefined;
+    expect(aLlm?.keys).toEqual({ google: 'google-key', openai: 'openai-key' });
+  });
+
+  it('merges a provider save and a default save so both changes persist', async () => {
+    const { authStore, llmStore } = await stores();
+    await signIn(authStore, 'user-a');
+
+    const first = llmStore.saveProvider('google', 'google-key');
+    const second = llmStore.saveDefault({ provider: 'openai', model: 'gpt-6-luna' });
+    await flushPromises();
+
+    while (pendingWrites.length) {
+      applyWrite(0);
+      pendingWrites.splice(0, 1);
+      await flushPromises();
+    }
+    const [firstResult, secondResult] = await Promise.all([first, second]);
+    await flushPromises();
+
+    expect(firstResult).toBe(true);
+    expect(secondResult).toBe(true);
+    expect(llmStore.llm.keys.google).toBe('google-key');
+    expect(llmStore.llm.defaultModel).toEqual({ provider: 'openai', model: 'gpt-6-luna' });
+    const aLlm = authStore.user?.preferences.llm as LlmPreferences | undefined;
+    expect(aLlm?.keys.google).toBe('google-key');
+    expect(aLlm?.defaultModel).toEqual({ provider: 'openai', model: 'gpt-6-luna' });
+  });
+
+  it('still completes a normal save when the account stays the same', async () => {
+    const { authStore, llmStore } = await stores();
+    await signIn(authStore, 'user-a', makeLlm({ keys: { anthropic: 'keep' } }));
+
+    const pending = llmStore.saveProvider('google', 'google-key', {
+      'gemini-3.8-flash': 'high',
+    });
+    await flushPromises();
+    while (pendingWrites.length) {
+      applyWrite(0);
+      pendingWrites.splice(0, 1);
+      await flushPromises();
+    }
+    const result = await pending;
+    await flushPromises();
+
+    expect(result).toBe(true);
+    expect(llmStore.llm.keys).toEqual({ anthropic: 'keep', google: 'google-key' });
+    expect(llmStore.llm.thinking['gemini-3.8-flash']).toBe('high');
+  });
+});

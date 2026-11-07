@@ -62,18 +62,12 @@ const store = useLLMSettingsStore();
 const authStore = useAuthStore();
 const isAuthenticated = computed(() => authStore.isAuthenticated);
 
-// Sentinel marking "OpenRouter (custom ID)" in the Default model select; the
-// free-form ID itself lives in the adjacent input, never inside the card.
 const CUSTOM_VALUE = 'openrouter::__custom__';
 const encode = (provider: LlmProvider, model: string) => `${provider}::${model}`;
 
 const pairToValue = (provider: LlmProvider, model: string) =>
   provider === 'openrouter' ? CUSTOM_VALUE : encode(provider, model);
 
-// Until the Task 3 capability query exists, a provider's models are eligible
-// only when the user saved a key for it. The current pair always stays
-// visible even when it is not eligible — deleting a key must not silently
-// reselect the default.
 const defaultOptions = computed(() => {
   const options: { label: string; value: string }[] = [];
   for (const provider of LLM_PROVIDERS) {
@@ -110,8 +104,6 @@ const customModelId = ref(
 );
 const savingDefault = ref(false);
 
-// The selector draft tracks the persisted pair: sign-out, account switch and
-// hydration reset it, while a key deletion never rewrites the pair itself.
 watch(
   () => store.llm.defaultModel,
   (dm) => {
