@@ -4,13 +4,8 @@ export { DEFAULT_DAILY_LESSON_GOAL, DEFAULT_LESSON_DURATION_MINUTES } from '@vel
 
 import type { LlmProvider, LlmEffort } from '@vela/common';
 
-/**
- * Per-user LLM preferences persisted inside `UserPreferences.llm`.
- * `thinking` holds only explicit per-model effort overrides; an absent entry
- * means the backend applies the registry default (chat) or its low-effort
- * policy (dictionary).
- */
 export interface LlmPreferences {
+  // Optional per-provider API keys saved by the user
   keys: Partial<Record<LlmProvider, string>>;
   thinking: Record<string, LlmEffort>;
   defaultModel: { provider: LlmProvider; model: string };
@@ -33,7 +28,7 @@ export interface UserPreferences {
   todayStudyTime?: number;
   // Theme preferences
   darkMode?: boolean;
-  // Per-user LLM settings; the provider union is the shared LLM_PROVIDERS tuple
+  // Per-user LLM preferences; the provider union is the shared LLM_PROVIDERS tuple
   llm?: LlmPreferences;
 }
 

@@ -98,8 +98,11 @@ export const useLLMSettingsStore = defineStore('llmSettings', () => {
     thinkingPatch: LlmThinkingPatch = {},
   ): Promise<boolean> => {
     const initiatorId = auth.user?.id;
+    const generation = auth.sessionGeneration;
     return enqueueMutation(async () => {
-      if (!initiatorId || auth.user?.id !== initiatorId) return false;
+      if (!initiatorId || auth.user?.id !== initiatorId || auth.sessionGeneration !== generation) {
+        return false;
+      }
       const next = currentSnapshot();
       const trimmed = (key ?? '').trim();
       if (trimmed) {
@@ -115,7 +118,7 @@ export const useLLMSettingsStore = defineStore('llmSettings', () => {
         }
       }
       const ok = await auth.updatePreferences({ llm: next });
-      if (ok && auth.user?.id === initiatorId) {
+      if (ok && auth.user?.id === initiatorId && auth.sessionGeneration === generation) {
         llm.value = cloneLlm(next);
       }
       return ok;
@@ -124,12 +127,15 @@ export const useLLMSettingsStore = defineStore('llmSettings', () => {
 
   const saveDefault = (pair: { provider: LlmProvider; model: string }): Promise<boolean> => {
     const initiatorId = auth.user?.id;
+    const generation = auth.sessionGeneration;
     return enqueueMutation(async () => {
-      if (!initiatorId || auth.user?.id !== initiatorId) return false;
+      if (!initiatorId || auth.user?.id !== initiatorId || auth.sessionGeneration !== generation) {
+        return false;
+      }
       const next = currentSnapshot();
       next.defaultModel = { provider: pair.provider, model: pair.model };
       const ok = await auth.updatePreferences({ llm: next });
-      if (ok && auth.user?.id === initiatorId) {
+      if (ok && auth.user?.id === initiatorId && auth.sessionGeneration === generation) {
         llm.value = cloneLlm(next);
       }
       return ok;

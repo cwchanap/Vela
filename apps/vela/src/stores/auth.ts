@@ -78,6 +78,10 @@ export const useAuthStore = defineStore('auth', () => {
   const isLoading = ref(false);
   const error = ref<string | null>(null);
   const isInitialized = ref(false);
+  // Increments whenever the session user identity changes (sign-in, sign-out,
+  // account switch); same-user session updates keep it stable. Async work
+  // captures it to reject completions that land in a different session.
+  const sessionGeneration = ref(0);
 
   // Getters
   const isAuthenticated = computed(() => !!user.value && !!session.value);
@@ -97,6 +101,9 @@ export const useAuthStore = defineStore('auth', () => {
   };
 
   const setSession = (sessionData: AppSession | null) => {
+    if ((session.value?.user?.id ?? null) !== (sessionData?.user?.id ?? null)) {
+      sessionGeneration.value += 1;
+    }
     session.value = sessionData;
   };
 
@@ -113,6 +120,9 @@ export const useAuthStore = defineStore('auth', () => {
   };
 
   const clearAuth = () => {
+    if (session.value?.user) {
+      sessionGeneration.value += 1;
+    }
     user.value = null;
     session.value = null;
     error.value = null;
@@ -172,6 +182,7 @@ export const useAuthStore = defineStore('auth', () => {
    * Load user profile from database
    */
   const loadUserProfile = async (userId: string) => {
+    const generation = sessionGeneration.value;
     try {
       const queryKey = authKeys.profile(userId);
       const queryState = queryClient.getQueryState(queryKey);
@@ -192,7 +203,7 @@ export const useAuthStore = defineStore('auth', () => {
         // Update query cache with fresh data
         queryClient.setQueryData(queryKey, profile);
 
-        if (session.value?.user?.id === userId) {
+        if (session.value?.user?.id === userId && sessionGeneration.value === generation) {
           setUser({
             id: profile.id,
             email: profile.email || '',
@@ -290,6 +301,7 @@ export const useAuthStore = defineStore('auth', () => {
       return false;
     }
     const userId = initiator.id;
+    const generation = sessionGeneration.value;
 
     setLoading(true);
     setError(null);
@@ -306,7 +318,9 @@ export const useAuthStore = defineStore('auth', () => {
       queryClient.invalidateQueries({ queryKey: authKeys.profile(userId) });
 
       // Reload user profile to get updated data
-      await loadUserProfile(userId);
+      if (sessionGeneration.value === generation && user.value?.id === userId) {
+        await loadUserProfile(userId);
+      }
       return true;
     } catch (err) {
       console.error('Profile update error:', err);
@@ -323,6 +337,7 @@ export const useAuthStore = defineStore('auth', () => {
   const updateExperience = async (experienceGained: number) => {
     const initiator = user.value;
     if (!initiator) return false;
+    const generation = sessionGeneration.value;
 
     const newExperience = initiator.total_experience + experienceGained;
     const newLevel = Math.floor(newExperience / 1000) + 1; // Simple level calculation
@@ -335,7 +350,8 @@ export const useAuthStore = defineStore('auth', () => {
         },
       });
 
-      const stillCurrent = user.value?.id === initiator.id;
+      const stillCurrent =
+        user.value?.id === initiator.id && sessionGeneration.value === generation;
       if (success && stillCurrent && user.value) {
         // Update local state immediately for better UX
         user.value.total_experience = newExperience;
@@ -355,6 +371,7 @@ export const useAuthStore = defineStore('auth', () => {
   const updateStreak = async (increment: boolean = true) => {
     const initiator = user.value;
     if (!initiator) return false;
+    const generation = sessionGeneration.value;
 
     const newStreak = increment ? initiator.learning_streak + 1 : 0;
 
@@ -366,7 +383,8 @@ export const useAuthStore = defineStore('auth', () => {
         },
       });
 
-      const stillCurrent = user.value?.id === initiator.id;
+      const stillCurrent =
+        user.value?.id === initiator.id && sessionGeneration.value === generation;
       if (success && stillCurrent && user.value) {
         user.value.learning_streak = newStreak;
       }
@@ -384,6 +402,7 @@ export const useAuthStore = defineStore('auth', () => {
   const updatePreferences = async (preferences: Partial<UserPreferences>) => {
     const initiator = user.value;
     if (!initiator) return false;
+    const generation = sessionGeneration.value;
 
     try {
       const success = await updateProfile({
@@ -393,7 +412,8 @@ export const useAuthStore = defineStore('auth', () => {
         },
       });
 
-      const stillCurrent = user.value?.id === initiator.id;
+      const stillCurrent =
+        user.value?.id === initiator.id && sessionGeneration.value === generation;
       if (success && stillCurrent && user.value) {
         // Update local state immediately
         user.value.preferences = {
@@ -416,6 +436,7 @@ export const useAuthStore = defineStore('auth', () => {
     isLoading,
     error,
     isInitialized,
+    sessionGeneration,
     // Getters
     isAuthenticated,
     userLevel,
