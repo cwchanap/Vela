@@ -26,7 +26,7 @@ const stubs = {
   },
   'q-select': {
     template:
-      '<select :value="modelValue" @change="$emit(\'update:modelValue\', $event.target.value)"><option v-for="o in options" :key="optionValue(o)" :value="optionValue(o)">{{ optionLabel(o) }}</option></select>',
+      '<select :value="modelValue" :aria-label="$attrs[\'aria-label\']" @change="$emit(\'update:modelValue\', $event.target.value)"><option v-for="o in options" :key="optionValue(o)" :value="optionValue(o)">{{ optionLabel(o) }}</option></select>',
     props: ['modelValue', 'options'],
     emits: ['update:modelValue'],
     methods: {
@@ -39,13 +39,15 @@ const stubs = {
     },
   },
   'q-input': {
+    inheritAttrs: false,
     template:
-      '<input :value="modelValue" @input="$emit(\'update:modelValue\', $event.target.value)" />',
+      '<span><input v-bind="$attrs" :value="modelValue" @input="$emit(\'update:modelValue\', $event.target.value)" /><slot name="append" /></span>',
     props: ['modelValue'],
     emits: ['update:modelValue'],
   },
   'q-btn': {
-    template: '<button :disabled="disable" @click="$emit(\'click\')"><slot /></button>',
+    template:
+      '<button :disabled="disable" :aria-label="$attrs[\'aria-label\']" @click="$emit(\'click\')"><slot /></button>',
     props: ['disable', 'loading'],
     emits: ['click'],
   },
@@ -167,6 +169,17 @@ describe('LlmProviderCard', () => {
       expect(wrapper.findAll('select').length).toBe(0);
       expect(wrapper.text()).toContain('Free-form model IDs; no thinking controls');
     });
+
+    it('provides accessible labels for the key visibility toggle and effort selectors', async () => {
+      wrapper = mountCard('google');
+      const toggleBtn = wrapper.find('button[aria-label="Show API key"]');
+      expect(toggleBtn.exists()).toBe(true);
+      await toggleBtn.trigger('click');
+      expect(wrapper.find('button[aria-label="Hide API key"]').exists()).toBe(true);
+
+      const select = wrapper.find('[data-testid="llm-effort-gemini-3.8-flash"]');
+      expect(select.attributes('aria-label')).toBe('Thinking for gemini-3.8-flash');
+    });
   });
 
   describe('draft hydration', () => {
@@ -283,6 +296,36 @@ describe('LlmProviderCard', () => {
       const keyInput = wrapper.find('[data-testid="llm-key-input-google"]');
       expect((keyInput.element as HTMLInputElement).value).toBe('draft-unsaved');
       expect(llmStore.llm.keys.google).toBe('saved');
+    });
+
+    it('preserves draft edits made while a save is in flight', async () => {
+      setUser(authStore, llmFor({ keys: { google: 'saved' } }));
+      let resolveSave!: (_val: boolean) => void;
+      updatePreferencesSpy.mockImplementation(async (partial) => {
+        if (!authStore.user) return false;
+        authStore.user.preferences = {
+          ...(authStore.user.preferences as UserPreferences),
+          ...resolvePatchArg(partial),
+        };
+        return new Promise<boolean>((resolve) => {
+          resolveSave = resolve;
+        });
+      });
+      wrapper = mountCard('google');
+      await flushPromises();
+
+      const input = wrapper.find('[data-testid="llm-key-input-google"]');
+      await input.setValue('first-draft');
+      await wrapper.find('[data-testid="llm-save-google"]').trigger('click');
+
+      // User types newer edits while the save is still pending
+      await input.setValue('second-draft');
+
+      // Save finishes
+      resolveSave(true);
+      await flushPromises();
+
+      expect((input.element as HTMLInputElement).value).toBe('second-draft');
     });
   });
 });

@@ -10,7 +10,7 @@
       </div>
       <div class="col-auto">
         <q-toggle
-          v-model="darkModeEnabled"
+          :model-value="darkModeEnabled"
           color="primary"
           data-testid="dark-mode-toggle"
           @update:model-value="toggleDarkMode"
@@ -42,7 +42,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue';
+import { computed } from 'vue';
 import { useThemeStore } from '../../../stores/theme';
 import { useAuthStore } from '../../../stores/auth';
 import { Notify } from 'quasar';
@@ -51,20 +51,32 @@ const themeStore = useThemeStore();
 const authStore = useAuthStore();
 
 const isAuthenticated = computed(() => authStore.isAuthenticated);
-const darkModeEnabled = ref(themeStore.isDark);
+const darkModeEnabled = computed({
+  get: () => themeStore.isDark,
+  set: (val: boolean) => {
+    themeStore.setDarkMode(val);
+  },
+});
 
 const toggleDarkMode = () => {
   themeStore.toggle();
-  darkModeEnabled.value = themeStore.isDark;
 };
 
 const saveThemeToProfile = async () => {
-  await themeStore.saveToUserPreferences();
-  Notify.create({
-    type: 'positive',
-    message: 'Theme preference saved to your profile',
-    position: 'top',
-  });
+  const ok = await themeStore.saveToUserPreferences();
+  if (ok) {
+    Notify.create({
+      type: 'positive',
+      message: 'Theme preference saved to your profile',
+      position: 'top',
+    });
+  } else {
+    Notify.create({
+      type: 'negative',
+      message: 'Failed to save theme preference',
+      position: 'top',
+    });
+  }
 };
 </script>
 

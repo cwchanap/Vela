@@ -753,7 +753,9 @@ export const useAuthStore = defineStore('auth', () => {
         const response = await authService.updateUserProfile(userId, mergedProfileData);
 
         if (!response.success) {
-          setError(response.error || 'Profile update failed');
+          if (sessionGeneration.value === generation && user.value?.id === userId) {
+            setError(response.error || 'Profile update failed');
+          }
           return false;
         }
 
@@ -776,10 +778,14 @@ export const useAuthStore = defineStore('auth', () => {
         return sessionGeneration.value === generation && user.value?.id === userId;
       } catch (err) {
         console.error('Profile update error:', err);
-        setError('An unexpected error occurred during profile update');
+        if (sessionGeneration.value === generation && user.value?.id === userId) {
+          setError('An unexpected error occurred during profile update');
+        }
         return false;
       } finally {
-        setLoading(false);
+        if (sessionGeneration.value === generation && user.value?.id === userId) {
+          setLoading(false);
+        }
       }
     });
   };

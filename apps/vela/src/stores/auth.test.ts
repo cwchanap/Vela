@@ -825,5 +825,32 @@ describe('useAuthStore', () => {
       expect(result).toBe(false);
       expect(store.user).toBeNull();
     });
+
+    it('does not set error or overwrite loading when update fails after session transition', async () => {
+      let rejectUpdate!: (_v: unknown) => void;
+      mockAuthService.updateUserProfile.mockImplementationOnce(
+        () =>
+          new Promise((_, rej) => {
+            rejectUpdate = rej;
+          }),
+      );
+      const { useAuthStore } = await import('./auth');
+      const store = useAuthStore();
+      store.setSession({ user: { id: 'user-a', email: 'a@example.com' }, provider: 'cognito' });
+      store.setUser(makeUser({ id: 'user-a', preferences: { dailyGoal: 30 } }));
+
+      const pending = store.updateProfile({ preferences: { dailyGoal: 60 } });
+
+      // Session transitions before the request fails
+      store.clearAuth();
+      store.setLoading(true); // e.g. a new sign-in starts
+
+      rejectUpdate(new Error('Network error'));
+      const result = await pending;
+
+      expect(result).toBe(false);
+      expect(store.error).toBeNull();
+      expect(store.isLoading).toBe(true);
+    });
   });
 });

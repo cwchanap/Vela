@@ -66,8 +66,8 @@ describe('ThemeSection', () => {
   });
 
   describe('theme preference persistence', () => {
-    it('saves the theme preference and shows a success notification', async () => {
-      const saveSpy = vi.spyOn(themeStore, 'saveToUserPreferences').mockResolvedValue(undefined);
+    it('saves the theme preference and shows a success notification on success', async () => {
+      const saveSpy = vi.spyOn(themeStore, 'saveToUserPreferences').mockResolvedValue(true);
 
       await wrapper.vm.saveThemeToProfile();
 
@@ -75,6 +75,19 @@ describe('ThemeSection', () => {
       expect(Notify.create).toHaveBeenCalledWith({
         type: 'positive',
         message: 'Theme preference saved to your profile',
+        position: 'top',
+      });
+    });
+
+    it('shows a negative notification when save fails', async () => {
+      const saveSpy = vi.spyOn(themeStore, 'saveToUserPreferences').mockResolvedValue(false);
+
+      await wrapper.vm.saveThemeToProfile();
+
+      expect(saveSpy).toHaveBeenCalled();
+      expect(Notify.create).toHaveBeenCalledWith({
+        type: 'negative',
+        message: 'Failed to save theme preference',
         position: 'top',
       });
     });
