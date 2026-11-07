@@ -274,4 +274,83 @@ describe('llmSettings + auth account transitions (real stores)', () => {
     expect(llmStore.llm.keys).toEqual({ anthropic: 'keep', google: 'google-key' });
     expect(llmStore.llm.thinking['gemini-3.8-flash']).toBe('high');
   });
+
+  it('does not commit an in-flight save after sign-out and same-account re-authentication', async () => {
+    const { authStore, llmStore } = await stores();
+    await signIn(authStore, 'user-a');
+
+    const pending = llmStore.saveProvider('google', 'a-secret-key');
+    await flushPromises();
+    expect(pendingWrites).toHaveLength(1);
+    expect(pendingWrites[0]!.userId).toBe('user-a');
+
+    authStore.setSession(null);
+    authStore.setUser(null);
+    await flushPromises();
+    await signIn(authStore, 'user-a', makeLlm({ keys: { anthropic: 'fresh-key' } }));
+
+    applyWrite(0);
+    const result = await pending;
+    await flushPromises();
+
+    expect(result).toBe(false);
+    expect(authStore.user?.id).toBe('user-a');
+    const aLlm = authStore.user?.preferences.llm as LlmPreferences | undefined;
+    expect(aLlm?.keys.google).toBeUndefined();
+    expect(llmStore.llm.keys).toEqual({ anthropic: 'fresh-key' });
+  });
+
+  it('does not let a save queued under a previous session issue a write after same-account re-authentication', async () => {
+    const { authStore, llmStore } = await stores();
+    await signIn(authStore, 'user-a');
+
+    const first = llmStore.saveProvider('google', 'old-google-key');
+    const second = llmStore.saveProvider('openai', 'old-openai-key');
+    await flushPromises();
+    expect(pendingWrites).toHaveLength(1);
+
+    authStore.setSession(null);
+    authStore.setUser(null);
+    await flushPromises();
+    await signIn(authStore, 'user-a', makeLlm());
+
+    applyWrite(0);
+    await flushPromises();
+    if (pendingWrites[1]) applyWrite(1);
+
+    const [firstResult, secondResult] = await Promise.all([first, second]);
+    await flushPromises();
+
+    expect(firstResult).toBe(false);
+    expect(secondResult).toBe(false);
+    expect(pendingWrites).toHaveLength(1);
+    expect(llmStore.llm.keys).toEqual({});
+  });
+
+  it('does not hydrate a stale profile response into a new same-account session', async () => {
+    const { authStore, llmStore } = await stores();
+    await signIn(authStore, 'user-a', makeLlm({ keys: { google: 'stale-key' } }));
+
+    let resolveGet!: (_v: Profile | null) => void;
+    mockAuthService.getUserProfile.mockImplementationOnce(
+      () =>
+        new Promise<Profile | null>((res) => {
+          resolveGet = res;
+        }),
+    );
+    const pending = authStore.loadUserProfile('user-a');
+
+    authStore.setSession(null);
+    authStore.setUser(null);
+    await flushPromises();
+    await signIn(authStore, 'user-a', makeLlm({ keys: { openai: 'fresh-key' } }));
+
+    resolveGet(makeProfile(makeUser('user-a', makeLlm({ keys: { google: 'stale-key' } }))));
+    await pending;
+    await flushPromises();
+
+    const aLlm = authStore.user?.preferences.llm as LlmPreferences | undefined;
+    expect(aLlm?.keys).toEqual({ openai: 'fresh-key' });
+    expect(llmStore.llm.keys).toEqual({ openai: 'fresh-key' });
+  });
 });
