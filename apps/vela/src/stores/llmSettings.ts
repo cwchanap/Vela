@@ -118,10 +118,11 @@ export const useLLMSettingsStore = defineStore('llmSettings', () => {
         }
       }
       const ok = await auth.updatePreferences({ llm: next });
-      if (ok && auth.user?.id === initiatorId && auth.sessionGeneration === generation) {
+      const stillCurrent = auth.user?.id === initiatorId && auth.sessionGeneration === generation;
+      if (ok && stillCurrent) {
         llm.value = cloneLlm(next);
       }
-      return ok;
+      return ok && stillCurrent;
     });
   };
 
@@ -135,10 +136,11 @@ export const useLLMSettingsStore = defineStore('llmSettings', () => {
       const next = currentSnapshot();
       next.defaultModel = { provider: pair.provider, model: pair.model };
       const ok = await auth.updatePreferences({ llm: next });
-      if (ok && auth.user?.id === initiatorId && auth.sessionGeneration === generation) {
+      const stillCurrent = auth.user?.id === initiatorId && auth.sessionGeneration === generation;
+      if (ok && stillCurrent) {
         llm.value = cloneLlm(next);
       }
-      return ok;
+      return ok && stillCurrent;
     });
   };
 
