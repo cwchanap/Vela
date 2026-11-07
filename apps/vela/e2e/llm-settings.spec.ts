@@ -1,5 +1,11 @@
 import type { Page } from '@playwright/test';
-import { test, expect, makeSyntheticTokens, seedSessionFor } from './fixtures/syntheticAuth';
+import {
+  test,
+  expect,
+  buildSessionEntries,
+  makeSyntheticTokens,
+  seedSessionFor,
+} from './fixtures/syntheticAuth';
 import { SYNTHETIC_USER_A, SYNTHETIC_USER_B } from './fixtures/syntheticEnv';
 import { waitForPageLoad } from './utils/helpers';
 
@@ -279,7 +285,7 @@ test.describe('LLM Settings - Default model pair', () => {
   }) => {
     apiMock.seedProfile(SYNTHETIC_USER_A, {
       llm: {
-        keys: { openrouter: OPENROUTER_KEY },
+        keys: { openai: OPENAI_KEY, openrouter: OPENROUTER_KEY },
         thinking: {},
         defaultModel: { provider: 'google', model: 'gemini-3.8-flash' },
       },
@@ -289,19 +295,19 @@ test.describe('LLM Settings - Default model pair', () => {
 
     await page.getByTestId('llm-default-model-select').click();
     await page.getByRole('option', { name: 'OpenRouter (custom ID)', exact: true }).click();
-    await page.getByTestId('llm-default-model-input').fill('openai/gpt-4o-mini');
+    await page.getByTestId('llm-default-model-input').fill('gpt-6.1-sol');
     const putResponse = waitForProfilePut(page);
     await page.getByTestId('llm-default-save').click();
     await putResponse;
     expect(llmOf(apiMock.lastPut()).defaultModel).toEqual({
       provider: 'openrouter',
-      model: 'openai/gpt-4o-mini',
+      model: 'gpt-6.1-sol',
     });
-    await expect(page.getByText('Active: OpenRouter • openai/gpt-4o-mini')).toBeVisible();
+    await expect(page.getByText('Active: OpenRouter • gpt-6.1-sol')).toBeVisible();
 
     await page.reload();
     await waitForPageLoad(page);
-    await expect(page.getByText('Active: OpenRouter • openai/gpt-4o-mini')).toBeVisible();
+    await expect(page.getByText('Active: OpenRouter • gpt-6.1-sol')).toBeVisible();
 
     await page.goto('/chat');
     await waitForPageLoad(page);
@@ -312,7 +318,7 @@ test.describe('LLM Settings - Default model pair', () => {
     await page.getByTestId('llm-chat-send').click();
     const chatBody = (await chatRequest).postDataJSON() as Record<string, unknown>;
     expect(chatBody.provider).toBe('openrouter');
-    expect(chatBody.model).toBe('openai/gpt-4o-mini');
+    expect(chatBody.model).toBe('gpt-6.1-sol');
     expect(chatBody.apiKey).toBe(OPENROUTER_KEY);
 
     await page.goto('/my-dictionaries');
@@ -323,7 +329,7 @@ test.describe('LLM Settings - Default model pair', () => {
     await page.getByRole('button', { name: 'Ask AI' }).click();
     const analyzeBody = (await analyzeRequest).postDataJSON() as Record<string, unknown>;
     expect(analyzeBody.provider).toBe('openrouter');
-    expect(analyzeBody.model).toBe('openai/gpt-4o-mini');
+    expect(analyzeBody.model).toBe('gpt-6.1-sol');
     expect(analyzeBody.apiKey).toBe(OPENROUTER_KEY);
     await expect(page.getByText('Mock streamed analysis of the sentence.')).toBeVisible();
   });
@@ -608,9 +614,89 @@ test.describe('LLM Settings - Session and profile integrity', () => {
       defaultModel: { provider: 'google', model: 'gemini-3.8-flash' },
     });
 
+    await page.evaluate(() => {
+      (window as unknown as { __e2eRuntimeSentinel?: string }).__e2eRuntimeSentinel =
+        'same-runtime';
+    });
+
     const tokensB = makeSyntheticTokens(SYNTHETIC_USER_B);
-    await seedSessionFor(context, SYNTHETIC_USER_B, tokensB);
-    await page.goto('/settings');
+    const transition = await page.evaluate(
+      (entries) => {
+        for (const [key, value] of entries) {
+          window.localStorage.setItem(key, value);
+        }
+        const app = (
+          document.getElementById('q-app') as unknown as {
+            __vue_app__?: {
+              _context?: {
+                provides?: Record<symbol, unknown>;
+                config?: { globalProperties?: Record<string, unknown> };
+              };
+            };
+          }
+        ).__vue_app__;
+        const provides = app?._context?.provides ?? {};
+        const pinia = Object.getOwnPropertySymbols(provides)
+          .map((key) => provides[key])
+          .find(
+            (
+              value,
+            ): value is {
+              _s: Map<string, unknown>;
+              state: { value: Record<string, unknown> };
+            } => !!value && typeof value === 'object' && '_s' in value && 'state' in value,
+          );
+        if (!pinia) throw new Error('Pinia instance not found on the live app');
+        const store = pinia._s.get('auth') as
+          | {
+              isInitialized: boolean;
+              user: { id: string } | null;
+              session: unknown;
+              initialize: () => Promise<void>;
+            }
+          | undefined;
+        if (!store) throw new Error('Auth store not found on the live app');
+        const router = app?._context?.config?.globalProperties?.['$router'] as
+          | {
+              push: (_location: string) => Promise<unknown>;
+              currentRoute: { value: { path: string } };
+            }
+          | undefined;
+        if (!router) throw new Error('Vue Router instance not found on the live app');
+        const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
+        store.user = { id: 'e2e-watcher-probe' };
+        store.session = { e2e: true };
+        return flush()
+          .then(() => {
+            store.user = null;
+            store.session = null;
+            store.isInitialized = false;
+            return store.initialize();
+          })
+          .then(() => router.push('/settings'))
+          .then(
+            () => ({
+              path: router.currentRoute.value.path,
+              userId: store.user?.id ?? null,
+              hasSession: !!store.session,
+              isInitialized: store.isInitialized,
+            }),
+            () => 'transition rejected',
+          );
+      },
+      buildSessionEntries(SYNTHETIC_USER_B, tokensB),
+    );
+    expect(transition).toEqual({
+      path: '/settings',
+      userId: SYNTHETIC_USER_B.userId,
+      hasSession: true,
+      isInitialized: true,
+    });
+
+    const sentinel = await page.evaluate(
+      () => (window as unknown as { __e2eRuntimeSentinel?: string }).__e2eRuntimeSentinel,
+    );
+    expect(sentinel).toBe('same-runtime');
 
     await waitForPageLoad(page);
     await expect(page.getByTestId('settings-page')).toBeVisible();
@@ -624,6 +710,7 @@ test.describe('LLM Settings - Session and profile integrity', () => {
     expect(bAuthCalls.some((h) => h.authorization === `Bearer ${tokensB.idToken}`)).toBe(true);
     expect(apiMock.profiles.get(SYNTHETIC_USER_B.userId)).toBeTruthy();
 
+    await seedSessionFor(context, SYNTHETIC_USER_B, tokensB);
     await page.reload();
     await waitForPageLoad(page);
     await expect(page.getByText('Active: Google • gemini-3.8-flash')).toBeVisible();
