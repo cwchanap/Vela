@@ -6,6 +6,7 @@ import {
   myDictionariesKeys,
   progressKeys,
   useAddFlashcardMutation,
+  useLlmCapabilitiesQuery,
   useMyDictionariesQuery,
   useProgressAnalyticsQuery,
   useSessionQuery,
@@ -38,5 +39,9 @@ describe('composables/queries/index', () => {
 
   it('re-exports the TTS query helpers', () => {
     expect(typeof useTTSSettingsQuery).toBe('function');
+  });
+
+  it('re-exports the LLM capabilities query helper', () => {
+    expect(typeof useLlmCapabilitiesQuery).toBe('function');
   });
 });

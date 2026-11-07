@@ -67,8 +67,11 @@ describe('AIChatPage', () => {
     chatStore.setTyping(false);
     chatStore.setError(null);
 
-    llmSettingsStore.setProvider('google');
-    llmSettingsStore.setModel('gemini-3.8-flash');
+    llmSettingsStore.llm = {
+      keys: {},
+      thinking: {},
+      defaultModel: { provider: 'google', model: 'gemini-3.8-flash' },
+    };
 
     authStore.user = null;
 
@@ -915,9 +918,11 @@ describe('AIChatPage', () => {
 
     it('should pass the current provider/model/key snapshot explicitly on send', async () => {
       const llmSettings = useLLMSettingsStore();
-      llmSettings.setProvider('google');
-      llmSettings.setModel('gemini-3.8-flash');
-      llmSettings.setApiKey('snapshot-key');
+      llmSettings.llm = {
+        keys: { google: 'snapshot-key' },
+        thinking: {},
+        defaultModel: { provider: 'google', model: 'gemini-3.8-flash' },
+      };
       mockLLMResponse();
       mockChatMessageSaves();
 
@@ -940,6 +945,34 @@ describe('AIChatPage', () => {
       const call = vi.mocked(llmModule.llmClient.generate).mock.calls[0]![0];
       expect(call).not.toHaveProperty('temperature');
       expect(call).not.toHaveProperty('thinking');
+    });
+
+    it('should send only the explicitly saved thinking override on send', async () => {
+      const llmSettings = useLLMSettingsStore();
+      llmSettings.llm = {
+        keys: { google: 'snapshot-key' },
+        thinking: { 'gemini-3.8-flash': 'high' },
+        defaultModel: { provider: 'google', model: 'gemini-3.8-flash' },
+      };
+      mockLLMResponse();
+      mockChatMessageSaves();
+
+      const wrapper = mountComponent();
+      await flushPromises();
+
+      const input = wrapper.find('[data-testid="llm-chat-input"]');
+      await input.setValue('Thinking test');
+      await wrapper.find('[data-testid="llm-chat-send"]').trigger('click');
+      await flushPromises();
+
+      expect(llmModule.llmClient.generate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          provider: 'google',
+          model: 'gemini-3.8-flash',
+          apiKey: 'snapshot-key',
+          thinking: 'high',
+        }),
+      );
     });
   });
 

@@ -287,7 +287,7 @@ const queryClient = useQueryClient();
 const addFlashcardMutation = useAddFlashcardMutation();
 const llmSettings = useLLMSettingsStore();
 const authStore = useAuthStore();
-const { provider, currentModel, currentApiKey } = storeToRefs(llmSettings);
+const { selection } = storeToRefs(llmSettings);
 const { user, isAuthenticated } = storeToRefs(authStore);
 
 const entries = ref<MyDictionaryEntry[]>([]);
@@ -637,9 +637,10 @@ async function handleAskAI(entry: MyDictionaryEntry) {
     await llmClient.analyzeSentenceStream(
       {
         sentence: entry.sentence,
-        provider: provider.value,
-        model: currentModel.value,
-        apiKey: currentApiKey.value,
+        provider: selection.value.provider,
+        model: selection.value.model,
+        apiKey: selection.value.apiKey,
+        ...(selection.value.thinking ? { thinking: selection.value.thinking } : {}),
         signal: controller.signal,
       },
       (frame) => {

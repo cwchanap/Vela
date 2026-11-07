@@ -71,6 +71,304 @@ const clearPendingAuthRedirect = () => {
   }
 };
 
+interface ProfileFingerprint {
+  username?: string | null;
+  avatar_url?: string | null;
+  native_language?: string;
+  preferences?: Record<string, unknown>;
+}
+
+type PreferencesUpdater = (_current: UserPreferences) => Partial<UserPreferences>;
+
+type PreferencesPatch = Record<string, unknown> | PreferencesUpdater;
+
+type ProfilePatch = Omit<ProfileData, 'preferences'> & {
+  preferences?: PreferencesPatch | undefined;
+};
+
+const REMOVED_VALUE: unique symbol = Symbol('removed');
+
+const isPlainRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value);
+
+const isSameJsonValue = (a: unknown, b: unknown): boolean => {
+  if (a === b) return true;
+  if (typeof a !== 'object' || a === null || typeof b !== 'object' || b === null) {
+    return false;
+  }
+  if (Array.isArray(a) || Array.isArray(b)) {
+    return (
+      Array.isArray(a) &&
+      Array.isArray(b) &&
+      a.length === b.length &&
+      a.every((item, index) => isSameJsonValue(item, b[index]))
+    );
+  }
+  const aRecord = a as Record<string, unknown>;
+  const bRecord = b as Record<string, unknown>;
+  return (
+    Object.keys(aRecord).every((key) => isSameJsonValue(aRecord[key], bRecord[key])) &&
+    Object.keys(bRecord).every((key) => isSameJsonValue(aRecord[key], bRecord[key]))
+  );
+};
+
+const diffToFingerprint = (
+  baseline: unknown,
+  committed: unknown,
+  path: readonly string[],
+): unknown => {
+  const isAtomic = path.length === 2 && path[0] === 'llm' && path[1] === 'defaultModel';
+  if (!isAtomic && isPlainRecord(committed)) {
+    const base = isPlainRecord(baseline) ? baseline : {};
+    const node: Record<string, unknown> = {};
+    let changed = false;
+    for (const key of new Set([...Object.keys(base), ...Object.keys(committed)])) {
+      const child = diffToFingerprint(base[key], committed[key], [...path, key]);
+      if (child !== undefined) {
+        node[key] = child;
+        changed = true;
+      }
+    }
+    return changed ? node : undefined;
+  }
+  if (isSameJsonValue(baseline, committed)) return undefined;
+  return committed === undefined ? REMOVED_VALUE : committed;
+};
+
+const fingerprintFromPatch = (
+  source: Profile,
+  patch: ProfileData,
+  baseline: Profile,
+): ProfileFingerprint => {
+  const fingerprint: ProfileFingerprint = {};
+  if (patch.username !== undefined) fingerprint.username = source.username;
+  if (patch.avatar_url !== undefined) fingerprint.avatar_url = source.avatar_url;
+  if (patch.native_language !== undefined) fingerprint.native_language = source.native_language;
+  if (patch.preferences) {
+    const baselinePreferences = baseline.preferences as unknown as
+      Record<string, unknown> | undefined;
+    const sourcePreferences = source.preferences as unknown as Record<string, unknown> | undefined;
+    const preferences: Record<string, unknown> = {};
+    for (const key of Object.keys(patch.preferences)) {
+      const child = diffToFingerprint(baselinePreferences?.[key], sourcePreferences?.[key], [key]);
+      if (child !== undefined) preferences[key] = child;
+    }
+    if (Object.keys(preferences).length > 0) fingerprint.preferences = preferences;
+  }
+  return fingerprint;
+};
+
+const coversFingerprintNode = (recordValue: unknown, node: unknown): boolean => {
+  if (node === REMOVED_VALUE) return recordValue === undefined;
+  if (isPlainRecord(node)) {
+    const record = isPlainRecord(recordValue) ? recordValue : {};
+    return Object.entries(node).every(([key, child]) => coversFingerprintNode(record[key], child));
+  }
+  return isSameJsonValue(recordValue, node);
+};
+
+const recordCoversFingerprint = (record: Profile, fingerprint: ProfileFingerprint): boolean => {
+  if (
+    fingerprint.username !== undefined &&
+    !isSameJsonValue(record.username, fingerprint.username)
+  ) {
+    return false;
+  }
+  if (
+    fingerprint.avatar_url !== undefined &&
+    !isSameJsonValue(record.avatar_url, fingerprint.avatar_url)
+  ) {
+    return false;
+  }
+  if (
+    fingerprint.native_language !== undefined &&
+    !isSameJsonValue(record.native_language, fingerprint.native_language)
+  ) {
+    return false;
+  }
+  if (fingerprint.preferences) {
+    return coversFingerprintNode(record.preferences, fingerprint.preferences);
+  }
+  return true;
+};
+
+const retainFingerprintNode = (recordValue: unknown, node: unknown): unknown => {
+  if (isPlainRecord(node)) {
+    const record = isPlainRecord(recordValue) ? recordValue : {};
+    const retained: Record<string, unknown> = {};
+    let kept = false;
+    for (const [key, child] of Object.entries(node)) {
+      const retainedChild = retainFingerprintNode(record[key], child);
+      if (retainedChild !== undefined) {
+        retained[key] = retainedChild;
+        kept = true;
+      }
+    }
+    return kept ? retained : undefined;
+  }
+  return coversFingerprintNode(recordValue, node) ? node : undefined;
+};
+
+const retainedFingerprint = (
+  record: Profile,
+  fingerprint: ProfileFingerprint | null,
+): ProfileFingerprint | null => {
+  if (!fingerprint) return null;
+  const retained: ProfileFingerprint = {};
+  if (
+    fingerprint.username !== undefined &&
+    isSameJsonValue(record.username, fingerprint.username)
+  ) {
+    retained.username = fingerprint.username;
+  }
+  if (
+    fingerprint.avatar_url !== undefined &&
+    isSameJsonValue(record.avatar_url, fingerprint.avatar_url)
+  ) {
+    retained.avatar_url = fingerprint.avatar_url;
+  }
+  if (
+    fingerprint.native_language !== undefined &&
+    isSameJsonValue(record.native_language, fingerprint.native_language)
+  ) {
+    retained.native_language = fingerprint.native_language;
+  }
+  if (fingerprint.preferences) {
+    const kept = retainFingerprintNode(record.preferences, fingerprint.preferences);
+    if (kept !== undefined) retained.preferences = kept as Record<string, unknown>;
+  }
+  return Object.keys(retained).length > 0 ? retained : null;
+};
+
+const reconcileFingerprintNode = (
+  tracked: unknown,
+  node: unknown,
+  baseline: unknown,
+): { applied: unknown; resolved: unknown } => {
+  if (isPlainRecord(node)) {
+    if (tracked !== undefined && !isPlainRecord(tracked)) {
+      return { applied: tracked, resolved: tracked };
+    }
+    const base = isPlainRecord(tracked) ? tracked : {};
+    const baselineBase = isPlainRecord(baseline) ? baseline : {};
+    const applied: Record<string, unknown> = { ...base };
+    const resolved: Record<string, unknown> = {};
+    let hasResolved = false;
+    for (const [key, child] of Object.entries(node)) {
+      const childResult = reconcileFingerprintNode(base[key], child, baselineBase[key]);
+      if (childResult.applied === REMOVED_VALUE) {
+        delete applied[key];
+      } else {
+        applied[key] = childResult.applied;
+      }
+      if (childResult.resolved !== undefined) {
+        resolved[key] = childResult.resolved;
+        hasResolved = true;
+      }
+    }
+    return { applied, resolved: hasResolved ? resolved : undefined };
+  }
+  if (node === REMOVED_VALUE) {
+    return tracked === undefined
+      ? { applied: REMOVED_VALUE, resolved: REMOVED_VALUE }
+      : { applied: tracked, resolved: tracked };
+  }
+  if (tracked === undefined) {
+    return baseline === undefined
+      ? { applied: node, resolved: node }
+      : { applied: REMOVED_VALUE, resolved: REMOVED_VALUE };
+  }
+  if (isSameJsonValue(tracked, node)) {
+    return { applied: node, resolved: node };
+  }
+  return { applied: tracked, resolved: tracked };
+};
+
+const reconcileScalar = (applied: unknown, fallback: unknown): unknown =>
+  applied === REMOVED_VALUE ? fallback : applied;
+
+const reconcileAcknowledgedProfile = (
+  tracked: Profile,
+  fingerprint: ProfileFingerprint,
+  baseline: Profile,
+): { profile: Profile; fingerprint: ProfileFingerprint | null } => {
+  const username =
+    fingerprint.username !== undefined
+      ? reconcileFingerprintNode(tracked.username, fingerprint.username, baseline.username)
+      : { applied: tracked.username, resolved: undefined };
+  const avatarUrl =
+    fingerprint.avatar_url !== undefined
+      ? reconcileFingerprintNode(tracked.avatar_url, fingerprint.avatar_url, baseline.avatar_url)
+      : { applied: tracked.avatar_url, resolved: undefined };
+  const nativeLanguage =
+    fingerprint.native_language !== undefined
+      ? reconcileFingerprintNode(
+          tracked.native_language,
+          fingerprint.native_language,
+          baseline.native_language,
+        )
+      : { applied: tracked.native_language, resolved: undefined };
+  const preferences =
+    fingerprint.preferences !== undefined
+      ? reconcileFingerprintNode(tracked.preferences, fingerprint.preferences, baseline.preferences)
+      : { applied: tracked.preferences, resolved: undefined };
+  const resolvedFingerprint: ProfileFingerprint = {};
+  if (username.resolved !== undefined) {
+    resolvedFingerprint.username = username.resolved as string | null;
+  }
+  if (avatarUrl.resolved !== undefined) {
+    resolvedFingerprint.avatar_url = avatarUrl.resolved as string | null;
+  }
+  if (nativeLanguage.resolved !== undefined) {
+    resolvedFingerprint.native_language = nativeLanguage.resolved as string;
+  }
+  if (preferences.resolved !== undefined) {
+    resolvedFingerprint.preferences = preferences.resolved as Record<string, unknown>;
+  }
+  return {
+    profile: {
+      ...tracked,
+      username: reconcileScalar(username.applied, tracked.username) as string | null,
+      avatar_url: reconcileScalar(avatarUrl.applied, tracked.avatar_url) as string | null,
+      native_language: reconcileScalar(nativeLanguage.applied, tracked.native_language) as string,
+      preferences: preferences.applied as Profile['preferences'],
+    },
+    fingerprint: Object.keys(resolvedFingerprint).length > 0 ? resolvedFingerprint : null,
+  };
+};
+
+const mergeFingerprintNodes = (base: unknown, next: unknown): unknown => {
+  if (isPlainRecord(base) && isPlainRecord(next)) {
+    const merged: Record<string, unknown> = { ...base };
+    for (const [key, value] of Object.entries(next)) {
+      merged[key] = Object.prototype.hasOwnProperty.call(merged, key)
+        ? mergeFingerprintNodes(merged[key], value)
+        : value;
+    }
+    return merged;
+  }
+  return next !== undefined ? next : base;
+};
+
+const mergeFingerprints = (
+  base: ProfileFingerprint | null,
+  next: ProfileFingerprint | null,
+): ProfileFingerprint | null => {
+  const merged: ProfileFingerprint = {};
+  const username = next?.username !== undefined ? next.username : base?.username;
+  if (username !== undefined) merged.username = username;
+  const avatarUrl = next?.avatar_url !== undefined ? next.avatar_url : base?.avatar_url;
+  if (avatarUrl !== undefined) merged.avatar_url = avatarUrl;
+  const nativeLanguage =
+    next?.native_language !== undefined ? next.native_language : base?.native_language;
+  if (nativeLanguage !== undefined) merged.native_language = nativeLanguage;
+  const preferences = mergeFingerprintNodes(base?.preferences, next?.preferences);
+  if (isPlainRecord(preferences) && Object.keys(preferences).length > 0) {
+    merged.preferences = preferences;
+  }
+  return Object.keys(merged).length > 0 ? merged : null;
+};
+
 export const useAuthStore = defineStore('auth', () => {
   // State
   const user = ref<User | null>(null);
@@ -78,6 +376,16 @@ export const useAuthStore = defineStore('auth', () => {
   const isLoading = ref(false);
   const error = ref<string | null>(null);
   const isInitialized = ref(false);
+  // Increments whenever the session user identity changes (sign-in, sign-out,
+  // account switch); same-user session updates keep it stable. Async work
+  // captures it to reject completions that land in a different session.
+  const sessionGeneration = ref(0);
+
+  let lastAcknowledgedProfile: {
+    profile: Profile;
+    fingerprint: ProfileFingerprint | null;
+    generation: number;
+  } | null = null;
 
   // Getters
   const isAuthenticated = computed(() => !!user.value && !!session.value);
@@ -97,6 +405,19 @@ export const useAuthStore = defineStore('auth', () => {
   };
 
   const setSession = (sessionData: AppSession | null) => {
+    const previousUserId = session.value?.user?.id ?? null;
+    const nextUserId = sessionData?.user?.id ?? null;
+    if (previousUserId !== nextUserId) {
+      sessionGeneration.value += 1;
+      isLoading.value = false;
+      lastAcknowledgedProfile = null;
+      if (previousUserId) {
+        queryClient.invalidateQueries({ queryKey: authKeys.profile(previousUserId) });
+      }
+      if (nextUserId) {
+        queryClient.invalidateQueries({ queryKey: authKeys.profile(nextUserId) });
+      }
+    }
     session.value = sessionData;
   };
 
@@ -113,10 +434,92 @@ export const useAuthStore = defineStore('auth', () => {
   };
 
   const clearAuth = () => {
+    const previousUserId = session.value?.user?.id ?? null;
+    if (previousUserId) {
+      sessionGeneration.value += 1;
+      queryClient.invalidateQueries({ queryKey: authKeys.profile(previousUserId) });
+    }
     user.value = null;
     session.value = null;
     error.value = null;
     isLoading.value = false;
+    lastAcknowledgedProfile = null;
+  };
+
+  const userFromProfile = (profile: Profile): User => ({
+    id: profile.id,
+    email: profile.email || '',
+    username: profile.username || undefined,
+    avatar_url: profile.avatar_url || undefined,
+    current_level: profile.current_level,
+    total_experience: profile.total_experience,
+    learning_streak: profile.learning_streak,
+    native_language: profile.native_language,
+    preferences: profile.preferences as unknown as UserPreferences,
+    last_activity: profile.last_activity || undefined,
+    created_at: profile.created_at,
+    updated_at: profile.updated_at,
+  });
+
+  const profileFromUser = (source: User): Profile => ({
+    id: source.id,
+    username: source.username ?? null,
+    email: source.email || null,
+    avatar_url: source.avatar_url ?? null,
+    native_language: source.native_language,
+    current_level: source.current_level,
+    total_experience: source.total_experience,
+    learning_streak: source.learning_streak,
+    last_activity: source.last_activity ?? null,
+    preferences: source.preferences,
+    created_at: source.created_at,
+    updated_at: source.updated_at,
+  });
+
+  const applyProfileData = (base: Profile, data: ProfileData): Profile => ({
+    ...base,
+    username: data.username ?? base.username,
+    avatar_url: data.avatar_url ?? base.avatar_url,
+    native_language: data.native_language ?? base.native_language,
+    preferences: (data.preferences ?? base.preferences) as unknown as Profile['preferences'],
+  });
+
+  const registerAcknowledgedProfile = (
+    acknowledged: Profile,
+    patch: ProfileData,
+    baseline: Profile,
+    generation: number,
+  ) => {
+    const fingerprint = fingerprintFromPatch(acknowledged, patch, baseline);
+    const tracked = lastAcknowledgedProfile;
+    const trackedApplies =
+      tracked !== null &&
+      tracked.generation === generation &&
+      tracked.profile.id === acknowledged.id;
+    if (
+      trackedApplies &&
+      (tracked.profile.updated_at > acknowledged.updated_at ||
+        (tracked.profile.updated_at === acknowledged.updated_at &&
+          recordCoversFingerprint(tracked.profile, fingerprint)))
+    ) {
+      const reconciled = reconcileAcknowledgedProfile(tracked.profile, fingerprint, baseline);
+      lastAcknowledgedProfile = {
+        profile: reconciled.profile,
+        fingerprint: mergeFingerprints(tracked.fingerprint, reconciled.fingerprint),
+        generation,
+      };
+      setUser(userFromProfile(reconciled.profile));
+      return;
+    }
+    lastAcknowledgedProfile = {
+      profile: acknowledged,
+      fingerprint: mergeFingerprints(
+        trackedApplies ? retainedFingerprint(acknowledged, tracked.fingerprint) : null,
+        fingerprint,
+      ),
+      generation,
+    };
+    setUser(userFromProfile(acknowledged));
   };
 
   /**
@@ -172,6 +575,7 @@ export const useAuthStore = defineStore('auth', () => {
    * Load user profile from database
    */
   const loadUserProfile = async (userId: string) => {
+    const generation = sessionGeneration.value;
     try {
       const queryKey = authKeys.profile(userId);
       const queryState = queryClient.getQueryState(queryKey);
@@ -188,24 +592,34 @@ export const useAuthStore = defineStore('auth', () => {
 
       const profile = cachedProfile || (await authService.getUserProfile(userId));
 
-      if (profile) {
-        // Update query cache with fresh data
-        queryClient.setQueryData(queryKey, profile);
+      if (profile && session.value?.user?.id === userId && sessionGeneration.value === generation) {
+        const tracked = lastAcknowledgedProfile;
+        let effectiveProfile = profile;
+        if (
+          tracked === null ||
+          tracked.generation !== generation ||
+          tracked.profile.id !== userId
+        ) {
+          lastAcknowledgedProfile = { profile, fingerprint: null, generation };
+        } else if (
+          profile.updated_at < tracked.profile.updated_at ||
+          (profile.updated_at === tracked.profile.updated_at &&
+            tracked.fingerprint !== null &&
+            !recordCoversFingerprint(profile, tracked.fingerprint))
+        ) {
+          effectiveProfile = tracked.profile;
+        } else {
+          lastAcknowledgedProfile = {
+            profile,
+            fingerprint: retainedFingerprint(profile, tracked.fingerprint),
+            generation,
+          };
+        }
 
-        setUser({
-          id: profile.id,
-          email: profile.email || '',
-          username: profile.username || undefined,
-          avatar_url: profile.avatar_url || undefined,
-          current_level: profile.current_level,
-          total_experience: profile.total_experience,
-          learning_streak: profile.learning_streak,
-          native_language: profile.native_language,
-          preferences: profile.preferences as unknown as UserPreferences,
-          last_activity: profile.last_activity || undefined,
-          created_at: profile.created_at,
-          updated_at: profile.updated_at,
-        });
+        // Update query cache with fresh data
+        queryClient.setQueryData(queryKey, effectiveProfile);
+
+        setUser(userFromProfile(effectiveProfile));
       }
     } catch (err) {
       console.error('Error loading user profile:', err);
@@ -278,65 +692,133 @@ export const useAuthStore = defineStore('auth', () => {
     }
   };
 
+  let preferenceMutationQueue: Promise<void> = Promise.resolve();
+  let pendingPreferenceMutations = 0;
+
+  const enqueuePreferenceMutation = <T>(task: () => Promise<T>): Promise<T> => {
+    pendingPreferenceMutations += 1;
+    const runTask = () =>
+      task().finally(() => {
+        pendingPreferenceMutations -= 1;
+      });
+    const run =
+      pendingPreferenceMutations === 1 ? runTask() : preferenceMutationQueue.then(runTask);
+    preferenceMutationQueue = run.then(
+      () => undefined,
+      () => undefined,
+    );
+    return run;
+  };
+
   /**
    * Update user profile
    */
-  const updateProfile = async (profileData: ProfileData) => {
-    if (!user.value) {
+  const updateProfile = async (profileData: ProfilePatch) => {
+    const initiator = user.value;
+    if (!initiator) {
       setError('No user logged in');
       return false;
     }
+    const userId = initiator.id;
+    const generation = sessionGeneration.value;
 
-    setLoading(true);
-    setError(null);
-
-    try {
-      const response = await authService.updateUserProfile(user.value.id, profileData);
-
-      if (!response.success) {
-        setError(response.error || 'Profile update failed');
+    return enqueuePreferenceMutation(async () => {
+      const current = user.value;
+      if (!current || current.id !== userId || sessionGeneration.value !== generation) {
         return false;
       }
 
-      // Invalidate profile query to refetch fresh data
-      queryClient.invalidateQueries({ queryKey: authKeys.profile(user.value.id) });
+      const { preferences: preferencesPatch, ...profileFields } = profileData;
+      const resolvedPreferences: Record<string, unknown> | undefined =
+        typeof preferencesPatch === 'function'
+          ? ({ ...preferencesPatch(current.preferences) } as Record<string, unknown>)
+          : preferencesPatch;
+      const resolvedProfileData: ProfileData =
+        resolvedPreferences === undefined
+          ? profileFields
+          : { ...profileFields, preferences: resolvedPreferences };
+      const mergedProfileData: ProfileData =
+        resolvedPreferences === undefined
+          ? resolvedProfileData
+          : {
+              ...resolvedProfileData,
+              preferences: {
+                ...(current.preferences as Record<string, unknown>),
+                ...resolvedPreferences,
+              },
+            };
 
-      // Reload user profile to get updated data
-      await loadUserProfile(user.value.id);
-      return true;
-    } catch (err) {
-      console.error('Profile update error:', err);
-      setError('An unexpected error occurred during profile update');
-      return false;
-    } finally {
-      setLoading(false);
-    }
+      setLoading(true);
+      setError(null);
+
+      try {
+        const response = await authService.updateUserProfile(userId, mergedProfileData);
+
+        if (!response.success) {
+          if (sessionGeneration.value === generation && user.value?.id === userId) {
+            setError(response.error || 'Profile update failed');
+          }
+          return false;
+        }
+
+        // Invalidate profile query to refetch fresh data
+        queryClient.invalidateQueries({ queryKey: authKeys.profile(userId) });
+
+        // Reload user profile to get updated data
+        if (sessionGeneration.value === generation && user.value?.id === userId) {
+          const acknowledged: Profile =
+            response.profile ?? applyProfileData(profileFromUser(current), mergedProfileData);
+          registerAcknowledgedProfile(
+            acknowledged,
+            resolvedProfileData,
+            profileFromUser(current),
+            generation,
+          );
+
+          await loadUserProfile(userId);
+        }
+        return sessionGeneration.value === generation && user.value?.id === userId;
+      } catch (err) {
+        console.error('Profile update error:', err);
+        if (sessionGeneration.value === generation && user.value?.id === userId) {
+          setError('An unexpected error occurred during profile update');
+        }
+        return false;
+      } finally {
+        if (sessionGeneration.value === generation && user.value?.id === userId) {
+          setLoading(false);
+        }
+      }
+    });
   };
 
   /**
    * Update user experience and level
    */
   const updateExperience = async (experienceGained: number) => {
-    if (!user.value) return false;
+    const initiator = user.value;
+    if (!initiator) return false;
+    const generation = sessionGeneration.value;
 
-    const newExperience = user.value.total_experience + experienceGained;
+    const newExperience = initiator.total_experience + experienceGained;
     const newLevel = Math.floor(newExperience / 1000) + 1; // Simple level calculation
 
     try {
       const success = await updateProfile({
         preferences: {
-          ...(user.value.preferences as UserPreferences),
           last_experience_gain: experienceGained,
         },
       });
 
-      if (success && user.value) {
+      const stillCurrent =
+        user.value?.id === initiator.id && sessionGeneration.value === generation;
+      if (success && stillCurrent && user.value) {
         // Update local state immediately for better UX
         user.value.total_experience = newExperience;
         user.value.current_level = newLevel;
       }
 
-      return success;
+      return success && stillCurrent;
     } catch (err) {
       console.error('Experience update error:', err);
       return false;
@@ -347,23 +829,26 @@ export const useAuthStore = defineStore('auth', () => {
    * Update learning streak
    */
   const updateStreak = async (increment: boolean = true) => {
-    if (!user.value) return false;
+    const initiator = user.value;
+    if (!initiator) return false;
+    const generation = sessionGeneration.value;
 
-    const newStreak = increment ? user.value.learning_streak + 1 : 0;
+    const newStreak = increment ? initiator.learning_streak + 1 : 0;
 
     try {
       const success = await updateProfile({
         preferences: {
-          ...(user.value.preferences as UserPreferences),
           last_activity_date: new Date().toISOString().split('T')[0],
         },
       });
 
-      if (success && user.value) {
+      const stillCurrent =
+        user.value?.id === initiator.id && sessionGeneration.value === generation;
+      if (success && stillCurrent && user.value) {
         user.value.learning_streak = newStreak;
       }
 
-      return success;
+      return success && stillCurrent;
     } catch (err) {
       console.error('Streak update error:', err);
       return false;
@@ -373,26 +858,20 @@ export const useAuthStore = defineStore('auth', () => {
   /**
    * Update user preferences
    */
-  const updatePreferences = async (preferences: Partial<UserPreferences>) => {
-    if (!user.value) return false;
+  const updatePreferences = async (preferences: Partial<UserPreferences> | PreferencesUpdater) => {
+    const initiator = user.value;
+    if (!initiator) return false;
+    const generation = sessionGeneration.value;
 
     try {
       const success = await updateProfile({
-        preferences: {
-          ...(user.value.preferences as UserPreferences),
-          ...preferences,
-        },
+        preferences: typeof preferences === 'function' ? preferences : { ...preferences },
       });
 
-      if (success && user.value) {
-        // Update local state immediately
-        user.value.preferences = {
-          ...(user.value.preferences as UserPreferences),
-          ...preferences,
-        };
-      }
+      const stillCurrent =
+        user.value?.id === initiator.id && sessionGeneration.value === generation;
 
-      return success;
+      return success && stillCurrent;
     } catch (err) {
       console.error('Preferences update error:', err);
       return false;
@@ -406,6 +885,7 @@ export const useAuthStore = defineStore('auth', () => {
     isLoading,
     error,
     isInitialized,
+    sessionGeneration,
     // Getters
     isAuthenticated,
     userLevel,

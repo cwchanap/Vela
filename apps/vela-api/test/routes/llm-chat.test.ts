@@ -588,6 +588,97 @@ describe('LLM Chat Route', () => {
     });
   });
 
+  describe('Capabilities endpoint', () => {
+    const capabilitiesRequest = (headers: Record<string, string> = {}) =>
+      new Request('http://localhost/capabilities', {
+        method: 'GET',
+        headers: {
+          Authorization: 'Bearer valid-token',
+          ...headers,
+        },
+      });
+
+    test('rejects anonymous requests with 401', async () => {
+      const app = createTestApp({ GOOGLE_API_KEY: 'server-side-key' });
+      const res = await app.request(capabilitiesRequest({ Authorization: '' }));
+      const json = await res.json();
+
+      expect(res.status).toBe(401);
+      expect(json.error).toContain('Unauthorized');
+    });
+
+    test('rejects invalid or expired tokens with 401', async () => {
+      mockAuthConfig.validToken = false;
+      const app = createTestApp({ GOOGLE_API_KEY: 'server-side-key' });
+      const res = await app.request(capabilitiesRequest());
+      const json = await res.json();
+
+      expect(res.status).toBe(401);
+      expect(json.error).toContain('Unauthorized');
+    });
+
+    test('returns an empty list when no server keys are configured', async () => {
+      const app = createTestApp();
+      const res = await app.request(capabilitiesRequest());
+      const json = await res.json();
+
+      expect(res.status).toBe(200);
+      expect(json).toEqual({ serverKeyProviders: [] });
+    });
+
+    test('advertises Google and OpenRouter when both server keys are configured', async () => {
+      const app = createTestApp({
+        GOOGLE_API_KEY: 'g-secret',
+        OPENROUTER_API_KEY: 'or-secret',
+      });
+      const res = await app.request(capabilitiesRequest());
+      const json = await res.json();
+
+      expect(res.status).toBe(200);
+      expect(json.serverKeyProviders).toEqual(['google', 'openrouter']);
+      expect(JSON.stringify(json)).not.toContain('g-secret');
+      expect(JSON.stringify(json)).not.toContain('or-secret');
+      expect(Object.keys(json).sort()).toEqual(['serverKeyProviders']);
+    });
+
+    test('advertises only the configured subset', async () => {
+      const app = createTestApp({ OPENROUTER_API_KEY: 'or-secret' });
+      const res = await app.request(capabilitiesRequest());
+      const json = await res.json();
+
+      expect(res.status).toBe(200);
+      expect(json.serverKeyProviders).toEqual(['openrouter']);
+
+      const app2 = createTestApp({ GOOGLE_API_KEY: 'g-secret' });
+      const res2 = await app2.request(capabilitiesRequest());
+      const json2 = await res2.json();
+
+      expect(res2.status).toBe(200);
+      expect(json2.serverKeyProviders).toEqual(['google']);
+    });
+
+    test('treats empty-string server keys as unconfigured', async () => {
+      const app = createTestApp({ GOOGLE_API_KEY: '', OPENROUTER_API_KEY: 'or-secret' });
+      const res = await app.request(capabilitiesRequest());
+      const json = await res.json();
+
+      expect(res.status).toBe(200);
+      expect(json.serverKeyProviders).toEqual(['openrouter']);
+    });
+
+    test('never lists providers without a server-key path', async () => {
+      const app = createTestApp({
+        GOOGLE_API_KEY: 'g-secret',
+        OPENROUTER_API_KEY: 'or-secret',
+      });
+      const res = await app.request(capabilitiesRequest());
+      const json = await res.json();
+
+      expect(json.serverKeyProviders).not.toContain('openai');
+      expect(json.serverKeyProviders).not.toContain('anthropic');
+    });
+  });
+
   describe('CORS handling (unchanged, centralized)', () => {
     test('handles OPTIONS request without Origin by not setting Access-Control-Allow-Origin', async () => {
       const app = createTestApp({

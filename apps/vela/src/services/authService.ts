@@ -81,6 +81,7 @@ export interface AuthResponse {
   error?: string;
   user?: { id: string; email?: string | null } | null;
   session?: AppSession | null;
+  profile?: Profile | null;
 }
 
 export interface ProfileData {
@@ -105,6 +106,36 @@ interface HydratedAuthUser {
   email: string | null;
   username: string | null;
 }
+
+interface ProfileApiRecord {
+  user_id: string;
+  username?: string | null;
+  email?: string | null;
+  avatar_url?: string | null;
+  native_language?: string;
+  current_level?: number;
+  total_experience?: number;
+  learning_streak?: number;
+  last_activity?: string | null;
+  preferences?: Record<string, unknown>;
+  created_at?: string;
+  updated_at?: string;
+}
+
+const normalizeProfileRecord = (record: ProfileApiRecord): Profile => ({
+  id: record.user_id,
+  username: record.username ?? null,
+  email: record.email ?? null,
+  avatar_url: record.avatar_url ?? null,
+  native_language: record.native_language ?? 'en',
+  current_level: record.current_level ?? 1,
+  total_experience: record.total_experience ?? 0,
+  learning_streak: record.learning_streak ?? 0,
+  last_activity: record.last_activity ?? null,
+  preferences: (record.preferences ?? {}) as unknown as Profile['preferences'],
+  created_at: record.created_at ?? '',
+  updated_at: record.updated_at ?? '',
+});
 
 class AuthService {
   /**
@@ -248,10 +279,10 @@ class AuthService {
    */
   async getUserProfile(userId: string): Promise<Profile | null> {
     try {
-      const data = await httpJsonAuth<{ profile: Profile }>(
+      const data = await httpJsonAuth<{ profile: ProfileApiRecord | null }>(
         `${config.api.url}profiles?user_id=${encodeURIComponent(userId)}`,
       );
-      return data.profile;
+      return data.profile ? normalizeProfileRecord(data.profile) : null;
     } catch (error) {
       console.error('Error fetching user profile:', error);
       return null;
@@ -263,7 +294,10 @@ class AuthService {
    */
   async updateUserProfile(userId: string, profileData: ProfileData): Promise<AuthResponse> {
     try {
-      await httpJsonAuth<{ success: boolean }>(`${config.api.url}profiles/update`, {
+      const data = await httpJsonAuth<{
+        success: boolean;
+        profile?: ProfileApiRecord | null;
+      }>(`${config.api.url}profiles/update`, {
         method: 'PUT',
         body: JSON.stringify({
           user_id: userId,
@@ -271,7 +305,10 @@ class AuthService {
         }),
       });
 
-      return { success: true };
+      return {
+        success: true,
+        profile: data.profile ? normalizeProfileRecord(data.profile) : null,
+      };
     } catch (error) {
       return {
         success: false,

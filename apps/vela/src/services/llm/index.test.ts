@@ -125,6 +125,56 @@ describe('llmClient.generate', () => {
   });
 });
 
+describe('llmClient.capabilities', () => {
+  let fetchMock: ReturnType<typeof vi.fn>;
+  let originalFetch: typeof global.fetch;
+
+  beforeEach(() => {
+    originalFetch = global.fetch;
+    fetchMock = vi.fn();
+    global.fetch = fetchMock as unknown as typeof global.fetch;
+    mockFetchAuthSession.mockResolvedValue({
+      tokens: { idToken: { toString: () => 'mock-id-token' } },
+    } as Awaited<ReturnType<typeof fetchAuthSession>>);
+  });
+
+  afterEach(() => {
+    global.fetch = originalFetch;
+    vi.resetAllMocks();
+  });
+
+  it('sends an authenticated GET to the capabilities endpoint and returns the payload', async () => {
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      headers: new Headers({ 'content-type': 'application/json' }),
+      json: async () => ({ serverKeyProviders: ['google', 'openrouter'] }),
+    });
+
+    const result = await llmClient.capabilities();
+
+    expect(result.serverKeyProviders).toEqual(['google', 'openrouter']);
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe('http://localhost:9005/api/llm-chat/capabilities');
+    expect(init.method ?? 'GET').toBe('GET');
+    expect(init.headers).toMatchObject({ Authorization: 'Bearer mock-id-token' });
+  });
+
+  it('rejects with the server error message on a non-ok response', async () => {
+    fetchMock.mockResolvedValueOnce({
+      ok: false,
+      status: 401,
+      headers: new Headers({ 'content-type': 'application/json' }),
+      json: async () => ({ error: 'Unauthorized' }),
+    });
+
+    const error = await llmClient.capabilities().catch((e) => e);
+
+    expect(error).toBeInstanceOf(Error);
+    expect(error.message).toBe('Unauthorized');
+    expect(error.status).toBe(401);
+  });
+});
+
 describe('llmClient.analyzeSentenceStream', () => {
   let fetchMock: ReturnType<typeof vi.fn>;
   let originalFetch: typeof global.fetch;
@@ -174,6 +224,24 @@ describe('llmClient.analyzeSentenceStream', () => {
       model: 'gemini-3.8-flash',
       apiKey: 'user-key',
     });
+  });
+
+  it('forwards an explicit thinking override in the request body', async () => {
+    fetchMock.mockResolvedValueOnce(sseResponse(['data: {"type":"done"}\n\n']));
+
+    await llmClient.analyzeSentenceStream(
+      {
+        sentence: '日本語',
+        provider: 'google',
+        model: 'gemini-3.8-flash',
+        apiKey: 'user-key',
+        thinking: 'high',
+      },
+      () => {},
+    );
+
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(JSON.parse(String(init.body)).thinking).toBe('high');
   });
 
   it('delivers frames in order and resolves on done (buffered single-chunk body)', async () => {

@@ -619,7 +619,11 @@ describe('MyDictionariesPage', () => {
       ]);
       const { llmClient } = await import('src/services/llm');
       const { useLLMSettingsStore } = await import('src/stores/llmSettings');
-      useLLMSettingsStore().setApiKey('dict-key');
+      useLLMSettingsStore().llm = {
+        keys: { google: 'dict-key' },
+        thinking: { 'gemini-3.8-flash': 'max' },
+        defaultModel: { provider: 'google', model: 'gemini-3.8-flash' },
+      };
       wrapper = mountComponent();
 
       await wrapper.vm.handleAskAI(mockEntry);
@@ -631,10 +635,13 @@ describe('MyDictionariesPage', () => {
           provider: 'google',
           model: 'gemini-3.8-flash',
           apiKey: 'dict-key',
+          thinking: 'max',
           signal: expect.any(AbortSignal),
         },
         expect.any(Function),
       );
+      const analyzeInput = vi.mocked(llmClient.analyzeSentenceStream).mock.calls[0]![0];
+      expect(analyzeInput.thinking).toBe('max');
       expect(wrapper.vm.aiDialog).toBe(true);
       expect(wrapper.vm.analyzing).toBe(false);
       expect(wrapper.vm.streamingText).toBe('This sentence means studying Japanese.');
@@ -645,6 +652,32 @@ describe('MyDictionariesPage', () => {
         model: 'gemini-3.8-flash',
       });
       expect(wrapper.vm.analysisError).toBe('');
+    });
+
+    it('omits thinking from the request when the selection has no override', async () => {
+      await streamFrames([
+        {
+          type: 'metadata',
+          sentence: '日本語を勉強しています',
+          provider: 'google',
+          model: 'gemini-3.8-flash',
+        },
+        { type: 'chunk', text: 'plain.' },
+      ]);
+      const { llmClient } = await import('src/services/llm');
+      const { useLLMSettingsStore } = await import('src/stores/llmSettings');
+      useLLMSettingsStore().llm = {
+        keys: { google: 'dict-key' },
+        thinking: {},
+        defaultModel: { provider: 'google', model: 'gemini-3.8-flash' },
+      };
+      wrapper = mountComponent();
+
+      await wrapper.vm.handleAskAI(mockEntry);
+      await flushPromises();
+
+      const analyzeInput = vi.mocked(llmClient.analyzeSentenceStream).mock.calls[0]![0];
+      expect(analyzeInput).not.toHaveProperty('thinking');
     });
 
     it('keeps partial text visible but flags an error when the stream ends without done', async () => {

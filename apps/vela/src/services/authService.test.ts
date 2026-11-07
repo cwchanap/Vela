@@ -344,11 +344,19 @@ describe('AuthService', () => {
   });
 
   describe('getUserProfile', () => {
-    it('should return user profile when found', async () => {
-      const mockProfile = {
+    it('should normalize a route-shaped profile (user_id, no id) to the frontend Profile', async () => {
+      const routeProfile = {
         user_id: 'user-123',
         email: 'test@example.com',
         username: 'testuser',
+        avatar_url: null,
+        native_language: 'en',
+        current_level: 2,
+        total_experience: 150,
+        learning_streak: 3,
+        preferences: { dailyGoal: 30 },
+        created_at: '2024-01-01T00:00:00Z',
+        updated_at: '2024-01-02T00:00:00Z',
       };
 
       vi.mocked(fetchAuthSession).mockResolvedValue({
@@ -359,12 +367,26 @@ describe('AuthService', () => {
       } as any);
       mockFetch.mockResolvedValue({
         ok: true,
-        json: vi.fn().mockResolvedValue({ profile: mockProfile }),
+        json: vi.fn().mockResolvedValue({ profile: routeProfile }),
       });
 
       const result = await authService.getUserProfile('user-123');
 
-      expect(result).toEqual(mockProfile);
+      expect(result).toEqual({
+        id: 'user-123',
+        email: 'test@example.com',
+        username: 'testuser',
+        avatar_url: null,
+        native_language: 'en',
+        current_level: 2,
+        total_experience: 150,
+        learning_streak: 3,
+        last_activity: null,
+        preferences: { dailyGoal: 30 },
+        created_at: '2024-01-01T00:00:00Z',
+        updated_at: '2024-01-02T00:00:00Z',
+      });
+      expect(result).not.toHaveProperty('user_id');
     });
 
     it('should return null when profile fetch fails', async () => {
@@ -400,6 +422,65 @@ describe('AuthService', () => {
       });
 
       expect(result.success).toBe(true);
+    });
+
+    it('should normalize the route-shaped profile returned by the PUT response', async () => {
+      vi.mocked(fetchAuthSession).mockResolvedValue({
+        tokens: {
+          idToken: { toString: () => 'id-token' } as any,
+          accessToken: { toString: () => 'token' } as any,
+        },
+      } as any);
+      mockFetch.mockResolvedValue({
+        ok: true,
+        json: vi.fn().mockResolvedValue({
+          success: true,
+          profile: {
+            user_id: 'user-123',
+            email: 'test@example.com',
+            username: 'newusername',
+            avatar_url: null,
+            native_language: 'en',
+            current_level: 2,
+            total_experience: 150,
+            learning_streak: 3,
+            preferences: { dailyGoal: 30 },
+            created_at: '2024-01-01T00:00:00Z',
+            updated_at: '2024-01-03T00:00:00Z',
+          },
+        }),
+      });
+
+      const result = await authService.updateUserProfile('user-123', {
+        username: 'newusername',
+      });
+
+      expect(result.success).toBe(true);
+      expect(result.profile?.id).toBe('user-123');
+      expect(result.profile?.username).toBe('newusername');
+      expect(result.profile?.preferences).toEqual({ dailyGoal: 30 });
+      expect(result.profile?.updated_at).toBe('2024-01-03T00:00:00Z');
+      expect(result.profile).not.toHaveProperty('user_id');
+    });
+
+    it('should return a null profile when the PUT response omits one', async () => {
+      vi.mocked(fetchAuthSession).mockResolvedValue({
+        tokens: {
+          idToken: { toString: () => 'id-token' } as any,
+          accessToken: { toString: () => 'token' } as any,
+        },
+      } as any);
+      mockFetch.mockResolvedValue({
+        ok: true,
+        json: vi.fn().mockResolvedValue({ success: true }),
+      });
+
+      const result = await authService.updateUserProfile('user-123', {
+        username: 'newusername',
+      });
+
+      expect(result.success).toBe(true);
+      expect(result.profile).toBeNull();
     });
 
     it('should return error when update fails', async () => {

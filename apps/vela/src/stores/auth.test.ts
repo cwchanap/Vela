@@ -538,4 +538,346 @@ describe('useAuthStore', () => {
       expect(result).toBe(false);
     });
   });
+
+  describe('account transition guards', () => {
+    it('does not merge an in-flight updatePreferences into a different account', async () => {
+      let resolveUpdate!: (_v: { success: boolean }) => void;
+      mockAuthService.updateUserProfile.mockImplementationOnce(
+        () =>
+          new Promise((res) => {
+            resolveUpdate = res;
+          }),
+      );
+      const { useAuthStore } = await import('./auth');
+      const store = useAuthStore();
+      store.setSession({ user: { id: 'user-a', email: 'a@example.com' }, provider: 'cognito' });
+      store.setUser(makeUser({ id: 'user-a', preferences: { dailyGoal: 30 } }));
+
+      const pending = store.updatePreferences({ dailyGoal: 60 });
+      store.setSession({ user: { id: 'user-b', email: 'b@example.com' }, provider: 'cognito' });
+      store.setUser(makeUser({ id: 'user-b', preferences: { dailyGoal: 10 } }));
+      resolveUpdate({ success: true });
+
+      const result = await pending;
+      expect(result).toBe(false);
+      expect(store.user?.id).toBe('user-b');
+      expect(store.user?.preferences).toMatchObject({ dailyGoal: 10 });
+    });
+
+    it('returns false and keeps error clear when the user signs out mid-request', async () => {
+      let resolveUpdate!: (_v: { success: boolean }) => void;
+      mockAuthService.updateUserProfile.mockImplementationOnce(
+        () =>
+          new Promise((res) => {
+            resolveUpdate = res;
+          }),
+      );
+      const { useAuthStore } = await import('./auth');
+      const store = useAuthStore();
+      store.setSession({ user: { id: 'user-a', email: 'a@example.com' }, provider: 'cognito' });
+      store.setUser(makeUser({ id: 'user-a', preferences: { dailyGoal: 30 } }));
+
+      const pending = store.updatePreferences({ dailyGoal: 60 });
+      store.setSession(null);
+      store.setUser(null);
+      resolveUpdate({ success: true });
+
+      const result = await pending;
+      expect(result).toBe(false);
+      expect(store.user).toBeNull();
+      expect(store.error).toBeNull();
+    });
+
+    it('does not commit an in-flight updateExperience to a different account', async () => {
+      let resolveUpdate!: (_v: { success: boolean }) => void;
+      mockAuthService.updateUserProfile.mockImplementationOnce(
+        () =>
+          new Promise((res) => {
+            resolveUpdate = res;
+          }),
+      );
+      const { useAuthStore } = await import('./auth');
+      const store = useAuthStore();
+      store.setSession({ user: { id: 'user-a', email: 'a@example.com' }, provider: 'cognito' });
+      store.setUser(makeUser({ id: 'user-a', total_experience: 900 }));
+
+      const pending = store.updateExperience(200);
+      store.setSession({ user: { id: 'user-b', email: 'b@example.com' }, provider: 'cognito' });
+      store.setUser(makeUser({ id: 'user-b', total_experience: 0 }));
+      resolveUpdate({ success: true });
+
+      const result = await pending;
+      expect(result).toBe(false);
+      expect(store.user?.id).toBe('user-b');
+      expect(store.user?.total_experience).toBe(0);
+    });
+
+    it('does not commit a loadUserProfile response for a different session user', async () => {
+      let resolveGet!: (_v: unknown) => void;
+      mockAuthService.getUserProfile.mockImplementationOnce(
+        () =>
+          new Promise((res) => {
+            resolveGet = res;
+          }),
+      );
+      const { useAuthStore } = await import('./auth');
+      const store = useAuthStore();
+      store.setSession({ user: { id: 'user-a', email: 'a@example.com' }, provider: 'cognito' });
+
+      const pending = store.loadUserProfile('user-a');
+      store.setSession({ user: { id: 'user-b', email: 'b@example.com' }, provider: 'cognito' });
+      store.setUser(makeUser({ id: 'user-b' }));
+      resolveGet({ ...mockProfile, id: 'user-a' });
+
+      await pending;
+      expect(store.user?.id).toBe('user-b');
+    });
+
+    it('commits a loadUserProfile response when the session still matches', async () => {
+      mockAuthService.getUserProfile.mockResolvedValueOnce({
+        ...mockProfile,
+        id: 'user-a',
+      });
+      const { useAuthStore } = await import('./auth');
+      const store = useAuthStore();
+      store.setSession({ user: { id: 'user-a', email: 'a@example.com' }, provider: 'cognito' });
+
+      await store.loadUserProfile('user-a');
+      expect(store.user?.id).toBe('user-a');
+      expect(store.user?.username).toBe('testuser');
+    });
+
+    it('does not commit a loadUserProfile response after sign-out', async () => {
+      let resolveGet!: (_v: unknown) => void;
+      mockAuthService.getUserProfile.mockImplementationOnce(
+        () =>
+          new Promise((res) => {
+            resolveGet = res;
+          }),
+      );
+      const { useAuthStore } = await import('./auth');
+      const store = useAuthStore();
+      store.setSession({ user: { id: 'user-a', email: 'a@example.com' }, provider: 'cognito' });
+      store.setUser(makeUser({ id: 'user-a' }));
+
+      const pending = store.loadUserProfile('user-a');
+      store.setSession(null);
+      store.setUser(null);
+      resolveGet({ ...mockProfile, id: 'user-a' });
+
+      await pending;
+      expect(store.user).toBeNull();
+    });
+
+    it('exposes a session generation that changes across session boundaries only', async () => {
+      const { useAuthStore } = await import('./auth');
+      const store = useAuthStore();
+      const g0 = store.sessionGeneration;
+
+      store.setSession({ user: { id: 'user-a', email: 'a@example.com' }, provider: 'cognito' });
+      const g1 = store.sessionGeneration;
+      expect(g1).not.toBe(g0);
+
+      store.setSession({ user: { id: 'user-a', email: 'a@example.com' }, provider: 'cognito' });
+      expect(store.sessionGeneration).toBe(g1);
+
+      store.setSession(null);
+      const g2 = store.sessionGeneration;
+      expect(g2).not.toBe(g1);
+
+      store.setSession({ user: { id: 'user-a', email: 'a@example.com' }, provider: 'cognito' });
+      const g3 = store.sessionGeneration;
+      expect(g3).not.toBe(g2);
+      expect(g3).not.toBe(g1);
+    });
+
+    it('does not merge an in-flight updatePreferences after same-account re-authentication', async () => {
+      let resolveUpdate!: (_v: { success: boolean }) => void;
+      mockAuthService.updateUserProfile.mockImplementationOnce(
+        () =>
+          new Promise((res) => {
+            resolveUpdate = res;
+          }),
+      );
+      const { useAuthStore } = await import('./auth');
+      const store = useAuthStore();
+      store.setSession({ user: { id: 'user-a', email: 'a@example.com' }, provider: 'cognito' });
+      store.setUser(makeUser({ id: 'user-a', preferences: { dailyGoal: 30 } }));
+
+      const pending = store.updatePreferences({ dailyGoal: 60 });
+      store.setSession(null);
+      store.setUser(null);
+      store.setSession({ user: { id: 'user-a', email: 'a@example.com' }, provider: 'cognito' });
+      store.setUser(makeUser({ id: 'user-a', preferences: { dailyGoal: 5 } }));
+      resolveUpdate({ success: true });
+
+      const result = await pending;
+      expect(result).toBe(false);
+      expect(store.user?.id).toBe('user-a');
+      expect(store.user?.preferences).toMatchObject({ dailyGoal: 5 });
+    });
+
+    it('does not commit an in-flight updateExperience after same-account re-authentication', async () => {
+      let resolveUpdate!: (_v: { success: boolean }) => void;
+      mockAuthService.updateUserProfile.mockImplementationOnce(
+        () =>
+          new Promise((res) => {
+            resolveUpdate = res;
+          }),
+      );
+      const { useAuthStore } = await import('./auth');
+      const store = useAuthStore();
+      store.setSession({ user: { id: 'user-a', email: 'a@example.com' }, provider: 'cognito' });
+      store.setUser(makeUser({ id: 'user-a', total_experience: 900 }));
+
+      const pending = store.updateExperience(200);
+      store.setSession(null);
+      store.setUser(null);
+      store.setSession({ user: { id: 'user-a', email: 'a@example.com' }, provider: 'cognito' });
+      store.setUser(makeUser({ id: 'user-a', total_experience: 42 }));
+      resolveUpdate({ success: true });
+
+      const result = await pending;
+      expect(result).toBe(false);
+      expect(store.user?.id).toBe('user-a');
+      expect(store.user?.total_experience).toBe(42);
+    });
+
+    it('does not commit a loadUserProfile response after same-account re-authentication', async () => {
+      let resolveGet!: (_v: unknown) => void;
+      mockAuthService.getUserProfile.mockImplementationOnce(
+        () =>
+          new Promise((res) => {
+            resolveGet = res;
+          }),
+      );
+      const { useAuthStore } = await import('./auth');
+      const store = useAuthStore();
+      store.setSession({ user: { id: 'user-a', email: 'a@example.com' }, provider: 'cognito' });
+      store.setUser(makeUser({ id: 'user-a', preferences: { dailyGoal: 11 } }));
+
+      const pending = store.loadUserProfile('user-a');
+      store.setSession(null);
+      store.setUser(null);
+      store.setSession({ user: { id: 'user-a', email: 'a@example.com' }, provider: 'cognito' });
+      store.setUser(makeUser({ id: 'user-a', preferences: { dailyGoal: 7 } }));
+      resolveGet({ ...mockProfile, id: 'user-a' });
+
+      await pending;
+      expect(store.user?.preferences).toMatchObject({ dailyGoal: 7 });
+    });
+
+    it('returns false when updateProfile completes after same-account re-authentication', async () => {
+      let resolveUpdate!: (_v: { success: boolean }) => void;
+      mockAuthService.updateUserProfile.mockImplementationOnce(
+        () =>
+          new Promise((res) => {
+            resolveUpdate = res;
+          }),
+      );
+      const { useAuthStore } = await import('./auth');
+      const store = useAuthStore();
+      store.setSession({ user: { id: 'user-a', email: 'a@example.com' }, provider: 'cognito' });
+      store.setUser(makeUser({ id: 'user-a', preferences: { dailyGoal: 30 } }));
+
+      const pending = store.updateProfile({ preferences: { dailyGoal: 60 } });
+      store.setSession(null);
+      store.setUser(null);
+      store.setSession({ user: { id: 'user-a', email: 'a@example.com' }, provider: 'cognito' });
+      store.setUser(makeUser({ id: 'user-a', preferences: { dailyGoal: 5 } }));
+      resolveUpdate({ success: true });
+
+      const result = await pending;
+      expect(result).toBe(false);
+      expect(store.user?.id).toBe('user-a');
+      expect(store.user?.preferences).toMatchObject({ dailyGoal: 5 });
+    });
+
+    it('returns false when the session changes during the updateProfile reload', async () => {
+      let resolveUpdate!: (_v: { success: boolean }) => void;
+      mockAuthService.updateUserProfile.mockImplementationOnce(
+        () =>
+          new Promise((res) => {
+            resolveUpdate = res;
+          }),
+      );
+      let resolveGet!: (_v: unknown) => void;
+      const pendingProfile = new Promise((res) => {
+        resolveGet = res;
+      });
+      mockAuthService.getUserProfile.mockImplementationOnce(() => pendingProfile);
+      const { useAuthStore } = await import('./auth');
+      const store = useAuthStore();
+      store.setSession({ user: { id: 'user-a', email: 'a@example.com' }, provider: 'cognito' });
+      store.setUser(makeUser({ id: 'user-a', preferences: { dailyGoal: 30 } }));
+
+      const pending = store.updateProfile({ preferences: { dailyGoal: 60 } });
+      resolveUpdate({ success: true });
+      await Promise.resolve();
+
+      void pendingProfile.then(() => {
+        store.setSession(null);
+        store.setUser(null);
+      });
+      resolveGet({ ...mockProfile, id: 'user-a' });
+
+      const result = await pending;
+      expect(result).toBe(false);
+      expect(store.user).toBeNull();
+    });
+
+    it('does not set error or overwrite loading when update fails after session transition', async () => {
+      let rejectUpdate!: (_v: unknown) => void;
+      mockAuthService.updateUserProfile.mockImplementationOnce(
+        () =>
+          new Promise((_, rej) => {
+            rejectUpdate = rej;
+          }),
+      );
+      const { useAuthStore } = await import('./auth');
+      const store = useAuthStore();
+      store.setSession({ user: { id: 'user-a', email: 'a@example.com' }, provider: 'cognito' });
+      store.setUser(makeUser({ id: 'user-a', preferences: { dailyGoal: 30 } }));
+
+      const pending = store.updateProfile({ preferences: { dailyGoal: 60 } });
+
+      // Session transitions before the request fails
+      store.clearAuth();
+      store.setLoading(true); // e.g. a new sign-in starts
+
+      rejectUpdate(new Error('Network error'));
+      const result = await pending;
+
+      expect(result).toBe(false);
+      expect(store.error).toBeNull();
+      expect(store.isLoading).toBe(true);
+    });
+
+    it('resets isLoading when switching directly to another account during pending updateProfile', async () => {
+      let resolveUpdate!: (_v: { success: boolean }) => void;
+      mockAuthService.updateUserProfile.mockImplementationOnce(
+        () =>
+          new Promise((res) => {
+            resolveUpdate = res;
+          }),
+      );
+      const { useAuthStore } = await import('./auth');
+      const store = useAuthStore();
+      store.setSession({ user: { id: 'user-a', email: 'a@example.com' }, provider: 'cognito' });
+      store.setUser(makeUser({ id: 'user-a', preferences: { dailyGoal: 30 } }));
+
+      const pending = store.updateProfile({ preferences: { dailyGoal: 60 } });
+      expect(store.isLoading).toBe(true);
+
+      // Account switches directly to user-b while update is in flight
+      store.setSession({ user: { id: 'user-b', email: 'b@example.com' }, provider: 'cognito' });
+      expect(store.isLoading).toBe(false);
+
+      resolveUpdate({ success: true });
+      const result = await pending;
+
+      expect(result).toBe(false);
+      expect(store.isLoading).toBe(false);
+    });
+  });
 });
