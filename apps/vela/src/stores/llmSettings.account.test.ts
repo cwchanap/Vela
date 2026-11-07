@@ -1428,3 +1428,478 @@ describe('acknowledged writes reconcile against equal and newer reads', () => {
     expect(llmStore.llm.keys.google).toBe('g-key');
   });
 });
+
+describe('acknowledged writes reconcile at preference path granularity', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia());
+    vi.clearAllMocks();
+    pendingWrites.length = 0;
+    serverProfiles.clear();
+    queryCache.clear();
+    mockAuthService.getUserProfile.mockImplementation((userId: string) =>
+      Promise.resolve(serverProfiles.get(userId) ?? null),
+    );
+  });
+
+  const stores = async () => {
+    const { useAuthStore } = await import('./auth');
+    const { useLLMSettingsStore } = await import('./llmSettings');
+    const { useThemeStore } = await import('./theme');
+    const authStore = useAuthStore();
+    const llmStore = useLLMSettingsStore();
+    const themeStore = useThemeStore();
+    return { authStore, llmStore, themeStore };
+  };
+
+  const signInWithBasePrefs = async (
+    authStore: ReturnType<(typeof import('./auth'))['useAuthStore']>,
+    llm: LlmPreferences = makeLlm(),
+  ) => {
+    const user = makeUser('user-a', llm);
+    (user.preferences as Record<string, unknown>).dailyGoal = 30;
+    serverProfiles.set('user-a', makeProfile(user));
+    authStore.setSession(makeSession('user-a'));
+    authStore.setUser(user);
+    await flushPromises();
+  };
+
+  const invalidateProfileCache = () => {
+    const entry = queryCache.get(cacheKey(authKeys.profile('user-a')));
+    if (entry) entry.isInvalidated = true;
+  };
+
+  const cachedPreferences = () =>
+    (queryCache.get(cacheKey(authKeys.profile('user-a')))?.data as Profile | undefined)
+      ?.preferences as Record<string, unknown> | undefined;
+
+  it('keeps a newer unrelated provider key when an older llm acknowledgment resolves', async () => {
+    const { authStore, llmStore, themeStore } = await stores();
+    await signInWithBasePrefs(authStore);
+
+    const llmSave = llmStore.saveProvider('google', 'g-key');
+    await flushPromises();
+    expect(pendingWrites).toHaveLength(1);
+
+    themeStore.setDarkMode(true);
+    const themeSave = themeStore.saveToUserPreferences();
+    await flushPromises();
+    expect(pendingWrites).toHaveLength(1);
+
+    const base = serverProfiles.get('user-a')!;
+    const newerRead: Profile = {
+      ...base,
+      preferences: {
+        ...(base.preferences as Record<string, unknown>),
+        llm: makeLlm({ keys: { google: 'g-key', openai: 'o-key' } }),
+      } as UserPreferences,
+      updated_at: '2030-06-01T00:00:00.000Z',
+    };
+    mockAuthService.getUserProfile.mockResolvedValue(newerRead);
+
+    await authStore.loadUserProfile('user-a');
+    await flushPromises();
+
+    const olderAck: Profile = {
+      ...base,
+      preferences: {
+        ...(base.preferences as Record<string, unknown>),
+        llm: makeLlm({ keys: { google: 'g-key' } }),
+      } as UserPreferences,
+      updated_at: '2030-01-01T00:00:00.000Z',
+    };
+    resolveWrite(0, { success: true, profile: olderAck });
+    pendingWrites.splice(0, 1);
+    await flushPromises();
+
+    expect(pendingWrites).toHaveLength(1);
+    const themeBody = pendingWrites[0]!.data.preferences as Record<string, unknown>;
+    const themeLlm = themeBody.llm as LlmPreferences;
+    expect(themeLlm.keys.google).toBe('g-key');
+    expect(themeLlm.keys.openai).toBe('o-key');
+    applyWrite(0);
+    pendingWrites.splice(0, 1);
+    await flushPromises();
+
+    await Promise.all([llmSave, themeSave]);
+    await flushPromises();
+
+    const serverPrefs = serverProfiles.get('user-a')!.preferences as Record<string, unknown>;
+    expect((serverPrefs.llm as LlmPreferences).keys.google).toBe('g-key');
+    expect((serverPrefs.llm as LlmPreferences).keys.openai).toBe('o-key');
+    expect(serverPrefs.darkMode).toBe(true);
+    const localLlm = (authStore.user?.preferences as Record<string, unknown>).llm as LlmPreferences;
+    expect(localLlm.keys.google).toBe('g-key');
+    expect(localLlm.keys.openai).toBe('o-key');
+    expect((cachedPreferences()?.llm as LlmPreferences | undefined)?.keys.openai).toBe('o-key');
+    expect(llmStore.llm.keys.openai).toBe('o-key');
+  });
+
+  it('keeps a newer unrelated provider key when the first llm acknowledgment resolves', async () => {
+    const { authStore, llmStore, themeStore } = await stores();
+    const user = makeUser('user-a');
+    (user.preferences as Record<string, unknown>).dailyGoal = 30;
+    serverProfiles.set('user-a', makeProfile(user));
+    authStore.setSession(makeSession('user-a'));
+    authStore.setUser(user);
+    await flushPromises();
+
+    const llmSave = llmStore.saveProvider('google', 'g-key');
+    await flushPromises();
+    expect(pendingWrites).toHaveLength(1);
+
+    themeStore.setDarkMode(true);
+    const themeSave = themeStore.saveToUserPreferences();
+    await flushPromises();
+
+    const base = serverProfiles.get('user-a')!;
+    const newerRead: Profile = {
+      ...base,
+      preferences: {
+        ...(base.preferences as Record<string, unknown>),
+        llm: makeLlm({ keys: { google: 'g-key', openai: 'o-key' } }),
+      } as UserPreferences,
+      updated_at: '2030-06-01T00:00:00.000Z',
+    };
+    mockAuthService.getUserProfile.mockResolvedValue(newerRead);
+
+    await authStore.loadUserProfile('user-a');
+    await flushPromises();
+
+    const olderAck: Profile = {
+      ...base,
+      preferences: {
+        ...(base.preferences as Record<string, unknown>),
+        llm: makeLlm({ keys: { google: 'g-key' } }),
+      } as UserPreferences,
+      updated_at: '2030-01-01T00:00:00.000Z',
+    };
+    resolveWrite(0, { success: true, profile: olderAck });
+    pendingWrites.splice(0, 1);
+    await flushPromises();
+
+    expect(pendingWrites).toHaveLength(1);
+    const themeBody = pendingWrites[0]!.data.preferences as Record<string, unknown>;
+    const themeLlm = themeBody.llm as LlmPreferences;
+    expect(themeLlm.keys.google).toBe('g-key');
+    expect(themeLlm.keys.openai).toBe('o-key');
+    applyWrite(0);
+    pendingWrites.splice(0, 1);
+    await flushPromises();
+
+    await Promise.all([llmSave, themeSave]);
+    await flushPromises();
+
+    const localLlm = (authStore.user?.preferences as Record<string, unknown>).llm as LlmPreferences;
+    expect(localLlm.keys.google).toBe('g-key');
+    expect(localLlm.keys.openai).toBe('o-key');
+    expect(llmStore.llm.keys.openai).toBe('o-key');
+  });
+
+  it('keeps a newer provider rotation when an older llm acknowledgment resolves', async () => {
+    const { authStore, llmStore, themeStore } = await stores();
+    await signInWithBasePrefs(authStore);
+
+    const llmSave = llmStore.saveProvider('google', 'g-key');
+    await flushPromises();
+    expect(pendingWrites).toHaveLength(1);
+
+    themeStore.setDarkMode(true);
+    const themeSave = themeStore.saveToUserPreferences();
+    await flushPromises();
+
+    const base = serverProfiles.get('user-a')!;
+    const newerRead: Profile = {
+      ...base,
+      preferences: {
+        ...(base.preferences as Record<string, unknown>),
+        llm: makeLlm({ keys: { google: 'rotated-key' } }),
+      } as UserPreferences,
+      updated_at: '2030-06-01T00:00:00.000Z',
+    };
+    mockAuthService.getUserProfile.mockResolvedValue(newerRead);
+
+    await authStore.loadUserProfile('user-a');
+    await flushPromises();
+
+    const olderAck: Profile = {
+      ...base,
+      preferences: {
+        ...(base.preferences as Record<string, unknown>),
+        llm: makeLlm({ keys: { google: 'g-key' } }),
+      } as UserPreferences,
+      updated_at: '2030-01-01T00:00:00.000Z',
+    };
+    resolveWrite(0, { success: true, profile: olderAck });
+    pendingWrites.splice(0, 1);
+    await flushPromises();
+
+    expect(pendingWrites).toHaveLength(1);
+    const themeBody = pendingWrites[0]!.data.preferences as Record<string, unknown>;
+    const themeLlm = themeBody.llm as LlmPreferences;
+    expect(themeLlm.keys.google).toBe('rotated-key');
+    applyWrite(0);
+    pendingWrites.splice(0, 1);
+    await flushPromises();
+
+    await Promise.all([llmSave, themeSave]);
+    await flushPromises();
+
+    const localLlm = (authStore.user?.preferences as Record<string, unknown>).llm as LlmPreferences;
+    expect(localLlm.keys.google).toBe('rotated-key');
+    expect(llmStore.llm.keys.google).toBe('rotated-key');
+  });
+
+  it('keeps a newer deletion of an untouched provider when an older llm acknowledgment resolves', async () => {
+    const { authStore, llmStore, themeStore } = await stores();
+    await signInWithBasePrefs(
+      authStore,
+      makeLlm({ keys: { google: 'old-google', anthropic: 'a-key' } }),
+    );
+
+    const llmSave = llmStore.saveProvider('google', 'g-key');
+    await flushPromises();
+    expect(pendingWrites).toHaveLength(1);
+
+    themeStore.setDarkMode(true);
+    const themeSave = themeStore.saveToUserPreferences();
+    await flushPromises();
+
+    const base = serverProfiles.get('user-a')!;
+    const newerRead: Profile = {
+      ...base,
+      preferences: {
+        ...(base.preferences as Record<string, unknown>),
+        llm: makeLlm({ keys: { google: 'g-key' } }),
+      } as UserPreferences,
+      updated_at: '2030-06-01T00:00:00.000Z',
+    };
+    mockAuthService.getUserProfile.mockResolvedValue(newerRead);
+
+    await authStore.loadUserProfile('user-a');
+    await flushPromises();
+
+    const olderAck: Profile = {
+      ...base,
+      preferences: {
+        ...(base.preferences as Record<string, unknown>),
+        llm: makeLlm({ keys: { google: 'g-key', anthropic: 'a-key' } }),
+      } as UserPreferences,
+      updated_at: '2030-01-01T00:00:00.000Z',
+    };
+    resolveWrite(0, { success: true, profile: olderAck });
+    pendingWrites.splice(0, 1);
+    await flushPromises();
+
+    expect(pendingWrites).toHaveLength(1);
+    const themeBody = pendingWrites[0]!.data.preferences as Record<string, unknown>;
+    const themeLlm = themeBody.llm as LlmPreferences;
+    expect(themeLlm.keys.google).toBe('g-key');
+    expect(themeLlm.keys.anthropic).toBeUndefined();
+    applyWrite(0);
+    pendingWrites.splice(0, 1);
+    await flushPromises();
+
+    await Promise.all([llmSave, themeSave]);
+    await flushPromises();
+
+    const localLlm = (authStore.user?.preferences as Record<string, unknown>).llm as LlmPreferences;
+    expect(localLlm.keys.google).toBe('g-key');
+    expect(localLlm.keys.anthropic).toBeUndefined();
+    expect(llmStore.llm.keys.anthropic).toBeUndefined();
+  });
+
+  it('keeps a newer provider value when an older deletion acknowledgment resolves', async () => {
+    const { authStore, llmStore, themeStore } = await stores();
+    await signInWithBasePrefs(authStore, makeLlm({ keys: { google: 'g-key' } }));
+
+    const llmSave = llmStore.saveProvider('google', null);
+    await flushPromises();
+    expect(pendingWrites).toHaveLength(1);
+
+    themeStore.setDarkMode(true);
+    const themeSave = themeStore.saveToUserPreferences();
+    await flushPromises();
+
+    const base = serverProfiles.get('user-a')!;
+    const newerRead: Profile = {
+      ...base,
+      preferences: {
+        ...(base.preferences as Record<string, unknown>),
+        llm: makeLlm({ keys: { google: 'readded-key' } }),
+      } as UserPreferences,
+      updated_at: '2030-06-01T00:00:00.000Z',
+    };
+    mockAuthService.getUserProfile.mockResolvedValue(newerRead);
+
+    await authStore.loadUserProfile('user-a');
+    await flushPromises();
+
+    const olderAck: Profile = {
+      ...base,
+      preferences: {
+        ...(base.preferences as Record<string, unknown>),
+        llm: makeLlm(),
+      } as UserPreferences,
+      updated_at: '2030-01-01T00:00:00.000Z',
+    };
+    resolveWrite(0, { success: true, profile: olderAck });
+    pendingWrites.splice(0, 1);
+    await flushPromises();
+
+    expect(pendingWrites).toHaveLength(1);
+    const themeBody = pendingWrites[0]!.data.preferences as Record<string, unknown>;
+    const themeLlm = themeBody.llm as LlmPreferences;
+    expect(themeLlm.keys.google).toBe('readded-key');
+    applyWrite(0);
+    pendingWrites.splice(0, 1);
+    await flushPromises();
+
+    await Promise.all([llmSave, themeSave]);
+    await flushPromises();
+
+    const localLlm = (authStore.user?.preferences as Record<string, unknown>).llm as LlmPreferences;
+    expect(localLlm.keys.google).toBe('readded-key');
+    expect(llmStore.llm.keys.google).toBe('readded-key');
+  });
+
+  it('keeps earlier acknowledged fields when a newer acknowledgment resolves (llm -> theme)', async () => {
+    const { authStore, llmStore, themeStore } = await stores();
+    await signInWithBasePrefs(authStore);
+
+    const llmSave = llmStore.saveProvider('google', 'g-key');
+    await flushPromises();
+    expect(pendingWrites).toHaveLength(1);
+
+    const base = serverProfiles.get('user-a')!;
+    const firstAck: Profile = {
+      ...base,
+      preferences: {
+        ...(base.preferences as Record<string, unknown>),
+        llm: makeLlm({ keys: { google: 'g-key' } }),
+      } as UserPreferences,
+      updated_at: '2030-01-01T00:00:00.000Z',
+    };
+    resolveWrite(0, { success: true, profile: firstAck });
+    pendingWrites.splice(0, 1);
+    await flushPromises();
+    await llmSave;
+    await flushPromises();
+
+    themeStore.setDarkMode(true);
+    const themeSave = themeStore.saveToUserPreferences();
+    await flushPromises();
+    await drainWrites();
+    await themeSave;
+    await flushPromises();
+
+    const acknowledgedStamp = serverProfiles.get('user-a')!.updated_at;
+    const stale: Profile = {
+      ...serverProfiles.get('user-a')!,
+      preferences: {
+        dailyGoal: 30,
+        darkMode: true,
+        llm: makeLlm(),
+      } as UserPreferences,
+      updated_at: acknowledgedStamp,
+    };
+    mockAuthService.getUserProfile.mockResolvedValue(stale);
+    invalidateProfileCache();
+
+    await authStore.loadUserProfile('user-a');
+    await flushPromises();
+
+    const localPrefs = authStore.user?.preferences as Record<string, unknown>;
+    expect(localPrefs.darkMode).toBe(true);
+    expect((localPrefs.llm as LlmPreferences).keys.google).toBe('g-key');
+    expect((cachedPreferences()?.llm as LlmPreferences | undefined)?.keys.google).toBe('g-key');
+    expect(llmStore.llm.keys.google).toBe('g-key');
+  });
+
+  it('keeps earlier acknowledged fields when a newer acknowledgment resolves (theme -> llm)', async () => {
+    const { authStore, llmStore, themeStore } = await stores();
+    await signInWithBasePrefs(authStore);
+
+    themeStore.setDarkMode(true);
+    const themeSave = themeStore.saveToUserPreferences();
+    await flushPromises();
+    expect(pendingWrites).toHaveLength(1);
+
+    const base = serverProfiles.get('user-a')!;
+    const firstAck: Profile = {
+      ...base,
+      preferences: {
+        ...(base.preferences as Record<string, unknown>),
+        darkMode: true,
+      } as UserPreferences,
+      updated_at: '2030-01-01T00:00:00.000Z',
+    };
+    resolveWrite(0, { success: true, profile: firstAck });
+    pendingWrites.splice(0, 1);
+    await flushPromises();
+    await themeSave;
+    await flushPromises();
+
+    const llmSave = llmStore.saveProvider('google', 'g-key');
+    await flushPromises();
+    await drainWrites();
+    await llmSave;
+    await flushPromises();
+
+    const acknowledgedStamp = serverProfiles.get('user-a')!.updated_at;
+    const stale: Profile = {
+      ...serverProfiles.get('user-a')!,
+      preferences: {
+        dailyGoal: 30,
+        llm: makeLlm({ keys: { google: 'g-key' } }),
+      } as UserPreferences,
+      updated_at: acknowledgedStamp,
+    };
+    mockAuthService.getUserProfile.mockResolvedValue(stale);
+    invalidateProfileCache();
+
+    await authStore.loadUserProfile('user-a');
+    await flushPromises();
+
+    const localPrefs = authStore.user?.preferences as Record<string, unknown>;
+    expect(localPrefs.darkMode).toBe(true);
+    expect((localPrefs.llm as LlmPreferences).keys.google).toBe('g-key');
+    expect(llmStore.llm.keys.google).toBe('g-key');
+  });
+
+  it('suppresses an equal-stamp stale read that resurrects an explicitly cleared provider key', async () => {
+    const { authStore, llmStore } = await stores();
+    await signInWithBasePrefs(authStore);
+
+    const llmSave = llmStore.saveProvider('google', 'g-key');
+    await flushPromises();
+    await drainWrites();
+    await llmSave;
+    await flushPromises();
+
+    const clearSave = llmStore.saveProvider('google', null);
+    await flushPromises();
+    await drainWrites();
+    await clearSave;
+    await flushPromises();
+
+    const acknowledgedStamp = serverProfiles.get('user-a')!.updated_at;
+    const stale: Profile = {
+      ...serverProfiles.get('user-a')!,
+      preferences: {
+        dailyGoal: 30,
+        llm: makeLlm({ keys: { google: 'g-key' } }),
+      } as UserPreferences,
+      updated_at: acknowledgedStamp,
+    };
+    mockAuthService.getUserProfile.mockResolvedValue(stale);
+    invalidateProfileCache();
+
+    await authStore.loadUserProfile('user-a');
+    await flushPromises();
+
+    const localPrefs = authStore.user?.preferences as Record<string, unknown>;
+    expect((localPrefs.llm as LlmPreferences).keys.google).toBeUndefined();
+    expect((cachedPreferences()?.llm as LlmPreferences | undefined)?.keys.google).toBeUndefined();
+    expect(llmStore.llm.keys.google).toBeUndefined();
+  });
+});
