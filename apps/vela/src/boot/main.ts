@@ -17,11 +17,26 @@ export default boot(async ({ store }) => {
   const themeStore = useThemeStore(store);
   themeStore.initialize();
 
-  // Watch for auth changes and sync theme from user preferences
+  // Watch for auth changes and sync theme only when user identity changes or
+  // saved darkMode preference actually changes (preventing unsaved local toggles
+  // from being reverted on unrelated auth mutations).
   const authStore = useAuthStore(store);
-  authStore.$subscribe((mutation, state) => {
-    if (state.user?.preferences?.darkMode !== undefined) {
-      themeStore.syncWithUserPreferences(state.user.preferences.darkMode);
+  let lastSyncedUserId: string | null = null;
+  let lastSyncedDarkMode: boolean | undefined = undefined;
+
+  authStore.$subscribe((_mutation, state) => {
+    const currentUserId = state.user ? (state.user.id ?? '__authenticated__') : null;
+    const currentDarkMode = state.user?.preferences?.darkMode;
+
+    if (
+      currentUserId !== lastSyncedUserId ||
+      (currentDarkMode !== undefined && currentDarkMode !== lastSyncedDarkMode)
+    ) {
+      lastSyncedUserId = currentUserId;
+      lastSyncedDarkMode = currentDarkMode;
+      if (currentDarkMode !== undefined) {
+        themeStore.syncWithUserPreferences(currentDarkMode);
+      }
     }
   });
 });

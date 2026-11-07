@@ -288,13 +288,10 @@ app.post('/analyze', async (c) => {
       );
     }
 
-    // Analysis deliberately runs at low native effort where the model supports
-    // it; the browser never sends `thinking` for dictionary analysis.
-    const effort = thinking?.trim()
-      ? normalizedEffort
-      : modelInfo?.efforts.includes('low')
-        ? ('low' as const)
-        : normalizedEffort;
+    // Use low native effort when no explicit thinking was requested and the model supports it;
+    // otherwise preserve normalizedEffort (the caller's explicit effort or model default).
+    const effort =
+      !thinking?.trim() && modelInfo?.efforts.includes('low') ? ('low' as const) : normalizedEffort;
 
     // Shared adapter stream, lazy: the first read performs the upstream call,
     // so initial provider 401/429/5xx failures surface inside the SSE body as

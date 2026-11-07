@@ -37,6 +37,8 @@ const shouldReuseExistingServer = shouldReuseServer();
  */
 export default defineConfig({
   testDir: './e2e',
+  /* llm-settings.spec.ts runs under playwright.mocked.config.ts with synthetic Cognito env */
+  testIgnore: ['**/llm-settings.spec.ts'],
   /* Run tests in files in parallel */
   fullyParallel: true,
   /* Fail the build on CI if you accidentally left test.only in the source code. */

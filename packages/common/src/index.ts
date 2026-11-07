@@ -30,6 +30,7 @@ export { parseSrsStats, type SRSStats } from './contracts/srs';
 
 // Export shared LLM provider contract
 export {
+  LLM_EFFORT_LEVELS,
   LLM_PROVIDER_REGISTRY,
   LLM_PROVIDERS,
   type LlmEffort,

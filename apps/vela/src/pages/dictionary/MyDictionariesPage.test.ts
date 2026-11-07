@@ -537,7 +537,7 @@ describe('MyDictionariesPage', () => {
         updated_at: new Date().toISOString(),
       });
       authStore.setSession({
-        user: { id: 'session-user-1', email: 'test@example.com' },
+        user: { id: 'user-1', email: 'test@example.com' },
         provider: 'cognito',
       });
       vi.mocked(ttsService.playAudio).mockReturnValue({
@@ -572,7 +572,7 @@ describe('MyDictionariesPage', () => {
         updated_at: new Date().toISOString(),
       });
       authStore.setSession({
-        user: { id: 'session-user-1', email: 'test@example.com' },
+        user: { id: 'user-1', email: 'test@example.com' },
         provider: 'cognito',
       });
       vi.mocked(ttsService.playAudio).mockReturnValue({

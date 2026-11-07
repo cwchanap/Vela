@@ -409,13 +409,18 @@ export const useAuthStore = defineStore('auth', () => {
     const nextUserId = sessionData?.user?.id ?? null;
     if (previousUserId !== nextUserId) {
       sessionGeneration.value += 1;
-      isLoading.value = false;
+      if (user.value?.id !== nextUserId) {
+        user.value = null;
+      }
       lastAcknowledgedProfile = null;
       if (previousUserId) {
         queryClient.invalidateQueries({ queryKey: authKeys.profile(previousUserId) });
       }
       if (nextUserId) {
+        isLoading.value = true;
         queryClient.invalidateQueries({ queryKey: authKeys.profile(nextUserId) });
+      } else {
+        isLoading.value = false;
       }
     }
     session.value = sessionData;
@@ -624,6 +629,10 @@ export const useAuthStore = defineStore('auth', () => {
     } catch (err) {
       console.error('Error loading user profile:', err);
       setError('Failed to load user profile');
+    } finally {
+      if (sessionGeneration.value === generation) {
+        isLoading.value = false;
+      }
     }
   };
 

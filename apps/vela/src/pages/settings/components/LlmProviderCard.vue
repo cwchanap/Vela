@@ -116,7 +116,8 @@ const resetDrafts = (slice: ReturnType<typeof readSavedSlice>) => {
 };
 
 let lastSlice = readSavedSlice();
-let inFlightKey: string | null = null;
+let hasInFlightSave = false;
+let inFlightKey = '';
 let inFlightEfforts: Record<string, EffortDraft> | null = null;
 const draftKey = ref(lastSlice.key);
 const draftEfforts = ref<Record<string, EffortDraft>>(
@@ -128,7 +129,7 @@ watch(
   () => {
     const next = readSavedSlice();
     if (next.key !== lastSlice.key) {
-      if (inFlightKey === null || draftKey.value === inFlightKey) {
+      if (!hasInFlightSave || (draftKey.value ?? '') === inFlightKey) {
         draftKey.value = next.key;
       }
     }
@@ -136,8 +137,8 @@ watch(
       const effort = next.efforts[i] ?? '';
       if (effort !== lastSlice.efforts[i]) {
         if (
-          inFlightEfforts === null ||
-          draftEfforts.value[model.id] === (inFlightEfforts[model.id] ?? '')
+          !hasInFlightSave ||
+          draftEfforts.value[model.id] === (inFlightEfforts?.[model.id] ?? '')
         ) {
           draftEfforts.value[model.id] = effort;
         }
@@ -151,7 +152,7 @@ watch(
 watch(
   () => authStore.user?.id,
   () => {
-    inFlightKey = null;
+    hasInFlightSave = false;
     inFlightEfforts = null;
     lastSlice = readSavedSlice();
     resetDrafts(lastSlice);
@@ -169,7 +170,8 @@ const save = async () => {
     patch[model.id] = draftEfforts.value[model.id] || null;
   }
   saving.value = true;
-  inFlightKey = draftKey.value;
+  hasInFlightSave = true;
+  inFlightKey = draftKey.value ?? '';
   inFlightEfforts = { ...draftEfforts.value };
   try {
     const ok = await store.saveProvider(props.provider, draftKey.value, patch);
@@ -188,7 +190,7 @@ const save = async () => {
     }
   } finally {
     saving.value = false;
-    inFlightKey = null;
+    hasInFlightSave = false;
     inFlightEfforts = null;
   }
 };
