@@ -61,6 +61,16 @@ describe('useLLMSettingsStore', () => {
   });
 
   describe('initial state', () => {
+    it('purges legacy plaintext llm_settings_v1 from localStorage on creation', async () => {
+      window.localStorage.setItem(
+        'llm_settings_v1',
+        JSON.stringify({ keys: { google: 'legacy' } }),
+      );
+      const { useLLMSettingsStore } = await import('./llmSettings');
+      useLLMSettingsStore();
+      expect(window.localStorage.getItem('llm_settings_v1')).toBeNull();
+    });
+
     it('starts from the registry Google default with empty keys and overrides', async () => {
       const { useLLMSettingsStore } = await import('./llmSettings');
       const store = useLLMSettingsStore();
@@ -153,6 +163,21 @@ describe('useLLMSettingsStore', () => {
         thinking: {},
         defaultModel: { provider: 'google', model: GOOGLE_DEFAULT },
       });
+    });
+
+    it('does not re-sync or replace llm state on unrelated profile mutations', async () => {
+      const { useLLMSettingsStore } = await import('./llmSettings');
+      mockAuthStore.user = makeUser('user-1', makeLlm({ keys: { google: 'stable-key' } }));
+      const store = useLLMSettingsStore();
+      const initialLlmRef = store.llm;
+
+      // Mutate unrelated profile fields
+      (mockAuthStore.user as any).total_experience = 500;
+      (mockAuthStore.user as any).learning_streak = 5;
+      await nextTick();
+
+      expect(store.llm).toBe(initialLlmRef);
+      expect(store.llm.keys).toEqual({ google: 'stable-key' });
     });
   });
 

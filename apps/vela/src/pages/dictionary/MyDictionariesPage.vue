@@ -288,7 +288,7 @@ const addFlashcardMutation = useAddFlashcardMutation();
 const llmSettings = useLLMSettingsStore();
 const authStore = useAuthStore();
 const { selection } = storeToRefs(llmSettings);
-const { user, isAuthenticated } = storeToRefs(authStore);
+const { user } = storeToRefs(authStore);
 
 const entries = ref<MyDictionaryEntry[]>([]);
 const loading = ref(false);
@@ -693,7 +693,7 @@ onUnmounted(() => analysisAbort?.abort());
 
 async function handlePronounce(entry: MyDictionaryEntry) {
   // Check if authenticated and has a valid session
-  if (!isAuthenticated.value || !authStore.session?.user?.id) {
+  if (!authStore.session?.user?.id) {
     $q.notify({
       type: 'warning',
       message: 'Please sign in to use pronunciation features',

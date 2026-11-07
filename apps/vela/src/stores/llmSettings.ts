@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia';
 import { ref, computed, watch } from 'vue';
+import { LocalStorage } from 'quasar';
 import {
   LLM_PROVIDER_REGISTRY,
   LLM_PROVIDERS,
@@ -19,6 +20,24 @@ export interface LlmSelection {
 export type LlmThinkingPatch = Record<string, LlmEffort | null | undefined>;
 
 const DEFAULT_PROVIDER: LlmProvider = 'google';
+const LEGACY_STORAGE_KEY = 'llm_settings_v1';
+
+const purgeLegacyStorage = () => {
+  try {
+    if (typeof window !== 'undefined') {
+      window.localStorage.removeItem(LEGACY_STORAGE_KEY);
+    }
+  } catch {
+    // Ignore environments where localStorage is unavailable
+  }
+  try {
+    if (LocalStorage.has(LEGACY_STORAGE_KEY)) {
+      LocalStorage.remove(LEGACY_STORAGE_KEY);
+    }
+  } catch {
+    // Ignore Quasar LocalStorage mock/SSR errors
+  }
+};
 
 const emptyLlm = (): LlmPreferences => ({
   keys: {},
@@ -55,6 +74,8 @@ const cloneLlm = (value: LlmPreferences): LlmPreferences => ({
 });
 
 export const useLLMSettingsStore = defineStore('llmSettings', () => {
+  purgeLegacyStorage();
+
   const auth = useAuthStore();
 
   const llm = ref<LlmPreferences>(emptyLlm());
@@ -74,70 +95,46 @@ export const useLLMSettingsStore = defineStore('llmSettings', () => {
     llm.value = isLlmPreferences(prefs) ? cloneLlm(prefs) : emptyLlm();
   };
 
-  watch(() => auth.user, syncFromAuth, { deep: true, immediate: true });
+  watch(() => [auth.user?.id, auth.user?.preferences?.llm], syncFromAuth, {
+    deep: true,
+    immediate: true,
+  });
 
-  let mutationQueue: Promise<void> = Promise.resolve();
-
-  const enqueueMutation = <T>(task: () => Promise<T>): Promise<T> => {
-    const run = mutationQueue.then(task);
-    mutationQueue = run.then(
-      () => undefined,
-      () => undefined,
-    );
-    return run;
-  };
-
-  const saveProvider = (
+  const saveProvider = async (
     provider: LlmProvider,
     key: string | null | undefined,
     thinkingPatch: LlmThinkingPatch = {},
   ): Promise<boolean> => {
-    const initiatorId = auth.user?.id;
-    const generation = auth.sessionGeneration;
-    return enqueueMutation(async () => {
-      if (!initiatorId || auth.user?.id !== initiatorId || auth.sessionGeneration !== generation) {
-        return false;
+    if (!auth.user) return false;
+    const trimmed = (key ?? '').trim();
+    const allowedModelIds = new Set(
+      LLM_PROVIDER_REGISTRY[provider].models?.map((model) => model.id) ?? [],
+    );
+    return await auth.updatePreferences((current) => {
+      const next = isLlmPreferences(current.llm) ? cloneLlm(current.llm) : emptyLlm();
+      if (trimmed) {
+        next.keys[provider] = trimmed;
+      } else {
+        delete next.keys[provider];
       }
-      const trimmed = (key ?? '').trim();
-      const allowedModelIds = new Set(
-        LLM_PROVIDER_REGISTRY[provider].models?.map((model) => model.id) ?? [],
-      );
-      const ok = await auth.updatePreferences((current) => {
-        const next = isLlmPreferences(current.llm) ? cloneLlm(current.llm) : emptyLlm();
-        if (trimmed) {
-          next.keys[provider] = trimmed;
+      for (const [modelId, effort] of Object.entries(thinkingPatch)) {
+        if (!allowedModelIds.has(modelId)) continue;
+        if (effort) {
+          next.thinking[modelId] = effort;
         } else {
-          delete next.keys[provider];
+          delete next.thinking[modelId];
         }
-        for (const [modelId, effort] of Object.entries(thinkingPatch)) {
-          if (!allowedModelIds.has(modelId)) continue;
-          if (effort) {
-            next.thinking[modelId] = effort;
-          } else {
-            delete next.thinking[modelId];
-          }
-        }
-        return { llm: next };
-      });
-      const stillCurrent = auth.user?.id === initiatorId && auth.sessionGeneration === generation;
-      return ok && stillCurrent;
+      }
+      return { llm: next };
     });
   };
 
-  const saveDefault = (pair: { provider: LlmProvider; model: string }): Promise<boolean> => {
-    const initiatorId = auth.user?.id;
-    const generation = auth.sessionGeneration;
-    return enqueueMutation(async () => {
-      if (!initiatorId || auth.user?.id !== initiatorId || auth.sessionGeneration !== generation) {
-        return false;
-      }
-      const ok = await auth.updatePreferences((current) => {
-        const next = isLlmPreferences(current.llm) ? cloneLlm(current.llm) : emptyLlm();
-        next.defaultModel = { provider: pair.provider, model: pair.model };
-        return { llm: next };
-      });
-      const stillCurrent = auth.user?.id === initiatorId && auth.sessionGeneration === generation;
-      return ok && stillCurrent;
+  const saveDefault = async (pair: { provider: LlmProvider; model: string }): Promise<boolean> => {
+    if (!auth.user) return false;
+    return await auth.updatePreferences((current) => {
+      const next = isLlmPreferences(current.llm) ? cloneLlm(current.llm) : emptyLlm();
+      next.defaultModel = { provider: pair.provider, model: pair.model };
+      return { llm: next };
     });
   };
 

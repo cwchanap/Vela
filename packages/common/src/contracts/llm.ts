@@ -10,7 +10,9 @@
  */
 
 /** Native effort/thinking values used across supported providers. */
-export type LlmEffort = 'none' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
+export const LLM_EFFORT_LEVELS = ['none', 'low', 'medium', 'high', 'xhigh', 'max'] as const;
+
+export type LlmEffort = (typeof LLM_EFFORT_LEVELS)[number];
 
 /** Closed list of supported providers; the single source for provider unions. */
 export const LLM_PROVIDERS = ['google', 'openai', 'anthropic', 'openrouter'] as const;

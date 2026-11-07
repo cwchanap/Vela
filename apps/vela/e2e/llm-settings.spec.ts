@@ -75,9 +75,8 @@ test.describe('LLM Settings - Provider cards', () => {
     authedPage: page,
     apiMock,
   }) => {
-    // The auth fixture uses a real shared account whose profile may carry
-    // provider/key preferences from earlier runs. Explicitly establish the
-    // starting state: active provider Google, no OpenAI key.
+    // Explicitly seed the synthetic profile starting state: active provider
+    // Google with a saved key, no OpenAI key.
     apiMock.seedProfile(SYNTHETIC_USER_A, {
       llm: {
         keys: { google: GOOGLE_KEY },

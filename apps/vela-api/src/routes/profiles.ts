@@ -1,7 +1,13 @@
 import { Hono } from 'hono';
 import { zValidator } from '@hono/zod-validator';
 import { z } from 'zod';
-import { LLM_PROVIDERS, type LlmEffort } from '@vela/common/contracts/llm';
+import {
+  LLM_EFFORT_LEVELS,
+  LLM_PROVIDER_REGISTRY,
+  LLM_PROVIDERS,
+  type LlmEffort,
+  type LlmProvider,
+} from '@vela/common/contracts/llm';
 import type { Env } from '../types';
 import { profiles as profilesDB, type Profile } from '../dynamodb';
 import { requireAuth, type AuthContext } from '../middleware/auth';
@@ -11,15 +17,7 @@ const DEFAULT_DAILY_LESSON_GOAL = 5;
 const DEFAULT_LESSON_DURATION_MINUTES = 6;
 const DEFAULT_DAILY_GOAL = 30;
 
-const llmEffortValues = [
-  'none',
-  'low',
-  'medium',
-  'high',
-  'xhigh',
-  'max',
-] as const satisfies readonly LlmEffort[];
-const LlmEffortSchema = z.enum(llmEffortValues);
+const LlmEffortSchema = z.enum(LLM_EFFORT_LEVELS);
 
 const LlmPreferencesSchema = z.object({
   keys: z.partialRecord(z.enum(LLM_PROVIDERS), z.string()),
@@ -29,6 +27,60 @@ const LlmPreferencesSchema = z.object({
     model: z.string(),
   }),
 });
+
+const isPlainObject = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value);
+
+const isKnownProvider = (val: unknown): val is LlmProvider =>
+  typeof val === 'string' && (LLM_PROVIDERS as readonly string[]).includes(val);
+
+const isEffortLevel = (val: unknown): val is LlmEffort =>
+  typeof val === 'string' && (LLM_EFFORT_LEVELS as readonly string[]).includes(val);
+
+// Lenient on reads: one malformed provider key or thinking entry should never drop the
+// entire llm preferences map and cause saved keys to be lost on the next save.
+const LlmPreferencesReadSchema = z.preprocess((val) => {
+  if (!isPlainObject(val)) return undefined;
+
+  const rawKeys = isPlainObject(val.keys) ? val.keys : {};
+  const cleanedKeys: Partial<Record<LlmProvider, string>> = {};
+  for (const [k, v] of Object.entries(rawKeys)) {
+    if (isKnownProvider(k) && typeof v === 'string') {
+      cleanedKeys[k] = v;
+    }
+  }
+
+  const rawThinking = isPlainObject(val.thinking) ? val.thinking : {};
+  const cleanedThinking: Record<string, LlmEffort> = {};
+  for (const [k, v] of Object.entries(rawThinking)) {
+    if (typeof k === 'string' && isEffortLevel(v)) {
+      cleanedThinking[k] = v;
+    }
+  }
+
+  let cleanedDefaultModel: { provider: LlmProvider; model: string };
+  if (
+    isPlainObject(val.defaultModel) &&
+    isKnownProvider(val.defaultModel.provider) &&
+    typeof val.defaultModel.model === 'string'
+  ) {
+    cleanedDefaultModel = {
+      provider: val.defaultModel.provider,
+      model: val.defaultModel.model,
+    };
+  } else {
+    cleanedDefaultModel = {
+      provider: 'google',
+      model: LLM_PROVIDER_REGISTRY.google.defaultModel,
+    };
+  }
+
+  return {
+    keys: cleanedKeys,
+    thinking: cleanedThinking,
+    defaultModel: cleanedDefaultModel,
+  };
+}, LlmPreferencesSchema.optional().catch(undefined));
 
 const PreferencesShape = {
   dailyGoal: z.coerce.number().int().min(1).max(1440).optional(),
@@ -51,7 +103,7 @@ const PreferencesReadSchema = z
   .object({
     ...PreferencesShape,
     darkMode: z.boolean().optional().catch(undefined),
-    llm: LlmPreferencesSchema.optional().catch(undefined),
+    llm: LlmPreferencesReadSchema,
   })
   .strip();
 
@@ -63,9 +115,6 @@ const UpdateProfileSchema = z.object({
   native_language: z.string().optional(),
   preferences: PreferencesSchema.optional(),
 });
-
-const isPlainObject = (value: unknown): value is Record<string, unknown> =>
-  typeof value === 'object' && value !== null && !Array.isArray(value);
 
 /**
  * Validates and normalizes a numeric preference value.

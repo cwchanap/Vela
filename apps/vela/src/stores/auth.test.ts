@@ -853,7 +853,7 @@ describe('useAuthStore', () => {
       expect(store.isLoading).toBe(true);
     });
 
-    it('resets isLoading when switching directly to another account during pending updateProfile', async () => {
+    it('clears previous user and maintains loading until new profile loads when switching accounts during pending updateProfile', async () => {
       let resolveUpdate!: (_v: { success: boolean }) => void;
       mockAuthService.updateUserProfile.mockImplementationOnce(
         () =>
@@ -861,6 +861,11 @@ describe('useAuthStore', () => {
             resolveUpdate = res;
           }),
       );
+      mockAuthService.getUserProfile.mockResolvedValueOnce({
+        ...mockProfile,
+        id: 'user-b',
+        email: 'b@example.com',
+      });
       const { useAuthStore } = await import('./auth');
       const store = useAuthStore();
       store.setSession({ user: { id: 'user-a', email: 'a@example.com' }, provider: 'cognito' });
@@ -871,12 +876,41 @@ describe('useAuthStore', () => {
 
       // Account switches directly to user-b while update is in flight
       store.setSession({ user: { id: 'user-b', email: 'b@example.com' }, provider: 'cognito' });
+      expect(store.user).toBeNull();
+      expect(store.isLoading).toBe(true);
+
+      // New user profile loads
+      await store.loadUserProfile('user-b');
+      expect(store.user?.id).toBe('user-b');
       expect(store.isLoading).toBe(false);
 
       resolveUpdate({ success: true });
       const result = await pending;
 
       expect(result).toBe(false);
+      expect(store.isLoading).toBe(false);
+    });
+
+    it('clears user.value on account switch so user A profile is not retained if user B profile fails to load', async () => {
+      mockAuthService.getUserProfile.mockRejectedValueOnce(new Error('Profile fetch failed'));
+      const { useAuthStore } = await import('./auth');
+      const store = useAuthStore();
+      store.setSession({ user: { id: 'user-a', email: 'a@example.com' }, provider: 'cognito' });
+      store.setUser(
+        makeUser({
+          id: 'user-a',
+          preferences: { llm: { keys: { google: 'user-a-secret-key' } } },
+        }),
+      );
+
+      // Switch to user-b: user A profile must be cleared immediately
+      store.setSession({ user: { id: 'user-b', email: 'b@example.com' }, provider: 'cognito' });
+      expect(store.user).toBeNull();
+
+      // Profile load for user-b fails
+      await store.loadUserProfile('user-b');
+      expect(store.user).toBeNull();
+      expect(store.error).toBe('Failed to load user profile');
       expect(store.isLoading).toBe(false);
     });
   });

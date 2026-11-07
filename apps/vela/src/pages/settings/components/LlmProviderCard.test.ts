@@ -327,5 +327,36 @@ describe('LlmProviderCard', () => {
 
       expect((input.element as HTMLInputElement).value).toBe('second-draft');
     });
+
+    it('preserves typed text when clearing key, saving, and typing while save is in flight', async () => {
+      setUser(authStore, llmFor({ keys: { google: 'initial-key' } }));
+      let resolveSave!: (_val: boolean) => void;
+      updatePreferencesSpy.mockImplementation(async (partial) => {
+        if (!authStore.user) return false;
+        authStore.user.preferences = {
+          ...(authStore.user.preferences as UserPreferences),
+          ...resolvePatchArg(partial),
+        };
+        return new Promise<boolean>((resolve) => {
+          resolveSave = resolve;
+        });
+      });
+      wrapper = mountCard('google');
+      await flushPromises();
+
+      const input = wrapper.find('[data-testid="llm-key-input-google"]');
+      // Clear input and trigger save
+      await input.setValue('');
+      await wrapper.find('[data-testid="llm-save-google"]').trigger('click');
+
+      // User starts typing while save is in flight
+      await input.setValue('typed-after-clearing');
+
+      // Save finishes
+      resolveSave(true);
+      await flushPromises();
+
+      expect((input.element as HTMLInputElement).value).toBe('typed-after-clearing');
+    });
   });
 });

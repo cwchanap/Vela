@@ -153,4 +153,39 @@ describe('boot/main', () => {
 
     expect(syncSpy).not.toHaveBeenCalled();
   });
+
+  it('should not re-sync theme on unrelated auth mutation when darkMode has not changed', async () => {
+    const authStore = useAuthStore();
+    const themeStore = useThemeStore();
+    const syncSpy = vi.spyOn(themeStore, 'syncWithUserPreferences');
+    const subscribeSpy = vi.spyOn(authStore, '$subscribe');
+
+    const { default: mainBoot } = await import('./main');
+    await mainBoot({ store: pinia });
+
+    const subscribeCallback = subscribeSpy.mock.calls[0][0];
+
+    // Initial sync on sign in
+    subscribeCallback(
+      {} as any,
+      {
+        user: { id: 'user-1', preferences: { darkMode: false } },
+      } as any,
+    );
+    expect(syncSpy).toHaveBeenCalledTimes(1);
+    expect(syncSpy).toHaveBeenCalledWith(false);
+
+    syncSpy.mockClear();
+
+    // Unrelated auth mutation (e.g. LLM settings saved or streak updated)
+    subscribeCallback(
+      {} as any,
+      {
+        user: { id: 'user-1', preferences: { darkMode: false, llm: { keys: { google: 'k' } } } },
+      } as any,
+    );
+
+    // Theme must NOT be re-synced, avoiding reverting local unsaved toggle
+    expect(syncSpy).not.toHaveBeenCalled();
+  });
 });
