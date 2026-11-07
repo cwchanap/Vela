@@ -65,14 +65,15 @@ export const useThemeStore = defineStore('theme', () => {
   /**
    * Save current theme to user preferences
    */
-  const saveToUserPreferences = async () => {
+  const saveToUserPreferences = async (): Promise<boolean> => {
     const authStore = useAuthStore();
 
     if (authStore.user) {
-      await authStore.updatePreferences({
+      return await authStore.updatePreferences({
         darkMode: darkMode.value,
       });
     }
+    return false;
   };
 
   return {

@@ -271,7 +271,8 @@ const handleApiRoute = async (state: MockApi, route: Route): Promise<void> => {
   const method = request.method();
   const authorization = request.headers()['authorization'] ?? null;
   state.authHeaders.push({ method, path, authorization });
-  if (!authenticateRequest(authorization)) {
+  const authUser = authenticateRequest(authorization);
+  if (!authUser) {
     return jsonResponse(route, { error: 'Unauthorized' }, 401);
   }
 
@@ -288,6 +289,13 @@ const handleApiRoute = async (state: MockApi, route: Route): Promise<void> => {
     const body = readJsonBody(route);
     const userId = typeof body.user_id === 'string' ? body.user_id : '';
     if (!userId) return jsonResponse(route, { error: 'user_id is required' }, 400);
+    if (userId !== authUser.userId) {
+      return jsonResponse(
+        route,
+        { error: 'Forbidden: Cannot create profile for another user' },
+        403,
+      );
+    }
     const exists = state.profiles.has(userId);
     if (!exists) {
       state.profiles.set(userId, makeProfile({ userId, username: userId, email: null }));
@@ -301,6 +309,9 @@ const handleApiRoute = async (state: MockApi, route: Route): Promise<void> => {
   if (path === '/api/profiles' && method === 'GET') {
     const userId = url.searchParams.get('user_id') ?? '';
     if (!userId) return jsonResponse(route, { error: 'user_id is required' }, 400);
+    if (userId !== authUser.userId) {
+      return jsonResponse(route, { error: "Forbidden: Cannot access another user's profile" }, 403);
+    }
     const profile = getOrCreateProfile(userId);
     return jsonResponse(route, {
       profile: { ...profile, preferences: normalizePreferencesForRead(profile.preferences) },
@@ -312,6 +323,9 @@ const handleApiRoute = async (state: MockApi, route: Route): Promise<void> => {
     state.profilePuts.push(body);
     const userId = typeof body.user_id === 'string' ? body.user_id : '';
     if (!userId) return jsonResponse(route, { error: 'user_id is required' }, 400);
+    if (userId !== authUser.userId) {
+      return jsonResponse(route, { error: "Forbidden: Cannot update another user's profile" }, 403);
+    }
     const profile = getOrCreateProfile(userId);
     if (body.username !== undefined) profile.username = body.username as string | null;
     if (body.avatar_url !== undefined) profile.avatar_url = body.avatar_url as string | null;

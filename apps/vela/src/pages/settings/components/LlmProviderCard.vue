@@ -19,9 +19,12 @@
         "
       >
         <template #append>
-          <q-icon
-            :name="showKey ? 'visibility_off' : 'visibility'"
-            class="cursor-pointer"
+          <q-btn
+            round
+            dense
+            flat
+            :icon="showKey ? 'visibility_off' : 'visibility'"
+            :aria-label="showKey ? 'Hide API key' : 'Show API key'"
             @click="showKey = !showKey"
           />
         </template>
@@ -44,6 +47,7 @@
               v-model="draftEfforts[model.id]"
               :options="effortOptions(model)"
               label="Thinking"
+              :aria-label="`Thinking for ${model.id}`"
               dense
               emit-value
               map-options
@@ -112,6 +116,8 @@ const resetDrafts = (slice: ReturnType<typeof readSavedSlice>) => {
 };
 
 let lastSlice = readSavedSlice();
+let inFlightKey: string | null = null;
+let inFlightEfforts: Record<string, EffortDraft> | null = null;
 const draftKey = ref(lastSlice.key);
 const draftEfforts = ref<Record<string, EffortDraft>>(
   Object.fromEntries(providerModels.value.map((m, i) => [m.id, lastSlice.efforts[i] ?? ''])),
@@ -121,10 +127,21 @@ watch(
   () => store.llm,
   () => {
     const next = readSavedSlice();
-    if (next.key !== lastSlice.key) draftKey.value = next.key;
+    if (next.key !== lastSlice.key) {
+      if (inFlightKey === null || draftKey.value === inFlightKey) {
+        draftKey.value = next.key;
+      }
+    }
     providerModels.value.forEach((model, i) => {
       const effort = next.efforts[i] ?? '';
-      if (effort !== lastSlice.efforts[i]) draftEfforts.value[model.id] = effort;
+      if (effort !== lastSlice.efforts[i]) {
+        if (
+          inFlightEfforts === null ||
+          draftEfforts.value[model.id] === (inFlightEfforts[model.id] ?? '')
+        ) {
+          draftEfforts.value[model.id] = effort;
+        }
+      }
     });
     lastSlice = next;
   },
@@ -134,6 +151,8 @@ watch(
 watch(
   () => authStore.user?.id,
   () => {
+    inFlightKey = null;
+    inFlightEfforts = null;
     lastSlice = readSavedSlice();
     resetDrafts(lastSlice);
   },
@@ -150,6 +169,8 @@ const save = async () => {
     patch[model.id] = draftEfforts.value[model.id] || null;
   }
   saving.value = true;
+  inFlightKey = draftKey.value;
+  inFlightEfforts = { ...draftEfforts.value };
   try {
     const ok = await store.saveProvider(props.provider, draftKey.value, patch);
     if (ok) {
@@ -167,6 +188,8 @@ const save = async () => {
     }
   } finally {
     saving.value = false;
+    inFlightKey = null;
+    inFlightEfforts = null;
   }
 };
 </script>

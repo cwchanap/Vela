@@ -418,4 +418,21 @@ describe('Profiles Route', () => {
     }
     expect(mockProfilesDb.update).not.toHaveBeenCalled();
   });
+
+  test('GET / drops invalid darkMode values from stored profiles without 500', async () => {
+    const app = createTestApp();
+    mockProfilesDb.get.mockResolvedValueOnce({
+      user_id: 'test-user',
+      email: null,
+      username: null,
+      preferences: { dailyLessonGoal: 7, darkMode: 'invalid-string' },
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    });
+    const res = await app.request('/?user_id=test-user');
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.profile.preferences.darkMode).toBeUndefined();
+    expect(json.profile.preferences.dailyLessonGoal).toBe(7);
+  });
 });

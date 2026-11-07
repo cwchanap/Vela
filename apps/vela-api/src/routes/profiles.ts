@@ -50,6 +50,7 @@ const PreferencesSchema = z.object(PreferencesShape).strip();
 const PreferencesReadSchema = z
   .object({
     ...PreferencesShape,
+    darkMode: z.boolean().optional().catch(undefined),
     llm: LlmPreferencesSchema.optional().catch(undefined),
   })
   .strip();
