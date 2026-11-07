@@ -80,6 +80,7 @@ const pairToValue = (provider: LlmProvider, model: string) =>
 
 const serverKeyProviders = computed<LlmProvider[]>(() => {
   if (!isAuthenticated.value) return [];
+  if (capabilitiesQuery.isError.value) return [];
   const providers: unknown = capabilitiesQuery.data.value?.serverKeyProviders;
   if (!Array.isArray(providers)) return [];
   return providers.filter(

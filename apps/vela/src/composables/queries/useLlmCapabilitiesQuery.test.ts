@@ -75,4 +75,25 @@ describe('useLlmCapabilitiesQuery', () => {
     expect(result.isError.value).toBe(true);
     expect(result.data.value).toBeUndefined();
   });
+
+  it('flags error while retaining stale data after a failed refetch', async () => {
+    mockUser.value = { id: 'user-123' };
+    mockCapabilities.mockResolvedValue({ serverKeyProviders: ['google'] });
+    const { useLlmCapabilitiesQuery } = await import('./useLlmCapabilitiesQuery');
+    const {
+      result,
+      queryClient,
+      cleanup: qcCleanup,
+    } = withQueryClient(() => useLlmCapabilitiesQuery());
+    cleanup = qcCleanup;
+    await flushPromises();
+    expect(result.data.value).toEqual({ serverKeyProviders: ['google'] });
+
+    mockCapabilities.mockRejectedValue(new Error('Unauthorized'));
+    await queryClient.invalidateQueries({ queryKey: ['llm-capabilities'] });
+    await flushPromises();
+
+    expect(result.isError.value).toBe(true);
+    expect(result.data.value).toEqual({ serverKeyProviders: ['google'] });
+  });
 });
