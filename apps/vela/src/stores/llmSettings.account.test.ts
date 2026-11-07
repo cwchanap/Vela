@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { setActivePinia, createPinia } from 'pinia';
 import { flushPromises } from '@vue/test-utils';
-import { LLM_PROVIDER_REGISTRY } from '@vela/common';
+import { LLM_PROVIDER_REGISTRY, authKeys } from '@vela/common';
 import type { LlmPreferences, Profile, UserPreferences } from '../types/shared';
 import type { User } from './auth';
 import type { AppSession, AuthResponse, ProfileData } from '../services/authService';
@@ -115,14 +115,49 @@ const makeProfile = (user: User): Profile => ({
   updated_at: user.updated_at,
 });
 
+let writeStamp = 0;
+
+const nextWriteStamp = () => {
+  writeStamp += 1;
+  return new Date(Date.UTC(2030, 0, 1, 0, 0, writeStamp)).toISOString();
+};
+
 const applyWrite = (index: number) => {
   const write = pendingWrites[index]!;
   const existing = serverProfiles.get(write.userId);
   if (existing) {
     Object.assign(existing, write.data);
+    existing.updated_at = nextWriteStamp();
   }
-  write.resolve({ success: true });
+  write.resolve({
+    success: true,
+    profile: serverProfiles.get(write.userId),
+  } as AuthResponse);
 };
+
+const resolveWrite = (index: number, response: AuthResponse) => {
+  pendingWrites[index]!.resolve(response);
+};
+
+const staleRead = (id: string): Profile => {
+  const user = makeUser(id, makeLlm());
+  (user.preferences as Record<string, unknown>).dailyGoal = 30;
+  return { ...makeProfile(user), updated_at: '2024-01-01T00:00:00.000Z' };
+};
+
+const drainWrites = async () => {
+  while (pendingWrites.length) {
+    applyWrite(0);
+    pendingWrites.splice(0, 1);
+    await flushPromises();
+  }
+};
+
+const writeHas = (write: (typeof pendingWrites)[number], key: string) =>
+  Object.prototype.hasOwnProperty.call(
+    (write.data.preferences as Record<string, unknown> | undefined) ?? {},
+    key,
+  );
 
 describe('llmSettings + auth account transitions (real stores)', () => {
   beforeEach(() => {
@@ -474,12 +509,6 @@ describe('overlapping theme and llm preference writes (real stores)', () => {
     await flushPromises();
   };
 
-  const writeHas = (write: (typeof pendingWrites)[number], key: string) =>
-    Object.prototype.hasOwnProperty.call(
-      (write.data.preferences as Record<string, unknown> | undefined) ?? {},
-      key,
-    );
-
   const expectMergedPreferences = (
     authStore: ReturnType<(typeof import('./auth'))['useAuthStore']>,
   ) => {
@@ -498,21 +527,29 @@ describe('overlapping theme and llm preference writes (real stores)', () => {
     await signInWithBasePrefs(authStore);
 
     const llmSave = llmStore.saveProvider('google', 'g-key');
+    await flushPromises();
+    expect(pendingWrites).toHaveLength(1);
+    const llmPrefs = pendingWrites[0]!.data.preferences as Record<string, unknown>;
+    expect(writeHas(pendingWrites[0]!, 'darkMode')).toBe(false);
+    expect((llmPrefs.llm as LlmPreferences).keys.google).toBe('g-key');
+
     themeStore.setDarkMode(true);
     const themeSave = themeStore.saveToUserPreferences();
     await flushPromises();
+    expect(pendingWrites).toHaveLength(1);
 
-    const llmIndex = pendingWrites.findIndex((write) => writeHas(write, 'llm'));
-    if (llmIndex >= 0) {
-      applyWrite(llmIndex);
-      pendingWrites.splice(llmIndex, 1);
-      await flushPromises();
-    }
-    while (pendingWrites.length) {
-      applyWrite(0);
-      pendingWrites.splice(0, 1);
-      await flushPromises();
-    }
+    applyWrite(0);
+    pendingWrites.splice(0, 1);
+    await flushPromises();
+
+    expect(pendingWrites).toHaveLength(1);
+    const themePrefs = pendingWrites[0]!.data.preferences as Record<string, unknown>;
+    expect(themePrefs.darkMode).toBe(true);
+    expect((themePrefs.llm as LlmPreferences).keys.google).toBe('g-key');
+    applyWrite(0);
+    pendingWrites.splice(0, 1);
+    await flushPromises();
+
     await Promise.all([llmSave, themeSave]);
     await flushPromises();
 
@@ -526,24 +563,360 @@ describe('overlapping theme and llm preference writes (real stores)', () => {
 
     themeStore.setDarkMode(true);
     const themeSave = themeStore.saveToUserPreferences();
+    await flushPromises();
+    expect(pendingWrites).toHaveLength(1);
+    const themePrefs = pendingWrites[0]!.data.preferences as Record<string, unknown>;
+    expect(themePrefs.darkMode).toBe(true);
+    expect((themePrefs.llm as LlmPreferences).keys.google).toBeUndefined();
+
     const llmSave = llmStore.saveProvider('google', 'g-key');
     await flushPromises();
+    expect(pendingWrites).toHaveLength(1);
 
-    const themeIndex = pendingWrites.findIndex((write) => writeHas(write, 'darkMode'));
-    if (themeIndex >= 0) {
-      applyWrite(themeIndex);
-      pendingWrites.splice(themeIndex, 1);
-      await flushPromises();
-    }
-    while (pendingWrites.length) {
-      applyWrite(0);
-      pendingWrites.splice(0, 1);
-      await flushPromises();
-    }
+    applyWrite(0);
+    pendingWrites.splice(0, 1);
+    await flushPromises();
+
+    expect(pendingWrites).toHaveLength(1);
+    const llmPrefs = pendingWrites[0]!.data.preferences as Record<string, unknown>;
+    expect((llmPrefs.llm as LlmPreferences).keys.google).toBe('g-key');
+    expect(llmPrefs.darkMode).toBe(true);
+    applyWrite(0);
+    pendingWrites.splice(0, 1);
+    await flushPromises();
+
     await Promise.all([themeSave, llmSave]);
     await flushPromises();
 
     expectMergedPreferences(authStore);
     expect(llmStore.llm.keys.google).toBe('g-key');
+  });
+});
+
+describe('acknowledged writes survive missing or stale profile reads', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia());
+    vi.clearAllMocks();
+    pendingWrites.length = 0;
+    serverProfiles.clear();
+    queryCache.clear();
+    mockAuthService.getUserProfile.mockImplementation((userId: string) =>
+      Promise.resolve(serverProfiles.get(userId) ?? null),
+    );
+  });
+
+  const stores = async () => {
+    const { useAuthStore } = await import('./auth');
+    const { useLLMSettingsStore } = await import('./llmSettings');
+    const { useThemeStore } = await import('./theme');
+    const authStore = useAuthStore();
+    const llmStore = useLLMSettingsStore();
+    const themeStore = useThemeStore();
+    return { authStore, llmStore, themeStore };
+  };
+
+  const signInWithBasePrefs = async (
+    authStore: ReturnType<(typeof import('./auth'))['useAuthStore']>,
+  ) => {
+    const user = makeUser('user-a', makeLlm());
+    (user.preferences as Record<string, unknown>).dailyGoal = 30;
+    serverProfiles.set('user-a', makeProfile(user));
+    authStore.setSession(makeSession('user-a'));
+    authStore.setUser(user);
+    await flushPromises();
+  };
+
+  const signIn = async (
+    authStore: ReturnType<(typeof import('./auth'))['useAuthStore']>,
+    id: string,
+    llm?: LlmPreferences,
+  ) => {
+    const user = makeUser(id, llm);
+    serverProfiles.set(id, makeProfile(user));
+    authStore.setSession(makeSession(id));
+    authStore.setUser(user);
+    await flushPromises();
+  };
+
+  const expectMergedPreferences = (
+    authStore: ReturnType<(typeof import('./auth'))['useAuthStore']>,
+  ) => {
+    const serverPrefs = serverProfiles.get('user-a')?.preferences as Record<string, unknown>;
+    expect(serverPrefs.darkMode).toBe(true);
+    expect((serverPrefs.llm as LlmPreferences).keys.google).toBe('g-key');
+    expect(serverPrefs.dailyGoal).toBe(30);
+    const localPrefs = authStore.user?.preferences as Record<string, unknown>;
+    expect(localPrefs.darkMode).toBe(true);
+    expect((localPrefs.llm as LlmPreferences).keys.google).toBe('g-key');
+    expect(localPrefs.dailyGoal).toBe(30);
+  };
+
+  const llmThenTheme = async () => {
+    const { authStore, llmStore, themeStore } = await stores();
+    await signInWithBasePrefs(authStore);
+
+    const llmSave = llmStore.saveProvider('google', 'g-key');
+    await flushPromises();
+    expect(pendingWrites).toHaveLength(1);
+    expect(writeHas(pendingWrites[0]!, 'darkMode')).toBe(false);
+
+    themeStore.setDarkMode(true);
+    const themeSave = themeStore.saveToUserPreferences();
+    await flushPromises();
+    expect(pendingWrites).toHaveLength(1);
+
+    return { authStore, llmStore, llmSave, themeSave };
+  };
+
+  const themeThenLlm = async () => {
+    const { authStore, llmStore, themeStore } = await stores();
+    await signInWithBasePrefs(authStore);
+
+    themeStore.setDarkMode(true);
+    const themeSave = themeStore.saveToUserPreferences();
+    await flushPromises();
+    expect(pendingWrites).toHaveLength(1);
+    expect(writeHas(pendingWrites[0]!, 'darkMode')).toBe(true);
+
+    const llmSave = llmStore.saveProvider('google', 'g-key');
+    await flushPromises();
+    expect(pendingWrites).toHaveLength(1);
+
+    return { authStore, llmStore, llmSave, themeSave };
+  };
+
+  it('keeps both patches when the first follow-up read returns null (llm -> theme)', async () => {
+    mockAuthService.getUserProfile.mockResolvedValue(null);
+    const { authStore, llmStore, llmSave, themeSave } = await llmThenTheme();
+
+    await drainWrites();
+    await Promise.all([llmSave, themeSave]);
+    await flushPromises();
+
+    expectMergedPreferences(authStore);
+    expect(llmStore.llm.keys.google).toBe('g-key');
+  });
+
+  it('keeps both patches when the first follow-up read returns null (theme -> llm)', async () => {
+    mockAuthService.getUserProfile.mockResolvedValue(null);
+    const { authStore, llmStore, llmSave, themeSave } = await themeThenLlm();
+
+    await drainWrites();
+    await Promise.all([llmSave, themeSave]);
+    await flushPromises();
+
+    expectMergedPreferences(authStore);
+    expect(llmStore.llm.keys.google).toBe('g-key');
+  });
+
+  it('keeps both patches when the first follow-up read returns stale preferences (llm -> theme)', async () => {
+    mockAuthService.getUserProfile.mockResolvedValue(staleRead('user-a'));
+    const { authStore, llmStore, llmSave, themeSave } = await llmThenTheme();
+
+    await drainWrites();
+    await Promise.all([llmSave, themeSave]);
+    await flushPromises();
+
+    expectMergedPreferences(authStore);
+    expect(llmStore.llm.keys.google).toBe('g-key');
+  });
+
+  it('keeps both patches when the first follow-up read returns stale preferences (theme -> llm)', async () => {
+    mockAuthService.getUserProfile.mockResolvedValue(staleRead('user-a'));
+    const { authStore, llmStore, llmSave, themeSave } = await themeThenLlm();
+
+    await drainWrites();
+    await Promise.all([llmSave, themeSave]);
+    await flushPromises();
+
+    expectMergedPreferences(authStore);
+    expect(llmStore.llm.keys.google).toBe('g-key');
+  });
+
+  it('keeps both patches when the last follow-up read returns stale preferences (llm -> theme)', async () => {
+    mockAuthService.getUserProfile
+      .mockImplementationOnce((userId: string) =>
+        Promise.resolve(serverProfiles.get(userId) ?? null),
+      )
+      .mockResolvedValue(staleRead('user-a'));
+    const { authStore, llmStore, llmSave, themeSave } = await llmThenTheme();
+
+    await drainWrites();
+    await Promise.all([llmSave, themeSave]);
+    await flushPromises();
+
+    expectMergedPreferences(authStore);
+    expect(llmStore.llm.keys.google).toBe('g-key');
+  });
+
+  it('keeps both patches when the last follow-up read returns stale preferences (theme -> llm)', async () => {
+    mockAuthService.getUserProfile
+      .mockImplementationOnce((userId: string) =>
+        Promise.resolve(serverProfiles.get(userId) ?? null),
+      )
+      .mockResolvedValue(staleRead('user-a'));
+    const { authStore, llmStore, llmSave, themeSave } = await themeThenLlm();
+
+    await drainWrites();
+    await Promise.all([llmSave, themeSave]);
+    await flushPromises();
+
+    expectMergedPreferences(authStore);
+    expect(llmStore.llm.keys.google).toBe('g-key');
+  });
+
+  it('keeps both patches when the last follow-up read returns null (llm -> theme)', async () => {
+    mockAuthService.getUserProfile
+      .mockImplementationOnce((userId: string) =>
+        Promise.resolve(serverProfiles.get(userId) ?? null),
+      )
+      .mockResolvedValue(null);
+    const { authStore, llmStore, llmSave, themeSave } = await llmThenTheme();
+
+    await drainWrites();
+    await Promise.all([llmSave, themeSave]);
+    await flushPromises();
+
+    expectMergedPreferences(authStore);
+    expect(llmStore.llm.keys.google).toBe('g-key');
+  });
+
+  it('keeps both patches when the last follow-up read returns null (theme -> llm)', async () => {
+    mockAuthService.getUserProfile
+      .mockImplementationOnce((userId: string) =>
+        Promise.resolve(serverProfiles.get(userId) ?? null),
+      )
+      .mockResolvedValue(null);
+    const { authStore, llmStore, llmSave, themeSave } = await themeThenLlm();
+
+    await drainWrites();
+    await Promise.all([llmSave, themeSave]);
+    await flushPromises();
+
+    expectMergedPreferences(authStore);
+    expect(llmStore.llm.keys.google).toBe('g-key');
+  });
+
+  it('does not let a stale in-flight profile read overwrite an acknowledged save', async () => {
+    let resolveRead!: (_v: Profile | null) => void;
+    mockAuthService.getUserProfile.mockImplementationOnce(
+      () =>
+        new Promise((res) => {
+          resolveRead = res;
+        }),
+    );
+    const { authStore, llmStore, themeStore } = await stores();
+    await signInWithBasePrefs(authStore);
+
+    const read = authStore.loadUserProfile('user-a');
+    const llmSave = llmStore.saveProvider('google', 'g-key');
+    await flushPromises();
+    expect(pendingWrites).toHaveLength(1);
+    themeStore.setDarkMode(true);
+    const themeSave = themeStore.saveToUserPreferences();
+    await flushPromises();
+
+    await drainWrites();
+    resolveRead(staleRead('user-a'));
+    await read;
+    await Promise.all([llmSave, themeSave]);
+    await flushPromises();
+
+    expectMergedPreferences(authStore);
+    expect(llmStore.llm.keys.google).toBe('g-key');
+  });
+
+  it('does not hydrate stale cached preferences over an acknowledged save', async () => {
+    const { authStore, llmStore, llmSave, themeSave } = await llmThenTheme();
+
+    await drainWrites();
+    await Promise.all([llmSave, themeSave]);
+    await flushPromises();
+    expectMergedPreferences(authStore);
+
+    const stale = staleRead('user-a');
+    queryCache.set(cacheKey(authKeys.profile('user-a')), {
+      data: stale,
+      dataUpdatedAt: Date.now(),
+      isInvalidated: false,
+    });
+    mockAuthService.getUserProfile.mockResolvedValue(stale);
+
+    await authStore.loadUserProfile('user-a');
+    await flushPromises();
+
+    expectMergedPreferences(authStore);
+    expect(llmStore.llm.keys.google).toBe('g-key');
+  });
+
+  it('keeps a preference patch when an overlapping non-preference write resolves', async () => {
+    const { authStore, llmStore } = await stores();
+    await signInWithBasePrefs(authStore);
+
+    const llmSave = llmStore.saveProvider('google', 'g-key');
+    await flushPromises();
+    expect(pendingWrites).toHaveLength(1);
+
+    const nameSave = authStore.updateProfile({ username: 'renamed' });
+    await flushPromises();
+
+    await drainWrites();
+    const [llmOk, nameOk] = await Promise.all([llmSave, nameSave]);
+    await flushPromises();
+
+    expect(llmOk).toBe(true);
+    expect(nameOk).toBe(true);
+    expect(authStore.user?.username).toBe('renamed');
+    const localPrefs = authStore.user?.preferences as Record<string, unknown>;
+    expect((localPrefs.llm as LlmPreferences).keys.google).toBe('g-key');
+    expect(localPrefs.dailyGoal).toBe(30);
+    const server = serverProfiles.get('user-a');
+    expect(server?.username).toBe('renamed');
+    const serverPrefs = server?.preferences as Record<string, unknown>;
+    expect((serverPrefs.llm as LlmPreferences).keys.google).toBe('g-key');
+    expect(serverPrefs.dailyGoal).toBe(30);
+    expect(llmStore.llm.keys.google).toBe('g-key');
+  });
+
+  it('still applies the next queued write after a failed write', async () => {
+    const { authStore, llmStore, llmSave, themeSave } = await llmThenTheme();
+
+    resolveWrite(0, { success: false, error: 'rejected' });
+    pendingWrites.splice(0, 1);
+    await flushPromises();
+    await drainWrites();
+    const [llmOk] = await Promise.all([llmSave, themeSave]);
+    await flushPromises();
+
+    expect(llmOk).toBe(false);
+    const serverPrefs = serverProfiles.get('user-a')?.preferences as Record<string, unknown>;
+    expect(serverPrefs.darkMode).toBe(true);
+    expect((serverPrefs.llm as LlmPreferences).keys.google).toBeUndefined();
+    expect(serverPrefs.dailyGoal).toBe(30);
+    const localPrefs = authStore.user?.preferences as Record<string, unknown>;
+    expect(localPrefs.darkMode).toBe(true);
+    expect((localPrefs.llm as LlmPreferences).keys.google).toBeUndefined();
+    expect(llmStore.llm.keys.google).toBeUndefined();
+  });
+
+  it('does not install an acknowledged profile after the session changes', async () => {
+    const { authStore, llmStore } = await stores();
+    await signIn(authStore, 'user-a');
+
+    const pending = llmStore.saveProvider('google', 'a-key');
+    await flushPromises();
+    expect(pendingWrites).toHaveLength(1);
+
+    await signIn(authStore, 'user-b');
+    applyWrite(0);
+
+    const result = await pending;
+    await flushPromises();
+
+    expect(result).toBe(false);
+    expect(authStore.user?.id).toBe('user-b');
+    const bLlm = authStore.user?.preferences.llm as LlmPreferences | undefined;
+    expect(bLlm?.keys.google).toBeUndefined();
+    expect(llmStore.llm.keys).toEqual({});
   });
 });

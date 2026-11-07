@@ -81,6 +81,7 @@ export interface AuthResponse {
   error?: string;
   user?: { id: string; email?: string | null } | null;
   session?: AppSession | null;
+  profile?: Profile | null;
 }
 
 export interface ProfileData {
@@ -293,7 +294,10 @@ class AuthService {
    */
   async updateUserProfile(userId: string, profileData: ProfileData): Promise<AuthResponse> {
     try {
-      await httpJsonAuth<{ success: boolean }>(`${config.api.url}profiles/update`, {
+      const data = await httpJsonAuth<{
+        success: boolean;
+        profile?: ProfileApiRecord | null;
+      }>(`${config.api.url}profiles/update`, {
         method: 'PUT',
         body: JSON.stringify({
           user_id: userId,
@@ -301,7 +305,10 @@ class AuthService {
         }),
       });
 
-      return { success: true };
+      return {
+        success: true,
+        profile: data.profile ? normalizeProfileRecord(data.profile) : null,
+      };
     } catch (error) {
       return {
         success: false,
