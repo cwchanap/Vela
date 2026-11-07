@@ -38,9 +38,17 @@
 
     <div class="text-caption q-mt-sm" :class="hasSelectionKey ? 'text-grey' : 'text-warning'">
       Active: {{ selectionLabel }}
-      <template v-if="!hasSelectionKey">
+      <template v-if="!hasSelectionKey && hasSelectionServerKey">
+        — Chat uses the server key; My Dictionaries requires your own
+        {{ selectionProviderLabel }} API key</template
+      >
+      <template v-else-if="!hasSelectionKey">
         — No API key saved for {{ selectionProviderLabel }}</template
       >
+    </div>
+    <div v-if="serverKeyProviderLabels.length" class="text-caption text-grey">
+      Server key available for chat: {{ serverKeyProviderLabels.join(', ') }}. My Dictionaries uses
+      only your saved API keys.
     </div>
     <div v-if="!isAuthenticated" class="text-caption text-grey">Sign in to save LLM settings</div>
 
@@ -56,11 +64,13 @@ import { Notify } from 'quasar';
 import { LLM_PROVIDER_REGISTRY, LLM_PROVIDERS, type LlmProvider } from '@vela/common';
 import { useLLMSettingsStore } from 'src/stores/llmSettings';
 import { useAuthStore } from 'src/stores/auth';
+import { useLlmCapabilitiesQuery } from '../../../composables/queries/useLlmCapabilitiesQuery';
 import LlmProviderCard from './LlmProviderCard.vue';
 
 const store = useLLMSettingsStore();
 const authStore = useAuthStore();
 const isAuthenticated = computed(() => authStore.isAuthenticated);
+const capabilitiesQuery = useLlmCapabilitiesQuery();
 
 const CUSTOM_VALUE = 'openrouter::__custom__';
 const encode = (provider: LlmProvider, model: string) => `${provider}::${model}`;
@@ -68,20 +78,39 @@ const encode = (provider: LlmProvider, model: string) => `${provider}::${model}`
 const pairToValue = (provider: LlmProvider, model: string) =>
   provider === 'openrouter' ? CUSTOM_VALUE : encode(provider, model);
 
+const serverKeyProviders = computed<LlmProvider[]>(() => {
+  if (!isAuthenticated.value) return [];
+  const providers: unknown = capabilitiesQuery.data.value?.serverKeyProviders;
+  if (!Array.isArray(providers)) return [];
+  return providers.filter(
+    (provider): provider is LlmProvider =>
+      typeof provider === 'string' && (LLM_PROVIDERS as readonly string[]).includes(provider),
+  );
+});
+const serverKeyProviderLabels = computed(() =>
+  serverKeyProviders.value.map((provider) => LLM_PROVIDER_REGISTRY[provider].label),
+);
+
 const defaultOptions = computed(() => {
   const options: { label: string; value: string }[] = [];
   for (const provider of LLM_PROVIDERS) {
-    if (!store.llm.keys[provider]) continue;
+    const hasUserKey = !!store.llm.keys[provider];
+    const hasServerKey = serverKeyProviders.value.includes(provider);
+    if (!hasUserKey && !hasServerKey) continue;
     const registry = LLM_PROVIDER_REGISTRY[provider];
     if (registry.models) {
+      const suffix = hasUserKey ? '' : ' (server key)';
       for (const model of registry.models) {
         options.push({
-          label: `${registry.label} — ${model.id}`,
+          label: `${registry.label} — ${model.id}${suffix}`,
           value: encode(provider, model.id),
         });
       }
     } else {
-      options.push({ label: 'OpenRouter (custom ID)', value: CUSTOM_VALUE });
+      options.push({
+        label: `OpenRouter (custom ID${hasUserKey ? '' : ', server key'})`,
+        value: CUSTOM_VALUE,
+      });
     }
   }
   const { provider, model } = store.llm.defaultModel;
@@ -124,6 +153,9 @@ const selectionLabel = computed(
   () => `${selectionProviderLabel.value} • ${store.llm.defaultModel.model}`,
 );
 const hasSelectionKey = computed(() => !!store.llm.keys[store.llm.defaultModel.provider]);
+const hasSelectionServerKey = computed(() =>
+  serverKeyProviders.value.includes(store.llm.defaultModel.provider),
+);
 
 const saveDefault = async () => {
   let pair: { provider: LlmProvider; model: string };

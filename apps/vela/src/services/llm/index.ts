@@ -13,6 +13,10 @@ export interface GenerateInput {
   messages: LlmMessage[];
 }
 
+export interface LlmCapabilities {
+  serverKeyProviders: LlmProvider[];
+}
+
 /** Provider/model/key snapshot sent with every dictionary analysis request. */
 export interface AnalyzeSentenceInput {
   sentence: string;
@@ -33,6 +37,10 @@ export type AnalysisFrame =
  * provider/model/apiKey snapshot — there is no mutable global provider.
  */
 export const llmClient = {
+  async capabilities(): Promise<LlmCapabilities> {
+    return httpJsonAuth<LlmCapabilities>(getApiUrl('llm-chat/capabilities'));
+  },
+
   async generate(input: GenerateInput): Promise<LlmResponse> {
     return httpJsonAuth<LlmResponse>(getApiUrl('llm-chat'), {
       method: 'POST',

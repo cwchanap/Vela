@@ -2,12 +2,19 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { mount, VueWrapper, flushPromises } from '@vue/test-utils';
 import { createPinia, setActivePinia } from 'pinia';
 import { Quasar, Notify } from 'quasar';
+import { ref } from 'vue';
 import LlmProvidersSection from './LlmProvidersSection.vue';
 import LlmProviderCard from './LlmProviderCard.vue';
 import { useLLMSettingsStore } from 'src/stores/llmSettings';
 import { useAuthStore } from 'src/stores/auth';
-import { LLM_PROVIDER_REGISTRY, LLM_PROVIDERS } from '@vela/common';
+import { LLM_PROVIDER_REGISTRY, LLM_PROVIDERS, type LlmProvider } from '@vela/common';
 import type { LlmPreferences, UserPreferences } from 'src/types/shared';
+
+const mockCapabilitiesData = ref<{ serverKeyProviders: LlmProvider[] } | undefined>(undefined);
+
+vi.mock('src/composables/queries/useLlmCapabilitiesQuery', () => ({
+  useLlmCapabilitiesQuery: () => ({ data: mockCapabilitiesData }),
+}));
 
 const stubs = {
   'q-card': { template: '<div><slot /></div>' },
@@ -94,6 +101,7 @@ describe('LlmProvidersSection', () => {
     llmStore = useLLMSettingsStore();
     authStore = useAuthStore();
     vi.clearAllMocks();
+    mockCapabilitiesData.value = undefined;
     Notify.create = vi.fn() as never;
     updatePreferencesSpy = vi
       .spyOn(authStore, 'updatePreferences')
@@ -283,6 +291,103 @@ describe('LlmProvidersSection', () => {
       const openaiInput = openaiCard.find('[data-testid="llm-key-input-openai"]');
       expect((openaiInput.element as HTMLInputElement).value).toBe('openai-draft-unsaved');
       expect(llmStore.llm.keys.openai).toBe('saved-openai');
+    });
+  });
+
+  describe('server-key capabilities', () => {
+    const optionValues = () =>
+      defaultSelect()
+        .findAll('option')
+        .map((o) => (o.element as HTMLOptionElement).value);
+    const optionLabels = () =>
+      defaultSelect()
+        .findAll('option')
+        .map((o) => o.text());
+
+    it('offers server-backed providers in the Default selector without a user key', async () => {
+      mockCapabilitiesData.value = { serverKeyProviders: ['google', 'openrouter'] };
+      setUser(
+        authStore,
+        llmFor({
+          keys: { openai: 'openai-key' },
+          defaultModel: { provider: 'openai', model: 'gpt-6.1-sol' },
+        }),
+      );
+      wrapper = mountSection();
+      await flushPromises();
+
+      const values = optionValues();
+      expect(values).toContain(`google::${GOOGLE_DEFAULT}`);
+      expect(values).toContain(`google::gemini-4-argon`);
+      expect(values).toContain('openrouter::__custom__');
+      expect(values.some((v) => v.startsWith('anthropic::'))).toBe(false);
+    });
+
+    it('marks server-backed options and labels the chat/dictionary credential split', async () => {
+      mockCapabilitiesData.value = { serverKeyProviders: ['google', 'openrouter'] };
+      setUser(
+        authStore,
+        llmFor({
+          keys: { openai: 'openai-key' },
+          defaultModel: { provider: 'openai', model: 'gpt-6.1-sol' },
+        }),
+      );
+      wrapper = mountSection();
+      await flushPromises();
+
+      const labels = optionLabels();
+      expect(labels.some((l) => l.includes('Google') && l.includes('server key'))).toBe(true);
+      expect(labels.some((l) => l.includes('OpenAI') && l.includes('server key'))).toBe(false);
+      expect(wrapper.text()).toContain('Server key available for chat: Google, OpenRouter');
+      expect(wrapper.text()).toContain('My Dictionaries uses only your saved API keys');
+    });
+
+    it('shows server-key status for a server-backed selection instead of a missing-key warning', async () => {
+      mockCapabilitiesData.value = { serverKeyProviders: ['google'] };
+      setUser(authStore, llmFor());
+      wrapper = mountSection();
+      await flushPromises();
+
+      expect(wrapper.text()).toContain('Chat uses the server key');
+      expect(wrapper.text()).toContain('My Dictionaries requires your own Google API key');
+      expect(wrapper.text()).not.toContain('No API key saved for Google');
+    });
+
+    it('does not fabricate availability when capabilities are missing', async () => {
+      mockCapabilitiesData.value = undefined;
+      setUser(authStore, llmFor({ keys: { openai: 'openai-key' } }));
+      wrapper = mountSection();
+      await flushPromises();
+
+      expect(wrapper.text()).not.toContain('server key');
+      expect(optionLabels().every((l) => !l.includes('server key'))).toBe(true);
+    });
+
+    it('does not fabricate availability when unauthenticated', async () => {
+      mockCapabilitiesData.value = { serverKeyProviders: ['google', 'openrouter'] };
+      wrapper = mountSection();
+      await flushPromises();
+
+      const values = optionValues();
+      expect(values).not.toContain('openrouter::__custom__');
+      expect(optionLabels().every((l) => !l.includes('server key'))).toBe(true);
+      expect(wrapper.text()).not.toContain('Server key available for chat');
+    });
+
+    it('saves a server-backed OpenRouter custom model ID', async () => {
+      mockCapabilitiesData.value = { serverKeyProviders: ['openrouter'] };
+      setUser(authStore, llmFor());
+      wrapper = mountSection();
+      await flushPromises();
+
+      await defaultSelect().setValue('openrouter::__custom__');
+      await wrapper.vm.$nextTick();
+      await wrapper.find('[data-testid="llm-default-model-input"]').setValue('acme/model:free');
+      await wrapper.find('[data-testid="llm-default-save"]').trigger('click');
+      await flushPromises();
+
+      const llm = updatePreferencesSpy.mock.calls[0]![0].llm as LlmPreferences;
+      expect(llm.defaultModel).toEqual({ provider: 'openrouter', model: 'acme/model:free' });
     });
   });
 

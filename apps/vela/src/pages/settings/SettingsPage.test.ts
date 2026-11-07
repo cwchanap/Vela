@@ -20,6 +20,12 @@ vi.mock('../../composables/queries/useTTSQueries', () => ({
   })),
 }));
 
+vi.mock('../../composables/queries/useLlmCapabilitiesQuery', () => ({
+  useLlmCapabilitiesQuery: vi.fn(() => ({
+    data: { value: undefined },
+  })),
+}));
+
 const createTestRouter = () =>
   createRouter({
     history: createMemoryHistory(),
