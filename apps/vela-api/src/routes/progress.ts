@@ -146,9 +146,11 @@ progress.post('/game-session', zValidator('json', RecordGameSessionSchema), asyn
     // Update user experience
     const profile = await profilesDB.get(sessionData.user_id);
     if (profile) {
+      const now = new Date().toISOString();
       await profilesDB.update(sessionData.user_id, {
         total_experience: (profile.total_experience || 0) + sessionData.experience_gained,
-        last_activity: new Date().toISOString(),
+        last_activity: now,
+        updated_at: now,
       });
     }
 

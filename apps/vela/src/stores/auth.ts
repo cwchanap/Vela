@@ -71,6 +71,110 @@ const clearPendingAuthRedirect = () => {
   }
 };
 
+interface ProfileFingerprint {
+  username?: string | null;
+  avatar_url?: string | null;
+  native_language?: string;
+  preferences?: Record<string, unknown>;
+}
+
+const isSameJsonValue = (a: unknown, b: unknown): boolean => {
+  if (a === b) return true;
+  if (typeof a !== 'object' || a === null || typeof b !== 'object' || b === null) {
+    return false;
+  }
+  if (Array.isArray(a) || Array.isArray(b)) {
+    return (
+      Array.isArray(a) &&
+      Array.isArray(b) &&
+      a.length === b.length &&
+      a.every((item, index) => isSameJsonValue(item, b[index]))
+    );
+  }
+  const aRecord = a as Record<string, unknown>;
+  const bRecord = b as Record<string, unknown>;
+  return (
+    Object.keys(aRecord).every((key) => isSameJsonValue(aRecord[key], bRecord[key])) &&
+    Object.keys(bRecord).every((key) => isSameJsonValue(aRecord[key], bRecord[key]))
+  );
+};
+
+const fingerprintFromPatch = (source: Profile, patch: ProfileData): ProfileFingerprint => {
+  const fingerprint: ProfileFingerprint = {};
+  if (patch.username !== undefined) fingerprint.username = source.username;
+  if (patch.avatar_url !== undefined) fingerprint.avatar_url = source.avatar_url;
+  if (patch.native_language !== undefined) fingerprint.native_language = source.native_language;
+  if (patch.preferences) {
+    const sourcePreferences = source.preferences as unknown as Record<string, unknown> | undefined;
+    fingerprint.preferences = {};
+    for (const key of Object.keys(patch.preferences)) {
+      fingerprint.preferences[key] = sourcePreferences?.[key];
+    }
+  }
+  return fingerprint;
+};
+
+const recordCoversFingerprint = (record: Profile, fingerprint: ProfileFingerprint): boolean => {
+  if (
+    fingerprint.username !== undefined &&
+    !isSameJsonValue(record.username, fingerprint.username)
+  ) {
+    return false;
+  }
+  if (
+    fingerprint.avatar_url !== undefined &&
+    !isSameJsonValue(record.avatar_url, fingerprint.avatar_url)
+  ) {
+    return false;
+  }
+  if (
+    fingerprint.native_language !== undefined &&
+    !isSameJsonValue(record.native_language, fingerprint.native_language)
+  ) {
+    return false;
+  }
+  if (fingerprint.preferences) {
+    const recordPreferences = record.preferences as unknown as Record<string, unknown> | undefined;
+    for (const [key, value] of Object.entries(fingerprint.preferences)) {
+      if (!isSameJsonValue(recordPreferences?.[key], value)) {
+        return false;
+      }
+    }
+  }
+  return true;
+};
+
+const applyFingerprint = (base: Profile, fingerprint: ProfileFingerprint): Profile => ({
+  ...base,
+  username: fingerprint.username !== undefined ? fingerprint.username : base.username,
+  avatar_url: fingerprint.avatar_url !== undefined ? fingerprint.avatar_url : base.avatar_url,
+  native_language:
+    fingerprint.native_language !== undefined ? fingerprint.native_language : base.native_language,
+  preferences: fingerprint.preferences
+    ? ({
+        ...(base.preferences as unknown as Record<string, unknown> | undefined),
+        ...fingerprint.preferences,
+      } as unknown as Profile['preferences'])
+    : base.preferences,
+});
+
+const mergeFingerprints = (
+  base: ProfileFingerprint | null,
+  next: ProfileFingerprint,
+): ProfileFingerprint => {
+  const merged: ProfileFingerprint = {};
+  const username = next.username !== undefined ? next.username : base?.username;
+  if (username !== undefined) merged.username = username;
+  const avatarUrl = next.avatar_url !== undefined ? next.avatar_url : base?.avatar_url;
+  if (avatarUrl !== undefined) merged.avatar_url = avatarUrl;
+  const nativeLanguage =
+    next.native_language !== undefined ? next.native_language : base?.native_language;
+  if (nativeLanguage !== undefined) merged.native_language = nativeLanguage;
+  const preferences = { ...base?.preferences, ...next.preferences };
+  if (Object.keys(preferences).length > 0) merged.preferences = preferences;
+  return merged;
+};
+
 export const useAuthStore = defineStore('auth', () => {
   // State
   const user = ref<User | null>(null);
@@ -178,7 +282,39 @@ export const useAuthStore = defineStore('auth', () => {
     preferences: (data.preferences ?? base.preferences) as unknown as Profile['preferences'],
   });
 
-  let lastAcknowledgedProfile: { profile: Profile; generation: number } | null = null;
+  let lastAcknowledgedProfile: {
+    profile: Profile;
+    fingerprint: ProfileFingerprint | null;
+    generation: number;
+  } | null = null;
+
+  const registerAcknowledgedProfile = (
+    acknowledged: Profile,
+    patch: ProfileData,
+    generation: number,
+  ) => {
+    const fingerprint = fingerprintFromPatch(acknowledged, patch);
+    const tracked = lastAcknowledgedProfile;
+    if (
+      tracked &&
+      tracked.generation === generation &&
+      tracked.profile.id === acknowledged.id &&
+      (tracked.profile.updated_at > acknowledged.updated_at ||
+        (tracked.profile.updated_at === acknowledged.updated_at &&
+          recordCoversFingerprint(tracked.profile, fingerprint)))
+    ) {
+      const merged = applyFingerprint(tracked.profile, fingerprint);
+      lastAcknowledgedProfile = {
+        profile: merged,
+        fingerprint: mergeFingerprints(tracked.fingerprint, fingerprint),
+        generation,
+      };
+      setUser(userFromProfile(merged));
+      return;
+    }
+    lastAcknowledgedProfile = { profile: acknowledged, fingerprint, generation };
+    setUser(userFromProfile(acknowledged));
+  };
 
   /**
    * Initialize authentication state
@@ -251,15 +387,30 @@ export const useAuthStore = defineStore('auth', () => {
       const profile = cachedProfile || (await authService.getUserProfile(userId));
 
       if (profile && session.value?.user?.id === userId && sessionGeneration.value === generation) {
-        const acknowledged = lastAcknowledgedProfile;
-        const superseded =
-          acknowledged !== null &&
-          acknowledged.generation === generation &&
-          acknowledged.profile.id === userId &&
-          profile.updated_at <= acknowledged.profile.updated_at;
-        const effectiveProfile = superseded ? acknowledged.profile : profile;
-        if (!superseded) {
-          lastAcknowledgedProfile = { profile, generation };
+        const tracked = lastAcknowledgedProfile;
+        let effectiveProfile = profile;
+        if (
+          tracked === null ||
+          tracked.generation !== generation ||
+          tracked.profile.id !== userId
+        ) {
+          lastAcknowledgedProfile = { profile, fingerprint: null, generation };
+        } else if (
+          profile.updated_at < tracked.profile.updated_at ||
+          (profile.updated_at === tracked.profile.updated_at &&
+            tracked.fingerprint !== null &&
+            !recordCoversFingerprint(profile, tracked.fingerprint))
+        ) {
+          effectiveProfile = tracked.profile;
+        } else {
+          lastAcknowledgedProfile = {
+            profile,
+            fingerprint:
+              tracked.fingerprint !== null && recordCoversFingerprint(profile, tracked.fingerprint)
+                ? tracked.fingerprint
+                : null,
+            generation,
+          };
         }
 
         // Update query cache with fresh data
@@ -403,23 +554,9 @@ export const useAuthStore = defineStore('auth', () => {
         if (sessionGeneration.value === generation && user.value?.id === userId) {
           const acknowledged: Profile =
             response.profile ?? applyProfileData(profileFromUser(current), mergedProfileData);
-          lastAcknowledgedProfile = { profile: acknowledged, generation };
+          registerAcknowledgedProfile(acknowledged, profileData, generation);
 
           await loadUserProfile(userId);
-
-          const latest = user.value;
-          if (latest && latest.id === userId && sessionGeneration.value === generation) {
-            const effective: Profile =
-              latest.updated_at > acknowledged.updated_at
-                ? applyProfileData(
-                    profileFromUser(latest),
-                    response.profile ? {} : mergedProfileData,
-                  )
-                : acknowledged;
-            lastAcknowledgedProfile = { profile: effective, generation };
-            queryClient.setQueryData(authKeys.profile(userId), effective);
-            setUser(userFromProfile(effective));
-          }
         }
         return sessionGeneration.value === generation && user.value?.id === userId;
       } catch (err) {

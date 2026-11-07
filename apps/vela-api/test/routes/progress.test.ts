@@ -213,6 +213,31 @@ describe('Progress Route', () => {
       expect(createCall.vocabulary_studied).toBe(0);
     });
 
+    test('bumps the profile updated_at when recording game-session experience', async () => {
+      mockGameSessionsDB.create.mockResolvedValueOnce(undefined);
+      mockDailyProgressDB.getByUserAndDate.mockResolvedValueOnce(null);
+      mockDailyProgressDB.create.mockResolvedValueOnce(undefined);
+      mockProfilesDB.get.mockResolvedValueOnce({
+        user_id: 'test-user',
+        total_experience: 100,
+        updated_at: '2020-01-01T00:00:00.000Z',
+      });
+      mockProfilesDB.update.mockResolvedValueOnce(undefined);
+
+      const app = createTestApp();
+      const res = await app.request('/game-session', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(validSession),
+      });
+      expect(res.status).toBe(200);
+      const updates = mockProfilesDB.update.mock.calls[0]![1] as Record<string, unknown>;
+      expect(updates.total_experience).toBe(150);
+      expect(typeof updates.updated_at).toBe('string');
+      expect(Number.isNaN(Date.parse(String(updates.updated_at)))).toBe(false);
+      expect(String(updates.updated_at) > '2020-01-01T00:00:00.000Z').toBe(true);
+    });
+
     test('returns 400 for missing required fields', async () => {
       const app = createTestApp();
       const res = await app.request('/game-session', {
