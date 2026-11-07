@@ -61,14 +61,26 @@ describe('useLLMSettingsStore', () => {
   });
 
   describe('initial state', () => {
-    it('purges legacy plaintext llm_settings_v1 from localStorage on creation', async () => {
-      window.localStorage.setItem(
-        'llm_settings_v1',
-        JSON.stringify({ keys: { google: 'legacy' } }),
+    it('leaves legacy settings untouched without loading their keys', async () => {
+      const legacy = JSON.stringify({ keys: { google: 'legacy' } });
+      window.localStorage.setItem('llm_settings_v1', legacy);
+      const { useLLMSettingsStore } = await import('./llmSettings');
+      const store = useLLMSettingsStore();
+      expect(window.localStorage.getItem('llm_settings_v1')).toBe(legacy);
+      expect(store.selection.apiKey).toBeUndefined();
+      window.localStorage.removeItem('llm_settings_v1');
+    });
+
+    it('does not apply a fixed-provider thinking override to a colliding OpenRouter ID', async () => {
+      mockAuthStore.user = makeUser(
+        'user-1',
+        makeLlm({
+          thinking: { 'gpt-6.1-sol': 'high' },
+          defaultModel: { provider: 'openrouter', model: 'gpt-6.1-sol' },
+        }),
       );
       const { useLLMSettingsStore } = await import('./llmSettings');
-      useLLMSettingsStore();
-      expect(window.localStorage.getItem('llm_settings_v1')).toBeNull();
+      expect(useLLMSettingsStore().selection.thinking).toBeUndefined();
     });
 
     it('starts from the registry Google default with empty keys and overrides', async () => {

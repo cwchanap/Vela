@@ -1,6 +1,5 @@
 import { defineStore } from 'pinia';
 import { ref, computed, watch } from 'vue';
-import { LocalStorage } from 'quasar';
 import {
   LLM_PROVIDER_REGISTRY,
   LLM_PROVIDERS,
@@ -17,27 +16,9 @@ export interface LlmSelection {
   thinking?: LlmEffort | undefined;
 }
 
-export type LlmThinkingPatch = Record<string, LlmEffort | null | undefined>;
+export type LlmThinkingPatch = Record<string, LlmEffort | null>;
 
 const DEFAULT_PROVIDER: LlmProvider = 'google';
-const LEGACY_STORAGE_KEY = 'llm_settings_v1';
-
-const purgeLegacyStorage = () => {
-  try {
-    if (typeof window !== 'undefined') {
-      window.localStorage.removeItem(LEGACY_STORAGE_KEY);
-    }
-  } catch {
-    // Ignore environments where localStorage is unavailable
-  }
-  try {
-    if (LocalStorage.has(LEGACY_STORAGE_KEY)) {
-      LocalStorage.remove(LEGACY_STORAGE_KEY);
-    }
-  } catch {
-    // Ignore Quasar LocalStorage mock/SSR errors
-  }
-};
 
 const emptyLlm = (): LlmPreferences => ({
   keys: {},
@@ -74,8 +55,6 @@ const cloneLlm = (value: LlmPreferences): LlmPreferences => ({
 });
 
 export const useLLMSettingsStore = defineStore('llmSettings', () => {
-  purgeLegacyStorage();
-
   const auth = useAuthStore();
 
   const llm = ref<LlmPreferences>(emptyLlm());
@@ -86,7 +65,11 @@ export const useLLMSettingsStore = defineStore('llmSettings', () => {
       provider,
       model,
       apiKey: llm.value.keys[provider],
-      thinking: llm.value.thinking[model],
+      thinking:
+        LLM_PROVIDER_REGISTRY[provider].models?.some((entry) => entry.id === model) &&
+        Object.hasOwn(llm.value.thinking, model)
+          ? llm.value.thinking[model]
+          : undefined,
     };
   });
 

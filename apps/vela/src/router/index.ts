@@ -53,7 +53,7 @@ export default defineRouter(function (/* { store, ssrContext } */) {
       const requiresAuth = to.matched.some((record) => record.meta.requiresAuth);
       const requiresGuest = to.matched.some((record) => record.meta.requiresGuest);
 
-      if (requiresAuth && !authStore.isAuthenticated) {
+      if (requiresAuth && !authStore.isAuthenticated && !authStore.session?.user) {
         // Redirect to login with return URL
         next({
           name: 'login',

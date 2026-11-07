@@ -116,10 +116,8 @@ const resetDrafts = (slice: ReturnType<typeof readSavedSlice>) => {
 };
 
 let lastSlice = readSavedSlice();
-let hasInFlightSave = false;
-let inFlightKey = '';
-let inFlightEfforts: Record<string, EffortDraft> | null = null;
-const draftKey = ref(lastSlice.key);
+let activeSave: symbol | null = null;
+const draftKey = ref<string | null>(lastSlice.key);
 const draftEfforts = ref<Record<string, EffortDraft>>(
   Object.fromEntries(providerModels.value.map((m, i) => [m.id, lastSlice.efforts[i] ?? ''])),
 );
@@ -128,20 +126,17 @@ watch(
   () => store.llm,
   () => {
     const next = readSavedSlice();
-    if (next.key !== lastSlice.key) {
-      if (!hasInFlightSave || (draftKey.value ?? '') === inFlightKey) {
-        draftKey.value = next.key;
-      }
+    if (next.key !== lastSlice.key && !activeSave && (draftKey.value ?? '') === lastSlice.key) {
+      draftKey.value = next.key;
     }
     providerModels.value.forEach((model, i) => {
       const effort = next.efforts[i] ?? '';
-      if (effort !== lastSlice.efforts[i]) {
-        if (
-          !hasInFlightSave ||
-          draftEfforts.value[model.id] === (inFlightEfforts?.[model.id] ?? '')
-        ) {
-          draftEfforts.value[model.id] = effort;
-        }
+      if (
+        effort !== lastSlice.efforts[i] &&
+        !activeSave &&
+        draftEfforts.value[model.id] === (lastSlice.efforts[i] ?? '')
+      ) {
+        draftEfforts.value[model.id] = effort;
       }
     });
     lastSlice = next;
@@ -149,15 +144,12 @@ watch(
   { deep: true },
 );
 
-watch(
-  () => authStore.user?.id,
-  () => {
-    hasInFlightSave = false;
-    inFlightEfforts = null;
-    lastSlice = readSavedSlice();
-    resetDrafts(lastSlice);
-  },
-);
+watch([() => authStore.user?.id, () => authStore.sessionGeneration], () => {
+  activeSave = null;
+  saving.value = false;
+  lastSlice = readSavedSlice();
+  resetDrafts(lastSlice);
+});
 
 const effortOptions = (model: LlmModelInfo) => [
   { label: 'Default', value: '' },
@@ -169,13 +161,23 @@ const save = async () => {
   for (const model of providerModels.value) {
     patch[model.id] = draftEfforts.value[model.id] || null;
   }
+  const generation = authStore.sessionGeneration;
+  const submittedKey = draftKey.value ?? '';
+  const submittedEfforts = { ...draftEfforts.value };
+  const saveToken = Symbol('provider-save');
   saving.value = true;
-  hasInFlightSave = true;
-  inFlightKey = draftKey.value ?? '';
-  inFlightEfforts = { ...draftEfforts.value };
+  activeSave = saveToken;
   try {
     const ok = await store.saveProvider(props.provider, draftKey.value, patch);
+    if (authStore.sessionGeneration !== generation) return;
     if (ok) {
+      const saved = readSavedSlice();
+      if ((draftKey.value ?? '') === submittedKey) draftKey.value = saved.key;
+      providerModels.value.forEach((model, index) => {
+        if (draftEfforts.value[model.id] === submittedEfforts[model.id]) {
+          draftEfforts.value[model.id] = saved.efforts[index] ?? '';
+        }
+      });
       Notify.create({
         type: 'positive',
         message: `${label.value} settings saved`,
@@ -184,14 +186,15 @@ const save = async () => {
     } else {
       Notify.create({
         type: 'negative',
-        message: `Failed to save ${label.value} settings`,
+        message: authStore.error || `Failed to save ${label.value} settings`,
         position: 'top',
       });
     }
   } finally {
-    saving.value = false;
-    hasInFlightSave = false;
-    inFlightEfforts = null;
+    if (activeSave === saveToken) {
+      saving.value = false;
+      activeSave = null;
+    }
   }
 };
 </script>

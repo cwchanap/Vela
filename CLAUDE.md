@@ -58,10 +58,12 @@ bun run test:ui                                  # Playwright UI mode
 bun run build                                    # Production build
 ```
 
-The isolated LLM Settings browser suite runs with
-`bunx playwright test --config playwright.mocked.config.ts`. It starts its own
-local web server, uses synthetic sessions and mocked APIs, and writes artifacts
-under `.artifacts/`; it does not verify live Cognito or provider integration.
+The isolated LLM Settings browser suite runs from `apps/vela` with
+`bun run test:e2e:mocked` and in the `mocked-settings` CI job, including on
+draft PRs. It starts its own local web server on port 9000 and fails if that
+port is occupied. It uses synthetic sessions and mocked APIs, and writes
+artifacts under the repository-root `.artifacts/`; it does not verify live
+Cognito or provider integration.
 
 ### Vela API (from apps/vela-api/)
 

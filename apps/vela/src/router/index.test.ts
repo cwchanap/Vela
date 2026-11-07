@@ -160,6 +160,18 @@ describe('router/index', () => {
       guard = mockBeforeEachCbs[0] as (..._args: unknown[]) => Promise<void>;
     });
 
+    it('keeps a valid session on a protected route when profile loading failed', async () => {
+      mockAuthStore.isInitialized = true;
+      mockAuthStore.session = { user: { id: 'user-1' } };
+      const next = vi.fn();
+      await guard(
+        makeRoute({ path: '/settings', matched: [{ meta: { requiresAuth: true } }] }),
+        makeRoute({}),
+        next,
+      );
+      expect(next).toHaveBeenCalledWith();
+    });
+
     // --- legacy /dashboard redirect ---
     it('redirects /dashboard to { name: "home" }', async () => {
       const next = vi.fn();

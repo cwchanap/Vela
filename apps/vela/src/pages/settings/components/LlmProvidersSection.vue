@@ -42,9 +42,28 @@
         — Chat uses the server key; My Dictionaries requires your own
         {{ selectionProviderLabel }} API key</template
       >
-      <template v-else-if="!hasSelectionKey">
+      <template
+        v-else-if="!hasSelectionKey && isAuthenticated && capabilitiesQuery.isPending?.value"
+      >
+        — Checking server key availability…</template
+      >
+      <template v-else-if="!hasSelectionKey && !capabilitiesQuery.isError.value">
         — No API key saved for {{ selectionProviderLabel }}</template
       >
+    </div>
+    <div
+      v-if="isAuthenticated && capabilitiesQuery.isError.value"
+      class="text-caption text-warning"
+      role="alert"
+    >
+      Server key availability could not be checked.
+      <q-btn
+        flat
+        dense
+        label="Retry"
+        data-testid="retry-capabilities"
+        @click="capabilitiesQuery.refetch()"
+      />
     </div>
     <div v-if="serverKeyProviderLabels.length" class="text-caption text-grey">
       Server key available for chat: {{ serverKeyProviderLabels.join(', ') }}. My Dictionaries uses
@@ -123,6 +142,20 @@ const defaultOptions = computed(() => {
         : { label: `${LLM_PROVIDER_REGISTRY[provider].label} — ${model}`, value: currentValue },
     );
   }
+  const draft = draftPairValue.value;
+  if (!options.some((option) => option.value === draft)) {
+    const [draftProvider, ...modelParts] = draft.split('::');
+    if ((LLM_PROVIDERS as readonly string[]).includes(draftProvider ?? '')) {
+      const label = LLM_PROVIDER_REGISTRY[draftProvider as LlmProvider].label;
+      options.push({
+        label:
+          draftProvider === 'openrouter'
+            ? 'OpenRouter (custom ID)'
+            : `${label} — ${modelParts.join('::')}`,
+        value: draft,
+      });
+    }
+  }
   return options;
 });
 
@@ -133,6 +166,7 @@ const customModelId = ref(
   store.llm.defaultModel.provider === 'openrouter' ? store.llm.defaultModel.model : '',
 );
 const savingDefault = ref(false);
+let activeDefaultSave: symbol | null = null;
 
 watch(
   () => [store.llm.defaultModel, authStore.user?.id, authStore.sessionGeneration] as const,
@@ -140,6 +174,16 @@ watch(
     const sessionChanged = userId !== prevUserId || generation !== prevGeneration;
     const pairChanged = dm.provider !== prevDm.provider || dm.model !== prevDm.model;
     if (!sessionChanged && !pairChanged) return;
+    if (sessionChanged) {
+      activeDefaultSave = null;
+      savingDefault.value = false;
+    } else if (
+      activeDefaultSave ||
+      draftPairValue.value !== pairToValue(prevDm.provider, prevDm.model) ||
+      (prevDm.provider === 'openrouter' && customModelId.value !== prevDm.model)
+    ) {
+      return;
+    }
     draftPairValue.value = pairToValue(dm.provider, dm.model);
     customModelId.value = dm.provider === 'openrouter' ? dm.model : '';
   },
@@ -179,20 +223,34 @@ const saveDefault = async () => {
       model: draftPairValue.value.slice(separator + 2),
     };
   }
+  const generation = authStore.sessionGeneration;
+  const submittedValue = draftPairValue.value;
+  const submittedModel = customModelId.value;
+  const saveToken = Symbol('default-save');
+  activeDefaultSave = saveToken;
   savingDefault.value = true;
   try {
     const ok = await store.saveDefault(pair);
+    if (authStore.sessionGeneration !== generation) return;
     if (ok) {
+      if (draftPairValue.value === submittedValue && customModelId.value === submittedModel) {
+        const dm = store.llm.defaultModel;
+        draftPairValue.value = pairToValue(dm.provider, dm.model);
+        customModelId.value = dm.provider === 'openrouter' ? dm.model : '';
+      }
       Notify.create({ type: 'positive', message: 'Default model saved', position: 'top' });
     } else {
       Notify.create({
         type: 'negative',
-        message: 'Failed to save default model',
+        message: authStore.error || 'Failed to save default model',
         position: 'top',
       });
     }
   } finally {
-    savingDefault.value = false;
+    if (activeDefaultSave === saveToken) {
+      activeDefaultSave = null;
+      savingDefault.value = false;
+    }
   }
 };
 </script>

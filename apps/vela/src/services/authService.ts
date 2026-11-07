@@ -79,6 +79,7 @@ if (cognitoEnabled) {
 export interface AuthResponse {
   success: boolean;
   error?: string;
+  status?: number;
   user?: { id: string; email?: string | null } | null;
   session?: AppSession | null;
   profile?: Profile | null;
@@ -89,6 +90,7 @@ export interface ProfileData {
   avatar_url?: string | undefined;
   native_language?: string | undefined;
   preferences?: Record<string, unknown> | undefined;
+  expected_preferences_version?: string | null | undefined;
 }
 
 export interface AppUser {
@@ -118,6 +120,7 @@ interface ProfileApiRecord {
   learning_streak?: number;
   last_activity?: string | null;
   preferences?: Record<string, unknown>;
+  preferences_version?: string | null;
   created_at?: string;
   updated_at?: string;
 }
@@ -133,6 +136,7 @@ const normalizeProfileRecord = (record: ProfileApiRecord): Profile => ({
   learning_streak: record.learning_streak ?? 0,
   last_activity: record.last_activity ?? null,
   preferences: (record.preferences ?? {}) as unknown as Profile['preferences'],
+  preferences_version: record.preferences_version ?? null,
   created_at: record.created_at ?? '',
   updated_at: record.updated_at ?? '',
 });
@@ -278,15 +282,10 @@ class AuthService {
    * Get user profile from API
    */
   async getUserProfile(userId: string): Promise<Profile | null> {
-    try {
-      const data = await httpJsonAuth<{ profile: ProfileApiRecord | null }>(
-        `${config.api.url}profiles?user_id=${encodeURIComponent(userId)}`,
-      );
-      return data.profile ? normalizeProfileRecord(data.profile) : null;
-    } catch (error) {
-      console.error('Error fetching user profile:', error);
-      return null;
-    }
+    const data = await httpJsonAuth<{ profile: ProfileApiRecord | null }>(
+      `${config.api.url}profiles?user_id=${encodeURIComponent(userId)}`,
+    );
+    return data.profile ? normalizeProfileRecord(data.profile) : null;
   }
 
   /**
@@ -313,6 +312,12 @@ class AuthService {
       return {
         success: false,
         error: error instanceof Error ? error.message : 'An unexpected error occurred',
+        ...(typeof error === 'object' &&
+        error !== null &&
+        'status' in error &&
+        typeof error.status === 'number'
+          ? { status: error.status }
+          : {}),
       };
     }
   }

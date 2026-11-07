@@ -5,14 +5,14 @@
 **Design review:** https://github.com/cwchanap/Vela/pull/81#issuecomment-6690108759  
 **Base:** `main` with completed HPA-754.
 
-**Delivery rule: exactly one HPA-755 draft PR.** These checkpoints are tasks *within this PR*, not separate tickets or PRs. Documentation-only commits do not complete the issue. Keep any review corrections and implementation on this same branch/PR; do not prematurely mark the PR ready or the ticket Done.
+**Delivery rule: exactly one HPA-755 draft PR.** These checkpoints are tasks _within this PR_, not separate tickets or PRs. Documentation-only commits do not complete the issue. Keep any review corrections and implementation on this same branch/PR; do not prematurely mark the PR ready or the ticket Done.
 
 ## Decisions incorporated from the review
 
 1. The **client sends only explicit per-model `thinking` overrides**, not registry defaults. Chat's backend uses default efforts and dictionary analysis keeps its latency-safe low default if omitted. A model row's “Default” choice removes its override; high+ effort may exceed dictionary's ~25-second provider deadline with deployed buffered SSE.
 2. `llm.defaultModel` is `{provider,model}`, matching the existing request contract. Remove any model-ID-to-provider resolver and avoid OpenRouter misrouting.
-3. Profile validation is strict on PUT (400), with **`llm: LlmPreferencesSchema.optional().catch(undefined)` on GET** so an invalid LLM subtree cannot lock users out. Use **Zod 4 `z.partialRecord`** for provider key maps. Include existing `darkMode`.
-4. No localStorage mirror and no reconciliation or account-crossing fallbacks. Use existing `auth.updatePreferences({ llm })`. After an authenticated profile change, replace the entire store snapshot, not merge keys.
+3. Profile validation is strict and bounded on PUT (400). GET sanitizes invalid entries, falls back within a known provider, and omits an unreadable subtree; unrelated writes preserve the unreadable stored subtree. Include existing `darkMode`.
+4. No localStorage mirror or account-crossing fallback; leave the legacy key untouched. Profile preference saves are serialized within a tab and use a server-generated version across clients. On conflict, reload and retry the updater once. Existing acknowledgment reconciliation protects in-flight profile reads and account transitions.
 5. Capability GET returns `{serverKeyProviders: LlmProvider[]}` derived from the existing `SERVER_KEY_ENV` (Google and OpenRouter), not a hard-coded Google boolean. Consume through a conventional query composable. Dictionary remains user-key-only.
 6. Removing a provider key does not auto-select another model. Keep the default pair visible and show a warning; reuse the backend's actionable error. No dictionary-specific model rewrite or pre-check.
 7. The free-form OpenRouter ID belongs beside the global Default model selector, not in the provider card. Its card manages only the key; no OpenRouter effort dropdown.
@@ -23,6 +23,7 @@
 ## Minimal file map
 
 **Add**
+
 ```text
 apps/vela/src/pages/settings/components/ThemeSection.vue
 apps/vela/src/pages/settings/components/TtsSection.vue
@@ -34,6 +35,7 @@ apps/vela/src/composables/queries/useLlmCapabilitiesQuery.ts
 ```
 
 **Modify if required**
+
 ```text
 apps/vela/src/pages/settings/SettingsPage.vue
 apps/vela/src/pages/settings/SettingsPage.test.ts
@@ -70,7 +72,7 @@ No registry change, new DB, CDK table, backend provider adapter, key vault or ne
 **Files:** `apps/vela-api/src/routes/profiles.ts`, `test/routes/profiles.test.ts`; optionally add the **new** frontend `UserPreferences.llm` type while temporarily retaining old type fields until Task 2.
 
 1. Add the nested schema to the existing `PreferencesShape`: `keys` via `z.partialRecord(z.enum(LLM_PROVIDERS), z.string())`; `thinking` values typed from the native effort values; `defaultModel` as an explicit `{provider,model}` object. Also add `darkMode`.
-2. Writes: reject invalid nested settings (400). Reads: use `LlmPreferencesSchema.optional().catch(undefined)` to drop malformed LLM settings **only**. Preserve other preferences and no-write semantics on GET.
+2. Writes: reject invalid nested settings (400) and stale preferences versions (409). Reads: sanitize invalid entries and omit unreadable LLM settings without writing. Preserve unrelated preferences and an unreadable stored LLM subtree during unrelated saves.
 3. Tests: PUT→GET round trip of all keys, effort overrides, explicit model pair, darkMode and learning prefs; partial provider key map; invalid write 400; malformed read `llm` omitted without 500; authenticated ownership unchanged. Keep existing legacy-field stripping test.
 
 **Gate:** `bun --filter vela-api test` and `bun --filter vela-api compile` (target the profile test first).

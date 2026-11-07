@@ -193,15 +193,22 @@ describe('useThemeStore', () => {
       mockAuthStore.updatePreferences.mockResolvedValue(true);
       const store = useThemeStore();
       store.setDarkMode(true);
-      await store.saveToUserPreferences();
+      expect(await store.saveToUserPreferences()).toBe(true);
       expect(mockAuthStore.updatePreferences).toHaveBeenCalledWith({ darkMode: true });
     });
 
     it('does nothing when no user', async () => {
       const { useThemeStore } = await import('./theme');
       const store = useThemeStore();
-      await store.saveToUserPreferences();
+      expect(await store.saveToUserPreferences()).toBe(false);
       expect(mockAuthStore.updatePreferences).not.toHaveBeenCalled();
+    });
+
+    it('returns false when the preference save fails', async () => {
+      const { useThemeStore } = await import('./theme');
+      mockAuthStore.user = { id: 'user-1' };
+      mockAuthStore.updatePreferences.mockResolvedValue(false);
+      expect(await useThemeStore().saveToUserPreferences()).toBe(false);
     });
   });
 });

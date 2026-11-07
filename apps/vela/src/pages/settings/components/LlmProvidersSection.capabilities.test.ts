@@ -142,7 +142,7 @@ describe('LlmProvidersSection capabilities (real query)', () => {
     expect(values).not.toContain('google::gemini-4-argon');
     expect(values).not.toContain('openrouter::__custom__');
     expect(wrapper.text()).not.toContain('server key');
-    expect(wrapper.text()).toContain('No API key saved for Google');
+    expect(wrapper.text()).toContain('Server key availability could not be checked');
     expect(llmStore.selection.provider).toBe('google');
     expect(llmStore.selection.model).toBe(GOOGLE_DEFAULT);
     expect(values).toContain(`google::${GOOGLE_DEFAULT}`);

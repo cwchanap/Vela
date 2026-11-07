@@ -1,6 +1,6 @@
 import { getApiUrl } from '../../utils/api';
 import { getAuthHeaders, httpJsonAuth } from '../../utils/httpClient';
-import type { LlmMessage, LlmProvider, LlmResponse } from '@vela/common';
+import type { LlmEffort, LlmMessage, LlmProvider, LlmResponse } from '@vela/common';
 
 /** One non-stream chat generation against the authenticated /llm-chat route. */
 export interface GenerateInput {
@@ -8,8 +8,8 @@ export interface GenerateInput {
   model?: string | undefined;
   apiKey?: string | undefined;
   system?: string | undefined;
-  /** Native effort/thinking level; registry defaults apply when omitted. The HPA-754 UI never sends it. */
-  thinking?: string | undefined;
+  /** Explicit native effort; the backend applies its default when omitted. */
+  thinking?: LlmEffort | undefined;
   messages: LlmMessage[];
 }
 
@@ -23,7 +23,7 @@ export interface AnalyzeSentenceInput {
   provider: LlmProvider;
   model?: string | undefined;
   apiKey?: string | undefined;
-  thinking?: string | undefined;
+  thinking?: LlmEffort | undefined;
   /** Cancels the upstream stream; superseded asks abort the previous one. */
   signal?: AbortSignal | undefined;
 }

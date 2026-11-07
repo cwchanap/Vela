@@ -183,6 +183,28 @@ describe('LlmProviderCard', () => {
   });
 
   describe('draft hydration', () => {
+    it('keeps an unsaved key and effort when the same provider changes remotely', async () => {
+      setUser(
+        authStore,
+        llmFor({ keys: { google: 'original' }, thinking: { 'gemini-3.8-flash': 'low' } }),
+      );
+      wrapper = mountCard('google');
+      await flushPromises();
+      const input = wrapper.find('[data-testid="llm-key-input-google"]');
+      const effort = wrapper.find('[data-testid="llm-effort-gemini-3.8-flash"]');
+      await input.setValue('unsaved');
+      await effort.setValue('high');
+      authStore.user = {
+        ...authStore.user!,
+        preferences: {
+          ...authStore.user!.preferences,
+          llm: llmFor({ keys: { google: 'remote' }, thinking: { 'gemini-3.8-flash': 'medium' } }),
+        },
+      };
+      await flushPromises();
+      expect((input.element as HTMLInputElement).value).toBe('unsaved');
+      expect((effort.element as HTMLSelectElement).value).toBe('high');
+    });
     it('initializes the key draft and effort drafts from saved preferences', async () => {
       setUser(
         authStore,
@@ -282,6 +304,17 @@ describe('LlmProviderCard', () => {
       expect(llm.thinking).toEqual({ 'gpt-6.1-sol': 'max' });
     });
 
+    it('clears the saved key when the clearable input emits null', async () => {
+      setUser(authStore, llmFor({ keys: { google: 'saved-key' } }));
+      wrapper = mountCard('google');
+      const input = wrapper.findComponent(stubs['q-input']);
+      input.vm.$emit('update:modelValue', null);
+      await wrapper.find('[data-testid="llm-save-google"]').trigger('click');
+      await flushPromises();
+      const llm = resolvePatchArg(updatePreferencesSpy.mock.calls[0]![0]).llm as LlmPreferences;
+      expect(llm.keys.google).toBeUndefined();
+    });
+
     it('keeps the draft editable and shows no success toast on a failed save', async () => {
       setUser(authStore, llmFor({ keys: { google: 'saved' } }));
       updatePreferencesSpy.mockResolvedValue(false);
@@ -296,6 +329,56 @@ describe('LlmProviderCard', () => {
       const keyInput = wrapper.find('[data-testid="llm-key-input-google"]');
       expect((keyInput.element as HTMLInputElement).value).toBe('draft-unsaved');
       expect(llmStore.llm.keys.google).toBe('saved');
+    });
+
+    it('preserves submitted drafts when a conflicting profile arrives and the retry fails', async () => {
+      setUser(authStore, llmFor({ keys: { google: 'original' } }));
+      let finish!: (_value: boolean) => void;
+      updatePreferencesSpy.mockImplementation(
+        () =>
+          new Promise<boolean>((resolve) => {
+            finish = resolve;
+          }),
+      );
+      wrapper = mountCard('google');
+      await flushPromises();
+      const input = wrapper.find('[data-testid="llm-key-input-google"]');
+      const effort = wrapper.find('[data-testid="llm-effort-gemini-3.8-flash"]');
+      await input.setValue('my-draft');
+      await effort.setValue('high');
+      await wrapper.find('[data-testid="llm-save-google"]').trigger('click');
+      authStore.user!.preferences.llm = llmFor({
+        keys: { google: 'remote' },
+        thinking: { 'gemini-3.8-flash': 'low' },
+      });
+      await flushPromises();
+      finish(false);
+      await flushPromises();
+      expect((input.element as HTMLInputElement).value).toBe('my-draft');
+      expect((effort.element as HTMLSelectElement).value).toBe('high');
+    });
+
+    it('does not show an old session save result after an account switch', async () => {
+      setUser(authStore, llmFor(), 'user-a');
+      let finish!: (_value: boolean) => void;
+      updatePreferencesSpy.mockImplementation(
+        () =>
+          new Promise<boolean>((resolve) => {
+            finish = resolve;
+          }),
+      );
+      wrapper = mountCard('google');
+      await flushPromises();
+      await wrapper.find('[data-testid="llm-key-input-google"]').setValue('user-a-draft');
+      await wrapper.find('[data-testid="llm-save-google"]').trigger('click');
+      setUser(authStore, llmFor({ keys: { google: 'user-b-key' } }), 'user-b');
+      await flushPromises();
+      finish(false);
+      await flushPromises();
+      expect(
+        (wrapper.find('[data-testid="llm-key-input-google"]').element as HTMLInputElement).value,
+      ).toBe('user-b-key');
+      expect(Notify.create).not.toHaveBeenCalled();
     });
 
     it('preserves draft edits made while a save is in flight', async () => {

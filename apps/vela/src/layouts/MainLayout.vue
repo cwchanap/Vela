@@ -156,7 +156,20 @@
     </q-drawer>
 
     <q-page-container>
-      <router-view />
+      <q-page v-if="authStore.session?.user && !user" class="q-pa-md">
+        <div v-if="authStore.isLoading">Loading your profile…</div>
+        <div v-else>
+          <p role="alert">{{ authStore.error || 'Failed to load user profile' }}</p>
+          <q-btn
+            label="Retry"
+            color="primary"
+            data-testid="retry-profile"
+            @click="authStore.loadUserProfile(authStore.session.user.id)"
+          />
+          <q-btn label="Sign out" flat @click="handleLogout" />
+        </div>
+      </q-page>
+      <router-view v-else />
     </q-page-container>
   </q-layout>
 </template>

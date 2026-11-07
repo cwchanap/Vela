@@ -14,9 +14,29 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  BUN_VERSION: "1.3.1"
+  BUN_VERSION: '1.3.1'
 
 jobs:
+  mocked-settings:
+    timeout-minutes: 15
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+      - run: bun install --frozen-lockfile
+      - run: bun --cwd packages/common run build
+      - run: bunx playwright install --with-deps chromium
+        working-directory: ./apps/vela
+      - run: bun --cwd apps/vela run test:e2e:mocked
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: mocked-settings-results
+          path: .artifacts/pw-mocked-*/
+          retention-days: 7
+
   test:
     if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
     timeout-minutes: 60

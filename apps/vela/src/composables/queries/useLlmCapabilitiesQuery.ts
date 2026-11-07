@@ -14,7 +14,18 @@ export function useLlmCapabilitiesQuery() {
 
   return useQuery({
     queryKey: llmCapabilitiesKey,
-    queryFn: () => llmClient.capabilities(),
+    queryFn: async () => {
+      try {
+        return await llmClient.capabilities();
+      } catch (error) {
+        const status =
+          typeof error === 'object' && error !== null && 'status' in error
+            ? error.status
+            : 'network';
+        console.warn('LLM capabilities request failed', { status });
+        throw error;
+      }
+    },
     staleTime: 5 * 60 * 1000,
     gcTime: 10 * 60 * 1000,
     enabled,

@@ -2,179 +2,25 @@ import { Hono } from 'hono';
 import { zValidator } from '@hono/zod-validator';
 import { z } from 'zod';
 import {
-  LLM_EFFORT_LEVELS,
-  LLM_PROVIDER_REGISTRY,
-  LLM_PROVIDERS,
-  type LlmEffort,
-  type LlmProvider,
-} from '@vela/common/contracts/llm';
+  normalizePreferences,
+  preserveStoredLlm,
+  PreferencesReadSchema,
+  PreferencesSchema,
+} from '../profile-preferences';
 import type { Env } from '../types';
 import { profiles as profilesDB, type Profile } from '../dynamodb';
 import { requireAuth, type AuthContext } from '../middleware/auth';
 import { UserIdQuerySchema } from '../validation';
 
-const DEFAULT_DAILY_LESSON_GOAL = 5;
-const DEFAULT_LESSON_DURATION_MINUTES = 6;
-const DEFAULT_DAILY_GOAL = 30;
-
-const LlmEffortSchema = z.enum(LLM_EFFORT_LEVELS);
-
-const LlmPreferencesSchema = z.object({
-  keys: z.partialRecord(z.enum(LLM_PROVIDERS), z.string()),
-  thinking: z.record(z.string(), LlmEffortSchema),
-  defaultModel: z.object({
-    provider: z.enum(LLM_PROVIDERS),
-    model: z.string(),
-  }),
-});
-
-const isPlainObject = (value: unknown): value is Record<string, unknown> =>
-  typeof value === 'object' && value !== null && !Array.isArray(value);
-
-const isKnownProvider = (val: unknown): val is LlmProvider =>
-  typeof val === 'string' && (LLM_PROVIDERS as readonly string[]).includes(val);
-
-const isEffortLevel = (val: unknown): val is LlmEffort =>
-  typeof val === 'string' && (LLM_EFFORT_LEVELS as readonly string[]).includes(val);
-
-// Lenient on reads: one malformed provider key or thinking entry should never drop the
-// entire llm preferences map and cause saved keys to be lost on the next save.
-const LlmPreferencesReadSchema = z.preprocess((val) => {
-  if (!isPlainObject(val)) return undefined;
-
-  const rawKeys = isPlainObject(val.keys) ? val.keys : {};
-  const cleanedKeys: Partial<Record<LlmProvider, string>> = {};
-  for (const [k, v] of Object.entries(rawKeys)) {
-    if (isKnownProvider(k) && typeof v === 'string') {
-      cleanedKeys[k] = v;
-    }
-  }
-
-  const rawThinking = isPlainObject(val.thinking) ? val.thinking : {};
-  const cleanedThinking: Record<string, LlmEffort> = {};
-  for (const [k, v] of Object.entries(rawThinking)) {
-    if (typeof k === 'string' && isEffortLevel(v)) {
-      cleanedThinking[k] = v;
-    }
-  }
-
-  let cleanedDefaultModel: { provider: LlmProvider; model: string };
-  if (
-    isPlainObject(val.defaultModel) &&
-    isKnownProvider(val.defaultModel.provider) &&
-    typeof val.defaultModel.model === 'string'
-  ) {
-    cleanedDefaultModel = {
-      provider: val.defaultModel.provider,
-      model: val.defaultModel.model,
-    };
-  } else {
-    cleanedDefaultModel = {
-      provider: 'google',
-      model: LLM_PROVIDER_REGISTRY.google.defaultModel,
-    };
-  }
-
-  return {
-    keys: cleanedKeys,
-    thinking: cleanedThinking,
-    defaultModel: cleanedDefaultModel,
-  };
-}, LlmPreferencesSchema.optional().catch(undefined));
-
-const PreferencesShape = {
-  dailyGoal: z.coerce.number().int().min(1).max(1440).optional(),
-  dailyLessonGoal: z.coerce.number().int().min(1).max(50).optional(),
-  lessonDurationMinutes: z.coerce.number().int().min(1).max(120).optional(),
-  difficulty: z.enum(['Beginner', 'Intermediate', 'Advanced']).optional(),
-  notifications: z.boolean().optional(),
-  todayStudyTime: z.coerce.number().optional(),
-  darkMode: z.boolean().optional(),
-  llm: LlmPreferencesSchema.optional(),
-} satisfies z.ZodRawShape;
-
-// Strip unknown keys on writes (PUT) to prevent arbitrary/unexpected keys being stored
-// while still accepting legacy data with extra fields.
-const PreferencesSchema = z.object(PreferencesShape).strip();
-
-// Lenient on reads (GET) to prevent legacy keys in DynamoDB from causing 500s.
-// This strips unknown keys while still validating known keys.
-const PreferencesReadSchema = z
-  .object({
-    ...PreferencesShape,
-    darkMode: z.boolean().optional().catch(undefined),
-    llm: LlmPreferencesReadSchema,
-  })
-  .strip();
-
 // Validation schemas
 const UpdateProfileSchema = z.object({
   user_id: z.string().min(1, 'user_id is required'),
+  expected_preferences_version: z.string().uuid().nullable().optional(),
   username: z.string().optional(),
   avatar_url: z.string().optional(),
   native_language: z.string().optional(),
   preferences: PreferencesSchema.optional(),
 });
-
-/**
- * Validates and normalizes a numeric preference value.
- * Ensures the value is a finite number within the specified range [min, max].
- * If invalid or out of range, returns the fallback value.
- */
-const normalizeRequiredPreferenceNumber = (
-  value: unknown,
-  fallback: number,
-  min: number,
-  max: number,
-  fieldName: string,
-) => {
-  const parsedValue = typeof value === 'number' ? value : Number(value);
-  if (!Number.isFinite(parsedValue)) {
-    console.warn(`Invalid ${fieldName}: ${value}. Using fallback: ${fallback}`);
-    return fallback;
-  }
-  const normalized = Math.trunc(parsedValue);
-  if (normalized < min || normalized > max) {
-    console.warn(`Out of range ${fieldName}: ${normalized}. Using fallback: ${fallback}`);
-    return fallback;
-  }
-  return normalized;
-};
-
-const normalizePreferences = (preferences: unknown) => {
-  const base = isPlainObject(preferences) ? preferences : {};
-  return {
-    ...base,
-    dailyGoal: normalizeRequiredPreferenceNumber(
-      base.dailyGoal,
-      DEFAULT_DAILY_GOAL,
-      1,
-      1440,
-      'dailyGoal',
-    ),
-    dailyLessonGoal: normalizeRequiredPreferenceNumber(
-      base.dailyLessonGoal,
-      DEFAULT_DAILY_LESSON_GOAL,
-      1,
-      50,
-      'dailyLessonGoal',
-    ),
-    lessonDurationMinutes: normalizeRequiredPreferenceNumber(
-      base.lessonDurationMinutes,
-      DEFAULT_LESSON_DURATION_MINUTES,
-      1,
-      120,
-      'lessonDurationMinutes',
-    ),
-    todayStudyTime: normalizeRequiredPreferenceNumber(
-      base.todayStudyTime,
-      0,
-      0,
-      1440, // Max minutes in a day
-      'todayStudyTime',
-    ),
-  };
-};
 
 const createProfilesRoute = (env: Env) => {
   console.debug('Creating profiles route with env:', env ? 'provided' : 'not provided');
@@ -218,22 +64,27 @@ const createProfilesRoute = (env: Env) => {
           created_at: new Date().toISOString(),
           updated_at: new Date().toISOString(),
         };
-        await profilesDB.create(newProfile);
-        profile = newProfile;
-      } else {
-        const rawPreferences = profile.preferences;
-        const normalizedPreferences = normalizePreferences(rawPreferences);
-        const parsedPreferences = PreferencesReadSchema.safeParse(normalizedPreferences);
-
-        if (!parsedPreferences.success) {
-          console.error('Invalid preferences data for user_id:', user_id);
-          return c.json({ error: 'Invalid preferences data' }, 500);
+        try {
+          await profilesDB.create(newProfile);
+          profile = newProfile;
+        } catch (error) {
+          if (!(error instanceof Error) || error.name !== 'ConditionalCheckFailedException')
+            throw error;
+          profile = await profilesDB.get(user_id);
+          if (!profile) throw error;
         }
-
-        // Return normalized preferences in-memory without persisting to DB
-        // to ensure GET is idempotent.
-        profile.preferences = parsedPreferences.data;
       }
+      const rawPreferences = profile.preferences;
+      const normalizedPreferences = normalizePreferences(rawPreferences);
+      const parsedPreferences = PreferencesReadSchema.safeParse(normalizedPreferences);
+
+      if (!parsedPreferences.success) {
+        console.error('Invalid preferences data for user_id:', user_id);
+        return c.json({ error: 'Invalid preferences data' }, 500);
+      }
+
+      // Return normalized preferences without persisting them on GET.
+      profile.preferences = parsedPreferences.data;
 
       return c.json({ profile });
     } catch (e) {
@@ -248,7 +99,7 @@ const createProfilesRoute = (env: Env) => {
       // Use authenticated user's ID from context instead of trusting client-supplied user_id
       const authenticatedUserId = c.get('userId');
       const profileData = c.req.valid('json');
-      const { user_id, ...updates } = profileData;
+      const { user_id, expected_preferences_version, ...updates } = profileData;
 
       // Authorization check: ensure client can only update their own profile
       if (user_id !== authenticatedUserId) {
@@ -257,6 +108,9 @@ const createProfilesRoute = (env: Env) => {
 
       // Normalize preferences if they are being updated
       if (updates.preferences) {
+        if (expected_preferences_version === undefined) {
+          return c.json({ error: 'Reload your profile before saving preferences' }, 428);
+        }
         updates.preferences = normalizePreferences(updates.preferences);
 
         // Validate the normalized preferences before persisting
@@ -268,16 +122,26 @@ const createProfilesRoute = (env: Env) => {
         }
 
         updates.preferences = parsedPreferences.data;
+        const existing = await profilesDB.get(user_id);
+        preserveStoredLlm(updates.preferences as Record<string, unknown>, existing?.preferences);
       }
 
       // Add updated_at timestamp
-      const updatedProfile = await profilesDB.update(user_id, {
-        ...updates,
-        updated_at: new Date().toISOString(),
-      });
+      const timestampedUpdates = { ...updates, updated_at: new Date().toISOString() };
+      const updatedProfile = updates.preferences
+        ? await profilesDB.update(user_id, timestampedUpdates, expected_preferences_version)
+        : await profilesDB.update(user_id, timestampedUpdates);
 
+      if (updatedProfile?.preferences) {
+        updatedProfile.preferences = PreferencesReadSchema.parse(
+          normalizePreferences(updatedProfile.preferences),
+        );
+      }
       return c.json({ success: true, profile: updatedProfile });
     } catch (e) {
+      if (e instanceof Error && e.name === 'ConditionalCheckFailedException') {
+        return c.json({ error: 'Preferences changed elsewhere' }, 409);
+      }
       console.error('profiles update error', e);
       const msg = e instanceof Error ? e.message : 'Unknown error';
       return c.json({ error: msg }, 500);
@@ -333,7 +197,12 @@ const createProfilesRoute = (env: Env) => {
           updated_at: new Date().toISOString(),
         };
 
-        await profilesDB.create(profile);
+        try {
+          await profilesDB.create(profile);
+        } catch (error) {
+          if (!(error instanceof Error) || error.name !== 'ConditionalCheckFailedException')
+            throw error;
+        }
 
         return c.json({ success: true });
       } catch (e) {

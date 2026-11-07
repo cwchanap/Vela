@@ -17,6 +17,7 @@ export interface User {
   learning_streak: number;
   native_language: string;
   preferences: UserPreferences;
+  preferences_version?: string | null;
   last_activity?: string | undefined;
   created_at: string;
   updated_at: string;
@@ -86,6 +87,7 @@ type ProfilePatch = Omit<ProfileData, 'preferences'> & {
   preferences?: PreferencesPatch | undefined;
 };
 
+// Distinguish deletion from an unchanged field in acknowledgment fingerprints.
 const REMOVED_VALUE: unique symbol = Symbol('removed');
 
 const isPlainRecord = (value: unknown): value is Record<string, unknown> =>
@@ -117,6 +119,7 @@ const diffToFingerprint = (
   committed: unknown,
   path: readonly string[],
 ): unknown => {
+  // The provider and model form one selection, even when only one changed.
   const isAtomic = path.length === 2 && path[0] === 'llm' && path[1] === 'defaultModel';
   if (!isAtomic && isPlainRecord(committed)) {
     const base = isPlainRecord(baseline) ? baseline : {};
@@ -461,6 +464,7 @@ export const useAuthStore = defineStore('auth', () => {
     learning_streak: profile.learning_streak,
     native_language: profile.native_language,
     preferences: profile.preferences as unknown as UserPreferences,
+    preferences_version: profile.preferences_version ?? null,
     last_activity: profile.last_activity || undefined,
     created_at: profile.created_at,
     updated_at: profile.updated_at,
@@ -477,6 +481,7 @@ export const useAuthStore = defineStore('auth', () => {
     learning_streak: source.learning_streak,
     last_activity: source.last_activity ?? null,
     preferences: source.preferences,
+    preferences_version: source.preferences_version ?? null,
     created_at: source.created_at,
     updated_at: source.updated_at,
   });
@@ -501,6 +506,7 @@ export const useAuthStore = defineStore('auth', () => {
       tracked !== null &&
       tracked.generation === generation &&
       tracked.profile.id === acknowledged.id;
+    // API timestamps are ISO UTC strings, so lexical order is chronological.
     if (
       trackedApplies &&
       (tracked.profile.updated_at > acknowledged.updated_at ||
@@ -581,6 +587,7 @@ export const useAuthStore = defineStore('auth', () => {
    */
   const loadUserProfile = async (userId: string) => {
     const generation = sessionGeneration.value;
+    if (session.value?.user?.id === userId) setLoading(true);
     try {
       const queryKey = authKeys.profile(userId);
       const queryState = queryClient.getQueryState(queryKey);
@@ -596,6 +603,7 @@ export const useAuthStore = defineStore('auth', () => {
       const cachedProfile = isFresh ? queryClient.getQueryData<Profile>(queryKey) : null;
 
       const profile = cachedProfile || (await authService.getUserProfile(userId));
+      if (!profile) throw new Error('Profile unavailable');
 
       if (profile && session.value?.user?.id === userId && sessionGeneration.value === generation) {
         const tracked = lastAcknowledgedProfile;
@@ -628,7 +636,7 @@ export const useAuthStore = defineStore('auth', () => {
       }
     } catch (err) {
       console.error('Error loading user profile:', err);
-      setError('Failed to load user profile');
+      if (sessionGeneration.value === generation) setError('Failed to load user profile');
     } finally {
       if (sessionGeneration.value === generation) {
         isLoading.value = false;
@@ -701,6 +709,7 @@ export const useAuthStore = defineStore('auth', () => {
     }
   };
 
+  // PUT replaces preferences, so evaluate each updater only after the prior save settles.
   let preferenceMutationQueue: Promise<void> = Promise.resolve();
   let pendingPreferenceMutations = 0;
 
@@ -732,59 +741,87 @@ export const useAuthStore = defineStore('auth', () => {
     const generation = sessionGeneration.value;
 
     return enqueuePreferenceMutation(async () => {
-      const current = user.value;
+      let current = user.value;
       if (!current || current.id !== userId || sessionGeneration.value !== generation) {
         return false;
       }
-
-      const { preferences: preferencesPatch, ...profileFields } = profileData;
-      const resolvedPreferences: Record<string, unknown> | undefined =
-        typeof preferencesPatch === 'function'
-          ? ({ ...preferencesPatch(current.preferences) } as Record<string, unknown>)
-          : preferencesPatch;
-      const resolvedProfileData: ProfileData =
-        resolvedPreferences === undefined
-          ? profileFields
-          : { ...profileFields, preferences: resolvedPreferences };
-      const mergedProfileData: ProfileData =
-        resolvedPreferences === undefined
-          ? resolvedProfileData
-          : {
-              ...resolvedProfileData,
-              preferences: {
-                ...(current.preferences as Record<string, unknown>),
-                ...resolvedPreferences,
-              },
-            };
 
       setLoading(true);
       setError(null);
 
       try {
-        const response = await authService.updateUserProfile(userId, mergedProfileData);
+        const { preferences: preferencesPatch, ...profileFields } = profileData;
+        let resolvedProfileData: ProfileData = profileFields;
+        let mergedProfileData: ProfileData = profileFields;
+        let response;
+        for (let attempt = 0; attempt < 2; attempt++) {
+          const resolvedPreferences: Record<string, unknown> | undefined =
+            typeof preferencesPatch === 'function'
+              ? { ...preferencesPatch(current.preferences) }
+              : preferencesPatch;
+          resolvedProfileData =
+            resolvedPreferences === undefined
+              ? profileFields
+              : { ...profileFields, preferences: resolvedPreferences };
+          mergedProfileData =
+            resolvedPreferences === undefined
+              ? resolvedProfileData
+              : {
+                  ...resolvedProfileData,
+                  preferences: { ...current.preferences, ...resolvedPreferences },
+                  expected_preferences_version: current.preferences_version ?? null,
+                };
+          response = await authService.updateUserProfile(userId, mergedProfileData);
+          if (response.status !== 409 || attempt !== 0 || resolvedPreferences === undefined) break;
 
-        if (!response.success) {
+          const fresh = await authService.getUserProfile(userId);
+          if (!fresh || sessionGeneration.value !== generation || user.value?.id !== userId) {
+            return false;
+          }
+          lastAcknowledgedProfile = { profile: fresh, fingerprint: null, generation };
+          queryClient.setQueryData(authKeys.profile(userId), fresh);
+          current = userFromProfile(fresh);
+          setUser(current);
+        }
+
+        if (!response?.success) {
           if (sessionGeneration.value === generation && user.value?.id === userId) {
-            setError(response.error || 'Profile update failed');
+            console.warn('Profile save failed', { status: response?.status ?? 'network' });
+            setError(
+              response?.status === 409
+                ? 'Settings changed elsewhere. Please try saving again.'
+                : response?.status === 400
+                  ? 'Some settings are invalid. Check your entries and try again.'
+                  : response?.status === 401 || response?.status === 403
+                    ? 'Your session cannot save settings. Please sign in again.'
+                    : response?.status
+                      ? `Save failed (HTTP ${response.status}). Please try again.`
+                      : response?.error || 'Profile update failed',
+            );
           }
           return false;
         }
 
-        // Invalidate profile query to refetch fresh data
-        queryClient.invalidateQueries({ queryKey: authKeys.profile(userId) });
-
-        // Reload user profile to get updated data
-        if (sessionGeneration.value === generation && user.value?.id === userId) {
-          const acknowledged: Profile =
-            response.profile ?? applyProfileData(profileFromUser(current), mergedProfileData);
-          registerAcknowledgedProfile(
-            acknowledged,
-            resolvedProfileData,
-            profileFromUser(current),
-            generation,
-          );
-
-          await loadUserProfile(userId);
+        try {
+          if (sessionGeneration.value === generation && user.value?.id === userId) {
+            const acknowledged: Profile =
+              response.profile ?? applyProfileData(profileFromUser(current), mergedProfileData);
+            registerAcknowledgedProfile(
+              acknowledged,
+              resolvedProfileData,
+              profileFromUser(current),
+              generation,
+            );
+            queryClient.invalidateQueries({ queryKey: authKeys.profile(userId) });
+            await loadUserProfile(userId);
+          }
+        } catch (err) {
+          console.error('Profile was saved but local refresh failed:', err);
+          if (sessionGeneration.value === generation && user.value?.id === userId) {
+            setError(
+              'Settings were saved, but the profile could not be refreshed. Reload the page.',
+            );
+          }
         }
         return sessionGeneration.value === generation && user.value?.id === userId;
       } catch (err) {
