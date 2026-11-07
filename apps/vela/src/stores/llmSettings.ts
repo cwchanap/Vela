@@ -1,184 +1,138 @@
 import { defineStore } from 'pinia';
 import { ref, computed, watch } from 'vue';
-import { LocalStorage, Notify } from 'quasar';
-import { LLM_PROVIDER_REGISTRY, LLM_PROVIDERS, type LlmProvider } from '@vela/common';
+import {
+  LLM_PROVIDER_REGISTRY,
+  LLM_PROVIDERS,
+  type LlmProvider,
+  type LlmEffort,
+} from '@vela/common';
 import { useAuthStore } from './auth';
-import type { UserPreferences } from '../types/shared';
+import type { LlmPreferences } from '../types/shared';
 
-export type ProviderModelMap = Partial<Record<LlmProvider, string>>;
-export type ProviderKeyMap = Partial<Record<LlmProvider, string>>;
-
-interface PersistedSettings {
+/** Per-request snapshot consumed by Chat and My Dictionaries. */
+export interface LlmSelection {
   provider: LlmProvider;
-  models: ProviderModelMap;
-  keys?: ProviderKeyMap;
+  model: string;
+  apiKey?: string | undefined;
+  thinking?: LlmEffort | undefined;
 }
 
-const STORAGE_KEY = 'llm_settings_v1';
+/** Effort overrides to apply per model id; a nullish value deletes the entry. */
+export type LlmThinkingPatch = Record<string, LlmEffort | null | undefined>;
 
-// Default models come from the shared registry; the store keeps no provider
-// state of its own beyond the active selection.
 const DEFAULT_PROVIDER: LlmProvider = 'google';
-const DEFAULT_MODELS: ProviderModelMap = Object.fromEntries(
-  LLM_PROVIDERS.map((p) => [p, LLM_PROVIDER_REGISTRY[p].defaultModel]),
-);
 
-// Persisted provider/model values can predate the current registry (e.g.
-// 'chutes', 'gemini-2.5-flash-lite'); the API 400s them on every request.
-// Retain saved nonempty model IDs in memory so the API rejects them with
-// the specified 400 rather than silently switching models.
+const emptyLlm = (): LlmPreferences => ({
+  keys: {},
+  thinking: {},
+  defaultModel: {
+    provider: DEFAULT_PROVIDER,
+    model: LLM_PROVIDER_REGISTRY[DEFAULT_PROVIDER].defaultModel,
+  },
+});
+
 const isKnownProvider = (p: unknown): p is LlmProvider =>
   typeof p === 'string' && (LLM_PROVIDERS as readonly string[]).includes(p);
 
-const sanitizedModels = (models: ProviderModelMap | undefined): ProviderModelMap => {
-  const next: ProviderModelMap = {};
-  for (const p of LLM_PROVIDERS) {
-    const saved = models?.[p];
-    const registry = LLM_PROVIDER_REGISTRY[p];
-    next[p] = typeof saved === 'string' && saved.trim().length > 0 ? saved : registry.defaultModel;
-  }
-  return next;
+// The profile route tolerantly drops malformed `llm` subtrees on read, but a
+// stale write or a preferences payload assembled outside that path can still
+// surface one here; anything that does not match the
+// {keys,thinking,defaultModel} contract is treated as absent so the snapshot
+// resets to fresh defaults instead of keeping partial state.
+const isLlmPreferences = (value: unknown): value is LlmPreferences => {
+  if (!value || typeof value !== 'object') return false;
+  const candidate = value as Partial<LlmPreferences>;
+  const dm = candidate.defaultModel;
+  return (
+    !!candidate.keys &&
+    typeof candidate.keys === 'object' &&
+    !!candidate.thinking &&
+    typeof candidate.thinking === 'object' &&
+    !!dm &&
+    typeof dm === 'object' &&
+    isKnownProvider(dm.provider) &&
+    typeof dm.model === 'string'
+  );
 };
 
+const cloneLlm = (value: LlmPreferences): LlmPreferences => ({
+  keys: { ...value.keys },
+  thinking: { ...value.thinking },
+  defaultModel: { ...value.defaultModel },
+});
+
 export const useLLMSettingsStore = defineStore('llmSettings', () => {
-  // State
-  const provider = ref<LlmProvider>(DEFAULT_PROVIDER);
-  const models = ref<ProviderModelMap>({ ...DEFAULT_MODELS });
-  const keys = ref<ProviderKeyMap>({});
-
-  // Getters
-  const currentModel = computed(
-    () =>
-      models.value[provider.value] ||
-      DEFAULT_MODELS[provider.value] ||
-      DEFAULT_MODELS[DEFAULT_PROVIDER]!,
-  );
-
-  const currentApiKey = computed(() => keys.value[provider.value]);
-
-  // Actions
-  const setProvider = (name: LlmProvider) => {
-    provider.value = name;
-    // ensure model exists for provider
-    if (!models.value[name]) {
-      models.value[name] = DEFAULT_MODELS[name] ?? DEFAULT_MODELS.google!;
-    }
-    persist();
-  };
-
-  const setModel = (model: string) => {
-    models.value[provider.value] = model;
-    persist();
-  };
-
-  const persist = () => {
-    const data: PersistedSettings = {
-      provider: provider.value,
-      models: models.value,
-      keys: keys.value,
-    };
-    LocalStorage.set(STORAGE_KEY, data);
-  };
-
-  // Profile integration
   const auth = useAuthStore();
 
-  const loadFromProfile = () => {
-    const prefs: UserPreferences | undefined = auth.user?.preferences as
-      UserPreferences | undefined;
-    if (!prefs) return false;
-    const p = prefs.llm_provider;
-    const m = prefs.llm_models;
-    const k = (prefs as any).llm_keys as ProviderKeyMap | undefined;
-    if (p) provider.value = isKnownProvider(p) ? p : DEFAULT_PROVIDER;
-    if (m) models.value = sanitizedModels({ ...models.value, ...m });
-    if (k) keys.value = { ...keys.value, ...k };
-    return !!p || !!m || !!k;
+  // State: the single authenticated llm snapshot. The profile is the only
+  // source of truth — there is no localStorage mirror.
+  const llm = ref<LlmPreferences>(emptyLlm());
+
+  const selection = computed<LlmSelection>(() => {
+    const { provider, model } = llm.value.defaultModel;
+    return {
+      provider,
+      model,
+      apiKey: llm.value.keys[provider],
+      thinking: llm.value.thinking[model],
+    };
+  });
+
+  // Unconditionally replace state on any auth user/profile transition:
+  // sign-out, account switch, and preference hydration (even when the user id
+  // stays the same) all rebuild from the latest preferences. A missing or
+  // malformed llm subtree resets to fresh defaults rather than retaining the
+  // previous user's keys.
+  const syncFromAuth = () => {
+    const prefs = auth.user?.preferences?.llm;
+    llm.value = isLlmPreferences(prefs) ? cloneLlm(prefs) : emptyLlm();
   };
 
-  const saveToProfile = async () => {
-    if (!auth.user) return false;
-    const existing: UserPreferences =
-      (auth.user.preferences as UserPreferences) || ({} as UserPreferences);
-    const nextPrefs: UserPreferences = {
-      ...existing,
-      llm_provider: provider.value,
-      llm_models: models.value,
-      llm_keys: keys.value,
-    };
-    const ok = await auth.updateProfile({
-      preferences: nextPrefs as unknown as Record<string, unknown>,
-    });
+  watch(() => auth.user, syncFromAuth, { deep: true, immediate: true });
+
+  // Build the next snapshot from the latest authenticated preferences so a
+  // save can never resurrect state the profile no longer holds.
+  const currentSnapshot = (): LlmPreferences => {
+    const prefs = auth.user?.preferences?.llm;
+    return isLlmPreferences(prefs) ? cloneLlm(prefs) : emptyLlm();
+  };
+
+  const saveProvider = async (
+    provider: LlmProvider,
+    key: string | null | undefined,
+    thinkingPatch: LlmThinkingPatch = {},
+  ): Promise<boolean> => {
+    const next = currentSnapshot();
+    const trimmed = (key ?? '').trim();
+    if (trimmed) {
+      next.keys[provider] = trimmed;
+    } else {
+      delete next.keys[provider];
+    }
+    for (const [modelId, effort] of Object.entries(thinkingPatch)) {
+      if (effort) {
+        next.thinking[modelId] = effort;
+      } else {
+        delete next.thinking[modelId];
+      }
+    }
+    const ok = await auth.updatePreferences({ llm: next });
+    if (ok) llm.value = cloneLlm(next);
     return ok;
   };
 
-  const load = () => {
-    // Try DB first
-    const loadedFromDb = loadFromProfile();
-    if (!loadedFromDb) {
-      const data = LocalStorage.getItem<PersistedSettings>(STORAGE_KEY) || null;
-      if (data && data.provider) {
-        provider.value = isKnownProvider(data.provider) ? data.provider : DEFAULT_PROVIDER;
-        models.value = sanitizedModels(data.models);
-        keys.value = data.keys || {};
-      }
-    }
-  };
-
-  // Auto-load once store is created
-  load();
-
-  // React to auth user availability to load profile-backed settings
-  watch(
-    () => auth.user?.id,
-    () => {
-      loadFromProfile();
-    },
-  );
-
-  const notifySaved = () => {
-    Notify.create({ type: 'positive', message: 'LLM settings saved' });
-  };
-
-  const resetToDefaults = async () => {
-    provider.value = DEFAULT_PROVIDER;
-    models.value = { ...DEFAULT_MODELS };
-    keys.value = {};
-    persist();
-    await saveToProfile();
-  };
-
-  const save = async () => {
-    persist();
-    await saveToProfile();
-  };
-
-  const setApiKey = (key?: string | null) => {
-    const trimmed = (key ?? '').trim();
-    if (!trimmed) {
-      delete keys.value[provider.value];
-    } else {
-      keys.value[provider.value] = trimmed;
-    }
-    persist();
+  const saveDefault = async (pair: { provider: LlmProvider; model: string }): Promise<boolean> => {
+    const next = currentSnapshot();
+    next.defaultModel = { provider: pair.provider, model: pair.model };
+    const ok = await auth.updatePreferences({ llm: next });
+    if (ok) llm.value = cloneLlm(next);
+    return ok;
   };
 
   return {
-    // state
-    provider,
-    models,
-    keys,
-    // getters
-    currentModel,
-    currentApiKey,
-    // actions
-    setProvider,
-    setModel,
-    setApiKey,
-    persist,
-    load,
-    save,
-    resetToDefaults,
-    notifySaved,
+    llm,
+    selection,
+    saveProvider,
+    saveDefault,
   };
 });

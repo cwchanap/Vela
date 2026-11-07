@@ -1,309 +1,369 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { setActivePinia, createPinia } from 'pinia';
+import { nextTick, reactive } from 'vue';
 import { LLM_PROVIDER_REGISTRY } from '@vela/common';
+import type { LlmPreferences } from '../types/shared';
 
-const mockLocalStorage = {
-  set: vi.fn(),
-  has: vi.fn(() => false),
-  getItem: vi.fn(() => null),
-};
+const GOOGLE_DEFAULT = LLM_PROVIDER_REGISTRY.google.defaultModel;
 
-const mockNotify = { create: vi.fn() };
+interface MockUser {
+  id: string;
+  preferences?: Record<string, unknown>;
+}
 
-vi.mock('quasar', () => ({
-  LocalStorage: mockLocalStorage,
-  Notify: mockNotify,
-}));
-
-const mockAuthStore = {
-  user: null as null | { id: string; preferences?: Record<string, unknown> },
-  updateProfile: vi.fn(),
-};
+const mockAuthStore = reactive({
+  user: null as MockUser | null,
+  updatePreferences: vi.fn(),
+});
 
 vi.mock('./auth', () => ({
   useAuthStore: () => mockAuthStore,
 }));
+
+const makeUser = (id: string, llm?: LlmPreferences): MockUser => ({
+  id,
+  preferences: llm ? { llm } : {},
+});
+
+const makeLlm = (overrides: Partial<LlmPreferences> = {}): LlmPreferences => ({
+  keys: {},
+  thinking: {},
+  defaultModel: { provider: 'google', model: GOOGLE_DEFAULT },
+  ...overrides,
+});
+
+// Mirrors auth.updatePreferences' merge semantics so the store's auth watcher
+// sees the same profile mutation the real implementation produces.
+const mockUpdateSuccess = () => {
+  mockAuthStore.updatePreferences.mockImplementation(async (partial: Record<string, unknown>) => {
+    if (!mockAuthStore.user) return false;
+    mockAuthStore.user.preferences = {
+      ...(mockAuthStore.user.preferences ?? {}),
+      ...partial,
+    };
+    return true;
+  });
+};
 
 describe('useLLMSettingsStore', () => {
   beforeEach(() => {
     setActivePinia(createPinia());
     vi.clearAllMocks();
     mockAuthStore.user = null;
-    mockLocalStorage.has.mockReturnValue(false);
-    mockLocalStorage.getItem.mockReturnValue(null);
+    mockUpdateSuccess();
   });
 
   describe('initial state', () => {
-    it('has default provider google', async () => {
+    it('starts from the registry Google default with empty keys and overrides', async () => {
       const { useLLMSettingsStore } = await import('./llmSettings');
       const store = useLLMSettingsStore();
-      expect(store.provider).toBe('google');
+      expect(store.llm).toEqual({
+        keys: {},
+        thinking: {},
+        defaultModel: { provider: 'google', model: GOOGLE_DEFAULT },
+      });
     });
 
-    it('has registry-backed default models for every provider', async () => {
+    it('derives selection without an API key or thinking override', async () => {
       const { useLLMSettingsStore } = await import('./llmSettings');
       const store = useLLMSettingsStore();
-      expect(store.models.google).toBe(LLM_PROVIDER_REGISTRY.google.defaultModel);
-      expect(store.models.openai).toBe(LLM_PROVIDER_REGISTRY.openai.defaultModel);
-      expect(store.models.anthropic).toBe(LLM_PROVIDER_REGISTRY.anthropic.defaultModel);
-      expect(store.models.openrouter).toBe(LLM_PROVIDER_REGISTRY.openrouter.defaultModel);
-    });
-
-    it('has empty keys', async () => {
-      const { useLLMSettingsStore } = await import('./llmSettings');
-      const store = useLLMSettingsStore();
-      expect(store.keys).toEqual({});
-    });
-  });
-
-  describe('computed: currentModel', () => {
-    it('has default model from the registry', async () => {
-      const { useLLMSettingsStore } = await import('./llmSettings');
-      const store = useLLMSettingsStore();
-      expect(store.currentModel).toBe(LLM_PROVIDER_REGISTRY.google.defaultModel);
-    });
-
-    it('falls back to the default provider model for unexpected runtime providers', async () => {
-      const { useLLMSettingsStore } = await import('./llmSettings');
-      const store = useLLMSettingsStore();
-
-      store.models = {} as any;
-      store.provider = 'unexpected-provider' as any;
-
-      expect(store.currentModel).toBe(LLM_PROVIDER_REGISTRY.google.defaultModel);
+      expect(store.selection).toEqual({
+        provider: 'google',
+        model: GOOGLE_DEFAULT,
+        apiKey: undefined,
+        thinking: undefined,
+      });
     });
   });
 
-  describe('computed: currentApiKey', () => {
-    it('returns undefined when no key set', async () => {
+  describe('profile hydration', () => {
+    it('hydrates llm state from the authenticated user preferences', async () => {
       const { useLLMSettingsStore } = await import('./llmSettings');
-      const store = useLLMSettingsStore();
-      expect(store.currentApiKey).toBeUndefined();
-    });
-
-    it('returns key for current provider', async () => {
-      const { useLLMSettingsStore } = await import('./llmSettings');
-      const store = useLLMSettingsStore();
-      store.setApiKey('test-api-key');
-      expect(store.currentApiKey).toBe('test-api-key');
-    });
-  });
-
-  describe('setProvider', () => {
-    it('changes provider and persists', async () => {
-      const { useLLMSettingsStore } = await import('./llmSettings');
-      const store = useLLMSettingsStore();
-      store.setProvider('openrouter');
-      expect(store.provider).toBe('openrouter');
-      expect(mockLocalStorage.set).toHaveBeenCalled();
-    });
-
-    it('ensures model is set for new provider', async () => {
-      const { useLLMSettingsStore } = await import('./llmSettings');
-      const store = useLLMSettingsStore();
-      store.models = { google: LLM_PROVIDER_REGISTRY.google.defaultModel } as any; // clear other models
-      store.setProvider('anthropic');
-      expect(store.models.anthropic).toBe(LLM_PROVIDER_REGISTRY.anthropic.defaultModel);
-    });
-
-    it('keeps per-provider keys isolated when switching providers', async () => {
-      const { useLLMSettingsStore } = await import('./llmSettings');
-      const store = useLLMSettingsStore();
-      store.setApiKey('google-key');
-      store.setProvider('openai');
-      expect(store.currentApiKey).toBeUndefined();
-      store.setProvider('google');
-      expect(store.currentApiKey).toBe('google-key');
-    });
-  });
-
-  describe('setModel', () => {
-    it('sets model for current provider', async () => {
-      const { useLLMSettingsStore } = await import('./llmSettings');
-      const store = useLLMSettingsStore();
-      store.setModel('gemini-pro');
-      expect(store.models.google).toBe('gemini-pro');
-      expect(mockLocalStorage.set).toHaveBeenCalled();
-    });
-  });
-
-  describe('setApiKey', () => {
-    it('sets API key for current provider', async () => {
-      const { useLLMSettingsStore } = await import('./llmSettings');
-      const store = useLLMSettingsStore();
-      store.setApiKey('my-key-123');
-      expect(store.keys.google).toBe('my-key-123');
-    });
-
-    it('removes key when empty string', async () => {
-      const { useLLMSettingsStore } = await import('./llmSettings');
-      const store = useLLMSettingsStore();
-      store.setApiKey('my-key-123');
-      store.setApiKey('');
-      expect(store.keys.google).toBeUndefined();
-    });
-
-    it('removes key when null', async () => {
-      const { useLLMSettingsStore } = await import('./llmSettings');
-      const store = useLLMSettingsStore();
-      store.setApiKey('my-key-123');
-      store.setApiKey(null);
-      expect(store.keys.google).toBeUndefined();
-    });
-
-    it('trims whitespace from key', async () => {
-      const { useLLMSettingsStore } = await import('./llmSettings');
-      const store = useLLMSettingsStore();
-      store.setApiKey('  my-key-123  ');
-      expect(store.keys.google).toBe('my-key-123');
-    });
-  });
-
-  describe('persist', () => {
-    it('saves settings to LocalStorage', async () => {
-      const { useLLMSettingsStore } = await import('./llmSettings');
-      const store = useLLMSettingsStore();
-      store.persist();
-      expect(mockLocalStorage.set).toHaveBeenCalledWith(
-        'llm_settings_v1',
-        expect.objectContaining({ provider: 'google' }),
+      mockAuthStore.user = makeUser(
+        'user-1',
+        makeLlm({
+          keys: { anthropic: 'anthropic-key' },
+          thinking: { 'claude-opus-5-5': 'high' },
+          defaultModel: { provider: 'anthropic', model: 'claude-opus-5-5' },
+        }),
       );
-    });
-  });
-
-  describe('load', () => {
-    it('loads from localStorage when no profile', async () => {
-      const { useLLMSettingsStore } = await import('./llmSettings');
-      mockLocalStorage.getItem.mockReturnValue({
-        provider: 'openrouter',
-        models: { openrouter: 'gpt-4o' },
-        keys: { openrouter: 'or-key' },
-      });
       const store = useLLMSettingsStore();
-      store.load();
-      expect(store.provider).toBe('openrouter');
-      expect(store.models.openrouter).toBe('gpt-4o');
+      expect(store.llm).toEqual({
+        keys: { anthropic: 'anthropic-key' },
+        thinking: { 'claude-opus-5-5': 'high' },
+        defaultModel: { provider: 'anthropic', model: 'claude-opus-5-5' },
+      });
+      expect(store.selection).toEqual({
+        provider: 'anthropic',
+        model: 'claude-opus-5-5',
+        apiKey: 'anthropic-key',
+        thinking: 'high',
+      });
     });
 
-    it('loads from user profile when available', async () => {
+    it('syncs when the user object arrives after store creation', async () => {
+      const { useLLMSettingsStore } = await import('./llmSettings');
+      const store = useLLMSettingsStore();
+      mockAuthStore.user = makeUser('user-1', makeLlm({ keys: { openai: 'openai-key' } }));
+      await nextTick();
+      expect(store.llm.keys).toEqual({ openai: 'openai-key' });
+    });
+
+    it('resyncs on preference hydration even when the user id stays the same', async () => {
+      const { useLLMSettingsStore } = await import('./llmSettings');
+      mockAuthStore.user = makeUser('user-1');
+      const store = useLLMSettingsStore();
+      expect(store.llm.keys).toEqual({});
+
+      // The same user id now carries hydrated llm preferences; identity alone
+      // must not gate the refresh.
+      mockAuthStore.user = makeUser('user-1', makeLlm({ keys: { google: 'hydrated-key' } }));
+      await nextTick();
+      expect(store.llm.keys).toEqual({ google: 'hydrated-key' });
+    });
+
+    it('resyncs when preferences.llm is assigned in place', async () => {
+      const { useLLMSettingsStore } = await import('./llmSettings');
+      mockAuthStore.user = makeUser('user-1');
+      const store = useLLMSettingsStore();
+
+      mockAuthStore.user.preferences = {
+        llm: makeLlm({ keys: { openrouter: 'or-key' } }),
+      };
+      await nextTick();
+      expect(store.llm.keys).toEqual({ openrouter: 'or-key' });
+    });
+
+    it('falls back to fresh defaults when the stored llm subtree is malformed', async () => {
       const { useLLMSettingsStore } = await import('./llmSettings');
       mockAuthStore.user = {
         id: 'user-1',
         preferences: {
-          llm_provider: 'anthropic',
-          llm_models: { anthropic: 'claude-opus-5-5' },
+          llm: { keys: { google: 'leaked' }, thinking: {}, defaultModel: { provider: 'bogus' } },
         },
       };
       const store = useLLMSettingsStore();
-      store.load();
-      expect(store.provider).toBe('anthropic');
-    });
-
-    it('falls back to the default provider for a removed provider value', async () => {
-      const { useLLMSettingsStore } = await import('./llmSettings');
-      // 'chutes' was a selectable provider before the registry migration;
-      // leaving it in place would 400 every request.
-      mockLocalStorage.getItem.mockReturnValue({
-        provider: 'chutes',
-        models: { google: 'gemini-3.8-flash' },
+      expect(store.llm).toEqual({
+        keys: {},
+        thinking: {},
+        defaultModel: { provider: 'google', model: GOOGLE_DEFAULT },
       });
-      const store = useLLMSettingsStore();
-      store.load();
-      expect(store.provider).toBe('google');
     });
+  });
 
-    it('preserves an unsupported saved model ID so the API can reject it', async () => {
+  describe('sign-out and account switching', () => {
+    it('clears in-memory keys and resets the model on sign-out', async () => {
       const { useLLMSettingsStore } = await import('./llmSettings');
-      // 'gemini-2.5-flash-lite' was the pre-registry Google default.
-      // Retain it so the API produces a 400 rather than silently switching models.
-      mockLocalStorage.getItem.mockReturnValue({
-        provider: 'google',
-        models: { google: 'gemini-2.5-flash-lite' },
+      mockAuthStore.user = makeUser(
+        'user-a',
+        makeLlm({
+          keys: { google: 'user-a-google-key', openai: 'user-a-openai-key' },
+          thinking: { 'gpt-6.1-sol': 'max' },
+          defaultModel: { provider: 'openai', model: 'gpt-6.1-sol' },
+        }),
+      );
+      const store = useLLMSettingsStore();
+      expect(store.llm.keys.google).toBe('user-a-google-key');
+
+      mockAuthStore.user = null;
+      await nextTick();
+
+      expect(store.llm).toEqual({
+        keys: {},
+        thinking: {},
+        defaultModel: { provider: 'google', model: GOOGLE_DEFAULT },
       });
-      const store = useLLMSettingsStore();
-      store.load();
-      expect(store.models.google).toBe('gemini-2.5-flash-lite');
+      expect(store.selection.apiKey).toBeUndefined();
+      expect(store.selection.thinking).toBeUndefined();
     });
 
-    it('falls back to the registry default when saved model is empty or whitespace', async () => {
+    it('gives a second user with no llm preferences fresh defaults, never the first user keys', async () => {
       const { useLLMSettingsStore } = await import('./llmSettings');
-      mockLocalStorage.getItem.mockReturnValue({
-        provider: 'google',
-        models: { google: '   ' },
+      mockAuthStore.user = makeUser('user-a', makeLlm({ keys: { google: 'user-a-google-key' } }));
+      const store = useLLMSettingsStore();
+      expect(store.llm.keys.google).toBe('user-a-google-key');
+
+      // Direct account switch without a null interlude.
+      mockAuthStore.user = makeUser('user-b');
+      await nextTick();
+
+      expect(store.llm).toEqual({
+        keys: {},
+        thinking: {},
+        defaultModel: { provider: 'google', model: GOOGLE_DEFAULT },
       });
+    });
+  });
+
+  describe('selection', () => {
+    it('returns an undefined apiKey when the default provider has no saved key', async () => {
+      const { useLLMSettingsStore } = await import('./llmSettings');
+      mockAuthStore.user = makeUser(
+        'user-1',
+        makeLlm({
+          keys: { openai: 'openai-key' },
+          defaultModel: { provider: 'google', model: GOOGLE_DEFAULT },
+        }),
+      );
       const store = useLLMSettingsStore();
-      store.load();
-      expect(store.models.google).toBe(LLM_PROVIDER_REGISTRY.google.defaultModel);
+      expect(store.selection.apiKey).toBeUndefined();
+      expect(store.selection.provider).toBe('google');
     });
 
-    it('keeps a custom OpenRouter model ID from persisted settings', async () => {
+    it('exposes the saved thinking override only for the selected model', async () => {
       const { useLLMSettingsStore } = await import('./llmSettings');
-      mockLocalStorage.getItem.mockReturnValue({
-        provider: 'openrouter',
-        models: { openrouter: 'acme/custom-model:free' },
+      mockAuthStore.user = makeUser(
+        'user-1',
+        makeLlm({
+          thinking: { 'claude-sonnet-5-5': 'xhigh', 'gpt-6.1-sol': 'low' },
+          defaultModel: { provider: 'anthropic', model: 'claude-sonnet-5-5' },
+        }),
+      );
+      const store = useLLMSettingsStore();
+      expect(store.selection.thinking).toBe('xhigh');
+    });
+  });
+
+  describe('saveProvider', () => {
+    it('saves a key for only the target provider and preserves everything else', async () => {
+      const { useLLMSettingsStore } = await import('./llmSettings');
+      mockAuthStore.user = makeUser(
+        'user-1',
+        makeLlm({
+          keys: { google: 'saved-google-key' },
+          thinking: { 'gemini-3.8-flash': 'low' },
+          defaultModel: { provider: 'openai', model: 'gpt-6.1-sol' },
+        }),
+      );
+      const store = useLLMSettingsStore();
+
+      const ok = await store.saveProvider('openai', ' new-openai-key ', {
+        'gpt-6.1-sol': 'high',
       });
-      const store = useLLMSettingsStore();
-      store.load();
-      expect(store.models.openrouter).toBe('acme/custom-model:free');
-    });
 
-    it('sanitizes profile-loaded values without rewriting persisted preferences', async () => {
-      const { useLLMSettingsStore } = await import('./llmSettings');
-      mockAuthStore.user = {
-        id: 'user-1',
-        preferences: {
-          llm_provider: 'chutes',
-          llm_models: { google: 'gemini-2.5-flash-lite' },
+      expect(ok).toBe(true);
+      expect(mockAuthStore.updatePreferences).toHaveBeenCalledWith({
+        llm: {
+          keys: { google: 'saved-google-key', openai: 'new-openai-key' },
+          thinking: { 'gemini-3.8-flash': 'low', 'gpt-6.1-sol': 'high' },
+          defaultModel: { provider: 'openai', model: 'gpt-6.1-sol' },
         },
-      };
+      });
+      expect(store.llm.keys.openai).toBe('new-openai-key');
+      expect(store.llm.thinking['gpt-6.1-sol']).toBe('high');
+    });
+
+    it('removes a saved key on empty input without changing the default model', async () => {
+      const { useLLMSettingsStore } = await import('./llmSettings');
+      mockAuthStore.user = makeUser(
+        'user-1',
+        makeLlm({
+          keys: { google: 'saved-google-key' },
+          defaultModel: { provider: 'google', model: GOOGLE_DEFAULT },
+        }),
+      );
       const store = useLLMSettingsStore();
-      store.load();
-      expect(store.provider).toBe('google');
-      expect(store.models.google).toBe('gemini-2.5-flash-lite');
-      // Sanitization is in-memory only — load must never persist.
-      expect(mockLocalStorage.set).not.toHaveBeenCalled();
+
+      const ok = await store.saveProvider('google', '');
+
+      expect(ok).toBe(true);
+      expect(mockAuthStore.updatePreferences).toHaveBeenCalledWith({
+        llm: expect.objectContaining({
+          keys: {},
+          defaultModel: { provider: 'google', model: GOOGLE_DEFAULT },
+        }),
+      });
+      expect(store.llm.keys.google).toBeUndefined();
+      expect(store.selection.provider).toBe('google');
+      expect(store.selection.model).toBe(GOOGLE_DEFAULT);
+    });
+
+    it('deletes a thinking override when the patch entry is null', async () => {
+      const { useLLMSettingsStore } = await import('./llmSettings');
+      mockAuthStore.user = makeUser('user-1', makeLlm({ thinking: { 'gpt-6.1-sol': 'high' } }));
+      const store = useLLMSettingsStore();
+
+      await store.saveProvider('openai', 'k', { 'gpt-6.1-sol': null });
+
+      expect(mockAuthStore.updatePreferences).toHaveBeenCalledWith({
+        llm: expect.objectContaining({ thinking: {} }),
+      });
+      expect(store.llm.thinking['gpt-6.1-sol']).toBeUndefined();
+    });
+
+    it('does not commit locally and reports failure when the profile write fails', async () => {
+      const { useLLMSettingsStore } = await import('./llmSettings');
+      mockAuthStore.user = makeUser('user-1', makeLlm({ keys: { google: 'before' } }));
+      const store = useLLMSettingsStore();
+      mockAuthStore.updatePreferences.mockResolvedValue(false);
+
+      const ok = await store.saveProvider('google', 'after', {});
+
+      expect(ok).toBe(false);
+      expect(store.llm.keys.google).toBe('before');
+    });
+
+    it('returns false when no user is signed in', async () => {
+      const { useLLMSettingsStore } = await import('./llmSettings');
+      const store = useLLMSettingsStore();
+      const ok = await store.saveProvider('google', 'k', {});
+      expect(ok).toBe(false);
+      expect(mockAuthStore.updatePreferences).toHaveBeenCalled();
     });
   });
 
-  describe('notifySaved', () => {
-    it('creates a positive notification', async () => {
+  describe('saveDefault', () => {
+    it('persists only the provider/model pair', async () => {
       const { useLLMSettingsStore } = await import('./llmSettings');
+      mockAuthStore.user = makeUser(
+        'user-1',
+        makeLlm({
+          keys: { google: 'saved-google-key' },
+          thinking: { 'claude-opus-5-5': 'low' },
+        }),
+      );
       const store = useLLMSettingsStore();
-      store.notifySaved();
-      expect(mockNotify.create).toHaveBeenCalledWith(expect.objectContaining({ type: 'positive' }));
-    });
-  });
 
-  describe('resetToDefaults', () => {
-    it('resets to default provider and models', async () => {
-      const { useLLMSettingsStore } = await import('./llmSettings');
-      const store = useLLMSettingsStore();
-      mockAuthStore.updateProfile.mockResolvedValue(true);
-      store.setProvider('openrouter');
-      store.setApiKey('some-key');
-      await store.resetToDefaults();
-      expect(store.provider).toBe('google');
-      expect(store.keys).toEqual({});
-    });
-  });
+      const ok = await store.saveDefault({ provider: 'anthropic', model: 'claude-opus-5-5' });
 
-  describe('save', () => {
-    it('persists and saves to profile', async () => {
-      const { useLLMSettingsStore } = await import('./llmSettings');
-      mockAuthStore.user = { id: 'user-1', preferences: {} };
-      mockAuthStore.updateProfile.mockResolvedValue(true);
-      const store = useLLMSettingsStore();
-      await store.save();
-      expect(mockLocalStorage.set).toHaveBeenCalled();
-      expect(mockAuthStore.updateProfile).toHaveBeenCalled();
+      expect(ok).toBe(true);
+      expect(mockAuthStore.updatePreferences).toHaveBeenCalledWith({
+        llm: {
+          keys: { google: 'saved-google-key' },
+          thinking: { 'claude-opus-5-5': 'low' },
+          defaultModel: { provider: 'anthropic', model: 'claude-opus-5-5' },
+        },
+      });
+      expect(store.selection.provider).toBe('anthropic');
+      expect(store.selection.model).toBe('claude-opus-5-5');
+      expect(store.selection.apiKey).toBeUndefined();
+      expect(store.selection.thinking).toBe('low');
     });
 
-    it('only persists locally when no user logged in', async () => {
+    it('accepts a free-form OpenRouter model id', async () => {
       const { useLLMSettingsStore } = await import('./llmSettings');
+      mockAuthStore.user = makeUser('user-1', makeLlm());
       const store = useLLMSettingsStore();
-      await store.save();
-      expect(mockLocalStorage.set).toHaveBeenCalled();
-      expect(mockAuthStore.updateProfile).not.toHaveBeenCalled();
+
+      await store.saveDefault({ provider: 'openrouter', model: 'acme/custom:free' });
+
+      expect(mockAuthStore.updatePreferences).toHaveBeenCalledWith({
+        llm: expect.objectContaining({
+          defaultModel: { provider: 'openrouter', model: 'acme/custom:free' },
+        }),
+      });
+    });
+
+    it('does not commit locally when the profile write fails', async () => {
+      const { useLLMSettingsStore } = await import('./llmSettings');
+      mockAuthStore.user = makeUser('user-1', makeLlm());
+      const store = useLLMSettingsStore();
+      mockAuthStore.updatePreferences.mockResolvedValue(false);
+
+      const ok = await store.saveDefault({ provider: 'openai', model: 'gpt-6.1-sol' });
+
+      expect(ok).toBe(false);
+      expect(store.llm.defaultModel).toEqual({ provider: 'google', model: GOOGLE_DEFAULT });
     });
   });
 });
