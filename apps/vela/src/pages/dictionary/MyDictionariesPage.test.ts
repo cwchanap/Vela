@@ -639,7 +639,6 @@ describe('MyDictionariesPage', () => {
         },
         expect.any(Function),
       );
-      // Dictionary forwards no thinking until the backend contract adds it.
       const analyzeInput = vi.mocked(llmClient.analyzeSentenceStream).mock.calls[0]![0];
       expect(analyzeInput).not.toHaveProperty('thinking');
       expect(wrapper.vm.aiDialog).toBe(true);

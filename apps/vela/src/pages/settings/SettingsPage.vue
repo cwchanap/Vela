@@ -4,8 +4,13 @@
       <div class="text-h6">App Settings</div>
     </div>
 
+    <!-- Theme Settings -->
     <ThemeSection />
+
+    <!-- LLM Settings -->
     <LlmProvidersSection />
+
+    <!-- TTS Settings -->
     <TtsSection />
   </q-page>
 </template>

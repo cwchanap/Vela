@@ -192,20 +192,22 @@ export const useAuthStore = defineStore('auth', () => {
         // Update query cache with fresh data
         queryClient.setQueryData(queryKey, profile);
 
-        setUser({
-          id: profile.id,
-          email: profile.email || '',
-          username: profile.username || undefined,
-          avatar_url: profile.avatar_url || undefined,
-          current_level: profile.current_level,
-          total_experience: profile.total_experience,
-          learning_streak: profile.learning_streak,
-          native_language: profile.native_language,
-          preferences: profile.preferences as unknown as UserPreferences,
-          last_activity: profile.last_activity || undefined,
-          created_at: profile.created_at,
-          updated_at: profile.updated_at,
-        });
+        if (session.value?.user?.id === userId) {
+          setUser({
+            id: profile.id,
+            email: profile.email || '',
+            username: profile.username || undefined,
+            avatar_url: profile.avatar_url || undefined,
+            current_level: profile.current_level,
+            total_experience: profile.total_experience,
+            learning_streak: profile.learning_streak,
+            native_language: profile.native_language,
+            preferences: profile.preferences as unknown as UserPreferences,
+            last_activity: profile.last_activity || undefined,
+            created_at: profile.created_at,
+            updated_at: profile.updated_at,
+          });
+        }
       }
     } catch (err) {
       console.error('Error loading user profile:', err);
@@ -282,16 +284,18 @@ export const useAuthStore = defineStore('auth', () => {
    * Update user profile
    */
   const updateProfile = async (profileData: ProfileData) => {
-    if (!user.value) {
+    const initiator = user.value;
+    if (!initiator) {
       setError('No user logged in');
       return false;
     }
+    const userId = initiator.id;
 
     setLoading(true);
     setError(null);
 
     try {
-      const response = await authService.updateUserProfile(user.value.id, profileData);
+      const response = await authService.updateUserProfile(userId, profileData);
 
       if (!response.success) {
         setError(response.error || 'Profile update failed');
@@ -299,10 +303,10 @@ export const useAuthStore = defineStore('auth', () => {
       }
 
       // Invalidate profile query to refetch fresh data
-      queryClient.invalidateQueries({ queryKey: authKeys.profile(user.value.id) });
+      queryClient.invalidateQueries({ queryKey: authKeys.profile(userId) });
 
       // Reload user profile to get updated data
-      await loadUserProfile(user.value.id);
+      await loadUserProfile(userId);
       return true;
     } catch (err) {
       console.error('Profile update error:', err);
@@ -317,26 +321,28 @@ export const useAuthStore = defineStore('auth', () => {
    * Update user experience and level
    */
   const updateExperience = async (experienceGained: number) => {
-    if (!user.value) return false;
+    const initiator = user.value;
+    if (!initiator) return false;
 
-    const newExperience = user.value.total_experience + experienceGained;
+    const newExperience = initiator.total_experience + experienceGained;
     const newLevel = Math.floor(newExperience / 1000) + 1; // Simple level calculation
 
     try {
       const success = await updateProfile({
         preferences: {
-          ...(user.value.preferences as UserPreferences),
+          ...(initiator.preferences as UserPreferences),
           last_experience_gain: experienceGained,
         },
       });
 
-      if (success && user.value) {
+      const stillCurrent = user.value?.id === initiator.id;
+      if (success && stillCurrent && user.value) {
         // Update local state immediately for better UX
         user.value.total_experience = newExperience;
         user.value.current_level = newLevel;
       }
 
-      return success;
+      return success && stillCurrent;
     } catch (err) {
       console.error('Experience update error:', err);
       return false;
@@ -347,23 +353,25 @@ export const useAuthStore = defineStore('auth', () => {
    * Update learning streak
    */
   const updateStreak = async (increment: boolean = true) => {
-    if (!user.value) return false;
+    const initiator = user.value;
+    if (!initiator) return false;
 
-    const newStreak = increment ? user.value.learning_streak + 1 : 0;
+    const newStreak = increment ? initiator.learning_streak + 1 : 0;
 
     try {
       const success = await updateProfile({
         preferences: {
-          ...(user.value.preferences as UserPreferences),
+          ...(initiator.preferences as UserPreferences),
           last_activity_date: new Date().toISOString().split('T')[0],
         },
       });
 
-      if (success && user.value) {
+      const stillCurrent = user.value?.id === initiator.id;
+      if (success && stillCurrent && user.value) {
         user.value.learning_streak = newStreak;
       }
 
-      return success;
+      return success && stillCurrent;
     } catch (err) {
       console.error('Streak update error:', err);
       return false;
@@ -374,17 +382,19 @@ export const useAuthStore = defineStore('auth', () => {
    * Update user preferences
    */
   const updatePreferences = async (preferences: Partial<UserPreferences>) => {
-    if (!user.value) return false;
+    const initiator = user.value;
+    if (!initiator) return false;
 
     try {
       const success = await updateProfile({
         preferences: {
-          ...(user.value.preferences as UserPreferences),
+          ...(initiator.preferences as UserPreferences),
           ...preferences,
         },
       });
 
-      if (success && user.value) {
+      const stillCurrent = user.value?.id === initiator.id;
+      if (success && stillCurrent && user.value) {
         // Update local state immediately
         user.value.preferences = {
           ...(user.value.preferences as UserPreferences),
@@ -392,7 +402,7 @@ export const useAuthStore = defineStore('auth', () => {
         };
       }
 
-      return success;
+      return success && stillCurrent;
     } catch (err) {
       console.error('Preferences update error:', err);
       return false;

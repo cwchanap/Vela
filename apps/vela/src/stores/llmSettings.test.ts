@@ -32,8 +32,6 @@ const makeLlm = (overrides: Partial<LlmPreferences> = {}): LlmPreferences => ({
   ...overrides,
 });
 
-// Mirrors auth.updatePreferences' merge semantics so the store's auth watcher
-// sees the same profile mutation the real implementation produces.
 const mockUpdateSuccess = () => {
   mockAuthStore.updatePreferences.mockImplementation(async (partial: Record<string, unknown>) => {
     if (!mockAuthStore.user) return false;
@@ -115,8 +113,6 @@ describe('useLLMSettingsStore', () => {
       const store = useLLMSettingsStore();
       expect(store.llm.keys).toEqual({});
 
-      // The same user id now carries hydrated llm preferences; identity alone
-      // must not gate the refresh.
       mockAuthStore.user = makeUser('user-1', makeLlm({ keys: { google: 'hydrated-key' } }));
       await nextTick();
       expect(store.llm.keys).toEqual({ google: 'hydrated-key' });
@@ -183,7 +179,6 @@ describe('useLLMSettingsStore', () => {
       const store = useLLMSettingsStore();
       expect(store.llm.keys.google).toBe('user-a-google-key');
 
-      // Direct account switch without a null interlude.
       mockAuthStore.user = makeUser('user-b');
       await nextTick();
 
@@ -308,7 +303,7 @@ describe('useLLMSettingsStore', () => {
       const store = useLLMSettingsStore();
       const ok = await store.saveProvider('google', 'k', {});
       expect(ok).toBe(false);
-      expect(mockAuthStore.updatePreferences).toHaveBeenCalled();
+      expect(mockAuthStore.updatePreferences).not.toHaveBeenCalled();
     });
   });
 

@@ -424,8 +424,7 @@ const onSend = async () => {
     }));
 
     // Explicit per-request snapshot of the active provider/model/key; there is
-    // no global service state to keep in sync. Only a saved thinking override
-    // is sent — the backend applies the registry default when it is absent.
+    // no global service state to keep in sync.
     const resp = await llmClient.generate({
       provider: selection.value.provider,
       model: selection.value.model,

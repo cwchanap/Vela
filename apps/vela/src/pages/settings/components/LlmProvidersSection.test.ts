@@ -134,7 +134,6 @@ describe('LlmProvidersSection', () => {
         authStore,
         llmFor({
           keys: { openai: 'openai-key' },
-          // Google default has no user key — it must stay visible anyway.
           defaultModel: { provider: 'google', model: GOOGLE_DEFAULT },
         }),
       );
@@ -143,11 +142,8 @@ describe('LlmProvidersSection', () => {
 
       const options = defaultSelect().findAll('option');
       const values = options.map((o) => (o.element as HTMLOptionElement).value);
-      // OpenAI key → all OpenAI registry models eligible.
       expect(values).toContain(`openai::${LLM_PROVIDER_REGISTRY.openai.defaultModel}`);
-      // Anthropic/OpenRouter have no user key → none of their registry options.
       expect(values.some((v) => v.startsWith('anthropic::'))).toBe(false);
-      // Google has no key but is the current selection → stays visible.
       expect(values).toContain(`google::${GOOGLE_DEFAULT}`);
     });
 
@@ -170,7 +166,6 @@ describe('LlmProvidersSection', () => {
       wrapper = mountSection();
       await flushPromises();
 
-      // Clear the OpenAI key via its card.
       const openaiCard = cardFor('openai');
       await openaiCard.find('[data-testid="llm-key-input-openai"]').setValue('');
       await openaiCard.find('[data-testid="llm-save-openai"]').trigger('click');
@@ -257,16 +252,13 @@ describe('LlmProvidersSection', () => {
       const googleCard = cardFor('google');
       const openaiCard = cardFor('openai');
 
-      // Expand Google and type a draft key.
       await googleCard.find('.exp-header').trigger('click');
       await googleCard.find('[data-testid="llm-key-input-google"]').setValue('google-draft');
 
-      // Expand OpenAI and edit it too.
       await openaiCard.find('.exp-header').trigger('click');
       await openaiCard.find('[data-testid="llm-key-input-openai"]').setValue('openai-draft');
       await flushPromises();
 
-      // Google draft must still be there.
       const googleInput = googleCard.find('[data-testid="llm-key-input-google"]');
       expect((googleInput.element as HTMLInputElement).value).toBe('google-draft');
     });
@@ -279,7 +271,6 @@ describe('LlmProvidersSection', () => {
       const googleCard = cardFor('google');
       const openaiCard = cardFor('openai');
 
-      // OpenAI holds an unsaved draft while Google is saved.
       await openaiCard
         .find('[data-testid="llm-key-input-openai"]')
         .setValue('openai-draft-unsaved');
@@ -287,13 +278,10 @@ describe('LlmProvidersSection', () => {
       await googleCard.find('[data-testid="llm-save-google"]').trigger('click');
       await flushPromises();
 
-      // The save wrote only the Google card change.
       const llm = updatePreferencesSpy.mock.calls[0]![0].llm as LlmPreferences;
       expect(llm.keys).toEqual({ google: 'google-updated', openai: 'saved-openai' });
-      // OpenAI draft is untouched by Google's save.
       const openaiInput = openaiCard.find('[data-testid="llm-key-input-openai"]');
       expect((openaiInput.element as HTMLInputElement).value).toBe('openai-draft-unsaved');
-      // Store reflects the merged snapshot, not the unsaved OpenAI draft.
       expect(llmStore.llm.keys.openai).toBe('saved-openai');
     });
   });
