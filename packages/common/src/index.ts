@@ -33,6 +33,7 @@ export {
   LLM_EFFORT_LEVELS,
   LLM_PROVIDER_REGISTRY,
   LLM_PROVIDERS,
+  MAX_LLM_THINKING_OVERRIDES,
   type LlmEffort,
   type LlmEvent,
   type LlmMessage,

@@ -133,9 +133,21 @@ const createProfilesRoute = (env: Env) => {
         : await profilesDB.update(user_id, timestampedUpdates);
 
       if (updatedProfile?.preferences) {
-        updatedProfile.preferences = PreferencesReadSchema.parse(
+        // The update already committed, so a malformed stored preference must
+        // not turn this success response into an error. Sanitize when possible
+        // and fall back to the committed record otherwise.
+        const parsedPreferences = PreferencesReadSchema.safeParse(
           normalizePreferences(updatedProfile.preferences),
         );
+        if (parsedPreferences.success) {
+          updatedProfile.preferences = parsedPreferences.data;
+        } else {
+          console.error(
+            'Committed preferences failed sanitization for user_id:',
+            user_id,
+            parsedPreferences.error,
+          );
+        }
       }
       return c.json({ success: true, profile: updatedProfile });
     } catch (e) {
@@ -202,6 +214,18 @@ const createProfilesRoute = (env: Env) => {
         } catch (error) {
           if (!(error instanceof Error) || error.name !== 'ConditionalCheckFailedException')
             throw error;
+          // A concurrent request created the profile first (e.g. GET auto-create
+          // with a null username). Preserve the supplied username when the
+          // winning profile does not already carry one.
+          if (username) {
+            const winner = await profilesDB.get(user_id);
+            if (winner && !winner.username) {
+              await profilesDB.update(user_id, {
+                username,
+                updated_at: new Date().toISOString(),
+              });
+            }
+          }
         }
 
         return c.json({ success: true });

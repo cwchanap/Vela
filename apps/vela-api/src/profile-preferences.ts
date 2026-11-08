@@ -3,6 +3,7 @@ import {
   LLM_EFFORT_LEVELS,
   LLM_PROVIDER_REGISTRY,
   LLM_PROVIDERS,
+  MAX_LLM_THINKING_OVERRIDES,
   type LlmEffort,
   type LlmPreferences,
   type LlmProvider,
@@ -15,7 +16,7 @@ const DEFAULT_DAILY_GOAL = 30;
 const LlmEffortSchema = z.enum(LLM_EFFORT_LEVELS);
 const LlmKeySchema = z.string().min(1).max(4096);
 const LlmModelSchema = z.string().min(1).max(512);
-const MAX_THINKING_OVERRIDES = 128;
+const MAX_THINKING_OVERRIDES = MAX_LLM_THINKING_OVERRIDES;
 
 const LlmPreferencesSchema = z.object({
   keys: z.partialRecord(z.enum(LLM_PROVIDERS), LlmKeySchema),

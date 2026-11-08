@@ -188,4 +188,35 @@ describe('boot/main', () => {
     // Theme must NOT be re-synced, avoiding reverting local unsaved toggle
     expect(syncSpy).not.toHaveBeenCalled();
   });
+
+  it('re-syncs theme when a removed darkMode preference is restored', async () => {
+    const authStore = useAuthStore();
+    const themeStore = useThemeStore();
+    const syncSpy = vi.spyOn(themeStore, 'syncWithUserPreferences');
+    const subscribeSpy = vi.spyOn(authStore, '$subscribe');
+
+    const { default: mainBoot } = await import('./main');
+    await mainBoot({ store: pinia });
+
+    const subscribeCallback = subscribeSpy.mock.calls[0][0];
+    const mutation = {} as any;
+
+    // Sign in with a saved darkMode: false
+    subscribeCallback(mutation, {
+      user: { id: 'user-1', preferences: { darkMode: false } },
+    } as any);
+    expect(syncSpy).toHaveBeenCalledWith(false);
+
+    // Saved preference is removed elsewhere; theme is left alone
+    subscribeCallback(mutation, { user: { id: 'user-1', preferences: {} } } as any);
+
+    syncSpy.mockClear();
+
+    // Preference returns as false — counts as a change and must be applied
+    subscribeCallback(mutation, {
+      user: { id: 'user-1', preferences: { darkMode: false } },
+    } as any);
+
+    expect(syncSpy).toHaveBeenCalledWith(false);
+  });
 });
