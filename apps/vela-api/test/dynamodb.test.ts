@@ -471,6 +471,26 @@ describe('DynamoDB Operations', () => {
       );
     });
 
+    test('claimUsername only writes while the stored username is absent or null', async () => {
+      mockSend.mockResolvedValueOnce({ Attributes: { user_id: mockUserId } });
+      await profiles.claimUsername(mockUserId, 'oauth-name');
+      const command = mockUpdateCommand.mock.calls[0][0];
+      expect(command.ConditionExpression).toBe(
+        'attribute_not_exists(#username) OR attribute_type(#username, :nullType)',
+      );
+      expect(command.ExpressionAttributeValues[':username']).toBe('oauth-name');
+      expect(command.ExpressionAttributeValues[':nullType']).toBe('NULL');
+    });
+
+    test('claimUsername returns null when a concurrent write already set the username', async () => {
+      mockSend.mockRejectedValueOnce(
+        Object.assign(new Error('Condition failed'), {
+          name: 'ConditionalCheckFailedException',
+        }),
+      );
+      await expect(profiles.claimUsername(mockUserId, 'oauth-name')).resolves.toBeNull();
+    });
+
     test('should throw on DynamoDB error', async () => {
       const err = new Error('DynamoDB error');
       mockSend.mockRejectedValueOnce(err);

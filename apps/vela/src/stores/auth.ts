@@ -506,9 +506,21 @@ export const useAuthStore = defineStore('auth', () => {
       tracked !== null &&
       tracked.generation === generation &&
       tracked.profile.id === acknowledged.id;
+    // A preference save that passed its version CAS is the direct successor of
+    // the version it replaced. When the tracked profile still carries that base
+    // version, the acknowledgment is newer in commit order even if updated_at
+    // says otherwise — unrelated writes (e.g. game progress) move updated_at
+    // without touching preferences_version.
+    const acknowledgedSucceedsTracked =
+      trackedApplies &&
+      (acknowledged.preferences_version ?? null) !== null &&
+      (acknowledged.preferences_version ?? null) !==
+        (tracked.profile.preferences_version ?? null) &&
+      (tracked.profile.preferences_version ?? null) === (baseline.preferences_version ?? null);
     // API timestamps are ISO UTC strings, so lexical order is chronological.
     if (
       trackedApplies &&
+      !acknowledgedSucceedsTracked &&
       (tracked.profile.updated_at > acknowledged.updated_at ||
         (tracked.profile.updated_at === acknowledged.updated_at &&
           recordCoversFingerprint(tracked.profile, fingerprint)))

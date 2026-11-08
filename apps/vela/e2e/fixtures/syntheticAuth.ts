@@ -1,6 +1,7 @@
 import { test as base, expect } from '@playwright/test';
 import { randomUUID } from 'node:crypto';
 import {
+  ExpectedPreferencesVersionSchema,
   normalizePreferences,
   PreferencesReadSchema,
   PreferencesSchema,
@@ -17,7 +18,6 @@ import {
 const AUTH_KEY_PREFIX = 'CognitoIdentityServiceProvider';
 const SESSION_BOOTSTRAP_KEY = 'e2e.syntheticSessionEntries';
 const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '::1', '[::1]']);
-const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const PROVIDER_LABELS: Record<string, string> = {
   google: 'Google',
   openai: 'OpenAI',
@@ -311,14 +311,9 @@ const handleApiRoute = async (state: MockApi, route: Route): Promise<void> => {
       return jsonResponse(route, { error: "Forbidden: Cannot update another user's profile" }, 403);
     }
     const profile = getOrCreateProfile(userId);
-    // Mirror UpdateProfileSchema: a non-UUID version is rejected before the
+    // Mirror UpdateProfileSchema: an invalid version is rejected before the
     // handler logic, regardless of whether preferences are being updated.
-    if (
-      body.expected_preferences_version !== undefined &&
-      body.expected_preferences_version !== null &&
-      (typeof body.expected_preferences_version !== 'string' ||
-        !UUID_PATTERN.test(body.expected_preferences_version))
-    ) {
+    if (!ExpectedPreferencesVersionSchema.safeParse(body.expected_preferences_version).success) {
       return jsonResponse(route, { error: 'Invalid preferences data' }, 400);
     }
     if (body.preferences !== undefined) {

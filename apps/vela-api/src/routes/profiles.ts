@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import { zValidator } from '@hono/zod-validator';
 import { z } from 'zod';
 import {
+  ExpectedPreferencesVersionSchema,
   normalizePreferences,
   preserveStoredLlm,
   PreferencesReadSchema,
@@ -15,7 +16,7 @@ import { UserIdQuerySchema } from '../validation';
 // Validation schemas
 const UpdateProfileSchema = z.object({
   user_id: z.string().min(1, 'user_id is required'),
-  expected_preferences_version: z.string().uuid().nullable().optional(),
+  expected_preferences_version: ExpectedPreferencesVersionSchema,
   username: z.string().optional(),
   avatar_url: z.string().optional(),
   native_language: z.string().optional(),
@@ -185,12 +186,11 @@ const createProfilesRoute = (env: Env) => {
         const existingProfile = await profilesDB.get(user_id);
 
         if (existingProfile) {
-          // Profile exists - update username if provided and currently null
+          // Profile exists - claim the username if provided and still unset.
+          // The claim is conditional so a username set between the read and
+          // the write is never overwritten.
           if (username && !existingProfile.username) {
-            await profilesDB.update(user_id, {
-              username,
-              updated_at: new Date().toISOString(),
-            });
+            await profilesDB.claimUsername(user_id, username);
           }
           return c.json({ success: true, message: 'Profile already exists' });
         }
@@ -216,14 +216,12 @@ const createProfilesRoute = (env: Env) => {
             throw error;
           // A concurrent request created the profile first (e.g. GET auto-create
           // with a null username). Preserve the supplied username when the
-          // winning profile does not already carry one.
+          // winning profile does not already carry one. The claim is a
+          // conditional write so a username set after this re-read still wins.
           if (username) {
             const winner = await profilesDB.get(user_id);
             if (winner && !winner.username) {
-              await profilesDB.update(user_id, {
-                username,
-                updated_at: new Date().toISOString(),
-              });
+              await profilesDB.claimUsername(user_id, username);
             }
           }
         }
