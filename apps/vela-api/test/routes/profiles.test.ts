@@ -375,6 +375,31 @@ describe('Profiles Route', () => {
     expect(body.profile.username).toBe('new-name');
   });
 
+  test('PUT /update returns the committed update when stored preferences cannot be normalized', async () => {
+    // Number({ toString: 0 }) throws a TypeError — a committed update must
+    // still succeed even when a stored preference cannot be coerced.
+    mockProfilesDb.update.mockResolvedValueOnce({
+      user_id: 'test-user',
+      username: 'new-name',
+      preferences: { dailyGoal: { toString: 0 } },
+      updated_at: new Date().toISOString(),
+    });
+    const app = createTestApp();
+    const res = await app.request('/update', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ user_id: 'test-user', username: 'new-name' }),
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      success: boolean;
+      profile: { username: string; preferences: { dailyGoal: number } };
+    };
+    expect(body.success).toBe(true);
+    expect(body.profile.username).toBe('new-name');
+    expect(body.profile.preferences.dailyGoal).toBe(30);
+  });
+
   test('PUT /update returns 500 on DynamoDB update error', async () => {
     mockProfilesDb.update.mockRejectedValueOnce(new Error('DDB update failed'));
     const app = createTestApp();

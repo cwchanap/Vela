@@ -475,6 +475,77 @@ describe('useAuthStore', () => {
       expect(store.user?.preferences).toMatchObject({ llm: { keys: { google: 'new-key' } } });
       expect(store.user?.preferences_version).toBe('v1');
     });
+    it('does not let a delayed read carrying the superseded version overwrite the acknowledged save', async () => {
+      const { useAuthStore } = await import('./auth');
+      const store = useAuthStore();
+      store.setSession(mockSession);
+      store.setUser(
+        makeUser({
+          preferences: { llm: { keys: { google: 'old-key' } } },
+          preferences_version: 'v0',
+          updated_at: '2024-01-01T00:00:10Z',
+        }),
+      );
+      mockAuthService.updateUserProfile.mockResolvedValueOnce({
+        success: true,
+        profile: {
+          ...mockProfile,
+          preferences: { llm: { keys: { google: 'new-key' } } },
+          preferences_version: 'v1',
+          updated_at: '2024-01-01T00:00:15Z',
+        },
+      });
+      // A read issued before the save resolves after it with a torn replica
+      // state: a progress write is visible (newer updated_at) but the
+      // preference commit is not — it still serves the version the save's
+      // CAS replaced.
+      mockAuthService.getUserProfile.mockResolvedValueOnce({
+        ...mockProfile,
+        preferences: { llm: { keys: { google: 'old-key' } } },
+        preferences_version: 'v0',
+        updated_at: '2024-01-01T00:00:20Z',
+      });
+
+      expect(await store.updatePreferences({ llm: { keys: { google: 'new-key' } } })).toBe(true);
+      expect(store.user?.preferences).toMatchObject({ llm: { keys: { google: 'new-key' } } });
+      expect(store.user?.preferences_version).toBe('v1');
+    });
+    it('still accepts a read carrying a newer preferences_version from another writer', async () => {
+      const { useAuthStore } = await import('./auth');
+      const store = useAuthStore();
+      store.setSession(mockSession);
+      store.setUser(
+        makeUser({
+          preferences: { llm: { keys: { google: 'old-key' } } },
+          preferences_version: 'v0',
+          updated_at: '2024-01-01T00:00:10Z',
+        }),
+      );
+      mockAuthService.updateUserProfile.mockResolvedValueOnce({
+        success: true,
+        profile: {
+          ...mockProfile,
+          preferences: { llm: { keys: { google: 'new-key' } } },
+          preferences_version: 'v1',
+          updated_at: '2024-01-01T00:00:15Z',
+        },
+      });
+      // Another writer saved preferences after ours — v2 is neither the
+      // acknowledged version nor the superseded one, so the read wins.
+      mockAuthService.getUserProfile.mockResolvedValueOnce({
+        ...mockProfile,
+        preferences: { llm: { keys: { google: 'other-key' } }, dailyGoal: 60 },
+        preferences_version: 'v2',
+        updated_at: '2024-01-01T00:00:20Z',
+      });
+
+      expect(await store.updatePreferences({ llm: { keys: { google: 'new-key' } } })).toBe(true);
+      expect(store.user?.preferences).toMatchObject({
+        llm: { keys: { google: 'other-key' } },
+        dailyGoal: 60,
+      });
+      expect(store.user?.preferences_version).toBe('v2');
+    });
     it('returns false and sets error when no user is logged in', async () => {
       const { useAuthStore } = await import('./auth');
       const store = useAuthStore();

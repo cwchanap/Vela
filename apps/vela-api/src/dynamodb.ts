@@ -329,12 +329,13 @@ export const profiles = {
         Key: { user_id: userId },
         UpdateExpression: 'SET #username = :username, #updated_at = :updated_at',
         ConditionExpression:
-          'attribute_not_exists(#username) OR attribute_type(#username, :nullType)',
+          'attribute_not_exists(#username) OR attribute_type(#username, :nullType) OR #username = :empty',
         ExpressionAttributeNames: { '#username': 'username', '#updated_at': 'updated_at' },
         ExpressionAttributeValues: {
           ':username': username,
           ':updated_at': new Date().toISOString(),
           ':nullType': 'NULL',
+          ':empty': '',
         },
         ReturnValues: 'ALL_NEW',
       });
