@@ -388,6 +388,12 @@ export const useAuthStore = defineStore('auth', () => {
     profile: Profile;
     fingerprint: ProfileFingerprint | null;
     generation: number;
+    // preferences_version tokens replaced by acknowledged saves. DynamoDB
+    // replicates attribute updates independently, so a read can observe a
+    // later unrelated write (e.g. game progress — newer updated_at) while
+    // still serving the pre-save preferences_version. Such a read is
+    // provably pre-save and must not replace the acknowledged profile.
+    supersededPreferencesVersions: Set<string | null>;
   } | null = null;
 
   // Getters
@@ -517,6 +523,12 @@ export const useAuthStore = defineStore('auth', () => {
       (acknowledged.preferences_version ?? null) !==
         (tracked.profile.preferences_version ?? null) &&
       (tracked.profile.preferences_version ?? null) === (baseline.preferences_version ?? null);
+    const supersededPreferencesVersions = new Set(
+      trackedApplies ? tracked.supersededPreferencesVersions : [],
+    );
+    if ((acknowledged.preferences_version ?? null) !== (baseline.preferences_version ?? null)) {
+      supersededPreferencesVersions.add(baseline.preferences_version ?? null);
+    }
     // API timestamps are ISO UTC strings, so lexical order is chronological.
     if (
       trackedApplies &&
@@ -530,6 +542,7 @@ export const useAuthStore = defineStore('auth', () => {
         profile: reconciled.profile,
         fingerprint: mergeFingerprints(tracked.fingerprint, reconciled.fingerprint),
         generation,
+        supersededPreferencesVersions,
       };
       setUser(userFromProfile(reconciled.profile));
       return;
@@ -541,6 +554,7 @@ export const useAuthStore = defineStore('auth', () => {
         fingerprint,
       ),
       generation,
+      supersededPreferencesVersions,
     };
     setUser(userFromProfile(acknowledged));
   };
@@ -625,8 +639,14 @@ export const useAuthStore = defineStore('auth', () => {
           tracked.generation !== generation ||
           tracked.profile.id !== userId
         ) {
-          lastAcknowledgedProfile = { profile, fingerprint: null, generation };
+          lastAcknowledgedProfile = {
+            profile,
+            fingerprint: null,
+            generation,
+            supersededPreferencesVersions: new Set(),
+          };
         } else if (
+          tracked.supersededPreferencesVersions.has(profile.preferences_version ?? null) ||
           profile.updated_at < tracked.profile.updated_at ||
           (profile.updated_at === tracked.profile.updated_at &&
             tracked.fingerprint !== null &&
@@ -638,6 +658,7 @@ export const useAuthStore = defineStore('auth', () => {
             profile,
             fingerprint: retainedFingerprint(profile, tracked.fingerprint),
             generation,
+            supersededPreferencesVersions: tracked.supersededPreferencesVersions,
           };
         }
 
@@ -790,7 +811,14 @@ export const useAuthStore = defineStore('auth', () => {
           if (!fresh || sessionGeneration.value !== generation || user.value?.id !== userId) {
             return false;
           }
-          lastAcknowledgedProfile = { profile: fresh, fingerprint: null, generation };
+          lastAcknowledgedProfile = {
+            profile: fresh,
+            fingerprint: null,
+            generation,
+            supersededPreferencesVersions: new Set(
+              lastAcknowledgedProfile?.supersededPreferencesVersions ?? [],
+            ),
+          };
           queryClient.setQueryData(authKeys.profile(userId), fresh);
           current = userFromProfile(fresh);
           setUser(current);

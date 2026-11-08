@@ -137,16 +137,24 @@ const createProfilesRoute = (env: Env) => {
         // The update already committed, so a malformed stored preference must
         // not turn this success response into an error. Sanitize when possible
         // and fall back to the committed record otherwise.
-        const parsedPreferences = PreferencesReadSchema.safeParse(
-          normalizePreferences(updatedProfile.preferences),
-        );
-        if (parsedPreferences.success) {
-          updatedProfile.preferences = parsedPreferences.data;
-        } else {
+        try {
+          const parsedPreferences = PreferencesReadSchema.safeParse(
+            normalizePreferences(updatedProfile.preferences),
+          );
+          if (parsedPreferences.success) {
+            updatedProfile.preferences = parsedPreferences.data;
+          } else {
+            console.error(
+              'Committed preferences failed sanitization for user_id:',
+              user_id,
+              parsedPreferences.error,
+            );
+          }
+        } catch (sanitizeError) {
           console.error(
-            'Committed preferences failed sanitization for user_id:',
+            'Preferences sanitization threw for committed profile, user_id:',
             user_id,
-            parsedPreferences.error,
+            sanitizeError,
           );
         }
       }

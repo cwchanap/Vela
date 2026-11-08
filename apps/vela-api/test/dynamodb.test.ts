@@ -471,15 +471,16 @@ describe('DynamoDB Operations', () => {
       );
     });
 
-    test('claimUsername only writes while the stored username is absent or null', async () => {
+    test('claimUsername only writes while the stored username is absent, null, or empty', async () => {
       mockSend.mockResolvedValueOnce({ Attributes: { user_id: mockUserId } });
       await profiles.claimUsername(mockUserId, 'oauth-name');
       const command = mockUpdateCommand.mock.calls[0][0];
       expect(command.ConditionExpression).toBe(
-        'attribute_not_exists(#username) OR attribute_type(#username, :nullType)',
+        'attribute_not_exists(#username) OR attribute_type(#username, :nullType) OR #username = :empty',
       );
       expect(command.ExpressionAttributeValues[':username']).toBe('oauth-name');
       expect(command.ExpressionAttributeValues[':nullType']).toBe('NULL');
+      expect(command.ExpressionAttributeValues[':empty']).toBe('');
     });
 
     test('claimUsername returns null when a concurrent write already set the username', async () => {

@@ -149,9 +149,16 @@ const normalizeRequiredPreferenceNumber = (
   max: number,
   fieldName: string,
 ) => {
-  const parsedValue = typeof value === 'number' ? value : Number(value);
+  let parsedValue: number;
+  try {
+    parsedValue = typeof value === 'number' ? value : Number(value);
+  } catch {
+    // Exotic stored values (e.g. an object with a non-callable toString) make
+    // Number() throw — treat them like any other invalid value.
+    parsedValue = Number.NaN;
+  }
   if (!Number.isFinite(parsedValue)) {
-    console.warn(`Invalid ${fieldName}: ${value}. Using fallback: ${fallback}`);
+    console.warn(`Invalid ${fieldName}: using fallback ${fallback}`, value);
     return fallback;
   }
   const normalized = Math.trunc(parsedValue);
