@@ -108,6 +108,10 @@ export const preserveStoredLlm = (next: Record<string, unknown>, stored: unknown
   next.llm = { ...replacement, keys: { ...recovered.keys, ...replacement.keys }, thinking };
 };
 
+// Optimistic-lock token carried on preference writes. Kept here so the route
+// schema and the e2e mock apply the identical validation rule.
+export const ExpectedPreferencesVersionSchema = z.string().uuid().nullable().optional();
+
 const PreferencesShape = {
   dailyGoal: z.coerce.number().int().min(1).max(1440).optional(),
   dailyLessonGoal: z.coerce.number().int().min(1).max(50).optional(),

@@ -753,6 +753,38 @@ test.describe('LLM Settings - Session and profile integrity', () => {
       expect(call.authorization).toBe(`Bearer ${tokensB.idToken}`);
     }
   });
+
+  test('mocked profile save rejects preference versions the API schema rejects', async ({
+    authedPage: page,
+    apiMock,
+  }) => {
+    apiMock.seedProfile(SYNTHETIC_USER_A);
+    await gotoSettings(page);
+
+    const statuses = await page.evaluate(
+      async ([auth, userId]) => {
+        const put = (version: string | null) =>
+          fetch('/api/profiles/update', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json', Authorization: auth ?? '' },
+            body: JSON.stringify({
+              user_id: userId,
+              preferences: { dailyGoal: 30 },
+              expected_preferences_version: version,
+            }),
+          });
+        // UUID-shaped but with invalid RFC 4122 variant bits — the API's Zod
+        // schema rejects it even though it looks like a UUID.
+        const badVariant = await put('11111111-1111-4111-1111-111111111111');
+        // A valid UUID that does not match the stored version must still reach
+        // the version check and conflict.
+        const mismatch = await put(crypto.randomUUID());
+        return [badVariant.status, mismatch.status];
+      },
+      [apiMock.expectedAuthorization, SYNTHETIC_USER_A.userId] as const,
+    );
+    expect(statuses).toEqual([400, 409]);
+  });
 });
 
 test.describe('LLM Settings - Theme and TTS regression', () => {

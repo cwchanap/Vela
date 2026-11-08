@@ -431,6 +431,50 @@ describe('useAuthStore', () => {
       });
       expect(store.user?.preferences).toMatchObject({ darkMode: true, dailyGoal: 90 });
     });
+    it('keeps a committed preference save when a newer-timestamped read advanced the tracked profile', async () => {
+      const { useAuthStore } = await import('./auth');
+      const store = useAuthStore();
+      store.setSession(mockSession);
+      store.setUser(
+        makeUser({
+          preferences: { llm: { keys: { google: 'old-key' } } },
+          preferences_version: 'v0',
+          updated_at: '2024-01-01T00:00:10Z',
+        }),
+      );
+      // A non-preference write (e.g. a game-session update) commits with a
+      // later timestamp while the preference save is still in flight; a reload
+      // observes it and advances the tracked profile without changing
+      // preferences_version.
+      mockAuthService.getUserProfile.mockResolvedValueOnce({
+        ...mockProfile,
+        preferences: { llm: { keys: { google: 'old-key' } } },
+        preferences_version: 'v0',
+        updated_at: '2024-01-01T00:00:20Z',
+      });
+      await store.loadUserProfile('user-123');
+      // The preference write commits with the earlier timestamp it was
+      // assigned when the request started.
+      mockAuthService.updateUserProfile.mockResolvedValueOnce({
+        success: true,
+        profile: {
+          ...mockProfile,
+          preferences: { llm: { keys: { google: 'new-key' } } },
+          preferences_version: 'v1',
+          updated_at: '2024-01-01T00:00:15Z',
+        },
+      });
+      mockAuthService.getUserProfile.mockResolvedValueOnce({
+        ...mockProfile,
+        preferences: { llm: { keys: { google: 'new-key' } } },
+        preferences_version: 'v1',
+        updated_at: '2024-01-01T00:00:15Z',
+      });
+
+      expect(await store.updatePreferences({ llm: { keys: { google: 'new-key' } } })).toBe(true);
+      expect(store.user?.preferences).toMatchObject({ llm: { keys: { google: 'new-key' } } });
+      expect(store.user?.preferences_version).toBe('v1');
+    });
     it('returns false and sets error when no user is logged in', async () => {
       const { useAuthStore } = await import('./auth');
       const store = useAuthStore();

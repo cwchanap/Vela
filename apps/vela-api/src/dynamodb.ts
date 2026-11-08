@@ -319,6 +319,32 @@ export const profiles = {
       handleDynamoError(error);
     }
   },
+
+  // Fills an unset username atomically. Returns the updated profile, or null
+  // when a concurrent write already set one — the existing value always wins.
+  async claimUsername(userId: string, username: string) {
+    try {
+      const command = new UpdateCommand({
+        TableName: TABLE_NAMES.PROFILES,
+        Key: { user_id: userId },
+        UpdateExpression: 'SET #username = :username, #updated_at = :updated_at',
+        ConditionExpression:
+          'attribute_not_exists(#username) OR attribute_type(#username, :nullType)',
+        ExpressionAttributeNames: { '#username': 'username', '#updated_at': 'updated_at' },
+        ExpressionAttributeValues: {
+          ':username': username,
+          ':updated_at': new Date().toISOString(),
+          ':nullType': 'NULL',
+        },
+        ReturnValues: 'ALL_NEW',
+      });
+      const response = await docClient.send(command);
+      return response.Attributes;
+    } catch (error) {
+      if (isConditionalCheckFailedError(error)) return null;
+      handleDynamoError(error);
+    }
+  },
 };
 
 // Vocabulary operations

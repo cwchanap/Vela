@@ -8,6 +8,7 @@ const mockProfilesDb = {
   get: vi.fn(),
   create: vi.fn(),
   update: vi.fn(),
+  claimUsername: vi.fn(),
 };
 
 vi.mock('../../src/dynamodb', () => ({
@@ -197,7 +198,7 @@ describe('Profiles Route', () => {
 
   test('POST /create updates username when profile exists without username', async () => {
     mockProfilesDb.get.mockResolvedValueOnce({ user_id: 'test-user', username: null });
-    mockProfilesDb.update.mockResolvedValueOnce(undefined);
+    mockProfilesDb.claimUsername.mockResolvedValueOnce({ user_id: 'test-user' });
     const app = createTestApp();
     const res = await app.request('/create', {
       method: 'POST',
@@ -205,7 +206,8 @@ describe('Profiles Route', () => {
       body: JSON.stringify({ user_id: 'test-user', username: 'new-username' }),
     });
     expect(res.status).toBe(200);
-    expect(mockProfilesDb.update).toHaveBeenCalledTimes(1);
+    expect(mockProfilesDb.claimUsername).toHaveBeenCalledTimes(1);
+    expect(mockProfilesDb.claimUsername).toHaveBeenCalledWith('test-user', 'new-username');
   });
 
   test('POST /create applies the supplied username when a concurrent create wins', async () => {
@@ -215,7 +217,7 @@ describe('Profiles Route', () => {
     mockProfilesDb.create.mockRejectedValueOnce(
       Object.assign(new Error('exists'), { name: 'ConditionalCheckFailedException' }),
     );
-    mockProfilesDb.update.mockResolvedValueOnce(undefined);
+    mockProfilesDb.claimUsername.mockResolvedValueOnce({ user_id: 'test-user' });
     const app = createTestApp();
     const res = await app.request('/create', {
       method: 'POST',
@@ -223,10 +225,7 @@ describe('Profiles Route', () => {
       body: JSON.stringify({ user_id: 'test-user', username: 'oauth-name' }),
     });
     expect(res.status).toBe(200);
-    expect(mockProfilesDb.update).toHaveBeenCalledWith(
-      'test-user',
-      expect.objectContaining({ username: 'oauth-name' }),
-    );
+    expect(mockProfilesDb.claimUsername).toHaveBeenCalledWith('test-user', 'oauth-name');
   });
 
   test('POST /create does not overwrite a username after a create conflict', async () => {
@@ -243,7 +242,39 @@ describe('Profiles Route', () => {
       body: JSON.stringify({ user_id: 'test-user', username: 'oauth-name' }),
     });
     expect(res.status).toBe(200);
-    expect(mockProfilesDb.update).not.toHaveBeenCalled();
+    expect(mockProfilesDb.claimUsername).not.toHaveBeenCalled();
+  });
+
+  test('POST /create still succeeds when a concurrent write wins the username claim', async () => {
+    mockProfilesDb.get
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({ user_id: 'test-user', username: null });
+    mockProfilesDb.create.mockRejectedValueOnce(
+      Object.assign(new Error('exists'), { name: 'ConditionalCheckFailedException' }),
+    );
+    // The claim loses the interleaving — a username was set after the re-read.
+    mockProfilesDb.claimUsername.mockResolvedValueOnce(null);
+    const app = createTestApp();
+    const res = await app.request('/create', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ user_id: 'test-user', username: 'oauth-name' }),
+    });
+    expect(res.status).toBe(200);
+  });
+
+  test('POST /create still succeeds when the username claim loses on an existing profile', async () => {
+    mockProfilesDb.get.mockResolvedValueOnce({ user_id: 'test-user', username: null });
+    mockProfilesDb.claimUsername.mockResolvedValueOnce(null);
+    const app = createTestApp();
+    const res = await app.request('/create', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ user_id: 'test-user', username: 'oauth-name' }),
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { message: string };
+    expect(body.message).toContain('already exists');
   });
 
   test('POST /create returns 403 when user_id does not match', async () => {
