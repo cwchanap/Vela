@@ -2,22 +2,23 @@
 
 **Date:** 2026-11-08  
 **Linear:** https://linear.app/cwchanap/issue/HPA-756/add-chat-sidebar-with-thread-rename  
-**Design:** [HPA-756 chat sidebar design](../specs/2026-11-08-hpa756-chat-sidebar-design.md)
+**Design:** [HPA-756 chat sidebar design](../specs/2026-11-08-hpa756-chat-sidebar-design.md)  
+**Review reconciliation:** Revised 2026-11-08 following [GitHub review](https://github.com/cwchanap/Vela/pull/82#issuecomment-6724899527); implementation remains pending.
 
 > **Handoff:** This draft PR initially contains **only the reviewed design and implementation plan**. Implement, test, and handle review comments on **the same HPA-756 branch and PR**. Do not create one PR per phase, and do not move HPA-756 to Done until the acceptance gates pass.
 
 ## Ticket alignment and decisions
 
-The Linear ticket requires a sidebar (not the current history dialog), persistent thread table, title rename, delete, split chat UI components, TanStack Query hooks, and an API contract that HPA-758 can build on. This plan delivers all of those in a single implementation PR.
+The Linear ticket requires a chat sidebar (replacing the history dialog), a new thread table and API, title rename/delete, extracted chat UI components, TanStack Query hooks, and an HPA-758-ready `model` PATCH contract. The GitHub review preserves that acceptance while simplifying the architecture. The aligned Linear description must reflect these reviewed changes.
 
-Decisions consistent with that intent, without broadening product scope:
-
-- The existing global `MainLayout` nav stays unchanged. Use a page-local container `q-layout` and `q-drawer` for the chat sidebar; avoid injecting chat navigation into the app-wide layout.
-- Keep the message table and its message DTO unchanged. Replace message-derived thread summaries with row metadata in a new table; no backfill/old endpoint compatibility.
-- `model` is a validated optional provider/model pair that PATCH can store, **not** a working model picker. `lastLlmAt` is reserved but not written until HPA-758.
-- Query thread rows by user and sort in memory; no `updatedAt` GSI until there is a real scalability need.
-- Keep the existing Pinia chat store as the only owner of currently displayed messages. Thread-list fetching/mutations use TanStack Query, not a new Pinia store.
-- Persist message saves in order while a send is active; failures warn but do not suppress the AI response. Do not add DynamoDB transactions or a job queue.
+- Keep `MainLayout.vue` and its global `q-drawer` unchanged. Chat layout is a flex `<aside>` on desktop and the **same** `ChatSidebar` inside a left-positioned `q-dialog` on mobile. No nested `q-layout` or second drawer plumbing.
+- Preserve the message table/DTO. Add one thread metadata table; remove the now-unused message-table `UserIdIndex`. No backfill or old endpoint compatibility.
+- `model` is a validated optional pair accepted by PATCH, not a working picker. Drop `lastLlmAt` from this ticket; HPA-758 adds the timestamp and its write path when the cache reminder is built.
+- One maximum title length (60 characters) for both generated and manually entered titles. Use `Intl.RelativeTimeFormat` for timestamps, without new dependencies.
+- Paginate all three thread/message queries using one small route-local helper; don't abstract DynamoDB globally or add an `updatedAt` GSI.
+- Pinia remains the source of truth for displayed messages. TanStack Query owns only the user-scoped thread list and mutations.
+- Write the user thread row **before** its first message. Assistant saves write **only** messages. Set `chat.isLoading` before persistence; await saves sequentially until send settles; no transaction coordinator or queue.
+- Keep all review fixes and implementation in this one draft PR.
 
 ## Task 1 — Persistence infrastructure
 
@@ -31,12 +32,13 @@ Decisions consistent with that intent, without broadening product scope:
 
 **Steps**
 
-1. Add `chatThreadsTable` to `DatabaseStack`, named `vela-chat-threads`, with `UserId` string PK and `ThreadId` string SK; on-demand billing and the existing database-table lifecycle/PITR convention.
-2. Expose the table as a stack property. Wire `CHAT_THREADS_TABLE_NAME` into `VelaApiFunction` and grant the Lambda read/write access, parallel to the existing `chatHistoryTable`.
-3. Add `TABLE_NAMES.CHAT_THREADS` to the API's shared DynamoDB constants, with the same local default pattern.
-4. Assert the new table's keys, environment variable, and IAM grant in the existing CDK tests. No extra secondary index.
+1. Add `chatThreadsTable` to `DatabaseStack`, named `vela-chat-threads`, with `UserId` string PK and `ThreadId` string SK; on-demand billing and existing table lifecycle/PITR convention.
+2. Expose the table from the stack. Wire `CHAT_THREADS_TABLE_NAME` into `VelaApiFunction` and grant read/write access, parallel to the message-history table.
+3. Add `TABLE_NAMES.CHAT_THREADS` with the existing local-name fallback convention.
+4. **Remove `UserIdIndex` from `vela-chat-history`**. Its only runtime reader is the old `dynamodb_listThreads`, replaced by the new table query. Update the old index assertion in `database-stack.test.ts` to assert that the unused GSI is absent, while retaining the separate SRS index.
+5. Assert thread-table keys, Lambda environment, and IAM grant in CDK tests. No secondary index for sorting threads.
 
-**Gate:** CDK unit tests and synth include the thread table and API configuration. This task alone makes no endpoint/UI behavior claims.
+**Gate:** CDK unit tests and synth reflect the new table and removal of the unused chat-history GSI. No runtime behavior is claimed at this stage.
 
 ## Task 2 — Thread storage, API validation, and route tests
 
@@ -45,34 +47,39 @@ Decisions consistent with that intent, without broadening product scope:
 - `apps/vela-api/src/validation.ts`
 - `apps/vela-api/src/routes/chat-history.ts`
 - `apps/vela-api/test/routes/chat-history.test.ts`
+- `apps/vela/e2e/api.spec.ts`
+- `apps/vela-api/README.md` (remove outdated query-param API examples)
 
 **Steps**
 
-1. Define `ChatThreadSummarySchema` for the new returned fields (`ThreadId`, `title`, `createdAt`, `updatedAt`, optional `model`/`lastLlmAt`). Replace obsolete `lastTimestamp` and `messageCount`. Define `PatchChatThreadSchema` with optional trimmed title (1–100 chars) and optional `model: { provider: LlmProvider, model: string }`; refine to reject an empty PATCH. Reuse `LLM_PROVIDERS` from the pure `@vela/common/contracts/llm` subpath.
-2. Add small local helpers inside `routes/chat-history.ts` for querying a user's metadata rows (all DynamoDB pages), getting a row by authenticated user+thread, and conditionally updating metadata. Avoid a generic chat repository layer.
-3. Replace `GET /threads`' old GSI/Scan/history grouping with a metadata query by authenticated `UserId`. Remove the `user_id` request parameter and sort `updatedAt` descending, tie-break by `ThreadId`.
-4. On `POST /save`, keep the existing message write and server-derived user/timestamp. If `is_user=true`, upsert the thread row with the first message's trimmed 60-character title and `createdAt` only when absent; always touch `updatedAt`. If `is_user=false`, touch `updatedAt` only when the row exists, ignoring the known no-row case rather than manufacturing an assistant-titled row. Never reset manually renamed titles or the reserved model/cache fields.
-5. Implement `PATCH /thread/:id` using the authenticated `UserId` key and an existence condition; update only supplied fields and `updatedAt`, return the resulting row. Return 400 on bad title/model, 404 on no row for this user.
-6. Keep `GET /messages?thread_id=…` and its response shape; check matching metadata ownership first, then use the existing message lookup (and retain the existing mixed-owner guard).
-7. Replace query-string `DELETE /thread` with `DELETE /thread/:id`. Check ownership via the metadata row; reuse the existing paginated message delete + bounded BatchWrite retry, then remove the metadata row **last**. Return 404 for a missing own row. Do not add a legacy alias.
-8. Replace old Scan fallback and computed-title tests. Mock `UpdateCommand`/`GetCommand`/`DeleteCommand` in the existing Bun setup, and assert the message and metadata write sequences.
+1. Replace `ChatThreadSummarySchema` with `ThreadId`, `title`, `createdAt`, `updatedAt`, optional `model`; drop `lastTimestamp`, `messageCount` and `lastLlmAt`. Define `PatchChatThreadSchema` with a trimmed nonempty title **up to 60 characters** or a `model: { provider: LlmProvider, model: string }` (or both); reject an empty PATCH. Derive provider validation from `LLM_PROVIDERS` via the pure `@vela/common/contracts/llm` subpath.
+2. Add one local `queryAllPages(input: QueryCommandInput)` helper that copies the query input and advances `ExclusiveStartKey` until no `LastEvaluatedKey`. Reuse for metadata list (`GET /threads`), message retrieval (`GET /messages`), and message-delete enumeration (`DELETE /thread/:id`). Keep the bounded 25-item `BatchWrite` retry logic.
+3. Add simple route-local helpers to fetch a thread by authenticated `UserId` + `ThreadId`, and to conditionally update an existing thread; don't create a repository abstraction.
+4. Replace `GET /threads`' message GSI/Scan grouping with a metadata query by the authenticated `UserId`. Remove the `user_id` query parameter, paginate all rows, sort by `updatedAt` descending with `ThreadId` tie-break, return `{ threads }`.
+5. On `POST /save` derive user ID/timestamp server-side. If `is_user=true`, **upsert the metadata row first** (only set title/createdAt via `if_not_exists`, set updatedAt), then write the message. If `is_user=false`, write the message **only**; do not touch metadata or suppress conditional exceptions. Metadata creation failure does not write an invisible message. A message-write failure after metadata upsert leaves a visible empty thread that can be retried/deleted. Preserve a manual rename or stored model.
+6. Implement `PATCH /thread/:id` using the authenticated `UserId` key and an existence condition; update only supplied fields plus `updatedAt`, returning the new row. Bad/empty title/model returns 400, missing own row 404.
+7. Keep `GET /messages?thread_id=…` shape. First verify the matching metadata row; then use the shared paginate-all helper to load all message pages and retain the mixed-owner check.
+8. Replace query-string `DELETE /thread` with `DELETE /thread/:id`: check own thread row, enumerate and delete message pages using existing batch retry, **delete metadata last**, return 404 if missing. No legacy alias.
+9. Replace the obsolete Scan fallback and computed-title unit tests, including the old GSI assertions. Mock `GetCommand`/`UpdateCommand`/`DeleteCommand` in the existing Bun test harness, assert ordering and pagination.
+10. **Rewrite the old API E2E assumptions** in `e2e/api.spec.ts: it currently expects `?user_id=` and a 400 when missing, but the new route uses server auth and no user query parameter. Also fix the unauthenticated chat-history expectations; test 401 without credentials and appropriate authenticated flows when Cognito credentials are provided.
 
 **Backend test matrix**
 
 | Scenario | Expected |
 | --- | --- |
-| First user save | Message + one thread row, first-user title, timestamp fields |
-| Later user/assistant save | `updatedAt` bumps, manual title/model preserved |
-| Assistant save before any user row | Does not create a thread row |
-| List | Authenticated user only; all DynamoDB pages included; newest first |
-| Rename | Trimmed title persists, other metadata unchanged |
+| First user save | Upsert thread row **before** message; one 60-character title, timestamps |
+| Later user save | Bumps `updatedAt` without overwriting title or `model` |
+| Assistant save | Message-only write; no metadata call |
+| Thread list | Authenticated user only; all pages; newest first |
+| Message list | All pages; missing or wrong-user metadata denied |
+| Rename | Trimmed title persists; unrelated fields untouched |
 | PATCH bad/empty title or missing own thread | 400 / 404 |
-| PATCH model | Valid provider/model stored without changing the actual LLM request |
-| Get messages | Wrong-user thread refused |
-| Delete | Messages removed in batches, row removed last, wrong-user refused |
-| Partial batch delete failure | Metadata retained for retry |
+| PATCH model | Validated pair stored and returned; no runtime provider change in this ticket |
+| Delete | Paged messages removed in batches, metadata removed last |
+| Partial batch-delete failure | Metadata retained for retry |
+| Former GSI/Scan path | Removed, with no extra fallback |
 
-**Gate:** `cd apps/vela-api && bun test test/routes/chat-history.test.ts && bun run compile` (and the full API suite before final acceptance).
+**Gate:** `cd apps/vela-api && bun test test/routes/chat-history.test.ts && bun run compile`. Full API suite before acceptance. Reconcile `e2e/api.spec.ts` in this task rather than deferring stale contract assertions.
 
 ## Task 3 — Client service, query keys, and mutations
 
@@ -93,43 +100,65 @@ Decisions consistent with that intent, without broadening product scope:
 1. Add `chatKeys.all` and `chatKeys.threads(userId: string | null)` to shared common keys. Include the authenticated user ID to avoid showing a previous account's thread list.
 2. In `chatHistoryService.ts`, type the new metadata DTO and encapsulate `httpJsonAuth` calls for list/rename/delete and the existing message fetch/save. Use the API paths from the design; stop appending `user_id` for listing and stop using query-string deletion.
 3. Implement `useChatThreads` with a reactive authenticated user ID and `enabled` guard. Implement `useRenameThread` with optimistic update (cancel in-flight list, snapshot, update, rollback on error, invalidate on settle), and `useDeleteThread` with invalidation after success. Export through `src/composables/queries/index.ts`.
-4. Expose a small list invalidation call after successful user/assistant message save, rather than maintaining duplicated manual `threads` state on the page.
+4. Invalidate the thread list after a successful **user** message save (which creates/touches metadata), rename or delete. Assistant saves do not change the thread list. Do not maintain duplicated manual `threads` state on the page.
 
 **Gate:** composable tests cover cache scope on account switch, optimistic rename success/failure, delete invalidation, and list errors.
 
-## Task 4 — Page-scoped chat sidebar and component extraction
+## Task 4a — Pure chat component extraction (intermediate green commit)
 
 **Add**
 
-- `apps/vela/src/pages/chat/components/ChatSidebar.vue`
 - `apps/vela/src/pages/chat/components/ChatMessageList.vue`
 - `apps/vela/src/pages/chat/components/ChatComposer.vue`
 
 **Modify**
 
 - `apps/vela/src/pages/chat/AIChatPage.vue`
-- `apps/vela/src/pages/chat/AIChatPage.test.ts`
 
 **Steps**
 
-1. Move the existing bubble/Markdown/typing UI and scroll-to-bottom behavior to `ChatMessageList`, preserving the `marked` + `DOMPurify` sanitization rule and decorative greeting behavior.
-2. Move the draft input/send UI to `ChatComposer`. Keep provider selection and the actual `llmClient.generate` call in the page orchestrator, with the existing HPA-755 model/key selection. No model dropdown until HPA-758.
-3. Build `ChatSidebar` with New chat, scrollable thread rows, active highlighting, relative `updatedAt`, loading/empty/error states, inline title edit (Save/Enter, Cancel/Escape), row delete menu, and a confirm trigger. Emit intents rather than importing a second global store.
-4. Remove the history dialog. Wrap the chat content in a page-scoped, height-constrained `q-layout container` and a chat `q-drawer`; keep `MainLayout.vue` untouched. Desktop drawer stays visible; at mobile width it is toggled from the chat header and overlays the chat without modifying the global nav.
-5. In `AIChatPage` coordinate `useChatThreads`, active chat/store state, existing `GET /messages` restoration, and the delete confirmation. On success, delete active thread => `startNewChat()` + greeting; deleting a nonactive thread leaves current content intact.
-6. Make `onSend` await each history-save attempt in send order (with nonfatal warning on persistence failure), so `chat.isLoading` can guard select/new/delete until both LLM generation and saves settle. Disable those actions while sending, and ensure the active conversation cannot change mid-flight.
-7. New chat does not create a metadata row until the first user message. After the first successful user save, invalidate the thread list to make the row appear.
+1. Move only the existing bubble/Markdown/typing UI and scroll-to-bottom behavior to `ChatMessageList`. Preserve `marked` + `DOMPurify` behavior and existing greeting placement.
+2. Move only the existing draft input/send UI to `ChatComposer`. Retain `data-testid="llm-chat-input"` and `data-testid="llm-chat-send"` for the already-running `e2e/llm-settings.spec.ts` suite.
+3. Leave the history dialog, API calls, page behavior, and **existing `AIChatPage.test.ts` assertions unchanged** during this step. This provides a regression gate on the pure extraction.
+4. Run the unchanged chat page test and mocked settings Playwright checks, and commit this extraction **to the same PR** before rewriting the navigation.
+
+**Gate:** Existing `AIChatPage.test.ts` and `llm-settings.spec.ts` tests remain green without behavior-specific rewrites.
+
+## Task 4b — Sidebar, rename/delete, and automated responsive behavior
+
+**Add**
+
+- `apps/vela/src/pages/chat/components/ChatSidebar.vue`
+- `apps/vela/e2e/chat-sidebar.spec.ts`
+
+**Modify**
+
+- `apps/vela/src/pages/chat/AIChatPage.vue`
+- `apps/vela/src/pages/chat/AIChatPage.test.ts`
+- `apps/vela/e2e/fixtures/syntheticAuth.ts`
+- `apps/vela/playwright.mocked.config.ts`
+
+**Steps**
+
+1. Build `ChatSidebar` with New chat, scrollable thread list, active highlight, relative `updatedAt` via `Intl.RelativeTimeFormat`, loading/empty/error states, inline rename (Save/Enter, Cancel/Escape), row delete menu and confirm trigger. Emit intents; don't introduce another store.
+2. **Desktop:** place `ChatSidebar` in a fixed-width flex `<aside>` beside the message column. **Mobile:** render that same component inside a left-positioned `q-dialog` toggled from the chat header. Keep `MainLayout.vue` unchanged, no nested `q-layout`. Account for the main nav mini rail and chat column at 375px.
+3. Remove the old history dialog, retain the existing delete confirmation, and coordinate `useChatThreads` with Pinia chat state, thread selection, loading and delete behavior. Deleting the active thread starts a fresh chat + greeting. New chat stays in memory until a user save succeeds.
+4. In `onSend` set `chat.isLoading` **before** awaiting user-message persistence; await user save, LLM request, and assistant save in sequence, making save failures nonfatal for the LLM but visible as warnings. Block thread-select/new/delete while the entire sequence settles. Keep the current HPA-755 provider/model/key snapshot; no HPA-758 picker.
+5. Replace obsolete history-dialog page assertions and add tests for sidebar, selection, greeting, rename/rollback, delete/cancel/error, busy gating, ordered saves, user-specific cache and existing Markdown sanitization.
+6. Extend `syntheticAuth.ts`'s mocked API with in-memory per-user thread rows and per-thread message arrays. Respond to `POST /save`, `GET /threads`, `GET /messages`, `PATCH /thread/:id` and `DELETE /thread/:id`. Do not let unmocked requests silently pass (existing router fails them with 500).
+7. Edit `playwright.mocked.config.ts`'s `testMatch` to include the **new** `chat-sidebar.spec.ts` as well as the existing `llm-settings.spec.ts`. Add one synthetic Playwright flow at **1280px and 375px**: sidebar visible or togglable, send creates a row, rename persists after reload, delete active thread resets to greeting. Assert coexistence with the main navigation. Keep the existing LLM settings chat-request specs green.
 
 **Frontend test matrix**
 
-- Desktop and mobile chat-sidebar toggling independent of the existing main navigation.
-- Empty list, loaded list, selection restoration, greeting, current thread highlight, and New chat behavior.
-- Rename Enter/Save/Escape and network rollback; delete confirmation/cancel/success/error, including active deletion.
-- Relative timestamps from `updatedAt` (not `lastTimestamp`); no `messageCount` dependency.
-- In-flight send blocks destructive navigation; user/assistant history saves complete in order; provider request still uses current Settings.
-- Existing chat content rendering, sanitization, and error notifications still pass.
+- Desktop `<aside>` and mobile `q-dialog` independently from the global nav.
+- Empty/list/loading/error states, selection restoration, greeting, current thread highlight and New chat.
+- Rename Enter/Save/Escape, server rollback, delete confirmation/cancel/success/error, active deletion.
+- Relative `updatedAt` labels; no `messageCount` dependency.
+- In-flight send blocks destructive navigation; saves run in order; LLM request still uses current Settings.
+- Existing `llm-chat-input` and `llm-chat-send` E2E selectors, chat rendering and error notifications remain intact.
+- Stateful synthetic browser flow at both widths covers the actual changed UI.
 
-**Gate:** `cd apps/vela && bunx vitest run src/pages/chat/AIChatPage.test.ts src/composables/queries/useChatThreads.test.ts`, then full web unit tests, lint and build.
+**Gate:** `cd apps/vela && bunx vitest run src/pages/chat/AIChatPage.test.ts src/composables/queries/useChatThreads.test.ts`, then `bun run test:e2e:mocked`, full web unit tests, lint and build.
 
 ## Task 5 — Consolidated verification and handoff
 
@@ -138,17 +167,17 @@ Run from a clean checkout after installing workspace dependencies and building `
 ```sh
 cd packages/common && bun run build && bun run test:unit
 cd ../../apps/vela-api && bun test test/routes/chat-history.test.ts && bun run compile
-cd ../vela && bun run test:unit && bun run lint && bun run build
+cd ../vela && bun run test:unit && bun run lint && bun run build && bun run test:e2e:mocked
 cd ../../packages/cdk && bun run test:unit && bun run cdk:synth
 ```
 
-Additionally perform a manual browser smoke pass (authenticated local/dev environment where available):
+The mocked Playwright run **must include both** `llm-settings.spec.ts` and `chat-sidebar.spec.ts`; it is part of CI's mocked-settings job, not a manual optional smoke. Ensure the new spec covers desktop 1280px and mobile 375px, while keeping existing chat LLM request selectors.
 
-1. Desktop: app nav and chat sidebar coexist, send a message, reload, select saved thread, rename, reload, delete.
-2. Mobile viewport: independently open/close the chat sidebar; confirm overlay fits and the composer remains visible with the keyboard.
-3. Verify user A cannot read/edit/delete user B's metadata and that a fresh account sees no inherited thread list.
-4. Confirm legacy message-only threads are intentionally omitted (no backfill) and that a new chat appears only after a persisted user message.
-5. Review the PR against the Linear "Done when" section; capture exact commands/results. If a deployed or physical-device check cannot be run, name the blocker rather than claiming it passed.
+**Manual only where mocks are insufficient:**
+
+1. With a real authenticated local/staging environment, verify thread create/rename/reopen/delete survives a reload and that user A cannot read, rename or delete user B's thread.
+2. If a native/physical device is available, optionally spot-check the mobile keyboard and main-navigation interaction. This is not a substitute for the deterministic mocked responsive test.
+3. Review against Linear "Done when"; capture exact test commands and results. If live credentials/deployment are unavailable, name the blocker rather than claim acceptance.
 
 ## Explicit stop line
 
