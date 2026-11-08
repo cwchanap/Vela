@@ -208,6 +208,44 @@ describe('Profiles Route', () => {
     expect(mockProfilesDb.update).toHaveBeenCalledTimes(1);
   });
 
+  test('POST /create applies the supplied username when a concurrent create wins', async () => {
+    mockProfilesDb.get
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({ user_id: 'test-user', username: null });
+    mockProfilesDb.create.mockRejectedValueOnce(
+      Object.assign(new Error('exists'), { name: 'ConditionalCheckFailedException' }),
+    );
+    mockProfilesDb.update.mockResolvedValueOnce(undefined);
+    const app = createTestApp();
+    const res = await app.request('/create', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ user_id: 'test-user', username: 'oauth-name' }),
+    });
+    expect(res.status).toBe(200);
+    expect(mockProfilesDb.update).toHaveBeenCalledWith(
+      'test-user',
+      expect.objectContaining({ username: 'oauth-name' }),
+    );
+  });
+
+  test('POST /create does not overwrite a username after a create conflict', async () => {
+    mockProfilesDb.get
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({ user_id: 'test-user', username: 'taken-name' });
+    mockProfilesDb.create.mockRejectedValueOnce(
+      Object.assign(new Error('exists'), { name: 'ConditionalCheckFailedException' }),
+    );
+    const app = createTestApp();
+    const res = await app.request('/create', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ user_id: 'test-user', username: 'oauth-name' }),
+    });
+    expect(res.status).toBe(200);
+    expect(mockProfilesDb.update).not.toHaveBeenCalled();
+  });
+
   test('POST /create returns 403 when user_id does not match', async () => {
     const app = createTestApp();
     const res = await app.request('/create', {
@@ -282,6 +320,28 @@ describe('Profiles Route', () => {
       }),
       null,
     );
+  });
+
+  test('PUT /update returns the committed update when stored preferences fail sanitization', async () => {
+    mockProfilesDb.update.mockResolvedValueOnce({
+      user_id: 'test-user',
+      username: 'new-name',
+      preferences: { difficulty: 123 },
+      updated_at: new Date().toISOString(),
+    });
+    const app = createTestApp();
+    const res = await app.request('/update', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ user_id: 'test-user', username: 'new-name' }),
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      success: boolean;
+      profile: { username: string };
+    };
+    expect(body.success).toBe(true);
+    expect(body.profile.username).toBe('new-name');
   });
 
   test('PUT /update returns 500 on DynamoDB update error', async () => {

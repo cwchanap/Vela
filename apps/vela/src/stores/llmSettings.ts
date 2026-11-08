@@ -3,6 +3,7 @@ import { ref, computed, watch } from 'vue';
 import {
   LLM_PROVIDER_REGISTRY,
   LLM_PROVIDERS,
+  MAX_LLM_THINKING_OVERRIDES,
   type LlmProvider,
   type LlmEffort,
 } from '@vela/common';
@@ -28,6 +29,12 @@ const emptyLlm = (): LlmPreferences => ({
     model: LLM_PROVIDER_REGISTRY[DEFAULT_PROVIDER].defaultModel,
   },
 });
+
+const REGISTRY_MODEL_IDS = new Set(
+  LLM_PROVIDERS.flatMap(
+    (provider) => LLM_PROVIDER_REGISTRY[provider].models?.map((model) => model.id) ?? [],
+  ),
+);
 
 const isKnownProvider = (p: unknown): p is LlmProvider =>
   typeof p === 'string' && (LLM_PROVIDERS as readonly string[]).includes(p);
@@ -106,6 +113,16 @@ export const useLLMSettingsStore = defineStore('llmSettings', () => {
           next.thinking[modelId] = effort;
         } else {
           delete next.thinking[modelId];
+        }
+      }
+      // Overrides for models outside this build's registry can't be removed
+      // through the UI, and at the API cap they block every save. Drop just
+      // enough of them to bring the write under the limit.
+      if (Object.keys(next.thinking).length > MAX_LLM_THINKING_OVERRIDES) {
+        for (const modelId of Object.keys(next.thinking)) {
+          if (REGISTRY_MODEL_IDS.has(modelId)) continue;
+          delete next.thinking[modelId];
+          if (Object.keys(next.thinking).length <= MAX_LLM_THINKING_OVERRIDES) break;
         }
       }
       return { llm: next };

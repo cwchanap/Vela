@@ -372,6 +372,56 @@ describe('useLLMSettingsStore', () => {
       expect(store.llm.thinking).toEqual({ 'gemini-3.8-flash': 'low' });
     });
 
+    it('preserves overrides for models outside the registry while under the cap', async () => {
+      const { useLLMSettingsStore } = await import('./llmSettings');
+      mockAuthStore.user = makeUser('user-1', makeLlm({ thinking: { 'removed-model': 'low' } }));
+      const store = useLLMSettingsStore();
+
+      await store.saveProvider('openai', 'key', { 'gpt-6.1-sol': 'high' });
+
+      expect(lastPatch()).toEqual({
+        llm: expect.objectContaining({
+          thinking: { 'removed-model': 'low', 'gpt-6.1-sol': 'high' },
+        }),
+      });
+    });
+
+    it('drops overrides for models outside the registry when a save would exceed the cap', async () => {
+      const { useLLMSettingsStore } = await import('./llmSettings');
+      const thinking = Object.fromEntries(
+        Array.from({ length: 128 }, (_, i) => [`removed-model-${i}`, 'low' as const]),
+      );
+      mockAuthStore.user = makeUser('user-1', makeLlm({ thinking }));
+      const store = useLLMSettingsStore();
+
+      const ok = await store.saveProvider('openai', 'key', { 'gpt-6.1-sol': 'high' });
+
+      expect(ok).toBe(true);
+      const patched = (lastPatch().llm as LlmPreferences).thinking;
+      expect(Object.keys(patched)).toHaveLength(128);
+      expect(patched['gpt-6.1-sol']).toBe('high');
+      expect(Object.keys(patched).filter((id) => id.startsWith('removed-model-'))).toHaveLength(
+        127,
+      );
+    });
+
+    it('keeps every registry-known override when pruning for the cap', async () => {
+      const { useLLMSettingsStore } = await import('./llmSettings');
+      const thinking = Object.fromEntries(
+        Array.from({ length: 127 }, (_, i) => [`removed-model-${i}`, 'low' as const]),
+      );
+      thinking['claude-opus-5-5'] = 'max';
+      mockAuthStore.user = makeUser('user-1', makeLlm({ thinking }));
+      const store = useLLMSettingsStore();
+
+      await store.saveProvider('openai', 'key', { 'gpt-6.1-sol': 'high' });
+
+      const patched = (lastPatch().llm as LlmPreferences).thinking;
+      expect(Object.keys(patched)).toHaveLength(128);
+      expect(patched['claude-opus-5-5']).toBe('max');
+      expect(patched['gpt-6.1-sol']).toBe('high');
+    });
+
     it('does not commit locally and reports failure when the profile write fails', async () => {
       const { useLLMSettingsStore } = await import('./llmSettings');
       mockAuthStore.user = makeUser('user-1', makeLlm({ keys: { google: 'before' } }));

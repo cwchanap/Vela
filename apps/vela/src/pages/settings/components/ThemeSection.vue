@@ -54,7 +54,11 @@ const darkModeEnabled = computed({
 });
 
 const saveThemeToProfile = async () => {
+  const generation = authStore.sessionGeneration;
   const ok = await themeStore.saveToUserPreferences();
+  // Skip notifications when the save resolved under a different session
+  // (e.g. sign-out or account switch completed while it was in flight).
+  if (authStore.sessionGeneration !== generation) return;
   if (ok) {
     Notify.create({
       type: 'positive',

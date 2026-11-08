@@ -28,10 +28,9 @@ export default boot(async ({ store }) => {
     const currentUserId = state.user ? (state.user.id ?? '__authenticated__') : null;
     const currentDarkMode = state.user?.preferences?.darkMode;
 
-    if (
-      currentUserId !== lastSyncedUserId ||
-      (currentDarkMode !== undefined && currentDarkMode !== lastSyncedDarkMode)
-    ) {
+    // Track removal as a real state: if the saved preference is absent now and
+    // a defined value returns later, it must be re-applied like any change.
+    if (currentUserId !== lastSyncedUserId || currentDarkMode !== lastSyncedDarkMode) {
       lastSyncedUserId = currentUserId;
       lastSyncedDarkMode = currentDarkMode;
       if (currentDarkMode !== undefined) {

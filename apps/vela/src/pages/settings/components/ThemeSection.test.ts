@@ -90,6 +90,24 @@ describe('ThemeSection', () => {
         position: 'top',
       });
     });
+
+    it('shows no notification when the session changes while the save is pending', async () => {
+      let resolveSave: ((_ok: boolean) => void) | undefined;
+      vi.spyOn(themeStore, 'saveToUserPreferences').mockImplementation(
+        () =>
+          new Promise<boolean>((resolve) => {
+            resolveSave = resolve;
+          }),
+      );
+      authStore.setSession({ user: { id: 'user-1', email: 'test@example.com' } });
+
+      const pending = wrapper.vm.saveThemeToProfile();
+      authStore.clearAuth();
+      resolveSave!(false);
+      await pending;
+
+      expect(Notify.create).not.toHaveBeenCalled();
+    });
   });
 
   describe('isAuthenticated computed', () => {

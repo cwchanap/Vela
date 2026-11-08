@@ -14,6 +14,9 @@ export const LLM_EFFORT_LEVELS = ['none', 'low', 'medium', 'high', 'xhigh', 'max
 
 export type LlmEffort = (typeof LLM_EFFORT_LEVELS)[number];
 
+/** Maximum per-model thinking overrides stored in a profile (API write cap). */
+export const MAX_LLM_THINKING_OVERRIDES = 128;
+
 /** Closed list of supported providers; the single source for provider unions. */
 export const LLM_PROVIDERS = ['google', 'openai', 'anthropic', 'openrouter'] as const;
 
