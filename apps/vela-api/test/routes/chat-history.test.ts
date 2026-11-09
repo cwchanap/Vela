@@ -1036,13 +1036,20 @@ describe('Chat History Route', () => {
 
       expect(res.status).toBe(200);
       expect(json.ok).toBe(true);
-      expect(sentCommandTypes()).toEqual(['UpdateCommand', 'QueryCommand', 'BatchWriteCommand']);
+      expect(sentCommandTypes()).toEqual([
+        'UpdateCommand',
+        'QueryCommand',
+        'BatchWriteCommand',
+        'UpdateCommand',
+      ]);
 
       const markInput = mockUpdateCommand.mock.calls[0][0];
       expect(markInput.TableName).toBe('vela-chat-threads');
       expect(markInput.Key).toEqual({ UserId: 'user-123', ThreadId: 'thread-123' });
       expect(markInput.UpdateExpression).toContain('SET #deleting = :true');
       expect(markInput.ConditionExpression).toContain('attribute_exists(ThreadId)');
+      expect(markInput.ConditionExpression).toContain('attribute_not_exists(#deleting)');
+      expect(markInput.ConditionExpression).toContain('#deleteLease < :now');
 
       const queryInput = mockQueryCommand.mock.calls[0][0];
       expect(queryInput.ExpressionAttributeValues[':threadId']).toBe(PARTITION);
@@ -1056,13 +1063,18 @@ describe('Chat History Route', () => {
       ]);
       // The row stays as a tombstone so later saves cannot resurrect it.
       expect(mockDeleteCommand).not.toHaveBeenCalled();
+
+      // Success drops the lease, leaving a pure tombstone that blocks saves.
+      const finalizeInput = mockUpdateCommand.mock.calls[1][0];
+      expect(finalizeInput.UpdateExpression).toContain('REMOVE #deleteLease');
+      expect(finalizeInput.ConditionExpression).toContain('#deleteToken = :deleteToken');
     });
 
     test('should return 404 Thread not found for a missing or unowned thread row', async () => {
       const conditionalError = Object.assign(new Error('Condition check failed'), {
         name: 'ConditionalCheckFailedException',
       });
-      mockSend.mockRejectedValueOnce(conditionalError);
+      mockSend.mockRejectedValueOnce(conditionalError).mockResolvedValueOnce({ Item: undefined });
       const app = createTestApp({});
 
       const res = await app.request(
@@ -1072,13 +1084,19 @@ describe('Chat History Route', () => {
 
       expect(res.status).toBe(404);
       expect(json.error).toBe('Thread not found');
+      expect(sentCommandTypes()).toEqual(['UpdateCommand', 'GetCommand']);
       expect(mockQueryCommand).not.toHaveBeenCalled();
     });
 
     test('should accept a repeated delete on an already tombstoned thread', async () => {
-      mockSend
-        .mockResolvedValueOnce({})
-        .mockResolvedValueOnce({ Items: [], LastEvaluatedKey: undefined });
+      const conditionalError = Object.assign(new Error('Condition check failed'), {
+        name: 'ConditionalCheckFailedException',
+      });
+      // A finished tombstone keeps `deleting` with no lease: the repeated
+      // delete short-circuits instead of stealing the barrier.
+      mockSend.mockRejectedValueOnce(conditionalError).mockResolvedValueOnce({
+        Item: threadRow({ deleting: true, deleteToken: 'first-delete' }),
+      });
 
       const app = createTestApp({});
       const res = await app.request(
@@ -1086,7 +1104,104 @@ describe('Chat History Route', () => {
       );
 
       expect(res.status).toBe(200);
-      expect(sentCommandTypes()).toEqual(['UpdateCommand', 'QueryCommand']);
+      expect(sentCommandTypes()).toEqual(['UpdateCommand', 'GetCommand']);
+      expect(mockQueryCommand).not.toHaveBeenCalled();
+      expect(mockUpdateCommand).toHaveBeenCalledTimes(1);
+    });
+
+    test('should leave an in-flight delete barrier untouched instead of deleting alongside it', async () => {
+      const conditionalError = Object.assign(new Error('Condition check failed'), {
+        name: 'ConditionalCheckFailedException',
+      });
+      // Another delete owns the barrier with an unexpired lease: this request
+      // reports ok and issues no message work or barrier cleanup of its own.
+      mockSend.mockRejectedValueOnce(conditionalError).mockResolvedValueOnce({
+        Item: threadRow({
+          deleting: true,
+          deleteToken: 'other-delete',
+          deleteLease: Date.now() + 60_000,
+        }),
+      });
+
+      const app = createTestApp({});
+      const res = await app.request(
+        new Request('http://localhost/thread/thread-123', { method: 'DELETE' }),
+      );
+      const json = await res.json();
+
+      expect(res.status).toBe(200);
+      expect(json.ok).toBe(true);
+      expect(sentCommandTypes()).toEqual(['UpdateCommand', 'GetCommand']);
+      expect(mockQueryCommand).not.toHaveBeenCalled();
+      expect(mockBatchWriteCommand).not.toHaveBeenCalled();
+      // No second UpdateCommand means this delete never sent a REMOVE that
+      // could clear the other delete's barrier.
+      expect(mockUpdateCommand).toHaveBeenCalledTimes(1);
+    });
+
+    test('should take over a stale barrier left by a delete that never finished', async () => {
+      const conditionalError = Object.assign(new Error('Condition check failed'), {
+        name: 'ConditionalCheckFailedException',
+      });
+      // The first acquire loses to a lease that was still live at evaluation;
+      // by the read it has expired, so the retry steals the barrier and the
+      // delete proceeds normally.
+      mockSend
+        .mockRejectedValueOnce(conditionalError)
+        .mockResolvedValueOnce({
+          Item: threadRow({
+            deleting: true,
+            deleteToken: 'dead-delete',
+            deleteLease: Date.now() - 60_000,
+          }),
+        })
+        .mockResolvedValueOnce({})
+        .mockResolvedValueOnce({ Items: [], LastEvaluatedKey: undefined })
+        .mockResolvedValueOnce({});
+
+      const app = createTestApp({});
+      const res = await app.request(
+        new Request('http://localhost/thread/thread-123', { method: 'DELETE' }),
+      );
+
+      expect(res.status).toBe(200);
+      expect(sentCommandTypes()).toEqual([
+        'UpdateCommand',
+        'GetCommand',
+        'UpdateCommand',
+        'QueryCommand',
+        'UpdateCommand',
+      ]);
+      const reacquireInput = mockUpdateCommand.mock.calls[1][0];
+      expect(reacquireInput.UpdateExpression).toContain('SET #deleting = :true');
+      const finalizeInput = mockUpdateCommand.mock.calls[2][0];
+      expect(finalizeInput.UpdateExpression).toContain('REMOVE #deleteLease');
+    });
+
+    test('should retry the barrier acquire when the flag clears before the read', async () => {
+      const conditionalError = Object.assign(new Error('Condition check failed'), {
+        name: 'ConditionalCheckFailedException',
+      });
+      mockSend
+        .mockRejectedValueOnce(conditionalError)
+        .mockResolvedValueOnce({ Item: threadRow() })
+        .mockResolvedValueOnce({})
+        .mockResolvedValueOnce({ Items: [], LastEvaluatedKey: undefined })
+        .mockResolvedValueOnce({});
+
+      const app = createTestApp({});
+      const res = await app.request(
+        new Request('http://localhost/thread/thread-123', { method: 'DELETE' }),
+      );
+
+      expect(res.status).toBe(200);
+      expect(sentCommandTypes()).toEqual([
+        'UpdateCommand',
+        'GetCommand',
+        'UpdateCommand',
+        'QueryCommand',
+        'UpdateCommand',
+      ]);
     });
 
     test('should reject deletion when stored messages belong to another user', async () => {
@@ -1110,10 +1225,12 @@ describe('Chat History Route', () => {
       expect(res.status).toBe(403);
       expect(json.error).toContain('Forbidden');
       expect(mockBatchWriteCommand).not.toHaveBeenCalled();
-      // The tombstone is cleared so the thread stays usable.
+      // The tombstone is cleared so the thread stays usable. The clear is
+      // fenced on this delete's token so it cannot remove another barrier.
       expect(mockUpdateCommand).toHaveBeenCalledTimes(2);
       const clearInput = mockUpdateCommand.mock.calls[1][0];
       expect(clearInput.UpdateExpression).toContain('REMOVE #deleting');
+      expect(clearInput.ConditionExpression).toContain('#deleteToken = :deleteToken');
     });
 
     test('should reject deletion when a foreign message row appears on a later page', async () => {
@@ -1145,7 +1262,8 @@ describe('Chat History Route', () => {
     test('should tombstone an owned empty thread without batch deletes', async () => {
       mockSend
         .mockResolvedValueOnce({})
-        .mockResolvedValueOnce({ Items: [], LastEvaluatedKey: undefined });
+        .mockResolvedValueOnce({ Items: [], LastEvaluatedKey: undefined })
+        .mockResolvedValueOnce({});
 
       const app = createTestApp({});
       const res = await app.request(
@@ -1155,7 +1273,7 @@ describe('Chat History Route', () => {
 
       expect(res.status).toBe(200);
       expect(json.ok).toBe(true);
-      expect(sentCommandTypes()).toEqual(['UpdateCommand', 'QueryCommand']);
+      expect(sentCommandTypes()).toEqual(['UpdateCommand', 'QueryCommand', 'UpdateCommand']);
       expect(mockBatchWriteCommand).not.toHaveBeenCalled();
     });
 
@@ -1188,6 +1306,7 @@ describe('Chat History Route', () => {
         'QueryCommand',
         'QueryCommand',
         'BatchWriteCommand',
+        'UpdateCommand',
       ]);
     });
 
@@ -1302,6 +1421,7 @@ describe('Chat History Route', () => {
           'QueryCommand',
           'BatchWriteCommand',
           'BatchWriteCommand',
+          'UpdateCommand',
         ]);
       } finally {
         setTimeoutSpy.mockRestore();
@@ -1334,6 +1454,9 @@ describe('Chat History Route', () => {
         // Mark, then best-effort clear so the thread stays usable.
         expect(mockUpdateCommand).toHaveBeenCalledTimes(2);
         expect(mockUpdateCommand.mock.calls[1][0].UpdateExpression).toContain('REMOVE #deleting');
+        expect(mockUpdateCommand.mock.calls[1][0].ConditionExpression).toContain(
+          '#deleteToken = :deleteToken',
+        );
       } finally {
         setTimeoutSpy.mockRestore();
       }
@@ -1376,7 +1499,7 @@ describe('Chat History Route', () => {
 
       expect(res.status).toBe(200);
       expect(json.ok).toBe(true);
-      expect(mockSend).toHaveBeenCalledTimes(2);
+      expect(mockSend).toHaveBeenCalledTimes(3);
     });
   });
 
