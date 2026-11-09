@@ -103,8 +103,14 @@ const messageItem = (item: ChatHistoryItem) => ({
 // Threads being deleted carry a `deleting` flag. Message saves run inside
 // transactions conditioned on that flag so a write cannot land after deletion
 // has begun, and the retained tombstone row prevents a later save from
-// silently resurrecting the thread.
-type StoredChatThread = ChatThreadSummary & { deleting?: boolean };
+// silently resurrecting the thread. `deleteToken`/`deleteLease` fence the
+// barrier so only its owner can clear it and a dead owner's barrier can be
+// taken over once its lease expires.
+type StoredChatThread = ChatThreadSummary & {
+  deleting?: boolean;
+  deleteToken?: string;
+  deleteLease?: number;
+};
 
 const THREAD_ALIVE_CONDITION = 'attribute_exists(ThreadId) AND attribute_not_exists(#deleting)';
 
@@ -417,20 +423,126 @@ async function dynamodb_deleteThreadMessages(allMessages: Record<string, any>[])
   }
 }
 
-async function dynamodb_clearThreadDeleting(userId: string, threadId: string): Promise<void> {
+// How long an in-flight delete owns the barrier before another request may
+// take it over. Generous versus the seconds enumeration normally takes, so a
+// steal means the previous owner is genuinely gone rather than merely slow.
+const DELETE_BARRIER_LEASE_MS = 5 * 60 * 1000;
+
+async function dynamodb_clearThreadDeleting(
+  userId: string,
+  threadId: string,
+  deleteToken: string,
+): Promise<void> {
   try {
     const command = new UpdateCommand({
       TableName: TABLE_NAMES.CHAT_THREADS,
       Key: { UserId: userId, ThreadId: threadId },
-      UpdateExpression: 'REMOVE #deleting',
-      ConditionExpression: 'attribute_exists(ThreadId)',
-      ExpressionAttributeNames: { '#deleting': 'deleting' },
+      // Fenced on our token: cleanup can never remove another in-flight
+      // delete's barrier or a completed tombstone.
+      UpdateExpression: 'REMOVE #deleting, #deleteToken, #deleteLease',
+      ConditionExpression: '#deleteToken = :deleteToken',
+      ExpressionAttributeNames: {
+        '#deleting': 'deleting',
+        '#deleteToken': 'deleteToken',
+        '#deleteLease': 'deleteLease',
+      },
+      ExpressionAttributeValues: { ':deleteToken': deleteToken },
     });
     await docClient.send(command);
   } catch (error) {
-    // Best effort: a retained tombstone still lets a retried delete finish.
+    // Best effort: a retained barrier still lets a retried delete finish
+    // once its lease expires.
     console.error('DynamoDB clear deleting flag error:', error);
   }
+}
+
+async function dynamodb_finalizeThreadDelete(
+  userId: string,
+  threadId: string,
+  deleteToken: string,
+): Promise<void> {
+  // Drop the lease so the row becomes a pure tombstone: it still blocks saves
+  // and reads, but a repeated delete short-circuits instead of stealing the
+  // barrier and racing an owner that already finished.
+  try {
+    const command = new UpdateCommand({
+      TableName: TABLE_NAMES.CHAT_THREADS,
+      Key: { UserId: userId, ThreadId: threadId },
+      UpdateExpression: 'REMOVE #deleteLease',
+      ConditionExpression: '#deleteToken = :deleteToken',
+      ExpressionAttributeNames: {
+        '#deleteLease': 'deleteLease',
+        '#deleteToken': 'deleteToken',
+      },
+      ExpressionAttributeValues: { ':deleteToken': deleteToken },
+    });
+    await docClient.send(command);
+  } catch (error) {
+    // Best effort: a retained lease only means a retried delete re-runs the
+    // idempotent enumeration instead of short-circuiting.
+    console.error('DynamoDB finalize delete error:', error);
+  }
+}
+
+async function dynamodb_acquireThreadDelete(
+  userId: string,
+  threadId: string,
+  deleteToken: string,
+): Promise<'acquired' | 'not_found' | 'already_deleting'> {
+  // Acquire the barrier only when none exists or a previous owner let its
+  // lease expire. A live lease or a finished tombstone (flag, no lease) is
+  // off-limits, which keeps the barrier holder unique at all times.
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const command = new UpdateCommand({
+        TableName: TABLE_NAMES.CHAT_THREADS,
+        Key: { UserId: userId, ThreadId: threadId },
+        UpdateExpression:
+          'SET #deleting = :true, #deleteToken = :deleteToken, #deleteLease = :deleteLease',
+        ConditionExpression:
+          'attribute_exists(ThreadId) AND (attribute_not_exists(#deleting) OR #deleteLease < :now)',
+        ExpressionAttributeNames: {
+          '#deleting': 'deleting',
+          '#deleteToken': 'deleteToken',
+          '#deleteLease': 'deleteLease',
+        },
+        ExpressionAttributeValues: {
+          ':true': true,
+          ':deleteToken': deleteToken,
+          ':deleteLease': Date.now() + DELETE_BARRIER_LEASE_MS,
+          ':now': Date.now(),
+        },
+      });
+      await docClient.send(command);
+      return 'acquired';
+    } catch (error) {
+      if (!isConditionalCheckFailedError(error)) {
+        console.error('DynamoDB delete thread error:', error);
+        throw new Error(
+          `Failed to delete thread: ${error instanceof Error ? error.message : 'Unknown error'}`,
+        );
+      }
+    }
+
+    // The conditional write lost the race. Read the row to tell apart a
+    // missing thread, a live or finished delete, and a barrier that was
+    // cleared between our write and this read.
+    const row = await dynamodb_getThread(userId, threadId);
+    if (!row) {
+      return 'not_found';
+    }
+    if (row.deleting === true) {
+      const lease = row.deleteLease;
+      if (lease === undefined || lease > Date.now()) {
+        // Either a finished tombstone or a live delete owns the barrier;
+        // that request owns the outcome either way.
+        return 'already_deleting';
+      }
+    }
+    // Stale barrier (owner died mid-delete) or a flag cleared between our
+    // write and the read — loop and retry the conditional acquire.
+  }
+  throw new Error('Failed to delete thread: delete barrier remained contended');
 }
 
 async function dynamodb_deleteThread(
@@ -442,24 +554,14 @@ async function dynamodb_deleteThread(
   // rejected instead of stranded; writes committed before it are enumerated
   // below and removed. The row is kept as a permanent tombstone so a later
   // save cannot resurrect the thread.
-  try {
-    const command = new UpdateCommand({
-      TableName: TABLE_NAMES.CHAT_THREADS,
-      Key: { UserId: userId, ThreadId: threadId },
-      UpdateExpression: 'SET #deleting = :true',
-      ConditionExpression: 'attribute_exists(ThreadId)',
-      ExpressionAttributeNames: { '#deleting': 'deleting' },
-      ExpressionAttributeValues: { ':true': true },
-    });
-    await docClient.send(command);
-  } catch (error) {
-    if (isConditionalCheckFailedError(error)) {
-      return 'not_found';
-    }
-    console.error('DynamoDB delete thread error:', error);
-    throw new Error(
-      `Failed to delete thread: ${error instanceof Error ? error.message : 'Unknown error'}`,
-    );
+  const deleteToken = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  const acquired = await dynamodb_acquireThreadDelete(userId, threadId, deleteToken);
+  if (acquired === 'not_found') {
+    return 'not_found';
+  }
+  if (acquired === 'already_deleting') {
+    // Another request holds the barrier or already finished the delete.
+    return 'ok';
   }
 
   try {
@@ -477,14 +579,15 @@ async function dynamodb_deleteThread(
     // Ensure all thread messages belong to the authenticated user.
     // This prevents deleting mixed-owner/corrupted threads.
     if (!allMessages.every((message) => message.UserId === userId)) {
-      await dynamodb_clearThreadDeleting(userId, threadId);
+      await dynamodb_clearThreadDeleting(userId, threadId, deleteToken);
       return 'forbidden';
     }
 
     await dynamodb_deleteThreadMessages(allMessages);
+    await dynamodb_finalizeThreadDelete(userId, threadId, deleteToken);
     return 'ok';
   } catch (error) {
-    await dynamodb_clearThreadDeleting(userId, threadId);
+    await dynamodb_clearThreadDeleting(userId, threadId, deleteToken);
     console.error('DynamoDB delete thread error:', error);
     throw new Error(
       `Failed to delete thread: ${error instanceof Error ? error.message : 'Unknown error'}`,
