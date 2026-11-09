@@ -65,6 +65,7 @@ describe('AIChatPage', () => {
   let patchDelay: Promise<void> | null;
   let deleteDelay: Promise<void> | null;
   let deleteDelayQueue: Array<Promise<void>>;
+  let listDelay: Promise<void> | null;
   let messagesDelays: Record<string, Promise<void>>;
 
   const okJson = (data: unknown) => ({ ok: true, json: async () => data });
@@ -109,11 +110,14 @@ describe('AIChatPage', () => {
       }
 
       if (url.includes('/api/chat-history/threads') && method === 'GET') {
-        if (listFails) return Promise.resolve(errJson());
-        const sorted = [...threadRows].sort(
-          (a, b) => b.updatedAt - a.updatedAt || a.ThreadId.localeCompare(b.ThreadId),
-        );
-        return Promise.resolve(okJson({ threads: sorted }));
+        const respond = () => {
+          if (listFails) return errJson();
+          const sorted = [...threadRows].sort(
+            (a, b) => b.updatedAt - a.updatedAt || a.ThreadId.localeCompare(b.ThreadId),
+          );
+          return okJson({ threads: sorted });
+        };
+        return (listDelay ?? Promise.resolve()).then(respond);
       }
 
       if (url.includes('/api/chat-history/messages') && method === 'GET') {
@@ -221,6 +225,7 @@ describe('AIChatPage', () => {
     patchDelay = null;
     deleteDelay = null;
     deleteDelayQueue = [];
+    listDelay = null;
     messagesDelays = {};
 
     // Create a new QueryClient for each test
@@ -1949,6 +1954,136 @@ describe('AIChatPage', () => {
       );
     });
 
+    it('does not let a stale delayed delete failure release the newer session pending guard', async () => {
+      threadRows = [createMockThread({ ThreadId: 't-1', title: 'Shared id' })];
+      messageRows = [createMockMessage('shared body', false, 0, 't-1')];
+      const gateOld = deferred<void>();
+      const gateNew = deferred<void>();
+      deleteDelayQueue = [gateOld.promise, gateNew.promise];
+
+      mountComponent();
+      const chatStore = useChatStore();
+      await flushPromises();
+
+      await openThreadMenu(0);
+      await wrapper.find('[data-testid="llm-chat-delete-thread"]').trigger('click');
+      await flushPromises();
+      await wrapper.find('[data-testid="llm-chat-confirm-delete"]').trigger('click');
+      await flushPromises();
+      expect(deleteFetches().length).toBe(1);
+
+      await switchToAccountB();
+      vi.mocked(awsAmplify.fetchAuthSession).mockResolvedValue(sessionFor('user-123'));
+      signIn();
+      await flushPromises();
+
+      await wrapper.find('[data-testid="llm-chat-thread-item"]').trigger('click');
+      await flushPromises();
+      expect(chatStore.chatId).toBe('t-1');
+      expect(messageFetches().filter((f) => f.url.includes('thread_id=t-1')).length).toBe(1);
+
+      await openThreadMenu(0);
+      await wrapper.find('[data-testid="llm-chat-delete-thread"]').trigger('click');
+      await flushPromises();
+      await wrapper.find('[data-testid="llm-chat-confirm-delete"]').trigger('click');
+      await flushPromises();
+      expect(deleteFetches().length).toBe(2);
+
+      deleteFails = true;
+      gateOld.resolve();
+      await flushPromises();
+      deleteFails = false;
+      expect(notifyCreateSpy).not.toHaveBeenCalledWith(
+        expect.objectContaining({ type: 'negative', message: 'Failed to delete conversation' }),
+      );
+
+      await wrapper.find('[data-testid="llm-chat-thread-item"]').trigger('click');
+      await flushPromises();
+      expect(messageFetches().filter((f) => f.url.includes('thread_id=t-1')).length).toBe(1);
+
+      gateNew.resolve();
+      await flushPromises();
+
+      expect(chatStore.chatId).not.toBe('t-1');
+      expect(chatStore.messages.length).toBe(1);
+      expect(chatStore.messages[0]!.content).toContain('こんにちは');
+      expect(notifyCreateSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: 'positive',
+          message: 'Conversation deleted successfully',
+        }),
+      );
+    });
+
+    it('does not let a stale delayed delete success release the newer session pending guard', async () => {
+      threadRows = [createMockThread({ ThreadId: 't-1', title: 'Shared id' })];
+      messageRows = [createMockMessage('shared body', false, 0, 't-1')];
+      const gateOld = deferred<void>();
+      const gateNew = deferred<void>();
+      deleteDelayQueue = [gateOld.promise, gateNew.promise];
+
+      mountComponent();
+      const chatStore = useChatStore();
+      await flushPromises();
+
+      await openThreadMenu(0);
+      await wrapper.find('[data-testid="llm-chat-delete-thread"]').trigger('click');
+      await flushPromises();
+      await wrapper.find('[data-testid="llm-chat-confirm-delete"]').trigger('click');
+      await flushPromises();
+      expect(deleteFetches().length).toBe(1);
+
+      await switchToAccountB();
+      vi.mocked(awsAmplify.fetchAuthSession).mockResolvedValue(sessionFor('user-123'));
+      signIn();
+      await flushPromises();
+
+      await wrapper.find('[data-testid="llm-chat-thread-item"]').trigger('click');
+      await flushPromises();
+      expect(chatStore.chatId).toBe('t-1');
+      expect(messageFetches().filter((f) => f.url.includes('thread_id=t-1')).length).toBe(1);
+
+      await openThreadMenu(0);
+      await wrapper.find('[data-testid="llm-chat-delete-thread"]').trigger('click');
+      await flushPromises();
+      await wrapper.find('[data-testid="llm-chat-confirm-delete"]').trigger('click');
+      await flushPromises();
+      expect(deleteFetches().length).toBe(2);
+
+      gateOld.resolve();
+      await flushPromises();
+      expect(notifyCreateSpy).not.toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: 'positive',
+          message: 'Conversation deleted successfully',
+        }),
+      );
+
+      threadRows.push(createMockThread({ ThreadId: 't-1', title: 'Recreated row' }));
+      messageRows.push(createMockMessage('recreated body', false, 0, 't-1'));
+      await queryClient.invalidateQueries({ queryKey: chatKeys.threads('user-123') });
+      await flushPromises();
+      expect(wrapper.text()).toContain('Recreated row');
+
+      await wrapper.find('[data-testid="llm-chat-thread-item"]').trigger('click');
+      await flushPromises();
+      expect(messageFetches().filter((f) => f.url.includes('thread_id=t-1')).length).toBe(1);
+      expect(chatStore.messages.some((m) => m.content === 'recreated body')).toBe(false);
+
+      gateNew.resolve();
+      await flushPromises();
+
+      expect(chatStore.chatId).not.toBe('t-1');
+      expect(chatStore.messages.length).toBe(1);
+      expect(chatStore.messages[0]!.content).toContain('こんにちは');
+      expect(notifyCreateSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: 'positive',
+          message: 'Conversation deleted successfully',
+        }),
+      );
+    });
+
     it('lets a legitimately recreated thread be selected after authoritative refresh', async () => {
       threadRows = [createMockThread({ ThreadId: 't-1', title: 'Doomed' })];
 
@@ -1967,6 +2102,37 @@ describe('AIChatPage', () => {
       threadRows.push(createMockThread({ ThreadId: 't-1', title: 'Recreated row' }));
       messageRows = [createMockMessage('recreated body', false, 0, 't-1')];
       await queryClient.invalidateQueries({ queryKey: chatKeys.threads('user-123') });
+      await flushPromises();
+      expect(wrapper.text()).toContain('Recreated row');
+
+      await wrapper.find('[data-testid="llm-chat-thread-item"]').trigger('click');
+      await flushPromises();
+
+      expect(messageFetches().filter((f) => f.url.includes('thread_id=t-1')).length).toBe(1);
+      expect(chatStore.chatId).toBe('t-1');
+      expect(chatStore.messages.some((m) => m.content === 'recreated body')).toBe(true);
+    });
+
+    it('lets a recreated thread be selected when the post-delete refresh already returns it', async () => {
+      threadRows = [createMockThread({ ThreadId: 't-1', title: 'Doomed' })];
+      messageRows = [createMockMessage('recreated body', false, 0, 't-1')];
+
+      mountComponent();
+      const chatStore = useChatStore();
+      await flushPromises();
+
+      const listGate = deferred<void>();
+      listDelay = listGate.promise;
+
+      await openThreadMenu(0);
+      await wrapper.find('[data-testid="llm-chat-delete-thread"]').trigger('click');
+      await flushPromises();
+      await wrapper.find('[data-testid="llm-chat-confirm-delete"]').trigger('click');
+      await flushPromises();
+      expect(deleteFetches().length).toBe(1);
+
+      threadRows.push(createMockThread({ ThreadId: 't-1', title: 'Recreated row' }));
+      listGate.resolve();
       await flushPromises();
       expect(wrapper.text()).toContain('Recreated row');
 
