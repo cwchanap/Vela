@@ -120,6 +120,7 @@ const TABLE_NAMES = {
   GAME_SESSIONS: process.env.GAME_SESSIONS_TABLE_NAME || 'vela-game-sessions',
   DAILY_PROGRESS: process.env.DAILY_PROGRESS_TABLE_NAME || 'vela-daily-progress',
   CHAT_HISTORY: process.env.DYNAMODB_TABLE_NAME || process.env.DDB_TABLE || 'vela-chat-history',
+  CHAT_THREADS: process.env.CHAT_THREADS_TABLE_NAME || 'vela-chat-threads',
   MY_DICTIONARIES:
     process.env.MY_DICTIONARIES_TABLE_NAME ||
     process.env.SAVED_SENTENCES_TABLE_NAME ||
