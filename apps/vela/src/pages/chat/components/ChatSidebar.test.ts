@@ -41,7 +41,9 @@ describe('ChatSidebar', () => {
     await openRenameEditor(wrapper);
 
     await wrapper.find('[data-testid="chat-thread-rename-input"]').setValue('  New title  ');
-    await wrapper.find('[data-testid="chat-thread-rename-input"]').trigger('keyup.enter');
+    await wrapper
+      .find('[data-testid="chat-thread-rename-input"]')
+      .trigger('keydown', { key: 'Enter' });
     await flushPromises();
 
     expect(wrapper.emitted('rename')).toEqual([[{ threadId: 't-1', title: 'New title' }]]);
@@ -55,7 +57,9 @@ describe('ChatSidebar', () => {
     await wrapper.find('[data-testid="chat-thread-rename-input"]').setValue('Draft in progress');
     await wrapper.setProps({ disabled: true });
 
-    await wrapper.find('[data-testid="chat-thread-rename-input"]').trigger('keyup.enter');
+    await wrapper
+      .find('[data-testid="chat-thread-rename-input"]')
+      .trigger('keydown', { key: 'Enter' });
     await wrapper.find('[data-testid="chat-thread-rename-save"]').trigger('click');
     await flushPromises();
 
@@ -73,10 +77,45 @@ describe('ChatSidebar', () => {
     await wrapper.setProps({ disabled: true });
     await wrapper.setProps({ disabled: false });
 
-    await wrapper.find('[data-testid="chat-thread-rename-input"]').trigger('keyup.enter');
+    await wrapper
+      .find('[data-testid="chat-thread-rename-input"]')
+      .trigger('keydown', { key: 'Enter' });
     await flushPromises();
 
     expect(wrapper.emitted('rename')).toEqual([[{ threadId: 't-1', title: 'Held title' }]]);
+  });
+
+  it('keeps the editor open with an inline error when the trimmed title exceeds 60 characters', async () => {
+    const wrapper = mountComponent();
+    await openRenameEditor(wrapper);
+
+    await wrapper.find('[data-testid="chat-thread-rename-input"]').setValue(` ${'a'.repeat(61)} `);
+    await wrapper
+      .find('[data-testid="chat-thread-rename-input"]')
+      .trigger('keydown', { key: 'Enter' });
+    await flushPromises();
+
+    expect(wrapper.emitted('rename')).toBeUndefined();
+    expect(wrapper.find('[data-testid="chat-thread-rename-input"]').exists()).toBe(true);
+    expect(wrapper.text()).toContain('60 characters or fewer');
+  });
+
+  it('ignores Enter pressed to confirm an IME composition', async () => {
+    const wrapper = mountComponent();
+    await openRenameEditor(wrapper);
+
+    const input = wrapper.find('[data-testid="chat-thread-rename-input"]');
+    await input.trigger('keydown', { key: 'Enter', isComposing: true });
+    await flushPromises();
+
+    expect(wrapper.emitted('rename')).toBeUndefined();
+    expect(input.exists()).toBe(true);
+
+    await input.trigger('keydown', { key: 'Enter', keyCode: 229 });
+    await flushPromises();
+
+    expect(wrapper.emitted('rename')).toBeUndefined();
+    expect(input.exists()).toBe(true);
   });
 
   it('disables the rename input and save button while busy', async () => {

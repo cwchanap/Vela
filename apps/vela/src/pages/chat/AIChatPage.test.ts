@@ -1061,7 +1061,7 @@ describe('AIChatPage', () => {
 
       const renameInput = wrapper.find('[data-testid="chat-thread-rename-input"]');
       await renameInput.setValue('Renamed title');
-      await renameInput.trigger('keyup.enter');
+      await renameInput.trigger('keydown', { key: 'Enter' });
       await flushPromises();
 
       expect(patchFetches().length).toBe(1);
@@ -1107,7 +1107,9 @@ describe('AIChatPage', () => {
       await flushPromises();
 
       await wrapper.find('[data-testid="chat-thread-rename-input"]').setValue('Discarded title');
-      await wrapper.find('[data-testid="chat-thread-rename-input"]').trigger('keyup.escape');
+      await wrapper
+        .find('[data-testid="chat-thread-rename-input"]')
+        .trigger('keydown', { key: 'Escape' });
       await flushPromises();
 
       expect(patchFetches().length).toBe(0);
@@ -1128,7 +1130,9 @@ describe('AIChatPage', () => {
       await flushPromises();
 
       await wrapper.find('[data-testid="chat-thread-rename-input"]').setValue('   ');
-      await wrapper.find('[data-testid="chat-thread-rename-input"]').trigger('keyup.enter');
+      await wrapper
+        .find('[data-testid="chat-thread-rename-input"]')
+        .trigger('keydown', { key: 'Enter' });
       await flushPromises();
 
       expect(patchFetches().length).toBe(0);
@@ -1151,7 +1155,9 @@ describe('AIChatPage', () => {
       await flushPromises();
 
       await wrapper.find('[data-testid="chat-thread-rename-input"]').setValue('Optimistic title');
-      await wrapper.find('[data-testid="chat-thread-rename-input"]').trigger('keyup.enter');
+      await wrapper
+        .find('[data-testid="chat-thread-rename-input"]')
+        .trigger('keydown', { key: 'Enter' });
       await flushPromises();
 
       expect(wrapper.find('[data-testid="llm-chat-thread-item"]').text()).toContain(
@@ -1178,7 +1184,9 @@ describe('AIChatPage', () => {
       await flushPromises();
 
       await wrapper.find('[data-testid="chat-thread-rename-input"]').setValue('Rejected title');
-      await wrapper.find('[data-testid="chat-thread-rename-input"]').trigger('keyup.enter');
+      await wrapper
+        .find('[data-testid="chat-thread-rename-input"]')
+        .trigger('keydown', { key: 'Enter' });
       await flushPromises();
 
       expect(wrapper.find('[data-testid="llm-chat-thread-item"]').text()).toContain(
@@ -1780,7 +1788,9 @@ describe('AIChatPage', () => {
       await wrapper.find('[data-testid="chat-thread-rename"]').trigger('click');
       await flushPromises();
       await wrapper.find('[data-testid="chat-thread-rename-input"]').setValue('Renamed other');
-      await wrapper.find('[data-testid="chat-thread-rename-input"]').trigger('keyup.enter');
+      await wrapper
+        .find('[data-testid="chat-thread-rename-input"]')
+        .trigger('keydown', { key: 'Enter' });
       await flushPromises();
       expect(patchFetches().length).toBe(1);
 
@@ -1823,7 +1833,9 @@ describe('AIChatPage', () => {
       await wrapper.find('[data-testid="chat-thread-rename"]').trigger('click');
       await flushPromises();
       await wrapper.find('[data-testid="chat-thread-rename-input"]').setValue('Renamed other');
-      await wrapper.find('[data-testid="chat-thread-rename-input"]').trigger('keyup.enter');
+      await wrapper
+        .find('[data-testid="chat-thread-rename-input"]')
+        .trigger('keydown', { key: 'Enter' });
       await flushPromises();
       expect(patchFetches().length).toBe(1);
 

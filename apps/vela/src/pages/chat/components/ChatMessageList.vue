@@ -38,9 +38,8 @@
 
 <script setup lang="ts">
 import { ref, nextTick } from 'vue';
-import { marked } from 'marked';
-import DOMPurify from 'dompurify';
 import type { ChatMessage } from '../../../stores/chat';
+import { renderChatMarkdown } from '../utils/markdown';
 
 defineProps<{
   messages: ChatMessage[];
@@ -52,71 +51,7 @@ const messagesEl = ref<HTMLElement | null>(null);
 const formatTime = (d: Date) =>
   new Date(d).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
-// Configure marked options
-marked.setOptions({
-  breaks: true,
-  gfm: true,
-});
-
-// Configure DOMPurify to enforce noopener noreferrer on external links
-DOMPurify.addHook('afterSanitizeAttributes', (node) => {
-  // Enforce rel="noopener noreferrer" on all links with target="_blank" to prevent tabnabbing
-  if (node.tagName === 'A' && node.getAttribute('target') === '_blank') {
-    node.setAttribute('rel', 'noopener noreferrer');
-  }
-});
-
-// Render markdown with XSS protection
-const renderMarkdown = (text: string): string => {
-  if (!text) return '';
-
-  try {
-    const rawHtml = marked.parse(text) as string;
-    // Sanitize HTML to prevent XSS attacks from LLM output
-    return DOMPurify.sanitize(rawHtml, {
-      ALLOWED_TAGS: [
-        'h1',
-        'h2',
-        'h3',
-        'h4',
-        'h5',
-        'h6',
-        'p',
-        'br',
-        'strong',
-        'em',
-        'u',
-        's',
-        'del',
-        'ul',
-        'ol',
-        'li',
-        'blockquote',
-        'code',
-        'pre',
-        'a',
-        'hr',
-        'table',
-        'thead',
-        'tbody',
-        'tr',
-        'th',
-        'td',
-      ],
-      ALLOWED_ATTR: ['href', 'target', 'rel'],
-      ALLOW_DATA_ATTR: false,
-    });
-  } catch (error) {
-    // Log parsing error with context for debugging
-    console.error('Failed to parse markdown content:', error, { text });
-    // Return escaped text as safe fallback to prevent rendering issues
-    return DOMPurify.sanitize(text, {
-      ALLOWED_TAGS: [],
-      ALLOWED_ATTR: [],
-      ALLOW_DATA_ATTR: false,
-    });
-  }
-};
+const renderMarkdown = renderChatMarkdown;
 
 const scrollToBottom = async () => {
   await nextTick();

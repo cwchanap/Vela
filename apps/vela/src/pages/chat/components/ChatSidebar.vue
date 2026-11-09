@@ -51,10 +51,12 @@
                 dense
                 outlined
                 autofocus
-                v-model="renameDraft"
+                :model-value="renameDraft"
                 :disable="disabled"
-                @keyup.enter="commitRename"
-                @keyup.escape="cancelRename"
+                :error="renameError !== null"
+                :error-message="renameError ?? undefined"
+                @update:model-value="onRenameDraftInput"
+                @keydown="onRenameKeydown"
                 @click.stop
                 data-testid="chat-thread-rename-input"
               />
@@ -87,7 +89,7 @@
           <template v-else>
             <q-item-section>
               <q-item-label lines="1">{{ t.title }}</q-item-label>
-              <q-item-label caption>{{ formatRelativeTime(t.updatedAt) }}</q-item-label>
+              <q-item-label caption>{{ formatRelativeTime(t.updatedAt, now) }}</q-item-label>
             </q-item-section>
             <q-item-section side>
               <q-btn
@@ -139,7 +141,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue';
+import { onBeforeUnmount, onMounted, ref } from 'vue';
 import { formatRelativeTime } from '../utils/formatTime';
 import type { ChatThreadSummaryDTO } from '../../../services/chatHistoryService';
 
@@ -161,6 +163,21 @@ const emit = defineEmits<{
 
 const renamingId = ref<string | null>(null);
 const renameDraft = ref('');
+const renameError = ref<string | null>(null);
+
+// Relative thread times stay fresh while the sidebar remains open.
+const now = ref(Date.now());
+let clockTimer: ReturnType<typeof setInterval> | undefined;
+
+onMounted(() => {
+  clockTimer = setInterval(() => {
+    now.value = Date.now();
+  }, 30_000);
+});
+
+onBeforeUnmount(() => {
+  clearInterval(clockTimer);
+});
 
 const onThreadClick = (t: ChatThreadSummaryDTO) => {
   if (props.disabled || renamingId.value === t.ThreadId) return;
@@ -171,6 +188,12 @@ const startRename = (t: ChatThreadSummaryDTO) => {
   if (props.disabled) return;
   renamingId.value = t.ThreadId;
   renameDraft.value = t.title;
+  renameError.value = null;
+};
+
+const onRenameDraftInput = (value: string | number | null) => {
+  renameDraft.value = String(value ?? '');
+  renameError.value = null;
 };
 
 const commitRename = () => {
@@ -181,14 +204,37 @@ const commitRename = () => {
     cancelRename();
     return;
   }
+  if (title.length > 60) {
+    // The API rejects longer titles; keep the editor open so the draft can
+    // be corrected instead of failing with a generic error.
+    renameError.value = 'Name must be 60 characters or fewer';
+    return;
+  }
   renamingId.value = null;
   renameDraft.value = '';
+  renameError.value = null;
   emit('rename', { threadId, title });
 };
 
 const cancelRename = () => {
   renamingId.value = null;
   renameDraft.value = '';
+  renameError.value = null;
+};
+
+const onRenameKeydown = (event: KeyboardEvent) => {
+  if (event.key !== 'Enter' && event.key !== 'Escape') return;
+  // Guard IME composition: an Enter/Escape pressed to confirm or cancel an
+  // IME candidate must not submit or close the editor. isComposing covers
+  // the in-progress case; keyCode 229 covers browsers reporting composition
+  // keys. This mirrors the JapaneseInputProbe isComposing guard.
+  if (event.isComposing || event.keyCode === 229) return;
+  event.preventDefault();
+  if (event.key === 'Enter') {
+    commitRename();
+  } else {
+    cancelRename();
+  }
 };
 </script>
 
