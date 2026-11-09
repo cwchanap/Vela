@@ -141,9 +141,23 @@ const runBoundedScrollCheck = async (page: Page, apiMock: MockApi, mobile: boole
   expect(await sidebarList.evaluate((el) => el.scrollTop)).toBeGreaterThan(0);
 
   await sidebar.getByTestId('llm-chat-thread-item').first().click();
-  await expect(page.locator('.chat-container')).toContainText('Seeded message 39');
+  if (mobile) {
+    await expect(page.locator('.q-dialog .chat-sidebar-mobile')).toBeHidden();
+  }
 
   const chatList = page.locator('.chat-container');
+  await expect(chatList.getByText('Seeded message 39')).toBeInViewport();
+  await expect(chatList.getByText('Seeded message 0')).not.toBeInViewport();
+
+  let parkedSidebarScroll: number | null = null;
+  if (!mobile) {
+    await sidebarList.evaluate((el) => {
+      el.scrollTop = 400;
+    });
+    parkedSidebarScroll = await sidebarList.evaluate((el) => el.scrollTop);
+    expect(parkedSidebarScroll).toBe(400);
+  }
+
   const chatMetrics = await chatList.evaluate((el) => ({
     scrollHeight: el.scrollHeight,
     clientHeight: el.clientHeight,
@@ -151,27 +165,61 @@ const runBoundedScrollCheck = async (page: Page, apiMock: MockApi, mobile: boole
   expect(chatMetrics.scrollHeight).toBeGreaterThan(chatMetrics.clientHeight);
 
   const composer = page.getByTestId('llm-chat-input');
-  await expect(composer).toBeVisible();
-  const composerBox = await composer.boundingBox();
-  expect(composerBox).not.toBeNull();
-  expect(composerBox!.y + composerBox!.height).toBeLessThanOrEqual(
-    (mobile ? MOBILE : DESKTOP).height,
-  );
+  const composerBoxBefore = await composer.boundingBox();
+  const headerBoxBefore = await page.locator('.chat-title').boundingBox();
+  const columnBoxBefore = await page.locator('.chat-column').boundingBox();
+  const sidebarPaneBoxBefore = mobile
+    ? null
+    : await page.getByTestId('chat-sidebar-pane').boundingBox();
+  expect(composerBoxBefore).not.toBeNull();
+
+  await chatList.evaluate((el) => {
+    el.scrollTop = 0;
+  });
+  expect(await chatList.evaluate((el) => el.scrollTop)).toBe(0);
+  await expect(chatList.getByText('Seeded message 0')).toBeInViewport();
+  await expect(chatList.getByText('Seeded message 39')).not.toBeInViewport();
+
+  expect(await composer.boundingBox()).toEqual(composerBoxBefore);
+  expect(await page.locator('.chat-title').boundingBox()).toEqual(headerBoxBefore);
+  expect(await page.locator('.chat-column').boundingBox()).toEqual(columnBoxBefore);
+  if (sidebarPaneBoxBefore) {
+    expect(await page.getByTestId('chat-sidebar-pane').boundingBox()).toEqual(sidebarPaneBoxBefore);
+    expect(await sidebarList.evaluate((el) => el.scrollTop)).toBe(parkedSidebarScroll);
+  }
 
   const bounds = await page.evaluate(() => ({
     innerHeight: window.innerHeight,
+    scrollY: window.scrollY,
     docHeight: document.documentElement.scrollHeight,
     bodyHeight: document.body.scrollHeight,
   }));
   expect(bounds.docHeight).toBeLessThanOrEqual(bounds.innerHeight + 1);
+  expect(bounds.scrollY).toBeLessThanOrEqual(1);
 
-  await page.evaluate(() => window.scrollTo(0, 400));
-  expect(await page.evaluate(() => window.scrollY)).toBeLessThanOrEqual(1);
-  const composerAfter = await page.getByTestId('llm-chat-input').boundingBox();
-  expect(composerAfter).not.toBeNull();
-  expect(composerAfter!.y + composerAfter!.height).toBeLessThanOrEqual(
-    (mobile ? MOBILE : DESKTOP).height,
-  );
+  if (mobile) {
+    const dialogSidebar = await openSidebar(page, true);
+    const dialogList = dialogSidebar.locator('.chat-sidebar__list');
+    await dialogList.evaluate((el) => {
+      el.scrollTop = 40;
+    });
+    await chatList.evaluate((el) => {
+      el.scrollTop = el.scrollHeight;
+    });
+    expect(await chatList.evaluate((el) => el.scrollTop)).toBeGreaterThan(0);
+    expect(await dialogList.evaluate((el) => el.scrollTop)).toBe(40);
+    await expect(chatList.getByText('Seeded message 39')).toBeInViewport();
+    await expect(chatList.getByText('Seeded message 0')).not.toBeInViewport();
+    await page.keyboard.press('Escape');
+    await expect(page.locator('.q-dialog .chat-sidebar-mobile')).toBeHidden();
+  } else {
+    await chatList.evaluate((el) => {
+      el.scrollTop = el.scrollHeight;
+    });
+    await expect(chatList.getByText('Seeded message 39')).toBeInViewport();
+    expect(await sidebarList.evaluate((el) => el.scrollTop)).toBe(parkedSidebarScroll);
+    expect(await composer.boundingBox()).toEqual(composerBoxBefore);
+  }
 };
 
 test.describe('Chat sidebar - desktop (1280px)', () => {

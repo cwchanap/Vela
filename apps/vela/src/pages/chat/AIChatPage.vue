@@ -156,6 +156,18 @@ const scrollToBottom = () => messageListRef.value?.scrollToBottom();
 
 const getUserId = () => auth.user?.id || auth.session?.user?.id || 'anonymous';
 
+const isStaleOperation = (opGen: number, sessionGen: number) =>
+  chat.isStale(opGen) || auth.sessionGeneration !== sessionGen;
+
+watch(
+  () => getUserId(),
+  (next, prev) => {
+    if (next === prev) return;
+    chat.resetForUser(next, auth.sessionGeneration);
+    chat.addMessage({ type: 'ai', content: GREETING_MESSAGE });
+  },
+);
+
 const ensureChatId = () => {
   if (!chat.chatId) {
     chat.startNewChat();
@@ -168,11 +180,13 @@ const persistMessage = async (
   uid: string,
   message: string,
   isUser: boolean,
+  isStale: () => boolean,
 ): Promise<boolean> => {
   try {
     await saveChatMessage(cid, uid, message, isUser);
     return true;
   } catch (e) {
+    if (isStale()) return false;
     console.error('Failed to save chat message', e);
     $q.notify({ type: 'warning', message: 'Failed to save chat history' });
     return false;
@@ -186,8 +200,11 @@ const retryThreads = () => {
 const selectThread = async (t: ChatThreadSummaryDTO) => {
   if (chat.isLoading) return;
   const uid = getUserId();
+  const opGen = chat.nextGeneration();
+  const sessionGen = auth.sessionGeneration;
   try {
     const items = await getChatMessages(t.ThreadId, uid);
+    if (isStaleOperation(opGen, sessionGen)) return;
 
     chat.setChatId(t.ThreadId);
 
@@ -224,6 +241,7 @@ const selectThread = async (t: ChatThreadSummaryDTO) => {
     mobileSidebarOpen.value = false;
     await scrollToBottom();
   } catch (e) {
+    if (isStaleOperation(opGen, sessionGen)) return;
     console.error(e);
     $q.notify({ type: 'negative', message: 'Failed to load conversation' });
   }
@@ -237,6 +255,9 @@ const onSend = async (draft: string) => {
 
   const uid = getUserId();
   const cid = ensureChatId();
+  const opGen = chat.nextGeneration();
+  const sessionGen = auth.sessionGeneration;
+  const isStale = () => isStaleOperation(opGen, sessionGen);
   chat.addMessage({ type: 'user', content });
   input.value = '';
   chat.setLoading(true);
@@ -244,9 +265,10 @@ const onSend = async (draft: string) => {
   await scrollToBottom();
 
   try {
-    if (await persistMessage(cid, uid, content, true)) {
+    if (await persistMessage(cid, uid, content, true, isStale)) {
       void queryClient.invalidateQueries({ queryKey: chatKeys.threads(uid) });
     }
+    if (isStale()) return;
 
     const systemPrompt =
       'You are a helpful Japanese learning assistant. Keep responses concise and friendly. When relevant, include romaji for Japanese text.';
@@ -266,6 +288,7 @@ const onSend = async (draft: string) => {
       system: systemPrompt,
       messages: history,
     });
+    if (isStale()) return;
 
     // A successful-but-empty reply must not be stored: an empty assistant
     // turn would make the next request fail content min(1) validation.
@@ -274,16 +297,19 @@ const onSend = async (draft: string) => {
     }
 
     chat.addMessage({ type: 'ai', content: resp.text });
-    await persistMessage(cid, uid, resp.text, false);
+    await persistMessage(cid, uid, resp.text, false, isStale);
   } catch (e: unknown) {
+    if (isStale()) return;
     console.error(e);
     const message = describeLlmError(e, 'Failed to get AI response');
     chat.setError(message);
     $q.notify({ type: 'negative', message });
   } finally {
-    chat.setTyping(false);
-    chat.setLoading(false);
-    await scrollToBottom();
+    if (!isStale()) {
+      chat.setTyping(false);
+      chat.setLoading(false);
+      await scrollToBottom();
+    }
   }
 };
 
@@ -301,6 +327,8 @@ const onNewChat = () => {
 
 const onRenameThread = async ({ threadId, title }: { threadId: string; title: string }) => {
   if (chat.isLoading) return;
+  const opGen = chat.nextGeneration();
+  const sessionGen = auth.sessionGeneration;
   try {
     await renameThreadMutation.mutateAsync({
       threadId,
@@ -308,6 +336,7 @@ const onRenameThread = async ({ threadId, title }: { threadId: string; title: st
       userId: getUserId(),
     });
   } catch (e) {
+    if (isStaleOperation(opGen, sessionGen)) return;
     console.error(e);
     $q.notify({ type: 'negative', message: 'Failed to rename conversation' });
   }
@@ -324,33 +353,46 @@ const deleteThread = async () => {
   if (!thread || chat.isLoading) return;
 
   isDeleting.value = true;
+  const opGen = chat.nextGeneration();
+  const sessionGen = auth.sessionGeneration;
   try {
     await deleteThreadMutation.mutateAsync({
       threadId: thread.ThreadId,
       userId: getUserId(),
     });
 
-    // If the deleted thread is the current chat, start a new chat
-    if (chat.chatId === thread.ThreadId) {
-      chat.startNewChat();
-      chat.addMessage({
-        type: 'ai',
-        content: GREETING_MESSAGE,
-      });
-    }
+    if (!isStaleOperation(opGen, sessionGen)) {
+      // If the deleted thread is the current chat, start a new chat
+      if (chat.chatId === thread.ThreadId) {
+        chat.startNewChat();
+        chat.addMessage({
+          type: 'ai',
+          content: GREETING_MESSAGE,
+        });
+      }
 
-    $q.notify({ type: 'positive', message: 'Conversation deleted successfully' });
+      $q.notify({ type: 'positive', message: 'Conversation deleted successfully' });
+    }
     showDeleteConfirm.value = false;
     threadToDelete.value = null;
   } catch (e) {
-    console.error(e);
-    $q.notify({ type: 'negative', message: 'Failed to delete conversation' });
+    if (!isStaleOperation(opGen, sessionGen)) {
+      console.error(e);
+      $q.notify({ type: 'negative', message: 'Failed to delete conversation' });
+    }
   } finally {
     isDeleting.value = false;
   }
 };
 
 onMounted(() => {
+  const uid = getUserId();
+  const sessionGen = auth.sessionGeneration;
+  if (chat.ownerId === null) {
+    chat.bindOwner(uid, sessionGen);
+  } else if (chat.ownerId !== uid || chat.ownerSessionGen !== sessionGen) {
+    chat.resetForUser(uid, sessionGen);
+  }
   // Warm greeting if empty
   if (chat.messages.length === 0) {
     chat.addMessage({
