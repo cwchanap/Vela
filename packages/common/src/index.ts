@@ -14,6 +14,7 @@ export { createQueryClient, QUERY_STALE_TIME, QUERY_GC_TIME } from './config';
 // Export query key factories
 export {
   authKeys,
+  chatKeys,
   dictionaryKeys,
   gameKeys,
   progressKeys,
