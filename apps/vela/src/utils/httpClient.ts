@@ -95,23 +95,25 @@ export async function httpJson<T = unknown>(input: RequestInfo, init?: RequestIn
   return readJsonResponse<T>(res);
 }
 
-/**
- * Get Authorization header with JWT token from Cognito. Reusable by
- * non-JSON transports (e.g. the SSE dictionary stream) that cannot use
- * httpJsonAuth because they must read the response body incrementally.
- */
-export async function getAuthHeaders(): Promise<Record<string, string>> {
+async function getAuthSession(): Promise<{
+  headers: Record<string, string>;
+  userId: string | null;
+}> {
   try {
     const session = await fetchAuthSession();
-    const idToken = session.tokens?.idToken?.toString();
+    const idToken = session.tokens?.idToken;
+    const token = idToken?.toString();
 
-    if (!idToken) {
+    if (!token) {
       throw new Error('No authentication token available');
     }
 
     return {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${idToken}`,
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      userId: typeof idToken?.payload?.sub === 'string' ? idToken?.payload?.sub : null,
     };
   } catch (error) {
     // Log only sanitized error info to avoid leaking sensitive session data
@@ -122,13 +124,29 @@ export async function getAuthHeaders(): Promise<Record<string, string>> {
 }
 
 /**
+ * Get Authorization header with JWT token from Cognito. Reusable by
+ * non-JSON transports (e.g. the SSE dictionary stream) that cannot use
+ * httpJsonAuth because they must read the response body incrementally.
+ */
+export async function getAuthHeaders(): Promise<Record<string, string>> {
+  const { headers } = await getAuthSession();
+  return headers;
+}
+
+/**
  * Make an authenticated JSON request
  */
 export async function httpJsonAuth<T = unknown>(
   input: RequestInfo,
   init?: RequestInit,
+  expectedUserId?: string,
 ): Promise<T> {
-  const authHeaders = await getAuthHeaders();
+  const { headers: authHeaders, userId } = await getAuthSession();
+
+  if (expectedUserId !== undefined && userId !== expectedUserId) {
+    throw new Error('Account changed during request. Please try again.');
+  }
+
   const normalizedHeaders = normalizeHeaders(init?.headers);
 
   const res = await fetch(input, {

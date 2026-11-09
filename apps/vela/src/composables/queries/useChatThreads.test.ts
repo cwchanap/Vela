@@ -91,6 +91,7 @@ describe('useChatThreads', () => {
       cleanup = qcCleanup;
       await flushPromises();
       expect(mockListChatThreads).toHaveBeenCalledTimes(1);
+      expect(mockListChatThreads).toHaveBeenCalledWith('user-a');
       expect(result.data.value).toEqual(threads);
     });
 
@@ -101,7 +102,7 @@ describe('useChatThreads', () => {
       const { cleanup: qcCleanup } = withQueryClient(() => useChatThreads());
       cleanup = qcCleanup;
       await flushPromises();
-      expect(mockListChatThreads).toHaveBeenCalledTimes(1);
+      expect(mockListChatThreads).toHaveBeenCalledWith('user-a');
     });
 
     it('exposes the error when the thread list fails to load', async () => {
@@ -157,7 +158,11 @@ describe('useChatThreads', () => {
       const setDataSpy = vi.spyOn(queryClient, 'setQueryData');
       const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries');
 
-      const pending = result.mutateAsync({ threadId: 't-1', patch: { title: 'New title' } });
+      const pending = result.mutateAsync({
+        threadId: 't-1',
+        patch: { title: 'New title' },
+        userId: 'user-a',
+      });
 
       await vi.waitFor(() => {
         expect(cancelSpy).toHaveBeenCalledWith({ queryKey: threadsKey(userA) });
@@ -173,7 +178,7 @@ describe('useChatThreads', () => {
       resolvePatch({ ...existing[0]!, title: 'New title', updatedAt: 9_999 });
       await pending;
 
-      expect(mockUpdateChatThread).toHaveBeenCalledWith('t-1', { title: 'New title' });
+      expect(mockUpdateChatThread).toHaveBeenCalledWith('t-1', { title: 'New title' }, 'user-a');
       expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: threadsKey(userA) });
     });
 
@@ -189,7 +194,7 @@ describe('useChatThreads', () => {
       const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries');
 
       await expect(
-        result.mutateAsync({ threadId: 't-1', patch: { title: 'New title' } }),
+        result.mutateAsync({ threadId: 't-1', patch: { title: 'New title' }, userId: 'user-a' }),
       ).rejects.toThrow('Rename failed');
 
       const optimisticCall = setDataSpy.mock.calls[0];
@@ -222,7 +227,11 @@ describe('useChatThreads', () => {
       const setDataSpy = vi.spyOn(queryClient, 'setQueryData');
       const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries');
 
-      const pending = result.mutateAsync({ threadId: 't-1', patch: { title: 'Renamed' } });
+      const pending = result.mutateAsync({
+        threadId: 't-1',
+        patch: { title: 'Renamed' },
+        userId: 'user-a',
+      });
 
       await vi.waitFor(() => {
         expect(setDataSpy).toHaveBeenCalledWith(
@@ -253,9 +262,9 @@ describe('useChatThreads', () => {
       cleanup = qcCleanup;
       const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries');
 
-      await result.mutateAsync('t-1');
+      await result.mutateAsync({ threadId: 't-1', userId: 'user-a' });
 
-      expect(mockDeleteChatThread).toHaveBeenCalledWith('t-1');
+      expect(mockDeleteChatThread).toHaveBeenCalledWith('t-1', 'user-a');
       expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: threadsKey(userA) });
     });
 
@@ -267,7 +276,9 @@ describe('useChatThreads', () => {
       cleanup = qcCleanup;
       const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries');
 
-      await expect(result.mutateAsync('t-1')).rejects.toThrow('Delete failed');
+      await expect(result.mutateAsync({ threadId: 't-1', userId: 'user-a' })).rejects.toThrow(
+        'Delete failed',
+      );
 
       expect(invalidateSpy).not.toHaveBeenCalled();
     });
@@ -286,7 +297,7 @@ describe('useChatThreads', () => {
       cleanup = qcCleanup;
       const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries');
 
-      const pending = result.mutateAsync('t-1');
+      const pending = result.mutateAsync({ threadId: 't-1', userId: 'user-a' });
       await flushPromises();
 
       signIn(userB);
