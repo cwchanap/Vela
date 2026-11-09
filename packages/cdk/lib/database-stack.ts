@@ -8,6 +8,7 @@ export interface DatabaseStackProps extends StackProps {}
 
 export class DatabaseStack extends Stack {
   public readonly chatHistoryTable: Table;
+  public readonly chatThreadsTable: Table;
   public readonly profilesTable: Table;
   public readonly vocabularyTable: Table;
   public readonly sentencesTable: Table;
@@ -40,15 +41,20 @@ export class DatabaseStack extends Stack {
       },
     });
 
-    chatHistoryTable.addGlobalSecondaryIndex({
-      indexName: 'UserIdIndex',
+    const chatThreadsTable = new Table(this, 'VelaChatThreadsTable', {
+      tableName: 'vela-chat-threads',
       partitionKey: {
         name: 'UserId',
         type: AttributeType.STRING,
       },
       sortKey: {
-        name: 'Timestamp',
-        type: AttributeType.NUMBER,
+        name: 'ThreadId',
+        type: AttributeType.STRING,
+      },
+      billingMode: BillingMode.PAY_PER_REQUEST,
+      removalPolicy: RemovalPolicy.DESTROY,
+      pointInTimeRecoverySpecification: {
+        pointInTimeRecoveryEnabled: true,
       },
     });
 
@@ -206,6 +212,7 @@ export class DatabaseStack extends Stack {
     const dbClusterEndpoint = dsqlCluster.getAtt('Endpoint').toString();
 
     this.chatHistoryTable = chatHistoryTable;
+    this.chatThreadsTable = chatThreadsTable;
     this.profilesTable = profilesTable;
     this.vocabularyTable = vocabularyTable;
     this.sentencesTable = sentencesTable;

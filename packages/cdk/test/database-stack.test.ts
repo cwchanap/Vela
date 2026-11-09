@@ -43,21 +43,43 @@ describe('DatabaseStack', () => {
     });
   });
 
-  test('creates chat history UserIdIndex GSI', () => {
+  test('does not create the unused UserIdIndex GSI on the chat history table', () => {
+    const { template } = synthesizeTemplate();
+
+    const tables = template.findResources('AWS::DynamoDB::Table');
+    const chatHistory = Object.values(tables).find(
+      (table) => table.Properties?.TableName === 'vela-chat-history',
+    );
+
+    expect(chatHistory).toBeDefined();
+    const indexNames = (chatHistory?.Properties?.GlobalSecondaryIndexes ?? []).map(
+      (index: { IndexName?: string }) => index.IndexName,
+    );
+    expect(indexNames).not.toContain('UserIdIndex');
+  });
+
+  test('creates chat threads table with composite key and no secondary index', () => {
     const { template } = synthesizeTemplate();
 
     template.hasResourceProperties('AWS::DynamoDB::Table', {
-      TableName: 'vela-chat-history',
-      GlobalSecondaryIndexes: Match.arrayWith([
-        Match.objectLike({
-          IndexName: 'UserIdIndex',
-          KeySchema: [
-            { AttributeName: 'UserId', KeyType: 'HASH' },
-            { AttributeName: 'Timestamp', KeyType: 'RANGE' },
-          ],
-        }),
+      TableName: 'vela-chat-threads',
+      KeySchema: [
+        { AttributeName: 'UserId', KeyType: 'HASH' },
+        { AttributeName: 'ThreadId', KeyType: 'RANGE' },
+      ],
+      AttributeDefinitions: Match.arrayWith([
+        { AttributeName: 'UserId', AttributeType: 'S' },
+        { AttributeName: 'ThreadId', AttributeType: 'S' },
       ]),
     });
+
+    const tables = template.findResources('AWS::DynamoDB::Table');
+    const chatThreads = Object.values(tables).find(
+      (table) => table.Properties?.TableName === 'vela-chat-threads',
+    );
+
+    expect(chatThreads).toBeDefined();
+    expect(chatThreads?.Properties?.GlobalSecondaryIndexes).toBeUndefined();
   });
 
   test('creates profiles table with user_id partition key', () => {
@@ -181,10 +203,10 @@ describe('DatabaseStack', () => {
     });
   });
 
-  test('creates exactly 9 DynamoDB tables', () => {
+  test('creates exactly 10 DynamoDB tables', () => {
     const { template } = synthesizeTemplate();
 
-    template.resourceCountIs('AWS::DynamoDB::Table', 9);
+    template.resourceCountIs('AWS::DynamoDB::Table', 10);
   });
 
   test('all tables use PAY_PER_REQUEST billing', () => {
@@ -227,6 +249,7 @@ describe('DatabaseStack', () => {
     const { stack } = synthesizeTemplate();
 
     expect(stack.chatHistoryTable).toBeDefined();
+    expect(stack.chatThreadsTable).toBeDefined();
     expect(stack.profilesTable).toBeDefined();
     expect(stack.vocabularyTable).toBeDefined();
     expect(stack.sentencesTable).toBeDefined();

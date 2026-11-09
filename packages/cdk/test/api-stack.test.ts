@@ -181,4 +181,34 @@ describe('ApiStack', () => {
     expect(Object.keys(mobileClientId ?? {})).toEqual(['Fn::ImportValue']);
     expect(mobileClientId).not.toEqual(webClientId);
   });
+
+  test('passes the chat threads table name to the Lambda and grants read/write access', () => {
+    const template = synthesizeTemplate();
+
+    template.hasResourceProperties('AWS::Lambda::Function', {
+      FunctionName: 'vela-api',
+      Environment: {
+        Variables: Match.objectLike({
+          CHAT_THREADS_TABLE_NAME: Match.objectLike({
+            'Fn::ImportValue': Match.stringLikeRegexp('VelaChatThreadsTable'),
+          }),
+        }),
+      },
+    });
+
+    template.hasResourceProperties('AWS::IAM::Policy', {
+      PolicyDocument: {
+        Statement: Match.arrayWith([
+          Match.objectLike({
+            Action: Match.arrayWith(['dynamodb:PutItem']),
+            Resource: Match.arrayWith([
+              Match.objectLike({
+                'Fn::ImportValue': Match.stringLikeRegexp('VelaChatThreadsTable'),
+              }),
+            ]),
+          }),
+        ]),
+      },
+    });
+  });
 });

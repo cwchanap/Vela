@@ -66,6 +66,7 @@ export class ApiStack extends Stack {
       memorySize: 1024,
       environment: {
         DYNAMODB_TABLE_NAME: database.chatHistoryTable.tableName,
+        CHAT_THREADS_TABLE_NAME: database.chatThreadsTable.tableName,
         PROFILES_TABLE_NAME: database.profilesTable.tableName,
         VOCABULARY_TABLE_NAME: database.vocabularyTable.tableName,
         SENTENCES_TABLE_NAME: database.sentencesTable.tableName,
@@ -90,6 +91,7 @@ export class ApiStack extends Stack {
     });
 
     database.chatHistoryTable.grantReadWriteData(apiLambda);
+    database.chatThreadsTable.grantReadWriteData(apiLambda);
     database.profilesTable.grantReadWriteData(apiLambda);
     database.vocabularyTable.grantReadWriteData(apiLambda);
     database.sentencesTable.grantReadWriteData(apiLambda);
