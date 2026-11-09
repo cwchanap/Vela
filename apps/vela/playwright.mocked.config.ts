@@ -16,7 +16,7 @@ const runDir = join(artifactsRoot, `pw-mocked-${runId}`);
 
 export default defineConfig({
   testDir: './e2e',
-  testMatch: 'llm-settings.spec.ts',
+  testMatch: ['llm-settings.spec.ts', 'chat-sidebar.spec.ts'],
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 0,

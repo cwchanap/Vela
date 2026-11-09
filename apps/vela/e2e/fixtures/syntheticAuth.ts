@@ -130,6 +130,22 @@ export interface MockLlmPreferences {
   defaultModel?: { provider: string; model: string };
 }
 
+export interface MockChatThread {
+  ThreadId: string;
+  title: string;
+  createdAt: number;
+  updatedAt: number;
+  model?: { provider: string; model: string };
+}
+
+export interface MockChatMessage {
+  ThreadId: string;
+  Timestamp: number;
+  UserId: string;
+  message: string;
+  is_user: boolean;
+}
+
 export interface MockApi {
   profiles: Map<string, MockProfile>;
   serverKeyProviders: string[] | null;
@@ -139,6 +155,10 @@ export interface MockApi {
   chatBodies: Array<Record<string, unknown>>;
   analyzeBodies: Array<Record<string, unknown>>;
   chatHistorySaves: Array<Record<string, unknown>>;
+  chatThreads: Map<string, Map<string, MockChatThread>>;
+  chatMessages: Map<string, Map<string, MockChatMessage[]>>;
+  patchThreadBodies: Array<Record<string, unknown>>;
+  deletedThreadIds: Array<{ userId: string; threadId: string }>;
   dictionaryEntries: MockDictionaryEntry[];
   chatReply: string;
   ttsSettings: {
@@ -148,6 +168,18 @@ export interface MockApi {
     hasApiKey: boolean;
   };
   seedProfile(_user: SyntheticUser, _preferences?: Record<string, unknown>): MockProfile;
+  seedThread(
+    _user: SyntheticUser,
+    _thread: Partial<MockChatThread> & { ThreadId: string },
+  ): MockChatThread;
+  seedMessage(
+    _user: SyntheticUser,
+    _threadId: string,
+    _message: string,
+    _isUser: boolean,
+    _timestamp?: number,
+  ): MockChatMessage;
+  threadsFor(_user: SyntheticUser): MockChatThread[];
   lastPut(): Record<string, unknown> | undefined;
 }
 
@@ -182,6 +214,10 @@ const createMockApi = (): MockApi => {
     chatBodies: [],
     analyzeBodies: [],
     chatHistorySaves: [],
+    chatThreads: new Map(),
+    chatMessages: new Map(),
+    patchThreadBodies: [],
+    deletedThreadIds: [],
     dictionaryEntries: [],
     chatReply: 'Mock AI reply (synthetic)',
     ttsSettings: { provider: 'elevenlabs', voiceId: null, model: null, hasApiKey: false },
@@ -189,6 +225,45 @@ const createMockApi = (): MockApi => {
       const profile = makeProfile(user, preferences);
       state.profiles.set(user.userId, profile);
       return profile;
+    },
+    seedThread(user, thread) {
+      const now = Date.now();
+      const row: MockChatThread = {
+        title: 'Mock conversation',
+        createdAt: now,
+        updatedAt: now,
+        ...thread,
+      };
+      let userThreads = state.chatThreads.get(user.userId);
+      if (!userThreads) {
+        userThreads = new Map();
+        state.chatThreads.set(user.userId, userThreads);
+      }
+      userThreads.set(row.ThreadId, row);
+      return row;
+    },
+    seedMessage(user, threadId, message, isUser, timestamp = Date.now()) {
+      const row: MockChatMessage = {
+        ThreadId: threadId,
+        Timestamp: timestamp,
+        UserId: user.userId,
+        message,
+        is_user: isUser,
+      };
+      let userMessages = state.chatMessages.get(user.userId);
+      if (!userMessages) {
+        userMessages = new Map();
+        state.chatMessages.set(user.userId, userMessages);
+      }
+      const list = userMessages.get(threadId) ?? [];
+      list.push(row);
+      userMessages.set(threadId, list);
+      return row;
+    },
+    threadsFor(user) {
+      return [...(state.chatThreads.get(user.userId)?.values() ?? [])].sort(
+        (a, b) => b.updatedAt - a.updatedAt || a.ThreadId.localeCompare(b.ThreadId),
+      );
     },
     lastPut() {
       return state.profilePuts[state.profilePuts.length - 1];
@@ -355,16 +430,116 @@ const handleApiRoute = async (state: MockApi, route: Route): Promise<void> => {
   }
 
   if (path === '/api/chat-history/save' && method === 'POST') {
-    state.chatHistorySaves.push(readJsonBody(route));
+    const body = readJsonBody(route);
+    state.chatHistorySaves.push(body);
+    const threadId = typeof body.ThreadId === 'string' ? body.ThreadId : '';
+    const message = typeof body.message === 'string' ? body.message : '';
+    if (!threadId) return jsonResponse(route, { error: 'ThreadId is required' }, 400);
+    if (!message) return jsonResponse(route, { error: 'Message is required' }, 400);
+    if (typeof body.is_user !== 'boolean') {
+      return jsonResponse(route, { error: 'is_user is required' }, 400);
+    }
+    const now = Date.now();
+    if (body.is_user) {
+      let userThreads = state.chatThreads.get(authUser.userId);
+      if (!userThreads) {
+        userThreads = new Map();
+        state.chatThreads.set(authUser.userId, userThreads);
+      }
+      const existing = userThreads.get(threadId);
+      const initialTitle = message.trim().slice(0, 60) || 'New conversation';
+      userThreads.set(threadId, {
+        ThreadId: threadId,
+        title: existing?.title ?? initialTitle,
+        createdAt: existing?.createdAt ?? now,
+        updatedAt: now,
+        ...(existing?.model ? { model: existing.model } : {}),
+      });
+    }
+    let userMessages = state.chatMessages.get(authUser.userId);
+    if (!userMessages) {
+      userMessages = new Map();
+      state.chatMessages.set(authUser.userId, userMessages);
+    }
+    const list = userMessages.get(threadId) ?? [];
+    list.push({
+      ThreadId: threadId,
+      Timestamp: now,
+      UserId: authUser.userId,
+      message,
+      is_user: body.is_user,
+    });
+    userMessages.set(threadId, list);
     return jsonResponse(route, { ok: true });
   }
 
   if (path === '/api/chat-history/threads' && method === 'GET') {
-    return jsonResponse(route, { threads: [] });
+    return jsonResponse(route, { threads: state.threadsFor(authUser) });
   }
 
   if (path === '/api/chat-history/messages' && method === 'GET') {
-    return jsonResponse(route, { items: [] });
+    const threadId = url.searchParams.get('thread_id') ?? '';
+    if (!threadId) return jsonResponse(route, { error: 'thread_id is required' }, 400);
+    const thread = state.chatThreads.get(authUser.userId)?.get(threadId);
+    if (!thread) return jsonResponse(route, { error: 'Thread not found' }, 404);
+    const items = [...(state.chatMessages.get(authUser.userId)?.get(threadId) ?? [])].sort(
+      (a, b) => a.Timestamp - b.Timestamp,
+    );
+    return jsonResponse(route, { items });
+  }
+
+  const threadPathMatch = /^\/api\/chat-history\/thread\/([^/]+)$/.exec(path);
+  if (threadPathMatch && method === 'PATCH') {
+    const threadId = decodeURIComponent(threadPathMatch[1] ?? '');
+    const body = readJsonBody(route);
+    state.patchThreadBodies.push(body);
+    const patch: { title?: string; model?: { provider: string; model: string } } = {};
+    if (body.title !== undefined) {
+      if (typeof body.title !== 'string' || body.title.trim().length === 0) {
+        return jsonResponse(route, { error: 'title is required' }, 400);
+      }
+      const trimmed = body.title.trim();
+      if (trimmed.length > 60) {
+        return jsonResponse(route, { error: 'title must be 60 characters or fewer' }, 400);
+      }
+      patch.title = trimmed;
+    }
+    if (body.model !== undefined) {
+      const model = body.model as { provider?: unknown; model?: unknown };
+      if (
+        typeof model?.provider !== 'string' ||
+        model.provider.length === 0 ||
+        typeof model?.model !== 'string' ||
+        model.model.length === 0
+      ) {
+        return jsonResponse(route, { error: 'Invalid model' }, 400);
+      }
+      patch.model = { provider: model.provider, model: model.model };
+    }
+    if (patch.title === undefined && patch.model === undefined) {
+      return jsonResponse(route, { error: 'At least one of title or model is required' }, 400);
+    }
+    const existing = state.chatThreads.get(authUser.userId)?.get(threadId);
+    if (!existing) return jsonResponse(route, { error: 'Thread not found' }, 404);
+    const updated: MockChatThread = {
+      ...existing,
+      ...(patch.title !== undefined ? { title: patch.title } : {}),
+      ...(patch.model !== undefined ? { model: patch.model } : {}),
+      updatedAt: Date.now(),
+    };
+    state.chatThreads.get(authUser.userId)?.set(threadId, updated);
+    return jsonResponse(route, { thread: updated });
+  }
+
+  if (threadPathMatch && method === 'DELETE') {
+    const threadId = decodeURIComponent(threadPathMatch[1] ?? '');
+    const userThreads = state.chatThreads.get(authUser.userId);
+    const existing = userThreads?.get(threadId);
+    if (!existing) return jsonResponse(route, { error: 'Thread not found' }, 404);
+    userThreads?.delete(threadId);
+    state.chatMessages.get(authUser.userId)?.delete(threadId);
+    state.deletedThreadIds.push({ userId: authUser.userId, threadId });
+    return jsonResponse(route, { ok: true });
   }
 
   if (path === '/api/my-dictionaries' && method === 'GET') {
