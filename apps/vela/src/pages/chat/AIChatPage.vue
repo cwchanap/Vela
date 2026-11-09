@@ -235,8 +235,6 @@ const onSend = async (draft: string) => {
 
   chat.clearError();
 
-  // Capture the initiating identity once so every persisted write below is
-  // bound to the account that started this send.
   const uid = getUserId();
   const cid = ensureChatId();
   chat.addMessage({ type: 'user', content });

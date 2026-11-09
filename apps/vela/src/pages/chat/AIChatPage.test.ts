@@ -53,7 +53,6 @@ describe('AIChatPage', () => {
   let originalFetch: typeof global.fetch;
   let wrapper: VueWrapper<any> | null = null;
 
-  // Stateful in-memory chat-history mock mirroring the API semantics
   let threadRows: MockThread[];
   let messageRows: MockMessage[];
   let saveBodies: Array<Record<string, unknown>>;
@@ -86,7 +85,6 @@ describe('AIChatPage', () => {
         if ((isUser && saveFailures.user) || (!isUser && saveFailures.assistant)) {
           return Promise.resolve(errJson());
         }
-        // Mirror the server: a user save upserts the thread row first.
         if (isUser) {
           const threadId = String(body.ThreadId ?? '');
           const existing = threadRows.find((t) => t.ThreadId === threadId);
@@ -200,7 +198,6 @@ describe('AIChatPage', () => {
     authStore.session = null;
     signIn();
 
-    // Reset in-memory API state
     threadRows = [];
     messageRows = [];
     saveBodies = [];
@@ -336,7 +333,6 @@ describe('AIChatPage', () => {
     is_user: isUser,
   });
 
-  // Helper to mock auth session with token bound to a subject
   const sessionFor = (sub: string) =>
     ({
       tokens: {
@@ -668,7 +664,6 @@ describe('AIChatPage', () => {
       await sendMessage('Creates a row');
       await flushPromises();
 
-      // Exactly one extra fetch: user save invalidated the list; assistant save must not.
       expect(threadFetches().length).toBe(2);
       expect(saveFetches().length).toBe(2);
     });
@@ -687,7 +682,6 @@ describe('AIChatPage', () => {
         expect.objectContaining({ type: 'warning', message: 'Failed to save chat history' }),
       );
       expect(chatStore.messages.some((m) => m.content === 'Reply despite save failure')).toBe(true);
-      // No thread-list invalidation for the failed save
       expect(threadFetches().length).toBe(1);
     });
 
@@ -712,8 +706,6 @@ describe('AIChatPage', () => {
       mountComponent();
       await flushPromises();
 
-      // Session token now belongs to another account while the store still
-      // shows the original user.
       vi.mocked(awsAmplify.fetchAuthSession).mockResolvedValue(sessionFor('user-b'));
 
       const chatStore = useChatStore();
@@ -766,7 +758,6 @@ describe('AIChatPage', () => {
       mountComponent();
       await flushPromises();
 
-      // A fresh chat shows no persisted rows
       expect(wrapper.findAll('[data-testid="llm-chat-thread-item"]').length).toBe(0);
 
       const newChatButton = wrapper.find('[data-testid="llm-chat-new"]');
@@ -774,7 +765,6 @@ describe('AIChatPage', () => {
       await flushPromises();
       expect(wrapper.findAll('[data-testid="llm-chat-thread-item"]').length).toBe(0);
 
-      // The first user save persists the thread and the refetched list shows it
       await sendMessage('First real message');
       await flushPromises();
 
@@ -808,7 +798,6 @@ describe('AIChatPage', () => {
 
       const items = wrapper.findAll('[data-testid="llm-chat-thread-item"]');
       expect(items.length).toBe(2);
-      // Sorted newest-first by updatedAt
       expect(items[0]!.text()).toContain('Recent chat');
       expect(items[0]!.text()).toContain('just now');
       expect(items[1]!.text()).toContain('Older chat');
@@ -878,7 +867,6 @@ describe('AIChatPage', () => {
       await wrapper.find('[data-testid="llm-chat-thread-item"]').trigger('click');
       await flushPromises();
 
-      // Greeting prepended before the two stored messages
       expect(chatStore.messages.length).toBe(3);
       expect(chatStore.messages[0]!.content).toContain('こんにちは');
     });
@@ -966,7 +954,6 @@ describe('AIChatPage', () => {
       expect(wrapper.text()).toContain('A thread');
       expect(queryClient.getQueryData<MockThread[]>(chatKeys.threads('user-123'))).toHaveLength(1);
 
-      // Switch the active account; the session token flips with it
       vi.mocked(awsAmplify.fetchAuthSession).mockResolvedValue(sessionFor('user-b'));
       signIn(createMockUser({ id: 'user-b', username: 'otheruser' }));
       threadRows = [createMockThread({ ThreadId: 'b-1', title: 'B thread' })];
@@ -1003,7 +990,6 @@ describe('AIChatPage', () => {
       await dialogSidebar.find('[data-testid="llm-chat-thread-item"]').trigger('click');
       await flushPromises();
 
-      // Dialog closes after selecting a conversation and messages are restored
       expect(wrapper.find('.q-dialog [data-testid="chat-sidebar"]').exists()).toBe(false);
       const chatStore = useChatStore();
       expect(chatStore.chatId).toBe('thread-1');
@@ -1028,14 +1014,12 @@ describe('AIChatPage', () => {
       await renameInput.trigger('keyup.enter');
       await flushPromises();
 
-      // The PATCH request carries the new title
       expect(patchFetches().length).toBe(1);
       const patchCall = fetchMock.mock.calls[fetchLog.indexOf(patchFetches()[0]!)];
       const patchBody = JSON.parse(String(patchCall[1]?.body)) as Record<string, unknown>;
       expect(patchBody).toEqual({ title: 'Renamed title' });
       expect(patchCall[0]).toContain('/api/chat-history/thread/thread-1');
 
-      // After settle + refetch, the sidebar still shows the persisted title
       const item = wrapper.find('[data-testid="llm-chat-thread-item"]');
       expect(item.text()).toContain('Renamed title');
       expect(threadRows[0]!.title).toBe('Renamed title');
@@ -1120,7 +1104,6 @@ describe('AIChatPage', () => {
       await wrapper.find('[data-testid="chat-thread-rename-input"]').trigger('keyup.enter');
       await flushPromises();
 
-      // Optimistic update is visible before the PATCH resolves
       expect(wrapper.find('[data-testid="llm-chat-thread-item"]').text()).toContain(
         'Optimistic title',
       );
@@ -1148,7 +1131,6 @@ describe('AIChatPage', () => {
       await wrapper.find('[data-testid="chat-thread-rename-input"]').trigger('keyup.enter');
       await flushPromises();
 
-      // Rollback restores the original title in the visible list
       expect(wrapper.find('[data-testid="llm-chat-thread-item"]').text()).toContain(
         'Original title',
       );
@@ -1212,7 +1194,6 @@ describe('AIChatPage', () => {
       expect(deleteFetches().length).toBe(1);
       expect(deleteFetches()[0]!.url).toContain('/api/chat-history/thread/thread-1');
 
-      // Row removed after the list refetches
       expect(wrapper.findAll('[data-testid="llm-chat-thread-item"]').length).toBe(0);
       expect(wrapper.text()).toContain('No conversations yet');
       expect(notifyCreateSpy).toHaveBeenCalledWith(
@@ -1254,7 +1235,6 @@ describe('AIChatPage', () => {
       mountComponent();
       await flushPromises();
 
-      // Select the thread to make it active
       await wrapper.find('[data-testid="llm-chat-thread-item"]').trigger('click');
       await flushPromises();
       expect(chatStore.chatId).toBe(activeThreadId);
@@ -1267,7 +1247,6 @@ describe('AIChatPage', () => {
       await confirmButton.trigger('click');
       await flushPromises();
 
-      // After deleting the active thread, a new chat starts with a fresh greeting
       expect(chatStore.chatId).not.toBe(activeThreadId);
       expect(chatStore.chatId).toBeTruthy();
       expect(chatStore.messages.length).toBe(1);
@@ -1348,7 +1327,6 @@ describe('AIChatPage', () => {
       await menuButton.trigger('click');
       await flushPromises();
 
-      // The delete entry must not open the confirmation while sending
       const deleteItem = wrapper!.find('[data-testid="llm-chat-delete-thread"]');
       if (deleteItem.exists()) {
         await deleteItem.trigger('click');
@@ -1573,7 +1551,6 @@ describe('AIChatPage', () => {
       mountComponent();
       await flushPromises();
 
-      // Component should still be functional and surface the error state
       expect(wrapper.exists()).toBe(true);
       expect(wrapper.text()).toContain('Failed to load conversations');
     });
@@ -1592,7 +1569,6 @@ describe('AIChatPage', () => {
       await sendMessage('Message with no token');
       await flushPromises();
 
-      // The save fails, but the LLM reply still arrives and the page is stable
       expect(wrapper.exists()).toBe(true);
       expect(notifyCreateSpy).toHaveBeenCalledWith(expect.objectContaining({ type: 'warning' }));
       expect(chatStore.messages.some((m) => m.content === 'Reply despite auth error')).toBe(true);
