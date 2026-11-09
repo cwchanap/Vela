@@ -3,12 +3,6 @@ import { test, expect, type MockApi } from './fixtures/syntheticAuth';
 import { SYNTHETIC_USER_A } from './fixtures/syntheticEnv';
 import { waitForPageLoad } from './utils/helpers';
 
-/**
- * E2E coverage for the responsive chat-thread sidebar: thread list, rename,
- * delete, persistence across reloads, and bounded viewport scrolling.
- * All traffic is served by the stateful in-memory mock in syntheticAuth.ts.
- */
-
 const GREETING_SNIPPET = '日本語学習をお手伝いします';
 const DESKTOP = { width: 1280, height: 800 };
 const MOBILE = { width: 375, height: 667 };
@@ -35,8 +29,6 @@ const openSidebar = async (page: Page, mobile: boolean): Promise<Locator> => {
   return dialogSidebar;
 };
 
-// The global navigation rail is permanent at desktop widths; at mobile widths
-// it surfaces through the header hamburger which opens the same drawer.
 const expectGlobalNav = async (page: Page, mobile: boolean) => {
   if (!mobile) {
     await expect(page.getByTestId('left-drawer')).toBeVisible();
@@ -58,11 +50,9 @@ const runConversationLifecycle = async (page: Page, apiMock: MockApi, mobile: bo
   apiMock.seedProfile(SYNTHETIC_USER_A);
   await gotoChat(page);
 
-  // The global navigation coexists with the chat navigation at every size.
   await expectGlobalNav(page, mobile);
   await expect(page.locator('.chat-container')).toContainText(GREETING_SNIPPET);
 
-  // Sending a message persists a thread row derived from the message text.
   await sendAndWaitForThread(page, 'Hello sidebar thread');
   await expect(page.locator('.chat-container')).toContainText('Mock AI reply');
 
@@ -71,7 +61,6 @@ const runConversationLifecycle = async (page: Page, apiMock: MockApi, mobile: bo
   await expect(rows).toHaveCount(1);
   await expect(rows.first()).toContainText('Hello sidebar thread');
 
-  // Rename the row inline and wait for the PATCH to land.
   const patchResponse = page.waitForResponse(
     (r) => r.url().includes('/api/chat-history/thread/') && r.request().method() === 'PATCH',
   );
@@ -82,7 +71,6 @@ const runConversationLifecycle = async (page: Page, apiMock: MockApi, mobile: bo
   await patchResponse;
   await expect(rows.first()).toContainText('Renamed sidebar chat');
 
-  // The rename survives a full reload because the mock is stateful per user.
   await page.reload();
   await waitForPageLoad(page);
   const sidebarAfterReload = await openSidebar(page, mobile);
@@ -90,7 +78,6 @@ const runConversationLifecycle = async (page: Page, apiMock: MockApi, mobile: bo
   await expect(rowsAfterReload).toHaveCount(1);
   await expect(rowsAfterReload.first()).toContainText('Renamed sidebar chat');
 
-  // Selecting the thread restores its messages into the message pane.
   await rowsAfterReload.first().click();
   await expect(page.locator('.chat-container')).toContainText('Hello sidebar thread');
   await expect(page.locator('.chat-container')).toContainText('Mock AI reply');
@@ -98,7 +85,6 @@ const runConversationLifecycle = async (page: Page, apiMock: MockApi, mobile: bo
     await expect(page.locator('.q-dialog .chat-sidebar-mobile')).toBeHidden();
   }
 
-  // Deleting the active thread removes the row and resets to the greeting.
   const sidebarForDelete = await openSidebar(page, mobile);
   const deleteResponse = page.waitForResponse(
     (r) => r.url().includes('/api/chat-history/thread/') && r.request().method() === 'DELETE',
@@ -143,7 +129,6 @@ const runBoundedScrollCheck = async (page: Page, apiMock: MockApi, mobile: boole
   const sidebar = await openSidebar(page, mobile);
   await expect(sidebar.getByTestId('llm-chat-thread-item')).toHaveCount(31);
 
-  // The sidebar list scrolls independently of the page.
   const sidebarList = sidebar.locator('.chat-sidebar__list');
   const sidebarMetrics = await sidebarList.evaluate((el) => ({
     scrollHeight: el.scrollHeight,
@@ -155,7 +140,6 @@ const runBoundedScrollCheck = async (page: Page, apiMock: MockApi, mobile: boole
   });
   expect(await sidebarList.evaluate((el) => el.scrollTop)).toBeGreaterThan(0);
 
-  // Selecting the newest thread loads a long conversation into the pane.
   await sidebar.getByTestId('llm-chat-thread-item').first().click();
   await expect(page.locator('.chat-container')).toContainText('Seeded message 39');
 
@@ -166,7 +150,6 @@ const runBoundedScrollCheck = async (page: Page, apiMock: MockApi, mobile: boole
   }));
   expect(chatMetrics.scrollHeight).toBeGreaterThan(chatMetrics.clientHeight);
 
-  // The composer stays fully visible inside the viewport.
   const composer = page.getByTestId('llm-chat-input');
   await expect(composer).toBeVisible();
   const composerBox = await composer.boundingBox();
@@ -175,7 +158,6 @@ const runBoundedScrollCheck = async (page: Page, apiMock: MockApi, mobile: boole
     (mobile ? MOBILE : DESKTOP).height,
   );
 
-  // Neither the document nor the window grows beyond the viewport.
   const bounds = await page.evaluate(() => ({
     innerHeight: window.innerHeight,
     docHeight: document.documentElement.scrollHeight,
@@ -183,8 +165,6 @@ const runBoundedScrollCheck = async (page: Page, apiMock: MockApi, mobile: boole
   }));
   expect(bounds.docHeight).toBeLessThanOrEqual(bounds.innerHeight + 1);
 
-  // Window scrolling cannot move the composer out of the viewport (at most a
-  // sub-pixel rounding slack is allowed on the window itself).
   await page.evaluate(() => window.scrollTo(0, 400));
   expect(await page.evaluate(() => window.scrollY)).toBeLessThanOrEqual(1);
   const composerAfter = await page.getByTestId('llm-chat-input').boundingBox();
@@ -236,8 +216,6 @@ test.describe('Chat sidebar - mobile (375px)', () => {
     await expect(page.getByTestId('chat-sidebar-pane')).toHaveCount(0);
     await expect(page.getByTestId('llm-chat-history')).toBeVisible();
 
-    // The global navigation hamburger coexists with the chat navigation and
-    // still opens the main drawer over the page content.
     await expectGlobalNav(page, true);
     await page.getByTestId('btn-open-nav').click();
     await expect(page.getByTestId('left-drawer')).toBeVisible();
@@ -247,7 +225,6 @@ test.describe('Chat sidebar - mobile (375px)', () => {
     const sidebar = await openSidebar(page, true);
     await expect(sidebar.getByTestId('llm-chat-new')).toBeVisible();
 
-    // New chat from the dialog starts a fresh thread and closes it.
     await sidebar.getByTestId('llm-chat-new').click();
     await expect(page.locator('.q-dialog .chat-sidebar-mobile')).toBeHidden();
     await expect(page.locator('.chat-container')).toContainText(GREETING_SNIPPET);
