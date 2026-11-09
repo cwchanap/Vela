@@ -444,6 +444,48 @@ describe('Chat History Route', () => {
       expect(json.threads).toEqual([]);
     });
 
+    test('should issue strongly consistent reads on every metadata page', async () => {
+      mockSend
+        .mockResolvedValueOnce({
+          Items: [threadRow({ ThreadId: 'thread-1', updatedAt: 300 })],
+          LastEvaluatedKey: { UserId: 'user-123', ThreadId: 'thread-1' },
+        })
+        .mockResolvedValueOnce({
+          Items: [threadRow({ ThreadId: 'thread-2', updatedAt: 200 })],
+          LastEvaluatedKey: undefined,
+        });
+
+      const app = createTestApp({});
+      const res = await app.request(new Request('http://localhost/threads'));
+
+      expect(res.status).toBe(200);
+      expect(mockSend).toHaveBeenCalledTimes(2);
+      for (const [input] of mockQueryCommand.mock.calls) {
+        expect(input.ConsistentRead).toBe(true);
+      }
+    });
+
+    test('should return an acknowledged thread save despite replica lag', async () => {
+      const saved = threadRow({ ThreadId: 'just-saved' });
+      mockSend.mockImplementation((command: any) => {
+        if (command.__type === 'QueryCommand') {
+          const consistent = command.input.ConsistentRead === true;
+          return Promise.resolve({ Items: consistent ? [saved] : [] });
+        }
+        return Promise.resolve({});
+      });
+
+      const app = createTestApp({});
+      const res = await app.request(new Request('http://localhost/threads'));
+      const json = await res.json();
+
+      expect(res.status).toBe(200);
+      expect(json.threads.map((t: any) => t.ThreadId)).toEqual(['just-saved']);
+      expect(mockQueryCommand).toHaveBeenCalledWith(
+        expect.objectContaining({ ConsistentRead: true }),
+      );
+    });
+
     test('should include the stored model on thread metadata when present', async () => {
       mockSend.mockResolvedValueOnce({
         Items: [
@@ -584,6 +626,52 @@ describe('Chat History Route', () => {
         expect.objectContaining({
           ExclusiveStartKey: { ThreadId: PARTITION, Timestamp: 1 },
         }),
+      );
+    });
+
+    test('should issue strongly consistent reads on every message page', async () => {
+      mockSend
+        .mockResolvedValueOnce({ Item: threadRow() })
+        .mockResolvedValueOnce({
+          Items: [messageRow({ Timestamp: 1 })],
+          LastEvaluatedKey: { ThreadId: PARTITION, Timestamp: 1 },
+        })
+        .mockResolvedValueOnce({
+          Items: [messageRow({ Timestamp: 2 })],
+          LastEvaluatedKey: undefined,
+        });
+
+      const app = createTestApp({});
+      const res = await app.request(new Request('http://localhost/messages?thread_id=thread-123'));
+
+      expect(res.status).toBe(200);
+      for (const [input] of mockQueryCommand.mock.calls) {
+        expect(input.ConsistentRead).toBe(true);
+      }
+    });
+
+    test('should return an acknowledged saved message despite replica lag', async () => {
+      const saved = messageRow({ message: 'acknowledged save' });
+      mockSend.mockImplementation((command: any) => {
+        if (command.__type === 'GetCommand') {
+          return Promise.resolve({ Item: threadRow() });
+        }
+        if (command.__type === 'QueryCommand') {
+          const consistent = command.input.ConsistentRead === true;
+          return Promise.resolve({ Items: consistent ? [saved] : [] });
+        }
+        return Promise.resolve({});
+      });
+
+      const app = createTestApp({});
+      const res = await app.request(new Request('http://localhost/messages?thread_id=thread-123'));
+      const json = await res.json();
+
+      expect(res.status).toBe(200);
+      expect(json.items).toHaveLength(1);
+      expect(json.items[0].message).toBe('acknowledged save');
+      expect(mockQueryCommand).toHaveBeenCalledWith(
+        expect.objectContaining({ ConsistentRead: true }),
       );
     });
 
@@ -963,6 +1051,70 @@ describe('Chat History Route', () => {
         'BatchWriteCommand',
         'DeleteCommand',
       ]);
+    });
+
+    test('should issue strongly consistent reads on every delete-enumeration page', async () => {
+      mockSend
+        .mockResolvedValueOnce({ Item: threadRow() })
+        .mockResolvedValueOnce({
+          Items: [messageRow({ Timestamp: 1 })],
+          LastEvaluatedKey: { ThreadId: PARTITION, Timestamp: 1 },
+        })
+        .mockResolvedValueOnce({
+          Items: [messageRow({ Timestamp: 2 })],
+          LastEvaluatedKey: undefined,
+        })
+        .mockResolvedValueOnce({ UnprocessedItems: {} })
+        .mockResolvedValueOnce({});
+
+      const app = createTestApp({});
+      const res = await app.request(
+        new Request('http://localhost/thread/thread-123', { method: 'DELETE' }),
+      );
+
+      expect(res.status).toBe(200);
+      expect(mockQueryCommand.mock.calls.length).toBe(2);
+      for (const [input] of mockQueryCommand.mock.calls) {
+        expect(input.ConsistentRead).toBe(true);
+      }
+    });
+
+    test('should fully delete an acknowledged saved message despite replica lag', async () => {
+      const saved = messageRow({ Timestamp: 4242, message: 'acknowledged save' });
+      mockSend.mockImplementation((command: any) => {
+        if (command.__type === 'GetCommand') {
+          return Promise.resolve({ Item: threadRow() });
+        }
+        if (command.__type === 'QueryCommand') {
+          const consistent = command.input.ConsistentRead === true;
+          return Promise.resolve({ Items: consistent ? [saved] : [] });
+        }
+        if (command.__type === 'BatchWriteCommand') {
+          return Promise.resolve({ UnprocessedItems: {} });
+        }
+        return Promise.resolve({});
+      });
+
+      const app = createTestApp({});
+      const res = await app.request(
+        new Request('http://localhost/thread/thread-123', { method: 'DELETE' }),
+      );
+      const json = await res.json();
+
+      expect(res.status).toBe(200);
+      expect(json.ok).toBe(true);
+      expect(mockQueryCommand).toHaveBeenCalledWith(
+        expect.objectContaining({ ConsistentRead: true }),
+      );
+      expect(mockBatchWriteCommand).toHaveBeenCalledTimes(1);
+      expect(mockBatchWriteCommand.mock.calls[0][0].RequestItems['vela-chat-history']).toEqual([
+        {
+          DeleteRequest: {
+            Key: { ThreadId: PARTITION, Timestamp: saved.Timestamp },
+          },
+        },
+      ]);
+      expect(mockDeleteCommand).toHaveBeenCalledTimes(1);
     });
 
     test('should chunk message deletes into batches of 25', async () => {

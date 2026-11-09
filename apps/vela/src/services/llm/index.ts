@@ -42,11 +42,15 @@ export const llmClient = {
     return httpJsonAuth<LlmCapabilities>(getApiUrl('llm-chat/capabilities'));
   },
 
-  async generate(input: GenerateInput): Promise<LlmResponse> {
-    return httpJsonAuth<LlmResponse>(getApiUrl('llm-chat'), {
-      method: 'POST',
-      body: JSON.stringify(input),
-    });
+  async generate(input: GenerateInput, expectedUserId?: string): Promise<LlmResponse> {
+    return httpJsonAuth<LlmResponse>(
+      getApiUrl('llm-chat'),
+      {
+        method: 'POST',
+        body: JSON.stringify(input),
+      },
+      expectedUserId,
+    );
   },
 
   /**

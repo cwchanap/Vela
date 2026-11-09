@@ -52,6 +52,7 @@
                 outlined
                 autofocus
                 v-model="renameDraft"
+                :disable="disabled"
                 @keyup.enter="commitRename"
                 @keyup.escape="cancelRename"
                 @click.stop
@@ -66,6 +67,7 @@
                   color="primary"
                   size="sm"
                   aria-label="Save name"
+                  :disable="disabled"
                   @click.stop="commitRename"
                   data-testid="chat-thread-rename-save"
                 />
@@ -103,6 +105,7 @@
                   <q-list dense>
                     <q-item
                       clickable
+                      :disable="disabled"
                       v-close-popup
                       @click="startRename(t)"
                       data-testid="chat-thread-rename"
@@ -114,6 +117,7 @@
                     </q-item>
                     <q-item
                       clickable
+                      :disable="disabled"
                       v-close-popup
                       @click="emit('delete', t)"
                       data-testid="llm-chat-delete-thread"
@@ -172,7 +176,7 @@ const startRename = (t: ChatThreadSummaryDTO) => {
 const commitRename = () => {
   const threadId = renamingId.value;
   const title = renameDraft.value.trim();
-  if (!threadId) return;
+  if (!threadId || props.disabled) return;
   if (!title) {
     cancelRename();
     return;

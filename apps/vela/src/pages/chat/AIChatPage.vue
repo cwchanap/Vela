@@ -66,7 +66,7 @@
     </q-dialog>
 
     <!-- Delete Confirmation Dialog -->
-    <q-dialog v-model="showDeleteConfirm">
+    <q-dialog v-model="showDeleteConfirm" :persistent="isDeleting">
       <q-card style="min-width: 350px">
         <q-card-section>
           <div class="text-h6">Delete Conversation?</div>
@@ -117,6 +117,7 @@ import {
   type ChatThreadSummaryDTO,
 } from '../../services/chatHistoryService';
 import { llmClient, describeLlmError } from '../../services/llm';
+import { isAccountChangedError } from '../../utils/httpClient';
 import type { LlmMessage } from '@vela/common';
 
 const $q = useQuasar();
@@ -199,6 +200,7 @@ const persistMessage = async (
     return true;
   } catch (e) {
     if (isStale()) return false;
+    if (isAccountChangedError(e)) throw e;
     console.error('Failed to save chat message', e);
     $q.notify({ type: 'warning', message: 'Failed to save chat history' });
     return false;
@@ -267,6 +269,7 @@ const onSend = async (draft: string) => {
 
   const uid = getUserId();
   const cid = ensureChatId();
+  if (isDeletePending(cid)) return;
   const opGen = chat.nextGeneration();
   const sessionGen = auth.sessionGeneration;
   const isStale = () => isStaleOperation(opGen, sessionGen);
@@ -292,14 +295,17 @@ const onSend = async (draft: string) => {
 
     // Explicit per-request snapshot of the active provider/model/key; there is
     // no global service state to keep in sync.
-    const resp = await llmClient.generate({
-      provider: selection.value.provider,
-      model: selection.value.model,
-      apiKey: selection.value.apiKey,
-      ...(selection.value.thinking ? { thinking: selection.value.thinking } : {}),
-      system: systemPrompt,
-      messages: history,
-    });
+    const resp = await llmClient.generate(
+      {
+        provider: selection.value.provider,
+        model: selection.value.model,
+        apiKey: selection.value.apiKey,
+        ...(selection.value.thinking ? { thinking: selection.value.thinking } : {}),
+        system: systemPrompt,
+        messages: history,
+      },
+      uid,
+    );
     if (isStale()) return;
 
     // A successful-but-empty reply must not be stored: an empty assistant
@@ -378,7 +384,7 @@ const deleteThread = async () => {
       userId: uid,
     });
 
-    if (!isStaleOperation(opGen, sessionGen)) {
+    if (auth.sessionGeneration === sessionGen) {
       // If the deleted thread is the current chat, start a new chat
       if (chat.chatId === thread.ThreadId) {
         chat.startNewChat();

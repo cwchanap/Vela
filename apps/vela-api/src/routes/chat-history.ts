@@ -205,6 +205,7 @@ async function dynamodb_listThreads(userId: string): Promise<ChatThreadSummary[]
       ExpressionAttributeValues: {
         ':userId': userId,
       },
+      ConsistentRead: true,
     });
 
     const threads = rows.map((row) => ({
@@ -235,6 +236,7 @@ async function dynamodb_getMessages(userId: string, thread_id: string): Promise<
       ExpressionAttributeValues: {
         ':threadId': messagePartitionKey(userId, thread_id),
       },
+      ConsistentRead: true,
     });
 
     return messages.map((message) => ({
@@ -317,6 +319,7 @@ async function dynamodb_deleteThread(
       ExpressionAttributeValues: {
         ':threadId': messagePartitionKey(userId, threadId),
       },
+      ConsistentRead: true,
     });
 
     // SECURITY: Verify the user owns this thread before deleting

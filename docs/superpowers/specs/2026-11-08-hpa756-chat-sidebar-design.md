@@ -2,7 +2,7 @@
 
 **Date:** 2026-11-08  
 **Linear:** https://linear.app/cwchanap/issue/HPA-756/add-chat-sidebar-with-thread-rename  
-**State:** Design updated after the 2026-11-08 review; implementation and acceptance have **not** been completed.  
+**State:** Implementation is complete on the HPA-756 PR and the automated verification gates (unit/component, API, CDK, synth, mocked browser) pass. Live authenticated acceptance and the optional physical-device checks remain outstanding — HPA-756 is **not** Done.  
 **PR policy:** Exactly one HPA-756 draft PR for these documents, implementation, tests, and subsequent review fixes.
 
 ## Goal and dependency
@@ -48,6 +48,8 @@ Create `vela-chat-threads` in `packages/cdk/lib/database-stack.ts`, mirroring th
 | `model` | `{ provider, model }` or absent | PATCH accepts/stores the value for HPA-758; no per-thread picker in HPA-756 |
 
 Messages remain in `vela-chat-history`; no copying or dual-read migration. Remove `UserIdIndex` from the message table: after thread-list queries move to the new table, it has no runtime reader. Existing old message-only threads do not appear because there are no real users yet. No chat-specific ORM, cache store, or new GSI. `lastLlmAt` is intentionally **not** part of HPA-756's schema/DTO: DynamoDB is schemaless and HPA-758 will add its own cache-timestamp write contract when it needs it.
+
+As implemented, the message table's internal partition key is a collision-resistant deterministic hash of `[authenticatedUserId, publicThreadId]` (SHA-256 hex), not the raw public `ThreadId`. Two accounts that generate the same public `ThreadId` therefore occupy disjoint message partitions, which removes the cross-user first-write poisoning race called out during Task 2 review. The public contract is unchanged — `thread_id` parameters and DTOs still carry the plain UUID — and no backfill is required because legacy message-only threads are already out of scope.
 
 `GET /threads` queries by `UserId`, paginates until complete (DynamoDB's 1 MiB query-page limit), then sorts records by `updatedAt` descending, with a deterministic `ThreadId` tie-break. Sorting in memory is deliberate at hobby-project scale: the required sort key is `ThreadId`, and a second index is not justified yet.
 
@@ -98,3 +100,5 @@ No HPA-758 model picker, cache countdown, or `lastLlmAt` write; no TTS work; no 
 - Main navigation + chat navigation coexist at desktop and mobile widths (mocked Playwright at 1280px and 375px); with a long conversation, sidebar/messages scroll independently, the page height stays constrained, and the composer remains visible. Keep `llm-chat-input` and `llm-chat-send` selectors intact for the existing settings E2E suite.
 - Update Bun API tests (including metadata-lookup-first 404 vs owned-empty 200, message pagination and long/whitespace title truncation), Vitest page/composable tests (including pure relative-time helper), CDK table/permission tests (including GSI removal), the synthetic API router, and old API E2E tests that assume `?user_id=`. Add one stateful mocked browser scenario for send → new thread → rename → reload → delete active thread at both widths, with a long-list scroll assertion.
 - Run targeted tests, API type-check, web type-check/build, CDK tests, `cdk:synth` and `bun run test:e2e:mocked`; record any missing environment-dependent verification honestly.
+
+**Verification status:** the automated checks above are implemented and passing. The manual items — live authenticated A/B verification (cross-user read/rename/delete denial, reload persistence) and the optional physical-device spot-check — remain outstanding and are the only blockers to Linear Done.
