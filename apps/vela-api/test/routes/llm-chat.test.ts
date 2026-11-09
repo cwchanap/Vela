@@ -690,7 +690,7 @@ describe('LLM Chat Route', () => {
       expect(res.status).toBe(204);
       expect(res.headers.get('Access-Control-Allow-Origin')).toBeNull();
       expect(res.headers.get('Access-Control-Allow-Methods')).toBe(
-        'GET, POST, PUT, DELETE, OPTIONS',
+        'GET, POST, PUT, PATCH, DELETE, OPTIONS',
       );
     });
 
@@ -707,7 +707,7 @@ describe('LLM Chat Route', () => {
       expect(res.status).toBe(204);
       expect(res.headers.get('Access-Control-Allow-Origin')).toBe('http://localhost:9000');
       expect(res.headers.get('Access-Control-Allow-Methods')).toBe(
-        'GET, POST, PUT, DELETE, OPTIONS',
+        'GET, POST, PUT, PATCH, DELETE, OPTIONS',
       );
     });
 

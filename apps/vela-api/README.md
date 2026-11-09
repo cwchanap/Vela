@@ -41,9 +41,11 @@ Send chat requests to LLM providers (Google Gemini, OpenAI, Anthropic, or OpenRo
 
 ### Chat History API
 
+**Requires Authentication**: All endpoints require a valid Cognito ID token in the `Authorization: Bearer <token>` header. The authenticated user's ID is derived from the token — the API accepts no user id parameter and ignores any `UserId`/`Timestamp` sent by the client in favour of server-side values.
+
 **POST /api/chat-history/save**
 
-Save a chat message to DynamoDB.
+Save a chat message to DynamoDB. A user message (`is_user: true`) first upserts the thread metadata row — the server derives the initial title from the trimmed first message (max 60 characters, falling back to `New conversation`) — then writes the message. An assistant message (`is_user: false`) writes the message only.
 
 ```json
 {
@@ -55,17 +57,28 @@ Save a chat message to DynamoDB.
 }
 ```
 
-**GET /api/chat-history/threads?user_id=USER_ID**
+**GET /api/chat-history/threads**
 
-Get all chat threads for a user.
+Get all chat threads for the authenticated user, newest first. Each thread is `{ ThreadId, title, createdAt, updatedAt, model? }`.
 
 **GET /api/chat-history/messages?thread_id=THREAD_ID**
 
-Get all messages in a specific thread.
+Get all messages in a specific thread. Returns `404 { "error": "Thread not found" }` when the thread does not exist or belongs to another user.
 
-**DELETE /api/chat-history/thread?thread_id=THREAD_ID**
+**PATCH /api/chat-history/thread/:id**
 
-**Requires Authentication**: Delete a chat thread and all its messages. The API validates that the authenticated user owns the thread before deletion. Requires a valid Cognito access token in the `Authorization: Bearer <token>` header.
+Rename a thread and/or store its model selection. Supply a nonempty trimmed `title` (max 60 characters), a `model` object (`{ "provider": "google" | "openai" | "anthropic" | "openrouter", "model": string }`), or both. Returns `{ "thread": <updated row> }`; an empty or invalid body returns 400, and a missing or unowned thread returns `404 { "error": "Thread not found" }`.
+
+```json
+{
+  "title": "JLPT N5 practice",
+  "model": { "provider": "google", "model": "gemini-3.8-flash" }
+}
+```
+
+**DELETE /api/chat-history/thread/:id**
+
+Delete a chat thread, all its messages, and its metadata row. Returns `404 { "error": "Thread not found" }` when the thread does not exist or belongs to another user.
 
 ### Saved Sentences API
 
@@ -120,7 +133,8 @@ If server-side API keys are configured, they will be used for all requests. User
 
 - `DDB_ENDPOINT`: DynamoDB endpoint (default: https://dynamodb.us-east-1.amazonaws.com)
 - `DDB_REGION`: AWS region (default: us-east-1)
-- `DDB_TABLE`: DynamoDB table name (default: vela)
+- `DDB_TABLE` / `DYNAMODB_TABLE_NAME`: chat history message table (default: vela-chat-history)
+- `CHAT_THREADS_TABLE_NAME`: chat thread metadata table (default: vela-chat-threads)
 
 ### CORS Configuration
 

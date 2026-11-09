@@ -38,5 +38,7 @@ export type {
   ChatMessage,
   LLMBridgeRequest,
   ChatHistoryItem,
+  ChatThreadModel,
   ChatThreadSummary,
+  PatchChatThread,
 } from './validation';
