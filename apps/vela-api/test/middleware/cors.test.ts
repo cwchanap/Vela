@@ -38,7 +38,7 @@ describe('CORS Middleware', () => {
       expect(res.status).toBe(204);
       expect(res.headers.get('Access-Control-Allow-Origin')).toBeNull();
       expect(res.headers.get('Access-Control-Allow-Methods')).toBe(
-        'GET, POST, PUT, DELETE, OPTIONS',
+        'GET, POST, PUT, PATCH, DELETE, OPTIONS',
       );
       expect(res.headers.get('Access-Control-Allow-Headers')).toBe(
         'authorization, x-client-info, apikey, content-type',
@@ -61,7 +61,7 @@ describe('CORS Middleware', () => {
       expect(res.headers.get('Access-Control-Allow-Origin')).toBe('http://localhost:9000');
       expect(res.headers.get('Access-Control-Allow-Credentials')).toBe('true');
       expect(res.headers.get('Access-Control-Allow-Methods')).toBe(
-        'GET, POST, PUT, DELETE, OPTIONS',
+        'GET, POST, PUT, PATCH, DELETE, OPTIONS',
       );
       expect(res.headers.get('Access-Control-Allow-Headers')).toBe(
         'authorization, x-client-info, apikey, content-type',

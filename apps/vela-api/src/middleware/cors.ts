@@ -112,7 +112,7 @@ export const corsMiddleware = async (c: Context<{ Bindings: Env }>, next: Next) 
 
   // Set other CORS headers
   c.header('Access-Control-Allow-Headers', 'authorization, x-client-info, apikey, content-type');
-  c.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+  c.header('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
 
   if (c.req.method === 'OPTIONS') {
     return new Response(null, {

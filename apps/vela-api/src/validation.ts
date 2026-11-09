@@ -10,12 +10,32 @@ export const ChatHistoryItemSchema = z.object({
   is_user: z.boolean(),
 });
 
+export const ChatThreadModelSchema = z.object({
+  provider: z.enum(LLM_PROVIDERS),
+  model: z.string().min(1, 'model is required'),
+});
+
 export const ChatThreadSummarySchema = z.object({
   ThreadId: z.string().min(1, 'ThreadId is required'),
-  lastTimestamp: z.number().int().positive('lastTimestamp must be a positive integer'),
-  title: z.string().min(1, 'Title is required'),
-  messageCount: z.number().int().min(0, 'messageCount must be non-negative'),
+  title: z.string().min(1, 'Title is required').max(60, 'Title must be 60 characters or fewer'),
+  createdAt: z.number().int().positive('createdAt must be a positive integer'),
+  updatedAt: z.number().int().positive('updatedAt must be a positive integer'),
+  model: ChatThreadModelSchema.optional(),
 });
+
+export const PatchChatThreadSchema = z
+  .object({
+    title: z
+      .string()
+      .trim()
+      .min(1, 'title is required')
+      .max(60, 'title must be 60 characters or fewer')
+      .optional(),
+    model: ChatThreadModelSchema.optional(),
+  })
+  .refine((data) => data.title !== undefined || data.model !== undefined, {
+    message: 'At least one of title or model is required',
+  });
 
 // Chat Message Schema for LLM requests
 export const ChatMessageSchema = z.object({
@@ -105,7 +125,9 @@ export const ThreadIdQuerySchema = z.object({
 
 // Type exports for use in handlers
 export type ChatHistoryItem = z.infer<typeof ChatHistoryItemSchema>;
+export type ChatThreadModel = z.infer<typeof ChatThreadModelSchema>;
 export type ChatThreadSummary = z.infer<typeof ChatThreadSummarySchema>;
+export type PatchChatThread = z.infer<typeof PatchChatThreadSchema>;
 export type ChatMessage = z.infer<typeof ChatMessageSchema>;
 export type LLMBridgeRequest = z.infer<typeof LLMBridgeRequestSchema>;
 export type UserIdQuery = z.infer<typeof UserIdQuerySchema>;

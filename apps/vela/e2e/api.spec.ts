@@ -74,22 +74,70 @@ test.describe('Vela API E2E Tests', () => {
   });
 
   test.describe('Chat History API', () => {
-    test.describe('POST /api/chat-history/save', () => {
-      test('should save chat message with valid data', async () => {
-        const chatMessage = {
-          ThreadId: 'test-thread-123',
-          Timestamp: Date.now(),
-          UserId: 'test-user-456',
-          message: 'Hello, this is a test message',
-          is_user: true,
-        };
-
+    // All chat-history routes are behind requireAuth: anonymous requests are
+    // rejected with 401 before validation or any DynamoDB call.
+    test.describe('unauthenticated', () => {
+      test('POST /api/chat-history/save returns 401', async () => {
         const response = await fetch(`${API_BASE_URL}/api/chat-history/save`, {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify(chatMessage),
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            ThreadId: 'test-thread-123',
+            Timestamp: Date.now(),
+            UserId: 'test-user-456',
+            message: 'Hello, this is a test message',
+            is_user: true,
+          }),
+        });
+
+        expect(response.status).toBe(401);
+      });
+
+      test('GET /api/chat-history/threads returns 401', async () => {
+        const response = await fetch(`${API_BASE_URL}/api/chat-history/threads`);
+        expect(response.status).toBe(401);
+      });
+
+      test('GET /api/chat-history/messages returns 401', async () => {
+        const response = await fetch(
+          `${API_BASE_URL}/api/chat-history/messages?thread_id=test-thread-123`,
+        );
+        expect(response.status).toBe(401);
+      });
+
+      test('PATCH /api/chat-history/thread/:id returns 401', async () => {
+        const response = await fetch(`${API_BASE_URL}/api/chat-history/thread/test-thread-123`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ title: 'Renamed' }),
+        });
+        expect(response.status).toBe(401);
+      });
+
+      test('DELETE /api/chat-history/thread/:id returns 401', async () => {
+        const response = await fetch(`${API_BASE_URL}/api/chat-history/thread/test-thread-123`, {
+          method: 'DELETE',
+        });
+        expect(response.status).toBe(401);
+      });
+    });
+
+    test.describe.serial('authenticated', () => {
+      test.skip(!hasCognitoTestEnv, 'Cognito test credentials not configured');
+
+      const threadId = `e2e-thread-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+
+      test('saves a first user message with server-derived identity', async () => {
+        const response = await fetch(`${API_BASE_URL}/api/chat-history/save`, {
+          method: 'POST',
+          headers: await authHeaders(),
+          body: JSON.stringify({
+            ThreadId: threadId,
+            Timestamp: 0,
+            UserId: 'client-ignored',
+            message: 'E2E test first user prompt',
+            is_user: true,
+          }),
         });
 
         expect(response.status).toBe(200);
@@ -97,106 +145,141 @@ test.describe('Vela API E2E Tests', () => {
         expect(data).toEqual({ ok: true });
       });
 
-      test('should reject invalid chat message data', async () => {
-        const invalidMessage = {
-          ThreadId: '', // Invalid: empty string
-          Timestamp: 'invalid-timestamp', // Invalid: should be number
-          UserId: 'test-user',
-          message: 'Test message',
-          is_user: 'true', // Invalid: should be boolean
-        };
-
+      test('rejects invalid chat message data', async () => {
         const response = await fetch(`${API_BASE_URL}/api/chat-history/save`, {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify(invalidMessage),
-        });
-
-        expect(response.status).toBe(400);
-        const data = await response.json();
-        expect(data.error).toBeDefined();
-        expect(data.error).toContain('ZodError');
-      });
-
-      test('should reject missing required fields', async () => {
-        const incompleteMessage = {
-          ThreadId: 'test-thread',
-          // Missing other required fields
-        };
-
-        const response = await fetch(`${API_BASE_URL}/api/chat-history/save`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify(incompleteMessage),
+          headers: await authHeaders(),
+          body: JSON.stringify({
+            ThreadId: '',
+            Timestamp: 'invalid-timestamp',
+            UserId: 'test-user',
+            message: 'Test message',
+            is_user: 'true',
+          }),
         });
 
         expect(response.status).toBe(400);
         const data = await response.json();
         expect(data.error).toBeDefined();
       });
-    });
 
-    test.describe('GET /api/chat-history/threads', () => {
-      test('should return threads for valid user_id', async () => {
+      test('lists the new thread with its derived title and timestamps', async () => {
+        const response = await fetch(`${API_BASE_URL}/api/chat-history/threads`, {
+          headers: await authHeaders(),
+        });
+
+        expect(response.status).toBe(200);
+        const data = await response.json();
+        expect(Array.isArray(data.threads)).toBe(true);
+        const thread = data.threads.find((t: any) => t.ThreadId === threadId);
+        expect(thread).toBeDefined();
+        expect(thread.title).toBe('E2E test first user prompt');
+        expect(thread.createdAt).toEqual(expect.any(Number));
+        expect(thread.updatedAt).toEqual(expect.any(Number));
+      });
+
+      test('returns the thread messages', async () => {
         const response = await fetch(
-          `${API_BASE_URL}/api/chat-history/threads?user_id=test-user-456`,
+          `${API_BASE_URL}/api/chat-history/messages?thread_id=${encodeURIComponent(threadId)}`,
+          { headers: await authHeaders() },
         );
 
-        // This might return 500 if DynamoDB is not configured, but the validation should pass
-        expect([200, 500]).toContain(response.status);
-
-        if (response.status === 200) {
-          const data = await response.json();
-          expect(data).toHaveProperty('threads');
-          expect(Array.isArray(data.threads)).toBe(true);
-        }
-      });
-
-      test('should reject missing user_id parameter', async () => {
-        const response = await fetch(`${API_BASE_URL}/api/chat-history/threads`);
-
-        expect(response.status).toBe(400);
+        expect(response.status).toBe(200);
         const data = await response.json();
-        expect(data.error).toBeDefined();
-        expect(data.error).toContain('ZodError');
+        expect(Array.isArray(data.items)).toBe(true);
+        expect(data.items).toHaveLength(1);
+        expect(data.items[0]).toEqual(
+          expect.objectContaining({ ThreadId: threadId, is_user: true }),
+        );
       });
 
-      test('should reject empty user_id parameter', async () => {
-        const response = await fetch(`${API_BASE_URL}/api/chat-history/threads?user_id=`);
-
-        expect(response.status).toBe(400);
-        const data = await response.json();
-        expect(data.error).toBeDefined();
-      });
-    });
-
-    test.describe('GET /api/chat-history/messages', () => {
-      test('should return messages for valid thread_id', async () => {
+      test('returns 404 Thread not found for an unknown thread', async () => {
         const response = await fetch(
-          `${API_BASE_URL}/api/chat-history/messages?thread_id=test-thread-123`,
+          `${API_BASE_URL}/api/chat-history/messages?thread_id=missing-${threadId}`,
+          { headers: await authHeaders() },
         );
 
-        // This might return 500 if DynamoDB is not configured, but the validation should pass
-        expect([200, 500]).toContain(response.status);
-
-        if (response.status === 200) {
-          const data = await response.json();
-          expect(data).toHaveProperty('items');
-          expect(Array.isArray(data.items)).toBe(true);
-        }
+        expect(response.status).toBe(404);
+        const data = await response.json();
+        expect(data.error).toBe('Thread not found');
       });
 
-      test('should reject missing thread_id parameter', async () => {
-        const response = await fetch(`${API_BASE_URL}/api/chat-history/messages`);
+      test('renames the thread and returns the updated row', async () => {
+        const response = await fetch(
+          `${API_BASE_URL}/api/chat-history/thread/${encodeURIComponent(threadId)}`,
+          {
+            method: 'PATCH',
+            headers: await authHeaders(),
+            body: JSON.stringify({ title: 'E2E renamed thread' }),
+          },
+        );
+
+        expect(response.status).toBe(200);
+        const data = await response.json();
+        expect(data.thread).toEqual(
+          expect.objectContaining({ ThreadId: threadId, title: 'E2E renamed thread' }),
+        );
+      });
+
+      test('rejects an empty PATCH body', async () => {
+        const response = await fetch(
+          `${API_BASE_URL}/api/chat-history/thread/${encodeURIComponent(threadId)}`,
+          {
+            method: 'PATCH',
+            headers: await authHeaders(),
+            body: JSON.stringify({}),
+          },
+        );
 
         expect(response.status).toBe(400);
         const data = await response.json();
         expect(data.error).toBeDefined();
-        expect(data.error).toContain('ZodError');
+      });
+
+      test('returns 404 when patching a missing thread', async () => {
+        const response = await fetch(
+          `${API_BASE_URL}/api/chat-history/thread/missing-${threadId}`,
+          {
+            method: 'PATCH',
+            headers: await authHeaders(),
+            body: JSON.stringify({ title: 'Whatever' }),
+          },
+        );
+
+        expect(response.status).toBe(404);
+        const data = await response.json();
+        expect(data.error).toBe('Thread not found');
+      });
+
+      test('deletes the thread and its metadata', async () => {
+        const response = await fetch(
+          `${API_BASE_URL}/api/chat-history/thread/${encodeURIComponent(threadId)}`,
+          { method: 'DELETE', headers: await authHeaders() },
+        );
+
+        expect(response.status).toBe(200);
+        const data = await response.json();
+        expect(data).toEqual({ ok: true });
+      });
+
+      test('returns 404 for the deleted thread', async () => {
+        const messagesResponse = await fetch(
+          `${API_BASE_URL}/api/chat-history/messages?thread_id=${encodeURIComponent(threadId)}`,
+          { headers: await authHeaders() },
+        );
+        expect(messagesResponse.status).toBe(404);
+
+        const deleteResponse = await fetch(
+          `${API_BASE_URL}/api/chat-history/thread/${encodeURIComponent(threadId)}`,
+          { method: 'DELETE', headers: await authHeaders() },
+        );
+        expect(deleteResponse.status).toBe(404);
+
+        const threadsResponse = await fetch(`${API_BASE_URL}/api/chat-history/threads`, {
+          headers: await authHeaders(),
+        });
+        const threads = await threadsResponse.json();
+        expect(threads.threads.some((t: any) => t.ThreadId === threadId)).toBe(false);
       });
     });
   });

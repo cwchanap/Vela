@@ -5,53 +5,82 @@ import type { ChatHistoryItem, Env } from '../../src/types';
 
 // Mock AWS SDK
 let mockPutCommand: any;
+let mockGetCommand: any;
 let mockQueryCommand: any;
-let mockScanCommand: any;
+let mockUpdateCommand: any;
+let mockDeleteCommand: any;
+let mockBatchWriteCommand: any;
 let mockSend: any;
 let chatHistory: typeof import('../../src/routes/chat-history').chatHistory;
 const globalMock = globalThis as typeof globalThis & {
   __dynamoMockSend?: ReturnType<typeof vi.fn>;
   __dynamoMockPutCommand?: ReturnType<typeof vi.fn>;
+  __dynamoMockGetCommand?: ReturnType<typeof vi.fn>;
   __dynamoMockQueryCommand?: ReturnType<typeof vi.fn>;
-  __dynamoMockScanCommand?: ReturnType<typeof vi.fn>;
+  __dynamoMockUpdateCommand?: ReturnType<typeof vi.fn>;
+  __dynamoMockDeleteCommand?: ReturnType<typeof vi.fn>;
+  __dynamoMockBatchWriteCommand?: ReturnType<typeof vi.fn>;
 };
 
 vi.mock('@aws-sdk/client-dynamodb', () => ({
   DynamoDBClient: vi.fn().mockImplementation(() => ({})),
 }));
 
+// Each command mock returns `{ input, __type }` so tests can assert the order
+// and shape of commands handed to docClient.send via mockSend.mock.calls.
 vi.mock('@aws-sdk/lib-dynamodb', () => ({
   DynamoDBDocumentClient: {
     from: vi.fn().mockImplementation(() => ({
       send: (...args: any[]) => globalMock.__dynamoMockSend?.(...args),
     })),
   },
-  GetCommand: vi.fn().mockImplementation((input: any) => ({ input })),
-  BatchGetCommand: vi.fn().mockImplementation((input: any) => ({ input })),
-  UpdateCommand: vi.fn().mockImplementation((input: any) => ({ input })),
-  DeleteCommand: vi.fn().mockImplementation((input: any) => ({ input })),
+  GetCommand: vi.fn().mockImplementation((input: any) => {
+    if (!globalMock.__dynamoMockGetCommand) {
+      globalMock.__dynamoMockGetCommand = vi.fn();
+    }
+    globalMock.__dynamoMockGetCommand(input);
+    return { input, __type: 'GetCommand' };
+  }),
+  BatchGetCommand: vi.fn().mockImplementation((input: any) => ({
+    input,
+    __type: 'BatchGetCommand',
+  })),
+  UpdateCommand: vi.fn().mockImplementation((input: any) => {
+    if (!globalMock.__dynamoMockUpdateCommand) {
+      globalMock.__dynamoMockUpdateCommand = vi.fn();
+    }
+    globalMock.__dynamoMockUpdateCommand(input);
+    return { input, __type: 'UpdateCommand' };
+  }),
+  DeleteCommand: vi.fn().mockImplementation((input: any) => {
+    if (!globalMock.__dynamoMockDeleteCommand) {
+      globalMock.__dynamoMockDeleteCommand = vi.fn();
+    }
+    globalMock.__dynamoMockDeleteCommand(input);
+    return { input, __type: 'DeleteCommand' };
+  }),
   PutCommand: vi.fn().mockImplementation((input: any) => {
     if (!globalMock.__dynamoMockPutCommand) {
       globalMock.__dynamoMockPutCommand = vi.fn();
     }
     globalMock.__dynamoMockPutCommand(input);
-    return { input };
+    return { input, __type: 'PutCommand' };
   }),
   QueryCommand: vi.fn().mockImplementation((input: any) => {
     if (!globalMock.__dynamoMockQueryCommand) {
       globalMock.__dynamoMockQueryCommand = vi.fn();
     }
     globalMock.__dynamoMockQueryCommand(input);
-    return { input };
+    return { input, __type: 'QueryCommand' };
   }),
-  ScanCommand: vi.fn().mockImplementation((input: any) => {
-    if (!globalMock.__dynamoMockScanCommand) {
-      globalMock.__dynamoMockScanCommand = vi.fn();
+  ScanCommand: vi.fn().mockImplementation((input: any) => ({ input, __type: 'ScanCommand' })),
+  BatchWriteCommand: vi.fn().mockImplementation((input: any) => {
+    if (!globalMock.__dynamoMockBatchWriteCommand) {
+      globalMock.__dynamoMockBatchWriteCommand = vi.fn();
     }
-    globalMock.__dynamoMockScanCommand(input);
-    return { input };
+    globalMock.__dynamoMockBatchWriteCommand(input);
+    return { input, __type: 'BatchWriteCommand' };
   }),
-  BatchWriteCommand: vi.fn().mockImplementation((input: any) => ({ input })),
 }));
 
 vi.mock('../../src/middleware/auth', () => ({
@@ -68,12 +97,18 @@ vi.mock('../../src/middleware/auth', () => ({
 beforeEach(() => {
   mockSend = vi.fn();
   mockPutCommand = vi.fn();
+  mockGetCommand = vi.fn();
   mockQueryCommand = vi.fn();
-  mockScanCommand = vi.fn();
+  mockUpdateCommand = vi.fn();
+  mockDeleteCommand = vi.fn();
+  mockBatchWriteCommand = vi.fn();
   globalMock.__dynamoMockSend = mockSend;
   globalMock.__dynamoMockPutCommand = mockPutCommand;
+  globalMock.__dynamoMockGetCommand = mockGetCommand;
   globalMock.__dynamoMockQueryCommand = mockQueryCommand;
-  globalMock.__dynamoMockScanCommand = mockScanCommand;
+  globalMock.__dynamoMockUpdateCommand = mockUpdateCommand;
+  globalMock.__dynamoMockDeleteCommand = mockDeleteCommand;
+  globalMock.__dynamoMockBatchWriteCommand = mockBatchWriteCommand;
 });
 
 // Create a test app that includes the environment
@@ -97,6 +132,49 @@ function createTestApp(env: Env = {}) {
   return app;
 }
 
+const sentCommandTypes = () => mockSend.mock.calls.map((call: any[]) => (call[0] as any).__type);
+const sentInputs = () => mockSend.mock.calls.map((call: any[]) => (call[0] as any).input);
+
+const stubTimeout = () =>
+  vi.spyOn(globalThis, 'setTimeout').mockImplementation(((fn: () => void) => {
+    fn();
+    return 0 as unknown as ReturnType<typeof setTimeout>;
+  }) as typeof setTimeout);
+
+const threadRow = (overrides: Record<string, unknown> = {}) => ({
+  UserId: 'user-123',
+  ThreadId: 'thread-123',
+  title: 'My thread',
+  createdAt: 1693440000000,
+  updatedAt: 1693440005000,
+  ...overrides,
+});
+
+const messageRow = (overrides: Record<string, unknown> = {}): ChatHistoryItem => ({
+  ThreadId: 'thread-123',
+  Timestamp: 1693440000000,
+  UserId: 'user-123',
+  message: 'hello',
+  is_user: true,
+  ...overrides,
+});
+
+const saveRequest = (body: Record<string, unknown>) =>
+  new Request('http://localhost/save', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+
+const validSaveBody = (overrides: Record<string, unknown> = {}) => ({
+  ThreadId: 'thread-123',
+  Timestamp: Date.now(),
+  UserId: 'user-456',
+  message: 'Hello world',
+  is_user: true,
+  ...overrides,
+});
+
 describe('Chat History Route', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -113,22 +191,14 @@ describe('Chat History Route', () => {
       expect(res.status).toBe(204);
       expect(res.headers.get('Access-Control-Allow-Origin')).toBeNull();
       expect(res.headers.get('Access-Control-Allow-Methods')).toBe(
-        'GET, POST, PUT, DELETE, OPTIONS',
+        'GET, POST, PUT, PATCH, DELETE, OPTIONS',
       );
     });
   });
 
   describe('POST /save', () => {
-    test('should save a chat message', async () => {
-      const chatItem: ChatHistoryItem = {
-        ThreadId: 'thread-123',
-        Timestamp: Date.now(),
-        UserId: 'user-456',
-        message: 'Hello world',
-        is_user: true,
-      };
-
-      mockSend.mockResolvedValueOnce({});
+    test('should upsert thread metadata before saving a first user message', async () => {
+      mockSend.mockResolvedValue({});
 
       const app = createTestApp({
         AWS_ACCESS_KEY_ID: 'test-key',
@@ -136,52 +206,122 @@ describe('Chat History Route', () => {
         DDB_TABLE: 'vela-chat-history',
       });
 
-      const req = new Request('http://localhost/save', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(chatItem),
-      });
-
-      const res = await app.request(req);
+      const res = await app.request(saveRequest(validSaveBody()));
       const json = await res.json();
 
       expect(res.status).toBe(200);
       expect(json.ok).toBe(true);
-      expect(mockPutCommand).toHaveBeenCalledWith(
+
+      // Metadata upsert must precede the message write so no invisible messages exist.
+      expect(sentCommandTypes()).toEqual(['UpdateCommand', 'PutCommand']);
+      const [updateInput, putInput] = sentInputs();
+
+      expect(updateInput.TableName).toBe('vela-chat-threads');
+      expect(updateInput.Key).toEqual({ UserId: 'user-123', ThreadId: 'thread-123' });
+      expect(updateInput.UpdateExpression).toContain('if_not_exists(#title, :title)');
+      expect(updateInput.UpdateExpression).toContain('if_not_exists(#createdAt, :now)');
+      expect(updateInput.UpdateExpression).toContain('#updatedAt = :now');
+      expect(updateInput.ExpressionAttributeValues[':title']).toBe('Hello world');
+      expect(updateInput.ExpressionAttributeValues[':now']).toEqual(expect.any(Number));
+
+      expect(putInput.TableName).toBe('vela-chat-history');
+      expect(putInput.Item).toEqual(
         expect.objectContaining({
-          TableName: 'vela-chat-history',
-          Item: expect.objectContaining({
-            ThreadId: chatItem.ThreadId,
-            message: chatItem.message,
-            is_user: chatItem.is_user,
-            UserId: 'user-123',
-            Timestamp: expect.any(Number),
-          }),
+          ThreadId: 'thread-123',
+          message: 'Hello world',
+          is_user: true,
+          UserId: 'user-123',
+          Timestamp: expect.any(Number),
         }),
       );
     });
 
+    test('should trim and truncate a long first user message to a 60-character title', async () => {
+      mockSend.mockResolvedValue({});
+      const app = createTestApp({});
+
+      const longMessage = `   ${'a'.repeat(70)}   `;
+      const res = await app.request(saveRequest(validSaveBody({ message: longMessage })));
+
+      expect(res.status).toBe(200);
+      const updateInput = mockUpdateCommand.mock.calls[0][0];
+      expect(updateInput.ExpressionAttributeValues[':title']).toBe('a'.repeat(60));
+    });
+
+    test('should store the New conversation fallback title for a whitespace-only first message', async () => {
+      mockSend.mockResolvedValue({});
+      const app = createTestApp({});
+
+      const res = await app.request(saveRequest(validSaveBody({ message: '   ' })));
+
+      expect(res.status).toBe(200);
+      const updateInput = mockUpdateCommand.mock.calls[0][0];
+      expect(updateInput.ExpressionAttributeValues[':title']).toBe('New conversation');
+    });
+
+    test('should preserve an existing title and model on later user saves while bumping updatedAt', async () => {
+      mockSend.mockResolvedValue({});
+      const app = createTestApp({});
+
+      const res = await app.request(
+        saveRequest(validSaveBody({ message: 'A completely different follow-up question' })),
+      );
+
+      expect(res.status).toBe(200);
+      const updateInput = mockUpdateCommand.mock.calls[0][0];
+      // if_not_exists keeps a manual rename; model is never part of the save upsert.
+      expect(updateInput.UpdateExpression).toContain('if_not_exists(#title, :title)');
+      expect(updateInput.UpdateExpression).not.toContain('#model');
+      expect(updateInput.UpdateExpression).toContain('#updatedAt = :now');
+    });
+
+    test('should write only the message for an assistant save', async () => {
+      mockSend.mockResolvedValue({});
+      const app = createTestApp({});
+
+      const res = await app.request(saveRequest(validSaveBody({ is_user: false })));
+
+      expect(res.status).toBe(200);
+      expect(sentCommandTypes()).toEqual(['PutCommand']);
+      expect(mockUpdateCommand).not.toHaveBeenCalled();
+      expect(mockPutCommand).toHaveBeenCalledWith(
+        expect.objectContaining({
+          TableName: 'vela-chat-history',
+          Item: expect.objectContaining({ is_user: false, UserId: 'user-123' }),
+        }),
+      );
+    });
+
+    test('should not write the message when the metadata upsert fails', async () => {
+      mockSend.mockRejectedValueOnce(new Error('Metadata write failed'));
+      const app = createTestApp({});
+
+      const res = await app.request(saveRequest(validSaveBody()));
+      const json = await res.json();
+
+      expect(res.status).toBe(500);
+      expect(json.error).toContain('Metadata write failed');
+      expect(mockSend).toHaveBeenCalledTimes(1);
+      expect(mockPutCommand).not.toHaveBeenCalled();
+    });
+
+    test('should return 500 when the message write fails after a metadata upsert', async () => {
+      mockSend.mockResolvedValueOnce({}).mockRejectedValueOnce(new Error('Message write failed'));
+      const app = createTestApp({});
+
+      const res = await app.request(saveRequest(validSaveBody()));
+      const json = await res.json();
+
+      expect(res.status).toBe(500);
+      expect(json.error).toContain('Message write failed');
+      expect(sentCommandTypes()).toEqual(['UpdateCommand', 'PutCommand']);
+    });
+
     test('should handle DynamoDB errors', async () => {
       mockSend.mockRejectedValueOnce(new Error('DynamoDB error'));
+      const app = createTestApp({});
 
-      const app = createTestApp({
-        AWS_ACCESS_KEY_ID: 'test-key',
-        AWS_SECRET_ACCESS_KEY: 'test-secret',
-      });
-
-      const req = new Request('http://localhost/save', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          ThreadId: 'thread-123',
-          Timestamp: Date.now(),
-          UserId: 'user-456',
-          message: 'Hello',
-          is_user: true,
-        }),
-      });
-
-      const res = await app.request(req);
+      const res = await app.request(saveRequest(validSaveBody({ is_user: false })));
       const json = await res.json();
 
       expect(res.status).toBe(500);
@@ -189,211 +329,27 @@ describe('Chat History Route', () => {
     });
 
     test('should save without static AWS credentials in Hono bindings', async () => {
-      mockSend.mockResolvedValueOnce({});
+      mockSend.mockResolvedValue({});
       const app = createTestApp({});
 
-      const req = new Request('http://localhost/save', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          ThreadId: 'thread-123',
-          Timestamp: Date.now(),
-          UserId: 'user-456',
-          message: 'Hello',
-          is_user: true,
-        }),
-      });
-
-      const res = await app.request(req);
+      const res = await app.request(saveRequest(validSaveBody()));
       const json = await res.json();
 
       expect(res.status).toBe(200);
       expect(json.ok).toBe(true);
-      expect(mockSend).toHaveBeenCalledTimes(1);
+      expect(mockSend).toHaveBeenCalledTimes(2);
     });
   });
 
   describe('GET /threads', () => {
-    test('should return thread summaries for a user', async () => {
-      const mockItems: ChatHistoryItem[] = [
-        {
-          ThreadId: 'thread-1',
-          Timestamp: 1693440000000,
-          UserId: 'user-123',
-          message: 'First message',
-          is_user: true,
-        },
-        {
-          ThreadId: 'thread-1',
-          Timestamp: 1693440001000,
-          UserId: 'user-123',
-          message: 'Assistant response',
-          is_user: false,
-        },
-        {
-          ThreadId: 'thread-2',
-          Timestamp: 1693440002000,
-          UserId: 'user-123',
-          message: 'Another thread',
-          is_user: true,
-        },
-      ];
-
-      mockSend.mockResolvedValueOnce({
-        Items: mockItems,
-        LastEvaluatedKey: undefined,
-      });
-
-      const app = createTestApp({
-        AWS_ACCESS_KEY_ID: 'test-key',
-        AWS_SECRET_ACCESS_KEY: 'test-secret',
-        DDB_TABLE: 'vela-chat-history',
-      });
-
-      const req = new Request('http://localhost/threads?user_id=user-123');
-
-      const res = await app.request(req);
-      const json = await res.json();
-
-      expect(res.status).toBe(200);
-      expect(json.threads).toHaveLength(2);
-      expect(json.threads[0].ThreadId).toBe('thread-2'); // Latest first
-      expect(json.threads[1].ThreadId).toBe('thread-1');
-      expect(json.threads[1].messageCount).toBe(2);
-    });
-
-    test('should return 400 when user_id is missing', async () => {
-      const app = createTestApp({
-        AWS_ACCESS_KEY_ID: 'test-key',
-        AWS_SECRET_ACCESS_KEY: 'test-secret',
-      });
-      const req = new Request('http://localhost/threads');
-      const res = await app.request(req);
-      const json = await res.json();
-
-      expect(res.status).toBe(400);
-      expect(json.error).toContain('user_id is required');
-    });
-  });
-
-  describe('GET /messages', () => {
-    test('should return messages for a thread', async () => {
-      const mockItems: ChatHistoryItem[] = [
-        {
-          ThreadId: 'thread-123',
-          Timestamp: 1693440000000,
-          UserId: 'user-123',
-          message: 'First message',
-          is_user: true,
-        },
-        {
-          ThreadId: 'thread-123',
-          Timestamp: 1693440001000,
-          UserId: 'user-123',
-          message: 'Assistant response',
-          is_user: false,
-        },
-      ];
-
-      mockSend.mockResolvedValueOnce({
-        Items: mockItems,
-        LastEvaluatedKey: undefined,
-      });
-
-      const app = createTestApp({
-        AWS_ACCESS_KEY_ID: 'test-key',
-        AWS_SECRET_ACCESS_KEY: 'test-secret',
-        DDB_TABLE: 'vela-chat-history',
-      });
-
-      const req = new Request('http://localhost/messages?thread_id=thread-123');
-
-      const res = await app.request(req);
-      const json = await res.json();
-
-      expect(res.status).toBe(200);
-      expect(json.items).toHaveLength(2);
-      expect(json.items[0].message).toBe('First message');
-      expect(json.items[1].message).toBe('Assistant response');
-    });
-
-    test('should return 400 when thread_id is missing', async () => {
-      const app = createTestApp({
-        AWS_ACCESS_KEY_ID: 'test-key',
-        AWS_SECRET_ACCESS_KEY: 'test-secret',
-      });
-      const req = new Request('http://localhost/messages');
-      const res = await app.request(req);
-      const json = await res.json();
-
-      expect(res.status).toBe(400);
-      expect(json.error).toContain('thread_id is required');
-    });
-  });
-
-  describe('DELETE /thread', () => {
-    test('should delete thread when all messages belong to authenticated user', async () => {
-      mockSend
-        .mockResolvedValueOnce({
-          Items: [
-            {
-              ThreadId: 'thread-123',
-              Timestamp: 1693440000000,
-              UserId: 'user-123',
-              message: 'hello',
-              is_user: true,
-            },
-          ],
-        })
-        .mockResolvedValueOnce({
-          Items: [
-            {
-              ThreadId: 'thread-123',
-              Timestamp: 1693440000000,
-              UserId: 'user-123',
-              message: 'hello',
-              is_user: true,
-            },
-          ],
-          LastEvaluatedKey: undefined,
-        })
-        .mockResolvedValueOnce({
-          UnprocessedItems: {},
-        });
-
-      const app = createTestApp({
-        AWS_ACCESS_KEY_ID: 'test-key',
-        AWS_SECRET_ACCESS_KEY: 'test-secret',
-      });
-
-      const req = new Request('http://localhost/thread?thread_id=thread-123', {
-        method: 'DELETE',
-      });
-      const res = await app.request(req);
-      const json = await res.json();
-
-      expect(res.status).toBe(200);
-      expect(json.ok).toBe(true);
-    });
-
-    test('should reject deletion when thread has mixed ownership', async () => {
+    test('should return thread metadata sorted by updatedAt descending for the authenticated user', async () => {
       mockSend.mockResolvedValueOnce({
         Items: [
-          {
-            ThreadId: 'thread-123',
-            Timestamp: 1693440000000,
-            UserId: 'user-123',
-            message: 'hello',
-            is_user: true,
-          },
-          {
-            ThreadId: 'thread-123',
-            Timestamp: 1693440001000,
-            UserId: 'other-user',
-            message: 'intruder',
-            is_user: false,
-          },
+          threadRow({ ThreadId: 'thread-b', title: 'B', updatedAt: 1693440002000 }),
+          threadRow({ ThreadId: 'thread-c', title: 'C', updatedAt: 1693440001000 }),
+          threadRow({ ThreadId: 'thread-a', title: 'A', updatedAt: 1693440001000 }),
         ],
+        LastEvaluatedKey: undefined,
       });
 
       const app = createTestApp({
@@ -401,418 +357,637 @@ describe('Chat History Route', () => {
         AWS_SECRET_ACCESS_KEY: 'test-secret',
       });
 
-      const req = new Request('http://localhost/thread?thread_id=thread-123', {
-        method: 'DELETE',
-      });
-      const res = await app.request(req);
-      const json = await res.json();
-
-      expect(res.status).toBe(403);
-      expect(json.error).toContain('Forbidden');
-    });
-
-    test('should delete without static AWS credentials in Hono bindings', async () => {
-      mockSend.mockResolvedValueOnce({ Items: [] });
-      const app = createTestApp({});
-      const req = new Request('http://localhost/thread?thread_id=thread-123', {
-        method: 'DELETE',
-      });
-      const res = await app.request(req);
+      const res = await app.request(new Request('http://localhost/threads'));
       const json = await res.json();
 
       expect(res.status).toBe(200);
-      expect(json.ok).toBe(true);
-      expect(mockSend).toHaveBeenCalledTimes(1);
+      expect(json.threads).toHaveLength(3);
+      expect(json.threads[0].ThreadId).toBe('thread-b'); // newest first
+      // updatedAt ties break on ThreadId for a stable ordering
+      expect(json.threads[1].ThreadId).toBe('thread-a');
+      expect(json.threads[2].ThreadId).toBe('thread-c');
+      expect(json.threads[0]).toEqual(
+        expect.objectContaining({
+          title: 'B',
+          createdAt: expect.any(Number),
+          updatedAt: 1693440002000,
+        }),
+      );
+
+      expect(mockQueryCommand).toHaveBeenCalledWith(
+        expect.objectContaining({
+          TableName: 'vela-chat-threads',
+          KeyConditionExpression: 'UserId = :userId',
+          ExpressionAttributeValues: { ':userId': 'user-123' },
+        }),
+      );
+      const queryInput = mockQueryCommand.mock.calls[0][0];
+      expect(queryInput).not.toHaveProperty('IndexName');
+      expect(queryInput).not.toHaveProperty('ScanIndexForward');
     });
 
-    test('should return ok when thread is already empty', async () => {
-      // First call: getMessages returns empty (no messages in thread)
-      mockSend.mockResolvedValueOnce({ Items: [] });
-
-      const app = createTestApp({
-        AWS_ACCESS_KEY_ID: 'test-key',
-        AWS_SECRET_ACCESS_KEY: 'test-secret',
-      });
-
-      const req = new Request('http://localhost/thread?thread_id=empty-thread', {
-        method: 'DELETE',
-      });
-      const res = await app.request(req);
-      const json = await res.json();
-
-      expect(res.status).toBe(200);
-      expect(json.ok).toBe(true);
-    });
-
-    test('should return 500 when DynamoDB error occurs during delete', async () => {
-      // getMessages succeeds, but deleteThread fails
+    test('should paginate through all thread metadata pages', async () => {
       mockSend
         .mockResolvedValueOnce({
-          Items: [
-            {
-              ThreadId: 'thread-123',
-              Timestamp: 1693440000000,
-              UserId: 'user-123',
-              message: 'hello',
-              is_user: true,
-            },
-          ],
+          Items: [threadRow({ ThreadId: 'thread-1', updatedAt: 300 })],
+          LastEvaluatedKey: { UserId: 'user-123', ThreadId: 'thread-1' },
         })
-        .mockRejectedValueOnce(new Error('DynamoDB delete error'));
+        .mockResolvedValueOnce({
+          Items: [threadRow({ ThreadId: 'thread-2', updatedAt: 200 })],
+          LastEvaluatedKey: undefined,
+        });
 
-      const app = createTestApp({
-        AWS_ACCESS_KEY_ID: 'test-key',
-        AWS_SECRET_ACCESS_KEY: 'test-secret',
-      });
-
-      const req = new Request('http://localhost/thread?thread_id=thread-123', {
-        method: 'DELETE',
-      });
-      const res = await app.request(req);
+      const app = createTestApp({});
+      const res = await app.request(new Request('http://localhost/threads'));
       const json = await res.json();
 
-      expect(res.status).toBe(500);
-      expect(json.error).toContain('delete');
+      expect(res.status).toBe(200);
+      expect(json.threads.map((t: any) => t.ThreadId)).toEqual(['thread-1', 'thread-2']);
+      expect(mockSend).toHaveBeenCalledTimes(2);
+      expect(mockQueryCommand).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          ExclusiveStartKey: { UserId: 'user-123', ThreadId: 'thread-1' },
+        }),
+      );
     });
 
-    test('should retry batch delete when there are unprocessed items', async () => {
-      // Stub setTimeout so exponential backoff in the retry loop does not add real delay
-      const setTimeoutSpy = vi.spyOn(globalThis, 'setTimeout').mockImplementation(((
-        fn: () => void,
-      ) => {
-        fn();
-        return 0 as unknown as ReturnType<typeof setTimeout>;
-      }) as typeof setTimeout);
-
-      try {
-        const message = {
-          ThreadId: 'thread-123',
-          Timestamp: 1693440000000,
-          UserId: 'user-123',
-          message: 'hello',
-          is_user: true,
-        };
-
-        mockSend
-          // getMessages call
-          .mockResolvedValueOnce({ Items: [message] })
-          // First deleteThread query (pagination)
-          .mockResolvedValueOnce({ Items: [message], LastEvaluatedKey: undefined })
-          // First batch write - returns unprocessed items
-          .mockResolvedValueOnce({
-            UnprocessedItems: {
-              'vela-chat-history': [
-                { DeleteRequest: { Key: { ThreadId: 'thread-123', Timestamp: 1693440000000 } } },
-              ],
-            },
-          })
-          // Retry batch write - all processed
-          .mockResolvedValueOnce({ UnprocessedItems: {} });
-
-        const app = createTestApp({
-          AWS_ACCESS_KEY_ID: 'test-key',
-          AWS_SECRET_ACCESS_KEY: 'test-secret',
-          DDB_TABLE: 'vela-chat-history',
-        });
-
-        const req = new Request('http://localhost/thread?thread_id=thread-123', {
-          method: 'DELETE',
-        });
-        const res = await app.request(req);
-        const json = await res.json();
-
-        expect(res.status).toBe(200);
-        expect(json.ok).toBe(true);
-        // Verify: getMessages query + pagination query + first batch write + retry batch write
-        expect(mockSend).toHaveBeenCalledTimes(4);
-      } finally {
-        setTimeoutSpy.mockRestore();
-      }
-    });
-  });
-
-  describe('GET /threads - additional coverage', () => {
-    test('should list threads without static AWS credentials in Hono bindings', async () => {
-      mockSend.mockResolvedValueOnce({ Items: [] });
+    test('should return an empty thread list when the user has no threads', async () => {
+      mockSend.mockResolvedValueOnce({ Items: [], LastEvaluatedKey: undefined });
       const app = createTestApp({});
-      const req = new Request('http://localhost/threads?user_id=user-123');
-      const res = await app.request(req);
+
+      const res = await app.request(new Request('http://localhost/threads'));
       const json = await res.json();
 
       expect(res.status).toBe(200);
       expect(json.threads).toEqual([]);
-      expect(mockSend).toHaveBeenCalledTimes(1);
     });
 
-    test('should return 403 when accessing another user threads', async () => {
-      const app = createTestApp({
-        AWS_ACCESS_KEY_ID: 'test-key',
-        AWS_SECRET_ACCESS_KEY: 'test-secret',
-      });
-      const req = new Request('http://localhost/threads?user_id=other-user-456');
-      const res = await app.request(req);
-      const json = await res.json();
-
-      expect(res.status).toBe(403);
-      expect(json.error).toContain('Forbidden');
-    });
-
-    test('should return empty threads list when user has no messages', async () => {
-      mockSend.mockResolvedValueOnce({ Items: [], LastEvaluatedKey: undefined });
-
-      const app = createTestApp({
-        AWS_ACCESS_KEY_ID: 'test-key',
-        AWS_SECRET_ACCESS_KEY: 'test-secret',
+    test('should include the stored model on thread metadata when present', async () => {
+      mockSend.mockResolvedValueOnce({
+        Items: [
+          threadRow({
+            ThreadId: 'thread-1',
+            model: { provider: 'google', model: 'gemini-3.8-flash' },
+          }),
+        ],
       });
 
-      const req = new Request('http://localhost/threads?user_id=user-123');
-      const res = await app.request(req);
+      const app = createTestApp({});
+      const res = await app.request(new Request('http://localhost/threads'));
       const json = await res.json();
 
       expect(res.status).toBe(200);
-      expect(json.threads).toHaveLength(0);
+      expect(json.threads[0].model).toEqual({ provider: 'google', model: 'gemini-3.8-flash' });
     });
 
-    test('should fallback to scan when GSI index is not found', async () => {
-      const resourceNotFoundError = Object.assign(new Error('Requested resource not found'), {
-        name: 'ResourceNotFoundException',
-      });
+    test('should return 500 when the metadata query fails', async () => {
+      mockSend.mockRejectedValueOnce(new Error('Access denied'));
+      const app = createTestApp({});
 
-      mockSend
-        // First call fails with ResourceNotFoundException (GSI missing)
-        .mockRejectedValueOnce(resourceNotFoundError)
-        // Fallback scan succeeds
-        .mockResolvedValueOnce({
-          Items: [
-            {
-              ThreadId: 'thread-1',
-              Timestamp: 1693440000000,
-              UserId: 'user-123',
-              message: 'Hello',
-              is_user: true,
-            },
-          ],
-        });
-
-      const app = createTestApp({
-        AWS_ACCESS_KEY_ID: 'test-key',
-        AWS_SECRET_ACCESS_KEY: 'test-secret',
-      });
-
-      const req = new Request('http://localhost/threads?user_id=user-123');
-      const res = await app.request(req);
-      const json = await res.json();
-
-      expect(res.status).toBe(200);
-      expect(json.threads).toHaveLength(1);
-      // Verify the call sequence: first a Query (with GSI), then a Scan (fallback)
-      expect(mockSend).toHaveBeenCalledTimes(2);
-      expect(mockQueryCommand).toHaveBeenCalledWith(
-        expect.objectContaining({ IndexName: 'UserIdIndex' }),
-      );
-      expect(mockScanCommand).toHaveBeenCalledWith(
-        expect.objectContaining({ FilterExpression: 'UserId = :userId' }),
-      );
-    });
-
-    test('should fallback to scan when index has ValidationException', async () => {
-      const validationError = Object.assign(new Error('Invalid IndexName'), {
-        name: 'ValidationException',
-      });
-
-      mockSend.mockRejectedValueOnce(validationError).mockResolvedValueOnce({ Items: [] });
-
-      const app = createTestApp({
-        AWS_ACCESS_KEY_ID: 'test-key',
-        AWS_SECRET_ACCESS_KEY: 'test-secret',
-      });
-
-      const req = new Request('http://localhost/threads?user_id=user-123');
-      const res = await app.request(req);
-
-      expect(res.status).toBe(200);
-      // Verify the call sequence: first a Query (with GSI), then a Scan (fallback)
-      expect(mockSend).toHaveBeenCalledTimes(2);
-      expect(mockQueryCommand).toHaveBeenCalledWith(
-        expect.objectContaining({ IndexName: 'UserIdIndex' }),
-      );
-      expect(mockScanCommand).toHaveBeenCalledWith(
-        expect.objectContaining({ FilterExpression: 'UserId = :userId' }),
-      );
-    });
-
-    test('should propagate non-index errors from listThreads query', async () => {
-      const accessDeniedError = Object.assign(new Error('Access denied'), {
-        name: 'AccessDeniedException',
-      });
-
-      mockSend.mockRejectedValueOnce(accessDeniedError);
-
-      const app = createTestApp({
-        AWS_ACCESS_KEY_ID: 'test-key',
-        AWS_SECRET_ACCESS_KEY: 'test-secret',
-      });
-
-      const req = new Request('http://localhost/threads?user_id=user-123');
-      const res = await app.request(req);
+      const res = await app.request(new Request('http://localhost/threads'));
       const json = await res.json();
 
       expect(res.status).toBe(500);
       expect(json.error).toContain('Access denied');
     });
 
-    test('should return 400 when user_id is empty string', async () => {
-      const app = createTestApp({
-        AWS_ACCESS_KEY_ID: 'test-key',
-        AWS_SECRET_ACCESS_KEY: 'test-secret',
-      });
-      const req = new Request('http://localhost/threads?user_id=');
-      const res = await app.request(req);
+    test('should list threads without static AWS credentials in Hono bindings', async () => {
+      mockSend.mockResolvedValueOnce({ Items: [] });
+      const app = createTestApp({});
+      const res = await app.request(new Request('http://localhost/threads'));
       const json = await res.json();
 
-      expect(res.status).toBe(400);
-      expect(json.error).toContain('user_id is required');
+      expect(res.status).toBe(200);
+      expect(json.threads).toEqual([]);
+      expect(mockSend).toHaveBeenCalledTimes(1);
     });
   });
 
-  describe('GET /messages - additional coverage', () => {
-    test('should get messages without static AWS credentials in Hono bindings', async () => {
-      mockSend.mockResolvedValueOnce({ Items: [] });
+  describe('GET /messages', () => {
+    test('should fetch the thread metadata row before querying messages', async () => {
+      mockSend.mockResolvedValueOnce({ Item: threadRow() }).mockResolvedValueOnce({
+        Items: [messageRow()],
+        LastEvaluatedKey: undefined,
+      });
+
       const app = createTestApp({});
-      const req = new Request('http://localhost/messages?thread_id=thread-123');
-      const res = await app.request(req);
+      const res = await app.request(new Request('http://localhost/messages?thread_id=thread-123'));
+      const json = await res.json();
+
+      expect(res.status).toBe(200);
+      expect(json.items).toHaveLength(1);
+      expect(sentCommandTypes()).toEqual(['GetCommand', 'QueryCommand']);
+      expect(mockGetCommand).toHaveBeenCalledWith(
+        expect.objectContaining({
+          TableName: 'vela-chat-threads',
+          Key: { UserId: 'user-123', ThreadId: 'thread-123' },
+        }),
+      );
+      expect(mockQueryCommand).toHaveBeenCalledWith(
+        expect.objectContaining({
+          TableName: 'vela-chat-history',
+          KeyConditionExpression: 'ThreadId = :threadId',
+          ExpressionAttributeValues: { ':threadId': 'thread-123' },
+        }),
+      );
+    });
+
+    test('should return 404 Thread not found for a missing or unowned thread row', async () => {
+      mockSend.mockResolvedValueOnce({ Item: undefined });
+      const app = createTestApp({});
+
+      const res = await app.request(
+        new Request('http://localhost/messages?thread_id=other-users-thread'),
+      );
+      const json = await res.json();
+
+      expect(res.status).toBe(404);
+      expect(json.error).toBe('Thread not found');
+      expect(mockQueryCommand).not.toHaveBeenCalled();
+    });
+
+    test('should return 200 with an empty items list for an owned empty thread', async () => {
+      mockSend
+        .mockResolvedValueOnce({ Item: threadRow() })
+        .mockResolvedValueOnce({ Items: [], LastEvaluatedKey: undefined });
+
+      const app = createTestApp({});
+      const res = await app.request(new Request('http://localhost/messages?thread_id=thread-123'));
       const json = await res.json();
 
       expect(res.status).toBe(200);
       expect(json.items).toEqual([]);
-      expect(mockSend).toHaveBeenCalledTimes(1);
     });
 
-    test('should return 403 when messages belong to different user', async () => {
-      mockSend.mockResolvedValueOnce({
+    test('should load all message pages for a thread', async () => {
+      mockSend
+        .mockResolvedValueOnce({ Item: threadRow() })
+        .mockResolvedValueOnce({
+          Items: [messageRow({ Timestamp: 1 })],
+          LastEvaluatedKey: { ThreadId: 'thread-123', Timestamp: 1 },
+        })
+        .mockResolvedValueOnce({
+          Items: [messageRow({ Timestamp: 2 })],
+          LastEvaluatedKey: undefined,
+        });
+
+      const app = createTestApp({});
+      const res = await app.request(new Request('http://localhost/messages?thread_id=thread-123'));
+      const json = await res.json();
+
+      expect(res.status).toBe(200);
+      expect(json.items).toHaveLength(2);
+      expect(json.items.map((m: any) => m.Timestamp)).toEqual([1, 2]);
+      expect(mockSend).toHaveBeenCalledTimes(3);
+      expect(mockQueryCommand).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          ExclusiveStartKey: { ThreadId: 'thread-123', Timestamp: 1 },
+        }),
+      );
+    });
+
+    test('should return 403 when stored messages belong to a different user', async () => {
+      mockSend.mockResolvedValueOnce({ Item: threadRow() }).mockResolvedValueOnce({
         Items: [
-          {
-            ThreadId: 'thread-123',
-            Timestamp: 1693440000000,
-            UserId: 'other-user',
-            message: 'Not mine',
-            is_user: true,
-          },
+          messageRow(),
+          messageRow({ Timestamp: 1693440001000, UserId: 'other-user', message: 'intruder' }),
         ],
       });
 
-      const app = createTestApp({
-        AWS_ACCESS_KEY_ID: 'test-key',
-        AWS_SECRET_ACCESS_KEY: 'test-secret',
-      });
-
-      const req = new Request('http://localhost/messages?thread_id=thread-123');
-      const res = await app.request(req);
+      const app = createTestApp({});
+      const res = await app.request(new Request('http://localhost/messages?thread_id=thread-123'));
       const json = await res.json();
 
       expect(res.status).toBe(403);
       expect(json.error).toContain('Forbidden');
     });
 
-    test('should return 500 when DynamoDB error occurs in getMessages', async () => {
+    test('should return 400 when thread_id is missing', async () => {
+      const app = createTestApp({});
+      const res = await app.request(new Request('http://localhost/messages'));
+      const json = await res.json();
+
+      expect(res.status).toBe(400);
+      expect(json.error).toContain('thread_id is required');
+    });
+
+    test('should return 500 when the metadata Get fails', async () => {
       mockSend.mockRejectedValueOnce(new Error('DynamoDB connection error'));
+      const app = createTestApp({});
 
-      const app = createTestApp({
-        AWS_ACCESS_KEY_ID: 'test-key',
-        AWS_SECRET_ACCESS_KEY: 'test-secret',
-      });
-
-      const req = new Request('http://localhost/messages?thread_id=thread-123');
-      const res = await app.request(req);
+      const res = await app.request(new Request('http://localhost/messages?thread_id=thread-123'));
       const json = await res.json();
 
       expect(res.status).toBe(500);
       expect(json.error).toContain('DynamoDB connection error');
     });
+
+    test('should get messages without static AWS credentials in Hono bindings', async () => {
+      mockSend.mockResolvedValueOnce({ Item: threadRow() }).mockResolvedValueOnce({ Items: [] });
+      const app = createTestApp({});
+
+      const res = await app.request(new Request('http://localhost/messages?thread_id=thread-123'));
+      const json = await res.json();
+
+      expect(res.status).toBe(200);
+      expect(json.items).toEqual([]);
+      expect(mockSend).toHaveBeenCalledTimes(2);
+    });
   });
 
-  describe('DELETE /thread - additional coverage', () => {
-    test('should handle race condition when messages deleted between get and delete', async () => {
+  describe('PATCH /thread/:id', () => {
+    test('should rename a thread and return the updated row', async () => {
+      const updatedRow = threadRow({ title: 'Renamed thread', updatedAt: 1693440009000 });
+      mockSend.mockResolvedValueOnce({ Attributes: updatedRow });
+
+      const app = createTestApp({});
+      const res = await app.request(
+        new Request('http://localhost/thread/thread-123', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ title: '  Renamed thread  ' }),
+        }),
+      );
+      const json = await res.json();
+
+      expect(res.status).toBe(200);
+      expect(json.thread).toEqual(updatedRow);
+
+      const updateInput = mockUpdateCommand.mock.calls[0][0];
+      expect(updateInput.TableName).toBe('vela-chat-threads');
+      expect(updateInput.Key).toEqual({ UserId: 'user-123', ThreadId: 'thread-123' });
+      expect(updateInput.ConditionExpression).toContain('attribute_exists');
+      expect(updateInput.UpdateExpression).toContain('#title = :title');
+      expect(updateInput.UpdateExpression).toContain('#updatedAt = :updatedAt');
+      expect(updateInput.ExpressionAttributeValues[':title']).toBe('Renamed thread');
+      expect(updateInput.ExpressionAttributeValues[':updatedAt']).toEqual(expect.any(Number));
+      expect(updateInput.ReturnValues).toBe('ALL_NEW');
+    });
+
+    test('should store a validated model pair', async () => {
+      const updatedRow = threadRow({ model: { provider: 'google', model: 'gemini-3.8-flash' } });
+      mockSend.mockResolvedValueOnce({ Attributes: updatedRow });
+
+      const app = createTestApp({});
+      const res = await app.request(
+        new Request('http://localhost/thread/thread-123', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ model: { provider: 'google', model: 'gemini-3.8-flash' } }),
+        }),
+      );
+      const json = await res.json();
+
+      expect(res.status).toBe(200);
+      expect(json.thread.model).toEqual({ provider: 'google', model: 'gemini-3.8-flash' });
+      const updateInput = mockUpdateCommand.mock.calls[0][0];
+      expect(updateInput.UpdateExpression).toContain('#model = :model');
+      expect(updateInput.ExpressionAttributeValues[':model']).toEqual({
+        provider: 'google',
+        model: 'gemini-3.8-flash',
+      });
+    });
+
+    test('should update title and model together', async () => {
+      mockSend.mockResolvedValueOnce({ Attributes: threadRow() });
+      const app = createTestApp({});
+
+      const res = await app.request(
+        new Request('http://localhost/thread/thread-123', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            title: 'New title',
+            model: { provider: 'anthropic', model: 'claude-opus-4' },
+          }),
+        }),
+      );
+
+      expect(res.status).toBe(200);
+      const updateInput = mockUpdateCommand.mock.calls[0][0];
+      expect(updateInput.ExpressionAttributeValues[':title']).toBe('New title');
+      expect(updateInput.ExpressionAttributeValues[':model']).toEqual({
+        provider: 'anthropic',
+        model: 'claude-opus-4',
+      });
+    });
+
+    test.each([
+      ['an empty body', {}],
+      ['an empty title', { title: '' }],
+      ['a whitespace-only title', { title: '   ' }],
+      ['a title over 60 characters', { title: 'a'.repeat(61) }],
+      ['a non-string title', { title: 42 }],
+      ['an empty model object', { model: {} }],
+      ['an unsupported provider', { model: { provider: 'bedrock', model: 'x' } }],
+      ['an empty model id', { model: { provider: 'google', model: '' } }],
+    ])('should return 400 for %s', async (_label, body) => {
+      const app = createTestApp({});
+      const res = await app.request(
+        new Request('http://localhost/thread/thread-123', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        }),
+      );
+      const json = await res.json();
+
+      expect(res.status).toBe(400);
+      expect(json.error).toBeDefined();
+      expect(mockUpdateCommand).not.toHaveBeenCalled();
+    });
+
+    test('should accept a title of exactly 60 characters', async () => {
+      mockSend.mockResolvedValueOnce({ Attributes: threadRow() });
+      const app = createTestApp({});
+
+      const res = await app.request(
+        new Request('http://localhost/thread/thread-123', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ title: 'a'.repeat(60) }),
+        }),
+      );
+
+      expect(res.status).toBe(200);
+    });
+
+    test('should return 404 Thread not found when the thread row does not exist', async () => {
+      const conditionalError = Object.assign(new Error('Condition check failed'), {
+        name: 'ConditionalCheckFailedException',
+      });
+      mockSend.mockRejectedValueOnce(conditionalError);
+
+      const app = createTestApp({});
+      const res = await app.request(
+        new Request('http://localhost/thread/missing-thread', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ title: 'Whatever' }),
+        }),
+      );
+      const json = await res.json();
+
+      expect(res.status).toBe(404);
+      expect(json.error).toBe('Thread not found');
+    });
+
+    test('should return 500 on other DynamoDB errors', async () => {
+      mockSend.mockRejectedValueOnce(new Error('Throughput exceeded'));
+      const app = createTestApp({});
+
+      const res = await app.request(
+        new Request('http://localhost/thread/thread-123', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ title: 'Whatever' }),
+        }),
+      );
+      const json = await res.json();
+
+      expect(res.status).toBe(500);
+      expect(json.error).toContain('Throughput exceeded');
+    });
+  });
+
+  describe('DELETE /thread/:id', () => {
+    test('should delete thread messages in batches and remove the metadata row last', async () => {
       mockSend
-        // getMessages returns items (route proceeds to deleteThread)
-        .mockResolvedValueOnce({
-          Items: [
-            {
-              ThreadId: 'thread-123',
-              Timestamp: 1693440000000,
-              UserId: 'user-123',
-              message: 'hello',
-              is_user: true,
-            },
-          ],
-        })
-        // deleteThread query returns empty (race condition)
-        .mockResolvedValueOnce({ Items: [], LastEvaluatedKey: undefined });
+        .mockResolvedValueOnce({ Item: threadRow() })
+        .mockResolvedValueOnce({ Items: [messageRow()], LastEvaluatedKey: undefined })
+        .mockResolvedValueOnce({ UnprocessedItems: {} })
+        .mockResolvedValueOnce({});
 
-      const app = createTestApp({
-        AWS_ACCESS_KEY_ID: 'test-key',
-        AWS_SECRET_ACCESS_KEY: 'test-secret',
-      });
-
-      const req = new Request('http://localhost/thread?thread_id=thread-123', {
-        method: 'DELETE',
-      });
-      const res = await app.request(req);
+      const app = createTestApp({});
+      const res = await app.request(
+        new Request('http://localhost/thread/thread-123', { method: 'DELETE' }),
+      );
       const json = await res.json();
 
       expect(res.status).toBe(200);
       expect(json.ok).toBe(true);
+      expect(sentCommandTypes()).toEqual([
+        'GetCommand',
+        'QueryCommand',
+        'BatchWriteCommand',
+        'DeleteCommand',
+      ]);
+      expect(mockDeleteCommand).toHaveBeenCalledWith(
+        expect.objectContaining({
+          TableName: 'vela-chat-threads',
+          Key: { UserId: 'user-123', ThreadId: 'thread-123' },
+        }),
+      );
+      const batchInput = mockBatchWriteCommand.mock.calls[0][0];
+      expect(batchInput.RequestItems['vela-chat-history']).toEqual([
+        {
+          DeleteRequest: {
+            Key: { ThreadId: 'thread-123', Timestamp: messageRow().Timestamp },
+          },
+        },
+      ]);
     });
 
-    test('should return 500 when batch delete retries are exhausted', async () => {
-      const setTimeoutSpy = vi.spyOn(globalThis, 'setTimeout').mockImplementation(((
-        fn: () => void,
-      ) => {
-        fn();
-        return 0 as unknown as ReturnType<typeof setTimeout>;
-      }) as typeof setTimeout);
+    test('should return 404 Thread not found for a missing or unowned thread row', async () => {
+      mockSend.mockResolvedValueOnce({ Item: undefined });
+      const app = createTestApp({});
 
+      const res = await app.request(
+        new Request('http://localhost/thread/other-users-thread', { method: 'DELETE' }),
+      );
+      const json = await res.json();
+
+      expect(res.status).toBe(404);
+      expect(json.error).toBe('Thread not found');
+      expect(mockQueryCommand).not.toHaveBeenCalled();
+      expect(mockDeleteCommand).not.toHaveBeenCalled();
+    });
+
+    test('should still delete the metadata row for an owned empty thread', async () => {
+      mockSend
+        .mockResolvedValueOnce({ Item: threadRow() })
+        .mockResolvedValueOnce({ Items: [], LastEvaluatedKey: undefined })
+        .mockResolvedValueOnce({});
+
+      const app = createTestApp({});
+      const res = await app.request(
+        new Request('http://localhost/thread/thread-123', { method: 'DELETE' }),
+      );
+      const json = await res.json();
+
+      expect(res.status).toBe(200);
+      expect(json.ok).toBe(true);
+      expect(sentCommandTypes()).toEqual(['GetCommand', 'QueryCommand', 'DeleteCommand']);
+      expect(mockBatchWriteCommand).not.toHaveBeenCalled();
+    });
+
+    test('should enumerate all message pages before deleting', async () => {
+      mockSend
+        .mockResolvedValueOnce({ Item: threadRow() })
+        .mockResolvedValueOnce({
+          Items: [messageRow({ Timestamp: 1 })],
+          LastEvaluatedKey: { ThreadId: 'thread-123', Timestamp: 1 },
+        })
+        .mockResolvedValueOnce({
+          Items: [messageRow({ Timestamp: 2 })],
+          LastEvaluatedKey: undefined,
+        })
+        .mockResolvedValueOnce({ UnprocessedItems: {} })
+        .mockResolvedValueOnce({});
+
+      const app = createTestApp({});
+      const res = await app.request(
+        new Request('http://localhost/thread/thread-123', { method: 'DELETE' }),
+      );
+
+      expect(res.status).toBe(200);
+      expect(mockQueryCommand).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          ExclusiveStartKey: { ThreadId: 'thread-123', Timestamp: 1 },
+        }),
+      );
+      expect(sentCommandTypes()).toEqual([
+        'GetCommand',
+        'QueryCommand',
+        'QueryCommand',
+        'BatchWriteCommand',
+        'DeleteCommand',
+      ]);
+    });
+
+    test('should chunk message deletes into batches of 25', async () => {
+      const messages = Array.from({ length: 26 }, (_, i) => messageRow({ Timestamp: i + 1 }));
+      mockSend
+        .mockResolvedValueOnce({ Item: threadRow() })
+        .mockResolvedValueOnce({ Items: messages, LastEvaluatedKey: undefined })
+        .mockResolvedValue({ UnprocessedItems: {} });
+      // Final DeleteCommand response is also covered by the default resolved value.
+      const app = createTestApp({});
+
+      const res = await app.request(
+        new Request('http://localhost/thread/thread-123', { method: 'DELETE' }),
+      );
+
+      expect(res.status).toBe(200);
+      expect(mockBatchWriteCommand).toHaveBeenCalledTimes(2);
+      expect(mockBatchWriteCommand.mock.calls[0][0].RequestItems['vela-chat-history']).toHaveLength(
+        25,
+      );
+      expect(mockBatchWriteCommand.mock.calls[1][0].RequestItems['vela-chat-history']).toHaveLength(
+        1,
+      );
+    });
+
+    test('should retry batch delete when there are unprocessed items', async () => {
+      const setTimeoutSpy = stubTimeout();
       try {
-        const message = {
-          ThreadId: 'thread-123',
-          Timestamp: 1693440000000,
-          UserId: 'user-123',
-          message: 'hello',
-          is_user: true,
-        };
-
-        const unprocessedResponse = {
-          UnprocessedItems: {
-            'vela-chat-history': [
-              { DeleteRequest: { Key: { ThreadId: 'thread-123', Timestamp: 1693440000000 } } },
-            ],
-          },
-        };
-
+        const message = messageRow();
         mockSend
-          // getMessages call
-          .mockResolvedValueOnce({ Items: [message] })
-          // deleteThread pagination query
+          .mockResolvedValueOnce({ Item: threadRow() })
           .mockResolvedValueOnce({ Items: [message], LastEvaluatedKey: undefined })
-          // 5 batch write retries, all returning unprocessed
-          .mockResolvedValue(unprocessedResponse);
+          .mockResolvedValueOnce({
+            UnprocessedItems: {
+              'vela-chat-history': [
+                {
+                  DeleteRequest: { Key: { ThreadId: 'thread-123', Timestamp: message.Timestamp } },
+                },
+              ],
+            },
+          })
+          .mockResolvedValueOnce({ UnprocessedItems: {} })
+          .mockResolvedValueOnce({});
 
-        const app = createTestApp({
-          AWS_ACCESS_KEY_ID: 'test-key',
-          AWS_SECRET_ACCESS_KEY: 'test-secret',
-        });
+        const app = createTestApp({});
+        const res = await app.request(
+          new Request('http://localhost/thread/thread-123', { method: 'DELETE' }),
+        );
+        const json = await res.json();
 
-        const req = new Request('http://localhost/thread?thread_id=thread-123', {
-          method: 'DELETE',
-        });
-        const res = await app.request(req);
+        expect(res.status).toBe(200);
+        expect(json.ok).toBe(true);
+        // Get + Query + first batch + retry batch + metadata delete
+        expect(sentCommandTypes()).toEqual([
+          'GetCommand',
+          'QueryCommand',
+          'BatchWriteCommand',
+          'BatchWriteCommand',
+          'DeleteCommand',
+        ]);
+      } finally {
+        setTimeoutSpy.mockRestore();
+      }
+    });
+
+    test('should retain the metadata row when batch delete retries are exhausted', async () => {
+      const setTimeoutSpy = stubTimeout();
+      try {
+        const message = messageRow();
+        mockSend
+          .mockResolvedValueOnce({ Item: threadRow() })
+          .mockResolvedValueOnce({ Items: [message], LastEvaluatedKey: undefined })
+          .mockResolvedValue({
+            UnprocessedItems: {
+              'vela-chat-history': [
+                {
+                  DeleteRequest: { Key: { ThreadId: 'thread-123', Timestamp: message.Timestamp } },
+                },
+              ],
+            },
+          });
+
+        const app = createTestApp({});
+        const res = await app.request(
+          new Request('http://localhost/thread/thread-123', { method: 'DELETE' }),
+        );
         const json = await res.json();
 
         expect(res.status).toBe(500);
         expect(json.error).toContain('Failed to delete all messages');
+        // Metadata row must survive so the delete can be retried.
+        expect(mockDeleteCommand).not.toHaveBeenCalled();
       } finally {
         setTimeoutSpy.mockRestore();
       }
+    });
+
+    test('should return 500 when the metadata Get fails', async () => {
+      mockSend.mockRejectedValueOnce(new Error('DynamoDB error'));
+      const app = createTestApp({});
+
+      const res = await app.request(
+        new Request('http://localhost/thread/thread-123', { method: 'DELETE' }),
+      );
+      const json = await res.json();
+
+      expect(res.status).toBe(500);
+      expect(json.error).toContain('DynamoDB error');
+    });
+
+    test('should not expose a legacy query-string DELETE /thread alias', async () => {
+      const app = createTestApp({});
+      const res = await app.request(
+        new Request('http://localhost/thread?thread_id=thread-123', { method: 'DELETE' }),
+      );
+
+      expect(res.status).toBe(404);
+      expect(mockSend).not.toHaveBeenCalled();
+    });
+
+    test('should delete without static AWS credentials in Hono bindings', async () => {
+      mockSend
+        .mockResolvedValueOnce({ Item: threadRow() })
+        .mockResolvedValueOnce({ Items: [] })
+        .mockResolvedValueOnce({});
+      const app = createTestApp({});
+
+      const res = await app.request(
+        new Request('http://localhost/thread/thread-123', { method: 'DELETE' }),
+      );
+      const json = await res.json();
+
+      expect(res.status).toBe(200);
+      expect(json.ok).toBe(true);
+      expect(mockSend).toHaveBeenCalledTimes(3);
     });
   });
 });
