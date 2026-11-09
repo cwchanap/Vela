@@ -110,6 +110,7 @@ async function dynamodb_getThread(
     const command = new GetCommand({
       TableName: TABLE_NAMES.CHAT_THREADS,
       Key: { UserId: userId, ThreadId: threadId },
+      ConsistentRead: true,
     });
     const response = await docClient.send(command);
     return response.Item as ChatThreadSummary | undefined;
