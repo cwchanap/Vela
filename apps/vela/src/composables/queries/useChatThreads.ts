@@ -20,7 +20,7 @@ export function useChatThreads() {
 
   return useQuery({
     queryKey: computed(() => chatKeys.threads(userId.value)),
-    queryFn: () => listChatThreads(),
+    queryFn: ({ queryKey }) => listChatThreads(queryKey[2] as string),
     enabled: computed(() => !!userId.value),
     staleTime: 5 * 60 * 1000,
     gcTime: 10 * 60 * 1000,
@@ -29,26 +29,25 @@ export function useChatThreads() {
 
 export function useRenameThread() {
   const queryClient = useQueryClient();
-  const authStore = useAuthStore();
-  const { user, session } = storeToRefs(authStore);
-  const currentUserId = () => user.value?.id ?? session.value?.user?.id ?? null;
 
   return useMutation({
-    mutationFn: ({ threadId, patch }: { threadId: string; patch: PatchChatThreadDTO }) =>
-      updateChatThread(threadId, patch),
-    onMutate: async ({ threadId, patch }) => {
-      const key = chatKeys.threads(currentUserId());
+    mutationFn: (variables: { threadId: string; patch: PatchChatThreadDTO; userId: string }) =>
+      updateChatThread(variables.threadId, variables.patch, variables.userId),
+    onMutate: async (variables) => {
+      const key = chatKeys.threads(variables.userId);
       await queryClient.cancelQueries({ queryKey: key });
       const previous = queryClient.getQueryData<ChatThreadSummaryDTO[]>(key);
       if (previous) {
         queryClient.setQueryData<ChatThreadSummaryDTO[]>(
           key,
           previous.map((thread) =>
-            thread.ThreadId === threadId
+            thread.ThreadId === variables.threadId
               ? {
                   ...thread,
-                  ...(patch.title !== undefined ? { title: patch.title.trim() } : {}),
-                  ...(patch.model !== undefined ? { model: patch.model } : {}),
+                  ...(variables.patch.title !== undefined
+                    ? { title: variables.patch.title.trim() }
+                    : {}),
+                  ...(variables.patch.model !== undefined ? { model: variables.patch.model } : {}),
                   updatedAt: Date.now(),
                 }
               : thread,
@@ -72,14 +71,12 @@ export function useRenameThread() {
 
 export function useDeleteThread() {
   const queryClient = useQueryClient();
-  const authStore = useAuthStore();
-  const { user, session } = storeToRefs(authStore);
-  const currentUserId = () => user.value?.id ?? session.value?.user?.id ?? null;
 
   return useMutation({
-    mutationFn: (threadId: string) => deleteChatThread(threadId),
-    onMutate: () => {
-      const key = chatKeys.threads(currentUserId());
+    mutationFn: (variables: { threadId: string; userId: string }) =>
+      deleteChatThread(variables.threadId, variables.userId),
+    onMutate: (variables) => {
+      const key = chatKeys.threads(variables.userId);
       return { key };
     },
     onSuccess: (_data, _variables, context) => {

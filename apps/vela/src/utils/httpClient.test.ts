@@ -279,4 +279,52 @@ describe('httpJsonAuth', () => {
       status: 200,
     });
   });
+
+  describe('expectedUserId binding', () => {
+    const sessionFor = (sub: string | undefined) => ({
+      tokens: {
+        idToken: {
+          toString: () => `token-${sub}`,
+          ...(sub === undefined ? {} : { payload: { sub } }),
+        },
+      },
+    });
+
+    it('sends the request when the token sub matches expectedUserId', async () => {
+      mockFetchAuthSession.mockResolvedValue(sessionFor('user-a') as any);
+      const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({}) });
+      vi.stubGlobal('fetch', fetchMock);
+
+      await httpJsonAuth('/api/protected', undefined, 'user-a');
+
+      expect(fetchMock).toHaveBeenCalledWith(
+        '/api/protected',
+        expect.objectContaining({
+          headers: expect.objectContaining({ Authorization: 'Bearer token-user-a' }),
+        }),
+      );
+    });
+
+    it('rejects without fetching when the token sub differs from expectedUserId', async () => {
+      mockFetchAuthSession.mockResolvedValue(sessionFor('user-b') as any);
+      const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({}) });
+      vi.stubGlobal('fetch', fetchMock);
+
+      await expect(httpJsonAuth('/api/protected', undefined, 'user-a')).rejects.toThrow(
+        /account changed/i,
+      );
+      expect(fetchMock).not.toHaveBeenCalled();
+    });
+
+    it('rejects without fetching when the token carries no sub', async () => {
+      mockFetchAuthSession.mockResolvedValue(sessionFor(undefined) as any);
+      const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({}) });
+      vi.stubGlobal('fetch', fetchMock);
+
+      await expect(httpJsonAuth('/api/protected', undefined, 'user-a')).rejects.toThrow(
+        /account changed/i,
+      );
+      expect(fetchMock).not.toHaveBeenCalled();
+    });
+  });
 });

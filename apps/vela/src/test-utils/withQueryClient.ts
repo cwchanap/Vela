@@ -14,18 +14,20 @@ import { defineComponent } from 'vue';
  * the QueryClient instance so tests can spy on cache operations, the VueWrapper
  * for additional assertions, and a cleanup function for afterEach.
  */
-export function withQueryClient<T>(composableFn: () => T): {
+export function withQueryClient<T>(
+  composableFn: () => T,
+  queryClient = new QueryClient({
+    defaultOptions: {
+      queries: { retry: false, gcTime: 0 },
+      mutations: { retry: false, gcTime: 0 },
+    },
+  }),
+): {
   result: T;
   queryClient: QueryClient;
   wrapper: ReturnType<typeof mount>;
   cleanup: () => void;
 } {
-  const queryClient = new QueryClient({
-    defaultOptions: {
-      queries: { retry: false, gcTime: 0 },
-      mutations: { retry: false, gcTime: 0 },
-    },
-  });
   let result!: T;
   const Wrapper = defineComponent({
     setup() {
