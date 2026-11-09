@@ -11,6 +11,7 @@ let mockQueryCommand: any;
 let mockUpdateCommand: any;
 let mockDeleteCommand: any;
 let mockBatchWriteCommand: any;
+let mockTransactWriteCommand: any;
 let mockSend: any;
 let chatHistory: typeof import('../../src/routes/chat-history').chatHistory;
 const globalMock = globalThis as typeof globalThis & {
@@ -22,6 +23,7 @@ const globalMock = globalThis as typeof globalThis & {
   __dynamoMockUpdateCommand?: ReturnType<typeof vi.fn>;
   __dynamoMockDeleteCommand?: ReturnType<typeof vi.fn>;
   __dynamoMockBatchWriteCommand?: ReturnType<typeof vi.fn>;
+  __dynamoMockTransactWriteCommand?: ReturnType<typeof vi.fn>;
 };
 
 vi.mock('@aws-sdk/client-dynamodb', () => ({
@@ -81,6 +83,13 @@ vi.mock('@aws-sdk/lib-dynamodb', () => ({
     globalMock.__dynamoMockBatchWriteCommand(input);
     return { input, __type: 'BatchWriteCommand' };
   }),
+  TransactWriteCommand: vi.fn().mockImplementation((input: any) => {
+    if (!globalMock.__dynamoMockTransactWriteCommand) {
+      globalMock.__dynamoMockTransactWriteCommand = vi.fn();
+    }
+    globalMock.__dynamoMockTransactWriteCommand(input);
+    return { input, __type: 'TransactWriteCommand' };
+  }),
 }));
 
 vi.mock('../../src/middleware/auth', () => ({
@@ -102,6 +111,7 @@ beforeEach(() => {
   mockUpdateCommand = vi.fn();
   mockDeleteCommand = vi.fn();
   mockBatchWriteCommand = vi.fn();
+  mockTransactWriteCommand = vi.fn();
   globalMock.__authUserId = 'user-123';
   globalMock.__dynamoMockSend = mockSend;
   globalMock.__dynamoMockPutCommand = mockPutCommand;
@@ -110,6 +120,7 @@ beforeEach(() => {
   globalMock.__dynamoMockUpdateCommand = mockUpdateCommand;
   globalMock.__dynamoMockDeleteCommand = mockDeleteCommand;
   globalMock.__dynamoMockBatchWriteCommand = mockBatchWriteCommand;
+  globalMock.__dynamoMockTransactWriteCommand = mockTransactWriteCommand;
 });
 
 // Create a test app that includes the environment
@@ -141,7 +152,14 @@ const partitionKey = (userId: string, threadId: string) =>
 const PARTITION = partitionKey('user-123', 'thread-123');
 
 const sentCommandTypes = () => mockSend.mock.calls.map((call: any[]) => (call[0] as any).__type);
-const sentInputs = () => mockSend.mock.calls.map((call: any[]) => (call[0] as any).input);
+const sentTxnItems = () =>
+  mockTransactWriteCommand.mock.calls.map((call: any[]) => (call[0] as any).TransactItems);
+
+const transactionConditionError = () =>
+  Object.assign(new Error('Transaction cancelled'), {
+    name: 'TransactionCanceledException',
+    CancellationReasons: [{ Code: 'ConditionalCheckFailed' }, { Code: 'None' }],
+  });
 
 const stubTimeout = () =>
   vi.spyOn(globalThis, 'setTimeout').mockImplementation(((fn: () => void) => {
@@ -205,7 +223,7 @@ describe('Chat History Route', () => {
   });
 
   describe('POST /save', () => {
-    test('should upsert thread metadata before saving a first user message', async () => {
+    test('should upsert thread metadata and write a first user message atomically', async () => {
       mockSend.mockResolvedValue({});
 
       const app = createTestApp({
@@ -220,14 +238,16 @@ describe('Chat History Route', () => {
       expect(res.status).toBe(200);
       expect(json.ok).toBe(true);
 
-      expect(sentCommandTypes()).toEqual(['UpdateCommand', 'PutCommand']);
-      const [updateInput, putInput] = sentInputs();
+      expect(sentCommandTypes()).toEqual(['TransactWriteCommand']);
+      const [updateInput, putInput] = [sentTxnItems()[0][0].Update, sentTxnItems()[0][1].Put];
 
       expect(updateInput.TableName).toBe('vela-chat-threads');
       expect(updateInput.Key).toEqual({ UserId: 'user-123', ThreadId: 'thread-123' });
       expect(updateInput.UpdateExpression).toContain('if_not_exists(#title, :title)');
       expect(updateInput.UpdateExpression).toContain('if_not_exists(#createdAt, :now)');
       expect(updateInput.UpdateExpression).toContain('#updatedAt = :now');
+      expect(updateInput.ConditionExpression).toContain('attribute_not_exists(#deleting)');
+      expect(updateInput.ConditionExpression).toContain('#updatedAt <= :now');
       expect(updateInput.ExpressionAttributeValues[':title']).toBe('Hello world');
       expect(updateInput.ExpressionAttributeValues[':now']).toEqual(expect.any(Number));
 
@@ -252,8 +272,21 @@ describe('Chat History Route', () => {
       const res = await app.request(saveRequest(validSaveBody({ message: longMessage })));
 
       expect(res.status).toBe(200);
-      const updateInput = mockUpdateCommand.mock.calls[0][0];
+      const updateInput = sentTxnItems()[0][0].Update;
       expect(updateInput.ExpressionAttributeValues[':title']).toBe('a'.repeat(60));
+    });
+
+    test('should not split a surrogate pair at the 60-character title boundary', async () => {
+      mockSend.mockResolvedValue({});
+      const app = createTestApp({});
+
+      const res = await app.request(
+        saveRequest(validSaveBody({ message: `${'a'.repeat(59)}🔥 tail` })),
+      );
+
+      expect(res.status).toBe(200);
+      const updateInput = sentTxnItems()[0][0].Update;
+      expect(updateInput.ExpressionAttributeValues[':title']).toBe('a'.repeat(59));
     });
 
     test('should store the New conversation fallback title for a whitespace-only first message', async () => {
@@ -263,7 +296,7 @@ describe('Chat History Route', () => {
       const res = await app.request(saveRequest(validSaveBody({ message: '   ' })));
 
       expect(res.status).toBe(200);
-      const updateInput = mockUpdateCommand.mock.calls[0][0];
+      const updateInput = sentTxnItems()[0][0].Update;
       expect(updateInput.ExpressionAttributeValues[':title']).toBe('New conversation');
     });
 
@@ -276,10 +309,32 @@ describe('Chat History Route', () => {
       );
 
       expect(res.status).toBe(200);
-      const updateInput = mockUpdateCommand.mock.calls[0][0];
+      const updateInput = sentTxnItems()[0][0].Update;
       expect(updateInput.UpdateExpression).toContain('if_not_exists(#title, :title)');
       expect(updateInput.UpdateExpression).not.toContain('#model');
       expect(updateInput.UpdateExpression).toContain('#updatedAt = :now');
+    });
+
+    test('should still write the message when the stored updatedAt is already newer', async () => {
+      mockSend.mockRejectedValueOnce(transactionConditionError()).mockResolvedValueOnce({});
+      const app = createTestApp({});
+
+      const res = await app.request(saveRequest(validSaveBody()));
+
+      expect(res.status).toBe(200);
+      expect(mockSend).toHaveBeenCalledTimes(2);
+      const fallbackItems = sentTxnItems()[1];
+      expect(Object.keys(fallbackItems[0])).toEqual(['ConditionCheck']);
+      expect(fallbackItems[0].ConditionCheck.TableName).toBe('vela-chat-threads');
+      expect(fallbackItems[0].ConditionCheck.Key).toEqual({
+        UserId: 'user-123',
+        ThreadId: 'thread-123',
+      });
+      expect(fallbackItems[0].ConditionCheck.ConditionExpression).toContain(
+        'attribute_not_exists(#deleting)',
+      );
+      expect(fallbackItems[1].Put.TableName).toBe('vela-chat-history');
+      expect(fallbackItems[1].Put.Item.message).toBe('Hello world');
     });
 
     test('should write only the message for an assistant save', async () => {
@@ -289,9 +344,14 @@ describe('Chat History Route', () => {
       const res = await app.request(saveRequest(validSaveBody({ is_user: false })));
 
       expect(res.status).toBe(200);
-      expect(sentCommandTypes()).toEqual(['PutCommand']);
-      expect(mockUpdateCommand).not.toHaveBeenCalled();
-      expect(mockPutCommand).toHaveBeenCalledWith(
+      expect(sentCommandTypes()).toEqual(['TransactWriteCommand']);
+      const [conditionCheck, put] = sentTxnItems()[0];
+      expect(conditionCheck.ConditionCheck.TableName).toBe('vela-chat-threads');
+      expect(conditionCheck.ConditionCheck.Key).toEqual({
+        UserId: 'user-123',
+        ThreadId: 'thread-123',
+      });
+      expect(put.Put).toEqual(
         expect.objectContaining({
           TableName: 'vela-chat-history',
           Item: expect.objectContaining({
@@ -311,11 +371,37 @@ describe('Chat History Route', () => {
       const res = await app.request(saveRequest(validSaveBody({ Timestamp: 1 })));
 
       expect(res.status).toBe(200);
-      const putInput = mockPutCommand.mock.calls[0][0];
+      const putInput = sentTxnItems()[0][1].Put;
       expect(putInput.Item.Timestamp).toBeGreaterThanOrEqual(before);
     });
 
-    test('should not write the message when the metadata upsert fails', async () => {
+    test('should return 404 when a save lands while the thread is being deleted', async () => {
+      mockSend
+        .mockRejectedValueOnce(transactionConditionError())
+        .mockRejectedValueOnce(transactionConditionError());
+      const app = createTestApp({});
+
+      const res = await app.request(saveRequest(validSaveBody()));
+      const json = await res.json();
+
+      expect(res.status).toBe(404);
+      expect(json.error).toBe('Thread not found');
+      expect(mockSend).toHaveBeenCalledTimes(2);
+    });
+
+    test('should return 404 when an assistant save lands after the thread row is gone', async () => {
+      mockSend.mockRejectedValueOnce(transactionConditionError());
+      const app = createTestApp({});
+
+      const res = await app.request(saveRequest(validSaveBody({ is_user: false })));
+      const json = await res.json();
+
+      expect(res.status).toBe(404);
+      expect(json.error).toBe('Thread not found');
+      expect(mockSend).toHaveBeenCalledTimes(1);
+    });
+
+    test('should not write the message when the save transaction fails', async () => {
       mockSend.mockRejectedValueOnce(new Error('Metadata write failed'));
       const app = createTestApp({});
 
@@ -325,11 +411,10 @@ describe('Chat History Route', () => {
       expect(res.status).toBe(500);
       expect(json.error).toContain('Metadata write failed');
       expect(mockSend).toHaveBeenCalledTimes(1);
-      expect(mockPutCommand).not.toHaveBeenCalled();
     });
 
-    test('should return 500 when the message write fails after a metadata upsert', async () => {
-      mockSend.mockResolvedValueOnce({}).mockRejectedValueOnce(new Error('Message write failed'));
+    test('should return 500 when a non-condition transaction error occurs', async () => {
+      mockSend.mockRejectedValueOnce(new Error('Message write failed'));
       const app = createTestApp({});
 
       const res = await app.request(saveRequest(validSaveBody()));
@@ -337,7 +422,7 @@ describe('Chat History Route', () => {
 
       expect(res.status).toBe(500);
       expect(json.error).toContain('Message write failed');
-      expect(sentCommandTypes()).toEqual(['UpdateCommand', 'PutCommand']);
+      expect(sentCommandTypes()).toEqual(['TransactWriteCommand']);
     });
 
     test('should handle DynamoDB errors', async () => {
@@ -360,7 +445,7 @@ describe('Chat History Route', () => {
 
       expect(res.status).toBe(200);
       expect(json.ok).toBe(true);
-      expect(mockSend).toHaveBeenCalledTimes(2);
+      expect(mockSend).toHaveBeenCalledTimes(1);
     });
   });
 
@@ -486,6 +571,22 @@ describe('Chat History Route', () => {
       );
     });
 
+    test('should hide threads that carry a deleting tombstone', async () => {
+      mockSend.mockResolvedValueOnce({
+        Items: [
+          threadRow({ ThreadId: 'alive' }),
+          threadRow({ ThreadId: 'mid-delete', deleting: true, updatedAt: 1693440009000 }),
+        ],
+      });
+
+      const app = createTestApp({});
+      const res = await app.request(new Request('http://localhost/threads'));
+      const json = await res.json();
+
+      expect(res.status).toBe(200);
+      expect(json.threads.map((t: any) => t.ThreadId)).toEqual(['alive']);
+    });
+
     test('should include the stored model on thread metadata when present', async () => {
       mockSend.mockResolvedValueOnce({
         Items: [
@@ -587,6 +688,18 @@ describe('Chat History Route', () => {
           ConsistentRead: true,
         }),
       );
+    });
+
+    test('should return 404 Thread not found when the thread carries a deleting tombstone', async () => {
+      mockSend.mockResolvedValueOnce({ Item: threadRow({ deleting: true }) });
+
+      const app = createTestApp({});
+      const res = await app.request(new Request('http://localhost/messages?thread_id=thread-123'));
+      const json = await res.json();
+
+      expect(res.status).toBe(404);
+      expect(json.error).toBe('Thread not found');
+      expect(mockQueryCommand).not.toHaveBeenCalled();
     });
 
     test('should return 200 with an empty items list for an owned empty thread', async () => {
@@ -841,11 +954,40 @@ describe('Chat History Route', () => {
       expect(res.status).toBe(200);
     });
 
+    test('should apply the patch without rewinding a newer stored updatedAt', async () => {
+      const conditionalError = Object.assign(new Error('Condition check failed'), {
+        name: 'ConditionalCheckFailedException',
+      });
+      const updatedRow = threadRow({ title: 'Renamed thread', updatedAt: 1693440009999 });
+      mockSend.mockRejectedValueOnce(conditionalError).mockResolvedValueOnce({
+        Attributes: updatedRow,
+      });
+
+      const app = createTestApp({});
+      const res = await app.request(
+        new Request('http://localhost/thread/thread-123', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ title: 'Renamed thread' }),
+        }),
+      );
+      const json = await res.json();
+
+      expect(res.status).toBe(200);
+      expect(json.thread).toEqual(updatedRow);
+      expect(mockSend).toHaveBeenCalledTimes(2);
+      const retryInput = mockUpdateCommand.mock.calls[1][0];
+      expect(retryInput.UpdateExpression).not.toContain('#updatedAt');
+      expect(retryInput.UpdateExpression).toContain('#title = :title');
+      expect(retryInput.ConditionExpression).toContain('attribute_exists');
+    });
+
     test('should return 404 Thread not found when the thread row does not exist', async () => {
       const conditionalError = Object.assign(new Error('Condition check failed'), {
         name: 'ConditionalCheckFailedException',
       });
-      mockSend.mockRejectedValueOnce(conditionalError);
+      // Both the timestamp-bumping attempt and the fields-only retry must fail.
+      mockSend.mockRejectedValue(conditionalError);
 
       const app = createTestApp({});
       const res = await app.request(
@@ -880,12 +1022,11 @@ describe('Chat History Route', () => {
   });
 
   describe('DELETE /thread/:id', () => {
-    test('should delete thread messages in batches and remove the metadata row last', async () => {
+    test('should tombstone the thread row first, then delete its messages in batches', async () => {
       mockSend
-        .mockResolvedValueOnce({ Item: threadRow() })
+        .mockResolvedValueOnce({})
         .mockResolvedValueOnce({ Items: [messageRow()], LastEvaluatedKey: undefined })
-        .mockResolvedValueOnce({ UnprocessedItems: {} })
-        .mockResolvedValueOnce({});
+        .mockResolvedValueOnce({ UnprocessedItems: {} });
 
       const app = createTestApp({});
       const res = await app.request(
@@ -895,20 +1036,16 @@ describe('Chat History Route', () => {
 
       expect(res.status).toBe(200);
       expect(json.ok).toBe(true);
-      expect(sentCommandTypes()).toEqual([
-        'GetCommand',
-        'QueryCommand',
-        'BatchWriteCommand',
-        'DeleteCommand',
-      ]);
+      expect(sentCommandTypes()).toEqual(['UpdateCommand', 'QueryCommand', 'BatchWriteCommand']);
+
+      const markInput = mockUpdateCommand.mock.calls[0][0];
+      expect(markInput.TableName).toBe('vela-chat-threads');
+      expect(markInput.Key).toEqual({ UserId: 'user-123', ThreadId: 'thread-123' });
+      expect(markInput.UpdateExpression).toContain('SET #deleting = :true');
+      expect(markInput.ConditionExpression).toContain('attribute_exists(ThreadId)');
+
       const queryInput = mockQueryCommand.mock.calls[0][0];
       expect(queryInput.ExpressionAttributeValues[':threadId']).toBe(PARTITION);
-      expect(mockDeleteCommand).toHaveBeenCalledWith(
-        expect.objectContaining({
-          TableName: 'vela-chat-threads',
-          Key: { UserId: 'user-123', ThreadId: 'thread-123' },
-        }),
-      );
       const batchInput = mockBatchWriteCommand.mock.calls[0][0];
       expect(batchInput.RequestItems['vela-chat-history']).toEqual([
         {
@@ -917,10 +1054,15 @@ describe('Chat History Route', () => {
           },
         },
       ]);
+      // The row stays as a tombstone so later saves cannot resurrect it.
+      expect(mockDeleteCommand).not.toHaveBeenCalled();
     });
 
     test('should return 404 Thread not found for a missing or unowned thread row', async () => {
-      mockSend.mockResolvedValueOnce({ Item: undefined });
+      const conditionalError = Object.assign(new Error('Condition check failed'), {
+        name: 'ConditionalCheckFailedException',
+      });
+      mockSend.mockRejectedValueOnce(conditionalError);
       const app = createTestApp({});
 
       const res = await app.request(
@@ -931,14 +1073,12 @@ describe('Chat History Route', () => {
       expect(res.status).toBe(404);
       expect(json.error).toBe('Thread not found');
       expect(mockQueryCommand).not.toHaveBeenCalled();
-      expect(mockDeleteCommand).not.toHaveBeenCalled();
     });
 
-    test('should issue a strongly consistent read for the delete existence check', async () => {
+    test('should accept a repeated delete on an already tombstoned thread', async () => {
       mockSend
-        .mockResolvedValueOnce({ Item: threadRow() })
-        .mockResolvedValueOnce({ Items: [], LastEvaluatedKey: undefined })
-        .mockResolvedValueOnce({});
+        .mockResolvedValueOnce({})
+        .mockResolvedValueOnce({ Items: [], LastEvaluatedKey: undefined });
 
       const app = createTestApp({});
       const res = await app.request(
@@ -946,23 +1086,20 @@ describe('Chat History Route', () => {
       );
 
       expect(res.status).toBe(200);
-      expect(mockGetCommand).toHaveBeenCalledWith(
-        expect.objectContaining({
-          TableName: 'vela-chat-threads',
-          Key: { UserId: 'user-123', ThreadId: 'thread-123' },
-          ConsistentRead: true,
-        }),
-      );
+      expect(sentCommandTypes()).toEqual(['UpdateCommand', 'QueryCommand']);
     });
 
     test('should reject deletion when stored messages belong to another user', async () => {
-      mockSend.mockResolvedValueOnce({ Item: threadRow() }).mockResolvedValueOnce({
-        Items: [
-          messageRow(),
-          messageRow({ Timestamp: 1693440001000, UserId: 'other-user', message: 'intruder' }),
-        ],
-        LastEvaluatedKey: undefined,
-      });
+      mockSend
+        .mockResolvedValueOnce({})
+        .mockResolvedValueOnce({
+          Items: [
+            messageRow(),
+            messageRow({ Timestamp: 1693440001000, UserId: 'other-user', message: 'intruder' }),
+          ],
+          LastEvaluatedKey: undefined,
+        })
+        .mockResolvedValueOnce({});
 
       const app = createTestApp({});
       const res = await app.request(
@@ -973,12 +1110,15 @@ describe('Chat History Route', () => {
       expect(res.status).toBe(403);
       expect(json.error).toContain('Forbidden');
       expect(mockBatchWriteCommand).not.toHaveBeenCalled();
-      expect(mockDeleteCommand).not.toHaveBeenCalled();
+      // The tombstone is cleared so the thread stays usable.
+      expect(mockUpdateCommand).toHaveBeenCalledTimes(2);
+      const clearInput = mockUpdateCommand.mock.calls[1][0];
+      expect(clearInput.UpdateExpression).toContain('REMOVE #deleting');
     });
 
     test('should reject deletion when a foreign message row appears on a later page', async () => {
       mockSend
-        .mockResolvedValueOnce({ Item: threadRow() })
+        .mockResolvedValueOnce({})
         .mockResolvedValueOnce({
           Items: [messageRow({ Timestamp: 1 })],
           LastEvaluatedKey: { ThreadId: PARTITION, Timestamp: 1 },
@@ -986,7 +1126,8 @@ describe('Chat History Route', () => {
         .mockResolvedValueOnce({
           Items: [messageRow({ Timestamp: 2, UserId: 'other-user', message: 'intruder' })],
           LastEvaluatedKey: undefined,
-        });
+        })
+        .mockResolvedValueOnce({});
 
       const app = createTestApp({});
       const res = await app.request(
@@ -996,16 +1137,15 @@ describe('Chat History Route', () => {
 
       expect(res.status).toBe(403);
       expect(json.error).toContain('Forbidden');
-      expect(mockSend).toHaveBeenCalledTimes(3);
+      expect(mockSend).toHaveBeenCalledTimes(4);
       expect(mockBatchWriteCommand).not.toHaveBeenCalled();
-      expect(mockDeleteCommand).not.toHaveBeenCalled();
+      expect(mockUpdateCommand.mock.calls[1][0].UpdateExpression).toContain('REMOVE #deleting');
     });
 
-    test('should still delete the metadata row for an owned empty thread', async () => {
+    test('should tombstone an owned empty thread without batch deletes', async () => {
       mockSend
-        .mockResolvedValueOnce({ Item: threadRow() })
-        .mockResolvedValueOnce({ Items: [], LastEvaluatedKey: undefined })
-        .mockResolvedValueOnce({});
+        .mockResolvedValueOnce({})
+        .mockResolvedValueOnce({ Items: [], LastEvaluatedKey: undefined });
 
       const app = createTestApp({});
       const res = await app.request(
@@ -1015,13 +1155,13 @@ describe('Chat History Route', () => {
 
       expect(res.status).toBe(200);
       expect(json.ok).toBe(true);
-      expect(sentCommandTypes()).toEqual(['GetCommand', 'QueryCommand', 'DeleteCommand']);
+      expect(sentCommandTypes()).toEqual(['UpdateCommand', 'QueryCommand']);
       expect(mockBatchWriteCommand).not.toHaveBeenCalled();
     });
 
     test('should enumerate all message pages before deleting', async () => {
       mockSend
-        .mockResolvedValueOnce({ Item: threadRow() })
+        .mockResolvedValueOnce({})
         .mockResolvedValueOnce({
           Items: [messageRow({ Timestamp: 1 })],
           LastEvaluatedKey: { ThreadId: PARTITION, Timestamp: 1 },
@@ -1030,8 +1170,7 @@ describe('Chat History Route', () => {
           Items: [messageRow({ Timestamp: 2 })],
           LastEvaluatedKey: undefined,
         })
-        .mockResolvedValueOnce({ UnprocessedItems: {} })
-        .mockResolvedValueOnce({});
+        .mockResolvedValueOnce({ UnprocessedItems: {} });
 
       const app = createTestApp({});
       const res = await app.request(
@@ -1045,17 +1184,16 @@ describe('Chat History Route', () => {
         }),
       );
       expect(sentCommandTypes()).toEqual([
-        'GetCommand',
+        'UpdateCommand',
         'QueryCommand',
         'QueryCommand',
         'BatchWriteCommand',
-        'DeleteCommand',
       ]);
     });
 
     test('should issue strongly consistent reads on every delete-enumeration page', async () => {
       mockSend
-        .mockResolvedValueOnce({ Item: threadRow() })
+        .mockResolvedValueOnce({})
         .mockResolvedValueOnce({
           Items: [messageRow({ Timestamp: 1 })],
           LastEvaluatedKey: { ThreadId: PARTITION, Timestamp: 1 },
@@ -1064,8 +1202,7 @@ describe('Chat History Route', () => {
           Items: [messageRow({ Timestamp: 2 })],
           LastEvaluatedKey: undefined,
         })
-        .mockResolvedValueOnce({ UnprocessedItems: {} })
-        .mockResolvedValueOnce({});
+        .mockResolvedValueOnce({ UnprocessedItems: {} });
 
       const app = createTestApp({});
       const res = await app.request(
@@ -1082,9 +1219,6 @@ describe('Chat History Route', () => {
     test('should fully delete an acknowledged saved message despite replica lag', async () => {
       const saved = messageRow({ Timestamp: 4242, message: 'acknowledged save' });
       mockSend.mockImplementation((command: any) => {
-        if (command.__type === 'GetCommand') {
-          return Promise.resolve({ Item: threadRow() });
-        }
         if (command.__type === 'QueryCommand') {
           const consistent = command.input.ConsistentRead === true;
           return Promise.resolve({ Items: consistent ? [saved] : [] });
@@ -1114,13 +1248,12 @@ describe('Chat History Route', () => {
           },
         },
       ]);
-      expect(mockDeleteCommand).toHaveBeenCalledTimes(1);
     });
 
     test('should chunk message deletes into batches of 25', async () => {
       const messages = Array.from({ length: 26 }, (_, i) => messageRow({ Timestamp: i + 1 }));
       mockSend
-        .mockResolvedValueOnce({ Item: threadRow() })
+        .mockResolvedValueOnce({})
         .mockResolvedValueOnce({ Items: messages, LastEvaluatedKey: undefined })
         .mockResolvedValue({ UnprocessedItems: {} });
       const app = createTestApp({});
@@ -1145,7 +1278,7 @@ describe('Chat History Route', () => {
       try {
         const message = messageRow();
         mockSend
-          .mockResolvedValueOnce({ Item: threadRow() })
+          .mockResolvedValueOnce({})
           .mockResolvedValueOnce({ Items: [message], LastEvaluatedKey: undefined })
           .mockResolvedValueOnce({
             UnprocessedItems: {
@@ -1154,8 +1287,7 @@ describe('Chat History Route', () => {
               ],
             },
           })
-          .mockResolvedValueOnce({ UnprocessedItems: {} })
-          .mockResolvedValueOnce({});
+          .mockResolvedValueOnce({ UnprocessedItems: {} });
 
         const app = createTestApp({});
         const res = await app.request(
@@ -1166,23 +1298,22 @@ describe('Chat History Route', () => {
         expect(res.status).toBe(200);
         expect(json.ok).toBe(true);
         expect(sentCommandTypes()).toEqual([
-          'GetCommand',
+          'UpdateCommand',
           'QueryCommand',
           'BatchWriteCommand',
           'BatchWriteCommand',
-          'DeleteCommand',
         ]);
       } finally {
         setTimeoutSpy.mockRestore();
       }
     });
 
-    test('should retain the metadata row when batch delete retries are exhausted', async () => {
+    test('should clear the tombstone when batch delete retries are exhausted', async () => {
       const setTimeoutSpy = stubTimeout();
       try {
         const message = messageRow();
         mockSend
-          .mockResolvedValueOnce({ Item: threadRow() })
+          .mockResolvedValueOnce({})
           .mockResolvedValueOnce({ Items: [message], LastEvaluatedKey: undefined })
           .mockResolvedValue({
             UnprocessedItems: {
@@ -1200,13 +1331,15 @@ describe('Chat History Route', () => {
 
         expect(res.status).toBe(500);
         expect(json.error).toContain('Failed to delete all messages');
-        expect(mockDeleteCommand).not.toHaveBeenCalled();
+        // Mark, then best-effort clear so the thread stays usable.
+        expect(mockUpdateCommand).toHaveBeenCalledTimes(2);
+        expect(mockUpdateCommand.mock.calls[1][0].UpdateExpression).toContain('REMOVE #deleting');
       } finally {
         setTimeoutSpy.mockRestore();
       }
     });
 
-    test('should return 500 when the metadata Get fails', async () => {
+    test('should return 500 when the tombstone write fails', async () => {
       mockSend.mockRejectedValueOnce(new Error('DynamoDB error'));
       const app = createTestApp({});
 
@@ -1231,7 +1364,7 @@ describe('Chat History Route', () => {
 
     test('should delete without static AWS credentials in Hono bindings', async () => {
       mockSend
-        .mockResolvedValueOnce({ Item: threadRow() })
+        .mockResolvedValueOnce({})
         .mockResolvedValueOnce({ Items: [] })
         .mockResolvedValueOnce({});
       const app = createTestApp({});
@@ -1243,7 +1376,7 @@ describe('Chat History Route', () => {
 
       expect(res.status).toBe(200);
       expect(json.ok).toBe(true);
-      expect(mockSend).toHaveBeenCalledTimes(3);
+      expect(mockSend).toHaveBeenCalledTimes(2);
     });
   });
 
@@ -1260,13 +1393,11 @@ describe('Chat History Route', () => {
       expect(first.status).toBe(200);
       expect(second.status).toBe(200);
 
-      const [firstUpdate, secondUpdate] = mockUpdateCommand.mock.calls.map(
-        (call: any[]) => call[0],
-      );
+      const [firstUpdate, secondUpdate] = sentTxnItems().map((items: any[]) => items[0].Update);
       expect(firstUpdate.Key).toEqual({ UserId: 'user-123', ThreadId: 'shared-thread' });
       expect(secondUpdate.Key).toEqual({ UserId: 'user-456', ThreadId: 'shared-thread' });
 
-      const [firstPut, secondPut] = mockPutCommand.mock.calls.map((call: any[]) => call[0]);
+      const [firstPut, secondPut] = sentTxnItems().map((items: any[]) => items[1].Put);
       expect(firstPut.Item.ThreadId).toBe(partitionKey('user-123', 'shared-thread'));
       expect(firstPut.Item.UserId).toBe('user-123');
       expect(secondPut.Item.ThreadId).toBe(partitionKey('user-456', 'shared-thread'));
@@ -1286,7 +1417,7 @@ describe('Chat History Route', () => {
 
       expect(res.status).toBe(200);
       expect(mockUpdateCommand).not.toHaveBeenCalled();
-      const putInput = mockPutCommand.mock.calls[0][0];
+      const putInput = sentTxnItems()[0][1].Put;
       expect(putInput.Item.ThreadId).toBe(partitionKey('user-456', 'shared-thread'));
       expect(putInput.Item.UserId).toBe('user-456');
     });
@@ -1317,9 +1448,7 @@ describe('Chat History Route', () => {
     test('should delete only the caller partition for a shared public ThreadId', async () => {
       globalMock.__authUserId = 'user-456';
       mockSend
-        .mockResolvedValueOnce({
-          Item: threadRow({ UserId: 'user-456', ThreadId: 'shared-thread' }),
-        })
+        .mockResolvedValueOnce({})
         .mockResolvedValueOnce({
           Items: [
             messageRow({
@@ -1329,8 +1458,7 @@ describe('Chat History Route', () => {
           ],
           LastEvaluatedKey: undefined,
         })
-        .mockResolvedValueOnce({ UnprocessedItems: {} })
-        .mockResolvedValueOnce({});
+        .mockResolvedValueOnce({ UnprocessedItems: {} });
 
       const app = createTestApp({});
       const res = await app.request(
@@ -1338,16 +1466,16 @@ describe('Chat History Route', () => {
       );
 
       expect(res.status).toBe(200);
+      expect(mockUpdateCommand).toHaveBeenCalledWith(
+        expect.objectContaining({
+          Key: { UserId: 'user-456', ThreadId: 'shared-thread' },
+        }),
+      );
       expect(mockQueryCommand).toHaveBeenCalledWith(
         expect.objectContaining({
           ExpressionAttributeValues: {
             ':threadId': partitionKey('user-456', 'shared-thread'),
           },
-        }),
-      );
-      expect(mockDeleteCommand).toHaveBeenCalledWith(
-        expect.objectContaining({
-          Key: { UserId: 'user-456', ThreadId: 'shared-thread' },
         }),
       );
     });

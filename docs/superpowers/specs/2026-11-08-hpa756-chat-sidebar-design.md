@@ -42,7 +42,7 @@ Create `vela-chat-threads` in `packages/cdk/lib/database-stack.ts`, mirroring th
 | --- | --- | --- |
 | `UserId` | String, partition key | Authenticated user ID from server middleware |
 | `ThreadId` | String, sort key | Existing chat UUID |
-| `title` | String | Server-derived initial title `message.trim().slice(0, 60) || 'New conversation'`; later manual rename is trimmed and at most 60 characters |
+| `title` | String | Server-derived initial title `message.trim().slice(0, 60) \|\| 'New conversation'`; later manual rename is trimmed and at most 60 characters |
 | `createdAt` | Number (epoch ms) | Write once |
 | `updatedAt` | Number (epoch ms) | Latest saved **user** message or title/model mutation |
 | `model` | `{ provider, model }` or absent | PATCH accepts/stores the value for HPA-758; no per-thread picker in HPA-756 |
@@ -59,9 +59,9 @@ As implemented, the message table's internal partition key is a collision-resist
 | --- | --- | --- |
 | `GET /threads` | No user ID parameter | `{ threads: ChatThreadSummary[] }`; identity from `requireAuth`; newest first |
 | `GET /messages?thread_id=…` | Existing query parameter | Check the metadata row for `(authenticatedUserId, ThreadId)` **first**. If absent, return HTTP **404** `{ error: 'Thread not found' }` for both unknown and other users' threads; if present, paginate messages and return `{ items }` (empty list is 200 for an owned row with no messages) |
-| `POST /save` | Existing `ChatHistoryItemSchema` message payload | Existing `{ ok: true }`; server overwrites `UserId` and timestamp. For user messages, upsert the row **before** writing the message; for assistant messages, write only the message |
+| `POST /save` | Existing `ChatHistoryItemSchema` message payload | Existing `{ ok: true }`; server overwrites `UserId` and timestamp. For user messages, a single transaction upserts the row and writes the message; for assistant messages, a transaction writes only the message behind a live-thread `ConditionCheck`. A tombstoned or missing thread returns 404 |
 | `PATCH /thread/:id` | `{ title?: string, model?: { provider: LlmProvider, model: string } }`, at least one field | `{ thread }`; trim title; use conditional update for existing row; missing own row returns 404 |
-| `DELETE /thread/:id` | No body | `{ ok: true }` after deleting message rows and thread row; missing own row returns 404 |
+| `DELETE /thread/:id` | No body | `{ ok: true }` after tombstoning the thread row (so a save racing the delete cannot resurrect it) and deleting all message rows; missing own row returns 404 |
 
 This intentionally drops the legacy `user_id` query parameter for listing and the old `DELETE /thread?thread_id=…` endpoint. No compatibility alias is needed. Restrict PATCH to known fields; provider is one of `LLM_PROVIDERS` (OpenRouter model ID remains free text), while HPA-758 will own model-selection behavior.
 
@@ -69,11 +69,11 @@ Shared Zod definitions go in `apps/vela-api/src/validation.ts`, with the new cli
 
 ### Save ordering and update rules
 
-- For a **user** save, compute the initial title **on the server** as `item.message.trim().slice(0, 60) || 'New conversation'` (the chat-message schema allows whitespace and unbounded text), then upsert the row using `if_not_exists(title)` and `if_not_exists(createdAt)`, set `updatedAt`, **then** write the message. This preserves manual rename and avoids an invisible message when metadata creation fails; a metadata-only row on message-write failure stays visible and can be retried/deleted.
-- Assistant saves write **only the message**. Do not conditionally update metadata or introduce a swallowed `ConditionalCheckFailedException` path. HPA-758 will write its own `lastLlmAt` when it owns cache lifecycle.
+- For a **user** save, compute the initial title **on the server** as `item.message.trim().slice(0, 60) || 'New conversation'` (the chat-message schema allows whitespace and unbounded text), dropping a trailing unpaired surrogate so truncation cannot split an emoji pair, then run one transaction that upserts the row (`if_not_exists(title)` / `if_not_exists(createdAt)`, monotonic `updatedAt`) and writes the message. This preserves manual rename and avoids an invisible message when metadata creation fails; a metadata-only row on message-write failure stays visible and can be retried/deleted.
+- Assistant saves write **only the message**, behind a `ConditionCheck` on the live thread row so a save racing a delete cannot land an orphaned message. Do not conditionally update metadata or introduce a swallowed `ConditionalCheckFailedException` path beyond translating the transaction rejection to 404. HPA-758 will write its own `lastLlmAt` when it owns cache lifecycle.
 - Set `chat.isLoading` **before** the first history-save await; serialize/await user save, LLM generation, and assistant save in `onSend`. Keep history failure nonfatal for LLM generation, but warn the user. Disable thread selection/new/delete while the entire operation settles to prevent replies landing in another chat.
 - User saves must never overwrite a manually renamed title or stored `model`. PATCH updates only supplied fields and `updatedAt`.
-- Delete is ordered **message rows first, thread row last**, so a partial batch-delete failure remains visible and retryable. Reuse existing bounded `BatchWrite` retry logic rather than introduce cross-table transactions.
+- Delete **tombstones the thread row first** (`deleting` flag, conditional on ownership), then enumerates and batch-deletes message rows. The tombstone acts as a write barrier: pending saves see the flag and are rejected with 404 instead of writing an orphaned message, and listing/reads skip tombstoned rows. On a partial batch-delete failure the tombstone is cleared (best effort) so the thread stays usable and deletable. Reuse existing bounded `BatchWrite` retry logic; saves use `TransactWriteCommand` rather than cross-table orchestration.
 - Add one small local `queryAllPages` helper around `QueryCommand` with `ExclusiveStartKey`, reused by the metadata list, message read and message-delete query; no generic database abstraction.
 - No state backfill, event bus, queue, or transaction orchestration. Tests should demonstrate the core ordering and ownership behavior.
 

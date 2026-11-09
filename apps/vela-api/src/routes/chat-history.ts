@@ -18,7 +18,7 @@ import * as DynamoDbLib from '@aws-sdk/lib-dynamodb';
 import type { QueryCommandInput } from '@aws-sdk/lib-dynamodb';
 import type { ZodIssue, ZodTypeAny } from 'zod';
 
-const { PutCommand, GetCommand, QueryCommand, UpdateCommand, DeleteCommand, BatchWriteCommand } =
+const { GetCommand, QueryCommand, UpdateCommand, BatchWriteCommand, TransactWriteCommand } =
   DynamoDbLib;
 
 const chatHistory = new Hono<{ Bindings: Env } & AuthContext>();
@@ -54,6 +54,17 @@ const isConditionalCheckFailedError = (error: unknown): boolean =>
   'name' in error &&
   error.name === 'ConditionalCheckFailedException';
 
+const isTransactionConditionFailed = (error: unknown): boolean =>
+  typeof error === 'object' &&
+  error !== null &&
+  'name' in error &&
+  error.name === 'TransactionCanceledException' &&
+  'CancellationReasons' in error &&
+  Array.isArray((error as { CancellationReasons?: unknown }).CancellationReasons) &&
+  ((error as { CancellationReasons?: { Code?: string }[] }).CancellationReasons ?? []).some(
+    (reason) => reason?.Code === 'ConditionalCheckFailed',
+  );
+
 // Apply auth middleware to all chat history routes.
 chatHistory.use('*', requireAuth);
 
@@ -80,22 +91,128 @@ const messagePartitionKey = (userId: string, threadId: string): string =>
     .update(JSON.stringify([userId, threadId]))
     .digest('hex');
 
-async function dynamodb_saveMessage(item: ChatHistoryItem): Promise<void> {
+const messageItem = (item: ChatHistoryItem) => ({
+  ThreadId: messagePartitionKey(item.UserId, item.ThreadId),
+  Timestamp: item.Timestamp,
+  UserId: item.UserId,
+  message: item.message,
+  is_user: item.is_user,
+  context: {},
+});
+
+// Threads being deleted carry a `deleting` flag. Message saves run inside
+// transactions conditioned on that flag so a write cannot land after deletion
+// has begun, and the retained tombstone row prevents a later save from
+// silently resurrecting the thread.
+type StoredChatThread = ChatThreadSummary & { deleting?: boolean };
+
+const THREAD_ALIVE_CONDITION = 'attribute_exists(ThreadId) AND attribute_not_exists(#deleting)';
+
+async function dynamodb_saveUserMessage(
+  userId: string,
+  item: ChatHistoryItem,
+  initialTitle: string,
+  now: number,
+): Promise<'ok' | 'rejected'> {
+  const put = { TableName: TABLE_NAMES.CHAT_HISTORY, Item: messageItem(item) };
+  const key = { UserId: userId, ThreadId: item.ThreadId };
   try {
-    const command = new PutCommand({
-      TableName: TABLE_NAMES.CHAT_HISTORY,
-      Item: {
-        ThreadId: messagePartitionKey(item.UserId, item.ThreadId),
-        Timestamp: item.Timestamp,
-        UserId: item.UserId,
-        message: item.message,
-        is_user: item.is_user,
-        context: {},
-      },
-    });
-    await docClient.send(command);
+    await docClient.send(
+      new TransactWriteCommand({
+        TransactItems: [
+          {
+            Update: {
+              TableName: TABLE_NAMES.CHAT_THREADS,
+              Key: key,
+              // Never rewind updatedAt: a delayed save must not overwrite a
+              // newer timestamp committed by another client.
+              UpdateExpression:
+                'SET #updatedAt = :now, #title = if_not_exists(#title, :title), #createdAt = if_not_exists(#createdAt, :now)',
+              ConditionExpression:
+                'attribute_not_exists(#deleting) AND (attribute_not_exists(#updatedAt) OR #updatedAt <= :now)',
+              ExpressionAttributeNames: {
+                '#updatedAt': 'updatedAt',
+                '#title': 'title',
+                '#createdAt': 'createdAt',
+                '#deleting': 'deleting',
+              },
+              ExpressionAttributeValues: {
+                ':now': now,
+                ':title': initialTitle,
+              },
+            },
+          },
+          { Put: put },
+        ],
+      }),
+    );
+    return 'ok';
   } catch (error) {
-    console.error('DynamoDB save message error:', error);
+    if (!isTransactionConditionFailed(error)) {
+      console.error('DynamoDB save user message error:', error);
+      throw new Error(
+        `Failed to save message: ${error instanceof Error ? error.message : 'Unknown error'}`,
+      );
+    }
+  }
+
+  // The metadata update was skipped either because the thread is being
+  // deleted or because it already carries a newer updatedAt. Write the
+  // message only when the thread is still alive.
+  try {
+    await docClient.send(
+      new TransactWriteCommand({
+        TransactItems: [
+          {
+            ConditionCheck: {
+              TableName: TABLE_NAMES.CHAT_THREADS,
+              Key: key,
+              ConditionExpression: THREAD_ALIVE_CONDITION,
+              ExpressionAttributeNames: { '#deleting': 'deleting' },
+            },
+          },
+          { Put: put },
+        ],
+      }),
+    );
+    return 'ok';
+  } catch (error) {
+    if (isTransactionConditionFailed(error)) {
+      return 'rejected';
+    }
+    console.error('DynamoDB save user message error:', error);
+    throw new Error(
+      `Failed to save message: ${error instanceof Error ? error.message : 'Unknown error'}`,
+    );
+  }
+}
+
+async function dynamodb_saveAssistantMessage(
+  userId: string,
+  item: ChatHistoryItem,
+): Promise<'ok' | 'rejected'> {
+  try {
+    await docClient.send(
+      new TransactWriteCommand({
+        TransactItems: [
+          {
+            ConditionCheck: {
+              TableName: TABLE_NAMES.CHAT_THREADS,
+              Key: { UserId: userId, ThreadId: item.ThreadId },
+              ConditionExpression: THREAD_ALIVE_CONDITION,
+              ExpressionAttributeNames: { '#deleting': 'deleting' },
+            },
+          },
+          { Put: { TableName: TABLE_NAMES.CHAT_HISTORY, Item: messageItem(item) } },
+        ],
+      }),
+    );
+    return 'ok';
+  } catch (error) {
+    if (isTransactionConditionFailed(error)) {
+      return 'rejected';
+    }
+    console.error('DynamoDB save assistant message error:', error);
     throw new Error(
       `Failed to save message: ${error instanceof Error ? error.message : 'Unknown error'}`,
     );
@@ -105,7 +222,7 @@ async function dynamodb_saveMessage(item: ChatHistoryItem): Promise<void> {
 async function dynamodb_getThread(
   userId: string,
   threadId: string,
-): Promise<ChatThreadSummary | undefined> {
+): Promise<StoredChatThread | undefined> {
   try {
     const command = new GetCommand({
       TableName: TABLE_NAMES.CHAT_THREADS,
@@ -113,42 +230,11 @@ async function dynamodb_getThread(
       ConsistentRead: true,
     });
     const response = await docClient.send(command);
-    return response.Item as ChatThreadSummary | undefined;
+    return response.Item as StoredChatThread | undefined;
   } catch (error) {
     console.error('DynamoDB get thread error:', error);
     throw new Error(
       `Failed to fetch thread: ${error instanceof Error ? error.message : 'Unknown error'}`,
-    );
-  }
-}
-
-async function dynamodb_upsertThread(
-  userId: string,
-  threadId: string,
-  initialTitle: string,
-  now: number,
-): Promise<void> {
-  try {
-    const command = new UpdateCommand({
-      TableName: TABLE_NAMES.CHAT_THREADS,
-      Key: { UserId: userId, ThreadId: threadId },
-      UpdateExpression:
-        'SET #updatedAt = :now, #title = if_not_exists(#title, :title), #createdAt = if_not_exists(#createdAt, :now)',
-      ExpressionAttributeNames: {
-        '#updatedAt': 'updatedAt',
-        '#title': 'title',
-        '#createdAt': 'createdAt',
-      },
-      ExpressionAttributeValues: {
-        ':now': now,
-        ':title': initialTitle,
-      },
-    });
-    await docClient.send(command);
-  } catch (error) {
-    console.error('DynamoDB upsert thread error:', error);
-    throw new Error(
-      `Failed to save thread: ${error instanceof Error ? error.message : 'Unknown error'}`,
     );
   }
 }
@@ -159,33 +245,55 @@ async function dynamodb_updateThread(
   patch: PatchChatThread,
   now: number,
 ): Promise<ChatThreadSummary> {
-  const names: Record<string, string> = { '#updatedAt': 'updatedAt' };
-  const values: Record<string, unknown> = { ':updatedAt': now };
-  const setClauses = ['#updatedAt = :updatedAt'];
+  const sendUpdate = async (bumpUpdatedAt: boolean): Promise<ChatThreadSummary> => {
+    const names: Record<string, string> = { '#deleting': 'deleting' };
+    const values: Record<string, unknown> = {};
+    const setClauses: string[] = [];
+    let condition = THREAD_ALIVE_CONDITION;
 
-  if (patch.title !== undefined) {
-    names['#title'] = 'title';
-    values[':title'] = patch.title;
-    setClauses.push('#title = :title');
-  }
-  if (patch.model !== undefined) {
-    names['#model'] = 'model';
-    values[':model'] = patch.model;
-    setClauses.push('#model = :model');
-  }
+    if (bumpUpdatedAt) {
+      names['#updatedAt'] = 'updatedAt';
+      values[':updatedAt'] = now;
+      setClauses.push('#updatedAt = :updatedAt');
+      // Never rewind updatedAt: a delayed patch must not overwrite a newer
+      // timestamp committed by another client.
+      condition += ' AND (attribute_not_exists(#updatedAt) OR #updatedAt <= :updatedAt)';
+    }
+    if (patch.title !== undefined) {
+      names['#title'] = 'title';
+      values[':title'] = patch.title;
+      setClauses.push('#title = :title');
+    }
+    if (patch.model !== undefined) {
+      names['#model'] = 'model';
+      values[':model'] = patch.model;
+      setClauses.push('#model = :model');
+    }
 
-  try {
     const command = new UpdateCommand({
       TableName: TABLE_NAMES.CHAT_THREADS,
       Key: { UserId: userId, ThreadId: threadId },
       UpdateExpression: `SET ${setClauses.join(', ')}`,
-      ConditionExpression: 'attribute_exists(ThreadId)',
+      ConditionExpression: condition,
       ExpressionAttributeNames: names,
       ExpressionAttributeValues: values,
       ReturnValues: 'ALL_NEW',
     });
     const response = await docClient.send(command);
     return response.Attributes as ChatThreadSummary;
+  };
+
+  try {
+    try {
+      return await sendUpdate(true);
+    } catch (error) {
+      if (!isConditionalCheckFailedError(error)) {
+        throw error;
+      }
+    }
+    // The stored updatedAt is newer — apply the patch fields without
+    // rewinding the timestamp. Fails again when the thread is gone/deleting.
+    return await sendUpdate(false);
   } catch (error) {
     if (isConditionalCheckFailedError(error)) {
       throw error;
@@ -208,13 +316,15 @@ async function dynamodb_listThreads(userId: string): Promise<ChatThreadSummary[]
       ConsistentRead: true,
     });
 
-    const threads = rows.map((row) => ({
-      ThreadId: row.ThreadId as string,
-      title: row.title as string,
-      createdAt: row.createdAt as number,
-      updatedAt: row.updatedAt as number,
-      ...(row.model !== undefined ? { model: row.model as ChatThreadModel } : {}),
-    }));
+    const threads = rows
+      .filter((row) => row.deleting !== true)
+      .map((row) => ({
+        ThreadId: row.ThreadId as string,
+        title: row.title as string,
+        createdAt: row.createdAt as number,
+        updatedAt: row.updatedAt as number,
+        ...(row.model !== undefined ? { model: row.model as ChatThreadModel } : {}),
+      }));
 
     return threads.sort(
       (a, b) => b.updatedAt - a.updatedAt || a.ThreadId.localeCompare(b.ThreadId),
@@ -307,10 +417,51 @@ async function dynamodb_deleteThreadMessages(allMessages: Record<string, any>[])
   }
 }
 
+async function dynamodb_clearThreadDeleting(userId: string, threadId: string): Promise<void> {
+  try {
+    const command = new UpdateCommand({
+      TableName: TABLE_NAMES.CHAT_THREADS,
+      Key: { UserId: userId, ThreadId: threadId },
+      UpdateExpression: 'REMOVE #deleting',
+      ConditionExpression: 'attribute_exists(ThreadId)',
+      ExpressionAttributeNames: { '#deleting': 'deleting' },
+    });
+    await docClient.send(command);
+  } catch (error) {
+    // Best effort: a retained tombstone still lets a retried delete finish.
+    console.error('DynamoDB clear deleting flag error:', error);
+  }
+}
+
 async function dynamodb_deleteThread(
   userId: string,
   threadId: string,
-): Promise<'ok' | 'forbidden'> {
+): Promise<'ok' | 'forbidden' | 'not_found'> {
+  // Tombstone the row before touching messages. Saves and patches are
+  // conditioned on `deleting`, so any write committed after this point is
+  // rejected instead of stranded; writes committed before it are enumerated
+  // below and removed. The row is kept as a permanent tombstone so a later
+  // save cannot resurrect the thread.
+  try {
+    const command = new UpdateCommand({
+      TableName: TABLE_NAMES.CHAT_THREADS,
+      Key: { UserId: userId, ThreadId: threadId },
+      UpdateExpression: 'SET #deleting = :true',
+      ConditionExpression: 'attribute_exists(ThreadId)',
+      ExpressionAttributeNames: { '#deleting': 'deleting' },
+      ExpressionAttributeValues: { ':true': true },
+    });
+    await docClient.send(command);
+  } catch (error) {
+    if (isConditionalCheckFailedError(error)) {
+      return 'not_found';
+    }
+    console.error('DynamoDB delete thread error:', error);
+    throw new Error(
+      `Failed to delete thread: ${error instanceof Error ? error.message : 'Unknown error'}`,
+    );
+  }
+
   try {
     // Paginate through all query results to get ALL messages in the thread
     const allMessages = await queryAllPages({
@@ -326,18 +477,14 @@ async function dynamodb_deleteThread(
     // Ensure all thread messages belong to the authenticated user.
     // This prevents deleting mixed-owner/corrupted threads.
     if (!allMessages.every((message) => message.UserId === userId)) {
+      await dynamodb_clearThreadDeleting(userId, threadId);
       return 'forbidden';
     }
 
     await dynamodb_deleteThreadMessages(allMessages);
-
-    const command = new DeleteCommand({
-      TableName: TABLE_NAMES.CHAT_THREADS,
-      Key: { UserId: userId, ThreadId: threadId },
-    });
-    await docClient.send(command);
     return 'ok';
   } catch (error) {
+    await dynamodb_clearThreadDeleting(userId, threadId);
     console.error('DynamoDB delete thread error:', error);
     throw new Error(
       `Failed to delete thread: ${error instanceof Error ? error.message : 'Unknown error'}`,
@@ -349,23 +496,49 @@ async function dynamodb_deleteThread(
  * Routes
  * ============ */
 
+const THREAD_TITLE_MAX_LENGTH = 60;
+
+// The title cap counts UTF-16 units like the rename schema; truncation must
+// not split a surrogate pair and leave an unpaired surrogate in the stored
+// string.
+const deriveInitialTitle = (message: string): string => {
+  const trimmed = message.trim();
+  if (trimmed.length <= THREAD_TITLE_MAX_LENGTH) {
+    return trimmed || 'New conversation';
+  }
+  let title = trimmed.slice(0, THREAD_TITLE_MAX_LENGTH);
+  const last = title.charCodeAt(title.length - 1);
+  if (last >= 0xd800 && last <= 0xdbff) {
+    title = title.slice(0, -1);
+  }
+  return title || 'New conversation';
+};
+
 chatHistory.post('/save', createValidator('json', ChatHistoryItemSchema), async (c) => {
   try {
     const authenticatedUserId = c.get('userId');
     const body = c.req.valid('json');
     const now = Date.now();
 
-    if (body.is_user) {
-      const initialTitle = body.message.trim().slice(0, 60) || 'New conversation';
-      await dynamodb_upsertThread(authenticatedUserId, body.ThreadId, initialTitle, now);
-    }
-
     // Always trust server-side identity/timestamp over client payload.
-    await dynamodb_saveMessage({
+    const item: ChatHistoryItem = {
       ...body,
       UserId: authenticatedUserId,
       Timestamp: now,
-    });
+    };
+
+    const result = body.is_user
+      ? await dynamodb_saveUserMessage(
+          authenticatedUserId,
+          item,
+          deriveInitialTitle(body.message),
+          now,
+        )
+      : await dynamodb_saveAssistantMessage(authenticatedUserId, item);
+
+    if (result === 'rejected') {
+      return c.json({ error: 'Thread not found' }, 404);
+    }
     return c.json({ ok: true });
   } catch (e) {
     console.error('chat-history save error', e);
@@ -392,7 +565,7 @@ chatHistory.get('/messages', createValidator('query', ThreadIdQuerySchema), asyn
     const { thread_id } = c.req.valid('query') as ThreadIdQuery;
 
     const thread = await dynamodb_getThread(authenticatedUserId, thread_id);
-    if (!thread) {
+    if (!thread || thread.deleting === true) {
       return c.json({ error: 'Thread not found' }, 404);
     }
 
@@ -434,12 +607,10 @@ chatHistory.delete('/thread/:id', async (c) => {
     const authenticatedUserId = c.get('userId');
     const threadId = c.req.param('id');
 
-    const thread = await dynamodb_getThread(authenticatedUserId, threadId);
-    if (!thread) {
+    const result = await dynamodb_deleteThread(authenticatedUserId, threadId);
+    if (result === 'not_found') {
       return c.json({ error: 'Thread not found' }, 404);
     }
-
-    const result = await dynamodb_deleteThread(authenticatedUserId, threadId);
     if (result === 'forbidden') {
       return c.json({ error: 'Forbidden: You do not own this thread' }, 403);
     }

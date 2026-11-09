@@ -280,7 +280,8 @@ const onSend = async (draft: string) => {
   await scrollToBottom();
 
   try {
-    if (await persistMessage(cid, uid, content, true, isStale)) {
+    const userSaved = await persistMessage(cid, uid, content, true, isStale);
+    if (userSaved) {
       void queryClient.invalidateQueries({ queryKey: chatKeys.threads(uid) });
     }
     if (isStale()) return;
@@ -315,7 +316,11 @@ const onSend = async (draft: string) => {
     }
 
     chat.addMessage({ type: 'ai', content: resp.text });
-    await persistMessage(cid, uid, resp.text, false, isStale);
+    // Skip the assistant save when the user save failed: the message would be
+    // written without a companion user turn or surviving thread metadata.
+    if (userSaved) {
+      await persistMessage(cid, uid, resp.text, false, isStale);
+    }
   } catch (e: unknown) {
     if (isStale()) return;
     console.error(e);
