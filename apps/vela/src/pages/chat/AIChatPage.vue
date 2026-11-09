@@ -147,6 +147,8 @@ const deleteThreadMutation = useDeleteThread();
 const showDeleteConfirm = ref(false);
 const threadToDelete = ref<ChatThreadSummaryDTO | null>(null);
 const isDeleting = ref(false);
+const dialogGen = ref(0);
+const deletingThreadIds = new Set<string>();
 
 watch(isNarrowScreen, (narrow) => {
   if (!narrow) mobileSidebarOpen.value = false;
@@ -160,11 +162,15 @@ const isStaleOperation = (opGen: number, sessionGen: number) =>
   chat.isStale(opGen) || auth.sessionGeneration !== sessionGen;
 
 watch(
-  () => getUserId(),
-  (next, prev) => {
-    if (next === prev) return;
-    chat.resetForUser(next, auth.sessionGeneration);
+  () => [getUserId(), auth.sessionGeneration] as const,
+  ([nextUid, nextGen], [prevUid, prevGen]) => {
+    if (nextUid === prevUid && nextGen === prevGen) return;
+    chat.resetForUser(nextUid, nextGen);
     chat.addMessage({ type: 'ai', content: GREETING_MESSAGE });
+    showDeleteConfirm.value = false;
+    threadToDelete.value = null;
+    isDeleting.value = false;
+    dialogGen.value += 1;
   },
 );
 
@@ -198,7 +204,7 @@ const retryThreads = () => {
 };
 
 const selectThread = async (t: ChatThreadSummaryDTO) => {
-  if (chat.isLoading) return;
+  if (chat.isLoading || deletingThreadIds.has(t.ThreadId)) return;
   const uid = getUserId();
   const opGen = chat.nextGeneration();
   const sessionGen = auth.sessionGeneration;
@@ -327,7 +333,6 @@ const onNewChat = () => {
 
 const onRenameThread = async ({ threadId, title }: { threadId: string; title: string }) => {
   if (chat.isLoading) return;
-  const opGen = chat.nextGeneration();
   const sessionGen = auth.sessionGeneration;
   try {
     await renameThreadMutation.mutateAsync({
@@ -336,16 +341,17 @@ const onRenameThread = async ({ threadId, title }: { threadId: string; title: st
       userId: getUserId(),
     });
   } catch (e) {
-    if (isStaleOperation(opGen, sessionGen)) return;
+    if (auth.sessionGeneration !== sessionGen) return;
     console.error(e);
     $q.notify({ type: 'negative', message: 'Failed to rename conversation' });
   }
 };
 
 const confirmDelete = (t: ChatThreadSummaryDTO) => {
-  if (chat.isLoading) return;
+  if (chat.isLoading || deletingThreadIds.has(t.ThreadId)) return;
   threadToDelete.value = t;
   showDeleteConfirm.value = true;
+  dialogGen.value += 1;
 };
 
 const deleteThread = async () => {
@@ -355,6 +361,8 @@ const deleteThread = async () => {
   isDeleting.value = true;
   const opGen = chat.nextGeneration();
   const sessionGen = auth.sessionGeneration;
+  const dialogToken = dialogGen.value;
+  deletingThreadIds.add(thread.ThreadId);
   try {
     await deleteThreadMutation.mutateAsync({
       threadId: thread.ThreadId,
@@ -373,15 +381,18 @@ const deleteThread = async () => {
 
       $q.notify({ type: 'positive', message: 'Conversation deleted successfully' });
     }
-    showDeleteConfirm.value = false;
-    threadToDelete.value = null;
   } catch (e) {
+    deletingThreadIds.delete(thread.ThreadId);
     if (!isStaleOperation(opGen, sessionGen)) {
       console.error(e);
       $q.notify({ type: 'negative', message: 'Failed to delete conversation' });
     }
   } finally {
-    isDeleting.value = false;
+    if (dialogToken === dialogGen.value) {
+      isDeleting.value = false;
+      showDeleteConfirm.value = false;
+      threadToDelete.value = null;
+    }
   }
 };
 

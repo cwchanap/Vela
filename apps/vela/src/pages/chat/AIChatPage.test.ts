@@ -423,8 +423,8 @@ describe('AIChatPage', () => {
     await w.find('[data-testid="llm-chat-send"]').trigger('click');
   };
 
-  const openThreadMenu = async () => {
-    await wrapper!.find('[data-testid="chat-thread-menu"]').trigger('click');
+  const openThreadMenu = async (index = 0) => {
+    await wrapper!.findAll('[data-testid="chat-thread-menu"]')[index]!.trigger('click');
     await flushPromises();
   };
 
@@ -1634,6 +1634,238 @@ describe('AIChatPage', () => {
       expect(chatStore.messages.length).toBe(1);
       expect(chatStore.chatId).not.toBe(firstChatId);
       expect(chatStore.isLoading).toBe(false);
+    });
+
+    it('resets sending state when the session generation changes within one batch', async () => {
+      const gateA = deferred<LlmResponse>();
+      vi.spyOn(llmModule.llmClient, 'generate').mockReturnValueOnce(gateA.promise);
+
+      mountComponent();
+      const chatStore = useChatStore();
+      await flushPromises();
+      await sendMessage('A in-flight');
+      await flushPromises();
+      const aChatId = chatStore.chatId;
+      expect(chatStore.isLoading).toBe(true);
+
+      vi.mocked(awsAmplify.fetchAuthSession).mockResolvedValue(sessionFor('user-b'));
+      signIn(createMockUser({ id: 'user-b', username: 'otheruser', email: 'b@example.com' }));
+      vi.mocked(awsAmplify.fetchAuthSession).mockResolvedValue(sessionFor('user-123'));
+      signIn();
+      await flushPromises();
+
+      expect(chatStore.chatId).not.toBe(aChatId);
+      expect(chatStore.messages.length).toBe(1);
+      expect(chatStore.messages[0]!.content).toContain('こんにちは');
+
+      gateA.resolve({ text: 'batched stale reply' });
+      await flushPromises();
+
+      expect(chatStore.isLoading).toBe(false);
+      expect(chatStore.isTyping).toBe(false);
+      expect(chatStore.messages.some((m) => m.content === 'batched stale reply')).toBe(false);
+    });
+
+    it('does not leak the previous account delete dialog into the next account', async () => {
+      threadRows = [
+        createMockThread({ ThreadId: 't-a', title: 'A thread', updatedAt: Date.now() }),
+        createMockThread({
+          ThreadId: 't-b',
+          title: 'B thread',
+          updatedAt: Date.now() - 60_000,
+        }),
+      ];
+      const gate = deferred<void>();
+      deleteDelay = gate.promise;
+
+      mountComponent();
+      const chatStore = useChatStore();
+      await flushPromises();
+
+      await openThreadMenu(0);
+      await wrapper.find('[data-testid="llm-chat-delete-thread"]').trigger('click');
+      await flushPromises();
+      expect(wrapper.text()).toContain('Delete Conversation?');
+      expect(wrapper.text()).toContain('A thread');
+
+      await wrapper.find('[data-testid="llm-chat-confirm-delete"]').trigger('click');
+      await flushPromises();
+      expect(deleteFetches().length).toBe(1);
+
+      await switchToAccountB();
+      expect(wrapper.text()).not.toContain('Delete Conversation?');
+
+      await openThreadMenu(1);
+      await wrapper.find('[data-testid="llm-chat-delete-thread"]').trigger('click');
+      await flushPromises();
+      expect(wrapper.text()).toContain('Delete Conversation?');
+      expect(wrapper.text()).toContain('B thread');
+
+      gate.resolve();
+      await flushPromises();
+
+      expect(wrapper.text()).toContain('Delete Conversation?');
+      expect(wrapper.text()).toContain('B thread');
+      expect(notifyCreateSpy).not.toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: 'positive',
+          message: 'Conversation deleted successfully',
+        }),
+      );
+      expect(chatStore.messages.length).toBe(1);
+    });
+
+    it('does not let an unrelated rename cancel a pending selection', async () => {
+      threadRows = [
+        createMockThread({ ThreadId: 't-1', title: 'Slow select', updatedAt: Date.now() }),
+        createMockThread({
+          ThreadId: 't-2',
+          title: 'Renamed soon',
+          updatedAt: Date.now() - 60_000,
+        }),
+      ];
+      messageRows = [createMockMessage('selected thread body', false, 0, 't-1')];
+      const slow = deferred<void>();
+      messagesDelays['t-1'] = slow.promise;
+
+      mountComponent();
+      const chatStore = useChatStore();
+      await flushPromises();
+
+      await wrapper.findAll('[data-testid="llm-chat-thread-item"]')[0]!.trigger('click');
+
+      await openThreadMenu(1);
+      await wrapper.find('[data-testid="chat-thread-rename"]').trigger('click');
+      await flushPromises();
+      await wrapper.find('[data-testid="chat-thread-rename-input"]').setValue('Renamed other');
+      await wrapper.find('[data-testid="chat-thread-rename-input"]').trigger('keyup.enter');
+      await flushPromises();
+      expect(patchFetches().length).toBe(1);
+
+      slow.resolve();
+      await flushPromises();
+
+      expect(chatStore.chatId).toBe('t-1');
+      expect(chatStore.messages.some((m) => m.content === 'selected thread body')).toBe(true);
+    });
+
+    it('still resets the active thread when a pending delete succeeds after an unrelated rename', async () => {
+      threadRows = [
+        createMockThread({ ThreadId: 't-1', title: 'Active delete', updatedAt: Date.now() }),
+        createMockThread({
+          ThreadId: 't-2',
+          title: 'Renamed soon',
+          updatedAt: Date.now() - 60_000,
+        }),
+      ];
+      messageRows = [createMockMessage('active thread body', false, 0, 't-1')];
+      const gate = deferred<void>();
+      deleteDelay = gate.promise;
+
+      mountComponent();
+      const chatStore = useChatStore();
+      await flushPromises();
+
+      await wrapper.findAll('[data-testid="llm-chat-thread-item"]')[0]!.trigger('click');
+      await flushPromises();
+      expect(chatStore.chatId).toBe('t-1');
+
+      await openThreadMenu(0);
+      await wrapper.find('[data-testid="llm-chat-delete-thread"]').trigger('click');
+      await flushPromises();
+      await wrapper.find('[data-testid="llm-chat-confirm-delete"]').trigger('click');
+      await flushPromises();
+      expect(deleteFetches().length).toBe(1);
+
+      await openThreadMenu(1);
+      await wrapper.find('[data-testid="chat-thread-rename"]').trigger('click');
+      await flushPromises();
+      await wrapper.find('[data-testid="chat-thread-rename-input"]').setValue('Renamed other');
+      await wrapper.find('[data-testid="chat-thread-rename-input"]').trigger('keyup.enter');
+      await flushPromises();
+      expect(patchFetches().length).toBe(1);
+
+      gate.resolve();
+      await flushPromises();
+
+      expect(chatStore.chatId).not.toBe('t-1');
+      expect(chatStore.messages.length).toBe(1);
+      expect(chatStore.messages[0]!.content).toContain('こんにちは');
+      expect(notifyCreateSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: 'positive',
+          message: 'Conversation deleted successfully',
+        }),
+      );
+    });
+
+    it('does not let a selection resurrect a thread while its delete is in flight', async () => {
+      threadRows = [
+        createMockThread({ ThreadId: 't-1', title: 'Doomed', updatedAt: Date.now() }),
+        createMockThread({ ThreadId: 't-2', title: 'Survivor', updatedAt: Date.now() - 60_000 }),
+      ];
+      messageRows = [createMockMessage('doomed body', false, 0, 't-1')];
+      const gate = deferred<void>();
+      deleteDelay = gate.promise;
+
+      mountComponent();
+      const chatStore = useChatStore();
+      await flushPromises();
+
+      await openThreadMenu(0);
+      await wrapper.find('[data-testid="llm-chat-delete-thread"]').trigger('click');
+      await flushPromises();
+      await wrapper.find('[data-testid="llm-chat-confirm-delete"]').trigger('click');
+      await flushPromises();
+      expect(deleteFetches().length).toBe(1);
+
+      await wrapper.findAll('[data-testid="llm-chat-thread-item"]')[0]!.trigger('click');
+      await flushPromises();
+
+      expect(messageFetches().filter((f) => f.url.includes('thread_id=t-1')).length).toBe(0);
+      expect(chatStore.chatId).not.toBe('t-1');
+
+      gate.resolve();
+      await flushPromises();
+
+      expect(chatStore.messages.some((m) => m.content === 'doomed body')).toBe(false);
+      expect(chatStore.chatId).not.toBe('t-1');
+    });
+
+    it('lets a thread be selected again after its delete fails', async () => {
+      threadRows = [createMockThread({ ThreadId: 't-1', title: 'Survivor' })];
+      messageRows = [createMockMessage('survivor body', false, 0, 't-1')];
+      deleteFails = true;
+      const gate = deferred<void>();
+      deleteDelay = gate.promise;
+
+      mountComponent();
+      const chatStore = useChatStore();
+      await flushPromises();
+
+      await openThreadMenu(0);
+      await wrapper.find('[data-testid="llm-chat-delete-thread"]').trigger('click');
+      await flushPromises();
+      await wrapper.find('[data-testid="llm-chat-confirm-delete"]').trigger('click');
+      await flushPromises();
+      expect(deleteFetches().length).toBe(1);
+
+      await wrapper.find('[data-testid="llm-chat-thread-item"]').trigger('click');
+      await flushPromises();
+      expect(messageFetches().filter((f) => f.url.includes('thread_id=t-1')).length).toBe(0);
+
+      gate.resolve();
+      await flushPromises();
+      expect(notifyCreateSpy).toHaveBeenCalledWith(
+        expect.objectContaining({ type: 'negative', message: 'Failed to delete conversation' }),
+      );
+
+      await wrapper.find('[data-testid="llm-chat-thread-item"]').trigger('click');
+      await flushPromises();
+
+      expect(messageFetches().filter((f) => f.url.includes('thread_id=t-1')).length).toBe(1);
+      expect(chatStore.chatId).toBe('t-1');
+      expect(chatStore.messages.some((m) => m.content === 'survivor body')).toBe(true);
     });
   });
 
