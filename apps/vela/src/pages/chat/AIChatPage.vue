@@ -268,8 +268,8 @@ const selectThread = async (t: ChatThreadSummaryDTO) => {
   }
 };
 
-const onSend = async () => {
-  const content = input.value.trim();
+const onSend = async (draft: string) => {
+  const content = draft.trim();
   if (!content || chat.isLoading) return;
 
   chat.clearError();

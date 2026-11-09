@@ -33,7 +33,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   'update:modelValue': [value: string];
-  send: [];
+  send: [content: string];
 }>();
 
 const draft = computed({
@@ -42,6 +42,8 @@ const draft = computed({
 });
 
 const onSend = () => {
-  emit('send');
+  const content = draft.value.trim();
+  if (!content || props.loading) return;
+  emit('send', content);
 };
 </script>
