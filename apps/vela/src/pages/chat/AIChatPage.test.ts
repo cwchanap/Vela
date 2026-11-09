@@ -3,6 +3,7 @@ import { mount, flushPromises, type VueWrapper } from '@vue/test-utils';
 import { createPinia, setActivePinia } from 'pinia';
 import { Quasar, Notify } from 'quasar';
 import { VueQueryPlugin, QueryClient } from '@tanstack/vue-query';
+import { chatKeys } from '@vela/common';
 import AIChatPage from './AIChatPage.vue';
 import { useChatStore } from '../../stores/chat';
 import { useLLMSettingsStore } from '../../stores/llmSettings';
@@ -52,6 +53,128 @@ describe('AIChatPage', () => {
   let originalFetch: typeof global.fetch;
   let wrapper: VueWrapper<any> | null = null;
 
+  // Stateful in-memory chat-history mock mirroring the API semantics
+  let threadRows: MockThread[];
+  let messageRows: MockMessage[];
+  let saveBodies: Array<Record<string, unknown>>;
+  let fetchLog: Array<{ url: string; method: string }>;
+  let saveFailures: { user: boolean; assistant: boolean };
+  let listFails: boolean;
+  let messagesFail: boolean;
+  let patchFails: boolean;
+  let deleteFails: boolean;
+  let patchDelay: Promise<void> | null;
+
+  const okJson = (data: unknown) => ({ ok: true, json: async () => data });
+  const errJson = (status = 500) => ({
+    ok: false,
+    status,
+    json: async () => ({ error: 'mock failure' }),
+  });
+
+  const installFetchRouter = () => {
+    fetchMock.mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+      const url =
+        typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+      const method = init?.method ?? 'GET';
+      fetchLog.push({ url, method });
+
+      if (url.includes('/api/chat-history/save') && method === 'POST') {
+        const body = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>;
+        saveBodies.push(body);
+        const isUser = body.is_user === true;
+        if ((isUser && saveFailures.user) || (!isUser && saveFailures.assistant)) {
+          return Promise.resolve(errJson());
+        }
+        // Mirror the server: a user save upserts the thread row first.
+        if (isUser) {
+          const threadId = String(body.ThreadId ?? '');
+          const existing = threadRows.find((t) => t.ThreadId === threadId);
+          if (existing) {
+            existing.updatedAt = Date.now();
+          } else {
+            threadRows.push({
+              ThreadId: threadId,
+              title:
+                String(body.message ?? '')
+                  .trim()
+                  .slice(0, 60) || 'New conversation',
+              createdAt: Date.now(),
+              updatedAt: Date.now(),
+            });
+          }
+        }
+        return Promise.resolve(okJson({ ok: true }));
+      }
+
+      if (url.includes('/api/chat-history/threads') && method === 'GET') {
+        if (listFails) return Promise.resolve(errJson());
+        const sorted = [...threadRows].sort(
+          (a, b) => b.updatedAt - a.updatedAt || a.ThreadId.localeCompare(b.ThreadId),
+        );
+        return Promise.resolve(okJson({ threads: sorted }));
+      }
+
+      if (url.includes('/api/chat-history/messages') && method === 'GET') {
+        if (messagesFail) return Promise.resolve(errJson());
+        const threadId = new URL(url, 'http://localhost').searchParams.get('thread_id') ?? '';
+        if (!threadRows.some((t) => t.ThreadId === threadId)) {
+          return Promise.resolve({
+            ok: false,
+            status: 404,
+            json: async () => ({ error: 'Thread not found' }),
+          });
+        }
+        return Promise.resolve(
+          okJson({ items: messageRows.filter((m) => m.ThreadId === threadId) }),
+        );
+      }
+
+      const threadMatch = /\/api\/chat-history\/thread\/([^/?]+)$/.exec(url);
+      if (threadMatch) {
+        const threadId = decodeURIComponent(threadMatch[1]!);
+        const thread = threadRows.find((t) => t.ThreadId === threadId);
+        if (method === 'PATCH') {
+          const respond = () => {
+            if (patchFails) return errJson();
+            if (!thread) {
+              return {
+                ok: false,
+                status: 404,
+                json: async () => ({ error: 'Thread not found' }),
+              };
+            }
+            const body = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>;
+            if (typeof body.title === 'string') thread.title = body.title.trim();
+            thread.updatedAt = Date.now();
+            return okJson({ thread });
+          };
+          return (patchDelay ?? Promise.resolve()).then(respond);
+        }
+        if (method === 'DELETE') {
+          if (deleteFails) return Promise.resolve(errJson());
+          if (!thread) {
+            return Promise.resolve({
+              ok: false,
+              status: 404,
+              json: async () => ({ error: 'Thread not found' }),
+            });
+          }
+          threadRows = threadRows.filter((t) => t.ThreadId !== threadId);
+          return Promise.resolve(okJson({ ok: true }));
+        }
+      }
+
+      return Promise.resolve(okJson({}));
+    });
+  };
+
+  const threadFetches = () => fetchLog.filter((l) => l.url.includes('/chat-history/threads'));
+  const saveFetches = () => fetchLog.filter((l) => l.url.includes('/chat-history/save'));
+  const messageFetches = () => fetchLog.filter((l) => l.url.includes('/chat-history/messages'));
+  const patchFetches = () => fetchLog.filter((l) => l.method === 'PATCH');
+  const deleteFetches = () => fetchLog.filter((l) => l.method === 'DELETE');
+
   beforeEach(() => {
     // Create fresh Pinia instance for test isolation
     setActivePinia(createPinia());
@@ -74,6 +197,20 @@ describe('AIChatPage', () => {
     };
 
     authStore.user = null;
+    authStore.session = null;
+    signIn();
+
+    // Reset in-memory API state
+    threadRows = [];
+    messageRows = [];
+    saveBodies = [];
+    fetchLog = [];
+    saveFailures = { user: false, assistant: false };
+    listFails = false;
+    messagesFail = false;
+    patchFails = false;
+    deleteFails = false;
+    patchDelay = null;
 
     // Create a new QueryClient for each test
     queryClient = new QueryClient({
@@ -88,19 +225,14 @@ describe('AIChatPage', () => {
     originalFetch = global.fetch;
     fetchMock = vi.fn();
     global.fetch = fetchMock as unknown as typeof global.fetch;
+    installFetchRouter();
 
     // Mock Quasar Notify
     notifyCreateSpy = vi.fn();
     Notify.create = notifyCreateSpy;
 
     // Default authenticated session for API calls using httpJsonAuth
-    vi.mocked(awsAmplify.fetchAuthSession).mockResolvedValue({
-      tokens: {
-        idToken: {
-          toString: () => 'mock-id-token',
-        },
-      },
-    } as Awaited<ReturnType<typeof awsAmplify.fetchAuthSession>>);
+    vi.mocked(awsAmplify.fetchAuthSession).mockResolvedValue(sessionFor('user-123'));
   });
 
   afterEach(() => {
@@ -151,12 +283,21 @@ describe('AIChatPage', () => {
 
   const mockUser = createMockUser();
 
+  const signIn = (user: MockUser = mockUser) => {
+    const authStore = useAuthStore();
+    authStore.user = user;
+    authStore.session = {
+      user: { id: user.id, email: user.email },
+      provider: 'cognito',
+    } as typeof authStore.session;
+  };
+
   // Type definitions for better type safety
   type MockThread = {
     ThreadId: string;
-    lastTimestamp: number;
     title: string;
-    messageCount: number;
+    createdAt: number;
+    updatedAt: number;
   };
 
   type MockMessage = {
@@ -167,37 +308,18 @@ describe('AIChatPage', () => {
     is_user: boolean;
   };
 
-  type MockResponse<T = Record<string, unknown>> = {
-    ok: boolean;
-    json: () => Promise<T>;
-  };
-
   // Reusable mock thread data to avoid duplication across tests
   const createMockThread = (overrides: Partial<MockThread> = {}): MockThread => ({
     ThreadId: 'thread-1',
-    lastTimestamp: Date.now(),
     title: 'Test conversation',
-    messageCount: 5,
+    createdAt: Date.now() - 120_000,
+    updatedAt: Date.now() - 60_000,
     ...overrides,
   });
 
   // Helper to mock LLM client response
   const mockLLMResponse = (text = 'AI response') => {
     vi.spyOn(llmModule.llmClient, 'generate').mockResolvedValue({ text } as LlmResponse);
-  };
-
-  // Helper to mock successful save operations (chat history, etc.)
-  const mockSuccessfulSaveResponse = <T = Record<string, unknown>>(data = {} as T) => {
-    fetchMock.mockResolvedValueOnce({
-      ok: true,
-      json: async () => data,
-    } as MockResponse<T>);
-  };
-
-  // Helper to mock two successful saves (user message + AI response)
-  const mockChatMessageSaves = () => {
-    mockSuccessfulSaveResponse(); // User message save
-    mockSuccessfulSaveResponse(); // AI response save
   };
 
   // Helper to create mock messages for chat history
@@ -214,18 +336,18 @@ describe('AIChatPage', () => {
     is_user: isUser,
   });
 
-  // Helper to mock auth session with token
-  const mockAuthSession = (token = 'mock-id-token') => {
-    vi.mocked(awsAmplify.fetchAuthSession).mockResolvedValue({
+  // Helper to mock auth session with token bound to a subject
+  const sessionFor = (sub: string) =>
+    ({
       tokens: {
         idToken: {
-          toString: () => token,
+          toString: () => `id-token-${sub}`,
+          payload: { sub },
         },
       },
-    } as Awaited<ReturnType<typeof awsAmplify.fetchAuthSession>>);
-  };
+    }) as Awaited<ReturnType<typeof awsAmplify.fetchAuthSession>>;
 
-  const mountComponent = (props = {}): VueWrapper<any> => {
+  const mountComponent = (options: { narrowScreen?: boolean } = {}): VueWrapper<any> => {
     wrapper?.unmount();
     const mockQuasarInstance = {
       notify: notifyCreateSpy,
@@ -243,6 +365,15 @@ describe('AIChatPage', () => {
       dark: {
         isActive: false,
         mode: false,
+      },
+      lang: {
+        rtl: false,
+        label: {},
+      },
+      screen: {
+        width: options.narrowScreen ? 375 : 1280,
+        height: options.narrowScreen ? 667 : 800,
+        lt: { md: options.narrowScreen ?? false },
       },
     };
 
@@ -276,49 +407,66 @@ describe('AIChatPage', () => {
           },
         },
       },
-      props,
     });
     wrapper = mountedWrapper;
     return mountedWrapper;
   };
 
+  const sendMessage = async (text = 'Test message') => {
+    const w = wrapper!;
+    const input = w.find('[data-testid="llm-chat-input"]');
+    await input.setValue(text);
+    await w.find('[data-testid="llm-chat-send"]').trigger('click');
+  };
+
+  const openThreadMenu = async () => {
+    await wrapper!.find('[data-testid="chat-thread-menu"]').trigger('click');
+    await flushPromises();
+  };
+
   describe('Initial Rendering', () => {
     it('should render the chat page', () => {
-      const wrapper = mountComponent();
+      mountComponent();
       expect(wrapper.find('[data-testid="ai-chat-page"]').exists()).toBe(true);
     });
 
     it('should show AI Chat heading', () => {
-      const wrapper = mountComponent();
+      mountComponent();
       expect(wrapper.text()).toContain('AI Chat');
     });
 
-    it('should show New Chat button', () => {
-      const wrapper = mountComponent();
+    it('should show New Chat button in the sidebar', () => {
+      mountComponent();
       const newChatButton = wrapper.find('[data-testid="llm-chat-new"]');
       expect(newChatButton.exists()).toBe(true);
     });
 
-    it('should show History button', () => {
-      const wrapper = mountComponent();
-      const historyButton = wrapper.find('[data-testid="llm-chat-history"]');
-      expect(historyButton.exists()).toBe(true);
+    it('should render the desktop sidebar without a history toggle button', () => {
+      mountComponent();
+      expect(wrapper.find('[data-testid="chat-sidebar-pane"]').exists()).toBe(true);
+      expect(wrapper.find('[data-testid="llm-chat-history"]').exists()).toBe(false);
+    });
+
+    it('should show the sidebar toggle instead of the aside on narrow screens', () => {
+      const wrapper = mountComponent({ narrowScreen: true });
+      expect(wrapper.find('[data-testid="chat-sidebar-pane"]').exists()).toBe(false);
+      expect(wrapper.find('[data-testid="llm-chat-history"]').exists()).toBe(true);
     });
 
     it('should show chat input field', () => {
-      const wrapper = mountComponent();
+      mountComponent();
       const input = wrapper.find('[data-testid="llm-chat-input"]');
       expect(input.exists()).toBe(true);
     });
 
     it('should show send button', () => {
-      const wrapper = mountComponent();
+      mountComponent();
       const sendButton = wrapper.find('[data-testid="llm-chat-send"]');
       expect(sendButton.exists()).toBe(true);
     });
 
     it('should show greeting message on mount', async () => {
-      const wrapper = mountComponent();
+      mountComponent();
       await flushPromises();
 
       expect(wrapper.text()).toContain('こんにちは！日本語学習をお手伝いします');
@@ -326,7 +474,7 @@ describe('AIChatPage', () => {
     });
 
     it('should show placeholder text when no messages', async () => {
-      const wrapper = mountComponent();
+      mountComponent();
       await flushPromises();
 
       // Clear messages after component has mounted (greeting was added)
@@ -340,7 +488,7 @@ describe('AIChatPage', () => {
 
   describe('Chat Input', () => {
     it('should allow typing in input field', async () => {
-      const wrapper = mountComponent();
+      mountComponent();
       const input = wrapper.find('[data-testid="llm-chat-input"]');
 
       await input.setValue('Hello');
@@ -351,7 +499,7 @@ describe('AIChatPage', () => {
       const chatStore = useChatStore();
       chatStore.setLoading(true);
 
-      const wrapper = mountComponent();
+      mountComponent();
       await wrapper.vm.$nextTick();
 
       const input = wrapper.findComponent({ name: 'QInput' });
@@ -362,7 +510,7 @@ describe('AIChatPage', () => {
       const chatStore = useChatStore();
       chatStore.setLoading(true);
 
-      const wrapper = mountComponent();
+      mountComponent();
       await wrapper.vm.$nextTick();
 
       const sendButton = wrapper.find('[data-testid="llm-chat-send"]');
@@ -375,13 +523,9 @@ describe('AIChatPage', () => {
     it('should send message when send button is clicked', async () => {
       const chatStore = useChatStore();
       mockLLMResponse();
-      mockChatMessageSaves();
 
-      const wrapper = mountComponent();
-      const input = wrapper.find('[data-testid="llm-chat-input"]');
-
-      await input.setValue('Test message');
-      await wrapper.find('[data-testid="llm-chat-send"]').trigger('click');
+      mountComponent();
+      await sendMessage('Test message');
       await flushPromises();
 
       const messages = chatStore.messages;
@@ -389,7 +533,7 @@ describe('AIChatPage', () => {
     });
 
     it('should not send empty messages', async () => {
-      const wrapper = mountComponent();
+      mountComponent();
       await flushPromises(); // Wait for component to mount and add greeting
 
       const chatStore = useChatStore();
@@ -405,9 +549,8 @@ describe('AIChatPage', () => {
 
     it('should clear input after sending message', async () => {
       mockLLMResponse();
-      mockChatMessageSaves();
 
-      const wrapper = mountComponent();
+      mountComponent();
       const input = wrapper.find('[data-testid="llm-chat-input"]');
 
       await input.setValue('Test message');
@@ -425,14 +568,11 @@ describe('AIChatPage', () => {
       });
 
       vi.spyOn(llmModule.llmClient, 'generate').mockReturnValueOnce(llmPromise);
-      mockChatMessageSaves();
 
-      const wrapper = mountComponent();
+      mountComponent();
       const chatStore = useChatStore();
-      const input = wrapper.find('[data-testid="llm-chat-input"]');
 
-      await input.setValue('Test message');
-      await wrapper.find('[data-testid="llm-chat-send"]').trigger('click');
+      await sendMessage('Test message');
       await wrapper.vm.$nextTick();
 
       // At this point, LLM is processing and typing indicator should be visible
@@ -448,14 +588,11 @@ describe('AIChatPage', () => {
 
     it('should add AI response to messages', async () => {
       mockLLMResponse('This is AI response');
-      mockChatMessageSaves();
 
-      const wrapper = mountComponent();
+      mountComponent();
       const chatStore = useChatStore();
-      const input = wrapper.find('[data-testid="llm-chat-input"]');
 
-      await input.setValue('Hello AI');
-      await wrapper.find('[data-testid="llm-chat-send"]').trigger('click');
+      await sendMessage('Hello AI');
       await flushPromises();
 
       const messages = chatStore.messages;
@@ -468,14 +605,11 @@ describe('AIChatPage', () => {
       // A successful-but-empty reply stored as an assistant turn would make
       // the next request fail server-side validation (content min 1).
       mockLLMResponse('   ');
-      mockSuccessfulSaveResponse(); // User message save only
 
-      const wrapper = mountComponent();
+      mountComponent();
       const chatStore = useChatStore();
-      const input = wrapper.find('[data-testid="llm-chat-input"]');
 
-      await input.setValue('Test message');
-      await wrapper.find('[data-testid="llm-chat-send"]').trigger('click');
+      await sendMessage('Test message');
       await flushPromises();
 
       expect(chatStore.error).toContain('empty');
@@ -486,30 +620,118 @@ describe('AIChatPage', () => {
       vi.spyOn(llmModule.llmClient, 'generate').mockRejectedValue(
         new Error('API connection failed'),
       );
-      mockSuccessfulSaveResponse(); // User message save succeeds
 
-      const wrapper = mountComponent();
+      mountComponent();
       const chatStore = useChatStore();
-      const input = wrapper.find('[data-testid="llm-chat-input"]');
 
-      await input.setValue('Test message');
-      await wrapper.find('[data-testid="llm-chat-send"]').trigger('click');
+      await sendMessage('Test message');
       await flushPromises();
 
       // Check that error was captured in store
       expect(chatStore.error).toBeTruthy();
       expect(chatStore.error).toContain('failed');
+    });
 
-      // Note: Notification testing is skipped because useQuasar() composable
-      // mocking is unreliable in unit tests. The component does call $q.notify
-      // in the onSend error handler, but the Quasar injection system doesn't
-      // pick up our mock properly. This is better tested in E2E tests.
+    it('should run user save, LLM request and assistant save in sequence', async () => {
+      mockLLMResponse('Ordered reply');
+      const generateSpy = vi.mocked(llmModule.llmClient.generate);
+
+      mountComponent();
+      await flushPromises();
+
+      await sendMessage('Ordered message');
+      await flushPromises();
+
+      const callOrder = fetchMock.mock.invocationCallOrder;
+      const saveCallOrders = fetchMock.mock.calls
+        .map((call, index) => ({ index, url: String(call[0]) }))
+        .filter((call) => call.url.includes('/api/chat-history/save'))
+        .map((call) => callOrder[call.index]!);
+      expect(saveCallOrders.length).toBe(2);
+      const llmCallOrder = generateSpy.mock.invocationCallOrder[0]!;
+      expect(saveCallOrders[0]!).toBeLessThan(llmCallOrder);
+      expect(llmCallOrder).toBeLessThan(saveCallOrders[1]!);
+
+      const userSave = saveBodies.find((b) => b.is_user === true);
+      const assistantSave = saveBodies.find((b) => b.is_user === false);
+      expect(userSave?.message).toBe('Ordered message');
+      expect(assistantSave?.message).toBe('Ordered reply');
+    });
+
+    it('should refetch the thread list after a successful user save only', async () => {
+      mockLLMResponse();
+
+      mountComponent();
+      await flushPromises();
+      expect(threadFetches().length).toBe(1);
+
+      await sendMessage('Creates a row');
+      await flushPromises();
+
+      // Exactly one extra fetch: user save invalidated the list; assistant save must not.
+      expect(threadFetches().length).toBe(2);
+      expect(saveFetches().length).toBe(2);
+    });
+
+    it('should warn but still get an AI reply when the user save fails', async () => {
+      saveFailures.user = true;
+      mockLLMResponse('Reply despite save failure');
+
+      mountComponent();
+      const chatStore = useChatStore();
+
+      await sendMessage('Unsaved message');
+      await flushPromises();
+
+      expect(notifyCreateSpy).toHaveBeenCalledWith(
+        expect.objectContaining({ type: 'warning', message: 'Failed to save chat history' }),
+      );
+      expect(chatStore.messages.some((m) => m.content === 'Reply despite save failure')).toBe(true);
+      // No thread-list invalidation for the failed save
+      expect(threadFetches().length).toBe(1);
+    });
+
+    it('should keep the AI reply when the assistant save fails', async () => {
+      saveFailures.assistant = true;
+      mockLLMResponse('Unsaved reply');
+
+      mountComponent();
+      const chatStore = useChatStore();
+
+      await sendMessage('Saved message');
+      await flushPromises();
+
+      expect(chatStore.messages.some((m) => m.content === 'Unsaved reply')).toBe(true);
+      expect(notifyCreateSpy).toHaveBeenCalledWith(
+        expect.objectContaining({ type: 'warning', message: 'Failed to save chat history' }),
+      );
+    });
+
+    it('should not reach the network for saves when the session account changed', async () => {
+      mockLLMResponse('Reply after account change');
+      mountComponent();
+      await flushPromises();
+
+      // Session token now belongs to another account while the store still
+      // shows the original user.
+      vi.mocked(awsAmplify.fetchAuthSession).mockResolvedValue(sessionFor('user-b'));
+
+      const chatStore = useChatStore();
+      await sendMessage('Sent during account switch');
+      await flushPromises();
+
+      expect(saveBodies.length).toBe(0);
+      expect(notifyCreateSpy).toHaveBeenCalledWith(
+        expect.objectContaining({ type: 'warning', message: 'Failed to save chat history' }),
+      );
+      expect(llmModule.llmClient.generate).toHaveBeenCalled();
+      expect(chatStore.messages.some((m) => m.content === 'Reply after account change')).toBe(true);
     });
   });
 
   describe('New Chat Functionality', () => {
     it('should start new chat when New Chat button is clicked', async () => {
-      const wrapper = mountComponent();
+      mountComponent();
       const chatStore = useChatStore();
 
       // Add some messages first
@@ -526,7 +748,7 @@ describe('AIChatPage', () => {
     });
 
     it('should generate new chat ID', async () => {
-      const wrapper = mountComponent();
+      mountComponent();
       const chatStore = useChatStore();
 
       const oldChatId = chatStore.chatId;
@@ -538,180 +760,143 @@ describe('AIChatPage', () => {
       expect(chatStore.chatId).not.toBe(oldChatId);
       expect(chatStore.chatId).toBeTruthy();
     });
+
+    it('keeps a new chat in memory until a user save creates the thread row', async () => {
+      mockLLMResponse('First reply');
+      mountComponent();
+      await flushPromises();
+
+      // A fresh chat shows no persisted rows
+      expect(wrapper.findAll('[data-testid="llm-chat-thread-item"]').length).toBe(0);
+
+      const newChatButton = wrapper.find('[data-testid="llm-chat-new"]');
+      await newChatButton.trigger('click');
+      await flushPromises();
+      expect(wrapper.findAll('[data-testid="llm-chat-thread-item"]').length).toBe(0);
+
+      // The first user save persists the thread and the refetched list shows it
+      await sendMessage('First real message');
+      await flushPromises();
+
+      const items = wrapper.findAll('[data-testid="llm-chat-thread-item"]');
+      expect(items.length).toBe(1);
+      expect(items[0]!.text()).toContain('First real message');
+    });
   });
 
-  describe('Chat History', () => {
-    it('should open history dialog when History button is clicked', async () => {
-      fetchMock.mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({ threads: [] }),
-      });
-
-      const wrapper = mountComponent();
-      const historyButton = wrapper.find('[data-testid="llm-chat-history"]');
-
-      await historyButton.trigger('click');
+  describe('Chat Sidebar', () => {
+    it('shows the empty state when there are no threads', async () => {
+      mountComponent();
       await flushPromises();
 
-      const dialogs = wrapper.findAllComponents({ name: 'QDialog' });
-      expect(dialogs.length).toBeGreaterThan(0);
+      expect(wrapper.find('[data-testid="chat-sidebar"]').exists()).toBe(true);
+      expect(wrapper.text()).toContain('No conversations yet');
     });
 
-    it('should load threads when opening history', async () => {
-      const mockThreads = [createMockThread()];
-
-      fetchMock.mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({ threads: mockThreads }),
-      });
-
-      const wrapper = mountComponent();
-      const authStore = useAuthStore();
-      authStore.user = mockUser;
-
-      const historyButton = wrapper.find('[data-testid="llm-chat-history"]');
-      await historyButton.trigger('click');
-      await flushPromises();
-
-      expect(fetchMock).toHaveBeenCalledWith(
-        expect.stringContaining('/api/chat-history/threads'),
-        expect.any(Object),
-      );
-      expect(wrapper.text()).toContain('Test conversation');
-    });
-
-    it('should use session user id for history when profile user is not loaded', async () => {
-      fetchMock.mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({ threads: [] }),
-      });
-
-      const wrapper = mountComponent();
-      const authStore = useAuthStore();
-      authStore.user = null;
-      authStore.session = {
-        user: { id: 'session-user-123', email: 'test@example.com' },
-        provider: 'cognito',
-      };
-
-      const historyButton = wrapper.find('[data-testid="llm-chat-history"]');
-      await historyButton.trigger('click');
-      await flushPromises();
-
-      expect(fetchMock).toHaveBeenCalledWith(
-        expect.stringContaining('user_id=session-user-123'),
-        expect.any(Object),
-      );
-      expect(fetchMock).not.toHaveBeenCalledWith(
-        expect.stringContaining('user_id=anonymous'),
-        expect.any(Object),
-      );
-    });
-
-    it('should show loading state while fetching threads', async () => {
-      // Create a promise that we can control when it resolves
-      type FetchResponse = MockResponse<{ threads: MockThread[] }>;
-      let resolveFetch: (_value: FetchResponse) => void = () => {};
-      const fetchPromise = new Promise<FetchResponse>((resolve) => {
-        resolveFetch = resolve;
-      });
-
-      fetchMock.mockReturnValueOnce(fetchPromise);
-
-      const wrapper = mountComponent();
-      const historyButton = wrapper.find('[data-testid="llm-chat-history"]');
-
-      await historyButton.trigger('click');
-      await wrapper.vm.$nextTick();
-
-      // At this point, fetch is in progress and loading state should be visible
-      expect(wrapper.text()).toContain('Loading threads');
-
-      // Clean up by resolving the promise
-      resolveFetch({ ok: true, json: async () => ({ threads: [] }) });
-      await flushPromises();
-    });
-
-    it('should show empty state when no threads exist', async () => {
-      fetchMock.mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({ threads: [] }),
-      });
-
-      const wrapper = mountComponent();
-      const historyButton = wrapper.find('[data-testid="llm-chat-history"]');
-
-      await historyButton.trigger('click');
-      await flushPromises();
-
-      expect(wrapper.text()).toContain('No previous conversations found');
-    });
-
-    it('should load thread messages when thread is selected', async () => {
-      const mockThreads = [createMockThread({ messageCount: 2 })];
-      const mockMessages = [
-        createMockMessage('Hello', true),
-        createMockMessage('Hi there', false, 1000),
+    it('lists thread titles with relative timestamps', async () => {
+      threadRows = [
+        createMockThread({ ThreadId: 't-1', title: 'Recent chat', updatedAt: Date.now() }),
+        createMockThread({
+          ThreadId: 't-2',
+          title: 'Older chat',
+          updatedAt: Date.now() - 5 * 60_000,
+        }),
       ];
 
-      fetchMock
-        .mockResolvedValueOnce({
-          ok: true,
-          json: async () => ({ threads: mockThreads }),
-        })
-        .mockResolvedValueOnce({
-          ok: true,
-          json: async () => ({ items: mockMessages }),
-        });
+      mountComponent();
+      await flushPromises();
 
-      const wrapper = mountComponent();
+      const items = wrapper.findAll('[data-testid="llm-chat-thread-item"]');
+      expect(items.length).toBe(2);
+      // Sorted newest-first by updatedAt
+      expect(items[0]!.text()).toContain('Recent chat');
+      expect(items[0]!.text()).toContain('just now');
+      expect(items[1]!.text()).toContain('Older chat');
+      expect(items[1]!.text()).toContain('5 minutes ago');
+    });
+
+    it('shows a loading state while fetching threads', async () => {
+      let resolveThreads: (_value: unknown) => void = () => {};
+      const threadsPromise = new Promise((resolve) => {
+        resolveThreads = resolve;
+      });
+      fetchMock.mockImplementationOnce(() => threadsPromise);
+
+      mountComponent();
+      await wrapper.vm.$nextTick();
+
+      expect(wrapper.text()).toContain('Loading threads');
+
+      resolveThreads({ ok: true, json: async () => ({ threads: [] }) });
+      await flushPromises();
+    });
+
+    it('shows an error state and retries the thread list', async () => {
+      listFails = true;
+      mountComponent();
+      await flushPromises();
+
+      expect(wrapper.text()).toContain('Failed to load conversations');
+
+      listFails = false;
+      threadRows = [createMockThread({ title: 'Recovered chat' })];
+      await wrapper.find('[data-testid="chat-sidebar-retry"]').trigger('click');
+      await flushPromises();
+
+      expect(wrapper.text()).toContain('Recovered chat');
+    });
+
+    it('should load thread messages when a thread is selected', async () => {
+      threadRows = [createMockThread({ ThreadId: 'thread-1' })];
+      messageRows = [createMockMessage('Hello', true), createMockMessage('Hi there', false, 1000)];
+
+      mountComponent();
       const chatStore = useChatStore();
-
-      const historyButton = wrapper.find('[data-testid="llm-chat-history"]');
-      await historyButton.trigger('click');
       await flushPromises();
 
       const threadItem = wrapper.find('[data-testid="llm-chat-thread-item"]');
       await threadItem.trigger('click');
       await flushPromises();
 
-      expect(fetchMock).toHaveBeenNthCalledWith(
-        2,
-        expect.stringContaining('/api/chat-history/messages'),
-        expect.any(Object),
+      expect(messageFetches().length).toBe(1);
+      expect(messageFetches()[0]!.url).toContain('thread_id=thread-1');
+      expect(chatStore.chatId).toBe('thread-1');
+      expect(chatStore.messages.some((m) => m.content === 'Hello' && m.type === 'user')).toBe(true);
+      expect(chatStore.messages.some((m) => m.content === 'Hi there' && m.type === 'ai')).toBe(
+        true,
       );
-      expect(chatStore.messages.length).toBeGreaterThan(0);
+    });
+
+    it('prepends the greeting when a restored thread lacks it', async () => {
+      threadRows = [createMockThread({ ThreadId: 'thread-1' })];
+      messageRows = [createMockMessage('Hello', true), createMockMessage('Hi there', false, 1000)];
+
+      mountComponent();
+      const chatStore = useChatStore();
+      await flushPromises();
+
+      await wrapper.find('[data-testid="llm-chat-thread-item"]').trigger('click');
+      await flushPromises();
+
+      // Greeting prepended before the two stored messages
+      expect(chatStore.messages.length).toBe(3);
+      expect(chatStore.messages[0]!.content).toContain('こんにちは');
     });
 
     it('skips prepending greeting when loaded thread already starts with greeting', async () => {
       const GREETING_MESSAGE =
         'こんにちは！日本語学習をお手伝いします。What would you like to practice today?';
 
-      const mockThreads = [createMockThread({ messageCount: 2 })];
-      const mockMessages = [
-        // First message IS the greeting (is_user=false, message=GREETING_MESSAGE)
+      threadRows = [createMockThread({ ThreadId: 'thread-1' })];
+      messageRows = [
         createMockMessage(GREETING_MESSAGE, false),
         createMockMessage('How do I say hello?', true, 1000),
       ];
 
-      mockAuthSession();
-      fetchMock
-        .mockResolvedValueOnce({
-          ok: true,
-          json: async () => ({ threads: mockThreads }),
-        })
-        .mockResolvedValueOnce({
-          ok: true,
-          json: async () => ({ items: mockMessages }),
-        });
-
-      const wrapper = mountComponent();
-      const historyButton = wrapper.find('[data-testid="llm-chat-history"]');
-      await historyButton.trigger('click');
+      mountComponent();
       await flushPromises();
 
-      const threadItem = wrapper.find('[data-testid="llm-chat-thread-item"]');
-      await threadItem.trigger('click');
+      await wrapper.find('[data-testid="llm-chat-thread-item"]').trigger('click');
       await flushPromises();
 
       const chatStore = useChatStore();
@@ -720,22 +905,29 @@ describe('AIChatPage', () => {
       expect(chatStore.messages[0]!.content).toBe(GREETING_MESSAGE);
     });
 
+    it('highlights the active thread after selection', async () => {
+      threadRows = [
+        createMockThread({ ThreadId: 'thread-1', title: 'Selected thread' }),
+        createMockThread({ ThreadId: 'thread-2', title: 'Other thread' }),
+      ];
+
+      mountComponent();
+      await flushPromises();
+
+      await wrapper.find('[data-testid="llm-chat-thread-item"]').trigger('click');
+      await flushPromises();
+
+      const items = wrapper.findAll('[data-testid="llm-chat-thread-item"]');
+      expect(items[0]!.classes()).toContain('chat-sidebar__thread--active');
+      expect(items[1]!.classes()).not.toContain('chat-sidebar__thread--active');
+    });
+
     it('logs an error when loading thread messages fails', async () => {
-      const mockThreads = [createMockThread({ messageCount: 1 })];
-      const networkError = new Error('Network error loading messages');
+      threadRows = [createMockThread({ ThreadId: 'thread-1' })];
+      messagesFail = true;
       const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
 
-      mockAuthSession();
-      fetchMock
-        .mockResolvedValueOnce({
-          ok: true,
-          json: async () => ({ threads: mockThreads }),
-        })
-        .mockRejectedValueOnce(networkError);
-
-      const wrapper = mountComponent();
-      const historyButton = wrapper.find('[data-testid="llm-chat-history"]');
-      await historyButton.trigger('click');
+      mountComponent();
       await flushPromises();
 
       const threadItem = wrapper.find('[data-testid="llm-chat-thread-item"]');
@@ -743,157 +935,440 @@ describe('AIChatPage', () => {
       await flushPromises();
 
       expect(consoleErrorSpy).toHaveBeenCalled();
-      expect(consoleErrorSpy.mock.calls.flat()).toContain(networkError);
+      expect(notifyCreateSpy).toHaveBeenCalledWith(expect.objectContaining({ type: 'negative' }));
       consoleErrorSpy.mockRestore();
+    });
+
+    it('fetches threads using the session identity before the profile loads', async () => {
+      const authStore = useAuthStore();
+      authStore.user = null;
+      authStore.session = {
+        user: { id: 'session-user-123', email: 'test@example.com' },
+        provider: 'cognito',
+      } as typeof authStore.session;
+      vi.mocked(awsAmplify.fetchAuthSession).mockResolvedValue(sessionFor('session-user-123'));
+      threadRows = [createMockThread({ title: 'Session thread' })];
+
+      mountComponent();
+      await flushPromises();
+
+      expect(threadFetches().length).toBeGreaterThan(0);
+      expect(wrapper.text()).toContain('Session thread');
+      expect(wrapper.text()).not.toContain('Failed to load conversations');
+    });
+
+    it('keeps thread lists isolated per account after an account switch', async () => {
+      signIn();
+      threadRows = [createMockThread({ ThreadId: 'a-1', title: 'A thread' })];
+
+      mountComponent();
+      await flushPromises();
+      expect(wrapper.text()).toContain('A thread');
+      expect(queryClient.getQueryData<MockThread[]>(chatKeys.threads('user-123'))).toHaveLength(1);
+
+      // Switch the active account; the session token flips with it
+      vi.mocked(awsAmplify.fetchAuthSession).mockResolvedValue(sessionFor('user-b'));
+      signIn(createMockUser({ id: 'user-b', username: 'otheruser' }));
+      threadRows = [createMockThread({ ThreadId: 'b-1', title: 'B thread' })];
+      await flushPromises();
+
+      expect(wrapper.text()).toContain('B thread');
+      expect(wrapper.text()).not.toContain('A thread');
+      expect(queryClient.getQueryData<MockThread[]>(chatKeys.threads('user-123'))![0]!.title).toBe(
+        'A thread',
+      );
+      expect(queryClient.getQueryData<MockThread[]>(chatKeys.threads('user-b'))![0]!.title).toBe(
+        'B thread',
+      );
+    });
+
+    it('opens the sidebar inside a left dialog on narrow screens and closes after selection', async () => {
+      signIn();
+      threadRows = [createMockThread({ ThreadId: 'thread-1' })];
+      messageRows = [createMockMessage('Restored', false)];
+
+      const wrapper = mountComponent({ narrowScreen: true });
+      await flushPromises();
+
+      expect(wrapper.find('[data-testid="chat-sidebar-pane"]').exists()).toBe(false);
+      expect(wrapper.find('[data-testid="llm-chat-history"]').exists()).toBe(true);
+
+      await wrapper.find('[data-testid="llm-chat-history"]').trigger('click');
+      await flushPromises();
+
+      const dialogSidebar = wrapper.find('.q-dialog [data-testid="chat-sidebar"]');
+      expect(dialogSidebar.exists()).toBe(true);
+      expect(dialogSidebar.text()).toContain('Test conversation');
+
+      await dialogSidebar.find('[data-testid="llm-chat-thread-item"]').trigger('click');
+      await flushPromises();
+
+      // Dialog closes after selecting a conversation and messages are restored
+      expect(wrapper.find('.q-dialog [data-testid="chat-sidebar"]').exists()).toBe(false);
+      const chatStore = useChatStore();
+      expect(chatStore.chatId).toBe('thread-1');
+      expect(chatStore.messages.some((m) => m.content === 'Restored')).toBe(true);
+    });
+  });
+
+  describe('Rename Functionality', () => {
+    it('renames a thread inline via Enter and persists it', async () => {
+      signIn();
+      threadRows = [createMockThread({ ThreadId: 'thread-1', title: 'Old title' })];
+
+      mountComponent();
+      await flushPromises();
+
+      await openThreadMenu();
+      await wrapper.find('[data-testid="chat-thread-rename"]').trigger('click');
+      await flushPromises();
+
+      const renameInput = wrapper.find('[data-testid="chat-thread-rename-input"]');
+      await renameInput.setValue('Renamed title');
+      await renameInput.trigger('keyup.enter');
+      await flushPromises();
+
+      // The PATCH request carries the new title
+      expect(patchFetches().length).toBe(1);
+      const patchCall = fetchMock.mock.calls[fetchLog.indexOf(patchFetches()[0]!)];
+      const patchBody = JSON.parse(String(patchCall[1]?.body)) as Record<string, unknown>;
+      expect(patchBody).toEqual({ title: 'Renamed title' });
+      expect(patchCall[0]).toContain('/api/chat-history/thread/thread-1');
+
+      // After settle + refetch, the sidebar still shows the persisted title
+      const item = wrapper.find('[data-testid="llm-chat-thread-item"]');
+      expect(item.text()).toContain('Renamed title');
+      expect(threadRows[0]!.title).toBe('Renamed title');
+    });
+
+    it('commits a trimmed title via the save button', async () => {
+      signIn();
+      threadRows = [createMockThread({ ThreadId: 'thread-1', title: 'Old title' })];
+
+      mountComponent();
+      await flushPromises();
+
+      await openThreadMenu();
+      await wrapper.find('[data-testid="chat-thread-rename"]').trigger('click');
+      await flushPromises();
+
+      await wrapper.find('[data-testid="chat-thread-rename-input"]').setValue('  Padded title  ');
+      await wrapper.find('[data-testid="chat-thread-rename-save"]').trigger('click');
+      await flushPromises();
+
+      const patchCall = fetchMock.mock.calls[fetchLog.indexOf(patchFetches()[0]!)];
+      const patchBody = JSON.parse(String(patchCall[1]?.body)) as Record<string, unknown>;
+      expect(patchBody).toEqual({ title: 'Padded title' });
+    });
+
+    it('cancels the rename with Escape without calling PATCH', async () => {
+      signIn();
+      threadRows = [createMockThread({ ThreadId: 'thread-1', title: 'Old title' })];
+
+      mountComponent();
+      await flushPromises();
+
+      await openThreadMenu();
+      await wrapper.find('[data-testid="chat-thread-rename"]').trigger('click');
+      await flushPromises();
+
+      await wrapper.find('[data-testid="chat-thread-rename-input"]').setValue('Discarded title');
+      await wrapper.find('[data-testid="chat-thread-rename-input"]').trigger('keyup.escape');
+      await flushPromises();
+
+      expect(patchFetches().length).toBe(0);
+      expect(wrapper.find('[data-testid="chat-thread-rename-input"]').exists()).toBe(false);
+      expect(wrapper.text()).toContain('Old title');
+      expect(wrapper.text()).not.toContain('Discarded title');
+    });
+
+    it('rejects a blank title without calling PATCH', async () => {
+      signIn();
+      threadRows = [createMockThread({ ThreadId: 'thread-1', title: 'Old title' })];
+
+      mountComponent();
+      await flushPromises();
+
+      await openThreadMenu();
+      await wrapper.find('[data-testid="chat-thread-rename"]').trigger('click');
+      await flushPromises();
+
+      await wrapper.find('[data-testid="chat-thread-rename-input"]').setValue('   ');
+      await wrapper.find('[data-testid="chat-thread-rename-input"]').trigger('keyup.enter');
+      await flushPromises();
+
+      expect(patchFetches().length).toBe(0);
+      expect(wrapper.text()).toContain('Old title');
+    });
+
+    it('applies the optimistic title before the server resolves', async () => {
+      signIn();
+      threadRows = [createMockThread({ ThreadId: 'thread-1', title: 'Old title' })];
+      let resolvePatch: () => void = () => {};
+      patchDelay = new Promise<void>((resolve) => {
+        resolvePatch = resolve;
+      });
+
+      mountComponent();
+      await flushPromises();
+
+      await openThreadMenu();
+      await wrapper.find('[data-testid="chat-thread-rename"]').trigger('click');
+      await flushPromises();
+
+      await wrapper.find('[data-testid="chat-thread-rename-input"]').setValue('Optimistic title');
+      await wrapper.find('[data-testid="chat-thread-rename-input"]').trigger('keyup.enter');
+      await flushPromises();
+
+      // Optimistic update is visible before the PATCH resolves
+      expect(wrapper.find('[data-testid="llm-chat-thread-item"]').text()).toContain(
+        'Optimistic title',
+      );
+
+      resolvePatch();
+      await flushPromises();
+      expect(wrapper.find('[data-testid="llm-chat-thread-item"]').text()).toContain(
+        'Optimistic title',
+      );
+    });
+
+    it('rolls back the sidebar title when the rename fails', async () => {
+      signIn();
+      threadRows = [createMockThread({ ThreadId: 'thread-1', title: 'Original title' })];
+      patchFails = true;
+
+      mountComponent();
+      await flushPromises();
+
+      await openThreadMenu();
+      await wrapper.find('[data-testid="chat-thread-rename"]').trigger('click');
+      await flushPromises();
+
+      await wrapper.find('[data-testid="chat-thread-rename-input"]').setValue('Rejected title');
+      await wrapper.find('[data-testid="chat-thread-rename-input"]').trigger('keyup.enter');
+      await flushPromises();
+
+      // Rollback restores the original title in the visible list
+      expect(wrapper.find('[data-testid="llm-chat-thread-item"]').text()).toContain(
+        'Original title',
+      );
+      expect(wrapper.find('[data-testid="llm-chat-thread-item"]').text()).not.toContain(
+        'Rejected title',
+      );
+      expect(notifyCreateSpy).toHaveBeenCalledWith(expect.objectContaining({ type: 'negative' }));
     });
   });
 
   describe('Delete Thread Functionality', () => {
-    it('should show delete confirmation dialog', async () => {
-      const mockThreads = [createMockThread()];
+    it('should show delete confirmation dialog from the row menu', async () => {
+      threadRows = [createMockThread()];
 
-      fetchMock.mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({ threads: mockThreads }),
-      });
-
-      const wrapper = mountComponent();
-      const historyButton = wrapper.find('[data-testid="llm-chat-history"]');
-
-      await historyButton.trigger('click');
+      mountComponent();
       await flushPromises();
 
-      const deleteButton = wrapper.find('[data-testid="llm-chat-delete-thread"]');
-      await deleteButton.trigger('click');
-      await wrapper.vm.$nextTick();
+      await openThreadMenu();
+      await wrapper.find('[data-testid="llm-chat-delete-thread"]').trigger('click');
+      await flushPromises();
 
       expect(wrapper.text()).toContain('Delete Conversation?');
       expect(wrapper.text()).toContain('This action cannot be undone');
     });
 
-    it('should delete thread when confirmed', async () => {
-      const mockThreads = [createMockThread()];
-      mockAuthSession();
+    it('should cancel deletion without calling DELETE', async () => {
+      threadRows = [createMockThread()];
 
-      fetchMock
-        .mockResolvedValueOnce({
-          ok: true,
-          json: async () => ({ threads: mockThreads }),
-        })
-        .mockResolvedValueOnce({
-          ok: true,
-          json: async () => ({}),
-        });
-
-      const wrapper = mountComponent();
-      const historyButton = wrapper.find('[data-testid="llm-chat-history"]');
-
-      await historyButton.trigger('click');
+      mountComponent();
       await flushPromises();
 
-      const deleteButton = wrapper.find('[data-testid="llm-chat-delete-thread"]');
-      await deleteButton.trigger('click');
-      await wrapper.vm.$nextTick();
-
-      const confirmButton = wrapper.find('[data-testid="llm-chat-confirm-delete"]');
-      await confirmButton.trigger('click');
+      await openThreadMenu();
+      await wrapper.find('[data-testid="llm-chat-delete-thread"]').trigger('click');
       await flushPromises();
 
-      expect(fetchMock).toHaveBeenCalledWith(
-        expect.stringContaining('/api/chat-history/thread'),
-        expect.objectContaining({
-          method: 'DELETE',
-          headers: expect.objectContaining({
-            Authorization: 'Bearer mock-id-token',
-          }),
-        }),
-      );
+      const cancelButton = wrapper
+        .findAllComponents({ name: 'QBtn' })
+        .find((b) => b.text() === 'Cancel');
+      await cancelButton!.trigger('click');
+      await flushPromises();
 
-      // Verify delete dialog is closed after successful deletion
-      const confirmDialog = wrapper.find('[data-testid="llm-chat-confirm-delete"]');
-      expect(confirmDialog.exists()).toBe(false);
-
-      // Note: Notification testing is skipped because useQuasar() composable
-      // mocking is unreliable in unit tests. The component does call $q.notify
-      // in the confirmDelete success handler, but the Quasar injection system
-      // doesn't pick up our mock properly. This is better tested in E2E tests.
+      expect(deleteFetches().length).toBe(0);
+      expect(wrapper.text()).not.toContain('Delete Conversation?');
+      expect(wrapper.text()).toContain('Test conversation');
     });
 
-    it('should handle delete errors', async () => {
-      const mockThreads = [createMockThread()];
-      mockAuthSession();
+    it('should delete thread when confirmed and remove it from the list', async () => {
+      threadRows = [createMockThread()];
 
-      fetchMock
-        .mockResolvedValueOnce({
-          ok: true,
-          json: async () => ({ threads: mockThreads }),
-        })
-        .mockResolvedValueOnce({
-          ok: false,
-          json: async () => ({ error: 'Delete failed' }),
-        });
-
-      const wrapper = mountComponent();
-      const historyButton = wrapper.find('[data-testid="llm-chat-history"]');
-
-      await historyButton.trigger('click');
+      mountComponent();
       await flushPromises();
 
-      const deleteButton = wrapper.find('[data-testid="llm-chat-delete-thread"]');
-      await deleteButton.trigger('click');
-      await wrapper.vm.$nextTick();
+      await openThreadMenu();
+      await wrapper.find('[data-testid="llm-chat-delete-thread"]').trigger('click');
+      await flushPromises();
 
       const confirmButton = wrapper.find('[data-testid="llm-chat-confirm-delete"]');
       await confirmButton.trigger('click');
       await flushPromises();
 
-      // Verify that the operation was attempted
-      expect(fetchMock).toHaveBeenCalledWith(
-        expect.stringContaining('/api/chat-history/thread'),
+      expect(deleteFetches().length).toBe(1);
+      expect(deleteFetches()[0]!.url).toContain('/api/chat-history/thread/thread-1');
+
+      // Row removed after the list refetches
+      expect(wrapper.findAll('[data-testid="llm-chat-thread-item"]').length).toBe(0);
+      expect(wrapper.text()).toContain('No conversations yet');
+      expect(notifyCreateSpy).toHaveBeenCalledWith(
         expect.objectContaining({
-          method: 'DELETE',
+          type: 'positive',
+          message: 'Conversation deleted successfully',
         }),
       );
+    });
 
-      // Note: Notification testing is skipped because useQuasar() composable
-      // mocking is unreliable in unit tests. The component does call $q.notify
-      // in the confirmDelete error handler, but the Quasar injection system
-      // doesn't pick up our mock properly. This is better tested in E2E tests.
+    it('should preserve the row when deletion fails', async () => {
+      threadRows = [createMockThread()];
+      deleteFails = true;
+
+      mountComponent();
+      await flushPromises();
+
+      await openThreadMenu();
+      await wrapper.find('[data-testid="llm-chat-delete-thread"]').trigger('click');
+      await flushPromises();
+
+      const confirmButton = wrapper.find('[data-testid="llm-chat-confirm-delete"]');
+      await confirmButton.trigger('click');
+      await flushPromises();
+
+      expect(deleteFetches().length).toBe(1);
+      expect(wrapper.text()).toContain('Test conversation');
+      expect(notifyCreateSpy).toHaveBeenCalledWith(
+        expect.objectContaining({ type: 'negative', message: 'Failed to delete conversation' }),
+      );
     });
 
     it('should start a new chat when the currently-active thread is deleted', async () => {
       const chatStore = useChatStore();
       const activeThreadId = 'thread-active';
-      chatStore.startNewChat();
-      // Set chatId to match the thread we'll delete
-      chatStore.setChatId(activeThreadId);
+      threadRows = [createMockThread({ ThreadId: activeThreadId, title: 'Active thread' })];
+      messageRows = [createMockMessage('Old message', false, 0, activeThreadId)];
 
-      mockAuthSession();
-      fetchMock
-        .mockResolvedValueOnce({
-          ok: true,
-          json: async () => ({ threads: [createMockThread({ ThreadId: activeThreadId })] }),
-        })
-        .mockResolvedValueOnce({
-          ok: true,
-          json: async () => ({}),
-        });
-
-      const wrapper = mountComponent();
-      const historyButton = wrapper.find('[data-testid="llm-chat-history"]');
-      await historyButton.trigger('click');
+      mountComponent();
       await flushPromises();
 
-      const deleteButton = wrapper.find('[data-testid="llm-chat-delete-thread"]');
-      await deleteButton.trigger('click');
-      await wrapper.vm.$nextTick();
+      // Select the thread to make it active
+      await wrapper.find('[data-testid="llm-chat-thread-item"]').trigger('click');
+      await flushPromises();
+      expect(chatStore.chatId).toBe(activeThreadId);
+
+      await openThreadMenu();
+      await wrapper.find('[data-testid="llm-chat-delete-thread"]').trigger('click');
+      await flushPromises();
 
       const confirmButton = wrapper.find('[data-testid="llm-chat-confirm-delete"]');
       await confirmButton.trigger('click');
       await flushPromises();
 
-      // After deleting the active thread, a new chat should be started
+      // After deleting the active thread, a new chat starts with a fresh greeting
       expect(chatStore.chatId).not.toBe(activeThreadId);
+      expect(chatStore.chatId).toBeTruthy();
+      expect(chatStore.messages.length).toBe(1);
+      expect(chatStore.messages[0]!.content).toContain('こんにちは');
+    });
+
+    it('should keep the current chat when deleting a non-active thread', async () => {
+      const chatStore = useChatStore();
+      chatStore.setChatId('other-thread');
+      threadRows = [createMockThread({ ThreadId: 'thread-1' })];
+
+      mountComponent();
+      await flushPromises();
+
+      await openThreadMenu();
+      await wrapper.find('[data-testid="llm-chat-delete-thread"]').trigger('click');
+      await flushPromises();
+
+      const confirmButton = wrapper.find('[data-testid="llm-chat-confirm-delete"]');
+      await confirmButton.trigger('click');
+      await flushPromises();
+
+      expect(chatStore.chatId).toBe('other-thread');
+    });
+  });
+
+  describe('Busy gating', () => {
+    const startDeferredSend = async () => {
+      let resolveLLM: (_value: LlmResponse) => void = () => {};
+      const llmPromise = new Promise<LlmResponse>((resolve) => {
+        resolveLLM = resolve;
+      });
+      vi.spyOn(llmModule.llmClient, 'generate').mockReturnValueOnce(llmPromise);
+      mountComponent();
+      await flushPromises();
+      await sendMessage('In-flight message');
+      await wrapper.vm.$nextTick();
+      return { resolveLLM };
+    };
+
+    it('should block thread selection while a send is in flight', async () => {
+      threadRows = [createMockThread({ ThreadId: 'thread-1' })];
+      const chatStore = useChatStore();
+      const { resolveLLM } = await startDeferredSend();
+      expect(chatStore.isLoading).toBe(true);
+
+      const messagesBefore = messageFetches().length;
+      await wrapper!.find('[data-testid="llm-chat-thread-item"]').trigger('click');
+      await flushPromises();
+
+      expect(messageFetches().length).toBe(messagesBefore);
+      expect(chatStore.chatId).not.toBe('thread-1');
+
+      resolveLLM({ text: 'Late reply' });
+      await flushPromises();
+      expect(chatStore.isLoading).toBe(false);
+    });
+
+    it('should block new chat while a send is in flight', async () => {
+      const chatStore = useChatStore();
+      const { resolveLLM } = await startDeferredSend();
+      const chatIdDuringSend = chatStore.chatId;
+
+      await wrapper!.find('[data-testid="llm-chat-new"]').trigger('click');
+      await flushPromises();
+
+      expect(chatStore.chatId).toBe(chatIdDuringSend);
+
+      resolveLLM({ text: 'Late reply' });
+      await flushPromises();
+    });
+
+    it('should block delete while a send is in flight', async () => {
+      threadRows = [createMockThread({ ThreadId: 'thread-1' })];
+      const { resolveLLM } = await startDeferredSend();
+
+      const menuButton = wrapper!.find('[data-testid="chat-thread-menu"]');
+      await menuButton.trigger('click');
+      await flushPromises();
+
+      // The delete entry must not open the confirmation while sending
+      const deleteItem = wrapper!.find('[data-testid="llm-chat-delete-thread"]');
+      if (deleteItem.exists()) {
+        await deleteItem.trigger('click');
+        await flushPromises();
+      }
+      expect(wrapper!.text()).not.toContain('Delete Conversation?');
+      expect(deleteFetches().length).toBe(0);
+
+      resolveLLM({ text: 'Late reply' });
+      await flushPromises();
+    });
+
+    it('disables sidebar actions while loading', async () => {
+      const chatStore = useChatStore();
+      chatStore.setLoading(true);
+      mountComponent();
+      await wrapper.vm.$nextTick();
+
+      const newButton = wrapper.find('[data-testid="llm-chat-new"]');
+      expect(newButton.findComponent({ name: 'QBtn' }).props('disable')).toBe(true);
     });
   });
 
@@ -924,9 +1399,8 @@ describe('AIChatPage', () => {
         defaultModel: { provider: 'google', model: 'gemini-3.8-flash' },
       };
       mockLLMResponse();
-      mockChatMessageSaves();
 
-      const wrapper = mountComponent();
+      mountComponent();
       await flushPromises();
 
       const input = wrapper.find('[data-testid="llm-chat-input"]');
@@ -955,9 +1429,8 @@ describe('AIChatPage', () => {
         defaultModel: { provider: 'google', model: 'gemini-3.8-flash' },
       };
       mockLLMResponse();
-      mockChatMessageSaves();
 
-      const wrapper = mountComponent();
+      mountComponent();
       await flushPromises();
 
       const input = wrapper.find('[data-testid="llm-chat-input"]');
@@ -981,7 +1454,7 @@ describe('AIChatPage', () => {
       const chatStore = useChatStore();
       chatStore.addMessage({ type: 'user', content: 'User message' });
 
-      const wrapper = mountComponent();
+      mountComponent();
       await wrapper.vm.$nextTick();
 
       const messages = wrapper.findAllComponents({ name: 'QChatMessage' });
@@ -994,7 +1467,7 @@ describe('AIChatPage', () => {
       const chatStore = useChatStore();
       chatStore.addMessage({ type: 'ai', content: 'AI message' });
 
-      const wrapper = mountComponent();
+      mountComponent();
       await wrapper.vm.$nextTick();
 
       const messages = wrapper.findAllComponents({ name: 'QChatMessage' });
@@ -1007,7 +1480,7 @@ describe('AIChatPage', () => {
       const chatStore = useChatStore();
       chatStore.addMessage({ type: 'user', content: 'Test' });
 
-      const wrapper = mountComponent();
+      mountComponent();
       await wrapper.vm.$nextTick();
 
       const message = wrapper.findComponent({ name: 'QChatMessage' });
@@ -1020,7 +1493,7 @@ describe('AIChatPage', () => {
       chatStore.addMessage({ type: 'ai', content: 'Second message' });
       chatStore.addMessage({ type: 'user', content: 'Third message' });
 
-      const wrapper = mountComponent();
+      mountComponent();
       await wrapper.vm.$nextTick();
 
       const messages = wrapper.findAllComponents({ name: 'QChatMessage' });
@@ -1033,7 +1506,7 @@ describe('AIChatPage', () => {
       const chatStore = useChatStore();
       chatStore.addMessage({ type: 'ai', content: '**Bold text**' });
 
-      const wrapper = mountComponent();
+      mountComponent();
       await wrapper.vm.$nextTick();
 
       const aiMessages = wrapper.findAll('.ai-message');
@@ -1044,7 +1517,7 @@ describe('AIChatPage', () => {
       const chatStore = useChatStore();
       chatStore.addMessage({ type: 'user', content: '**Bold text**' });
 
-      const wrapper = mountComponent();
+      mountComponent();
       await wrapper.vm.$nextTick();
 
       const userMessages = wrapper.findAll('.user-message');
@@ -1055,9 +1528,8 @@ describe('AIChatPage', () => {
   describe('Keyboard Shortcuts', () => {
     it('should send message on Enter key', async () => {
       mockLLMResponse();
-      mockChatMessageSaves();
 
-      const wrapper = mountComponent();
+      mountComponent();
       const chatStore = useChatStore();
       const input = wrapper.find('[data-testid="llm-chat-input"]');
 
@@ -1072,46 +1544,38 @@ describe('AIChatPage', () => {
 
   describe('UI Components', () => {
     it('should have chat container element', () => {
-      const wrapper = mountComponent();
+      mountComponent();
       const container = wrapper.find('.chat-container');
       expect(container.exists()).toBe(true);
     });
 
     it('should have proper data-testid attributes', () => {
-      const wrapper = mountComponent();
+      mountComponent();
 
       expect(wrapper.find('[data-testid="ai-chat-page"]').exists()).toBe(true);
       expect(wrapper.find('[data-testid="llm-chat-new"]').exists()).toBe(true);
-      expect(wrapper.find('[data-testid="llm-chat-history"]').exists()).toBe(true);
+      expect(wrapper.find('[data-testid="chat-sidebar"]').exists()).toBe(true);
       expect(wrapper.find('[data-testid="llm-chat-input"]').exists()).toBe(true);
       expect(wrapper.find('[data-testid="llm-chat-send"]').exists()).toBe(true);
     });
 
     it('should show button icons', () => {
-      const wrapper = mountComponent();
+      mountComponent();
       const icons = wrapper.findAllComponents({ name: 'QIcon' });
       expect(icons.length).toBeGreaterThan(0);
     });
   });
 
   describe('Error Handling', () => {
-    it('should handle fetch failure without crashing', async () => {
-      fetchMock.mockRejectedValueOnce(new Error('Network error'));
+    it('should handle thread list failure without crashing', async () => {
+      listFails = true;
 
-      const wrapper = mountComponent();
-      const historyButton = wrapper.find('[data-testid="llm-chat-history"]');
-
-      // Should not throw when clicking history button even if fetch fails
-      await historyButton.trigger('click');
+      mountComponent();
       await flushPromises();
 
-      // Component should still be functional
+      // Component should still be functional and surface the error state
       expect(wrapper.exists()).toBe(true);
-
-      // Note: Notification testing is skipped because useQuasar() composable
-      // mocking is unreliable in unit tests. The component does call $q.notify
-      // in the openHistory error handler, but the Quasar injection system
-      // doesn't pick up our mock properly. This is better tested in E2E tests.
+      expect(wrapper.text()).toContain('Failed to load conversations');
     });
 
     it('should handle missing auth token gracefully', async () => {
@@ -1119,27 +1583,19 @@ describe('AIChatPage', () => {
       vi.mocked(awsAmplify.fetchAuthSession).mockResolvedValue({
         tokens: undefined,
       } as Awaited<ReturnType<typeof awsAmplify.fetchAuthSession>>);
+      mockLLMResponse('Reply despite auth error');
 
-      const mockThreads = [createMockThread()];
-
-      fetchMock.mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({ threads: mockThreads }),
-      });
-
-      const wrapper = mountComponent();
-      const historyButton = wrapper.find('[data-testid="llm-chat-history"]');
-
-      await historyButton.trigger('click');
+      mountComponent();
       await flushPromises();
 
-      // Verify component doesn't crash when auth token is missing
-      expect(wrapper.exists()).toBe(true);
+      const chatStore = useChatStore();
+      await sendMessage('Message with no token');
+      await flushPromises();
 
-      // Note: Notification testing is skipped because useQuasar() composable
-      // mocking is unreliable in unit tests. The component does call $q.notify
-      // in error scenarios, but the Quasar injection system doesn't pick up
-      // our mock properly. This is better tested in E2E tests.
+      // The save fails, but the LLM reply still arrives and the page is stable
+      expect(wrapper.exists()).toBe(true);
+      expect(notifyCreateSpy).toHaveBeenCalledWith(expect.objectContaining({ type: 'warning' }));
+      expect(chatStore.messages.some((m) => m.content === 'Reply despite auth error')).toBe(true);
     });
   });
 
@@ -1149,13 +1605,9 @@ describe('AIChatPage', () => {
       chatStore.setChatId(null);
 
       mockLLMResponse();
-      mockChatMessageSaves();
 
-      const wrapper = mountComponent();
-      const input = wrapper.find('[data-testid="llm-chat-input"]');
-
-      await input.setValue('First message');
-      await wrapper.find('[data-testid="llm-chat-send"]').trigger('click');
+      mountComponent();
+      await sendMessage('First message');
       await flushPromises();
 
       expect(chatStore.chatId).toBeTruthy();
@@ -1163,13 +1615,9 @@ describe('AIChatPage', () => {
 
     it('should save messages to history', async () => {
       mockLLMResponse();
-      mockChatMessageSaves();
 
-      const wrapper = mountComponent();
-      const input = wrapper.find('[data-testid="llm-chat-input"]');
-
-      await input.setValue('Test message');
-      await wrapper.find('[data-testid="llm-chat-send"]').trigger('click');
+      mountComponent();
+      await sendMessage('Test message');
       await flushPromises();
 
       expect(fetchMock).toHaveBeenCalledWith(

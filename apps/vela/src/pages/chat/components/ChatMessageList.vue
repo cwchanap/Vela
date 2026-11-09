@@ -1,7 +1,7 @@
 <template>
   <div
     class="col column q-pa-md rounded-borders chat-container"
-    style="min-height: 300px; overflow-y: auto; flex: 1"
+    style="min-height: 0; overflow-y: auto; flex: 1"
     ref="messagesEl"
   >
     <template v-if="messages.length === 0">
