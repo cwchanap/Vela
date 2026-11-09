@@ -63,6 +63,8 @@ describe('AIChatPage', () => {
   let patchFails: boolean;
   let deleteFails: boolean;
   let patchDelay: Promise<void> | null;
+  let deleteDelay: Promise<void> | null;
+  let messagesDelays: Record<string, Promise<void>>;
 
   const okJson = (data: unknown) => ({ ok: true, json: async () => data });
   const errJson = (status = 500) => ({
@@ -114,18 +116,19 @@ describe('AIChatPage', () => {
       }
 
       if (url.includes('/api/chat-history/messages') && method === 'GET') {
-        if (messagesFail) return Promise.resolve(errJson());
         const threadId = new URL(url, 'http://localhost').searchParams.get('thread_id') ?? '';
-        if (!threadRows.some((t) => t.ThreadId === threadId)) {
-          return Promise.resolve({
-            ok: false,
-            status: 404,
-            json: async () => ({ error: 'Thread not found' }),
-          });
-        }
-        return Promise.resolve(
-          okJson({ items: messageRows.filter((m) => m.ThreadId === threadId) }),
-        );
+        const respond = () => {
+          if (messagesFail) return errJson();
+          if (!threadRows.some((t) => t.ThreadId === threadId)) {
+            return {
+              ok: false,
+              status: 404,
+              json: async () => ({ error: 'Thread not found' }),
+            };
+          }
+          return okJson({ items: messageRows.filter((m) => m.ThreadId === threadId) });
+        };
+        return (messagesDelays[threadId] ?? Promise.resolve()).then(respond);
       }
 
       const threadMatch = /\/api\/chat-history\/thread\/([^/?]+)$/.exec(url);
@@ -150,16 +153,19 @@ describe('AIChatPage', () => {
           return (patchDelay ?? Promise.resolve()).then(respond);
         }
         if (method === 'DELETE') {
-          if (deleteFails) return Promise.resolve(errJson());
-          if (!thread) {
-            return Promise.resolve({
-              ok: false,
-              status: 404,
-              json: async () => ({ error: 'Thread not found' }),
-            });
-          }
-          threadRows = threadRows.filter((t) => t.ThreadId !== threadId);
-          return Promise.resolve(okJson({ ok: true }));
+          const respond = () => {
+            if (deleteFails) return errJson();
+            if (!thread) {
+              return {
+                ok: false,
+                status: 404,
+                json: async () => ({ error: 'Thread not found' }),
+              };
+            }
+            threadRows = threadRows.filter((t) => t.ThreadId !== threadId);
+            return okJson({ ok: true });
+          };
+          return (deleteDelay ?? Promise.resolve()).then(respond);
         }
       }
 
@@ -208,6 +214,8 @@ describe('AIChatPage', () => {
     patchFails = false;
     deleteFails = false;
     patchDelay = null;
+    deleteDelay = null;
+    messagesDelays = {};
 
     // Create a new QueryClient for each test
     queryClient = new QueryClient({
@@ -282,11 +290,11 @@ describe('AIChatPage', () => {
 
   const signIn = (user: MockUser = mockUser) => {
     const authStore = useAuthStore();
-    authStore.user = user;
-    authStore.session = {
+    authStore.setSession({
       user: { id: user.id, email: user.email },
       provider: 'cognito',
-    } as typeof authStore.session;
+    });
+    authStore.user = user;
   };
 
   // Type definitions for better type safety
@@ -1347,6 +1355,285 @@ describe('AIChatPage', () => {
 
       const newButton = wrapper.find('[data-testid="llm-chat-new"]');
       expect(newButton.findComponent({ name: 'QBtn' }).props('disable')).toBe(true);
+    });
+  });
+
+  describe('Stale operation guards', () => {
+    const deferred = <T>() => {
+      let resolve!: (_value: T | PromiseLike<T>) => void;
+      let reject!: (_reason?: unknown) => void;
+      const promise = new Promise<T>((res, rej) => {
+        resolve = res;
+        reject = rej;
+      });
+      return { promise, resolve, reject };
+    };
+
+    const switchToAccountB = async () => {
+      vi.mocked(awsAmplify.fetchAuthSession).mockResolvedValue(sessionFor('user-b'));
+      signIn(createMockUser({ id: 'user-b', username: 'otheruser', email: 'b@example.com' }));
+      await flushPromises();
+    };
+
+    it('keeps the newer selection when an older selection resolves last', async () => {
+      threadRows = [
+        createMockThread({ ThreadId: 't-newer', title: 'Newer', updatedAt: Date.now() }),
+        createMockThread({
+          ThreadId: 't-older',
+          title: 'Older',
+          updatedAt: Date.now() - 60_000,
+        }),
+      ];
+      messageRows = [
+        createMockMessage('older thread body', false, 0, 't-older'),
+        createMockMessage('newer thread body', false, 0, 't-newer'),
+      ];
+      const slow = deferred<void>();
+      messagesDelays['t-older'] = slow.promise;
+
+      mountComponent();
+      const chatStore = useChatStore();
+      await flushPromises();
+
+      const items = wrapper.findAll('[data-testid="llm-chat-thread-item"]');
+      await items[1]!.trigger('click');
+      await items[0]!.trigger('click');
+      await flushPromises();
+      expect(chatStore.chatId).toBe('t-newer');
+
+      slow.resolve();
+      await flushPromises();
+
+      expect(chatStore.chatId).toBe('t-newer');
+      expect(chatStore.messages.some((m) => m.content === 'newer thread body')).toBe(true);
+      expect(chatStore.messages.some((m) => m.content === 'older thread body')).toBe(false);
+    });
+
+    it('does not let a pending selection overwrite a new chat', async () => {
+      threadRows = [createMockThread({ ThreadId: 't-1', title: 'Slow thread' })];
+      messageRows = [createMockMessage('slow thread body', false, 0, 't-1')];
+      const slow = deferred<void>();
+      messagesDelays['t-1'] = slow.promise;
+
+      mountComponent();
+      const chatStore = useChatStore();
+      await flushPromises();
+
+      await wrapper.find('[data-testid="llm-chat-thread-item"]').trigger('click');
+      await wrapper.find('[data-testid="llm-chat-new"]').trigger('click');
+      await flushPromises();
+      const freshChatId = chatStore.chatId;
+      expect(freshChatId).not.toBe('t-1');
+
+      slow.resolve();
+      await flushPromises();
+
+      expect(chatStore.chatId).toBe(freshChatId);
+      expect(chatStore.messages.length).toBe(1);
+      expect(chatStore.messages[0]!.content).toContain('こんにちは');
+      expect(chatStore.messages.some((m) => m.content === 'slow thread body')).toBe(false);
+    });
+
+    it('does not let a pending selection overwrite an in-flight send', async () => {
+      threadRows = [createMockThread({ ThreadId: 't-1', title: 'Slow thread' })];
+      messageRows = [createMockMessage('late thread body', false, 0, 't-1')];
+      const slow = deferred<void>();
+      messagesDelays['t-1'] = slow.promise;
+      const llmGate = deferred<LlmResponse>();
+      vi.spyOn(llmModule.llmClient, 'generate').mockReturnValueOnce(llmGate.promise);
+
+      mountComponent();
+      const chatStore = useChatStore();
+      await flushPromises();
+
+      await wrapper.find('[data-testid="llm-chat-thread-item"]').trigger('click');
+      await sendMessage('Send while selecting');
+      await flushPromises();
+
+      slow.resolve();
+      await flushPromises();
+
+      expect(chatStore.messages.some((m) => m.content === 'late thread body')).toBe(false);
+      expect(chatStore.messages.some((m) => m.content === 'Send while selecting')).toBe(true);
+      expect(chatStore.chatId).not.toBe('t-1');
+
+      llmGate.resolve({ text: 'busy reply' });
+      await flushPromises();
+      expect(chatStore.messages.some((m) => m.content === 'busy reply')).toBe(true);
+    });
+
+    it('does not apply an LLM reply that resolves after switching accounts', async () => {
+      const llmGate = deferred<LlmResponse>();
+      vi.spyOn(llmModule.llmClient, 'generate').mockReturnValueOnce(llmGate.promise);
+
+      mountComponent();
+      const chatStore = useChatStore();
+      await flushPromises();
+      await sendMessage('Question under account A');
+      await flushPromises();
+      const aChatId = chatStore.chatId;
+
+      await switchToAccountB();
+
+      llmGate.resolve({ text: 'Reply for account A' });
+      await flushPromises();
+
+      expect(chatStore.messages.some((m) => m.content === 'Reply for account A')).toBe(false);
+      expect(chatStore.messages.some((m) => m.content === 'Question under account A')).toBe(false);
+      expect(chatStore.messages.length).toBe(1);
+      expect(chatStore.messages[0]!.type).toBe('ai');
+      expect(chatStore.chatId).not.toBe(aChatId);
+      expect(chatStore.isLoading).toBe(false);
+      expect(chatStore.isTyping).toBe(false);
+    });
+
+    it('does not clear a newer send loading state when a stale send finishes', async () => {
+      const gateA = deferred<LlmResponse>();
+      vi.spyOn(llmModule.llmClient, 'generate').mockReturnValueOnce(gateA.promise);
+
+      mountComponent();
+      const chatStore = useChatStore();
+      await flushPromises();
+      await sendMessage('A in-flight');
+      await flushPromises();
+
+      await switchToAccountB();
+
+      const gateB = deferred<LlmResponse>();
+      vi.spyOn(llmModule.llmClient, 'generate').mockReturnValueOnce(gateB.promise);
+      await sendMessage('B in-flight');
+      await flushPromises();
+      expect(chatStore.isLoading).toBe(true);
+
+      gateA.resolve({ text: 'stale A reply' });
+      await flushPromises();
+
+      expect(chatStore.isLoading).toBe(true);
+      expect(chatStore.messages.some((m) => m.content === 'stale A reply')).toBe(false);
+
+      gateB.resolve({ text: 'B reply' });
+      await flushPromises();
+      expect(chatStore.isLoading).toBe(false);
+      expect(chatStore.messages.some((m) => m.content === 'B reply')).toBe(true);
+    });
+
+    it('does not apply a pending selection that resolves after switching accounts', async () => {
+      threadRows = [createMockThread({ ThreadId: 't-1', title: 'A thread' })];
+      messageRows = [createMockMessage('A thread body', false, 0, 't-1')];
+      const slow = deferred<void>();
+      messagesDelays['t-1'] = slow.promise;
+
+      mountComponent();
+      const chatStore = useChatStore();
+      await flushPromises();
+
+      await wrapper.find('[data-testid="llm-chat-thread-item"]').trigger('click');
+      await switchToAccountB();
+
+      slow.resolve();
+      await flushPromises();
+
+      expect(chatStore.chatId).not.toBe('t-1');
+      expect(chatStore.messages.some((m) => m.content === 'A thread body')).toBe(false);
+      expect(chatStore.messages.length).toBe(1);
+    });
+
+    it('does not run delete success effects after switching accounts mid-delete', async () => {
+      threadRows = [createMockThread({ ThreadId: 't-1', title: 'Doomed thread' })];
+      const gate = deferred<void>();
+      deleteDelay = gate.promise;
+
+      mountComponent();
+      const chatStore = useChatStore();
+      await flushPromises();
+
+      await openThreadMenu();
+      await wrapper.find('[data-testid="llm-chat-delete-thread"]').trigger('click');
+      await flushPromises();
+      await wrapper.find('[data-testid="llm-chat-confirm-delete"]').trigger('click');
+      await flushPromises();
+      expect(deleteFetches().length).toBe(1);
+
+      await switchToAccountB();
+
+      gate.resolve();
+      await flushPromises();
+
+      expect(notifyCreateSpy).not.toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: 'positive',
+          message: 'Conversation deleted successfully',
+        }),
+      );
+      expect(chatStore.messages.length).toBe(1);
+    });
+
+    it('resets leftover account-A conversation when remounting under account B', async () => {
+      mockLLMResponse('Reply under A');
+      mountComponent();
+      const chatStore = useChatStore();
+      await flushPromises();
+      await sendMessage('A transcript');
+      await flushPromises();
+      expect(chatStore.messages.length).toBeGreaterThan(1);
+      const aChatId = chatStore.chatId;
+
+      wrapper!.unmount();
+      vi.mocked(awsAmplify.fetchAuthSession).mockResolvedValue(sessionFor('user-b'));
+      signIn(createMockUser({ id: 'user-b', username: 'otheruser', email: 'b@example.com' }));
+      mountComponent();
+      await flushPromises();
+
+      expect(chatStore.chatId).not.toBe(aChatId);
+      expect(chatStore.messages.length).toBe(1);
+      expect(chatStore.messages[0]!.content).toContain('こんにちは');
+      expect(chatStore.messages.some((m) => m.content === 'A transcript')).toBe(false);
+    });
+
+    it('keeps the conversation when remounting under the same session', async () => {
+      mockLLMResponse('kept reply');
+      mountComponent();
+      const chatStore = useChatStore();
+      await flushPromises();
+      await sendMessage('Kept transcript');
+      await flushPromises();
+      const firstChatId = chatStore.chatId;
+
+      wrapper!.unmount();
+      mountComponent();
+      await flushPromises();
+
+      expect(chatStore.chatId).toBe(firstChatId);
+      expect(chatStore.messages.some((m) => m.content === 'Kept transcript')).toBe(true);
+      expect(chatStore.messages.some((m) => m.content === 'kept reply')).toBe(true);
+    });
+
+    it('drops a pending send across unmount and re-authentication with the same user id', async () => {
+      const gate = deferred<LlmResponse>();
+      vi.spyOn(llmModule.llmClient, 'generate').mockReturnValueOnce(gate.promise);
+
+      mountComponent();
+      const chatStore = useChatStore();
+      await flushPromises();
+      await sendMessage('Pending under first session');
+      await flushPromises();
+      const firstChatId = chatStore.chatId;
+
+      wrapper!.unmount();
+      vi.mocked(awsAmplify.fetchAuthSession).mockResolvedValue(sessionFor('user-b'));
+      signIn(createMockUser({ id: 'user-b', username: 'otheruser', email: 'b@example.com' }));
+      vi.mocked(awsAmplify.fetchAuthSession).mockResolvedValue(sessionFor('user-123'));
+      signIn();
+      mountComponent();
+      await flushPromises();
+
+      gate.resolve({ text: 'revived reply' });
+      await flushPromises();
+
+      expect(chatStore.messages.some((m) => m.content === 'revived reply')).toBe(false);
+      expect(chatStore.messages.length).toBe(1);
+      expect(chatStore.chatId).not.toBe(firstChatId);
+      expect(chatStore.isLoading).toBe(false);
     });
   });
 

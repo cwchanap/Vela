@@ -16,6 +16,12 @@ export const useChatStore = defineStore('chat', () => {
   const isLoading = ref(false);
   const error = ref<string | null>(null);
   const chatId = ref<string | null>(null); // current conversation/thread id
+  const ownerId = ref<string | null>(null);
+  const ownerSessionGen = ref<number | null>(null);
+  const generation = ref(0);
+
+  const nextGeneration = () => ++generation.value;
+  const isStale = (gen: number) => gen !== generation.value;
 
   // Actions
   const addMessage = (message: Omit<ChatMessage, 'id' | 'timestamp'>) => {
@@ -48,11 +54,23 @@ export const useChatStore = defineStore('chat', () => {
   };
 
   const startNewChat = () => {
+    generation.value += 1;
     chatId.value = crypto.randomUUID();
     messages.value = [];
     error.value = null;
     isTyping.value = false;
     isLoading.value = false;
+  };
+
+  const resetForUser = (uid: string | null, sessionGen: number | null) => {
+    startNewChat();
+    ownerId.value = uid;
+    ownerSessionGen.value = sessionGen;
+  };
+
+  const bindOwner = (uid: string | null, sessionGen: number | null) => {
+    ownerId.value = uid;
+    ownerSessionGen.value = sessionGen;
   };
 
   const clearMessages = () => {
@@ -71,7 +89,12 @@ export const useChatStore = defineStore('chat', () => {
     isLoading,
     error,
     chatId,
+    ownerId,
+    ownerSessionGen,
+    generation,
     // Actions
+    nextGeneration,
+    isStale,
     addMessage,
     setMessages,
     setTyping,
@@ -79,6 +102,8 @@ export const useChatStore = defineStore('chat', () => {
     setError,
     setChatId,
     startNewChat,
+    resetForUser,
+    bindOwner,
     clearMessages,
     clearError,
   };
