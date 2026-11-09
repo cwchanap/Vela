@@ -39,12 +39,13 @@ vi.mock('marked', () => ({
   },
 }));
 
-vi.mock('dompurify', () => ({
-  default: {
+vi.mock('dompurify', () => {
+  const instance = {
     sanitize: vi.fn((text: string) => text),
     addHook: vi.fn(),
-  },
-}));
+  };
+  return { default: Object.assign(() => instance, instance) };
+});
 
 describe('AIChatPage', () => {
   let fetchMock: ReturnType<typeof vi.fn>;

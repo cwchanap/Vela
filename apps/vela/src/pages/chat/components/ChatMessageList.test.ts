@@ -98,6 +98,12 @@ describe('ChatMessageList markdown sanitization', () => {
     expect(link.attributes('rel')).toBe('noopener noreferrer');
   });
 
+  it('keeps the chat sanitizer hook off the shared DOMPurify instance', async () => {
+    const DOMPurify = (await import('dompurify')).default;
+    const html = DOMPurify.sanitize('<a href="https://example.com" target="_blank">external</a>');
+    expect(html).not.toContain('noopener');
+  });
+
   it('does not render user messages as markdown', () => {
     const wrapper = mountComponent([message('user', '**not bold** <img src="x" onerror="a()">')]);
 

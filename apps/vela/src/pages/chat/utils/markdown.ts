@@ -1,11 +1,13 @@
 import { marked } from 'marked';
 import DOMPurify from 'dompurify';
 
-// Module scope: the DOMPurify hook is global, so registering it here keeps it
-// to exactly one hook per module load instead of one per component mount.
-// Enforce rel="noopener noreferrer" on all links with target="_blank" to
-// prevent tabnabbing.
-DOMPurify.addHook('afterSanitizeAttributes', (node) => {
+// A dedicated instance keeps the chat hook off the shared DOMPurify
+// singleton, so sanitization elsewhere (e.g. the dictionary page) never runs
+// chat hooks. Enforce rel="noopener noreferrer" on all links with
+// target="_blank" to prevent tabnabbing.
+const chatPurify = DOMPurify();
+
+chatPurify.addHook('afterSanitizeAttributes', (node) => {
   if (node.tagName === 'A' && node.getAttribute('target') === '_blank') {
     node.setAttribute('rel', 'noopener noreferrer');
   }
@@ -23,7 +25,7 @@ export const renderChatMarkdown = (text: string): string => {
   try {
     const rawHtml = marked.parse(text) as string;
     // Sanitize HTML to prevent XSS attacks from LLM output
-    return DOMPurify.sanitize(rawHtml, {
+    return chatPurify.sanitize(rawHtml, {
       ALLOWED_TAGS: [
         'h1',
         'h2',
@@ -60,7 +62,7 @@ export const renderChatMarkdown = (text: string): string => {
     // Log parsing error with context for debugging
     console.error('Failed to parse markdown content:', error, { text });
     // Return escaped text as safe fallback to prevent rendering issues
-    return DOMPurify.sanitize(text, {
+    return chatPurify.sanitize(text, {
       ALLOWED_TAGS: [],
       ALLOWED_ATTR: [],
       ALLOW_DATA_ATTR: false,
