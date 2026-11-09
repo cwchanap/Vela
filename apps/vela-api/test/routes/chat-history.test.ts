@@ -1,4 +1,5 @@
 import { describe, test, expect, beforeEach, vi } from 'bun:test';
+import { createHash } from 'crypto';
 import { Hono } from 'hono';
 import { corsMiddleware } from '../../src/middleware/cors';
 import type { ChatHistoryItem, Env } from '../../src/types';
@@ -13,6 +14,7 @@ let mockBatchWriteCommand: any;
 let mockSend: any;
 let chatHistory: typeof import('../../src/routes/chat-history').chatHistory;
 const globalMock = globalThis as typeof globalThis & {
+  __authUserId?: string;
   __dynamoMockSend?: ReturnType<typeof vi.fn>;
   __dynamoMockPutCommand?: ReturnType<typeof vi.fn>;
   __dynamoMockGetCommand?: ReturnType<typeof vi.fn>;
@@ -26,8 +28,6 @@ vi.mock('@aws-sdk/client-dynamodb', () => ({
   DynamoDBClient: vi.fn().mockImplementation(() => ({})),
 }));
 
-// Each command mock returns `{ input, __type }` so tests can assert the order
-// and shape of commands handed to docClient.send via mockSend.mock.calls.
 vi.mock('@aws-sdk/lib-dynamodb', () => ({
   DynamoDBDocumentClient: {
     from: vi.fn().mockImplementation(() => ({
@@ -85,7 +85,7 @@ vi.mock('@aws-sdk/lib-dynamodb', () => ({
 
 vi.mock('../../src/middleware/auth', () => ({
   requireAuth: async (c: any, next: () => Promise<void>) => {
-    c.set('userId', 'user-123');
+    c.set('userId', globalMock.__authUserId ?? 'user-123');
     c.set('userEmail', 'test@example.com');
     await next();
   },
@@ -102,6 +102,7 @@ beforeEach(() => {
   mockUpdateCommand = vi.fn();
   mockDeleteCommand = vi.fn();
   mockBatchWriteCommand = vi.fn();
+  globalMock.__authUserId = 'user-123';
   globalMock.__dynamoMockSend = mockSend;
   globalMock.__dynamoMockPutCommand = mockPutCommand;
   globalMock.__dynamoMockGetCommand = mockGetCommand;
@@ -132,6 +133,13 @@ function createTestApp(env: Env = {}) {
   return app;
 }
 
+const partitionKey = (userId: string, threadId: string) =>
+  createHash('sha256')
+    .update(JSON.stringify([userId, threadId]))
+    .digest('hex');
+
+const PARTITION = partitionKey('user-123', 'thread-123');
+
 const sentCommandTypes = () => mockSend.mock.calls.map((call: any[]) => (call[0] as any).__type);
 const sentInputs = () => mockSend.mock.calls.map((call: any[]) => (call[0] as any).input);
 
@@ -151,7 +159,7 @@ const threadRow = (overrides: Record<string, unknown> = {}) => ({
 });
 
 const messageRow = (overrides: Record<string, unknown> = {}): ChatHistoryItem => ({
-  ThreadId: 'thread-123',
+  ThreadId: PARTITION,
   Timestamp: 1693440000000,
   UserId: 'user-123',
   message: 'hello',
@@ -212,7 +220,6 @@ describe('Chat History Route', () => {
       expect(res.status).toBe(200);
       expect(json.ok).toBe(true);
 
-      // Metadata upsert must precede the message write so no invisible messages exist.
       expect(sentCommandTypes()).toEqual(['UpdateCommand', 'PutCommand']);
       const [updateInput, putInput] = sentInputs();
 
@@ -227,13 +234,14 @@ describe('Chat History Route', () => {
       expect(putInput.TableName).toBe('vela-chat-history');
       expect(putInput.Item).toEqual(
         expect.objectContaining({
-          ThreadId: 'thread-123',
+          ThreadId: PARTITION,
           message: 'Hello world',
           is_user: true,
           UserId: 'user-123',
           Timestamp: expect.any(Number),
         }),
       );
+      expect(putInput.Item.ThreadId).not.toBe('thread-123');
     });
 
     test('should trim and truncate a long first user message to a 60-character title', async () => {
@@ -269,7 +277,6 @@ describe('Chat History Route', () => {
 
       expect(res.status).toBe(200);
       const updateInput = mockUpdateCommand.mock.calls[0][0];
-      // if_not_exists keeps a manual rename; model is never part of the save upsert.
       expect(updateInput.UpdateExpression).toContain('if_not_exists(#title, :title)');
       expect(updateInput.UpdateExpression).not.toContain('#model');
       expect(updateInput.UpdateExpression).toContain('#updatedAt = :now');
@@ -287,9 +294,25 @@ describe('Chat History Route', () => {
       expect(mockPutCommand).toHaveBeenCalledWith(
         expect.objectContaining({
           TableName: 'vela-chat-history',
-          Item: expect.objectContaining({ is_user: false, UserId: 'user-123' }),
+          Item: expect.objectContaining({
+            ThreadId: PARTITION,
+            is_user: false,
+            UserId: 'user-123',
+          }),
         }),
       );
+    });
+
+    test('should overwrite a stale client timestamp with the server time', async () => {
+      mockSend.mockResolvedValue({});
+      const app = createTestApp({});
+
+      const before = Date.now();
+      const res = await app.request(saveRequest(validSaveBody({ Timestamp: 1 })));
+
+      expect(res.status).toBe(200);
+      const putInput = mockPutCommand.mock.calls[0][0];
+      expect(putInput.Item.Timestamp).toBeGreaterThanOrEqual(before);
     });
 
     test('should not write the message when the metadata upsert fails', async () => {
@@ -362,8 +385,7 @@ describe('Chat History Route', () => {
 
       expect(res.status).toBe(200);
       expect(json.threads).toHaveLength(3);
-      expect(json.threads[0].ThreadId).toBe('thread-b'); // newest first
-      // updatedAt ties break on ThreadId for a stable ordering
+      expect(json.threads[0].ThreadId).toBe('thread-b'); // Latest first
       expect(json.threads[1].ThreadId).toBe('thread-a');
       expect(json.threads[2].ThreadId).toBe('thread-c');
       expect(json.threads[0]).toEqual(
@@ -476,6 +498,7 @@ describe('Chat History Route', () => {
 
       expect(res.status).toBe(200);
       expect(json.items).toHaveLength(1);
+      expect(json.items[0].ThreadId).toBe('thread-123');
       expect(sentCommandTypes()).toEqual(['GetCommand', 'QueryCommand']);
       expect(mockGetCommand).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -487,7 +510,7 @@ describe('Chat History Route', () => {
         expect.objectContaining({
           TableName: 'vela-chat-history',
           KeyConditionExpression: 'ThreadId = :threadId',
-          ExpressionAttributeValues: { ':threadId': 'thread-123' },
+          ExpressionAttributeValues: { ':threadId': PARTITION },
         }),
       );
     });
@@ -524,7 +547,7 @@ describe('Chat History Route', () => {
         .mockResolvedValueOnce({ Item: threadRow() })
         .mockResolvedValueOnce({
           Items: [messageRow({ Timestamp: 1 })],
-          LastEvaluatedKey: { ThreadId: 'thread-123', Timestamp: 1 },
+          LastEvaluatedKey: { ThreadId: PARTITION, Timestamp: 1 },
         })
         .mockResolvedValueOnce({
           Items: [messageRow({ Timestamp: 2 })],
@@ -541,7 +564,7 @@ describe('Chat History Route', () => {
       expect(mockSend).toHaveBeenCalledTimes(3);
       expect(mockQueryCommand).toHaveBeenLastCalledWith(
         expect.objectContaining({
-          ExclusiveStartKey: { ThreadId: 'thread-123', Timestamp: 1 },
+          ExclusiveStartKey: { ThreadId: PARTITION, Timestamp: 1 },
         }),
       );
     });
@@ -772,6 +795,8 @@ describe('Chat History Route', () => {
         'BatchWriteCommand',
         'DeleteCommand',
       ]);
+      const queryInput = mockQueryCommand.mock.calls[0][0];
+      expect(queryInput.ExpressionAttributeValues[':threadId']).toBe(PARTITION);
       expect(mockDeleteCommand).toHaveBeenCalledWith(
         expect.objectContaining({
           TableName: 'vela-chat-threads',
@@ -782,7 +807,7 @@ describe('Chat History Route', () => {
       expect(batchInput.RequestItems['vela-chat-history']).toEqual([
         {
           DeleteRequest: {
-            Key: { ThreadId: 'thread-123', Timestamp: messageRow().Timestamp },
+            Key: { ThreadId: PARTITION, Timestamp: messageRow().Timestamp },
           },
         },
       ]);
@@ -800,6 +825,52 @@ describe('Chat History Route', () => {
       expect(res.status).toBe(404);
       expect(json.error).toBe('Thread not found');
       expect(mockQueryCommand).not.toHaveBeenCalled();
+      expect(mockDeleteCommand).not.toHaveBeenCalled();
+    });
+
+    test('should reject deletion when stored messages belong to another user', async () => {
+      mockSend.mockResolvedValueOnce({ Item: threadRow() }).mockResolvedValueOnce({
+        Items: [
+          messageRow(),
+          messageRow({ Timestamp: 1693440001000, UserId: 'other-user', message: 'intruder' }),
+        ],
+        LastEvaluatedKey: undefined,
+      });
+
+      const app = createTestApp({});
+      const res = await app.request(
+        new Request('http://localhost/thread/thread-123', { method: 'DELETE' }),
+      );
+      const json = await res.json();
+
+      expect(res.status).toBe(403);
+      expect(json.error).toContain('Forbidden');
+      expect(mockBatchWriteCommand).not.toHaveBeenCalled();
+      expect(mockDeleteCommand).not.toHaveBeenCalled();
+    });
+
+    test('should reject deletion when a foreign message row appears on a later page', async () => {
+      mockSend
+        .mockResolvedValueOnce({ Item: threadRow() })
+        .mockResolvedValueOnce({
+          Items: [messageRow({ Timestamp: 1 })],
+          LastEvaluatedKey: { ThreadId: PARTITION, Timestamp: 1 },
+        })
+        .mockResolvedValueOnce({
+          Items: [messageRow({ Timestamp: 2, UserId: 'other-user', message: 'intruder' })],
+          LastEvaluatedKey: undefined,
+        });
+
+      const app = createTestApp({});
+      const res = await app.request(
+        new Request('http://localhost/thread/thread-123', { method: 'DELETE' }),
+      );
+      const json = await res.json();
+
+      expect(res.status).toBe(403);
+      expect(json.error).toContain('Forbidden');
+      expect(mockSend).toHaveBeenCalledTimes(3);
+      expect(mockBatchWriteCommand).not.toHaveBeenCalled();
       expect(mockDeleteCommand).not.toHaveBeenCalled();
     });
 
@@ -826,7 +897,7 @@ describe('Chat History Route', () => {
         .mockResolvedValueOnce({ Item: threadRow() })
         .mockResolvedValueOnce({
           Items: [messageRow({ Timestamp: 1 })],
-          LastEvaluatedKey: { ThreadId: 'thread-123', Timestamp: 1 },
+          LastEvaluatedKey: { ThreadId: PARTITION, Timestamp: 1 },
         })
         .mockResolvedValueOnce({
           Items: [messageRow({ Timestamp: 2 })],
@@ -843,7 +914,7 @@ describe('Chat History Route', () => {
       expect(res.status).toBe(200);
       expect(mockQueryCommand).toHaveBeenLastCalledWith(
         expect.objectContaining({
-          ExclusiveStartKey: { ThreadId: 'thread-123', Timestamp: 1 },
+          ExclusiveStartKey: { ThreadId: PARTITION, Timestamp: 1 },
         }),
       );
       expect(sentCommandTypes()).toEqual([
@@ -861,7 +932,6 @@ describe('Chat History Route', () => {
         .mockResolvedValueOnce({ Item: threadRow() })
         .mockResolvedValueOnce({ Items: messages, LastEvaluatedKey: undefined })
         .mockResolvedValue({ UnprocessedItems: {} });
-      // Final DeleteCommand response is also covered by the default resolved value.
       const app = createTestApp({});
 
       const res = await app.request(
@@ -879,6 +949,7 @@ describe('Chat History Route', () => {
     });
 
     test('should retry batch delete when there are unprocessed items', async () => {
+      // Stub setTimeout so exponential backoff in the retry loop does not add real delay
       const setTimeoutSpy = stubTimeout();
       try {
         const message = messageRow();
@@ -888,9 +959,7 @@ describe('Chat History Route', () => {
           .mockResolvedValueOnce({
             UnprocessedItems: {
               'vela-chat-history': [
-                {
-                  DeleteRequest: { Key: { ThreadId: 'thread-123', Timestamp: message.Timestamp } },
-                },
+                { DeleteRequest: { Key: { ThreadId: PARTITION, Timestamp: message.Timestamp } } },
               ],
             },
           })
@@ -905,7 +974,6 @@ describe('Chat History Route', () => {
 
         expect(res.status).toBe(200);
         expect(json.ok).toBe(true);
-        // Get + Query + first batch + retry batch + metadata delete
         expect(sentCommandTypes()).toEqual([
           'GetCommand',
           'QueryCommand',
@@ -928,9 +996,7 @@ describe('Chat History Route', () => {
           .mockResolvedValue({
             UnprocessedItems: {
               'vela-chat-history': [
-                {
-                  DeleteRequest: { Key: { ThreadId: 'thread-123', Timestamp: message.Timestamp } },
-                },
+                { DeleteRequest: { Key: { ThreadId: PARTITION, Timestamp: message.Timestamp } } },
               ],
             },
           });
@@ -943,7 +1009,6 @@ describe('Chat History Route', () => {
 
         expect(res.status).toBe(500);
         expect(json.error).toContain('Failed to delete all messages');
-        // Metadata row must survive so the delete can be retried.
         expect(mockDeleteCommand).not.toHaveBeenCalled();
       } finally {
         setTimeoutSpy.mockRestore();
@@ -988,6 +1053,112 @@ describe('Chat History Route', () => {
       expect(res.status).toBe(200);
       expect(json.ok).toBe(true);
       expect(mockSend).toHaveBeenCalledTimes(3);
+    });
+  });
+
+  describe('cross-user thread isolation', () => {
+    test('should scope the same public ThreadId to each caller on user saves', async () => {
+      mockSend.mockResolvedValue({});
+      const app = createTestApp({});
+
+      globalMock.__authUserId = 'user-123';
+      const first = await app.request(saveRequest(validSaveBody({ ThreadId: 'shared-thread' })));
+      globalMock.__authUserId = 'user-456';
+      const second = await app.request(saveRequest(validSaveBody({ ThreadId: 'shared-thread' })));
+
+      expect(first.status).toBe(200);
+      expect(second.status).toBe(200);
+
+      const [firstUpdate, secondUpdate] = mockUpdateCommand.mock.calls.map(
+        (call: any[]) => call[0],
+      );
+      expect(firstUpdate.Key).toEqual({ UserId: 'user-123', ThreadId: 'shared-thread' });
+      expect(secondUpdate.Key).toEqual({ UserId: 'user-456', ThreadId: 'shared-thread' });
+
+      const [firstPut, secondPut] = mockPutCommand.mock.calls.map((call: any[]) => call[0]);
+      expect(firstPut.Item.ThreadId).toBe(partitionKey('user-123', 'shared-thread'));
+      expect(firstPut.Item.UserId).toBe('user-123');
+      expect(secondPut.Item.ThreadId).toBe(partitionKey('user-456', 'shared-thread'));
+      expect(secondPut.Item.UserId).toBe('user-456');
+      expect(firstPut.Item.ThreadId).not.toBe(secondPut.Item.ThreadId);
+      expect(firstPut.Item.ThreadId).not.toBe('shared-thread');
+    });
+
+    test('should scope an assistant save to the caller partition without touching metadata', async () => {
+      mockSend.mockResolvedValue({});
+      const app = createTestApp({});
+
+      globalMock.__authUserId = 'user-456';
+      const res = await app.request(
+        saveRequest(validSaveBody({ ThreadId: 'shared-thread', is_user: false })),
+      );
+
+      expect(res.status).toBe(200);
+      expect(mockUpdateCommand).not.toHaveBeenCalled();
+      const putInput = mockPutCommand.mock.calls[0][0];
+      expect(putInput.Item.ThreadId).toBe(partitionKey('user-456', 'shared-thread'));
+      expect(putInput.Item.UserId).toBe('user-456');
+    });
+
+    test('should query the caller-scoped partition when reading messages', async () => {
+      globalMock.__authUserId = 'user-456';
+      mockSend
+        .mockResolvedValueOnce({
+          Item: threadRow({ UserId: 'user-456', ThreadId: 'shared-thread' }),
+        })
+        .mockResolvedValueOnce({ Items: [] });
+
+      const app = createTestApp({});
+      const res = await app.request(
+        new Request('http://localhost/messages?thread_id=shared-thread'),
+      );
+
+      expect(res.status).toBe(200);
+      expect(mockQueryCommand).toHaveBeenCalledWith(
+        expect.objectContaining({
+          ExpressionAttributeValues: {
+            ':threadId': partitionKey('user-456', 'shared-thread'),
+          },
+        }),
+      );
+    });
+
+    test('should delete only the caller partition for a shared public ThreadId', async () => {
+      globalMock.__authUserId = 'user-456';
+      mockSend
+        .mockResolvedValueOnce({
+          Item: threadRow({ UserId: 'user-456', ThreadId: 'shared-thread' }),
+        })
+        .mockResolvedValueOnce({
+          Items: [
+            messageRow({
+              ThreadId: partitionKey('user-456', 'shared-thread'),
+              UserId: 'user-456',
+            }),
+          ],
+          LastEvaluatedKey: undefined,
+        })
+        .mockResolvedValueOnce({ UnprocessedItems: {} })
+        .mockResolvedValueOnce({});
+
+      const app = createTestApp({});
+      const res = await app.request(
+        new Request('http://localhost/thread/shared-thread', { method: 'DELETE' }),
+      );
+
+      expect(res.status).toBe(200);
+      expect(mockQueryCommand).toHaveBeenCalledWith(
+        expect.objectContaining({
+          ExpressionAttributeValues: {
+            ':threadId': partitionKey('user-456', 'shared-thread'),
+          },
+        }),
+      );
+      expect(mockDeleteCommand).toHaveBeenCalledWith(
+        expect.objectContaining({
+          Key: { UserId: 'user-456', ThreadId: 'shared-thread' },
+        }),
+      );
     });
   });
 });

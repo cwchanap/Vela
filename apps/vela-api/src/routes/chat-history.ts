@@ -1,3 +1,4 @@
+import { createHash } from 'crypto';
 import { Hono } from 'hono';
 import { zValidator } from '@hono/zod-validator';
 import type { Env } from '../types';
@@ -74,12 +75,17 @@ async function queryAllPages(input: QueryCommandInput): Promise<Record<string, a
   return items;
 }
 
+const messagePartitionKey = (userId: string, threadId: string): string =>
+  createHash('sha256')
+    .update(JSON.stringify([userId, threadId]))
+    .digest('hex');
+
 async function dynamodb_saveMessage(item: ChatHistoryItem): Promise<void> {
   try {
     const command = new PutCommand({
       TableName: TABLE_NAMES.CHAT_HISTORY,
       Item: {
-        ThreadId: item.ThreadId || 'default',
+        ThreadId: messagePartitionKey(item.UserId, item.ThreadId),
         Timestamp: item.Timestamp,
         UserId: item.UserId,
         message: item.message,
@@ -122,8 +128,6 @@ async function dynamodb_upsertThread(
   now: number,
 ): Promise<void> {
   try {
-    // Only a first user message seeds title/createdAt; later saves just bump
-    // updatedAt so a manual rename or stored model is preserved.
     const command = new UpdateCommand({
       TableName: TABLE_NAMES.CHAT_THREADS,
       Key: { UserId: userId, ThreadId: threadId },
@@ -210,7 +214,6 @@ async function dynamodb_listThreads(userId: string): Promise<ChatThreadSummary[]
       ...(row.model !== undefined ? { model: row.model as ChatThreadModel } : {}),
     }));
 
-    // Newest first; ThreadId breaks updatedAt ties for a stable ordering.
     return threads.sort(
       (a, b) => b.updatedAt - a.updatedAt || a.ThreadId.localeCompare(b.ThreadId),
     );
@@ -222,19 +225,19 @@ async function dynamodb_listThreads(userId: string): Promise<ChatThreadSummary[]
   }
 }
 
-async function dynamodb_getMessages(thread_id: string): Promise<ChatHistoryItem[]> {
+async function dynamodb_getMessages(userId: string, thread_id: string): Promise<ChatHistoryItem[]> {
   try {
     // Query by ThreadId partition key for efficient lookup
     const messages = await queryAllPages({
       TableName: TABLE_NAMES.CHAT_HISTORY,
       KeyConditionExpression: 'ThreadId = :threadId',
       ExpressionAttributeValues: {
-        ':threadId': thread_id,
+        ':threadId': messagePartitionKey(userId, thread_id),
       },
     });
 
     return messages.map((message) => ({
-      ThreadId: message.ThreadId,
+      ThreadId: thread_id,
       Timestamp: message.Timestamp,
       UserId: message.UserId,
       message: message.message,
@@ -248,15 +251,7 @@ async function dynamodb_getMessages(thread_id: string): Promise<ChatHistoryItem[
   }
 }
 
-async function dynamodb_deleteThreadMessages(thread_id: string): Promise<void> {
-  const allMessages = await queryAllPages({
-    TableName: TABLE_NAMES.CHAT_HISTORY,
-    KeyConditionExpression: 'ThreadId = :threadId',
-    ExpressionAttributeValues: {
-      ':threadId': thread_id,
-    },
-  });
-
+async function dynamodb_deleteThreadMessages(allMessages: Record<string, any>[]): Promise<void> {
   if (allMessages.length === 0) {
     return; // Nothing to delete
   }
@@ -309,17 +304,35 @@ async function dynamodb_deleteThreadMessages(thread_id: string): Promise<void> {
   }
 }
 
-async function dynamodb_deleteThread(userId: string, threadId: string): Promise<void> {
+async function dynamodb_deleteThread(
+  userId: string,
+  threadId: string,
+): Promise<'ok' | 'forbidden'> {
   try {
-    await dynamodb_deleteThreadMessages(threadId);
+    // Paginate through all query results to get ALL messages in the thread
+    const allMessages = await queryAllPages({
+      TableName: TABLE_NAMES.CHAT_HISTORY,
+      KeyConditionExpression: 'ThreadId = :threadId',
+      ExpressionAttributeValues: {
+        ':threadId': messagePartitionKey(userId, threadId),
+      },
+    });
 
-    // Metadata goes last: a partial batch-delete failure leaves the thread row
-    // visible so the delete can be retried.
+    // SECURITY: Verify the user owns this thread before deleting
+    // Ensure all thread messages belong to the authenticated user.
+    // This prevents deleting mixed-owner/corrupted threads.
+    if (!allMessages.every((message) => message.UserId === userId)) {
+      return 'forbidden';
+    }
+
+    await dynamodb_deleteThreadMessages(allMessages);
+
     const command = new DeleteCommand({
       TableName: TABLE_NAMES.CHAT_THREADS,
       Key: { UserId: userId, ThreadId: threadId },
     });
     await docClient.send(command);
+    return 'ok';
   } catch (error) {
     console.error('DynamoDB delete thread error:', error);
     throw new Error(
@@ -338,8 +351,6 @@ chatHistory.post('/save', createValidator('json', ChatHistoryItemSchema), async 
     const body = c.req.valid('json');
     const now = Date.now();
 
-    // A user message owns the thread row, so its metadata write comes first;
-    // a metadata failure must not leave an invisible message behind.
     if (body.is_user) {
       const initialTitle = body.message.trim().slice(0, 60) || 'New conversation';
       await dynamodb_upsertThread(authenticatedUserId, body.ThreadId, initialTitle, now);
@@ -376,14 +387,12 @@ chatHistory.get('/messages', createValidator('query', ThreadIdQuerySchema), asyn
     const authenticatedUserId = c.get('userId');
     const { thread_id } = c.req.valid('query') as ThreadIdQuery;
 
-    // The metadata row is the ownership check: unknown and other users' ids
-    // both return the same 404.
     const thread = await dynamodb_getThread(authenticatedUserId, thread_id);
     if (!thread) {
       return c.json({ error: 'Thread not found' }, 404);
     }
 
-    const items = await dynamodb_getMessages(thread_id);
+    const items = await dynamodb_getMessages(authenticatedUserId, thread_id);
 
     // Verify ownership before returning messages - check all items belong to the authenticated user
     if (items.length > 0 && !items.every((msg) => msg.UserId === authenticatedUserId)) {
@@ -421,13 +430,15 @@ chatHistory.delete('/thread/:id', async (c) => {
     const authenticatedUserId = c.get('userId');
     const threadId = c.req.param('id');
 
-    // The metadata row anchors ownership: absent/unowned rows get the same 404.
     const thread = await dynamodb_getThread(authenticatedUserId, threadId);
     if (!thread) {
       return c.json({ error: 'Thread not found' }, 404);
     }
 
-    await dynamodb_deleteThread(authenticatedUserId, threadId);
+    const result = await dynamodb_deleteThread(authenticatedUserId, threadId);
+    if (result === 'forbidden') {
+      return c.json({ error: 'Forbidden: You do not own this thread' }, 403);
+    }
     return c.json({ ok: true });
   } catch (e) {
     console.error('chat-history delete thread error', e);
