@@ -529,6 +529,24 @@ describe('Chat History Route', () => {
       expect(mockQueryCommand).not.toHaveBeenCalled();
     });
 
+    test('should issue a strongly consistent read for the thread metadata existence check', async () => {
+      mockSend
+        .mockResolvedValueOnce({ Item: threadRow() })
+        .mockResolvedValueOnce({ Items: [], LastEvaluatedKey: undefined });
+
+      const app = createTestApp({});
+      const res = await app.request(new Request('http://localhost/messages?thread_id=thread-123'));
+
+      expect(res.status).toBe(200);
+      expect(mockGetCommand).toHaveBeenCalledWith(
+        expect.objectContaining({
+          TableName: 'vela-chat-threads',
+          Key: { UserId: 'user-123', ThreadId: 'thread-123' },
+          ConsistentRead: true,
+        }),
+      );
+    });
+
     test('should return 200 with an empty items list for an owned empty thread', async () => {
       mockSend
         .mockResolvedValueOnce({ Item: threadRow() })
@@ -826,6 +844,27 @@ describe('Chat History Route', () => {
       expect(json.error).toBe('Thread not found');
       expect(mockQueryCommand).not.toHaveBeenCalled();
       expect(mockDeleteCommand).not.toHaveBeenCalled();
+    });
+
+    test('should issue a strongly consistent read for the delete existence check', async () => {
+      mockSend
+        .mockResolvedValueOnce({ Item: threadRow() })
+        .mockResolvedValueOnce({ Items: [], LastEvaluatedKey: undefined })
+        .mockResolvedValueOnce({});
+
+      const app = createTestApp({});
+      const res = await app.request(
+        new Request('http://localhost/thread/thread-123', { method: 'DELETE' }),
+      );
+
+      expect(res.status).toBe(200);
+      expect(mockGetCommand).toHaveBeenCalledWith(
+        expect.objectContaining({
+          TableName: 'vela-chat-threads',
+          Key: { UserId: 'user-123', ThreadId: 'thread-123' },
+          ConsistentRead: true,
+        }),
+      );
     });
 
     test('should reject deletion when stored messages belong to another user', async () => {
