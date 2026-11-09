@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   authKeys,
+  chatKeys,
   gameKeys,
   progressKeys,
   savedSentencesKeys,
@@ -140,5 +141,23 @@ describe('ttsKeys', () => {
 
   it('settings handles null userId', () => {
     expect(ttsKeys.settings(null)).toEqual(['tts', 'settings', null]);
+  });
+});
+
+describe('chatKeys', () => {
+  it('has correct base key', () => {
+    expect(chatKeys.all).toEqual(['chat']);
+  });
+
+  it('threads returns correct tuple with userId', () => {
+    expect(chatKeys.threads('user-1')).toEqual(['chat', 'threads', 'user-1']);
+  });
+
+  it('threads handles null userId', () => {
+    expect(chatKeys.threads(null)).toEqual(['chat', 'threads', null]);
+  });
+
+  it('threads produces distinct keys for distinct users', () => {
+    expect(chatKeys.threads('user-1')).not.toEqual(chatKeys.threads('user-2'));
   });
 });

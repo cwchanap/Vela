@@ -6,3 +6,4 @@ export * from './useMyDictionariesQueries';
 export * from './useTTSQueries';
 export * from './useVocabularyQueries';
 export * from './useLlmCapabilitiesQuery';
+export * from './useChatThreads';

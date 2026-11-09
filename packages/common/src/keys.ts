@@ -71,3 +71,8 @@ export const ttsKeys = {
   all: ['tts'] as const,
   settings: (userId: string | null) => [...ttsKeys.all, 'settings', userId] as const,
 };
+
+export const chatKeys = {
+  all: ['chat'] as const,
+  threads: (userId: string | null) => [...chatKeys.all, 'threads', userId] as const,
+};
