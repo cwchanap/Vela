@@ -74,8 +74,6 @@ test.describe('Vela API E2E Tests', () => {
   });
 
   test.describe('Chat History API', () => {
-    // All chat-history routes are behind requireAuth: anonymous requests are
-    // rejected with 401 before validation or any DynamoDB call.
     test.describe('unauthenticated', () => {
       test('POST /api/chat-history/save returns 401', async () => {
         const response = await fetch(`${API_BASE_URL}/api/chat-history/save`, {
@@ -133,7 +131,7 @@ test.describe('Vela API E2E Tests', () => {
           headers: await authHeaders(),
           body: JSON.stringify({
             ThreadId: threadId,
-            Timestamp: 0,
+            Timestamp: 1,
             UserId: 'client-ignored',
             message: 'E2E test first user prompt',
             is_user: true,
@@ -178,7 +176,10 @@ test.describe('Vela API E2E Tests', () => {
         expect(thread.updatedAt).toEqual(expect.any(Number));
       });
 
-      test('returns the thread messages', async () => {
+      test('returns the thread messages with server-derived identity and timestamp', async () => {
+        const token = await getIdToken();
+        const tokenSub = JSON.parse(Buffer.from(token.split('.')[1], 'base64').toString()).sub;
+
         const response = await fetch(
           `${API_BASE_URL}/api/chat-history/messages?thread_id=${encodeURIComponent(threadId)}`,
           { headers: await authHeaders() },
@@ -191,6 +192,8 @@ test.describe('Vela API E2E Tests', () => {
         expect(data.items[0]).toEqual(
           expect.objectContaining({ ThreadId: threadId, is_user: true }),
         );
+        expect(data.items[0].UserId).toBe(tokenSub);
+        expect(data.items[0].Timestamp).toBeGreaterThan(Date.now() - 5 * 60 * 1000);
       });
 
       test('returns 404 Thread not found for an unknown thread', async () => {
