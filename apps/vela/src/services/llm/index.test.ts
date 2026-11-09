@@ -123,6 +123,73 @@ describe('llmClient.generate', () => {
     expect(error.message).toBe('Unsupported model');
     expect(error.status).toBe(400);
   });
+
+  const sessionFor = (sub: string | undefined) =>
+    ({
+      tokens: {
+        idToken: {
+          toString: () => `token-${sub}`,
+          ...(sub === undefined ? {} : { payload: { sub } }),
+        },
+      },
+    }) as Awaited<ReturnType<typeof fetchAuthSession>>;
+
+  it('sends the request when the session token matches the expected user', async () => {
+    mockFetchAuthSession.mockResolvedValue(sessionFor('user-a'));
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      headers: new Headers({ 'content-type': 'application/json' }),
+      json: async () => ({ text: 'ok' }),
+    });
+
+    await llmClient.generate(
+      { provider: 'google', messages: [{ role: 'user', content: 'hi' }] },
+      'user-a',
+    );
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(init.headers).toMatchObject({ Authorization: 'Bearer token-user-a' });
+  });
+
+  it('rejects without fetching when the session token belongs to a different user', async () => {
+    mockFetchAuthSession.mockResolvedValue(sessionFor('user-b'));
+
+    await expect(
+      llmClient.generate(
+        {
+          provider: 'google',
+          apiKey: 'a-secret-key',
+          messages: [{ role: 'user', content: 'A transcript' }],
+        },
+        'user-a',
+      ),
+    ).rejects.toThrow(/account changed/i);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('does not include the expected user in the provider payload', async () => {
+    mockFetchAuthSession.mockResolvedValue(sessionFor('user-a'));
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      headers: new Headers({ 'content-type': 'application/json' }),
+      json: async () => ({ text: 'ok' }),
+    });
+
+    await llmClient.generate(
+      { provider: 'google', messages: [{ role: 'user', content: 'hi' }] },
+      'user-a',
+    );
+
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    const body = JSON.parse(String(init.body)) as Record<string, unknown>;
+    expect(body).not.toHaveProperty('expectedUserId');
+    expect(body).not.toHaveProperty('userId');
+    expect(body).toEqual({
+      provider: 'google',
+      messages: [{ role: 'user', content: 'hi' }],
+    });
+  });
 });
 
 describe('llmClient.capabilities', () => {

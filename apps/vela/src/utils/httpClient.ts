@@ -133,6 +133,12 @@ export async function getAuthHeaders(): Promise<Record<string, string>> {
   return headers;
 }
 
+const ACCOUNT_CHANGED_MESSAGE = 'Account changed during request. Please try again.';
+
+export function isAccountChangedError(error: unknown): boolean {
+  return error instanceof Error && error.message === ACCOUNT_CHANGED_MESSAGE;
+}
+
 /**
  * Make an authenticated JSON request
  */
@@ -144,7 +150,7 @@ export async function httpJsonAuth<T = unknown>(
   const { headers: authHeaders, userId } = await getAuthSession();
 
   if (expectedUserId !== undefined && userId !== expectedUserId) {
-    throw new Error('Account changed during request. Please try again.');
+    throw new Error(ACCOUNT_CHANGED_MESSAGE);
   }
 
   const normalizedHeaders = normalizeHeaders(init?.headers);

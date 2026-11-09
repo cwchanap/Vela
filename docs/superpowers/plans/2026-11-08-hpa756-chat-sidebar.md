@@ -3,9 +3,9 @@
 **Date:** 2026-11-08  
 **Linear:** https://linear.app/cwchanap/issue/HPA-756/add-chat-sidebar-with-thread-rename  
 **Design:** [HPA-756 chat sidebar design](../specs/2026-11-08-hpa756-chat-sidebar-design.md)  
-**Review reconciliation:** Revised 2026-11-08 following the [first design review](https://github.com/cwchanap/Vela/pull/82#issuecomment-6724899527) and [latest review](https://github.com/cwchanap/Vela/pull/82#pullrequestreview-5819110588); implementation remains pending.
+**Review reconciliation:** Revised 2026-11-08 following the [first design review](https://github.com/cwchanap/Vela/pull/82#issuecomment-6724899527) and [latest review](https://github.com/cwchanap/Vela/pull/82#pullrequestreview-5819110588). Implementation is now complete on this PR with the automated gates below green; live authenticated acceptance remains outstanding.
 
-> **Handoff:** This draft PR initially contains **only the reviewed design and implementation plan**. Implement, test, and handle review comments on **the same HPA-756 branch and PR**. Do not create one PR per phase, and do not move HPA-756 to Done until the acceptance gates pass.
+> **Handoff:** This draft PR began with **only the reviewed design and implementation plan**; implementation, tests, and review fixes have since landed on the same branch and PR. Do not create one PR per phase, and do not move HPA-756 to Done until the acceptance gates pass.
 
 ## Ticket alignment and decisions
 
@@ -58,26 +58,26 @@ The Linear ticket requires a chat sidebar (replacing the history dialog), a new 
 4. Replace `GET /threads`' message GSI/Scan grouping with a metadata query by the authenticated `UserId`. Remove the `user_id` query parameter, paginate all rows, sort by `updatedAt` descending with `ThreadId` tie-break, return `{ threads }`.
 5. On `POST /save` derive user ID/timestamp server-side. If `is_user=true`, compute `initialTitle = item.message.trim().slice(0, 60) || 'New conversation'` **on the server** before upserting the metadata row (only set title/createdAt via `if_not_exists`, set updatedAt), then write the message. Never store raw unbounded message text as the title; the message schema currently permits whitespace-only content. If `is_user=false`, write the message **only**; do not touch metadata or suppress conditional exceptions. Metadata creation failure does not write an invisible message. A message-write failure after metadata upsert leaves a visible empty thread that can be retried/deleted. Preserve a manual rename or stored model.
 6. Implement `PATCH /thread/:id` using the authenticated `UserId` key and an existence condition; update only supplied fields plus `updatedAt`, returning the new row. Bad/empty title/model returns 400, missing own row 404.
-7. Keep `GET /messages?thread_id=…` shape. **First** use `GetCommand` with `(UserId = authenticatedUserId, ThreadId = thread_id)` on `vela-chat-threads`; if missing, return **404** `{ error: 'Thread not found' }` for unknown and other users' IDs alike. If present, load *all* message pages via the shared helper, return `{ items: [] }` (200) for an owned empty thread, and retain the mixed-owner check for corrupted message rows.
+7. Keep `GET /messages?thread_id=…` shape. **First** use `GetCommand` with `(UserId = authenticatedUserId, ThreadId = thread_id)` on `vela-chat-threads`; if missing, return **404** `{ error: 'Thread not found' }` for unknown and other users' IDs alike. If present, load _all_ message pages via the shared helper, return `{ items: [] }` (200) for an owned empty thread, and retain the mixed-owner check for corrupted message rows.
 8. Replace query-string `DELETE /thread` with `DELETE /thread/:id`: check own thread row, enumerate and delete message pages using existing batch retry, **delete metadata last**, return the same 404 `{ error: 'Thread not found' }` for absent/unowned row. Use this error contract for PATCH too; no legacy alias.
 9. Replace the obsolete Scan fallback and computed-title unit tests, including the old GSI assertions. Mock `GetCommand`/`UpdateCommand`/`DeleteCommand` in the existing Bun test harness; set up a successful metadata Get before successful message-list queries, test missing/unowned 404, owned-empty 200, page continuation, and long/whitespace first-message title derivation. Assert save/delete ordering.
 10. **Rewrite the old API E2E assumptions** in `e2e/api.spec.ts`: it currently expects `?user_id=` and a 400 when missing, but the new route uses server auth and no user query parameter. Also fix the unauthenticated chat-history expectations; test 401 without credentials and appropriate authenticated flows when Cognito credentials are provided.
 
 **Backend test matrix**
 
-| Scenario | Expected |
-| --- | --- |
-| First user save | Upsert thread row **before** message; server trims/truncates long prompt at 60, whitespace-only prompt uses `New conversation`, timestamps |
-| Later user save | Bumps `updatedAt` without overwriting title or `model` |
-| Assistant save | Message-only write; no metadata call |
-| Thread list | Authenticated user only; all pages; newest first |
-| Message list | Metadata Get before Query; absent/other-user row returns 404 `Thread not found`; owned empty row returns 200 `items: []`; all pages loaded |
-| Rename | Trimmed title persists; unrelated fields untouched |
-| PATCH bad/empty title or missing own thread | 400 / 404 |
-| PATCH model | Validated pair stored and returned; no runtime provider change in this ticket |
-| Delete | Paged messages removed in batches, metadata removed last |
-| Partial batch-delete failure | Metadata retained for retry |
-| Former GSI/Scan path | Removed, with no extra fallback |
+| Scenario                                    | Expected                                                                                                                                   |
+| ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| First user save                             | Upsert thread row **before** message; server trims/truncates long prompt at 60, whitespace-only prompt uses `New conversation`, timestamps |
+| Later user save                             | Bumps `updatedAt` without overwriting title or `model`                                                                                     |
+| Assistant save                              | Message-only write; no metadata call                                                                                                       |
+| Thread list                                 | Authenticated user only; all pages; newest first                                                                                           |
+| Message list                                | Metadata Get before Query; absent/other-user row returns 404 `Thread not found`; owned empty row returns 200 `items: []`; all pages loaded |
+| Rename                                      | Trimmed title persists; unrelated fields untouched                                                                                         |
+| PATCH bad/empty title or missing own thread | 400 / 404                                                                                                                                  |
+| PATCH model                                 | Validated pair stored and returned; no runtime provider change in this ticket                                                              |
+| Delete                                      | Paged messages removed in batches, metadata removed last                                                                                   |
+| Partial batch-delete failure                | Metadata retained for retry                                                                                                                |
+| Former GSI/Scan path                        | Removed, with no extra fallback                                                                                                            |
 
 **Gate:** `cd apps/vela-api && bun test test/routes/chat-history.test.ts && bun run compile`. Full API suite before acceptance. Reconcile `e2e/api.spec.ts` in this task rather than deferring stale contract assertions.
 

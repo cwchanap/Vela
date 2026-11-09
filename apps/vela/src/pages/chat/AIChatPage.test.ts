@@ -67,6 +67,7 @@ describe('AIChatPage', () => {
   let deleteDelayQueue: Array<Promise<void>>;
   let listDelay: Promise<void> | null;
   let messagesDelays: Record<string, Promise<void>>;
+  let messagesFailFor: Set<string>;
 
   const okJson = (data: unknown) => ({ ok: true, json: async () => data });
   const errJson = (status = 500) => ({
@@ -123,7 +124,7 @@ describe('AIChatPage', () => {
       if (url.includes('/api/chat-history/messages') && method === 'GET') {
         const threadId = new URL(url, 'http://localhost').searchParams.get('thread_id') ?? '';
         const respond = () => {
-          if (messagesFail) return errJson();
+          if (messagesFail || messagesFailFor.has(threadId)) return errJson();
           if (!threadRows.some((t) => t.ThreadId === threadId)) {
             return {
               ok: false,
@@ -227,6 +228,7 @@ describe('AIChatPage', () => {
     deleteDelayQueue = [];
     listDelay = null;
     messagesDelays = {};
+    messagesFailFor = new Set();
 
     // Create a new QueryClient for each test
     queryClient = new QueryClient({
@@ -720,7 +722,7 @@ describe('AIChatPage', () => {
       );
     });
 
-    it('should not reach the network for saves when the session account changed', async () => {
+    it('should abort the send when the session account changed during persistence', async () => {
       mockLLMResponse('Reply after account change');
       mountComponent();
       await flushPromises();
@@ -732,11 +734,40 @@ describe('AIChatPage', () => {
       await flushPromises();
 
       expect(saveBodies.length).toBe(0);
-      expect(notifyCreateSpy).toHaveBeenCalledWith(
-        expect.objectContaining({ type: 'warning', message: 'Failed to save chat history' }),
+      expect(llmModule.llmClient.generate).not.toHaveBeenCalled();
+      expect(chatStore.error).toMatch(/account changed/i);
+      expect(notifyCreateSpy).toHaveBeenCalledWith(expect.objectContaining({ type: 'negative' }));
+      expect(chatStore.messages.some((m) => m.content === 'Reply after account change')).toBe(
+        false,
       );
-      expect(llmModule.llmClient.generate).toHaveBeenCalled();
-      expect(chatStore.messages.some((m) => m.content === 'Reply after account change')).toBe(true);
+      expect(chatStore.isLoading).toBe(false);
+      expect(chatStore.isTyping).toBe(false);
+    });
+
+    it('should not send the transcript or key through the real transport when the account changed mid-send', async () => {
+      const actual =
+        await vi.importActual<typeof import('../../services/llm')>('../../services/llm');
+      vi.spyOn(llmModule.llmClient, 'generate').mockImplementation(actual.llmClient.generate);
+
+      mountComponent();
+      await flushPromises();
+
+      const sessions = [sessionFor('user-123'), sessionFor('user-b'), sessionFor('user-b')];
+      vi.mocked(awsAmplify.fetchAuthSession).mockImplementation(() =>
+        Promise.resolve(sessions.length > 1 ? sessions.shift()! : sessions[0]!),
+      );
+
+      const chatStore = useChatStore();
+      await sendMessage('Transcript and key snapshot');
+      await flushPromises();
+
+      expect(saveBodies.some((b) => b.is_user === true)).toBe(true);
+      expect(fetchLog.filter((l) => l.url.includes('/api/llm-chat')).length).toBe(0);
+      expect(chatStore.error).toMatch(/account changed/i);
+      expect(chatStore.messages.filter((m) => m.type === 'ai').map((m) => m.content)).toEqual([
+        'こんにちは！日本語学習をお手伝いします。What would you like to practice today?',
+      ]);
+      expect(chatStore.isLoading).toBe(false);
     });
   });
 
@@ -2251,6 +2282,150 @@ describe('AIChatPage', () => {
     });
   });
 
+  describe('Pending delete guards', () => {
+    const deferred = <T>() => {
+      let resolve!: (_value: T | PromiseLike<T>) => void;
+      let reject!: (_reason?: unknown) => void;
+      const promise = new Promise<T>((res, rej) => {
+        resolve = res;
+        reject = rej;
+      });
+      return { promise, resolve, reject };
+    };
+
+    const selectFirstThread = async () => {
+      await wrapper!.findAll('[data-testid="llm-chat-thread-item"]')[0]!.trigger('click');
+      await flushPromises();
+    };
+
+    const confirmPendingDelete = async (index = 0) => {
+      await openThreadMenu(index);
+      await wrapper!.find('[data-testid="llm-chat-delete-thread"]').trigger('click');
+      await flushPromises();
+      await wrapper!.find('[data-testid="llm-chat-confirm-delete"]').trigger('click');
+      await flushPromises();
+    };
+
+    const deleteDialog = () =>
+      wrapper!.findAllComponents({ name: 'QDialog' }).find((d) => d.props('position') !== 'left');
+    const deleteDialogOpen = () => deleteDialog()?.text().includes('Delete Conversation?') ?? false;
+
+    it('keeps the delete confirmation dialog open while deletion is pending', async () => {
+      threadRows = [createMockThread({ ThreadId: 't-1', title: 'Doomed' })];
+      const gate = deferred<void>();
+      deleteDelay = gate.promise;
+
+      mountComponent();
+      await flushPromises();
+
+      await openThreadMenu(0);
+      await wrapper.find('[data-testid="llm-chat-delete-thread"]').trigger('click');
+      await flushPromises();
+      expect(deleteDialogOpen()).toBe(true);
+      expect(deleteDialog()?.props('persistent') ?? false).toBe(false);
+
+      await wrapper.find('[data-testid="llm-chat-confirm-delete"]').trigger('click');
+      await flushPromises();
+      expect(deleteFetches().length).toBe(1);
+      expect(deleteDialog()?.props('persistent')).toBe(true);
+
+      await wrapper.find('.q-dialog__backdrop').trigger('click');
+      await wrapper.trigger('keyup.esc');
+      await flushPromises();
+      expect(deleteDialogOpen()).toBe(true);
+
+      gate.resolve();
+      await flushPromises();
+      expect(deleteDialogOpen()).toBe(false);
+    });
+
+    it('refuses to send into the active thread while its deletion is pending', async () => {
+      threadRows = [createMockThread({ ThreadId: 't-1', title: 'Doomed' })];
+      messageRows = [createMockMessage('doomed body', false, 0, 't-1')];
+      const gate = deferred<void>();
+      deleteDelay = gate.promise;
+      mockLLMResponse('late reply');
+
+      mountComponent();
+      const chatStore = useChatStore();
+      await flushPromises();
+      await selectFirstThread();
+      expect(chatStore.chatId).toBe('t-1');
+
+      await confirmPendingDelete(0);
+      expect(deleteFetches().length).toBe(1);
+
+      const input = wrapper.find('[data-testid="llm-chat-input"]');
+      await input.setValue('Into doomed thread');
+      await wrapper.find('[data-testid="llm-chat-send"]').trigger('click');
+      await flushPromises();
+
+      expect(saveBodies.length).toBe(0);
+      expect(llmModule.llmClient.generate).not.toHaveBeenCalled();
+      expect(chatStore.messages.some((m) => m.content === 'Into doomed thread')).toBe(false);
+      expect((input.element as HTMLInputElement).value).toBe('Into doomed thread');
+
+      gate.resolve();
+      await flushPromises();
+
+      expect(chatStore.chatId).not.toBe('t-1');
+      expect(chatStore.messages.length).toBe(1);
+      expect(chatStore.messages[0]!.content).toContain('こんにちは');
+      expect(notifyCreateSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: 'positive',
+          message: 'Conversation deleted successfully',
+        }),
+      );
+    });
+
+    it('still resets the deleted active thread when a failed selection bumps the generation', async () => {
+      threadRows = [
+        createMockThread({ ThreadId: 't-1', title: 'Doomed', updatedAt: Date.now() }),
+        createMockThread({
+          ThreadId: 't-2',
+          title: 'Failing load',
+          updatedAt: Date.now() - 60_000,
+        }),
+      ];
+      messageRows = [createMockMessage('doomed body', false, 0, 't-1')];
+      messagesFailFor.add('t-2');
+      const gate = deferred<void>();
+      deleteDelay = gate.promise;
+      const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+      mountComponent();
+      const chatStore = useChatStore();
+      await flushPromises();
+      await selectFirstThread();
+      expect(chatStore.chatId).toBe('t-1');
+
+      await confirmPendingDelete(0);
+      expect(deleteFetches().length).toBe(1);
+
+      await wrapper.findAll('[data-testid="llm-chat-thread-item"]')[1]!.trigger('click');
+      await flushPromises();
+      expect(notifyCreateSpy).toHaveBeenCalledWith(
+        expect.objectContaining({ type: 'negative', message: 'Failed to load conversation' }),
+      );
+      expect(chatStore.chatId).toBe('t-1');
+
+      gate.resolve();
+      await flushPromises();
+
+      expect(chatStore.chatId).not.toBe('t-1');
+      expect(chatStore.messages.length).toBe(1);
+      expect(chatStore.messages[0]!.content).toContain('こんにちは');
+      expect(notifyCreateSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: 'positive',
+          message: 'Conversation deleted successfully',
+        }),
+      );
+      consoleErrorSpy.mockRestore();
+    });
+  });
+
   describe('Store Integration', () => {
     it('should have access to chat store', () => {
       mountComponent();
@@ -2287,13 +2462,16 @@ describe('AIChatPage', () => {
       await wrapper.find('[data-testid="llm-chat-send"]').trigger('click');
       await flushPromises();
 
-      expect(llmModule.llmClient.generate).toHaveBeenCalledWith({
-        provider: 'google',
-        model: 'gemini-3.8-flash',
-        apiKey: 'snapshot-key',
-        system: expect.stringContaining('Japanese learning assistant'),
-        messages: expect.arrayContaining([{ role: 'user', content: 'Snapshot test' }]),
-      });
+      expect(llmModule.llmClient.generate).toHaveBeenCalledWith(
+        {
+          provider: 'google',
+          model: 'gemini-3.8-flash',
+          apiKey: 'snapshot-key',
+          system: expect.stringContaining('Japanese learning assistant'),
+          messages: expect.arrayContaining([{ role: 'user', content: 'Snapshot test' }]),
+        },
+        'user-123',
+      );
       // temperature is no longer part of the request contract
       const call = vi.mocked(llmModule.llmClient.generate).mock.calls[0]![0];
       expect(call).not.toHaveProperty('temperature');
@@ -2324,6 +2502,7 @@ describe('AIChatPage', () => {
           apiKey: 'snapshot-key',
           thinking: 'high',
         }),
+        'user-123',
       );
     });
   });
