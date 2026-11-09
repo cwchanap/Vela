@@ -149,6 +149,8 @@ const threadToDelete = ref<ChatThreadSummaryDTO | null>(null);
 const isDeleting = ref(false);
 const dialogGen = ref(0);
 const deletingThreadIds = new Set<string>();
+const pendingDeleteIds = new Set<string>();
+const tombstoneKey = (uid: string, threadId: string) => `${uid}\n${threadId}`;
 
 watch(isNarrowScreen, (narrow) => {
   if (!narrow) mobileSidebarOpen.value = false;
@@ -171,8 +173,23 @@ watch(
     threadToDelete.value = null;
     isDeleting.value = false;
     dialogGen.value += 1;
+    deletingThreadIds.clear();
+    pendingDeleteIds.clear();
   },
 );
+
+const reconcileTombstone = (key: string) => {
+  if (pendingDeleteIds.has(key)) return;
+  const sep = key.indexOf('\n');
+  if (key.slice(0, sep) !== getUserId()) return;
+  if (!threads.value.some((t) => t.ThreadId === key.slice(sep + 1))) {
+    deletingThreadIds.delete(key);
+  }
+};
+
+watch(threads, () => {
+  for (const key of [...deletingThreadIds]) reconcileTombstone(key);
+});
 
 const ensureChatId = () => {
   if (!chat.chatId) {
@@ -204,7 +221,7 @@ const retryThreads = () => {
 };
 
 const selectThread = async (t: ChatThreadSummaryDTO) => {
-  if (chat.isLoading || deletingThreadIds.has(t.ThreadId)) return;
+  if (chat.isLoading || deletingThreadIds.has(tombstoneKey(getUserId(), t.ThreadId))) return;
   const uid = getUserId();
   const opGen = chat.nextGeneration();
   const sessionGen = auth.sessionGeneration;
@@ -348,7 +365,7 @@ const onRenameThread = async ({ threadId, title }: { threadId: string; title: st
 };
 
 const confirmDelete = (t: ChatThreadSummaryDTO) => {
-  if (chat.isLoading || deletingThreadIds.has(t.ThreadId)) return;
+  if (chat.isLoading || deletingThreadIds.has(tombstoneKey(getUserId(), t.ThreadId))) return;
   threadToDelete.value = t;
   showDeleteConfirm.value = true;
   dialogGen.value += 1;
@@ -359,14 +376,17 @@ const deleteThread = async () => {
   if (!thread || chat.isLoading) return;
 
   isDeleting.value = true;
+  const uid = getUserId();
   const opGen = chat.nextGeneration();
   const sessionGen = auth.sessionGeneration;
   const dialogToken = dialogGen.value;
-  deletingThreadIds.add(thread.ThreadId);
+  const tombstone = tombstoneKey(uid, thread.ThreadId);
+  deletingThreadIds.add(tombstone);
+  pendingDeleteIds.add(tombstone);
   try {
     await deleteThreadMutation.mutateAsync({
       threadId: thread.ThreadId,
-      userId: getUserId(),
+      userId: uid,
     });
 
     if (!isStaleOperation(opGen, sessionGen)) {
@@ -382,12 +402,14 @@ const deleteThread = async () => {
       $q.notify({ type: 'positive', message: 'Conversation deleted successfully' });
     }
   } catch (e) {
-    deletingThreadIds.delete(thread.ThreadId);
+    deletingThreadIds.delete(tombstone);
     if (!isStaleOperation(opGen, sessionGen)) {
       console.error(e);
       $q.notify({ type: 'negative', message: 'Failed to delete conversation' });
     }
   } finally {
+    pendingDeleteIds.delete(tombstone);
+    reconcileTombstone(tombstone);
     if (dialogToken === dialogGen.value) {
       isDeleting.value = false;
       showDeleteConfirm.value = false;

@@ -64,6 +64,7 @@ describe('AIChatPage', () => {
   let deleteFails: boolean;
   let patchDelay: Promise<void> | null;
   let deleteDelay: Promise<void> | null;
+  let deleteDelayQueue: Array<Promise<void>>;
   let messagesDelays: Record<string, Promise<void>>;
 
   const okJson = (data: unknown) => ({ ok: true, json: async () => data });
@@ -165,7 +166,11 @@ describe('AIChatPage', () => {
             threadRows = threadRows.filter((t) => t.ThreadId !== threadId);
             return okJson({ ok: true });
           };
-          return (deleteDelay ?? Promise.resolve()).then(respond);
+          const delay =
+            deleteDelayQueue.length > 0
+              ? deleteDelayQueue.shift()!
+              : (deleteDelay ?? Promise.resolve());
+          return delay.then(respond);
         }
       }
 
@@ -215,6 +220,7 @@ describe('AIChatPage', () => {
     deleteFails = false;
     patchDelay = null;
     deleteDelay = null;
+    deleteDelayQueue = [];
     messagesDelays = {};
 
     // Create a new QueryClient for each test
@@ -1866,6 +1872,139 @@ describe('AIChatPage', () => {
       expect(messageFetches().filter((f) => f.url.includes('thread_id=t-1')).length).toBe(1);
       expect(chatStore.chatId).toBe('t-1');
       expect(chatStore.messages.some((m) => m.content === 'survivor body')).toBe(true);
+    });
+
+    it('does not leak a deletion tombstone into the next account for the same thread id', async () => {
+      threadRows = [createMockThread({ ThreadId: 't-1', title: 'A shared id' })];
+
+      mountComponent();
+      const chatStore = useChatStore();
+      await flushPromises();
+
+      await openThreadMenu(0);
+      await wrapper.find('[data-testid="llm-chat-delete-thread"]').trigger('click');
+      await flushPromises();
+      await wrapper.find('[data-testid="llm-chat-confirm-delete"]').trigger('click');
+      await flushPromises();
+      expect(deleteFetches().length).toBe(1);
+
+      await switchToAccountB();
+      threadRows.push(createMockThread({ ThreadId: 't-1', title: 'B shared id' }));
+      messageRows = [createMockMessage('B thread body', false, 0, 't-1')];
+      await queryClient.invalidateQueries({ queryKey: chatKeys.threads('user-b') });
+      await flushPromises();
+      expect(wrapper.text()).toContain('B shared id');
+
+      await wrapper.find('[data-testid="llm-chat-thread-item"]').trigger('click');
+      await flushPromises();
+
+      expect(messageFetches().filter((f) => f.url.includes('thread_id=t-1')).length).toBe(1);
+      expect(chatStore.chatId).toBe('t-1');
+      expect(chatStore.messages.some((m) => m.content === 'B thread body')).toBe(true);
+    });
+
+    it('cannot release account B deletion guard when a stale A delete fails', async () => {
+      threadRows = [createMockThread({ ThreadId: 't-1', title: 'Shared id' })];
+      const gateA = deferred<void>();
+      const gateB = deferred<void>();
+      deleteDelayQueue = [gateA.promise, gateB.promise];
+
+      mountComponent();
+      const chatStore = useChatStore();
+      await flushPromises();
+
+      await openThreadMenu(0);
+      await wrapper.find('[data-testid="llm-chat-delete-thread"]').trigger('click');
+      await flushPromises();
+      await wrapper.find('[data-testid="llm-chat-confirm-delete"]').trigger('click');
+      await flushPromises();
+      expect(deleteFetches().length).toBe(1);
+
+      await switchToAccountB();
+
+      await openThreadMenu(0);
+      await wrapper.find('[data-testid="llm-chat-delete-thread"]').trigger('click');
+      await flushPromises();
+      await wrapper.find('[data-testid="llm-chat-confirm-delete"]').trigger('click');
+      await flushPromises();
+      expect(deleteFetches().length).toBe(2);
+
+      deleteFails = true;
+      gateA.resolve();
+      await flushPromises();
+      deleteFails = false;
+
+      await wrapper.find('[data-testid="llm-chat-thread-item"]').trigger('click');
+      await flushPromises();
+      expect(messageFetches().filter((f) => f.url.includes('thread_id=t-1')).length).toBe(0);
+      expect(chatStore.chatId).not.toBe('t-1');
+
+      gateB.resolve();
+      await flushPromises();
+      expect(notifyCreateSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: 'positive',
+          message: 'Conversation deleted successfully',
+        }),
+      );
+    });
+
+    it('lets a legitimately recreated thread be selected after authoritative refresh', async () => {
+      threadRows = [createMockThread({ ThreadId: 't-1', title: 'Doomed' })];
+
+      mountComponent();
+      const chatStore = useChatStore();
+      await flushPromises();
+
+      await openThreadMenu(0);
+      await wrapper.find('[data-testid="llm-chat-delete-thread"]').trigger('click');
+      await flushPromises();
+      await wrapper.find('[data-testid="llm-chat-confirm-delete"]').trigger('click');
+      await flushPromises();
+      expect(deleteFetches().length).toBe(1);
+      expect(wrapper.text()).toContain('No conversations yet');
+
+      threadRows.push(createMockThread({ ThreadId: 't-1', title: 'Recreated row' }));
+      messageRows = [createMockMessage('recreated body', false, 0, 't-1')];
+      await queryClient.invalidateQueries({ queryKey: chatKeys.threads('user-123') });
+      await flushPromises();
+      expect(wrapper.text()).toContain('Recreated row');
+
+      await wrapper.find('[data-testid="llm-chat-thread-item"]').trigger('click');
+      await flushPromises();
+
+      expect(messageFetches().filter((f) => f.url.includes('thread_id=t-1')).length).toBe(1);
+      expect(chatStore.chatId).toBe('t-1');
+      expect(chatStore.messages.some((m) => m.content === 'recreated body')).toBe(true);
+    });
+
+    it('does not let a selection started before deletion resurrect the deleted thread', async () => {
+      threadRows = [
+        createMockThread({ ThreadId: 't-1', title: 'Doomed', updatedAt: Date.now() }),
+        createMockThread({ ThreadId: 't-2', title: 'Survivor', updatedAt: Date.now() - 60_000 }),
+      ];
+      messageRows = [createMockMessage('doomed body', false, 0, 't-1')];
+      const slow = deferred<void>();
+      messagesDelays['t-1'] = slow.promise;
+
+      mountComponent();
+      const chatStore = useChatStore();
+      await flushPromises();
+
+      await wrapper.findAll('[data-testid="llm-chat-thread-item"]')[0]!.trigger('click');
+
+      await openThreadMenu(0);
+      await wrapper.find('[data-testid="llm-chat-delete-thread"]').trigger('click');
+      await flushPromises();
+      await wrapper.find('[data-testid="llm-chat-confirm-delete"]').trigger('click');
+      await flushPromises();
+      expect(deleteFetches().length).toBe(1);
+
+      slow.resolve();
+      await flushPromises();
+
+      expect(chatStore.chatId).not.toBe('t-1');
+      expect(chatStore.messages.some((m) => m.content === 'doomed body')).toBe(false);
     });
   });
 
