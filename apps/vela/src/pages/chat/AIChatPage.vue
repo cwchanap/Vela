@@ -428,8 +428,10 @@ const deleteThread = async () => {
     });
 
     if (auth.sessionGeneration === sessionGen) {
-      // If the deleted thread is the current chat, start a new chat
-      if (isActiveThread) {
+      // Recheck the current chat rather than trusting the pre-await snapshot:
+      // the user may have selected or started another conversation while the
+      // DELETE was in flight, and only the still-active thread may be reset.
+      if (chat.chatId === thread.ThreadId) {
         chat.startNewChat();
         chat.addMessage({
           type: 'ai',
