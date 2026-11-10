@@ -1057,7 +1057,7 @@ describe('Chat History Route', () => {
       mockSend
         .mockResolvedValueOnce({})
         .mockResolvedValueOnce({ Items: [messageRow()], LastEvaluatedKey: undefined })
-        .mockResolvedValueOnce({ UnprocessedItems: {} });
+        .mockResolvedValueOnce({});
 
       const app = createTestApp({});
       const res = await app.request(
@@ -1070,7 +1070,7 @@ describe('Chat History Route', () => {
       expect(sentCommandTypes()).toEqual([
         'UpdateCommand',
         'QueryCommand',
-        'BatchWriteCommand',
+        'TransactWriteCommand',
         'UpdateCommand',
       ]);
 
@@ -1084,10 +1084,20 @@ describe('Chat History Route', () => {
 
       const queryInput = mockQueryCommand.mock.calls[0][0];
       expect(queryInput.ExpressionAttributeValues[':threadId']).toBe(PARTITION);
-      const batchInput = mockBatchWriteCommand.mock.calls[0][0];
-      expect(batchInput.RequestItems['vela-chat-history']).toEqual([
+      const batchInput = mockTransactWriteCommand.mock.calls[0][0];
+      // The leading ConditionCheck fences the batch on this delete's token so
+      // a stale owner cannot keep deleting once it loses the barrier.
+      expect(batchInput.TransactItems[0].ConditionCheck).toEqual({
+        TableName: 'vela-chat-threads',
+        Key: { UserId: 'user-123', ThreadId: 'thread-123' },
+        ConditionExpression: '#deleteToken = :deleteToken',
+        ExpressionAttributeNames: { '#deleteToken': 'deleteToken' },
+        ExpressionAttributeValues: { ':deleteToken': expect.any(String) },
+      });
+      expect(batchInput.TransactItems.slice(1)).toEqual([
         {
-          DeleteRequest: {
+          Delete: {
+            TableName: 'vela-chat-history',
             Key: { ThreadId: PARTITION, Timestamp: messageRow().Timestamp },
           },
         },
@@ -1170,7 +1180,7 @@ describe('Chat History Route', () => {
       expect(res.status).toBe(404);
       expect(json.error).toBe('Thread not found');
       expect(mockQueryCommand).not.toHaveBeenCalled();
-      expect(mockBatchWriteCommand).not.toHaveBeenCalled();
+      expect(mockTransactWriteCommand).not.toHaveBeenCalled();
     });
 
     test('should take over a stale barrier left by a delete that never finished', async () => {
@@ -1258,7 +1268,7 @@ describe('Chat History Route', () => {
 
       expect(res.status).toBe(403);
       expect(json.error).toContain('Forbidden');
-      expect(mockBatchWriteCommand).not.toHaveBeenCalled();
+      expect(mockTransactWriteCommand).not.toHaveBeenCalled();
       // The tombstone is cleared so the thread stays usable. The clear is
       // fenced on this delete's token so it cannot remove another barrier.
       expect(mockUpdateCommand).toHaveBeenCalledTimes(2);
@@ -1289,7 +1299,7 @@ describe('Chat History Route', () => {
       expect(res.status).toBe(403);
       expect(json.error).toContain('Forbidden');
       expect(mockSend).toHaveBeenCalledTimes(4);
-      expect(mockBatchWriteCommand).not.toHaveBeenCalled();
+      expect(mockTransactWriteCommand).not.toHaveBeenCalled();
       expect(mockUpdateCommand.mock.calls[1][0].UpdateExpression).toContain('REMOVE #deleting');
     });
 
@@ -1308,7 +1318,7 @@ describe('Chat History Route', () => {
       expect(res.status).toBe(200);
       expect(json.ok).toBe(true);
       expect(sentCommandTypes()).toEqual(['UpdateCommand', 'QueryCommand', 'UpdateCommand']);
-      expect(mockBatchWriteCommand).not.toHaveBeenCalled();
+      expect(mockTransactWriteCommand).not.toHaveBeenCalled();
     });
 
     test('should enumerate all message pages before deleting', async () => {
@@ -1322,7 +1332,7 @@ describe('Chat History Route', () => {
           Items: [messageRow({ Timestamp: 2 })],
           LastEvaluatedKey: undefined,
         })
-        .mockResolvedValueOnce({ UnprocessedItems: {} });
+        .mockResolvedValueOnce({});
 
       const app = createTestApp({});
       const res = await app.request(
@@ -1339,7 +1349,7 @@ describe('Chat History Route', () => {
         'UpdateCommand',
         'QueryCommand',
         'QueryCommand',
-        'BatchWriteCommand',
+        'TransactWriteCommand',
         'UpdateCommand',
       ]);
     });
@@ -1355,7 +1365,7 @@ describe('Chat History Route', () => {
           Items: [messageRow({ Timestamp: 2 })],
           LastEvaluatedKey: undefined,
         })
-        .mockResolvedValueOnce({ UnprocessedItems: {} });
+        .mockResolvedValueOnce({});
 
       const app = createTestApp({});
       const res = await app.request(
@@ -1376,9 +1386,6 @@ describe('Chat History Route', () => {
           const consistent = command.input.ConsistentRead === true;
           return Promise.resolve({ Items: consistent ? [saved] : [] });
         }
-        if (command.__type === 'BatchWriteCommand') {
-          return Promise.resolve({ UnprocessedItems: {} });
-        }
         return Promise.resolve({});
       });
 
@@ -1393,10 +1400,11 @@ describe('Chat History Route', () => {
       expect(mockQueryCommand).toHaveBeenCalledWith(
         expect.objectContaining({ ConsistentRead: true }),
       );
-      expect(mockBatchWriteCommand).toHaveBeenCalledTimes(1);
-      expect(mockBatchWriteCommand.mock.calls[0][0].RequestItems['vela-chat-history']).toEqual([
+      expect(mockTransactWriteCommand).toHaveBeenCalledTimes(1);
+      expect(mockTransactWriteCommand.mock.calls[0][0].TransactItems.slice(1)).toEqual([
         {
-          DeleteRequest: {
+          Delete: {
+            TableName: 'vela-chat-history',
             Key: { ThreadId: PARTITION, Timestamp: saved.Timestamp },
           },
         },
@@ -1408,7 +1416,7 @@ describe('Chat History Route', () => {
       mockSend
         .mockResolvedValueOnce({})
         .mockResolvedValueOnce({ Items: messages, LastEvaluatedKey: undefined })
-        .mockResolvedValue({ UnprocessedItems: {} });
+        .mockResolvedValue({});
       const app = createTestApp({});
 
       const res = await app.request(
@@ -1416,31 +1424,26 @@ describe('Chat History Route', () => {
       );
 
       expect(res.status).toBe(200);
-      expect(mockBatchWriteCommand).toHaveBeenCalledTimes(2);
-      expect(mockBatchWriteCommand.mock.calls[0][0].RequestItems['vela-chat-history']).toHaveLength(
-        25,
-      );
-      expect(mockBatchWriteCommand.mock.calls[1][0].RequestItems['vela-chat-history']).toHaveLength(
-        1,
-      );
+      expect(mockTransactWriteCommand).toHaveBeenCalledTimes(2);
+      const countDeletes = (call: any[]) =>
+        call[0].TransactItems.filter((item: any) => item.Delete !== undefined).length;
+      expect(countDeletes(mockTransactWriteCommand.mock.calls[0])).toBe(25);
+      expect(countDeletes(mockTransactWriteCommand.mock.calls[1])).toBe(1);
     });
 
-    test('should retry batch delete when there are unprocessed items', async () => {
+    test('should retry a message delete transaction on conflict', async () => {
       // Stub setTimeout so exponential backoff in the retry loop does not add real delay
       const setTimeoutSpy = stubTimeout();
       try {
-        const message = messageRow();
+        const conflictError = Object.assign(new Error('Transaction cancelled'), {
+          name: 'TransactionCanceledException',
+          CancellationReasons: [{ Code: 'TransactionConflict' }, { Code: 'None' }],
+        });
         mockSend
           .mockResolvedValueOnce({})
-          .mockResolvedValueOnce({ Items: [message], LastEvaluatedKey: undefined })
-          .mockResolvedValueOnce({
-            UnprocessedItems: {
-              'vela-chat-history': [
-                { DeleteRequest: { Key: { ThreadId: PARTITION, Timestamp: message.Timestamp } } },
-              ],
-            },
-          })
-          .mockResolvedValueOnce({ UnprocessedItems: {} });
+          .mockResolvedValueOnce({ Items: [messageRow()], LastEvaluatedKey: undefined })
+          .mockRejectedValueOnce(conflictError)
+          .mockResolvedValueOnce({});
 
         const app = createTestApp({});
         const res = await app.request(
@@ -1453,8 +1456,8 @@ describe('Chat History Route', () => {
         expect(sentCommandTypes()).toEqual([
           'UpdateCommand',
           'QueryCommand',
-          'BatchWriteCommand',
-          'BatchWriteCommand',
+          'TransactWriteCommand',
+          'TransactWriteCommand',
           'UpdateCommand',
         ]);
       } finally {
@@ -1462,20 +1465,17 @@ describe('Chat History Route', () => {
       }
     });
 
-    test('should clear the tombstone when batch delete retries are exhausted', async () => {
+    test('should clear the barrier when a message delete transaction keeps failing', async () => {
       const setTimeoutSpy = stubTimeout();
       try {
-        const message = messageRow();
+        const conflictError = Object.assign(new Error('Transaction cancelled'), {
+          name: 'TransactionCanceledException',
+          CancellationReasons: [{ Code: 'TransactionConflict' }],
+        });
         mockSend
           .mockResolvedValueOnce({})
-          .mockResolvedValueOnce({ Items: [message], LastEvaluatedKey: undefined })
-          .mockResolvedValue({
-            UnprocessedItems: {
-              'vela-chat-history': [
-                { DeleteRequest: { Key: { ThreadId: PARTITION, Timestamp: message.Timestamp } } },
-              ],
-            },
-          });
+          .mockResolvedValueOnce({ Items: [messageRow()], LastEvaluatedKey: undefined })
+          .mockRejectedValue(conflictError);
 
         const app = createTestApp({});
         const res = await app.request(
@@ -1484,7 +1484,7 @@ describe('Chat History Route', () => {
         const json = await res.json();
 
         expect(res.status).toBe(500);
-        expect(json.error).toContain('Failed to delete all messages');
+        expect(json.error).toContain('Failed to delete thread');
         // Mark, then best-effort clear so the thread stays usable.
         expect(mockUpdateCommand).toHaveBeenCalledTimes(2);
         expect(mockUpdateCommand.mock.calls[1][0].UpdateExpression).toContain('REMOVE #deleting');
@@ -1494,6 +1494,37 @@ describe('Chat History Route', () => {
       } finally {
         setTimeoutSpy.mockRestore();
       }
+    });
+
+    test('should abort remaining message batches once the barrier is taken over', async () => {
+      // 26 messages span two batches. A takeover between them swaps the row's
+      // deleteToken, so the stale owner's second batch fails its condition.
+      const messages = Array.from({ length: 26 }, (_, i) => messageRow({ Timestamp: i + 1 }));
+      mockSend
+        .mockResolvedValueOnce({})
+        .mockResolvedValueOnce({ Items: messages, LastEvaluatedKey: undefined })
+        .mockResolvedValueOnce({})
+        .mockRejectedValueOnce(transactionConditionError())
+        .mockResolvedValueOnce({});
+
+      const app = createTestApp({});
+      const res = await app.request(
+        new Request('http://localhost/thread/thread-123', { method: 'DELETE' }),
+      );
+      const json = await res.json();
+
+      expect(res.status).toBe(500);
+      expect(json.error).toContain('Failed to delete thread');
+      // First batch committed; the fenced second batch was rejected and no
+      // further batches were attempted.
+      expect(mockTransactWriteCommand).toHaveBeenCalledTimes(2);
+      // The clear runs (fenced on our token, harmless after a takeover) but
+      // the delete never finalizes a tombstone it no longer owns.
+      expect(mockUpdateCommand).toHaveBeenCalledTimes(2);
+      expect(mockUpdateCommand.mock.calls[1][0].UpdateExpression).toContain('REMOVE #deleting');
+      expect(mockUpdateCommand.mock.calls[1][0].ConditionExpression).toContain(
+        '#deleteToken = :deleteToken',
+      );
     });
 
     test('should return 500 when the tombstone write fails', async () => {
@@ -1513,7 +1544,7 @@ describe('Chat History Route', () => {
       mockSend
         .mockResolvedValueOnce({})
         .mockResolvedValueOnce({ Items: [messageRow()], LastEvaluatedKey: undefined })
-        .mockResolvedValueOnce({ UnprocessedItems: {} })
+        .mockResolvedValueOnce({})
         .mockRejectedValueOnce(new Error('finalize write lost'))
         .mockResolvedValueOnce({});
 
@@ -1668,7 +1699,7 @@ describe('Chat History Route', () => {
           ],
           LastEvaluatedKey: undefined,
         })
-        .mockResolvedValueOnce({ UnprocessedItems: {} });
+        .mockResolvedValueOnce({});
 
       const app = createTestApp({});
       const res = await app.request(

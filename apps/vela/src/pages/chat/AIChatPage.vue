@@ -185,6 +185,12 @@ watch(
 const isDeletePending = (threadId: string) =>
   pendingDeletes.has(deleteKey(auth.sessionGeneration, getUserId(), threadId));
 
+// A deleted row leaves the list only after its DELETE resolves, so an
+// in-flight selection for it must not install the thread once its response
+// lands. The same check covers threads deleted from another device.
+const isThreadUnavailable = (threadId: string) =>
+  isDeletePending(threadId) || !threads.value.some((t) => t.ThreadId === threadId);
+
 const ensureChatId = () => {
   if (!chat.chatId) {
     chat.setChatId(crypto.randomUUID());
@@ -249,7 +255,7 @@ const selectThread = async (t: ChatThreadSummaryDTO) => {
   const sessionGen = auth.sessionGeneration;
   try {
     const items = await chatMessagesHelper.getMessages(t.ThreadId, uid);
-    if (isStaleOperation(opGen, sessionGen)) return;
+    if (isStaleOperation(opGen, sessionGen) || isThreadUnavailable(t.ThreadId)) return;
 
     chat.setChatId(t.ThreadId);
 
@@ -286,7 +292,7 @@ const selectThread = async (t: ChatThreadSummaryDTO) => {
     mobileSidebarOpen.value = false;
     await scrollToBottom();
   } catch (e) {
-    if (isStaleOperation(opGen, sessionGen)) return;
+    if (isStaleOperation(opGen, sessionGen) || isThreadUnavailable(t.ThreadId)) return;
     console.error(e);
     $q.notify({ type: 'negative', message: 'Failed to load conversation' });
   }

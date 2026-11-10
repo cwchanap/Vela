@@ -18,8 +18,7 @@ import * as DynamoDbLib from '@aws-sdk/lib-dynamodb';
 import type { QueryCommandInput } from '@aws-sdk/lib-dynamodb';
 import type { ZodIssue, ZodTypeAny } from 'zod';
 
-const { GetCommand, QueryCommand, UpdateCommand, BatchWriteCommand, TransactWriteCommand } =
-  DynamoDbLib;
+const { GetCommand, QueryCommand, UpdateCommand, TransactWriteCommand } = DynamoDbLib;
 
 const chatHistory = new Hono<{ Bindings: Env } & AuthContext>();
 
@@ -141,7 +140,9 @@ const messageItem = (item: ChatHistoryItem) => ({
 // the thread, and a repeat DELETE sees the tokenless tombstone and gets 404.
 // While the barrier is in flight, `deleteToken`/`deleteLease` fence it so
 // only its owner can clear it and a dead owner's barrier can be taken over
-// once its lease expires.
+// once its lease expires. Message deletes commit in transactions conditioned
+// on the token, so a stale owner that lost the barrier cannot keep deleting
+// rows from a thread that has been restored to normal.
 type StoredChatThread = ChatThreadSummary & {
   deleting?: boolean;
   deleteToken?: string;
@@ -412,56 +413,43 @@ async function dynamodb_getMessages(userId: string, thread_id: string): Promise<
   }
 }
 
-async function dynamodb_deleteThreadMessages(allMessages: Record<string, any>[]): Promise<void> {
-  if (allMessages.length === 0) {
-    return; // Nothing to delete
-  }
-
-  // DynamoDB BatchWrite can handle up to 25 items at a time
+// Each batch of message deletes commits in a transaction conditioned on our
+// `deleteToken`. Once the barrier is stolen, cleared, or finalized the check
+// fails, so a stale owner cannot keep deleting rows from a restored thread —
+// on runtimes without Lambda's hard timeout a slow delete could otherwise
+// outlive its lease and overlap the takeover.
+async function dynamodb_deleteThreadMessages(
+  userId: string,
+  threadId: string,
+  allMessages: Record<string, any>[],
+  deleteToken: string,
+): Promise<void> {
   const batchSize = 25;
   for (let i = 0; i < allMessages.length; i += batchSize) {
     const batch = allMessages.slice(i, i + batchSize);
-    let deleteRequests = batch.map((msg) => ({
-      DeleteRequest: {
-        Key: {
-          ThreadId: msg.ThreadId,
-          Timestamp: msg.Timestamp,
-        },
-      },
-    }));
-
-    // Retry unprocessed items until all are deleted (with max retries to prevent infinite loops)
-    let retries = 0;
-    const maxRetries = 5;
-
-    while (deleteRequests.length > 0 && retries < maxRetries) {
-      const batchCommand = new BatchWriteCommand({
-        RequestItems: {
-          [TABLE_NAMES.CHAT_HISTORY]: deleteRequests,
-        },
-      });
-
-      const response = await docClient.send(batchCommand);
-
-      // Check for unprocessed items and retry them
-      const unprocessedItems = response.UnprocessedItems?.[TABLE_NAMES.CHAT_HISTORY];
-      if (unprocessedItems && unprocessedItems.length > 0) {
-        deleteRequests = unprocessedItems as any; // DynamoDB SDK returns the same format we need
-        retries++;
-        // Exponential backoff: wait before retrying
-        await new Promise((resolve) => setTimeout(resolve, Math.pow(2, retries) * 100));
-      } else {
-        // All items processed successfully
-        break;
-      }
-    }
-
-    // If we exhausted retries and still have unprocessed items, throw an error
-    if (deleteRequests.length > 0 && retries >= maxRetries) {
-      throw new Error(
-        `Failed to delete all messages after ${maxRetries} retries. ${deleteRequests.length} items remain unprocessed.`,
-      );
-    }
+    await retryOnTransactionConflict(() =>
+      docClient.send(
+        new TransactWriteCommand({
+          TransactItems: [
+            {
+              ConditionCheck: {
+                TableName: TABLE_NAMES.CHAT_THREADS,
+                Key: { UserId: userId, ThreadId: threadId },
+                ConditionExpression: '#deleteToken = :deleteToken',
+                ExpressionAttributeNames: { '#deleteToken': 'deleteToken' },
+                ExpressionAttributeValues: { ':deleteToken': deleteToken },
+              },
+            },
+            ...batch.map((msg) => ({
+              Delete: {
+                TableName: TABLE_NAMES.CHAT_HISTORY,
+                Key: { ThreadId: msg.ThreadId, Timestamp: msg.Timestamp },
+              },
+            })),
+          ],
+        }),
+      ),
+    );
   }
 }
 
@@ -624,7 +612,7 @@ async function dynamodb_deleteThread(
       return 'forbidden';
     }
 
-    await dynamodb_deleteThreadMessages(allMessages);
+    await dynamodb_deleteThreadMessages(userId, threadId, allMessages, deleteToken);
     await dynamodb_finalizeThreadDelete(userId, threadId, deleteToken);
     return 'ok';
   } catch (error) {
