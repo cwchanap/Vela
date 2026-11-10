@@ -1071,7 +1071,7 @@ describe('Chat History Route', () => {
         'UpdateCommand',
         'QueryCommand',
         'BatchWriteCommand',
-        'DeleteCommand',
+        'UpdateCommand',
       ]);
 
       const markInput = mockUpdateCommand.mock.calls[0][0];
@@ -1092,11 +1092,14 @@ describe('Chat History Route', () => {
           },
         },
       ]);
-      // Success removes the metadata row so no permanent tombstone marker remains.
-      expect(mockDeleteCommand).toHaveBeenCalledTimes(1);
-      const finalizeInput = mockDeleteCommand.mock.calls[0][0];
+      // Success keeps `deleting` as a permanent tombstone and drops only the
+      // token/lease, fenced on the token that acquired the barrier.
+      expect(mockDeleteCommand).not.toHaveBeenCalled();
+      const finalizeInput = mockUpdateCommand.mock.calls[1][0];
       expect(finalizeInput.TableName).toBe('vela-chat-threads');
       expect(finalizeInput.Key).toEqual({ UserId: 'user-123', ThreadId: 'thread-123' });
+      expect(finalizeInput.UpdateExpression).toContain('REMOVE #deleteToken, #deleteLease');
+      expect(finalizeInput.UpdateExpression).not.toContain('REMOVE #deleting');
       expect(finalizeInput.ConditionExpression).toContain('#deleteToken = :deleteToken');
     });
 
@@ -1122,8 +1125,10 @@ describe('Chat History Route', () => {
       const conditionalError = Object.assign(new Error('Condition check failed'), {
         name: 'ConditionalCheckFailedException',
       });
-      // The thread metadata row was already deleted, so GetCommand returns undefined.
-      mockSend.mockRejectedValueOnce(conditionalError).mockResolvedValueOnce({ Item: undefined });
+      // The finished tombstone row still carries `deleting` but no token/lease.
+      mockSend
+        .mockRejectedValueOnce(conditionalError)
+        .mockResolvedValueOnce({ Item: threadRow({ deleting: true }) });
 
       const app = createTestApp({});
       const res = await app.request(
@@ -1143,7 +1148,7 @@ describe('Chat History Route', () => {
         name: 'ConditionalCheckFailedException',
       });
       // Another delete is in progress with an active lease. On next check after waiting,
-      // the first delete has completed and the row is gone.
+      // the first delete has completed and left a tokenless tombstone row.
       mockSend
         .mockRejectedValueOnce(conditionalError)
         .mockResolvedValueOnce({
@@ -1154,7 +1159,7 @@ describe('Chat History Route', () => {
           }),
         })
         .mockRejectedValueOnce(conditionalError)
-        .mockResolvedValueOnce({ Item: undefined });
+        .mockResolvedValueOnce({ Item: threadRow({ deleting: true }) });
 
       const app = createTestApp({});
       const res = await app.request(
@@ -1199,11 +1204,11 @@ describe('Chat History Route', () => {
         'GetCommand',
         'UpdateCommand',
         'QueryCommand',
-        'DeleteCommand',
+        'UpdateCommand',
       ]);
       const reacquireInput = mockUpdateCommand.mock.calls[1][0];
       expect(reacquireInput.UpdateExpression).toContain('SET #deleting = :true');
-      const finalizeInput = mockDeleteCommand.mock.calls[0][0];
+      const finalizeInput = mockUpdateCommand.mock.calls[2][0];
       expect(finalizeInput.ConditionExpression).toContain('#deleteToken = :deleteToken');
     });
 
@@ -1229,7 +1234,7 @@ describe('Chat History Route', () => {
         'GetCommand',
         'UpdateCommand',
         'QueryCommand',
-        'DeleteCommand',
+        'UpdateCommand',
       ]);
     });
 
@@ -1302,7 +1307,7 @@ describe('Chat History Route', () => {
 
       expect(res.status).toBe(200);
       expect(json.ok).toBe(true);
-      expect(sentCommandTypes()).toEqual(['UpdateCommand', 'QueryCommand', 'DeleteCommand']);
+      expect(sentCommandTypes()).toEqual(['UpdateCommand', 'QueryCommand', 'UpdateCommand']);
       expect(mockBatchWriteCommand).not.toHaveBeenCalled();
     });
 
@@ -1335,7 +1340,7 @@ describe('Chat History Route', () => {
         'QueryCommand',
         'QueryCommand',
         'BatchWriteCommand',
-        'DeleteCommand',
+        'UpdateCommand',
       ]);
     });
 
@@ -1450,7 +1455,7 @@ describe('Chat History Route', () => {
           'QueryCommand',
           'BatchWriteCommand',
           'BatchWriteCommand',
-          'DeleteCommand',
+          'UpdateCommand',
         ]);
       } finally {
         setTimeoutSpy.mockRestore();
@@ -1502,6 +1507,59 @@ describe('Chat History Route', () => {
 
       expect(res.status).toBe(500);
       expect(json.error).toContain('DynamoDB error');
+    });
+
+    test('should propagate a finalize failure, clear our barrier, and report a retryable error', async () => {
+      mockSend
+        .mockResolvedValueOnce({})
+        .mockResolvedValueOnce({ Items: [messageRow()], LastEvaluatedKey: undefined })
+        .mockResolvedValueOnce({ UnprocessedItems: {} })
+        .mockRejectedValueOnce(new Error('finalize write lost'))
+        .mockResolvedValueOnce({});
+
+      const app = createTestApp({});
+      const res = await app.request(
+        new Request('http://localhost/thread/thread-123', { method: 'DELETE' }),
+      );
+      const json = await res.json();
+
+      expect(res.status).toBe(500);
+      expect(json.error).toContain('finalize write lost');
+      // Acquire, failed finalize, then the fenced clear that un-hides the
+      // thread so the client can retry the delete.
+      expect(mockUpdateCommand).toHaveBeenCalledTimes(3);
+      const clearInput = mockUpdateCommand.mock.calls[2][0];
+      expect(clearInput.UpdateExpression).toContain('REMOVE #deleting');
+      expect(clearInput.ConditionExpression).toContain('#deleteToken = :deleteToken');
+    });
+
+    test('should reject a user save with 404 against a finished delete tombstone', async () => {
+      mockSend
+        .mockResolvedValueOnce({})
+        .mockResolvedValueOnce({ Items: [], LastEvaluatedKey: undefined })
+        .mockResolvedValueOnce({});
+
+      const app = createTestApp({});
+      const res = await app.request(
+        new Request('http://localhost/thread/thread-123', { method: 'DELETE' }),
+      );
+      expect(res.status).toBe(200);
+
+      // Finalize keeps `deleting` as the tombstone marker; the row stays
+      // invisible to saves, patches, listing, and message reads.
+      const finalizeInput = mockUpdateCommand.mock.calls[1][0];
+      expect(finalizeInput.UpdateExpression).toContain('REMOVE #deleteToken, #deleteLease');
+      expect(finalizeInput.UpdateExpression).not.toContain('REMOVE #deleting');
+
+      // Both user-save write paths fail their `deleting` conditions on the
+      // tombstone row, surfacing 404 instead of resurrecting the thread.
+      mockSend.mockRejectedValue(transactionConditionError());
+      const saveRes = await app.request(saveRequest(validSaveBody()));
+      const saveJson = await saveRes.json();
+
+      expect(saveRes.status).toBe(404);
+      expect(saveJson.error).toBe('Thread not found');
+      expect(mockTransactWriteCommand).toHaveBeenCalledTimes(2);
     });
 
     test('should not expose a legacy query-string DELETE /thread alias', async () => {

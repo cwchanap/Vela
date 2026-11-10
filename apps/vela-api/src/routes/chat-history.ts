@@ -18,14 +18,8 @@ import * as DynamoDbLib from '@aws-sdk/lib-dynamodb';
 import type { QueryCommandInput } from '@aws-sdk/lib-dynamodb';
 import type { ZodIssue, ZodTypeAny } from 'zod';
 
-const {
-  GetCommand,
-  QueryCommand,
-  UpdateCommand,
-  DeleteCommand,
-  BatchWriteCommand,
-  TransactWriteCommand,
-} = DynamoDbLib;
+const { GetCommand, QueryCommand, UpdateCommand, BatchWriteCommand, TransactWriteCommand } =
+  DynamoDbLib;
 
 const chatHistory = new Hono<{ Bindings: Env } & AuthContext>();
 
@@ -141,10 +135,13 @@ const messageItem = (item: ChatHistoryItem) => ({
 
 // Threads being deleted carry a `deleting` flag. Message saves run inside
 // transactions conditioned on that flag so a write cannot land after deletion
-// has begun, and the retained tombstone row prevents a later save from
-// silently resurrecting the thread. `deleteToken`/`deleteLease` fence the
-// barrier so only its owner can clear it and a dead owner's barrier can be
-// taken over once its lease expires.
+// has begun. A finished delete keeps `deleting` and drops `deleteToken`/
+// `deleteLease`, leaving a permanent tombstone row: a later save with the
+// same client-chosen thread id is rejected instead of silently resurrecting
+// the thread, and a repeat DELETE sees the tokenless tombstone and gets 404.
+// While the barrier is in flight, `deleteToken`/`deleteLease` fence it so
+// only its owner can clear it and a dead owner's barrier can be taken over
+// once its lease expires.
 type StoredChatThread = ChatThreadSummary & {
   deleting?: boolean;
   deleteToken?: string;
@@ -506,21 +503,28 @@ async function dynamodb_finalizeThreadDelete(
   threadId: string,
   deleteToken: string,
 ): Promise<void> {
-  // Remove the thread metadata row once all messages have been deleted.
-  // Fencing on deleteToken ensures we only delete if our token held the barrier.
+  // Convert the barrier into a permanent tombstone once all messages have
+  // been deleted: keep `deleting` so saves and patches keep returning 404,
+  // and drop our token/lease so the row can never be cleared or reacquired.
+  // Fencing on deleteToken ensures we only finalize if our token still holds
+  // the barrier. Failures must propagate: swallowing them would acknowledge
+  // a delete while the row stays hidden mid-barrier with no client retry.
   try {
-    const command = new DeleteCommand({
+    const command = new UpdateCommand({
       TableName: TABLE_NAMES.CHAT_THREADS,
       Key: { UserId: userId, ThreadId: threadId },
+      UpdateExpression: 'REMOVE #deleteToken, #deleteLease',
       ConditionExpression: '#deleteToken = :deleteToken',
       ExpressionAttributeNames: {
         '#deleteToken': 'deleteToken',
+        '#deleteLease': 'deleteLease',
       },
       ExpressionAttributeValues: { ':deleteToken': deleteToken },
     });
     await docClient.send(command);
   } catch (error) {
     console.error('DynamoDB finalize delete error:', error);
+    throw error;
   }
 }
 
@@ -565,12 +569,18 @@ async function dynamodb_acquireThreadDelete(
     }
 
     // The conditional write lost the race. Read the row to tell apart a
-    // missing thread, an in-progress delete, and an expired barrier.
+    // missing thread, a finished tombstone, an in-progress delete, and an
+    // expired barrier.
     const row = await dynamodb_getThread(userId, threadId);
     if (!row) {
       return 'not_found';
     }
     if (row.deleting === true) {
+      if (row.deleteToken === undefined) {
+        // A tombstone carries `deleting` with no token/lease: the delete
+        // already finished, so report it gone rather than contending.
+        return 'not_found';
+      }
       const lease = row.deleteLease;
       if (lease !== undefined && lease > Date.now()) {
         // Another active delete owns the barrier. Wait briefly for it to
