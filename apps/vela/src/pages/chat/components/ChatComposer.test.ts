@@ -51,12 +51,13 @@ describe('ChatComposer', () => {
     expect(wrapper.emitted('send')).toEqual([['hello world']]);
   });
 
-  it('should emit send with the trimmed draft on Enter', async () => {
+  it('should emit send once for a single Enter press', async () => {
     const wrapper = mountComponent();
     await typeDraft(wrapper, '\t padded message \n');
     const input = wrapper.find('[data-testid="llm-chat-input"]');
 
-    await input.trigger('keyup.enter');
+    await input.trigger('keydown', { key: 'Enter' });
+    await input.trigger('keyup', { key: 'Enter' });
 
     expect(wrapper.emitted('send')).toEqual([['padded message']]);
   });
@@ -66,7 +67,7 @@ describe('ChatComposer', () => {
     await typeDraft(wrapper, '   same message   ');
     const input = wrapper.find('[data-testid="llm-chat-input"]');
 
-    await input.trigger('keyup.enter');
+    await input.trigger('keydown', { key: 'Enter' });
     await wrapper.find('[data-testid="llm-chat-send"]').trigger('click');
 
     expect(wrapper.emitted('send')).toEqual([['same message'], ['same message']]);
@@ -77,7 +78,7 @@ describe('ChatComposer', () => {
     await typeDraft(wrapper, '   ');
     const input = wrapper.find('[data-testid="llm-chat-input"]');
 
-    await input.trigger('keyup.enter');
+    await input.trigger('keydown', { key: 'Enter' });
     await wrapper.find('[data-testid="llm-chat-send"]').trigger('click');
 
     expect(wrapper.emitted('send')).toBeUndefined();
@@ -92,13 +93,15 @@ describe('ChatComposer', () => {
     expect(wrapper.emitted('send')).toBeUndefined();
   });
 
-  it('should not emit send when Enter is pressed during IME composition', async () => {
+  it('should not emit send when Enter confirms an IME candidate', async () => {
     const wrapper = mountComponent();
     await typeDraft(wrapper, 'にほんご');
     const input = wrapper.find('[data-testid="llm-chat-input"]');
 
+    // The Enter that commits an IME candidate arrives as a composing keydown
+    // followed by a non-composing keyup after the candidate is committed.
     await input.trigger('keydown', { key: 'Enter', isComposing: true });
-    await input.trigger('keyup', { key: 'Enter', isComposing: true });
+    await input.trigger('keyup', { key: 'Enter', isComposing: false });
 
     expect(wrapper.emitted('send')).toBeUndefined();
   });

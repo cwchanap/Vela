@@ -60,6 +60,7 @@ describe('AIChatPage', () => {
   let fetchLog: Array<{ url: string; method: string }>;
   let saveFailures: { user: boolean; assistant: boolean };
   let saveNotFound: boolean;
+  let saveNotFoundFor: Set<string>;
   let listFails: boolean;
   let messagesFail: boolean;
   let patchFails: boolean;
@@ -97,7 +98,7 @@ describe('AIChatPage', () => {
       if (url.includes('/api/chat-history/save') && method === 'POST') {
         const body = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>;
         saveBodies.push(body);
-        if (saveNotFound) {
+        if (saveNotFound || saveNotFoundFor.has(String(body.ThreadId ?? ''))) {
           return Promise.resolve({
             ok: false,
             status: 404,
@@ -241,6 +242,7 @@ describe('AIChatPage', () => {
     fetchLog = [];
     saveFailures = { user: false, assistant: false };
     saveNotFound = false;
+    saveNotFoundFor = new Set();
     listFails = false;
     messagesFail = false;
     patchFails = false;
@@ -761,6 +763,61 @@ describe('AIChatPage', () => {
           message: 'This conversation was deleted. Started a new chat.',
         }),
       );
+    });
+
+    it('drops the dead transcript and re-saves the send under a fresh thread after a 404', async () => {
+      mockLLMResponse('Fresh reply');
+      mountComponent();
+      const chatStore = useChatStore();
+      await flushPromises();
+
+      // The active thread, deleted on another device, still has its
+      // transcript in memory when the next send goes out.
+      const greeting =
+        'こんにちは！日本語学習をお手伝いします。What would you like to practice today?';
+      chatStore.setChatId('dead-thread');
+      chatStore.setMessages([
+        { id: 'm0', type: 'ai', content: greeting, timestamp: new Date() },
+        { id: 'm1', type: 'user', content: 'old turn', timestamp: new Date() },
+        { id: 'm2', type: 'ai', content: 'old reply', timestamp: new Date() },
+      ]);
+      saveNotFoundFor.add('dead-thread');
+
+      await sendMessage('turn after delete');
+      await flushPromises();
+
+      const freshId = chatStore.chatId!;
+      expect(freshId).not.toBe('dead-thread');
+
+      // The visible transcript really is a new chat now: greeting plus the
+      // turns from this send, with nothing from the deleted thread.
+      expect(chatStore.messages.map((m) => `${m.type}:${m.content}`)).toEqual([
+        `ai:${greeting}`,
+        'user:turn after delete',
+        'ai:Fresh reply',
+      ]);
+
+      // The reply was generated without the deleted transcript as context.
+      const llmMessages = vi.mocked(llmModule.llmClient.generate).mock.calls[0]![0].messages;
+      expect(llmMessages.map((m) => m.content)).toEqual([greeting, 'turn after delete']);
+
+      // The fresh thread persisted exactly the turns now on screen.
+      const persisted = saveBodies.filter((b) => b.ThreadId === freshId);
+      expect(persisted.map((b) => `${String(b.is_user)}:${String(b.message)}`)).toEqual([
+        'true:turn after delete',
+        'false:Fresh reply',
+      ]);
+
+      // A follow-up send keeps appending to the same fresh thread, so the
+      // stored history keeps matching the visible transcript.
+      await sendMessage('follow-up turn');
+      await flushPromises();
+      expect(saveBodies.filter((b) => b.ThreadId === freshId).map((b) => b.message)).toEqual([
+        'turn after delete',
+        'Fresh reply',
+        'follow-up turn',
+        'Fresh reply',
+      ]);
     });
 
     it('preserves the initial greeting message when sending the first message', async () => {
@@ -2762,7 +2819,7 @@ describe('AIChatPage', () => {
       const input = wrapper.find('[data-testid="llm-chat-input"]');
 
       await input.setValue('Test message');
-      await input.trigger('keyup.enter');
+      await input.trigger('keydown', { key: 'Enter' });
       await flushPromises();
 
       const messages = chatStore.messages;
