@@ -254,17 +254,23 @@ describe('useChatThreads', () => {
   });
 
   describe('useDeleteThread', () => {
-    it('invalidates the initiating user list after a successful delete', async () => {
+    it('removes the deleted thread from cache and invalidates the initiating user list after a successful delete', async () => {
       signIn(userA);
       mockDeleteChatThread.mockResolvedValue(undefined);
       const { useDeleteThread } = await import('./useChatThreads');
       const { result, queryClient, cleanup: qcCleanup } = withQueryClient(() => useDeleteThread());
       cleanup = qcCleanup;
+      queryClient.setQueryData(threadsKey(userA), [
+        { ThreadId: 't-1', title: 'T1', createdAt: 1, updatedAt: 1 },
+        { ThreadId: 't-2', title: 'T2', createdAt: 2, updatedAt: 2 },
+      ]);
       const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries');
 
       await result.mutateAsync({ threadId: 't-1', userId: 'user-a' });
 
       expect(mockDeleteChatThread).toHaveBeenCalledWith('t-1', 'user-a');
+      const remaining = queryClient.getQueryData(threadsKey(userA)) as any[];
+      expect(remaining).toEqual([{ ThreadId: 't-2', title: 'T2', createdAt: 2, updatedAt: 2 }]);
       expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: threadsKey(userA) });
     });
 

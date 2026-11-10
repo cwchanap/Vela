@@ -19,7 +19,7 @@
         <q-spinner class="q-mr-sm" />
         <span>Loading threads…</span>
       </div>
-      <div v-else-if="error" class="chat-sidebar__state">
+      <div v-else-if="error && threads.length === 0" class="chat-sidebar__state">
         <div class="text-negative">Failed to load conversations</div>
         <q-btn
           flat
@@ -35,6 +35,21 @@
         No conversations yet.
       </div>
       <q-list v-else separator>
+        <div
+          v-if="error"
+          class="chat-sidebar__banner row items-center justify-between q-px-sm q-py-xs bg-red-1 text-negative"
+        >
+          <span class="text-caption">Failed to refresh</span>
+          <q-btn
+            flat
+            dense
+            size="sm"
+            label="Retry"
+            color="negative"
+            @click="emit('retry')"
+            data-testid="chat-sidebar-retry"
+          />
+        </div>
         <q-item
           v-for="t in threads"
           :key="t.ThreadId"
@@ -204,6 +219,11 @@ const commitRename = () => {
     cancelRename();
     return;
   }
+  const current = props.threads.find((t) => t.ThreadId === threadId);
+  if (current && title === current.title) {
+    cancelRename();
+    return;
+  }
   if (title.length > 60) {
     // The API rejects longer titles; keep the editor open so the draft can
     // be corrected instead of failing with a generic error.
@@ -230,6 +250,7 @@ const onRenameKeydown = (event: KeyboardEvent) => {
   // keys. This mirrors the JapaneseInputProbe isComposing guard.
   if (event.isComposing || event.keyCode === 229) return;
   event.preventDefault();
+  event.stopPropagation();
   if (event.key === 'Enter') {
     commitRename();
   } else {

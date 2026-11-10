@@ -413,6 +413,37 @@ describe('Chat History Route', () => {
       expect(mockSend).toHaveBeenCalledTimes(1);
     });
 
+    test('should retry and succeed when a transient transaction conflict occurs on save', async () => {
+      const conflictError = Object.assign(new Error('Transaction conflict'), {
+        name: 'TransactionCanceledException',
+        CancellationReasons: [{ Code: 'TransactionConflict' }],
+      });
+      mockSend.mockRejectedValueOnce(conflictError).mockResolvedValueOnce({});
+      const app = createTestApp({});
+
+      const res = await app.request(saveRequest(validSaveBody()));
+      const json = await res.json();
+
+      expect(res.status).toBe(200);
+      expect(json.ok).toBe(true);
+      expect(mockSend).toHaveBeenCalledTimes(2);
+    });
+
+    test('should retry and succeed when TransactionConflictException occurs on assistant save', async () => {
+      const conflictError = Object.assign(new Error('Transaction conflict'), {
+        name: 'TransactionConflictException',
+      });
+      mockSend.mockRejectedValueOnce(conflictError).mockResolvedValueOnce({});
+      const app = createTestApp({});
+
+      const res = await app.request(saveRequest(validSaveBody({ is_user: false })));
+      const json = await res.json();
+
+      expect(res.status).toBe(200);
+      expect(json.ok).toBe(true);
+      expect(mockSend).toHaveBeenCalledTimes(2);
+    });
+
     test('should return 500 when a non-condition transaction error occurs', async () => {
       mockSend.mockRejectedValueOnce(new Error('Message write failed'));
       const app = createTestApp({});
@@ -1040,7 +1071,7 @@ describe('Chat History Route', () => {
         'UpdateCommand',
         'QueryCommand',
         'BatchWriteCommand',
-        'UpdateCommand',
+        'DeleteCommand',
       ]);
 
       const markInput = mockUpdateCommand.mock.calls[0][0];
@@ -1061,12 +1092,11 @@ describe('Chat History Route', () => {
           },
         },
       ]);
-      // The row stays as a tombstone so later saves cannot resurrect it.
-      expect(mockDeleteCommand).not.toHaveBeenCalled();
-
-      // Success drops the lease, leaving a pure tombstone that blocks saves.
-      const finalizeInput = mockUpdateCommand.mock.calls[1][0];
-      expect(finalizeInput.UpdateExpression).toContain('REMOVE #deleteLease');
+      // Success removes the metadata row so no permanent tombstone marker remains.
+      expect(mockDeleteCommand).toHaveBeenCalledTimes(1);
+      const finalizeInput = mockDeleteCommand.mock.calls[0][0];
+      expect(finalizeInput.TableName).toBe('vela-chat-threads');
+      expect(finalizeInput.Key).toEqual({ UserId: 'user-123', ThreadId: 'thread-123' });
       expect(finalizeInput.ConditionExpression).toContain('#deleteToken = :deleteToken');
     });
 
@@ -1088,40 +1118,12 @@ describe('Chat History Route', () => {
       expect(mockQueryCommand).not.toHaveBeenCalled();
     });
 
-    test('should accept a repeated delete on an already tombstoned thread', async () => {
+    test('should return 404 Thread not found on repeat delete after thread is deleted', async () => {
       const conditionalError = Object.assign(new Error('Condition check failed'), {
         name: 'ConditionalCheckFailedException',
       });
-      // A finished tombstone keeps `deleting` with no lease: the repeated
-      // delete short-circuits instead of stealing the barrier.
-      mockSend.mockRejectedValueOnce(conditionalError).mockResolvedValueOnce({
-        Item: threadRow({ deleting: true, deleteToken: 'first-delete' }),
-      });
-
-      const app = createTestApp({});
-      const res = await app.request(
-        new Request('http://localhost/thread/thread-123', { method: 'DELETE' }),
-      );
-
-      expect(res.status).toBe(200);
-      expect(sentCommandTypes()).toEqual(['UpdateCommand', 'GetCommand']);
-      expect(mockQueryCommand).not.toHaveBeenCalled();
-      expect(mockUpdateCommand).toHaveBeenCalledTimes(1);
-    });
-
-    test('should leave an in-flight delete barrier untouched instead of deleting alongside it', async () => {
-      const conditionalError = Object.assign(new Error('Condition check failed'), {
-        name: 'ConditionalCheckFailedException',
-      });
-      // Another delete owns the barrier with an unexpired lease: this request
-      // reports ok and issues no message work or barrier cleanup of its own.
-      mockSend.mockRejectedValueOnce(conditionalError).mockResolvedValueOnce({
-        Item: threadRow({
-          deleting: true,
-          deleteToken: 'other-delete',
-          deleteLease: Date.now() + 60_000,
-        }),
-      });
+      // The thread metadata row was already deleted, so GetCommand returns undefined.
+      mockSend.mockRejectedValueOnce(conditionalError).mockResolvedValueOnce({ Item: undefined });
 
       const app = createTestApp({});
       const res = await app.request(
@@ -1129,14 +1131,41 @@ describe('Chat History Route', () => {
       );
       const json = await res.json();
 
-      expect(res.status).toBe(200);
-      expect(json.ok).toBe(true);
+      expect(res.status).toBe(404);
+      expect(json.error).toBe('Thread not found');
       expect(sentCommandTypes()).toEqual(['UpdateCommand', 'GetCommand']);
       expect(mockQueryCommand).not.toHaveBeenCalled();
-      expect(mockBatchWriteCommand).not.toHaveBeenCalled();
-      // No second UpdateCommand means this delete never sent a REMOVE that
-      // could clear the other delete's barrier.
       expect(mockUpdateCommand).toHaveBeenCalledTimes(1);
+    });
+
+    test('should wait for in-flight delete and return 404 once deleted rather than premature ok', async () => {
+      const conditionalError = Object.assign(new Error('Condition check failed'), {
+        name: 'ConditionalCheckFailedException',
+      });
+      // Another delete is in progress with an active lease. On next check after waiting,
+      // the first delete has completed and the row is gone.
+      mockSend
+        .mockRejectedValueOnce(conditionalError)
+        .mockResolvedValueOnce({
+          Item: threadRow({
+            deleting: true,
+            deleteToken: 'other-delete',
+            deleteLease: Date.now() + 60_000,
+          }),
+        })
+        .mockRejectedValueOnce(conditionalError)
+        .mockResolvedValueOnce({ Item: undefined });
+
+      const app = createTestApp({});
+      const res = await app.request(
+        new Request('http://localhost/thread/thread-123', { method: 'DELETE' }),
+      );
+      const json = await res.json();
+
+      expect(res.status).toBe(404);
+      expect(json.error).toBe('Thread not found');
+      expect(mockQueryCommand).not.toHaveBeenCalled();
+      expect(mockBatchWriteCommand).not.toHaveBeenCalled();
     });
 
     test('should take over a stale barrier left by a delete that never finished', async () => {
@@ -1170,12 +1199,12 @@ describe('Chat History Route', () => {
         'GetCommand',
         'UpdateCommand',
         'QueryCommand',
-        'UpdateCommand',
+        'DeleteCommand',
       ]);
       const reacquireInput = mockUpdateCommand.mock.calls[1][0];
       expect(reacquireInput.UpdateExpression).toContain('SET #deleting = :true');
-      const finalizeInput = mockUpdateCommand.mock.calls[2][0];
-      expect(finalizeInput.UpdateExpression).toContain('REMOVE #deleteLease');
+      const finalizeInput = mockDeleteCommand.mock.calls[0][0];
+      expect(finalizeInput.ConditionExpression).toContain('#deleteToken = :deleteToken');
     });
 
     test('should retry the barrier acquire when the flag clears before the read', async () => {
@@ -1200,7 +1229,7 @@ describe('Chat History Route', () => {
         'GetCommand',
         'UpdateCommand',
         'QueryCommand',
-        'UpdateCommand',
+        'DeleteCommand',
       ]);
     });
 
@@ -1273,7 +1302,7 @@ describe('Chat History Route', () => {
 
       expect(res.status).toBe(200);
       expect(json.ok).toBe(true);
-      expect(sentCommandTypes()).toEqual(['UpdateCommand', 'QueryCommand', 'UpdateCommand']);
+      expect(sentCommandTypes()).toEqual(['UpdateCommand', 'QueryCommand', 'DeleteCommand']);
       expect(mockBatchWriteCommand).not.toHaveBeenCalled();
     });
 
@@ -1306,7 +1335,7 @@ describe('Chat History Route', () => {
         'QueryCommand',
         'QueryCommand',
         'BatchWriteCommand',
-        'UpdateCommand',
+        'DeleteCommand',
       ]);
     });
 
@@ -1421,7 +1450,7 @@ describe('Chat History Route', () => {
           'QueryCommand',
           'BatchWriteCommand',
           'BatchWriteCommand',
-          'UpdateCommand',
+          'DeleteCommand',
         ]);
       } finally {
         setTimeoutSpy.mockRestore();

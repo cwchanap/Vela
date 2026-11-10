@@ -110,12 +110,14 @@ import { useAuthStore } from '../../stores/auth';
 import ChatMessageList from './components/ChatMessageList.vue';
 import ChatComposer from './components/ChatComposer.vue';
 import ChatSidebar from './components/ChatSidebar.vue';
-import { useChatThreads, useRenameThread, useDeleteThread } from '../../composables/queries';
 import {
-  getChatMessages,
-  saveChatMessage,
-  type ChatThreadSummaryDTO,
-} from '../../services/chatHistoryService';
+  useChatThreads,
+  useRenameThread,
+  useDeleteThread,
+  useSaveChatMessage,
+  useChatMessages,
+} from '../../composables/queries';
+import type { ChatThreadSummaryDTO } from '../../services/chatHistoryService';
 import { llmClient, describeLlmError } from '../../services/llm';
 import { isAccountChangedError } from '../../utils/httpClient';
 import type { LlmMessage } from '@vela/common';
@@ -143,6 +145,8 @@ const threadsLoading = computed(() => threadsQuery.isLoading.value);
 const threadsError = computed(() => threadsQuery.isError.value);
 const renameThreadMutation = useRenameThread();
 const deleteThreadMutation = useDeleteThread();
+const saveChatMessageMutation = useSaveChatMessage();
+const chatMessagesHelper = useChatMessages();
 
 // Delete confirmation dialog state
 const showDeleteConfirm = ref(false);
@@ -183,10 +187,19 @@ const isDeletePending = (threadId: string) =>
 
 const ensureChatId = () => {
   if (!chat.chatId) {
-    chat.startNewChat();
+    chat.setChatId(crypto.randomUUID());
   }
   return chat.chatId!;
 };
+
+const isNotFoundStatus = (e: unknown): boolean =>
+  typeof e === 'object' &&
+  e !== null &&
+  (('status' in e && (e as { status: unknown }).status === 404) ||
+    ('statusCode' in e && (e as { statusCode: unknown }).statusCode === 404) ||
+    ('message' in e &&
+      typeof (e as { message: unknown }).message === 'string' &&
+      (e as { message: string }).message.includes('Thread not found')));
 
 const persistMessage = async (
   cid: string,
@@ -196,12 +209,30 @@ const persistMessage = async (
   isStale: () => boolean,
 ): Promise<boolean> => {
   try {
-    await saveChatMessage(cid, uid, message, isUser);
+    await saveChatMessageMutation.mutateAsync({
+      threadId: cid,
+      userId: uid,
+      message,
+      isUser,
+    });
     return true;
   } catch (e) {
     if (isStale()) return false;
     if (isAccountChangedError(e)) throw e;
     console.error('Failed to save chat message', e);
+    if (isNotFoundStatus(e)) {
+      // The open thread was deleted (e.g. in another tab). Detach from the dead
+      // thread ID so subsequent sends create a fresh thread instead of permanently failing.
+      if (chat.chatId === cid) {
+        chat.setChatId(crypto.randomUUID());
+      }
+      void queryClient.invalidateQueries({ queryKey: chatKeys.threads(uid) });
+      $q.notify({
+        type: 'warning',
+        message: 'This conversation was deleted. Started a new chat.',
+      });
+      return false;
+    }
     $q.notify({ type: 'warning', message: 'Failed to save chat history' });
     return false;
   }
@@ -217,7 +248,7 @@ const selectThread = async (t: ChatThreadSummaryDTO) => {
   const opGen = chat.nextGeneration();
   const sessionGen = auth.sessionGeneration;
   try {
-    const items = await getChatMessages(t.ThreadId, uid);
+    const items = await chatMessagesHelper.getMessages(t.ThreadId, uid);
     if (isStaleOperation(opGen, sessionGen)) return;
 
     chat.setChatId(t.ThreadId);
@@ -377,7 +408,8 @@ const deleteThread = async () => {
 
   isDeleting.value = true;
   const uid = getUserId();
-  const opGen = chat.nextGeneration();
+  const isActiveThread = chat.chatId === thread.ThreadId;
+  const opGen = isActiveThread ? chat.nextGeneration() : chat.generation;
   const sessionGen = auth.sessionGeneration;
   const dialogToken = dialogGen.value;
   const key = deleteKey(sessionGen, uid, thread.ThreadId);
@@ -391,7 +423,7 @@ const deleteThread = async () => {
 
     if (auth.sessionGeneration === sessionGen) {
       // If the deleted thread is the current chat, start a new chat
-      if (chat.chatId === thread.ThreadId) {
+      if (isActiveThread) {
         chat.startNewChat();
         chat.addMessage({
           type: 'ai',
@@ -439,7 +471,7 @@ onMounted(() => {
 
 <style scoped lang="scss">
 .chat-page {
-  height: calc(100dvh - 60px);
+  height: calc(100dvh - 61px);
   box-sizing: border-box;
   overflow: hidden;
   padding: 24px;

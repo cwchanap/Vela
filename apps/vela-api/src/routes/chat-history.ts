@@ -18,8 +18,14 @@ import * as DynamoDbLib from '@aws-sdk/lib-dynamodb';
 import type { QueryCommandInput } from '@aws-sdk/lib-dynamodb';
 import type { ZodIssue, ZodTypeAny } from 'zod';
 
-const { GetCommand, QueryCommand, UpdateCommand, BatchWriteCommand, TransactWriteCommand } =
-  DynamoDbLib;
+const {
+  GetCommand,
+  QueryCommand,
+  UpdateCommand,
+  DeleteCommand,
+  BatchWriteCommand,
+  TransactWriteCommand,
+} = DynamoDbLib;
 
 const chatHistory = new Hono<{ Bindings: Env } & AuthContext>();
 
@@ -64,6 +70,39 @@ const isTransactionConditionFailed = (error: unknown): boolean =>
   ((error as { CancellationReasons?: { Code?: string }[] }).CancellationReasons ?? []).some(
     (reason) => reason?.Code === 'ConditionalCheckFailed',
   );
+
+const isTransactionConflict = (error: unknown): boolean => {
+  if (typeof error !== 'object' || error === null || !('name' in error)) {
+    return false;
+  }
+  if (error.name === 'TransactionConflictException') {
+    return true;
+  }
+  if (error.name === 'TransactionCanceledException' && 'CancellationReasons' in error) {
+    const reasons = (error as { CancellationReasons?: { Code?: string }[] }).CancellationReasons;
+    if (Array.isArray(reasons)) {
+      return reasons.some((reason) => reason?.Code === 'TransactionConflict');
+    }
+  }
+  return false;
+};
+
+async function retryOnTransactionConflict<T>(fn: () => Promise<T>, maxRetries = 3): Promise<T> {
+  let attempt = 0;
+  while (true) {
+    try {
+      return await fn();
+    } catch (error) {
+      if (attempt < maxRetries && isTransactionConflict(error)) {
+        attempt++;
+        const jitter = Math.random() * 20;
+        await new Promise((resolve) => setTimeout(resolve, Math.pow(2, attempt) * 20 + jitter));
+        continue;
+      }
+      throw error;
+    }
+  }
+}
 
 // Apply auth middleware to all chat history routes.
 chatHistory.use('*', requireAuth);
@@ -123,34 +162,36 @@ async function dynamodb_saveUserMessage(
   const put = { TableName: TABLE_NAMES.CHAT_HISTORY, Item: messageItem(item) };
   const key = { UserId: userId, ThreadId: item.ThreadId };
   try {
-    await docClient.send(
-      new TransactWriteCommand({
-        TransactItems: [
-          {
-            Update: {
-              TableName: TABLE_NAMES.CHAT_THREADS,
-              Key: key,
-              // Never rewind updatedAt: a delayed save must not overwrite a
-              // newer timestamp committed by another client.
-              UpdateExpression:
-                'SET #updatedAt = :now, #title = if_not_exists(#title, :title), #createdAt = if_not_exists(#createdAt, :now)',
-              ConditionExpression:
-                'attribute_not_exists(#deleting) AND (attribute_not_exists(#updatedAt) OR #updatedAt <= :now)',
-              ExpressionAttributeNames: {
-                '#updatedAt': 'updatedAt',
-                '#title': 'title',
-                '#createdAt': 'createdAt',
-                '#deleting': 'deleting',
-              },
-              ExpressionAttributeValues: {
-                ':now': now,
-                ':title': initialTitle,
+    await retryOnTransactionConflict(() =>
+      docClient.send(
+        new TransactWriteCommand({
+          TransactItems: [
+            {
+              Update: {
+                TableName: TABLE_NAMES.CHAT_THREADS,
+                Key: key,
+                // Never rewind updatedAt: a delayed save must not overwrite a
+                // newer timestamp committed by another client.
+                UpdateExpression:
+                  'SET #updatedAt = :now, #title = if_not_exists(#title, :title), #createdAt = if_not_exists(#createdAt, :now)',
+                ConditionExpression:
+                  'attribute_not_exists(#deleting) AND (attribute_not_exists(#updatedAt) OR #updatedAt <= :now)',
+                ExpressionAttributeNames: {
+                  '#updatedAt': 'updatedAt',
+                  '#title': 'title',
+                  '#createdAt': 'createdAt',
+                  '#deleting': 'deleting',
+                },
+                ExpressionAttributeValues: {
+                  ':now': now,
+                  ':title': initialTitle,
+                },
               },
             },
-          },
-          { Put: put },
-        ],
-      }),
+            { Put: put },
+          ],
+        }),
+      ),
     );
     return 'ok';
   } catch (error) {
@@ -166,20 +207,22 @@ async function dynamodb_saveUserMessage(
   // deleted or because it already carries a newer updatedAt. Write the
   // message only when the thread is still alive.
   try {
-    await docClient.send(
-      new TransactWriteCommand({
-        TransactItems: [
-          {
-            ConditionCheck: {
-              TableName: TABLE_NAMES.CHAT_THREADS,
-              Key: key,
-              ConditionExpression: THREAD_ALIVE_CONDITION,
-              ExpressionAttributeNames: { '#deleting': 'deleting' },
+    await retryOnTransactionConflict(() =>
+      docClient.send(
+        new TransactWriteCommand({
+          TransactItems: [
+            {
+              ConditionCheck: {
+                TableName: TABLE_NAMES.CHAT_THREADS,
+                Key: key,
+                ConditionExpression: THREAD_ALIVE_CONDITION,
+                ExpressionAttributeNames: { '#deleting': 'deleting' },
+              },
             },
-          },
-          { Put: put },
-        ],
-      }),
+            { Put: put },
+          ],
+        }),
+      ),
     );
     return 'ok';
   } catch (error) {
@@ -198,20 +241,22 @@ async function dynamodb_saveAssistantMessage(
   item: ChatHistoryItem,
 ): Promise<'ok' | 'rejected'> {
   try {
-    await docClient.send(
-      new TransactWriteCommand({
-        TransactItems: [
-          {
-            ConditionCheck: {
-              TableName: TABLE_NAMES.CHAT_THREADS,
-              Key: { UserId: userId, ThreadId: item.ThreadId },
-              ConditionExpression: THREAD_ALIVE_CONDITION,
-              ExpressionAttributeNames: { '#deleting': 'deleting' },
+    await retryOnTransactionConflict(() =>
+      docClient.send(
+        new TransactWriteCommand({
+          TransactItems: [
+            {
+              ConditionCheck: {
+                TableName: TABLE_NAMES.CHAT_THREADS,
+                Key: { UserId: userId, ThreadId: item.ThreadId },
+                ConditionExpression: THREAD_ALIVE_CONDITION,
+                ExpressionAttributeNames: { '#deleting': 'deleting' },
+              },
             },
-          },
-          { Put: { TableName: TABLE_NAMES.CHAT_HISTORY, Item: messageItem(item) } },
-        ],
-      }),
+            { Put: { TableName: TABLE_NAMES.CHAT_HISTORY, Item: messageItem(item) } },
+          ],
+        }),
+      ),
     );
     return 'ok';
   } catch (error) {
@@ -461,25 +506,20 @@ async function dynamodb_finalizeThreadDelete(
   threadId: string,
   deleteToken: string,
 ): Promise<void> {
-  // Drop the lease so the row becomes a pure tombstone: it still blocks saves
-  // and reads, but a repeated delete short-circuits instead of stealing the
-  // barrier and racing an owner that already finished.
+  // Remove the thread metadata row once all messages have been deleted.
+  // Fencing on deleteToken ensures we only delete if our token held the barrier.
   try {
-    const command = new UpdateCommand({
+    const command = new DeleteCommand({
       TableName: TABLE_NAMES.CHAT_THREADS,
       Key: { UserId: userId, ThreadId: threadId },
-      UpdateExpression: 'REMOVE #deleteLease',
       ConditionExpression: '#deleteToken = :deleteToken',
       ExpressionAttributeNames: {
-        '#deleteLease': 'deleteLease',
         '#deleteToken': 'deleteToken',
       },
       ExpressionAttributeValues: { ':deleteToken': deleteToken },
     });
     await docClient.send(command);
   } catch (error) {
-    // Best effort: a retained lease only means a retried delete re-runs the
-    // idempotent enumeration instead of short-circuiting.
     console.error('DynamoDB finalize delete error:', error);
   }
 }
@@ -488,11 +528,11 @@ async function dynamodb_acquireThreadDelete(
   userId: string,
   threadId: string,
   deleteToken: string,
-): Promise<'acquired' | 'not_found' | 'already_deleting'> {
+): Promise<'acquired' | 'not_found'> {
   // Acquire the barrier only when none exists or a previous owner let its
-  // lease expire. A live lease or a finished tombstone (flag, no lease) is
-  // off-limits, which keeps the barrier holder unique at all times.
-  for (let attempt = 0; attempt < 3; attempt++) {
+  // lease expire. When an active delete is already running, wait for it to
+  // finish instead of reporting premature success.
+  for (let attempt = 0; attempt < 5; attempt++) {
     try {
       const command = new UpdateCommand({
         TableName: TABLE_NAMES.CHAT_THREADS,
@@ -525,18 +565,18 @@ async function dynamodb_acquireThreadDelete(
     }
 
     // The conditional write lost the race. Read the row to tell apart a
-    // missing thread, a live or finished delete, and a barrier that was
-    // cleared between our write and this read.
+    // missing thread, an in-progress delete, and an expired barrier.
     const row = await dynamodb_getThread(userId, threadId);
     if (!row) {
       return 'not_found';
     }
     if (row.deleting === true) {
       const lease = row.deleteLease;
-      if (lease === undefined || lease > Date.now()) {
-        // Either a finished tombstone or a live delete owns the barrier;
-        // that request owns the outcome either way.
-        return 'already_deleting';
+      if (lease !== undefined && lease > Date.now()) {
+        // Another active delete owns the barrier. Wait briefly for it to
+        // complete so we never report premature success.
+        await new Promise((resolve) => setTimeout(resolve, 50 * (attempt + 1)));
+        continue;
       }
     }
     // Stale barrier (owner died mid-delete) or a flag cleared between our
@@ -549,19 +589,10 @@ async function dynamodb_deleteThread(
   userId: string,
   threadId: string,
 ): Promise<'ok' | 'forbidden' | 'not_found'> {
-  // Tombstone the row before touching messages. Saves and patches are
-  // conditioned on `deleting`, so any write committed after this point is
-  // rejected instead of stranded; writes committed before it are enumerated
-  // below and removed. The row is kept as a permanent tombstone so a later
-  // save cannot resurrect the thread.
   const deleteToken = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
   const acquired = await dynamodb_acquireThreadDelete(userId, threadId, deleteToken);
   if (acquired === 'not_found') {
     return 'not_found';
-  }
-  if (acquired === 'already_deleting') {
-    // Another request holds the barrier or already finished the delete.
-    return 'ok';
   }
 
   try {
