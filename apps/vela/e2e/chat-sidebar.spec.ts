@@ -194,8 +194,8 @@ const runBoundedScrollCheck = async (page: Page, apiMock: MockApi, mobile: boole
     docHeight: document.documentElement.scrollHeight,
     bodyHeight: document.body.scrollHeight,
   }));
-  expect(bounds.docHeight).toBeLessThanOrEqual(bounds.innerHeight + 1);
-  expect(bounds.scrollY).toBeLessThanOrEqual(1);
+  expect(bounds.docHeight).toBeLessThanOrEqual(bounds.innerHeight);
+  expect(bounds.scrollY).toBe(0);
 
   if (mobile) {
     const dialogSidebar = await openSidebar(page, true);

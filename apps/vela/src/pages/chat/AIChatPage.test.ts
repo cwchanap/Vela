@@ -59,6 +59,7 @@ describe('AIChatPage', () => {
   let saveBodies: Array<Record<string, unknown>>;
   let fetchLog: Array<{ url: string; method: string }>;
   let saveFailures: { user: boolean; assistant: boolean };
+  let saveNotFound: boolean;
   let listFails: boolean;
   let messagesFail: boolean;
   let patchFails: boolean;
@@ -76,6 +77,15 @@ describe('AIChatPage', () => {
     status,
     json: async () => ({ error: 'mock failure' }),
   });
+  const deferred = <T>() => {
+    let resolve!: (_value: T | PromiseLike<T>) => void;
+    let reject!: (_reason?: unknown) => void;
+    const promise = new Promise<T>((res, rej) => {
+      resolve = res;
+      reject = rej;
+    });
+    return { promise, resolve, reject };
+  };
 
   const installFetchRouter = () => {
     fetchMock.mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
@@ -87,6 +97,13 @@ describe('AIChatPage', () => {
       if (url.includes('/api/chat-history/save') && method === 'POST') {
         const body = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>;
         saveBodies.push(body);
+        if (saveNotFound) {
+          return Promise.resolve({
+            ok: false,
+            status: 404,
+            json: async () => ({ error: 'Thread not found' }),
+          });
+        }
         const isUser = body.is_user === true;
         if ((isUser && saveFailures.user) || (!isUser && saveFailures.assistant)) {
           return Promise.resolve(errJson());
@@ -220,6 +237,7 @@ describe('AIChatPage', () => {
     saveBodies = [];
     fetchLog = [];
     saveFailures = { user: false, assistant: false };
+    saveNotFound = false;
     listFails = false;
     messagesFail = false;
     patchFails = false;
@@ -721,6 +739,41 @@ describe('AIChatPage', () => {
       expect(notifyCreateSpy).toHaveBeenCalledWith(
         expect.objectContaining({ type: 'warning', message: 'Failed to save chat history' }),
       );
+    });
+
+    it('resets the chat ID and warns when save returns 404 for a deleted thread', async () => {
+      mockLLMResponse('Reply to zombie');
+      mountComponent();
+      const chatStore = useChatStore();
+      chatStore.setChatId('deleted-thread-id');
+      saveNotFound = true;
+
+      await sendMessage('Message to deleted thread');
+      await flushPromises();
+
+      expect(chatStore.chatId).not.toBe('deleted-thread-id');
+      expect(notifyCreateSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: 'warning',
+          message: 'This conversation was deleted. Started a new chat.',
+        }),
+      );
+    });
+
+    it('preserves the initial greeting message when sending the first message', async () => {
+      mockLLMResponse('Welcome reply');
+      mountComponent();
+      const chatStore = useChatStore();
+      await flushPromises();
+
+      expect(chatStore.messages[0]?.content).toContain('こんにちは！日本語学習をお手伝いします');
+
+      await sendMessage('First user message');
+      await flushPromises();
+
+      expect(chatStore.messages[0]?.content).toContain('こんにちは！日本語学習をお手伝いします');
+      expect(chatStore.messages[1]?.content).toBe('First user message');
+      expect(chatStore.messages[2]?.content).toBe('Welcome reply');
     });
 
     it('should abort the send when the session account changed during persistence', async () => {
@@ -1329,6 +1382,43 @@ describe('AIChatPage', () => {
       await flushPromises();
 
       expect(chatStore.chatId).toBe('other-thread');
+    });
+
+    it('does not cancel in-flight thread loading when an unrelated thread is deleted', async () => {
+      threadRows = [
+        createMockThread({ ThreadId: 'thread-1', title: 'Thread 1', updatedAt: Date.now() }),
+        createMockThread({
+          ThreadId: 'thread-2',
+          title: 'Thread 2',
+          updatedAt: Date.now() - 60_000,
+        }),
+      ];
+      messageRows = [createMockMessage('body of thread 2', false, 0, 'thread-2')];
+
+      mountComponent();
+      const chatStore = useChatStore();
+      await flushPromises();
+
+      const thread2Gate = deferred<void>();
+      messagesDelays['thread-2'] = thread2Gate.promise;
+
+      // Click thread-2 to select it (starts in-flight load)
+      await wrapper.findAll('[data-testid="llm-chat-thread-item"]')[1]!.trigger('click');
+      await flushPromises();
+
+      // Delete thread-1 while thread-2 is loading
+      await openThreadMenu(0);
+      await wrapper.find('[data-testid="llm-chat-delete-thread"]').trigger('click');
+      await flushPromises();
+      await wrapper.find('[data-testid="llm-chat-confirm-delete"]').trigger('click');
+      await flushPromises();
+
+      // Resolve thread-2's message load
+      thread2Gate.resolve();
+      await flushPromises();
+
+      expect(chatStore.chatId).toBe('thread-2');
+      expect(chatStore.messages.some((m) => m.content === 'body of thread 2')).toBe(true);
     });
   });
 
@@ -2217,7 +2307,7 @@ describe('AIChatPage', () => {
       expect(chatStore.messages.some((m) => m.content === 'doomed body')).toBe(false);
     });
 
-    it('does not select a stale row whose messages 404 while the post-delete refetch is pending', async () => {
+    it('removes the deleted thread from the sidebar immediately on delete even while refetch is pending', async () => {
       threadRows = [
         createMockThread({ ThreadId: 't-1', title: 'Doomed', updatedAt: Date.now() }),
         createMockThread({ ThreadId: 't-2', title: 'Survivor', updatedAt: Date.now() - 60_000 }),
@@ -2242,27 +2332,17 @@ describe('AIChatPage', () => {
       await flushPromises();
       expect(deleteFetches().length).toBe(1);
       expect(chatStore.chatId).not.toBe('t-1');
-      expect(wrapper.text()).toContain('Doomed');
-
-      const fetchesBefore = messageFetches().filter((f) => f.url.includes('thread_id=t-1')).length;
-      await wrapper.findAll('[data-testid="llm-chat-thread-item"]')[0]!.trigger('click');
-      await flushPromises();
-
-      expect(messageFetches().filter((f) => f.url.includes('thread_id=t-1')).length).toBe(
-        fetchesBefore + 1,
-      );
-      expect(chatStore.chatId).not.toBe('t-1');
-      expect(chatStore.messages.some((m) => m.content === 'doomed body')).toBe(false);
-      expect(notifyCreateSpy).toHaveBeenCalledWith(
-        expect.objectContaining({ type: 'negative', message: 'Failed to load conversation' }),
-      );
+      // The row is removed from cache immediately on delete success
+      expect(wrapper.text()).not.toContain('Doomed');
+      expect(wrapper.text()).toContain('Survivor');
 
       listGate.resolve();
       await flushPromises();
       expect(wrapper.text()).not.toContain('Doomed');
+      expect(wrapper.text()).toContain('Survivor');
     });
 
-    it('lets a recreated thread be selected while the post-delete refetch is still pending', async () => {
+    it('allows starting a new chat while post-delete refetch is still pending', async () => {
       threadRows = [createMockThread({ ThreadId: 't-1', title: 'Doomed' })];
 
       mountComponent();
@@ -2278,20 +2358,14 @@ describe('AIChatPage', () => {
       await wrapper.find('[data-testid="llm-chat-confirm-delete"]').trigger('click');
       await flushPromises();
       expect(deleteFetches().length).toBe(1);
-      expect(wrapper.text()).toContain('Doomed');
+      expect(wrapper.text()).not.toContain('Doomed');
 
-      threadRows.push(createMockThread({ ThreadId: 't-1', title: 'Recreated row' }));
-      messageRows = [createMockMessage('recreated body', false, 0, 't-1')];
-
-      const fetchesBefore = messageFetches().filter((f) => f.url.includes('thread_id=t-1')).length;
-      await wrapper.find('[data-testid="llm-chat-thread-item"]').trigger('click');
+      await wrapper.find('[data-testid="llm-chat-new"]').trigger('click');
       await flushPromises();
+      expect(chatStore.messages[0]?.content).toContain('こんにちは！日本語学習をお手伝いします');
 
-      expect(messageFetches().filter((f) => f.url.includes('thread_id=t-1')).length).toBe(
-        fetchesBefore + 1,
-      );
-      expect(chatStore.chatId).toBe('t-1');
-      expect(chatStore.messages.some((m) => m.content === 'recreated body')).toBe(true);
+      listGate.resolve();
+      await flushPromises();
     });
   });
 

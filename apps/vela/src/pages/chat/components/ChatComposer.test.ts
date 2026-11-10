@@ -91,4 +91,25 @@ describe('ChatComposer', () => {
 
     expect(wrapper.emitted('send')).toBeUndefined();
   });
+
+  it('should not emit send when Enter is pressed during IME composition', async () => {
+    const wrapper = mountComponent();
+    await typeDraft(wrapper, 'にほんご');
+    const input = wrapper.find('[data-testid="llm-chat-input"]');
+
+    await input.trigger('keydown', { key: 'Enter', isComposing: true });
+    await input.trigger('keyup', { key: 'Enter', isComposing: true });
+
+    expect(wrapper.emitted('send')).toBeUndefined();
+  });
+
+  it('should not emit send when Enter has keyCode 229 for IME', async () => {
+    const wrapper = mountComponent();
+    await typeDraft(wrapper, 'にほんご');
+    const input = wrapper.find('[data-testid="llm-chat-input"]');
+
+    await input.trigger('keydown', { key: 'Enter', keyCode: 229 });
+
+    expect(wrapper.emitted('send')).toBeUndefined();
+  });
 });

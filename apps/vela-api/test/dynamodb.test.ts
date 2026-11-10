@@ -90,6 +90,9 @@ vi.mock('@aws-sdk/lib-dynamodb', () => ({
     globalMock.__dynamoMockDeleteCommand(input);
     return { input };
   }),
+  TransactWriteCommand: vi.fn().mockImplementation((input: any) => {
+    return { input, __type: 'TransactWriteCommand' };
+  }),
 }));
 
 ({

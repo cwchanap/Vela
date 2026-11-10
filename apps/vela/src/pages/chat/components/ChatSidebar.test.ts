@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { mount, flushPromises } from '@vue/test-utils';
 import { Quasar } from 'quasar';
 import ChatSidebar from './ChatSidebar.vue';
@@ -151,5 +151,43 @@ describe('ChatSidebar', () => {
 
     expect(wrapper.find('[data-testid="chat-thread-rename-input"]').exists()).toBe(false);
     expect(wrapper.emitted('delete')).toBeUndefined();
+  });
+
+  it('closes rename without emitting when saving with unchanged title', async () => {
+    const wrapper = mountComponent();
+    await openRenameEditor(wrapper);
+
+    // Draft is already 'Original title'; press Enter without changes
+    await wrapper
+      .find('[data-testid="chat-thread-rename-input"]')
+      .trigger('keydown', { key: 'Enter' });
+    await flushPromises();
+
+    expect(wrapper.emitted('rename')).toBeUndefined();
+    expect(wrapper.find('[data-testid="chat-thread-rename-input"]').exists()).toBe(false);
+  });
+
+  it('stops event propagation on Escape so mobile dialog is not closed', async () => {
+    const wrapper = mountComponent();
+    await openRenameEditor(wrapper);
+
+    const event = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true });
+    const stopPropagationSpy = vi.spyOn(event, 'stopPropagation');
+    wrapper.find('[data-testid="chat-thread-rename-input"]').element.dispatchEvent(event);
+    await flushPromises();
+
+    expect(stopPropagationSpy).toHaveBeenCalled();
+    expect(wrapper.find('[data-testid="chat-thread-rename-input"]').exists()).toBe(false);
+  });
+
+  it('renders existing threads alongside a retry banner when a background refetch fails', () => {
+    const wrapper = mountComponent({
+      threads: [thread({ ThreadId: 't-1', title: 'Cached thread' })],
+      error: true,
+    });
+
+    expect(wrapper.find('[data-testid="llm-chat-thread-item"]').exists()).toBe(true);
+    expect(wrapper.text()).toContain('Cached thread');
+    expect(wrapper.find('[data-testid="chat-sidebar-retry"]').exists()).toBe(true);
   });
 });

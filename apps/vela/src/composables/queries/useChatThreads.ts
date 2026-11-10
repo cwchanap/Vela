@@ -5,13 +5,17 @@ import { chatKeys } from '@vela/common';
 import { useAuthStore } from 'src/stores/auth';
 import {
   deleteChatThread,
+  getChatMessages,
   listChatThreads,
+  saveChatMessage,
   updateChatThread,
+  type ChatHistoryItemDTO,
   type ChatThreadSummaryDTO,
   type PatchChatThreadDTO,
 } from 'src/services/chatHistoryService';
 
 export { chatKeys };
+export type { ChatHistoryItemDTO, ChatThreadSummaryDTO, PatchChatThreadDTO };
 
 export function useChatThreads() {
   const authStore = useAuthStore();
@@ -79,10 +83,31 @@ export function useDeleteThread() {
       const key = chatKeys.threads(variables.userId);
       return { key };
     },
-    onSuccess: (_data, _variables, context) => {
+    onSuccess: (_data, variables, context) => {
       if (context) {
+        queryClient.setQueryData<ChatThreadSummaryDTO[]>(context.key, (old) =>
+          old ? old.filter((t) => t.ThreadId !== variables.threadId) : [],
+        );
         void queryClient.invalidateQueries({ queryKey: context.key });
       }
     },
   });
+}
+
+export function useSaveChatMessage() {
+  return useMutation({
+    mutationFn: (variables: {
+      threadId: string;
+      userId: string;
+      message: string;
+      isUser: boolean;
+    }) =>
+      saveChatMessage(variables.threadId, variables.userId, variables.message, variables.isUser),
+  });
+}
+
+export function useChatMessages() {
+  return {
+    getMessages: (threadId: string, userId: string) => getChatMessages(threadId, userId),
+  };
 }
