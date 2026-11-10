@@ -2549,6 +2549,51 @@ describe('AIChatPage', () => {
       );
       consoleErrorSpy.mockRestore();
     });
+
+    it('does not reset a different conversation selected while the active thread delete is in flight', async () => {
+      threadRows = [
+        createMockThread({ ThreadId: 't-1', title: 'Doomed', updatedAt: Date.now() }),
+        createMockThread({
+          ThreadId: 't-2',
+          title: 'Survivor',
+          updatedAt: Date.now() - 60_000,
+        }),
+      ];
+      messageRows = [
+        createMockMessage('doomed body', false, 0, 't-1'),
+        createMockMessage('survivor body', false, 0, 't-2'),
+      ];
+      const gate = deferred<void>();
+      deleteDelay = gate.promise;
+
+      mountComponent();
+      const chatStore = useChatStore();
+      await flushPromises();
+      await selectFirstThread();
+      expect(chatStore.chatId).toBe('t-1');
+
+      await confirmPendingDelete(0);
+      expect(deleteFetches().length).toBe(1);
+
+      // While the DELETE is in flight the user lands on another conversation
+      // (e.g. by navigating away and back, which remounts the page).
+      await wrapper.findAll('[data-testid="llm-chat-thread-item"]')[1]!.trigger('click');
+      await flushPromises();
+      expect(chatStore.chatId).toBe('t-2');
+      expect(chatStore.messages.some((m) => m.content === 'survivor body')).toBe(true);
+
+      gate.resolve();
+      await flushPromises();
+
+      expect(chatStore.chatId).toBe('t-2');
+      expect(chatStore.messages.some((m) => m.content === 'survivor body')).toBe(true);
+      expect(notifyCreateSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: 'positive',
+          message: 'Conversation deleted successfully',
+        }),
+      );
+    });
   });
 
   describe('Store Integration', () => {
