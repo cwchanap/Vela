@@ -7,7 +7,6 @@
     placeholder="Type your message..."
     data-testid="llm-chat-input"
     @keydown="onKeydown"
-    @keyup.enter="onKeyupEnter"
     class="q-mt-md"
   >
     <template #append>
@@ -48,11 +47,6 @@ const onKeydown = (event: KeyboardEvent) => {
   // must not submit the message.
   if (event.isComposing || event.keyCode === 229) return;
   event.preventDefault();
-  onSend();
-};
-
-const onKeyupEnter = (event: KeyboardEvent) => {
-  if (event.isComposing || event.keyCode === 229) return;
   onSend();
 };
 

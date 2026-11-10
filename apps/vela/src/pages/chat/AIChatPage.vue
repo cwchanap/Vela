@@ -207,13 +207,15 @@ const isNotFoundStatus = (e: unknown): boolean =>
       typeof (e as { message: unknown }).message === 'string' &&
       (e as { message: string }).message.includes('Thread not found')));
 
+type PersistResult = 'saved' | 'failed' | 'gone';
+
 const persistMessage = async (
   cid: string,
   uid: string,
   message: string,
   isUser: boolean,
   isStale: () => boolean,
-): Promise<boolean> => {
+): Promise<PersistResult> => {
   try {
     await saveChatMessageMutation.mutateAsync({
       threadId: cid,
@@ -221,27 +223,45 @@ const persistMessage = async (
       message,
       isUser,
     });
-    return true;
+    return 'saved';
   } catch (e) {
-    if (isStale()) return false;
+    if (isStale()) return 'failed';
     if (isAccountChangedError(e)) throw e;
     console.error('Failed to save chat message', e);
-    if (isNotFoundStatus(e)) {
-      // The open thread was deleted (e.g. in another tab). Detach from the dead
-      // thread ID so subsequent sends create a fresh thread instead of permanently failing.
-      if (chat.chatId === cid) {
-        chat.setChatId(crypto.randomUUID());
-      }
-      void queryClient.invalidateQueries({ queryKey: chatKeys.threads(uid) });
-      $q.notify({
-        type: 'warning',
-        message: 'This conversation was deleted. Started a new chat.',
-      });
-      return false;
+    if (isNotFoundStatus(e) && chat.chatId === cid) {
+      // The open thread was deleted (e.g. in another tab). The caller restarts
+      // the chat so the visible transcript and stored history stay in lockstep.
+      return 'gone';
     }
     $q.notify({ type: 'warning', message: 'Failed to save chat history' });
-    return false;
+    return 'failed';
   }
+};
+
+// A save that 404s means the open thread was deleted elsewhere. Make the
+// "Started a new chat" transition real: drop the dead transcript, then
+// re-show and re-save the in-flight turns under a fresh thread id so the
+// visible transcript and persisted history match on reload.
+const restartDeletedChat = async (
+  uid: string,
+  turns: Array<{ message: string; isUser: boolean }>,
+  isStale: () => boolean,
+): Promise<string | null> => {
+  const freshId = crypto.randomUUID();
+  chat.setChatId(freshId);
+  chat.clearMessages();
+  chat.addMessage({ type: 'ai', content: GREETING_MESSAGE });
+  void queryClient.invalidateQueries({ queryKey: chatKeys.threads(uid) });
+  $q.notify({
+    type: 'warning',
+    message: 'This conversation was deleted. Started a new chat.',
+  });
+  for (const turn of turns) {
+    chat.addMessage({ type: turn.isUser ? 'user' : 'ai', content: turn.message });
+    const status = await persistMessage(freshId, uid, turn.message, turn.isUser, isStale);
+    if (status !== 'saved') return null;
+  }
+  return freshId;
 };
 
 const retryThreads = () => {
@@ -317,7 +337,15 @@ const onSend = async (draft: string) => {
   await scrollToBottom();
 
   try {
-    const userSaved = await persistMessage(cid, uid, content, true, isStale);
+    const turns: Array<{ message: string; isUser: boolean }> = [{ message: content, isUser: true }];
+    let saveCid = cid;
+    const firstSave = await persistMessage(saveCid, uid, content, true, isStale);
+    let userSaved = firstSave === 'saved';
+    if (firstSave === 'gone') {
+      const restarted = await restartDeletedChat(uid, turns, isStale);
+      userSaved = restarted !== null;
+      if (restarted !== null) saveCid = restarted;
+    }
     if (userSaved) {
       void queryClient.invalidateQueries({ queryKey: chatKeys.threads(uid) });
     }
@@ -353,10 +381,14 @@ const onSend = async (draft: string) => {
     }
 
     chat.addMessage({ type: 'ai', content: resp.text });
+    turns.push({ message: resp.text, isUser: false });
     // Skip the assistant save when the user save failed: the message would be
     // written without a companion user turn or surviving thread metadata.
     if (userSaved) {
-      await persistMessage(cid, uid, resp.text, false, isStale);
+      const assistantSave = await persistMessage(saveCid, uid, resp.text, false, isStale);
+      if (assistantSave === 'gone') {
+        await restartDeletedChat(uid, turns, isStale);
+      }
     }
   } catch (e: unknown) {
     if (isStale()) return;
