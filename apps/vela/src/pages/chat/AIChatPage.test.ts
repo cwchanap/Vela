@@ -152,7 +152,10 @@ describe('AIChatPage', () => {
           }
           return okJson({ items: messageRows.filter((m) => m.ThreadId === threadId) });
         };
-        return (messagesDelays[threadId] ?? Promise.resolve()).then(respond);
+        // The server reads when the request arrives; a slow response can still
+        // land after a concurrent DELETE completes, so snapshot it up front.
+        const response = respond();
+        return (messagesDelays[threadId] ?? Promise.resolve()).then(() => response);
       }
 
       const threadMatch = /\/api\/chat-history\/thread\/([^/?]+)$/.exec(url);
@@ -2305,6 +2308,41 @@ describe('AIChatPage', () => {
 
       expect(chatStore.chatId).not.toBe('t-1');
       expect(chatStore.messages.some((m) => m.content === 'doomed body')).toBe(false);
+    });
+
+    it('does not install a delayed selection while its delete is still pending', async () => {
+      threadRows = [
+        createMockThread({ ThreadId: 't-1', title: 'Doomed', updatedAt: Date.now() }),
+        createMockThread({ ThreadId: 't-2', title: 'Survivor', updatedAt: Date.now() - 60_000 }),
+      ];
+      messageRows = [createMockMessage('doomed body', false, 0, 't-1')];
+      const slowGet = deferred<void>();
+      messagesDelays['t-1'] = slowGet.promise;
+      const deleteGate = deferred<void>();
+      deleteDelay = deleteGate.promise;
+
+      mountComponent();
+      const chatStore = useChatStore();
+      await flushPromises();
+
+      // Select t-1, then delete it while the messages response is in flight.
+      await wrapper.findAll('[data-testid="llm-chat-thread-item"]')[0]!.trigger('click');
+      await openThreadMenu(0);
+      await wrapper.find('[data-testid="llm-chat-delete-thread"]').trigger('click');
+      await flushPromises();
+      await wrapper.find('[data-testid="llm-chat-confirm-delete"]').trigger('click');
+      await flushPromises();
+      expect(deleteFetches().length).toBe(1);
+
+      // The selection's response arrives while the DELETE is still pending.
+      slowGet.resolve();
+      await flushPromises();
+      expect(chatStore.chatId).not.toBe('t-1');
+      expect(chatStore.messages.some((m) => m.content === 'doomed body')).toBe(false);
+
+      deleteGate.resolve();
+      await flushPromises();
+      expect(chatStore.chatId).not.toBe('t-1');
     });
 
     it('removes the deleted thread from the sidebar immediately on delete even while refetch is pending', async () => {
