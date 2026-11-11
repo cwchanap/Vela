@@ -66,8 +66,10 @@ export const useLLMSettingsStore = defineStore('llmSettings', () => {
 
   const llm = ref<LlmPreferences>(emptyLlm());
 
-  const selection = computed<LlmSelection>(() => {
-    const { provider, model } = llm.value.defaultModel;
+  // Single source of pair → { key, saved effort } lookup; the global selection
+  // and thread-specific chat choices both resolve through it.
+  const selectionFor = (pair: { provider: LlmProvider; model: string }): LlmSelection => {
+    const { provider, model } = pair;
     return {
       provider,
       model,
@@ -78,7 +80,9 @@ export const useLLMSettingsStore = defineStore('llmSettings', () => {
           ? llm.value.thinking[model]
           : undefined,
     };
-  });
+  };
+
+  const selection = computed<LlmSelection>(() => selectionFor(llm.value.defaultModel));
 
   const syncFromAuth = () => {
     const prefs = auth.user?.preferences?.llm;
@@ -141,6 +145,7 @@ export const useLLMSettingsStore = defineStore('llmSettings', () => {
   return {
     llm,
     selection,
+    selectionFor,
     saveProvider,
     saveDefault,
   };

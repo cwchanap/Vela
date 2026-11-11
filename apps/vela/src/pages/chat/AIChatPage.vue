@@ -17,20 +17,32 @@
       </aside>
 
       <div class="chat-column">
-        <div class="chat-header">
-          <q-btn
-            v-if="isNarrowScreen"
-            flat
-            dense
-            round
-            icon="history"
-            color="primary"
-            aria-label="Open conversations"
-            @click="mobileSidebarOpen = true"
-            data-testid="llm-chat-history"
-            class="q-mr-sm"
-          />
-          <h1 class="chat-title">AI Chat</h1>
+        <div class="chat-header" :class="{ 'chat-header--stacked': isNarrowScreen }">
+          <div class="chat-header-row">
+            <q-btn
+              v-if="isNarrowScreen"
+              flat
+              dense
+              round
+              icon="history"
+              color="primary"
+              aria-label="Open conversations"
+              @click="mobileSidebarOpen = true"
+              data-testid="llm-chat-history"
+              class="q-mr-sm"
+            />
+            <h1 class="chat-title">AI Chat</h1>
+          </div>
+          <div class="chat-controls">
+            <ChatModelPicker
+              :pair="chat.activeModel"
+              :options="modelOptions"
+              :thinking="chat.thinkingOverride"
+              :disabled="chat.isLoading || modelPatching"
+              @update:pair="onModelSelect"
+              @update:thinking="onThinkingSelect"
+            />
+          </div>
         </div>
 
         <ChatMessageList
@@ -41,7 +53,7 @@
 
         <ChatComposer
           v-model="input"
-          :loading="chat.isLoading"
+          :loading="chat.isLoading || modelPatching"
           @send="onSend"
           class="chat-composer"
         />
@@ -101,15 +113,15 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted } from 'vue';
 import { useQuasar } from 'quasar';
-import { storeToRefs } from 'pinia';
 import { useQueryClient } from '@tanstack/vue-query';
-import { chatKeys } from '@vela/common';
-import { useChatStore } from '../../stores/chat';
+import { chatKeys, LLM_PROVIDER_REGISTRY, type LlmEffort } from '@vela/common';
+import { useChatStore, type ChatModelPair } from '../../stores/chat';
 import { useLLMSettingsStore } from '../../stores/llmSettings';
 import { useAuthStore } from '../../stores/auth';
 import ChatMessageList from './components/ChatMessageList.vue';
 import ChatComposer from './components/ChatComposer.vue';
 import ChatSidebar from './components/ChatSidebar.vue';
+import ChatModelPicker from './components/ChatModelPicker.vue';
 import {
   useChatThreads,
   useUpdateThread,
@@ -117,17 +129,25 @@ import {
   useSaveChatMessage,
   useChatMessages,
 } from '../../composables/queries';
+import { useLlmCapabilitiesQuery } from '../../composables/queries/useLlmCapabilitiesQuery';
 import type { ChatThreadSummaryDTO } from '../../services/chatHistoryService';
 import { llmClient, describeLlmError } from '../../services/llm';
 import { isAccountChangedError } from '../../utils/httpClient';
+import {
+  buildLlmModelOptions,
+  confirmedServerKeyProviders,
+  llmPairOption,
+  pairToOptionValue,
+  type LlmModelOption,
+} from '../../utils/llmModelOptions';
 import type { LlmMessage } from '@vela/common';
 
 const $q = useQuasar();
 const chat = useChatStore();
 const llmSettings = useLLMSettingsStore();
 const auth = useAuthStore();
-const { selection } = storeToRefs(llmSettings);
 const queryClient = useQueryClient();
+const capabilitiesQuery = useLlmCapabilitiesQuery();
 
 // Greeting message constant
 const GREETING_MESSAGE =
@@ -173,6 +193,7 @@ watch(
   ([nextUid, nextGen], [prevUid, prevGen]) => {
     if (nextUid === prevUid && nextGen === prevGen) return;
     chat.resetForUser(nextUid, nextGen);
+    seedActiveModel();
     chat.addMessage({ type: 'ai', content: GREETING_MESSAGE });
     showDeleteConfirm.value = false;
     threadToDelete.value = null;
@@ -181,6 +202,85 @@ watch(
     pendingDeletes.clear();
   },
 );
+
+// A fresh chat starts from the Settings default; an existing chat keeps its
+// model across remounts and thread switches.
+const seedActiveModel = () => {
+  if (!chat.activeModel) {
+    chat.setActiveModel({ ...llmSettings.llm.defaultModel });
+  }
+};
+
+// Server-key eligibility comes only from an affirmative capabilities response.
+const serverKeyProviders = computed(() =>
+  confirmedServerKeyProviders(capabilitiesQuery.data.value, {
+    isAuthenticated: auth.isAuthenticated,
+    isError: capabilitiesQuery.isError.value,
+  }),
+);
+
+const modelOptions = computed<LlmModelOption[]>(() => {
+  const options = buildLlmModelOptions(llmSettings.llm.keys, serverKeyProviders.value);
+  const pair = chat.activeModel;
+  if (pair) {
+    const value = pairToOptionValue(pair.provider, pair.model);
+    if (!options.some((option) => option.value === value)) {
+      // Keep an unusable stored/current model visible instead of silently
+      // substituting another choice.
+      options.push({ ...llmPairOption(pair.provider, pair.model), disabled: true });
+    }
+  }
+  return options;
+});
+
+const modelPatching = ref(false);
+
+const onThinkingSelect = (value: LlmEffort | null) => {
+  chat.setThinkingOverride(value);
+};
+
+const onModelSelect = async (pair: ChatModelPair) => {
+  if (chat.isLoading || modelPatching.value) return;
+  if (
+    chat.activeModel &&
+    chat.activeModel.provider === pair.provider &&
+    chat.activeModel.model === pair.model
+  ) {
+    return;
+  }
+  // A switch always drops the session thinking choice and prior cache evidence.
+  const applyLocally = () => {
+    chat.setActiveModel(pair);
+    chat.setThinkingOverride(null);
+    chat.setCacheStartedAt(null);
+  };
+  if (!chat.isPersistedThread || !chat.chatId) {
+    // Fresh chat: the first user save carries the model, so no PATCH here.
+    applyLocally();
+    return;
+  }
+  const uid = getUserId();
+  const sessionGen = auth.sessionGeneration;
+  const threadId = chat.chatId;
+  modelPatching.value = true;
+  try {
+    await updateThreadMutation.mutateAsync({
+      threadId,
+      patch: { model: pair },
+      userId: uid,
+    });
+    if (auth.sessionGeneration !== sessionGen || chat.chatId !== threadId) return;
+    applyLocally();
+  } catch (e) {
+    if (auth.sessionGeneration === sessionGen && chat.chatId === threadId) {
+      // Leave activeModel/cacheStartedAt untouched: no hidden model swap.
+      console.error(e);
+      $q.notify({ type: 'negative', message: 'Failed to change model' });
+    }
+  } finally {
+    modelPatching.value = false;
+  }
+};
 
 const isDeletePending = (threadId: string) =>
   pendingDeletes.has(deleteKey(auth.sessionGeneration, getUserId(), threadId));
@@ -215,6 +315,7 @@ const persistMessage = async (
   message: string,
   isUser: boolean,
   isStale: () => boolean,
+  model?: ChatModelPair,
 ): Promise<PersistResult> => {
   try {
     await saveChatMessageMutation.mutateAsync({
@@ -222,7 +323,12 @@ const persistMessage = async (
       userId: uid,
       message,
       isUser,
+      ...(isUser && model ? { model: { ...model } } : {}),
     });
+    if (isUser && !isStale() && chat.chatId === cid) {
+      // The row now exists; a client UUID alone never proved persistence.
+      chat.setIsPersistedThread(true);
+    }
     return 'saved';
   } catch (e) {
     if (isStale()) return 'failed';
@@ -246,10 +352,17 @@ const restartDeletedChat = async (
   uid: string,
   turns: Array<{ message: string; isUser: boolean }>,
   isStale: () => boolean,
+  model?: ChatModelPair,
 ): Promise<string | null> => {
   const freshId = crypto.randomUUID();
   chat.setChatId(freshId);
   chat.clearMessages();
+  // Keep the selected model for the replay, but the replacement thread has no
+  // row yet and must not inherit the old thread's cache evidence or the
+  // previous chat's session thinking choice.
+  chat.setCacheStartedAt(null);
+  chat.setThinkingOverride(null);
+  chat.setIsPersistedThread(false);
   chat.addMessage({ type: 'ai', content: GREETING_MESSAGE });
   void queryClient.invalidateQueries({ queryKey: chatKeys.threads(uid) });
   $q.notify({
@@ -262,7 +375,14 @@ const restartDeletedChat = async (
     // bypass persistMessage's stale check, so recheck around each await.
     if (isStale()) return null;
     chat.addMessage({ type: turn.isUser ? 'user' : 'ai', content: turn.message });
-    const status = await persistMessage(freshId, uid, turn.message, turn.isUser, isStale);
+    const status = await persistMessage(
+      freshId,
+      uid,
+      turn.message,
+      turn.isUser,
+      isStale,
+      turn.isUser ? model : undefined,
+    );
     if (status !== 'saved' || isStale()) return null;
   }
   return freshId;
@@ -282,6 +402,17 @@ const selectThread = async (t: ChatThreadSummaryDTO) => {
     if (isStaleOperation(opGen, sessionGen) || isThreadUnavailable(t.ThreadId)) return;
 
     chat.setChatId(t.ThreadId);
+    // Restore the thread's own choice: stored model (or the Settings default
+    // for legacy rows) and its cache evidence; the session thinking pick is
+    // per-chat and never carries across threads.
+    chat.setActiveModel(
+      t.model
+        ? { provider: t.model.provider, model: t.model.model }
+        : { ...llmSettings.llm.defaultModel },
+    );
+    chat.setCacheStartedAt(typeof t.lastLlmAt === 'number' ? t.lastLlmAt : null);
+    chat.setThinkingOverride(null);
+    chat.setIsPersistedThread(true);
 
     // Convert the messages to the correct type format
     const restoredMessages = items.map((it) => ({
@@ -331,6 +462,21 @@ const onSend = async (draft: string) => {
   const uid = getUserId();
   const cid = ensureChatId();
   if (isDeletePending(cid)) return;
+
+  // Per-request snapshot for both persistence and generation; a thread-specific
+  // choice must never resolve through the global llmSettings.selection.
+  const activePair: ChatModelPair = chat.activeModel ?? { ...llmSettings.llm.defaultModel };
+  const activeSelection = llmSettings.selectionFor(activePair);
+  if (!activeSelection.apiKey && !serverKeyProviders.value.includes(activeSelection.provider)) {
+    $q.notify({
+      type: 'warning',
+      message: `No API key for ${
+        LLM_PROVIDER_REGISTRY[activeSelection.provider].label
+      } and no confirmed server key. Add a key in Settings or retry the availability check.`,
+    });
+    return;
+  }
+
   const opGen = chat.nextGeneration();
   const sessionGen = auth.sessionGeneration;
   const isStale = () => isStaleOperation(opGen, sessionGen);
@@ -343,10 +489,10 @@ const onSend = async (draft: string) => {
   try {
     const turns: Array<{ message: string; isUser: boolean }> = [{ message: content, isUser: true }];
     let saveCid = cid;
-    const firstSave = await persistMessage(saveCid, uid, content, true, isStale);
+    const firstSave = await persistMessage(saveCid, uid, content, true, isStale, activePair);
     let userSaved = firstSave === 'saved';
     if (firstSave === 'gone') {
-      const restarted = await restartDeletedChat(uid, turns, isStale);
+      const restarted = await restartDeletedChat(uid, turns, isStale, activePair);
       userSaved = restarted !== null;
       if (restarted !== null) saveCid = restarted;
     }
@@ -363,14 +509,15 @@ const onSend = async (draft: string) => {
       content: m.content,
     }));
 
-    // Explicit per-request snapshot of the active provider/model/key; there is
-    // no global service state to keep in sync.
+    // Explicit per-request snapshot of the active provider/model/key and any
+    // session thinking override; there is no global service state to sync.
+    const thinking = chat.thinkingOverride ?? activeSelection.thinking;
     const resp = await llmClient.generate(
       {
-        provider: selection.value.provider,
-        model: selection.value.model,
-        apiKey: selection.value.apiKey,
-        ...(selection.value.thinking ? { thinking: selection.value.thinking } : {}),
+        provider: activeSelection.provider,
+        model: activeSelection.model,
+        apiKey: activeSelection.apiKey,
+        ...(thinking ? { thinking } : {}),
         system: systemPrompt,
         messages: history,
       },
@@ -391,7 +538,7 @@ const onSend = async (draft: string) => {
     if (userSaved) {
       const assistantSave = await persistMessage(saveCid, uid, resp.text, false, isStale);
       if (assistantSave === 'gone') {
-        await restartDeletedChat(uid, turns, isStale);
+        await restartDeletedChat(uid, turns, isStale, activePair);
       }
     }
   } catch (e: unknown) {
@@ -412,6 +559,7 @@ const onSend = async (draft: string) => {
 const onNewChat = () => {
   if (chat.isLoading) return;
   chat.startNewChat();
+  seedActiveModel();
   // Add a fresh greeting for the new chat
   chat.addMessage({
     type: 'ai',
@@ -469,6 +617,7 @@ const deleteThread = async () => {
       // DELETE was in flight, and only the still-active thread may be reset.
       if (chat.chatId === thread.ThreadId) {
         chat.startNewChat();
+        seedActiveModel();
         chat.addMessage({
           type: 'ai',
           content: GREETING_MESSAGE,
@@ -502,6 +651,8 @@ onMounted(() => {
   } else if (chat.ownerId !== uid || chat.ownerSessionGen !== sessionGen) {
     chat.resetForUser(uid, sessionGen);
   }
+  // Seed only a fresh chat's model; keep any existing model on remount.
+  seedActiveModel();
   // Warm greeting if empty
   if (chat.messages.length === 0) {
     chat.addMessage({
@@ -553,8 +704,30 @@ onMounted(() => {
 .chat-header {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 12px;
   margin-bottom: 16px;
   flex-shrink: 0;
+  min-width: 0;
+}
+
+.chat-header-row {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+
+.chat-controls {
+  display: flex;
+  align-items: center;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* 375px has no room for title + both controls in one 327px row: wrap the
+   controls onto a second full-width row while keeping the title visible. */
+.chat-header--stacked .chat-controls {
+  flex: 1 1 100%;
 }
 
 .chat-title {

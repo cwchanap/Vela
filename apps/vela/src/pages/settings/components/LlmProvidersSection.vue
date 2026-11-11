@@ -83,6 +83,14 @@ import { Notify } from 'quasar';
 import { LLM_PROVIDER_REGISTRY, LLM_PROVIDERS, type LlmProvider } from '@vela/common';
 import { useLLMSettingsStore } from 'src/stores/llmSettings';
 import { useAuthStore } from 'src/stores/auth';
+import {
+  OPENROUTER_CUSTOM_VALUE,
+  buildLlmModelOptions,
+  confirmedServerKeyProviders,
+  decodeModelValue,
+  llmPairOption,
+  pairToOptionValue,
+} from '../../../utils/llmModelOptions';
 import { useLlmCapabilitiesQuery } from '../../../composables/queries/useLlmCapabilitiesQuery';
 import LlmProviderCard from './LlmProviderCard.vue';
 
@@ -91,76 +99,33 @@ const authStore = useAuthStore();
 const isAuthenticated = computed(() => authStore.isAuthenticated);
 const capabilitiesQuery = useLlmCapabilitiesQuery();
 
-const CUSTOM_VALUE = 'openrouter::__custom__';
-const encode = (provider: LlmProvider, model: string) => `${provider}::${model}`;
-
-const pairToValue = (provider: LlmProvider, model: string) =>
-  provider === 'openrouter' ? CUSTOM_VALUE : encode(provider, model);
-
-const serverKeyProviders = computed<LlmProvider[]>(() => {
-  if (!isAuthenticated.value) return [];
-  if (capabilitiesQuery.isError.value) return [];
-  const providers: unknown = capabilitiesQuery.data.value?.serverKeyProviders;
-  if (!Array.isArray(providers)) return [];
-  return providers.filter(
-    (provider): provider is LlmProvider =>
-      typeof provider === 'string' && (LLM_PROVIDERS as readonly string[]).includes(provider),
-  );
-});
+const serverKeyProviders = computed<LlmProvider[]>(() =>
+  confirmedServerKeyProviders(capabilitiesQuery.data.value, {
+    isAuthenticated: isAuthenticated.value,
+    isError: capabilitiesQuery.isError.value,
+  }),
+);
 const serverKeyProviderLabels = computed(() =>
   serverKeyProviders.value.map((provider) => LLM_PROVIDER_REGISTRY[provider].label),
 );
 
 const defaultOptions = computed(() => {
-  const options: { label: string; value: string }[] = [];
-  for (const provider of LLM_PROVIDERS) {
-    const hasUserKey = !!store.llm.keys[provider];
-    const hasServerKey = serverKeyProviders.value.includes(provider);
-    if (!hasUserKey && !hasServerKey) continue;
-    const registry = LLM_PROVIDER_REGISTRY[provider];
-    if (registry.models) {
-      const suffix = hasUserKey ? '' : ' (server key)';
-      for (const model of registry.models) {
-        options.push({
-          label: `${registry.label} — ${model.id}${suffix}`,
-          value: encode(provider, model.id),
-        });
-      }
-    } else {
-      options.push({
-        label: `OpenRouter (custom ID${hasUserKey ? '' : ', server key'})`,
-        value: CUSTOM_VALUE,
-      });
-    }
-  }
+  const options = buildLlmModelOptions(store.llm.keys, serverKeyProviders.value);
   const { provider, model } = store.llm.defaultModel;
-  const currentValue = pairToValue(provider, model);
+  const currentValue = pairToOptionValue(provider, model);
   if (!options.some((option) => option.value === currentValue)) {
-    options.push(
-      provider === 'openrouter'
-        ? { label: 'OpenRouter (custom ID)', value: CUSTOM_VALUE }
-        : { label: `${LLM_PROVIDER_REGISTRY[provider].label} — ${model}`, value: currentValue },
-    );
+    options.push(llmPairOption(provider, model));
   }
   const draft = draftPairValue.value;
   if (!options.some((option) => option.value === draft)) {
-    const [draftProvider, ...modelParts] = draft.split('::');
-    if ((LLM_PROVIDERS as readonly string[]).includes(draftProvider ?? '')) {
-      const label = LLM_PROVIDER_REGISTRY[draftProvider as LlmProvider].label;
-      options.push({
-        label:
-          draftProvider === 'openrouter'
-            ? 'OpenRouter (custom ID)'
-            : `${label} — ${modelParts.join('::')}`,
-        value: draft,
-      });
-    }
+    const draftPair = decodeModelValue(draft);
+    if (draftPair) options.push(llmPairOption(draftPair.provider, draftPair.model));
   }
   return options;
 });
 
 const draftPairValue = ref(
-  pairToValue(store.llm.defaultModel.provider, store.llm.defaultModel.model),
+  pairToOptionValue(store.llm.defaultModel.provider, store.llm.defaultModel.model),
 );
 const customModelId = ref(
   store.llm.defaultModel.provider === 'openrouter' ? store.llm.defaultModel.model : '',
@@ -179,18 +144,18 @@ watch(
       savingDefault.value = false;
     } else if (
       activeDefaultSave ||
-      draftPairValue.value !== pairToValue(prevDm.provider, prevDm.model) ||
+      draftPairValue.value !== pairToOptionValue(prevDm.provider, prevDm.model) ||
       (prevDm.provider === 'openrouter' && customModelId.value !== prevDm.model)
     ) {
       return;
     }
-    draftPairValue.value = pairToValue(dm.provider, dm.model);
+    draftPairValue.value = pairToOptionValue(dm.provider, dm.model);
     customModelId.value = dm.provider === 'openrouter' ? dm.model : '';
   },
   { deep: true },
 );
 
-const isCustomSelected = computed(() => draftPairValue.value === CUSTOM_VALUE);
+const isCustomSelected = computed(() => draftPairValue.value === OPENROUTER_CUSTOM_VALUE);
 
 const selectionProviderLabel = computed(
   () => LLM_PROVIDER_REGISTRY[store.llm.defaultModel.provider].label,
@@ -205,7 +170,7 @@ const hasSelectionServerKey = computed(() =>
 
 const saveDefault = async () => {
   let pair: { provider: LlmProvider; model: string };
-  if (draftPairValue.value === CUSTOM_VALUE) {
+  if (draftPairValue.value === OPENROUTER_CUSTOM_VALUE) {
     const model = customModelId.value.trim();
     if (!model) {
       Notify.create({
@@ -235,7 +200,7 @@ const saveDefault = async () => {
     if (ok) {
       if (draftPairValue.value === submittedValue && customModelId.value === submittedModel) {
         const dm = store.llm.defaultModel;
-        draftPairValue.value = pairToValue(dm.provider, dm.model);
+        draftPairValue.value = pairToOptionValue(dm.provider, dm.model);
         customModelId.value = dm.provider === 'openrouter' ? dm.model : '';
       }
       Notify.create({ type: 'positive', message: 'Default model saved', position: 'top' });

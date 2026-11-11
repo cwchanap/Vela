@@ -12,8 +12,10 @@ export interface ChatThreadSummaryDTO {
   title: string;
   createdAt: number;
   updatedAt: number;
-  model?: ChatThreadModelDTO;
-  lastLlmAt?: number;
+  // `| undefined` keeps the optimistic-clear `{ lastLlmAt: undefined }` idiom
+  // valid under exactOptionalPropertyTypes.
+  model?: ChatThreadModelDTO | undefined;
+  lastLlmAt?: number | undefined;
 }
 
 export interface ChatHistoryItemDTO {
@@ -51,8 +53,8 @@ export async function getChatMessages(
 }
 
 export interface SaveChatMessageMetadata {
-  model?: ChatThreadModelDTO;
-  lastLlmAt?: number;
+  model?: ChatThreadModelDTO | undefined;
+  lastLlmAt?: number | undefined;
 }
 
 export async function saveChatMessage(

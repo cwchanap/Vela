@@ -82,6 +82,7 @@ import {
   type LlmModelInfo,
   type LlmProvider,
 } from '@vela/common';
+import { effortOptions, registryModels } from '../../../utils/llmModelOptions';
 import { useLLMSettingsStore, type LlmThinkingPatch } from 'src/stores/llmSettings';
 import { useAuthStore } from 'src/stores/auth';
 
@@ -91,9 +92,7 @@ const store = useLLMSettingsStore();
 const authStore = useAuthStore();
 
 const label = computed(() => LLM_PROVIDER_REGISTRY[props.provider].label);
-const providerModels = computed<readonly LlmModelInfo[]>(
-  () => LLM_PROVIDER_REGISTRY[props.provider].models ?? [],
-);
+const providerModels = computed<readonly LlmModelInfo[]>(() => registryModels(props.provider));
 const hasKey = computed(() => !!store.llm.keys[props.provider]);
 const isAuthenticated = computed(() => authStore.isAuthenticated);
 
@@ -150,11 +149,6 @@ watch([() => authStore.user?.id, () => authStore.sessionGeneration], () => {
   lastSlice = readSavedSlice();
   resetDrafts(lastSlice);
 });
-
-const effortOptions = (model: LlmModelInfo) => [
-  { label: 'Default', value: '' },
-  ...model.efforts.map((effort) => ({ label: effort, value: effort })),
-];
 
 const save = async () => {
   const patch: LlmThinkingPatch = {};

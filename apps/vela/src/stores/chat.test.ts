@@ -292,6 +292,61 @@ describe('useChatStore', () => {
     });
   });
 
+  describe('chat model state', () => {
+    const seedModelState = async (store: {
+      setActiveModel: (_pair: { provider: 'google'; model: string } | null) => void;
+      setThinkingOverride: (_effort: 'high' | null) => void;
+      setCacheStartedAt: (_timestamp: number | null) => void;
+      setIsPersistedThread: (_persisted: boolean) => void;
+    }) => {
+      store.setActiveModel({ provider: 'google', model: 'gemini-3.8-flash' });
+      store.setThinkingOverride('high');
+      store.setCacheStartedAt(1700000000000);
+      store.setIsPersistedThread(true);
+    };
+
+    it('starts with a fresh model state', async () => {
+      const { useChatStore } = await import('./chat');
+      const store = useChatStore();
+      expect(store.activeModel).toBeNull();
+      expect(store.thinkingOverride).toBeNull();
+      expect(store.cacheStartedAt).toBeNull();
+      expect(store.isPersistedThread).toBe(false);
+    });
+
+    it('stores provider/model, effort override, cache timestamp and persistence via setters', async () => {
+      const { useChatStore } = await import('./chat');
+      const store = useChatStore();
+      seedModelState(store);
+      expect(store.activeModel).toEqual({ provider: 'google', model: 'gemini-3.8-flash' });
+      expect(store.thinkingOverride).toBe('high');
+      expect(store.cacheStartedAt).toBe(1700000000000);
+      expect(store.isPersistedThread).toBe(true);
+    });
+
+    it('clears model, thinking, cache timestamp and the persistence flag on startNewChat', async () => {
+      const { useChatStore } = await import('./chat');
+      const store = useChatStore();
+      seedModelState(store);
+      store.startNewChat();
+      expect(store.activeModel).toBeNull();
+      expect(store.thinkingOverride).toBeNull();
+      expect(store.cacheStartedAt).toBeNull();
+      expect(store.isPersistedThread).toBe(false);
+    });
+
+    it('clears the model state on resetForUser', async () => {
+      const { useChatStore } = await import('./chat');
+      const store = useChatStore();
+      seedModelState(store);
+      store.resetForUser('user-2', 3);
+      expect(store.activeModel).toBeNull();
+      expect(store.thinkingOverride).toBeNull();
+      expect(store.cacheStartedAt).toBeNull();
+      expect(store.isPersistedThread).toBe(false);
+    });
+  });
+
   describe('clearError', () => {
     it('clears error', async () => {
       const { useChatStore } = await import('./chat');

@@ -497,4 +497,65 @@ describe('useLLMSettingsStore', () => {
       expect(store.llm.defaultModel).toEqual({ provider: 'google', model: GOOGLE_DEFAULT });
     });
   });
+
+  describe('selectionFor', () => {
+    it('returns the pair, its saved key and saved effort for any provider/model', async () => {
+      const { useLLMSettingsStore } = await import('./llmSettings');
+      mockAuthStore.user = makeUser(
+        'user-1',
+        makeLlm({
+          keys: { anthropic: 'anthropic-key', openai: 'openai-key' },
+          thinking: { 'claude-opus-5-5': 'high' },
+          defaultModel: { provider: 'google', model: GOOGLE_DEFAULT },
+        }),
+      );
+      const store = useLLMSettingsStore();
+
+      expect(store.selectionFor({ provider: 'anthropic', model: 'claude-opus-5-5' })).toEqual({
+        provider: 'anthropic',
+        model: 'claude-opus-5-5',
+        apiKey: 'anthropic-key',
+        thinking: 'high',
+      });
+      expect(store.selectionFor({ provider: 'openai', model: 'gpt-6.1-sol' })).toEqual({
+        provider: 'openai',
+        model: 'gpt-6.1-sol',
+        apiKey: 'openai-key',
+        thinking: undefined,
+      });
+    });
+
+    it('omits the thinking override for non-registry and cross-registry model ids', async () => {
+      const { useLLMSettingsStore } = await import('./llmSettings');
+      mockAuthStore.user = makeUser(
+        'user-1',
+        makeLlm({
+          thinking: { 'gpt-6.1-sol': 'high' },
+          defaultModel: { provider: 'openrouter', model: 'gpt-6.1-sol' },
+        }),
+      );
+      const store = useLLMSettingsStore();
+
+      expect(
+        store.selectionFor({ provider: 'openrouter', model: 'gpt-6.1-sol' }).thinking,
+      ).toBeUndefined();
+      expect(
+        store.selectionFor({ provider: 'google', model: 'not-in-registry' }).thinking,
+      ).toBeUndefined();
+    });
+
+    it('delegates the global selection to selectionFor(defaultModel)', async () => {
+      const { useLLMSettingsStore } = await import('./llmSettings');
+      mockAuthStore.user = makeUser(
+        'user-1',
+        makeLlm({
+          keys: { google: 'google-key' },
+          thinking: { [GOOGLE_DEFAULT]: 'medium' },
+        }),
+      );
+      const store = useLLMSettingsStore();
+
+      expect(store.selection).toEqual(store.selectionFor(store.llm.defaultModel));
+    });
+  });
 });
