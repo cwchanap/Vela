@@ -2462,6 +2462,55 @@ describe('AIChatPage', () => {
       listGate.resolve();
       await flushPromises();
     });
+
+    it('does not replay recovered turns into the next account after a mid-recovery switch', async () => {
+      const llmGate = deferred<LlmResponse>();
+      vi.spyOn(llmModule.llmClient, 'generate').mockReturnValueOnce(llmGate.promise);
+
+      mountComponent();
+      const chatStore = useChatStore();
+      await flushPromises();
+      chatStore.setChatId('dead-thread');
+
+      // Hold the first save to the replacement thread so the account can
+      // switch while the recovery write is still in flight.
+      const underlying = fetchMock.getMockImplementation()!;
+      const replayGate = deferred<void>();
+      fetchMock.mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+        const url =
+          typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+        const method = init?.method ?? 'GET';
+        if (url.includes('/api/chat-history/save') && method === 'POST') {
+          const body = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>;
+          if (body.ThreadId !== 'dead-thread') {
+            return replayGate.promise.then(() => underlying(input, init));
+          }
+        }
+        return underlying(input, init);
+      });
+
+      await sendMessage('A turn');
+      await flushPromises();
+
+      // The user save landed, but the thread dies before the assistant save,
+      // so recovery replays both turns under a fresh thread id.
+      saveNotFoundFor.add('dead-thread');
+      llmGate.resolve({ text: 'A reply' });
+      await flushPromises();
+
+      await switchToAccountB();
+
+      replayGate.resolve();
+      await flushPromises();
+
+      expect(chatStore.messages.some((m) => m.content === 'A turn')).toBe(false);
+      expect(chatStore.messages.some((m) => m.content === 'A reply')).toBe(false);
+      expect(chatStore.messages.length).toBe(1);
+      expect(chatStore.messages[0]!.content).toContain('こんにちは');
+      // The old account's reply is never re-persisted after the switch; only
+      // its original 404'd attempt was logged.
+      expect(saveBodies.filter((b) => b.message === 'A reply').length).toBe(1);
+    });
   });
 
   describe('Pending delete guards', () => {
