@@ -363,11 +363,11 @@ test.describe('Chat model picker and cache reminder - desktop (1280px)', () => {
     const chatRequest = page.waitForRequest(
       (r) => r.url().includes('/api/llm-chat') && r.method() === 'POST',
     );
-    const assistantSave = page.waitForRequest(
+    const assistantSaveResponse = page.waitForResponse(
       (r) =>
         r.url().includes('/api/chat-history/save') &&
-        r.method() === 'POST' &&
-        (r.postDataJSON() as Record<string, unknown> | null)?.is_user === false,
+        r.request().method() === 'POST' &&
+        (r.request().postDataJSON() as Record<string, unknown> | null)?.is_user === false,
     );
     await page.getByTestId('llm-chat-input').fill('After switching');
     await page.getByTestId('llm-chat-send').click();
@@ -382,9 +382,16 @@ test.describe('Chat model picker and cache reminder - desktop (1280px)', () => {
       { role: 'assistant', content: 'Persisted reply' },
       { role: 'user', content: 'After switching' },
     ]);
-    // Wait for the new assistant save so the reload sees a complete thread.
-    const assistantSaveBody = (await assistantSave).postDataJSON() as Record<string, unknown>;
-    expect(assistantSaveBody.message).toBe('Mock AI reply (synthetic)');
+    // Wait for the new assistant save to complete successfully before the
+    // reload, so the reload cannot race the in-flight save response.
+    const assistantSave = await assistantSaveResponse;
+    expect((assistantSave.request().postDataJSON() as Record<string, unknown>).message).toBe(
+      'Mock AI reply (synthetic)',
+    );
+    expect(assistantSave.status()).toBe(200);
+    // Awaiting the body is the completion barrier: the save response must be
+    // fully received before reloading.
+    await expect(assistantSave.json()).resolves.toEqual({ ok: true });
 
     // The persisted choice survives a reload and is restored on selection.
     await page.reload();
@@ -661,16 +668,27 @@ test.describe('Chat header responsive layout', () => {
     expect(titleBox!.y).toBeLessThan(navBox!.y + navBox!.height);
 
     // Row 2: the model and effort selectors share a second band below row 1
-    // (mutual overlap rules out a third selector row).
-    const modelBox = await page.getByTestId('chat-model-select').boundingBox();
-    const effortBox = await page.getByTestId('chat-thinking-select').boundingBox();
-    expect(modelBox).not.toBeNull();
-    expect(effortBox).not.toBeNull();
+    // (mutual overlap rules out a third selector row). Polled because the
+    // global nav drawer is still sliding shut right after the viewport
+    // change; a mid-transition measurement catches a transient third row.
     const rowOneBottom = Math.max(titleBox!.y + titleBox!.height, navBox!.y + navBox!.height);
-    expect(modelBox!.y).toBeGreaterThanOrEqual(rowOneBottom);
-    expect(effortBox!.y).toBeGreaterThanOrEqual(rowOneBottom);
-    expect(effortBox!.y).toBeLessThan(modelBox!.y + modelBox!.height);
-    expect(modelBox!.y).toBeLessThan(effortBox!.y + effortBox!.height);
+    await expect
+      .poll(async () => {
+        const modelBox = await page.getByTestId('chat-model-select').boundingBox();
+        const effortBox = await page.getByTestId('chat-thinking-select').boundingBox();
+        if (!modelBox || !effortBox) return 'selectors not rendered';
+        if (modelBox.y < rowOneBottom || effortBox.y < rowOneBottom) {
+          return 'selector rendered above row 1';
+        }
+        if (effortBox.y >= modelBox.y + modelBox.height) {
+          return 'effort select wrapped below the model select';
+        }
+        if (modelBox.y >= effortBox.y + effortBox.height) {
+          return 'model select wrapped below the effort select';
+        }
+        return 'ok';
+      })
+      .toBe('ok');
 
     // Both selectors remain usable at 375px: pick a model, then an effort.
     await chooseModel(page, 'Anthropic — claude-opus-5-5');
