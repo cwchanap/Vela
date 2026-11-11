@@ -7,7 +7,7 @@
           :active-thread-id="chat.chatId"
           :loading="threadsLoading"
           :error="threadsError"
-          :disabled="chat.isLoading"
+          :disabled="chat.isLoading || chat.modelPatchPending"
           @select="selectThread"
           @new="onNewChat"
           @rename="onRenameThread"
@@ -38,7 +38,7 @@
               :pair="chat.activeModel"
               :options="modelOptions"
               :thinking="chat.thinkingOverride"
-              :disabled="chat.isLoading || modelPatching"
+              :disabled="chat.isLoading || chat.modelPatchPending"
               @update:pair="onModelSelect"
               @update:thinking="onThinkingSelect"
             />
@@ -53,7 +53,7 @@
 
         <ChatComposer
           v-model="input"
-          :loading="chat.isLoading || modelPatching"
+          :loading="chat.isLoading || chat.modelPatchPending"
           @send="onSend"
           class="chat-composer"
         />
@@ -67,7 +67,7 @@
           :active-thread-id="chat.chatId"
           :loading="threadsLoading"
           :error="threadsError"
-          :disabled="chat.isLoading"
+          :disabled="chat.isLoading || chat.modelPatchPending"
           @select="selectThread"
           @new="onNewChat"
           @rename="onRenameThread"
@@ -136,6 +136,7 @@ import { isAccountChangedError } from '../../utils/httpClient';
 import {
   buildLlmModelOptions,
   confirmedServerKeyProviders,
+  isPairAvailable,
   llmPairOption,
   pairToOptionValue,
   type LlmModelOption,
@@ -233,14 +234,12 @@ const modelOptions = computed<LlmModelOption[]>(() => {
   return options;
 });
 
-const modelPatching = ref(false);
-
 const onThinkingSelect = (value: LlmEffort | null) => {
   chat.setThinkingOverride(value);
 };
 
 const onModelSelect = async (pair: ChatModelPair) => {
-  if (chat.isLoading || modelPatching.value) return;
+  if (chat.isLoading || chat.modelPatchPending) return;
   if (
     chat.activeModel &&
     chat.activeModel.provider === pair.provider &&
@@ -262,23 +261,29 @@ const onModelSelect = async (pair: ChatModelPair) => {
   const uid = getUserId();
   const sessionGen = auth.sessionGeneration;
   const threadId = chat.chatId;
-  modelPatching.value = true;
+  // The PATCH registers as a chat operation: selections and other
+  // generation-guarded transitions that are already in flight must not land
+  // over it once it resolves.
+  const opGen = chat.nextGeneration();
+  chat.setModelPatching(true);
   try {
     await updateThreadMutation.mutateAsync({
       threadId,
       patch: { model: pair },
       userId: uid,
     });
-    if (auth.sessionGeneration !== sessionGen || chat.chatId !== threadId) return;
+    if (isStaleOperation(opGen, sessionGen) || chat.chatId !== threadId) return;
     applyLocally();
   } catch (e) {
-    if (auth.sessionGeneration === sessionGen && chat.chatId === threadId) {
+    if (!isStaleOperation(opGen, sessionGen) && chat.chatId === threadId) {
       // Leave activeModel/cacheStartedAt untouched: no hidden model swap.
       console.error(e);
       $q.notify({ type: 'negative', message: 'Failed to change model' });
     }
   } finally {
-    modelPatching.value = false;
+    // Only a still-current transition may release the lock; a conversation
+    // reset already cleared it for the replacement chat.
+    if (!chat.isStale(opGen)) chat.setModelPatching(false);
   }
 };
 
@@ -393,7 +398,7 @@ const retryThreads = () => {
 };
 
 const selectThread = async (t: ChatThreadSummaryDTO) => {
-  if (chat.isLoading || isDeletePending(t.ThreadId)) return;
+  if (chat.isLoading || chat.modelPatchPending || isDeletePending(t.ThreadId)) return;
   const uid = getUserId();
   const opGen = chat.nextGeneration();
   const sessionGen = auth.sessionGeneration;
@@ -476,6 +481,15 @@ const onSend = async (draft: string) => {
     });
     return;
   }
+  // A retired/unknown stored model id is display-only even with a provider
+  // key: block the send (before saving) while keeping the selection visible.
+  if (!isPairAvailable(modelOptions.value, activePair)) {
+    $q.notify({
+      type: 'warning',
+      message: `The ${LLM_PROVIDER_REGISTRY[activeSelection.provider].label} model ${activeSelection.model} is no longer available. Pick another model in the header.`,
+    });
+    return;
+  }
 
   const opGen = chat.nextGeneration();
   const sessionGen = auth.sessionGeneration;
@@ -509,14 +523,16 @@ const onSend = async (draft: string) => {
       content: m.content,
     }));
 
-    // Explicit per-request snapshot of the active provider/model/key and any
-    // session thinking override; there is no global service state to sync.
-    const thinking = chat.thinkingOverride ?? activeSelection.thinking;
+    // Resolve the request selection and the explicit override together,
+    // immediately before generation: Settings key/effort edits during the
+    // awaited save above must not leak into this request.
+    const requestSelection = llmSettings.selectionFor(activePair);
+    const thinking = chat.thinkingOverride ?? requestSelection.thinking;
     const resp = await llmClient.generate(
       {
-        provider: activeSelection.provider,
-        model: activeSelection.model,
-        apiKey: activeSelection.apiKey,
+        provider: requestSelection.provider,
+        model: requestSelection.model,
+        apiKey: requestSelection.apiKey,
         ...(thinking ? { thinking } : {}),
         system: systemPrompt,
         messages: history,

@@ -115,3 +115,14 @@ export const llmPairOption = (provider: LlmProvider, model: string): LlmModelOpt
   value: pairToOptionValue(provider, model),
   provider,
 });
+
+/** Whether a pair is an actually selectable option (display-only unavailable
+ * options and options missing from the set are not). */
+export const isPairAvailable = (
+  options: readonly LlmModelOption[],
+  pair: LlmModelPair,
+): boolean => {
+  const value = pairToOptionValue(pair.provider, pair.model);
+  const option = options.find((candidate) => candidate.value === value);
+  return option !== undefined && option.disabled !== true;
+};

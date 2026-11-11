@@ -1,5 +1,5 @@
-import { describe, it, expect } from 'vitest';
-import { mount, VueWrapper } from '@vue/test-utils';
+import { describe, it, expect, afterEach, beforeAll } from 'vitest';
+import { mount, flushPromises, VueWrapper } from '@vue/test-utils';
 import { Quasar } from 'quasar';
 import ChatModelPicker from './ChatModelPicker.vue';
 import { LLM_PROVIDER_REGISTRY } from '@vela/common';
@@ -234,6 +234,97 @@ describe('ChatModelPicker', () => {
         (wrapper.find('[data-testid="chat-custom-model-input"] input').element as HTMLInputElement)
           .disabled,
       ).toBe(true);
+    });
+  });
+
+  // The option-disable mapping and provider sections are QSelect rendering
+  // behavior a native-select stub cannot exercise: these use the real QSelect
+  // with its menu teleported to document.body (clicks inside the menu must
+  // not bubble into the field, so Teleport is not stubbed here).
+  describe('real QSelect menu', () => {
+    let wrapper: VueWrapper | null = null;
+
+    beforeAll(() => {
+      // jsdom lacks Element.scrollTo; Quasar's virtual scroll calls it on a
+      // rAF after the menu opens to reveal the selected option.
+      if (!Element.prototype.scrollTo) {
+        Element.prototype.scrollTo = () => {};
+      }
+    });
+
+    afterEach(() => {
+      wrapper?.unmount();
+      wrapper = null;
+    });
+
+    const mountRealPicker = (props: {
+      options: LlmModelOption[];
+      pair: InstanceType<typeof ChatModelPicker>['$props']['pair'];
+    }): VueWrapper =>
+      (wrapper = mount(ChatModelPicker, {
+        props: { thinking: null, disabled: false, ...props },
+        global: { plugins: [Quasar] },
+      }));
+
+    const menuItems = () => Array.from(document.querySelectorAll<HTMLElement>('.q-menu .q-item'));
+
+    const openMenu = async (mounted: VueWrapper) => {
+      await mounted.find('.chat-model-select').trigger('click');
+      await flushPromises();
+      return menuItems();
+    };
+
+    it('renders one labeled section per provider with a single custom entry', async () => {
+      const options = buildLlmModelOptions({ google: 'key', openai: 'key', openrouter: 'key' });
+      const mounted = mountRealPicker({
+        options,
+        pair: { provider: 'google', model: 'gemini-3.8-flash' },
+      });
+      await openMenu(mounted);
+
+      const groups = Array.from(
+        document.querySelectorAll<HTMLElement>('[data-testid="chat-model-group"]'),
+      ).map((group) => group.textContent?.trim());
+      expect(groups).toEqual(['Google', 'OpenAI', 'OpenRouter']);
+
+      const items = menuItems().map((item) => item.textContent?.trim());
+      expect(items).toHaveLength(options.length);
+      expect(items!.filter((text) => text!.includes('OpenRouter'))).toHaveLength(1);
+    });
+
+    it('keeps a display-only unavailable option unselectable and sections it separately', async () => {
+      const options = [
+        ...buildLlmModelOptions({ google: 'key' }),
+        { ...llmPairOption('anthropic', 'claude-opus-5-5'), disabled: true },
+      ];
+      const mounted = mountRealPicker({
+        options,
+        pair: { provider: 'google', model: 'gemini-3.8-flash' },
+      });
+      await openMenu(mounted);
+
+      const groups = Array.from(
+        document.querySelectorAll<HTMLElement>('[data-testid="chat-model-group"]'),
+      ).map((group) => group.textContent?.trim());
+      expect(groups).toEqual(['Google', 'Anthropic']);
+
+      const disabledItem = menuItems().find((item) =>
+        item.textContent?.includes('claude-opus-5-5'),
+      )!;
+      expect(disabledItem.classList.contains('disabled')).toBe(true);
+      expect(disabledItem.getAttribute('aria-disabled')).toBe('true');
+
+      disabledItem.click();
+      await flushPromises();
+      expect(mounted.emitted('update:pair')).toBeUndefined();
+
+      // A normal option still selects through the custom option slot.
+      const enabledItem = menuItems().find((item) => item.textContent?.includes('gemini-4-argon'))!;
+      enabledItem.click();
+      await flushPromises();
+      expect(mounted.emitted('update:pair')).toEqual([
+        [{ provider: 'google', model: 'gemini-4-argon' }],
+      ]);
     });
   });
 });

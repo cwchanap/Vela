@@ -4,14 +4,29 @@
       v-model="selectValue"
       :options="options"
       :disable="disabled"
-      dense
-      outlined
+      option-disable="disabled"
       emit-value
       map-options
+      dense
+      outlined
       label="Model"
       class="chat-model-select"
       data-testid="chat-model-select"
-    />
+    >
+      <template #option="scope">
+        <div
+          v-if="isGroupStart(scope.index)"
+          :key="`group-${scope.index}`"
+          class="q-item__label q-item__label--header chat-model-group-label"
+          data-testid="chat-model-group"
+        >
+          {{ providerLabel(scope.opt.provider) }}
+        </div>
+        <q-item :key="scope.index" v-bind="scope.itemProps">
+          <q-item-section>{{ scope.opt.label }}</q-item-section>
+        </q-item>
+      </template>
+    </q-select>
     <q-input
       v-if="showCustomInput"
       v-model="customModelId"
@@ -63,10 +78,12 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue';
 import type { LlmEffort, LlmProvider } from '@vela/common';
+import { LLM_PROVIDER_REGISTRY } from '@vela/common';
 import {
   OPENROUTER_CUSTOM_VALUE,
   decodeModelValue,
   effortOptions,
+  isPairAvailable,
   pairToOptionValue,
   registryModel,
   type LlmModelOption,
@@ -136,12 +153,15 @@ const thinkingModelValue = computed<LlmEffort | ''>({
   set: (value) => emit('update:thinking', (value || null) as LlmEffort | null),
 });
 
-const currentUnavailable = computed(() => {
-  if (!props.pair) return false;
-  const value = pairToOptionValue(props.pair.provider, props.pair.model);
-  const option = props.options.find((candidate) => candidate.value === value);
-  return !option || !!option.disabled;
-});
+const currentUnavailable = computed(
+  () => !!props.pair && !isPairAvailable(props.options, props.pair),
+);
+
+// Provider sections render in the option slot at each group boundary; the
+// single OpenRouter custom entry is its own section.
+const isGroupStart = (index: number) =>
+  index === 0 || props.options[index]!.provider !== props.options[index - 1]!.provider;
+const providerLabel = (provider: LlmProvider) => LLM_PROVIDER_REGISTRY[provider].label;
 </script>
 
 <style scoped lang="scss">
@@ -167,6 +187,10 @@ const currentUnavailable = computed(() => {
 .chat-thinking-select {
   flex: 0 1 120px;
   min-width: 0;
+}
+
+.chat-model-group-label {
+  white-space: nowrap;
 }
 
 .chat-model-unavailable {

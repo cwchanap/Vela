@@ -75,6 +75,7 @@ describe('AIChatPage', () => {
   let patchFails: boolean;
   let deleteFails: boolean;
   let patchDelay: Promise<void> | null;
+  let saveDelay: Promise<void> | null;
   let deleteDelay: Promise<void> | null;
   let deleteDelayQueue: Array<Promise<void>>;
   let listDelay: Promise<void> | null;
@@ -108,35 +109,38 @@ describe('AIChatPage', () => {
       if (url.includes('/api/chat-history/save') && method === 'POST') {
         const body = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>;
         saveBodies.push(body);
-        if (saveNotFound || saveNotFoundFor.has(String(body.ThreadId ?? ''))) {
-          return Promise.resolve({
-            ok: false,
-            status: 404,
-            json: async () => ({ error: 'Thread not found' }),
-          });
-        }
-        const isUser = body.is_user === true;
-        if ((isUser && saveFailures.user) || (!isUser && saveFailures.assistant)) {
-          return Promise.resolve(errJson());
-        }
-        if (isUser) {
-          const threadId = String(body.ThreadId ?? '');
-          const existing = threadRows.find((t) => t.ThreadId === threadId);
-          if (existing) {
-            existing.updatedAt = Date.now();
-          } else {
-            threadRows.push({
-              ThreadId: threadId,
-              title:
-                String(body.message ?? '')
-                  .trim()
-                  .slice(0, 60) || 'New conversation',
-              createdAt: Date.now(),
-              updatedAt: Date.now(),
+        const respond = () => {
+          if (saveNotFound || saveNotFoundFor.has(String(body.ThreadId ?? ''))) {
+            return Promise.resolve({
+              ok: false,
+              status: 404,
+              json: async () => ({ error: 'Thread not found' }),
             });
           }
-        }
-        return Promise.resolve(okJson({ ok: true }));
+          const isUser = body.is_user === true;
+          if ((isUser && saveFailures.user) || (!isUser && saveFailures.assistant)) {
+            return Promise.resolve(errJson());
+          }
+          if (isUser) {
+            const threadId = String(body.ThreadId ?? '');
+            const existing = threadRows.find((t) => t.ThreadId === threadId);
+            if (existing) {
+              existing.updatedAt = Date.now();
+            } else {
+              threadRows.push({
+                ThreadId: threadId,
+                title:
+                  String(body.message ?? '')
+                    .trim()
+                    .slice(0, 60) || 'New conversation',
+                createdAt: Date.now(),
+                updatedAt: Date.now(),
+              });
+            }
+          }
+          return Promise.resolve(okJson({ ok: true }));
+        };
+        return (saveDelay ?? Promise.resolve()).then(respond);
       }
 
       if (url.includes('/api/chat-history/threads') && method === 'GET') {
@@ -259,6 +263,7 @@ describe('AIChatPage', () => {
     patchFails = false;
     deleteFails = false;
     patchDelay = null;
+    saveDelay = null;
     deleteDelay = null;
     deleteDelayQueue = [];
     listDelay = null;
@@ -2997,6 +3002,121 @@ describe('AIChatPage', () => {
       ).toBe(false);
     });
 
+    it('disables the sidebar and refuses reselection while a delayed model PATCH is pending, then fails without rollback', async () => {
+      enableOpenai();
+      threadRows = [createMockThread({ ThreadId: 'thread-1', model: anthropicRow })];
+      messageRows = [createMockMessage('Hello', true)];
+      mountComponent();
+      await flushPromises();
+      await wrapper.find('[data-testid="llm-chat-thread-item"]').trigger('click');
+      await flushPromises();
+      const chatStore = useChatStore();
+      const messageFetchesBefore = messageFetches().length;
+
+      const patchDeferred = deferred();
+      patchDelay = patchDeferred.promise;
+      patchFails = true; // the PATCH fails once it resolves
+      await chooseModel('openai::gpt-6.1-sol');
+
+      expect(wrapper.findComponent({ name: 'ChatSidebar' }).props('disabled')).toBe(true);
+
+      // Reselecting the same thread while the PATCH is pending must not
+      // install the stored row and must not bypass the pending transition.
+      await wrapper.find('[data-testid="llm-chat-thread-item"]').trigger('click');
+      await flushPromises();
+      expect(messageFetches().length).toBe(messageFetchesBefore);
+      expect(chatStore.chatId).toBe('thread-1');
+      expect(chatStore.activeModel).toEqual(anthropicRow);
+      expect(chatStore.modelPatchPending).toBe(true);
+
+      patchDeferred.resolve();
+      await flushPromises();
+
+      expect(patchFetches().length).toBe(1);
+      expect(chatStore.activeModel).toEqual(anthropicRow);
+      expect(chatStore.modelPatchPending).toBe(false);
+      expect(notifyCreateSpy).toHaveBeenCalledWith(expect.objectContaining({ type: 'negative' }));
+    });
+
+    it('does not let a selection that lands during a model PATCH install over the patched model', async () => {
+      enableOpenai();
+      threadRows = [
+        createMockThread({ ThreadId: 'thread-1' }),
+        createMockThread({ ThreadId: 'thread-2', model: anthropicRow }),
+      ];
+      messageRows = [
+        createMockMessage('one', true, 0, 'thread-1'),
+        createMockMessage('two', true, 0, 'thread-2'),
+      ];
+      mountComponent();
+      await flushPromises();
+      await wrapper.find('[data-testid="llm-chat-thread-item"]').trigger('click');
+      await flushPromises();
+      expect(useChatStore().chatId).toBe('thread-1');
+
+      // Start selecting thread-2 but hold its history fetch.
+      const selectionDeferred = deferred();
+      messagesDelays['thread-2'] = selectionDeferred.promise;
+      await wrapper.findAll('[data-testid="llm-chat-thread-item"]')[1]!.trigger('click');
+      await flushPromises();
+
+      // Start a model PATCH for thread-1 while the selection is in flight.
+      const patchDeferred = deferred();
+      patchDelay = patchDeferred.promise;
+      await chooseModel('openai::gpt-6.1-sol');
+      expect(patchFetches().length).toBe(1);
+
+      selectionDeferred.resolve();
+      await flushPromises();
+      const chatStore = useChatStore();
+      // The operation-generation stale check must discard the delayed
+      // selection instead of installing thread-2's stored model.
+      expect(chatStore.chatId).toBe('thread-1');
+      expect(chatStore.activeModel).not.toEqual(anthropicRow);
+      expect(chatStore.modelPatchPending).toBe(true);
+
+      patchDeferred.resolve();
+      await flushPromises();
+      expect(chatStore.activeModel).toEqual(openaiPair);
+      expect(chatStore.modelPatchPending).toBe(false);
+    });
+
+    it('keeps a pending model PATCH locked across a remount until it resolves', async () => {
+      enableOpenai();
+      threadRows = [createMockThread({ ThreadId: 'thread-1' })];
+      messageRows = [createMockMessage('Hello', true)];
+      mountComponent();
+      await flushPromises();
+      await wrapper.find('[data-testid="llm-chat-thread-item"]').trigger('click');
+      await flushPromises();
+
+      const patchDeferred = deferred();
+      patchDelay = patchDeferred.promise;
+      await chooseModel('openai::gpt-6.1-sol');
+
+      // Route remount while the PATCH is still in flight: the replacement
+      // page must inherit the pending lock from the shared store.
+      wrapper!.unmount();
+      wrapper = null;
+      mountComponent();
+      await flushPromises();
+
+      const chatStore = useChatStore();
+      expect(chatStore.modelPatchPending).toBe(true);
+      expect(modelSelect()!.props('disable')).toBe(true);
+      expect(
+        (wrapper.find('[data-testid="llm-chat-input"]').element as HTMLInputElement).disabled,
+      ).toBe(true);
+      expect(wrapper.findComponent({ name: 'ChatSidebar' }).props('disabled')).toBe(true);
+
+      patchDeferred.resolve();
+      await flushPromises();
+
+      expect(chatStore.activeModel).toEqual(openaiPair);
+      expect(chatStore.modelPatchPending).toBe(false);
+      expect(modelSelect()!.props('disable')).toBe(false);
+    });
+
     it('sends the new provider, key and complete history after a mid-chat model change', async () => {
       enableOpenai();
       mountComponent();
@@ -3041,6 +3161,64 @@ describe('AIChatPage', () => {
 
       await chooseModel('openai::gpt-6.1-sol');
       expect(chatStore.thinkingOverride).toBeNull();
+    });
+
+    it('resolves key and saved effort right before generation when Settings change mid-send', async () => {
+      const saveDeferred = deferred();
+      saveDelay = saveDeferred.promise;
+      mountComponent();
+      await flushPromises();
+      mockLLMResponse();
+
+      await sendMessage('settings drift');
+      await flushPromises();
+      expect(saveFetches().length).toBe(1);
+
+      // Settings edits while the awaited user save is still in flight.
+      const llmSettingsStore = useLLMSettingsStore();
+      llmSettingsStore.llm.keys.google = 'rotated-key';
+      llmSettingsStore.llm.thinking['gemini-3.8-flash'] = 'high';
+
+      saveDeferred.resolve();
+      await flushPromises();
+
+      const payload = vi.mocked(llmModule.llmClient.generate).mock.calls[0]![0];
+      expect(payload.apiKey).toBe('rotated-key');
+      expect(payload.thinking).toBe('high');
+    });
+
+    it('blocks sending when the stored model id is unavailable despite a provider key', async () => {
+      threadRows = [
+        createMockThread({
+          ThreadId: 'thread-1',
+          model: { provider: 'google', model: 'retired-model' },
+        }),
+      ];
+      messageRows = [createMockMessage('Hello', true)];
+      mountComponent();
+      await flushPromises();
+      await wrapper.find('[data-testid="llm-chat-thread-item"]').trigger('click');
+      await flushPromises();
+      const chatStore = useChatStore();
+      const retiredPair = { provider: 'google' as const, model: 'retired-model' };
+      expect(chatStore.activeModel).toEqual(retiredPair);
+      expect(wrapper.find('[data-testid="chat-model-unavailable"]').exists()).toBe(true);
+      mockLLMResponse();
+
+      await sendMessage('send into a retired model');
+      await flushPromises();
+
+      expect(llmModule.llmClient.generate).not.toHaveBeenCalled();
+      expect(saveFetches().length).toBe(0);
+      expect(notifyCreateSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: 'warning',
+          message: expect.stringContaining('no longer available'),
+        }),
+      );
+      // The unusable selection stays visible; nothing silently substituted.
+      expect(chatStore.activeModel).toEqual(retiredPair);
+      expect(wrapper.find('[data-testid="chat-model-unavailable"]').exists()).toBe(true);
     });
 
     it('blocks sending without a user key or confirmed server key and hints at settings', async () => {
