@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia';
 import { ref } from 'vue';
+import type { LlmEffort, LlmProvider } from '@vela/common';
 
 export interface ChatMessage {
   id: string;
@@ -7,6 +8,11 @@ export interface ChatMessage {
   content: string;
   timestamp: Date;
   context?: Record<string, unknown>;
+}
+
+export interface ChatModelPair {
+  provider: LlmProvider;
+  model: string;
 }
 
 export const useChatStore = defineStore('chat', () => {
@@ -19,6 +25,31 @@ export const useChatStore = defineStore('chat', () => {
   const ownerId = ref<string | null>(null);
   const ownerSessionGen = ref<number | null>(null);
   const generation = ref(0);
+
+  // Chat-specific selection state that must survive route changes but reset
+  // with the conversation. activeModel is seeded from Settings for fresh
+  // chats; isPersistedThread tracks whether a thread metadata row exists (a
+  // client UUID alone does not) and gates model PATCHes.
+  const activeModel = ref<ChatModelPair | null>(null);
+  const thinkingOverride = ref<LlmEffort | null>(null);
+  const cacheStartedAt = ref<number | null>(null);
+  const isPersistedThread = ref(false);
+
+  const setActiveModel = (pair: ChatModelPair | null) => {
+    activeModel.value = pair;
+  };
+
+  const setThinkingOverride = (effort: LlmEffort | null) => {
+    thinkingOverride.value = effort;
+  };
+
+  const setCacheStartedAt = (timestamp: number | null) => {
+    cacheStartedAt.value = timestamp;
+  };
+
+  const setIsPersistedThread = (persisted: boolean) => {
+    isPersistedThread.value = persisted;
+  };
 
   const nextGeneration = () => ++generation.value;
   const isStale = (gen: number) => gen !== generation.value;
@@ -60,6 +91,10 @@ export const useChatStore = defineStore('chat', () => {
     error.value = null;
     isTyping.value = false;
     isLoading.value = false;
+    activeModel.value = null;
+    thinkingOverride.value = null;
+    cacheStartedAt.value = null;
+    isPersistedThread.value = false;
   };
 
   const resetForUser = (uid: string | null, sessionGen: number | null) => {
@@ -89,6 +124,10 @@ export const useChatStore = defineStore('chat', () => {
     isLoading,
     error,
     chatId,
+    activeModel,
+    thinkingOverride,
+    cacheStartedAt,
+    isPersistedThread,
     ownerId,
     ownerSessionGen,
     generation,
@@ -101,6 +140,10 @@ export const useChatStore = defineStore('chat', () => {
     setLoading,
     setError,
     setChatId,
+    setActiveModel,
+    setThinkingOverride,
+    setCacheStartedAt,
+    setIsPersistedThread,
     startNewChat,
     resetForUser,
     bindOwner,

@@ -2,6 +2,14 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { mount, flushPromises, type VueWrapper } from '@vue/test-utils';
 import { createPinia, setActivePinia } from 'pinia';
 import { Quasar, Notify } from 'quasar';
+// QSelect reads iconSet.arrow.dropdown while rendering; the page mock replaces
+// the whole $q object, so it needs those icon definitions present.
+const mockIconSet = {
+  arrow: { dropdown: 'arrow_drop_down' },
+  select: { dropdownArrow: 'arrow_drop_down' },
+  field: { clear: 'clear', error: 'warning' },
+  chip: { remove: 'cancel', selected: 'check' },
+};
 import { VueQueryPlugin, QueryClient } from '@tanstack/vue-query';
 import { chatKeys } from '@vela/common';
 import AIChatPage from './AIChatPage.vue';
@@ -21,6 +29,7 @@ vi.mock('../../services/llm', () => ({
   llmClient: {
     generate: vi.fn(),
     analyzeSentenceStream: vi.fn(),
+    capabilities: vi.fn(),
   },
   describeLlmError: vi.fn((error: unknown, fallback: string) =>
     error instanceof Error && error.message ? error.message : fallback,
@@ -71,6 +80,7 @@ describe('AIChatPage', () => {
   let listDelay: Promise<void> | null;
   let messagesDelays: Record<string, Promise<void>>;
   let messagesFailFor: Set<string>;
+  let listThreadsOverride: MockThread[] | null;
 
   const okJson = (data: unknown) => ({ ok: true, json: async () => data });
   const errJson = (status = 500) => ({
@@ -132,6 +142,7 @@ describe('AIChatPage', () => {
       if (url.includes('/api/chat-history/threads') && method === 'GET') {
         const respond = () => {
           if (listFails) return errJson();
+          if (listThreadsOverride) return okJson({ threads: [...listThreadsOverride] });
           const sorted = [...threadRows].sort(
             (a, b) => b.updatedAt - a.updatedAt || a.ThreadId.localeCompare(b.ThreadId),
           );
@@ -227,7 +238,7 @@ describe('AIChatPage', () => {
     chatStore.setError(null);
 
     llmSettingsStore.llm = {
-      keys: {},
+      keys: { google: 'test-google-key' },
       thinking: {},
       defaultModel: { provider: 'google', model: 'gemini-3.8-flash' },
     };
@@ -253,6 +264,7 @@ describe('AIChatPage', () => {
     listDelay = null;
     messagesDelays = {};
     messagesFailFor = new Set();
+    listThreadsOverride = null;
 
     // Create a new QueryClient for each test
     queryClient = new QueryClient({
@@ -299,6 +311,11 @@ describe('AIChatPage', () => {
       dailyGoal: number;
       difficulty: 'Beginner' | 'Intermediate' | 'Advanced';
       notifications: boolean;
+      llm?: {
+        keys: Record<string, string>;
+        thinking: Record<string, string>;
+        defaultModel: { provider: string; model: string };
+      };
     };
     created_at: string;
     updated_at: string;
@@ -317,6 +334,13 @@ describe('AIChatPage', () => {
       dailyGoal: 20,
       difficulty: 'Beginner' as const,
       notifications: false,
+      // Hydration overwrites the store from these prefs at the hook boundary,
+      // so the default send-capable key must live here, not just in the store.
+      llm: {
+        keys: { google: 'test-google-key' },
+        thinking: {},
+        defaultModel: { provider: 'google', model: 'gemini-3.8-flash' },
+      },
     },
     created_at: '2024-01-01T00:00:00.000Z',
     updated_at: '2024-01-01T00:00:00.000Z',
@@ -340,6 +364,8 @@ describe('AIChatPage', () => {
     title: string;
     createdAt: number;
     updatedAt: number;
+    model?: { provider: 'google' | 'openai' | 'anthropic' | 'openrouter'; model: string };
+    lastLlmAt?: number;
   };
 
   type MockMessage = {
@@ -402,7 +428,7 @@ describe('AIChatPage', () => {
         },
       },
       iconMapFn: null,
-      iconSet: {},
+      iconSet: mockIconSet,
       dark: {
         isActive: false,
         mode: false,
@@ -459,6 +485,17 @@ describe('AIChatPage', () => {
     await input.setValue(text);
     await w.find('[data-testid="llm-chat-send"]').trigger('click');
   };
+
+  const modelSelect = () =>
+    // The model select is the picker's first QSelect; data-testid does not
+    // surface on Quasar component wrappers.
+    wrapper!.findAllComponents({ name: 'QSelect' })[0];
+  const chooseModel = async (value: string) => {
+    modelSelect()!.vm.$emit('update:modelValue', value);
+    await flushPromises();
+  };
+  const anthropicRow = { provider: 'anthropic' as const, model: 'claude-opus-5-5' };
+  const openaiPair = { provider: 'openai' as const, model: 'gpt-6.1-sol' };
 
   const openThreadMenu = async (index = 0) => {
     await wrapper!.findAll('[data-testid="chat-thread-menu"]')[index]!.trigger('click');
@@ -2780,6 +2817,340 @@ describe('AIChatPage', () => {
         }),
         'user-123',
       );
+    });
+  });
+
+  describe('Chat model picker', () => {
+    const enableOpenai = () => {
+      useLLMSettingsStore().llm.keys.openai = 'test-openai-key';
+    };
+
+    it('seeds the Settings default model into a fresh chat on mount', async () => {
+      mountComponent();
+      await flushPromises();
+      const chatStore = useChatStore();
+      expect(chatStore.activeModel).toEqual({
+        provider: 'google',
+        model: 'gemini-3.8-flash',
+      });
+    });
+
+    it('preserves the active model and transcript when navigating away and back', async () => {
+      enableOpenai();
+      mountComponent();
+      await flushPromises();
+      await chooseModel('openai::gpt-6.1-sol');
+      const chatStore = useChatStore();
+      chatStore.addMessage({ type: 'user', content: 'persisted across nav' });
+
+      wrapper!.unmount();
+      wrapper = null;
+      mountComponent();
+      await flushPromises();
+
+      expect(chatStore.activeModel).toEqual(openaiPair);
+      expect(chatStore.messages.some((m) => m.content === 'persisted across nav')).toBe(true);
+    });
+
+    it('restores the stored model, cache timestamp and persistence when selecting a saved thread', async () => {
+      threadRows = [
+        createMockThread({ ThreadId: 'thread-1', model: anthropicRow, lastLlmAt: 1700000000000 }),
+      ];
+      messageRows = [createMockMessage('Hello', true)];
+      mountComponent();
+      await flushPromises();
+
+      await wrapper.find('[data-testid="llm-chat-thread-item"]').trigger('click');
+      await flushPromises();
+
+      const chatStore = useChatStore();
+      expect(chatStore.activeModel).toEqual(anthropicRow);
+      expect(chatStore.cacheStartedAt).toBe(1700000000000);
+      expect(chatStore.isPersistedThread).toBe(true);
+      // The stored provider has no key in this test: the picker must show the
+      // unavailable-current option instead of silently substituting a model.
+      expect(wrapper.find('[data-testid="chat-model-unavailable"]').exists()).toBe(true);
+    });
+
+    it('clears the ephemeral thinking choice when selecting a thread', async () => {
+      threadRows = [createMockThread({ ThreadId: 'thread-1' })];
+      messageRows = [createMockMessage('Hello', true)];
+      mountComponent();
+      await flushPromises();
+      const chatStore = useChatStore();
+      chatStore.setThinkingOverride('high');
+
+      await wrapper.find('[data-testid="llm-chat-thread-item"]').trigger('click');
+      await flushPromises();
+
+      expect(chatStore.thinkingOverride).toBeNull();
+    });
+
+    it('carries the active model on the first user save', async () => {
+      mountComponent();
+      await flushPromises();
+      mockLLMResponse();
+
+      await sendMessage('pin my model');
+      await flushPromises();
+
+      const userSave = saveBodies.find((body) => body.is_user === true);
+      expect(userSave).toBeDefined();
+      expect(userSave!.model).toEqual({ provider: 'google', model: 'gemini-3.8-flash' });
+    });
+
+    it('updates the model locally without PATCH before the first save despite a non-null chat id', async () => {
+      enableOpenai();
+      mountComponent();
+      await flushPromises();
+      const chatStore = useChatStore();
+      // New chats already carry a client UUID that is NOT a saved row.
+      expect(chatStore.chatId).not.toBeNull();
+      expect(chatStore.isPersistedThread).toBe(false);
+
+      await chooseModel('openai::gpt-6.1-sol');
+
+      expect(patchFetches().length).toBe(0);
+      expect(chatStore.activeModel).toEqual(openaiPair);
+    });
+
+    it('PATCHes the model after a successful save even when the thread list is stale', async () => {
+      enableOpenai();
+      mountComponent();
+      await flushPromises();
+      mockLLMResponse();
+      await sendMessage('persist me');
+      await flushPromises();
+      const chatStore = useChatStore();
+      expect(chatStore.isPersistedThread).toBe(true);
+
+      // The sidebar refetch lags the successful save: the row is absent from
+      // the query cache, yet the persistence flag still unlocks the PATCH.
+      listThreadsOverride = [];
+      await chooseModel('openai::gpt-6.1-sol');
+
+      expect(patchFetches().length).toBe(1);
+      expect(chatStore.activeModel).toEqual(openaiPair);
+    });
+
+    it('keeps model changes local when the first user save failed', async () => {
+      enableOpenai();
+      saveFailures.user = true;
+      mountComponent();
+      await flushPromises();
+      mockLLMResponse();
+      await sendMessage('save fails');
+      await flushPromises();
+      const chatStore = useChatStore();
+      expect(chatStore.isPersistedThread).toBe(false);
+
+      await chooseModel('openai::gpt-6.1-sol');
+
+      expect(patchFetches().length).toBe(0);
+      expect(chatStore.activeModel).toEqual(openaiPair);
+    });
+
+    it('rolls back the active model when a saved-thread PATCH fails', async () => {
+      enableOpenai();
+      threadRows = [createMockThread({ ThreadId: 'thread-1', model: anthropicRow })];
+      messageRows = [createMockMessage('Hello', true)];
+      mountComponent();
+      await flushPromises();
+      await wrapper.find('[data-testid="llm-chat-thread-item"]').trigger('click');
+      await flushPromises();
+      const chatStore = useChatStore();
+      expect(chatStore.activeModel).toEqual(anthropicRow);
+
+      patchFails = true;
+      await chooseModel('openai::gpt-6.1-sol');
+
+      expect(patchFetches().length).toBe(1);
+      expect(chatStore.activeModel).toEqual(anthropicRow);
+      expect(notifyCreateSpy).toHaveBeenCalledWith(expect.objectContaining({ type: 'negative' }));
+    });
+
+    it('locks model edits and sending while a model PATCH is pending', async () => {
+      enableOpenai();
+      threadRows = [createMockThread({ ThreadId: 'thread-1' })];
+      messageRows = [createMockMessage('Hello', true)];
+      mountComponent();
+      await flushPromises();
+      await wrapper.find('[data-testid="llm-chat-thread-item"]').trigger('click');
+      await flushPromises();
+
+      const patchDeferred = deferred();
+      patchDelay = patchDeferred.promise;
+      await chooseModel('openai::gpt-6.1-sol');
+
+      expect(modelSelect()!.props('disable')).toBe(true);
+      expect(
+        (wrapper.find('[data-testid="llm-chat-input"]').element as HTMLInputElement).disabled,
+      ).toBe(true);
+
+      patchDeferred.resolve();
+      await flushPromises();
+
+      expect(useChatStore().activeModel).toEqual(openaiPair);
+      expect(modelSelect()!.props('disable')).toBe(false);
+      expect(
+        (wrapper.find('[data-testid="llm-chat-input"]').element as HTMLInputElement).disabled,
+      ).toBe(false);
+    });
+
+    it('sends the new provider, key and complete history after a mid-chat model change', async () => {
+      enableOpenai();
+      mountComponent();
+      await flushPromises();
+      mockLLMResponse();
+      await sendMessage('first question');
+      await flushPromises();
+      await chooseModel('openai::gpt-6.1-sol');
+      await sendMessage('second question');
+      await flushPromises();
+
+      const calls = vi.mocked(llmModule.llmClient.generate).mock.calls;
+      expect(calls.length).toBe(2);
+      const second = calls[1]![0];
+      expect(second.provider).toBe('openai');
+      expect(second.model).toBe('gpt-6.1-sol');
+      expect(second.apiKey).toBe('test-openai-key');
+      // Greeting + user1 + ai1 + user2: the transcript is fully preserved.
+      expect(second.messages.map((m) => m.role)).toEqual([
+        'assistant',
+        'user',
+        'assistant',
+        'user',
+      ]);
+      expect(second.messages.some((m) => m.content === 'first question')).toBe(true);
+      expect(second.messages.some((m) => m.content === 'AI response')).toBe(true);
+      expect(second.messages.some((m) => m.content === 'second question')).toBe(true);
+    });
+
+    it('sends an explicit thinking override and clears it when the model changes', async () => {
+      enableOpenai();
+      mockLLMResponse();
+      mountComponent();
+      await flushPromises();
+      const chatStore = useChatStore();
+      chatStore.setThinkingOverride('low');
+
+      await sendMessage('thinking check');
+      await flushPromises();
+
+      expect(vi.mocked(llmModule.llmClient.generate).mock.calls[0]![0].thinking).toBe('low');
+
+      await chooseModel('openai::gpt-6.1-sol');
+      expect(chatStore.thinkingOverride).toBeNull();
+    });
+
+    it('blocks sending without a user key or confirmed server key and hints at settings', async () => {
+      const llmSettingsStore = useLLMSettingsStore();
+      llmSettingsStore.llm = {
+        keys: {},
+        thinking: {},
+        defaultModel: { provider: 'google', model: 'gemini-3.8-flash' },
+      };
+      vi.mocked(llmModule.llmClient.capabilities).mockRejectedValue(new Error('down'));
+      // Re-establish the send spy: prior restores leave the factory vi.fn
+      // non-recording, matching the file's other send-assertion tests.
+      mockLLMResponse();
+      mountComponent();
+      await flushPromises();
+
+      await sendMessage('blocked');
+      await flushPromises();
+
+      expect(llmModule.llmClient.generate).not.toHaveBeenCalled();
+      expect(saveFetches().length).toBe(0);
+      expect(notifyCreateSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: 'warning',
+          message: expect.stringContaining('No API key for Google'),
+        }),
+      );
+    });
+
+    it('sends without a user key when capabilities confirm the server key', async () => {
+      const llmSettingsStore = useLLMSettingsStore();
+      llmSettingsStore.llm = {
+        keys: {},
+        thinking: {},
+        defaultModel: { provider: 'google', model: 'gemini-3.8-flash' },
+      };
+      vi.mocked(llmModule.llmClient.capabilities).mockResolvedValue({
+        serverKeyProviders: ['google'],
+      });
+      mockLLMResponse();
+      mountComponent();
+      await flushPromises();
+
+      await sendMessage('via server key');
+      await flushPromises();
+
+      expect(llmModule.llmClient.generate).toHaveBeenCalledTimes(1);
+      const payload = vi.mocked(llmModule.llmClient.generate).mock.calls[0]![0];
+      expect(payload.provider).toBe('google');
+      expect(payload.model).toBe('gemini-3.8-flash');
+      expect(payload.apiKey).toBeUndefined();
+    });
+
+    it('resets the model state and reseeds the default on an account switch', async () => {
+      mountComponent();
+      await flushPromises();
+      const chatStore = useChatStore();
+      chatStore.setActiveModel(openaiPair);
+      chatStore.setThinkingOverride('high');
+      chatStore.setCacheStartedAt(123);
+      chatStore.setIsPersistedThread(true);
+
+      signIn(createMockUser({ id: 'user-999' }));
+      await flushPromises();
+
+      expect(chatStore.activeModel).toEqual({
+        provider: 'google',
+        model: 'gemini-3.8-flash',
+      });
+      expect(chatStore.thinkingOverride).toBeNull();
+      expect(chatStore.cacheStartedAt).toBeNull();
+      expect(chatStore.isPersistedThread).toBe(false);
+    });
+
+    it('keeps the selected model but drops cache evidence on a deleted-thread restart', async () => {
+      mountComponent();
+      await flushPromises();
+      mockLLMResponse();
+      await sendMessage('first');
+      await flushPromises();
+      const chatStore = useChatStore();
+      chatStore.setCacheStartedAt(555);
+      saveNotFoundFor = new Set([chatStore.chatId!]);
+
+      await sendMessage('second');
+      await flushPromises();
+
+      expect(chatStore.activeModel).toEqual({
+        provider: 'google',
+        model: 'gemini-3.8-flash',
+      });
+      expect(chatStore.cacheStartedAt).toBeNull();
+      // The replayed user save re-persists the replacement thread.
+      expect(chatStore.isPersistedThread).toBe(true);
+      const replaySave = saveBodies.find(
+        (body) => body.ThreadId === chatStore.chatId && body.is_user === true,
+      );
+      expect(replaySave!.model).toEqual({ provider: 'google', model: 'gemini-3.8-flash' });
+    });
+
+    it('stacks the header controls on narrow screens and keeps them inline otherwise', () => {
+      mountComponent({ narrowScreen: true });
+      expect(wrapper.find('.chat-header--stacked').exists()).toBe(true);
+      expect(wrapper.find('[data-testid="chat-model-picker"]').exists()).toBe(true);
+
+      wrapper!.unmount();
+      wrapper = null;
+      mountComponent();
+      expect(wrapper.find('.chat-header--stacked').exists()).toBe(false);
+      expect(wrapper.find('[data-testid="chat-model-picker"]').exists()).toBe(true);
     });
   });
 
