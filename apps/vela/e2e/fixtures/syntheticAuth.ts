@@ -136,6 +136,7 @@ export interface MockChatThread {
   createdAt: number;
   updatedAt: number;
   model?: { provider: string; model: string };
+  lastLlmAt?: number;
 }
 
 export interface MockChatMessage {
@@ -161,6 +162,12 @@ export interface MockApi {
   deletedThreadIds: Array<{ userId: string; threadId: string }>;
   dictionaryEntries: MockDictionaryEntry[];
   chatReply: string;
+  chatUsage: {
+    inputTokens: number;
+    outputTokens: number;
+    cachedInputTokens: number;
+    cacheWriteTokens: number;
+  };
   ttsSettings: {
     provider: string;
     voiceId: string | null;
@@ -220,6 +227,7 @@ const createMockApi = (): MockApi => {
     deletedThreadIds: [],
     dictionaryEntries: [],
     chatReply: 'Mock AI reply (synthetic)',
+    chatUsage: { inputTokens: 5, outputTokens: 7, cachedInputTokens: 0, cacheWriteTokens: 0 },
     ttsSettings: { provider: 'elevenlabs', voiceId: null, model: null, hasApiKey: false },
     seedProfile(user, preferences) {
       const profile = makeProfile(user, preferences);
@@ -425,7 +433,7 @@ const handleApiRoute = async (state: MockApi, route: Route): Promise<void> => {
     state.chatBodies.push(body);
     return jsonResponse(route, {
       text: state.chatReply,
-      usage: { inputTokens: 5, outputTokens: 7, cachedInputTokens: 0, cacheWriteTokens: 0 },
+      usage: { ...state.chatUsage },
     });
   }
 
@@ -448,13 +456,39 @@ const handleApiRoute = async (state: MockApi, route: Route): Promise<void> => {
       }
       const existing = userThreads.get(threadId);
       const initialTitle = message.trim().slice(0, 60) || 'New conversation';
+      // Mirror the server's if_not_exists(model, suppliedModel) metadata update.
+      const bodyModel = body.model as { provider?: unknown; model?: unknown } | undefined;
+      const pinnedModel =
+        existing?.model ??
+        (typeof bodyModel?.provider === 'string' &&
+        bodyModel.provider.length > 0 &&
+        typeof bodyModel?.model === 'string' &&
+        bodyModel.model.length > 0
+          ? { provider: bodyModel.provider, model: bodyModel.model }
+          : undefined);
       userThreads.set(threadId, {
         ThreadId: threadId,
         title: existing?.title ?? initialTitle,
         createdAt: existing?.createdAt ?? now,
         updatedAt: now,
-        ...(existing?.model ? { model: existing.model } : {}),
+        ...(pinnedModel ? { model: pinnedModel } : {}),
+        ...(existing?.lastLlmAt !== undefined ? { lastLlmAt: existing.lastLlmAt } : {}),
       });
+    } else {
+      // Mirror the server's conditioned metadata update: positive integer
+      // lastLlmAt is SET on the thread row, its absence REMOVEs it.
+      const threadRow = state.chatThreads.get(authUser.userId)?.get(threadId);
+      if (threadRow) {
+        if (
+          typeof body.lastLlmAt === 'number' &&
+          Number.isInteger(body.lastLlmAt) &&
+          body.lastLlmAt > 0
+        ) {
+          threadRow.lastLlmAt = body.lastLlmAt;
+        } else {
+          delete threadRow.lastLlmAt;
+        }
+      }
     }
     let userMessages = state.chatMessages.get(authUser.userId);
     if (!userMessages) {
@@ -527,6 +561,8 @@ const handleApiRoute = async (state: MockApi, route: Route): Promise<void> => {
       ...(patch.model !== undefined ? { model: patch.model } : {}),
       updatedAt: Date.now(),
     };
+    // A model PATCH always removes stored cache evidence; title patches keep it.
+    if (patch.model !== undefined) delete updated.lastLlmAt;
     state.chatThreads.get(authUser.userId)?.set(threadId, updated);
     return jsonResponse(route, { thread: updated });
   }
