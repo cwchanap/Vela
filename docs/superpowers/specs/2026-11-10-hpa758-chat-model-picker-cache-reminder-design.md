@@ -1,77 +1,76 @@
 # HPA-758 — Chat model picker and prompt-cache reminder: design spec
 
-**Date:** 2026-11-10  
+**Date:** 2026-11-10; revised 2026-11-11 after [design review](https://github.com/cwchanap/Vela/pull/84#pullrequestreview-5855374846)  
 **Linear:** https://linear.app/cwchanap/issue/HPA-758/add-chat-model-picker-and-prompt-cache-expiry-reminder  
-**Prerequisites:** HPA-754, HPA-755, and HPA-756 are Done; HPA-756 merged in Vela PR #82.  
-**Delivery:** One draft PR starts with this design and its implementation plan. Put implementation, tests, and review fixes on this same PR; no follow-up implementation PR.
+**Prerequisites:** HPA-754/755/756 Done; HPA-756 merged in PR #82  
+**Delivery:** All design, implementation, tests and review fixes remain on this one draft PR (#84).
 
-## Goal
+## Goal and bounds
 
-On the existing AI Chat page, let a signed-in learner choose any chat-capable provider/model for which a user API key or verified server key is available. The choice applies to the next request, can change mid-conversation without losing history, and persists on the current thread. Optionally override the model's thinking effort for the active chat. Show a small **estimated** cache-reuse countdown only after actual provider usage reports a cache read or write.
+On AI Chat, choose a provider/model with a saved key or verified server-side chat key. Keep the complete transcript when switching models, persist the model per thread, optionally override thinking for the session, and show an **estimated cache-reuse window** after a successful response reports cached reads or writes.
 
-Do **not** implement a caching service, provider discovery, billing estimator, global settings rewrite, or chat-streaming refactor. HPA-757 (TTS), HPA-824 (cross-client preference ordering), and HPA-833 (preference tombstones) stay separate.
+Reuse the existing registry, Settings, LLM usage, chat thread table, user-scoped API and Quasar components. No new database/table/index, endpoint, cache service, billing calculator, remote model discovery, general-purpose framework, or LLM transport rewrite. HPA-757 (TTS), HPA-824 (cross-client preference CAS) and HPA-833 (preference tombstones) are out of scope.
 
-## Existing code seams, verified on main after PR #82
+## Verified code seams and review decisions
 
-- packages/common/src/contracts/llm.ts provides LLM_PROVIDER_REGISTRY, registered models/efforts/defaults, cacheTtlSeconds (300 for Anthropic, 1800 for OpenAI, null for Google and OpenRouter), and LlmResponse.usage with cachedInputTokens and cacheWriteTokens.
-- apps/vela/src/stores/llmSettings.ts owns saved per-provider keys, model-specific thinking overrides, and the global default model. Do not save a chat selection to global Settings.
-- apps/vela/src/composables/queries/useLlmCapabilitiesQuery.ts reports authenticated server key availability; only Google and OpenRouter can use those keys. A failed capability lookup is not proof that a server key exists.
-- apps/vela/src/pages/chat/AIChatPage.vue currently passes llmSettings.selection into each llmClient.generate call. It owns the account/session generation guard, thread selection, new-chat, send, deleted-thread restart, and message persistence.
-- apps/vela/src/pages/chat/components/ChatComposer.vue owns input/send; ChatSidebar.vue owns navigation. Add the model picker near the chat header, keeping the composer simple.
-- apps/vela/src/services/chatHistoryService.ts, useChatThreads.ts, and apps/vela-api/src/routes/chat-history.ts already support the authenticated user-scoped PATCH /chat-history/thread/:id for model: { provider, model }, as well as title rename. A thread row is created only on the first persisted **user** message.
-- apps/vela-api/src/llm/providers/anthropic.ts requests ephemeral 5-minute caching, and the OpenAI mapper surfaces provider usage. No changes to LLM adapter internals are required for the reminder.
+- packages/common/src/contracts/llm.ts defines LLM_PROVIDER_REGISTRY, effort choices, cacheTtlSeconds (Anthropic 300, OpenAI 1800, Google/OpenRouter null), and LlmResponse.usage.cachedInputTokens/cacheWriteTokens.
+- apps/vela/src/stores/chat.ts persists chatId and messages across route navigation. **It must also own activeModel, thinkingOverride and cacheStartedAt** to avoid returning to a transcript while silently selecting the Settings model. startNewChat/resetForUser clear the three fields; the chat page seeds the default model when starting a fresh chat.
+- apps/vela/src/stores/llmSettings.ts owns keys, saved thinking preferences, and the global default; expose selectionFor(pair) to return the active provider/model/key/saved thinking for **any pair**. Its existing selection computed should delegate to selectionFor(globalDefault).
+- Extract the already-shipped model option and effort-option rules from apps/vela/src/pages/settings/components/LlmProvidersSection.vue and LlmProviderCard.vue to one small pure app utility, e.g. src/utils/llmModelOptions.ts. Both Settings and Chat consume it; keep Settings draft behavior and tests intact. It handles registry entries, provider grouping metadata, custom OpenRouter ID, pair encoding, saved keys, capability-based server keys and the display-only unavailable-current option.
+- apps/vela/src/composables/queries/useLlmCapabilitiesQuery.ts provides authenticated server-key eligibility; trust only an affirmative capability response, not speculative frontend hardcoded provider permissions. On failure, user-key options remain available and server-key-only options are unavailable.
+- apps/vela/src/pages/chat/AIChatPage.vue owns selection/send/restartDeletedChat, and its existing session + operation generation checks must guard async results. A thread metadata row is created by the first **user** message save, not on New chat.
+- apps/vela-api/src/routes/chat-history.ts already supports user-scoped thread model PATCH and transactional user/assistant saves. Extend these **existing saves**, rather than adding an extra post-first-save model PATCH or post-assistant-save timestamp PATCH. No changes to the LLM response/transport.
+- This reconciliation accepts all six substantive review findings; [PR review](https://github.com/cwchanap/Vela/pull/84#pullrequestreview-5855374846) is the decision record.
 
-## Product and interaction contract
+## Product behavior — model and thinking
 
-### Model selector
+1. Render a compact ChatModelPicker in the **chat header**, beside the mobile conversation button. Group available registered models by provider; provide a single custom OpenRouter model-ID entry/input. Trim and require a nonempty custom ID; backend normalization remains authoritative for supported model/effort validation.
+2. Build choices from the **shared option utility**, saved provider keys and affirmative server-key capabilities. Reuse the helper in Settings. Do not assume that an unknown capability includes a server key. Keep an unavailable stored/current model visible as a disabled or clearly marked selection, with a configure/retry prompt; never silently substitute another model when sending.
+3. A new chat chooses Settings' current default model. Selecting an existing thread loads its stored model, or Settings' current default if absent. The chat store keeps activeModel, thinkingOverride and cacheStartedAt across page unmount/remount. Once a legacy thread without a stored model sends its next user message, that model is pinned on the row.
+4. Selecting a different model mid-chat preserves the complete ordered history and uses the selected provider/key for the next LLM request. A saved thread uses the existing authenticated PATCH /chat-history/thread/:id before activating the model; disabled UI and rollback-on-failure semantics stay. **An unpersisted fresh thread needs no PATCH**: the first user-message save carries its chosen model and sets it when the row is created. This applies to deleted-thread restart/replay as well.
+5. Adjacent thinking select offers Default + only the registered model's native effort values (shared effort-option helper). Default means the saved Settings override for that model, else backend registry default. A chat-specific explicit override changes only subsequent requests in this chat; **it is session-only**, not persisted to thread or Settings, and resets on model change, thread switch, new chat, and browser reload. Hide for free-form OpenRouter.
+6. Keep model/thinking controls disabled during send and pending model PATCH. Snapshot selectionFor(activeModel) + any explicit chat override immediately before llmClient.generate; supply the correct key (or server-key fallback) and whole transcript. Preserve active model on page navigation; reset all chat-specific fields on account/session switch or sign-out. A deleted-thread replacement keeps the selected model for its replay but clears cache evidence.
+7. If no key or confirmed server capability exists, block sending with an actionable settings/retry message. No extra frontend validation machinery beyond option membership and nonempty custom ID.
 
-1. Put a compact ChatModelPicker in the chat header (usable beside the mobile sidebar button). Quasar select options are grouped by provider label. Registered providers show their registry models; OpenRouter shows one custom model-ID entry/input. Trim and require a nonempty OpenRouter ID before applying. No remote model-list fetch.
-2. Show provider/model choices only for providers with a saved key or an **affirmative** useLlmCapabilitiesQuery server-key result. Server keys are allowed for Google/OpenRouter chat, not OpenAI/Anthropic. On a capabilities error, retain verified user-key options, show a brief retry affordance, and do not assume server-key eligibility.
-3. New chat starts with the current llmSettings.llm.defaultModel, with any saved per-model thinking override. Do not change that global default when the user picks a chat model.
-4. Opening a persisted thread restores its model field; an old thread without model falls back to the current Settings default. If its stored provider/model is no longer available, show it as unavailable and ask the user to select/configure a usable choice; never silently rewrite the thread or send under a different model.
-5. Switching model mid-chat keeps the full ordered message transcript. The next llmClient.generate call gets an explicit snapshot of provider, model, and that provider's current key; the existing backend normalization still removes the decorative greeting. Reset cache indication when the provider **or model** changes.
-6. The adjacent thinking control offers **Use model/Settings default** plus only the selected registered model's effort values. Resolve the default as the saved thinking override for that model when present; otherwise let the backend apply the registry default. An explicitly selected level overrides it for subsequent requests while that chat/model remains active. OpenRouter has no registered effort list: hide this control there. The temporary thinking choice is **not persisted** in the thread metadata or global Settings; reset it on thread/model switch, reload, and New chat. Only model identity is persisted by this ticket.
-7. Disable model/thinking edits while a send or thread PATCH is in flight. For an existing thread, PATCH model before activating a new choice; on PATCH failure keep the previous choice and report the error. For a fresh thread, keep the chosen model locally because no row exists yet; after the first successful user-message save creates the metadata row, PATCH the model before generating. If that PATCH fails, warn that the choice is not durable; keep existing nonfatal history-save behavior rather than silently claiming persistence.
-8. Reuse the existing account/session generation guards in asynchronous selection, patch, send, and reload flows. Do not add a second global store or generic conversation runtime. When restartDeletedChat creates a replacement ID, reset cache evidence and persist the active model against the **replacement** row after its first user save.
+## Product behavior — cache chip
 
-### Cache reminder (best-effort estimate, not a guarantee)
+1. A successful LlmResponse has cache evidence only if cachedInputTokens > 0 **or** cacheWriteTokens > 0. Never infer it from input token counts or prompt length. Capture Date.now() immediately **before** llmClient.generate, not at response completion.
+2. Use only LLM_PROVIDER_REGISTRY[provider].cacheTtlSeconds: Anthropic 5 minutes, OpenAI 30 minutes, null hides the chip for Gemini and OpenRouter. These are approximate reuse windows, **not guaranteed eviction or charge estimates**; OpenAI caches may persist longer.
+3. Place ChatCacheReminder **directly above the ChatComposer input**, below ChatMessageList, so it remains near the send action without crowding the mobile chat header. Render nothing until positive usage evidence exists; warm when 60+ seconds remain, warning when 1–59 seconds remain, and an elapsed-window warning at zero. Copy: 'Cache likely warm · M:SS left', 'Cache window · M:SS left', 'Cache window elapsed · next message may miss cache'. No guaranteed 'full input price' text.
+4. One page-local 1-second interval updates a pure cacheReminder(provider, cacheStartedAt, now) function; clear the interval on unmount. Clamp remaining seconds to [0, TTL], including future client timestamps. The timestamp is epoch milliseconds measured from **request start**.
+5. On a successful response, positive cache evidence refreshes the current chat store's cacheStartedAt; zero/absent usage clears it; errors do not create evidence. A failed assistant history save may leave a **local** chip for the successful response, but no persisted timestamp is claimed. While the next request is in flight, keep the previous estimate until new usage is known.
+6. The existing **assistant-message save** carries optional lastLlmAt when positive cache evidence exists. The backend atomically SETs that timestamp on the existing thread row, or REMOVEs it if absent, **in the same DynamoDB transaction as the assistant message**. No extra HTTP request and no updatedAt bump. This preserves consistency with a successfully saved assistant turn.
+7. Changing a stored model via PATCH **always removes lastLlmAt on the server**, in the same thread update, without accepting timestamp fields in PATCH. The optimistic client thread cache also drops lastLlmAt on a model change, restoring the old row on failure. Successful assistant-save responses update the cached thread summary locally without a redundant GET or updatedAt bump.
+8. GET /threads returns optional lastLlmAt, and thread selection restores cacheStartedAt from that row. Model switch, thread switch, New chat, deleted-thread restart, sign-out or user change cannot reuse the previous thread's cache evidence.
+9. Do not send a keep-alive request, auto-reply, or background refresh; no cross-device clock correction or cross-tab CAS.
 
-1. The successful llmClient.generate response already includes usage. Treat cachedInputTokens > 0 **or** cacheWriteTokens > 0 as evidence of a cached prefix; do not infer it from input length, token prices, elapsed time alone, or a zero/absent usage record.
-2. Capture the wall-clock epoch milliseconds immediately **before** calling llmClient.generate; use that request-start timestamp, **not response completion**, for the countdown. The browser clock is a deliberate lightweight approximation. Do not add server-time synchronization or a background refresh.
-3. For Anthropic use 5 minutes, OpenAI 30 minutes, directly from LLM_PROVIDER_REGISTRY[provider].cacheTtlSeconds. With null TTL (Google/Gemini or OpenRouter), no chip is rendered even if those adapters report cached reads.
-4. For the active selection with confirmed evidence, render: more than 60 seconds remaining, a small neutral "Cache likely warm · M:SS left" chip; from 0 to <60 seconds, an amber "Cache window · M:SS left" warning; after the window, "Cache window elapsed · next message may miss cache". Tick once per second while the chat page is mounted, using one local timer/composable, cleared on unmount. Clamp negative remaining time to zero; future timestamps are clamped to the TTL.
-5. Each successful response with positive cache usage refreshes the reference start time. A successful response reporting **zero** read/write evidence clears the indication; failed/aborted requests never fabricate a fresh window. While sending, do not claim the new call refreshed it until usage is known.
-6. Store only **lastLlmAt?: number (epoch ms)** on the existing thread row as the persisted marker for last verified cached usage. Its presence implies positive usage for the thread's current model. Clear it (PATCH null / DynamoDB REMOVE) on a model change or a successful response without evidence. There is no second boolean, per-message cache history, localStorage snapshot, or extra table.
-7. Persist the timestamp only for a successfully saved assistant turn so the restored transcript corresponds to the cache evidence; after that save, use the existing PATCH /thread/:id. A metadata-only timestamp PATCH should not bump thread updatedAt or resort the sidebar. If cache metadata persistence fails, do not fail the already-saved chat response; keep the chip conservative and allow the next send to retry naturally.
-8. When reopening the thread, derive the chip from the thread's model, lastLlmAt, and Date.now(); an absent timestamp, unsupported provider, changed model, or changed account hides it. Changing thread, New chat, or signing out must never show the previous thread's timer.
-9. This is an **estimated reuse window**, not a claim that a provider guarantees a cache hit or exact token charge. OpenAI describes 30 minutes as a *minimum* cache lifetime, and entries may persist longer; upstream routing/prefix changes also affect hits. Do not use "cache expired, next message pays full price" as a factual guarantee. No keep-alive requests or auto-messages.
+## Minimal HTTP and database contract
 
-## Minimal API/data changes
+Use the existing POST /chat-history/save, PATCH /chat-history/thread/:id and GET /chat-history/threads endpoints, all behind requireAuth and the current per-user thread access rules.
 
-- In apps/vela-api/src/validation.ts add optional lastLlmAt to ChatThreadSummarySchema and optional lastLlmAt: positive integer | null to PatchChatThreadSchema. PATCH must still require at least one supported field; unknown fields remain excluded. Null means explicitly clear. Keep existing authenticated ownership/404 behavior.
-- In apps/vela-api/src/routes/chat-history.ts expose lastLlmAt in GET /threads and PATCH return values. Update dynamodb_updateThread to support SET and REMOVE expressions without overwriting other fields. Bump updatedAt for model/title changes only; a cache-only PATCH leaves sidebar ordering alone. Changing model and clearing timestamp can happen in one PATCH. No new DynamoDB table, index, migration, or extra API route.
-- In apps/vela/src/services/chatHistoryService.ts and apps/vela/src/composables/queries/useChatThreads.ts extend the DTO/patch type and reuse the existing optimistic thread-update mutation (rename it to useUpdateThread if that improves clarity). Do not perform optimistic timestamp writes that imply success before the provider confirms usage. Keep cache keys scoped by authenticated identity.
-- Keep the LlmResponse usage contract, provider normalizer, and LLM transport unchanged.
+| Operation | Input change | Effect on existing thread metadata |
+| --- | --- | --- |
+| User-message POST /save | Optional model: { provider, model } for user turns | In the existing transaction, add model = if_not_exists(model, suppliedModel) to the row-creating Update (only when supplied). Never overwrite a later picker PATCH; preserve title/createdAt and monotonic updatedAt. Message row remains unchanged. |
+| Assistant-message POST /save | Optional positive integer lastLlmAt; omit for zero cache evidence | Convert the existing metadata ConditionCheck into a conditioned Update in the message-write transaction. SET lastLlmAt when present, otherwise REMOVE it; do not touch updatedAt or the message row. Missing/deleted thread still returns 404. |
+| PATCH /thread/:id model | **No schema change**; existing { model } | Existing conditional user-scoped Update SETs model and REMOVEs lastLlmAt together. Title-only PATCH does not remove it. Model PATCH continues to update updatedAt. |
+| GET /threads | No request change | Include optional lastLlmAt in the explicit list projection and resulting client DTO; absent on old rows is valid. |
 
-## Failure/edge behavior
+ChatHistoryItemSchema adds optional model and lastLlmAt, consumed only for their corresponding user/assistant turns. The server still overwrites UserId and Timestamp; messageItem continues picking fields explicitly so neither metadata field leaks into message rows. PATCH schema still only accepts title/model, and no lastLlmAt:null contract is introduced. Existing thread tombstone / transaction fencing remains intact. Do not add backward-compatibility paths or migrate old rows.
 
-- A nonempty but invalid/removed registered model must not be sent; OpenRouter accepts free-form IDs as it does in Settings.
-- Missing key or unknown server availability: block sending with an actionable setting/retry hint, rather than pretending the backend can serve the model.
-- PATCH 404 on a deleted thread uses the existing deleted-thread recovery semantics; do not resurrect a deleted row with a stale model/cache timestamp.
-- Stale async results after account change or selecting another thread cannot change the new active model or its cache chip.
-- Cross-tab concurrent model selection, precise provider cache-hit prediction, and clock-skew correction are explicitly deferred.
+Client: extend saveChatMessage/useSaveChatMessage with typed optional metadata, extend ChatThreadSummaryDTO with lastLlmAt, and rename useRenameThread to **useUpdateThread** (used by both title and model changes). On a successful assistant save, update the identity-scoped in-memory thread list timestamp directly so reopen does not use stale metadata; preserve its updatedAt.
 
-## Acceptance criteria
+## Failure behavior and deferrals
 
-- Model list and available keys reflect registry/settings/capabilities; custom OpenRouter ID works; unavailable providers do not appear as usable.
-- Selected provider/model is used for the next chat request, including after switching mid-conversation with complete history, and persists after reopening/reload.
-- New chats default to Settings; thread-specific model changes never mutate Settings. Thinking control exposes only valid efforts, respects saved defaults, and is explicitly session-only.
-- Cache chip appears **only after confirmed usage** for a provider with TTL; counts down from request start, warns in the final minute, becomes an elapsed-window hint, resets after a confirmed cache read/write, and hides for Gemini/OpenRouter or unconfirmed cache usage.
-- Timer survives thread reload through lastLlmAt; switching model, thread, or account cannot leak the previous timer.
-- Focused frontend/API/component tests cover persistence, error recovery, capability failure, zero usage, countdown boundaries, model switch, restored thread, and account isolation. No implementation is claimed by this documentation-only commit.
+- Model PATCH failure on a persisted thread: leave activeModel and cacheStartedAt unchanged, show error, and restore optimistic query state; avoid a hidden model swap.
+- User save failure: preserve existing nonfatal history warning/LLM-generation behavior, but never claim that a new thread/model was persisted.
+- Assistant save 404/deleted thread: use the existing restartDeletedChat replay, carry the selected model on the replacement user save, and clear stale cache evidence before assigning any usage for the recovered response.
+- Operation/session generation checks suppress late responses from another thread/user. Documented cross-client simultaneous edits, exact cache-hit prediction, and clock skew stay deferred.
+- No new shared abstraction beyond one tiny pure model-option helper and one feature-local cache helper; no native mobile work or art/SFX.
 
-## Provider documentation
+## Acceptance
 
-- Anthropic prompt caching: https://platform.claude.com/docs/en/build-with-claude/prompt-caching
-- OpenAI prompt caching (newer-model 30-minute minimum): https://developers.openai.com/api/docs/guides/prompt-caching
-- Gemini caching: https://ai.google.dev/gemini-api/docs/caching
+- Saved and server-key-eligible provider options are consistent between Settings and Chat; OpenRouter custom ID works; failed capability checks cannot introduce unusable options.
+- Current model and history survive navigation/reopen; next request uses the selected model/key/thinking; first user save pins model without extra PATCH; saved-thread PATCH persists even before sending.
+- Changing model clears cached evidence; a positive cache read/write after assistant save persists lastLlmAt without changing sidebar updatedAt; a zero-cache response removes it.
+- Cache chip only appears for evidenced TTL-based providers, ticks at 1-second boundaries, and clearly describes an estimated window.
+- Targeted tests cover navigation-away/back, model patch rollback, account change, deleted-thread replay, first-user-save payload, assistant-save transaction, cache visibility/boundaries, mobile header/composer and Settings nonregression. Design-only submission does not claim test results.
