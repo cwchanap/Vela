@@ -4,6 +4,10 @@ import { SYNTHETIC_USER_A } from './fixtures/syntheticEnv';
 import { waitForPageLoad } from './utils/helpers';
 
 const GREETING_SNIPPET = '日本語学習をお手伝いします';
+// Mirrors AIChatPage's GREETING_MESSAGE: thread restore prepends it when the
+// stored transcript does not already start with it.
+const GREETING_MESSAGE =
+  'こんにちは！日本語学習をお手伝いします。What would you like to practice today?';
 const DESKTOP = { width: 1280, height: 800 };
 const MOBILE = { width: 375, height: 667 };
 
@@ -263,6 +267,12 @@ const chooseModel = async (page: Page, label: string) => {
 
 const cacheChip = (page: Page) => page.getByTestId('chat-cache-reminder');
 
+// Message bubble texts in DOM order (markdown bubbles keep their plain text).
+const transcriptTexts = (page: Page) =>
+  page
+    .locator('.chat-container .q-message .message-content')
+    .evaluateAll((els) => els.map((el) => (el.textContent ?? '').trim()));
+
 const llmPreferences = (defaultModel: { provider: string; model: string }) => ({
   llm: {
     keys: { google: GOOGLE_KEY, anthropic: ANTHROPIC_KEY, openrouter: OPENROUTER_KEY },
@@ -341,12 +351,23 @@ test.describe('Chat model picker and cache reminder - desktop (1280px)', () => {
     });
     await expect(page.getByTestId('chat-model-select')).toHaveValue('Anthropic — claude-opus-5-5');
 
-    // The complete ordered transcript survives the switch.
-    await expect(page.locator('.chat-container')).toContainText('Persisted hello');
-    await expect(page.locator('.chat-container')).toContainText('Persisted reply');
+    // The complete ordered transcript (restored greeting included) survives
+    // the switch.
+    await expect(page.locator('.chat-container .q-message')).toHaveCount(3);
+    expect(await transcriptTexts(page)).toEqual([
+      GREETING_MESSAGE,
+      'Persisted hello',
+      'Persisted reply',
+    ]);
 
     const chatRequest = page.waitForRequest(
       (r) => r.url().includes('/api/llm-chat') && r.method() === 'POST',
+    );
+    const assistantSave = page.waitForRequest(
+      (r) =>
+        r.url().includes('/api/chat-history/save') &&
+        r.method() === 'POST' &&
+        (r.postDataJSON() as Record<string, unknown> | null)?.is_user === false,
     );
     await page.getByTestId('llm-chat-input').fill('After switching');
     await page.getByTestId('llm-chat-send').click();
@@ -354,6 +375,16 @@ test.describe('Chat model picker and cache reminder - desktop (1280px)', () => {
     expect(chatBody.provider).toBe('anthropic');
     expect(chatBody.model).toBe('claude-opus-5-5');
     expect(chatBody.apiKey).toBe(ANTHROPIC_KEY);
+    // The request carries the full ordered history, not just the latest turn.
+    expect(chatBody.messages).toEqual([
+      { role: 'assistant', content: GREETING_MESSAGE },
+      { role: 'user', content: 'Persisted hello' },
+      { role: 'assistant', content: 'Persisted reply' },
+      { role: 'user', content: 'After switching' },
+    ]);
+    // Wait for the new assistant save so the reload sees a complete thread.
+    const assistantSaveBody = (await assistantSave).postDataJSON() as Record<string, unknown>;
+    expect(assistantSaveBody.message).toBe('Mock AI reply (synthetic)');
 
     // The persisted choice survives a reload and is restored on selection.
     await page.reload();
@@ -363,7 +394,14 @@ test.describe('Chat model picker and cache reminder - desktop (1280px)', () => {
       .getByTestId('llm-chat-thread-item');
     await expect(rowsAfterReload.first()).toBeVisible();
     await rowsAfterReload.first().click();
-    await expect(page.locator('.chat-container')).toContainText('Persisted hello');
+    await expect(page.locator('.chat-container .q-message')).toHaveCount(5);
+    expect(await transcriptTexts(page)).toEqual([
+      GREETING_MESSAGE,
+      'Persisted hello',
+      'Persisted reply',
+      'After switching',
+      'Mock AI reply (synthetic)',
+    ]);
     await expect(page.getByTestId('chat-model-select')).toHaveValue('Anthropic — claude-opus-5-5');
   });
 
@@ -588,14 +626,17 @@ test.describe('Chat header responsive layout', () => {
     await gotoChat(page);
 
     // Desktop: the persistent sidebar replaces the conversation button and the
-    // title shares one header row with the model/thinking controls.
+    // title shares one header row with the model/effort controls.
     await expect(page.getByTestId('chat-sidebar-pane')).toBeVisible();
     await expect(page.getByTestId('llm-chat-history')).toBeHidden();
     const desktopTitle = await page.locator('.chat-title').boundingBox();
     const desktopModel = await page.getByTestId('chat-model-select').boundingBox();
+    const desktopEffort = await page.getByTestId('chat-thinking-select').boundingBox();
     expect(desktopTitle).not.toBeNull();
     expect(desktopModel).not.toBeNull();
+    expect(desktopEffort).not.toBeNull();
     expect(desktopModel!.y).toBeLessThan(desktopTitle!.y + desktopTitle!.height);
+    expect(desktopEffort!.y).toBeLessThan(desktopTitle!.y + desktopTitle!.height);
 
     // The mocked Playwright config only defines a Desktop Chrome project, so
     // the mobile viewport is exercised explicitly here.
@@ -608,22 +649,35 @@ test.describe('Chat header responsive layout', () => {
     }));
     expect(overflow.scrollWidth).toBeLessThanOrEqual(overflow.clientWidth);
 
-    // Row 1: conversation navigation and the visible title. Row 2: selectors.
+    // Row 1: conversation navigation and the title share the same vertical
+    // band (mutual bounds overlap rules out nav wrapping onto its own row).
     await expect(page.getByTestId('llm-chat-history')).toBeVisible();
     await expect(page.locator('.chat-title')).toBeVisible();
+    const navBox = await page.getByTestId('llm-chat-history').boundingBox();
     const titleBox = await page.locator('.chat-title').boundingBox();
-    const modelBox = await page.getByTestId('chat-model-select').boundingBox();
-    const thinkingBox = await page.getByTestId('chat-thinking-select').boundingBox();
-    const rowOneBottom = titleBox!.y + titleBox!.height;
-    expect(modelBox).not.toBeNull();
-    expect(thinkingBox).not.toBeNull();
-    expect(modelBox!.y).toBeGreaterThanOrEqual(rowOneBottom);
-    expect(thinkingBox!.y).toBeGreaterThanOrEqual(rowOneBottom);
+    expect(navBox).not.toBeNull();
+    expect(titleBox).not.toBeNull();
+    expect(navBox!.y).toBeLessThan(titleBox!.y + titleBox!.height);
+    expect(titleBox!.y).toBeLessThan(navBox!.y + navBox!.height);
 
-    // The selectors remain usable at 375px.
+    // Row 2: the model and effort selectors share a second band below row 1
+    // (mutual overlap rules out a third selector row).
+    const modelBox = await page.getByTestId('chat-model-select').boundingBox();
+    const effortBox = await page.getByTestId('chat-thinking-select').boundingBox();
+    expect(modelBox).not.toBeNull();
+    expect(effortBox).not.toBeNull();
+    const rowOneBottom = Math.max(titleBox!.y + titleBox!.height, navBox!.y + navBox!.height);
+    expect(modelBox!.y).toBeGreaterThanOrEqual(rowOneBottom);
+    expect(effortBox!.y).toBeGreaterThanOrEqual(rowOneBottom);
+    expect(effortBox!.y).toBeLessThan(modelBox!.y + modelBox!.height);
+    expect(modelBox!.y).toBeLessThan(effortBox!.y + effortBox!.height);
+
+    // Both selectors remain usable at 375px: pick a model, then an effort.
     await chooseModel(page, 'Anthropic — claude-opus-5-5');
     await expect(page.getByTestId('chat-model-select')).toHaveValue('Anthropic — claude-opus-5-5');
-    await expect(page.getByTestId('chat-thinking-select')).toBeVisible();
+    await page.getByTestId('chat-thinking-select').click();
+    await page.getByRole('option', { name: 'high', exact: true }).click();
+    await expect(page.getByTestId('chat-thinking-select')).toHaveValue('high');
 
     // The composer stays visible inside the viewport.
     const composerBox = await page.getByTestId('llm-chat-input').boundingBox();
