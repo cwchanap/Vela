@@ -7,6 +7,7 @@ import {
   decodeModelValue,
   effortOptions,
   encodeModelPair,
+  isPairAvailable,
   llmPairOption,
   pairToOptionValue,
   registryModel,
@@ -185,5 +186,31 @@ describe('llmPairOption', () => {
     expect(option.label).toBe('OpenRouter (custom ID)');
     expect(option.value).toBe(OPENROUTER_CUSTOM_VALUE);
     expect(option.provider).toBe('openrouter');
+  });
+});
+
+describe('isPairAvailable', () => {
+  it('accepts pairs whose option is present and not disabled', () => {
+    const options = buildLlmModelOptions({ google: 'key', openrouter: 'key' });
+    expect(isPairAvailable(options, { provider: 'google', model: 'gemini-3.8-flash' })).toBe(true);
+    // The free-form OpenRouter custom entry is available like any other.
+    expect(isPairAvailable(options, { provider: 'openrouter', model: 'acme/custom' })).toBe(true);
+  });
+
+  it('rejects pairs whose only option is the display-only disabled one', () => {
+    const options = [
+      ...buildLlmModelOptions({ google: 'key' }),
+      { ...llmPairOption('anthropic', 'claude-opus-5-5'), disabled: true },
+    ];
+    expect(isPairAvailable(options, { provider: 'anthropic', model: 'claude-opus-5-5' })).toBe(
+      false,
+    );
+  });
+
+  it('rejects pairs that are not among the options at all', () => {
+    const options = buildLlmModelOptions({ google: 'key' });
+    expect(isPairAvailable(options, { provider: 'openai', model: 'gpt-6.1-sol' })).toBe(false);
+    // A retired/unknown registry id under a keyed provider is unavailable.
+    expect(isPairAvailable(options, { provider: 'google', model: 'retired-model' })).toBe(false);
   });
 });

@@ -298,11 +298,13 @@ describe('useChatStore', () => {
       setThinkingOverride: (_effort: 'high' | null) => void;
       setCacheStartedAt: (_timestamp: number | null) => void;
       setIsPersistedThread: (_persisted: boolean) => void;
+      setModelPatching: (_pending: boolean) => void;
     }) => {
       store.setActiveModel({ provider: 'google', model: 'gemini-3.8-flash' });
       store.setThinkingOverride('high');
       store.setCacheStartedAt(1700000000000);
       store.setIsPersistedThread(true);
+      store.setModelPatching(true);
     };
 
     it('starts with a fresh model state', async () => {
@@ -312,6 +314,7 @@ describe('useChatStore', () => {
       expect(store.thinkingOverride).toBeNull();
       expect(store.cacheStartedAt).toBeNull();
       expect(store.isPersistedThread).toBe(false);
+      expect(store.modelPatchPending).toBe(false);
     });
 
     it('stores provider/model, effort override, cache timestamp and persistence via setters', async () => {
@@ -322,9 +325,10 @@ describe('useChatStore', () => {
       expect(store.thinkingOverride).toBe('high');
       expect(store.cacheStartedAt).toBe(1700000000000);
       expect(store.isPersistedThread).toBe(true);
+      expect(store.modelPatchPending).toBe(true);
     });
 
-    it('clears model, thinking, cache timestamp and the persistence flag on startNewChat', async () => {
+    it('clears model, thinking, cache timestamp, the persistence flag and the PATCH lock on startNewChat', async () => {
       const { useChatStore } = await import('./chat');
       const store = useChatStore();
       seedModelState(store);
@@ -333,6 +337,7 @@ describe('useChatStore', () => {
       expect(store.thinkingOverride).toBeNull();
       expect(store.cacheStartedAt).toBeNull();
       expect(store.isPersistedThread).toBe(false);
+      expect(store.modelPatchPending).toBe(false);
     });
 
     it('clears the model state on resetForUser', async () => {
@@ -344,6 +349,7 @@ describe('useChatStore', () => {
       expect(store.thinkingOverride).toBeNull();
       expect(store.cacheStartedAt).toBeNull();
       expect(store.isPersistedThread).toBe(false);
+      expect(store.modelPatchPending).toBe(false);
     });
   });
 

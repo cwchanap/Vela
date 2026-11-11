@@ -29,11 +29,14 @@ export const useChatStore = defineStore('chat', () => {
   // Chat-specific selection state that must survive route changes but reset
   // with the conversation. activeModel is seeded from Settings for fresh
   // chats; isPersistedThread tracks whether a thread metadata row exists (a
-  // client UUID alone does not) and gates model PATCHes.
+  // client UUID alone does not) and gates model PATCHes. modelPatchPending
+  // guards the in-flight saved-thread model transition alongside the
+  // conversation state so a route remount cannot unlock it.
   const activeModel = ref<ChatModelPair | null>(null);
   const thinkingOverride = ref<LlmEffort | null>(null);
   const cacheStartedAt = ref<number | null>(null);
   const isPersistedThread = ref(false);
+  const modelPatchPending = ref(false);
 
   const setActiveModel = (pair: ChatModelPair | null) => {
     activeModel.value = pair;
@@ -49,6 +52,10 @@ export const useChatStore = defineStore('chat', () => {
 
   const setIsPersistedThread = (persisted: boolean) => {
     isPersistedThread.value = persisted;
+  };
+
+  const setModelPatching = (pending: boolean) => {
+    modelPatchPending.value = pending;
   };
 
   const nextGeneration = () => ++generation.value;
@@ -95,6 +102,7 @@ export const useChatStore = defineStore('chat', () => {
     thinkingOverride.value = null;
     cacheStartedAt.value = null;
     isPersistedThread.value = false;
+    modelPatchPending.value = false;
   };
 
   const resetForUser = (uid: string | null, sessionGen: number | null) => {
@@ -128,6 +136,7 @@ export const useChatStore = defineStore('chat', () => {
     thinkingOverride,
     cacheStartedAt,
     isPersistedThread,
+    modelPatchPending,
     ownerId,
     ownerSessionGen,
     generation,
@@ -144,6 +153,7 @@ export const useChatStore = defineStore('chat', () => {
     setThinkingOverride,
     setCacheStartedAt,
     setIsPersistedThread,
+    setModelPatching,
     startNewChat,
     resetForUser,
     bindOwner,
