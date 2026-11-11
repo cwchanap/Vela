@@ -257,9 +257,13 @@ const restartDeletedChat = async (
     message: 'This conversation was deleted. Started a new chat.',
   });
   for (const turn of turns) {
+    // A save that resolves after an account switch must not replay the next
+    // turn into the new account's freshly reset transcript. Successful saves
+    // bypass persistMessage's stale check, so recheck around each await.
+    if (isStale()) return null;
     chat.addMessage({ type: turn.isUser ? 'user' : 'ai', content: turn.message });
     const status = await persistMessage(freshId, uid, turn.message, turn.isUser, isStale);
-    if (status !== 'saved') return null;
+    if (status !== 'saved' || isStale()) return null;
   }
   return freshId;
 };
