@@ -54,6 +54,84 @@ describe('ChatHistoryItemSchema', () => {
     });
     expect(result.success).toBe(false);
   });
+
+  test('accepts an optional model pair for a user turn', () => {
+    const result = ChatHistoryItemSchema.safeParse({
+      ThreadId: 'thread-1',
+      Timestamp: 1700000000,
+      UserId: 'user-1',
+      message: 'Hello',
+      is_user: true,
+      model: { provider: 'anthropic', model: 'claude-opus-4' },
+    });
+    expect(result.success).toBe(true);
+    expect(result.success && result.data.model).toEqual({
+      provider: 'anthropic',
+      model: 'claude-opus-4',
+    });
+  });
+
+  test('accepts payloads without model or lastLlmAt', () => {
+    const result = ChatHistoryItemSchema.safeParse({
+      ThreadId: 'thread-1',
+      Timestamp: 1700000000,
+      UserId: 'user-1',
+      message: 'Hello',
+      is_user: true,
+    });
+    expect(result.success).toBe(true);
+    expect(result.success && result.data.model).toBeUndefined();
+    expect(result.success && result.data.lastLlmAt).toBeUndefined();
+  });
+
+  test('accepts an optional positive lastLlmAt for an assistant turn', () => {
+    const result = ChatHistoryItemSchema.safeParse({
+      ThreadId: 'thread-1',
+      Timestamp: 1700000000,
+      UserId: 'user-1',
+      message: 'こんにちは',
+      is_user: false,
+      lastLlmAt: 1700000000000,
+    });
+    expect(result.success).toBe(true);
+    expect(result.success && result.data.lastLlmAt).toBe(1700000000000);
+  });
+
+  test.each([0, -5, 1.5, '1700000000000'])('rejects lastLlmAt value %p', (lastLlmAt) => {
+    const result = ChatHistoryItemSchema.safeParse({
+      ThreadId: 'thread-1',
+      Timestamp: 1700000000,
+      UserId: 'user-1',
+      message: 'Hello',
+      is_user: false,
+      lastLlmAt,
+    });
+    expect(result.success).toBe(false);
+  });
+
+  test('rejects an unsupported model provider', () => {
+    const result = ChatHistoryItemSchema.safeParse({
+      ThreadId: 'thread-1',
+      Timestamp: 1700000000,
+      UserId: 'user-1',
+      message: 'Hello',
+      is_user: true,
+      model: { provider: 'bedrock', model: 'x' },
+    });
+    expect(result.success).toBe(false);
+  });
+
+  test('rejects an empty model id', () => {
+    const result = ChatHistoryItemSchema.safeParse({
+      ThreadId: 'thread-1',
+      Timestamp: 1700000000,
+      UserId: 'user-1',
+      message: 'Hello',
+      is_user: true,
+      model: { provider: 'google', model: '' },
+    });
+    expect(result.success).toBe(false);
+  });
 });
 
 describe('ChatMessageSchema', () => {

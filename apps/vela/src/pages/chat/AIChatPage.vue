@@ -112,7 +112,7 @@ import ChatComposer from './components/ChatComposer.vue';
 import ChatSidebar from './components/ChatSidebar.vue';
 import {
   useChatThreads,
-  useRenameThread,
+  useUpdateThread,
   useDeleteThread,
   useSaveChatMessage,
   useChatMessages,
@@ -143,7 +143,7 @@ const threadsQuery = useChatThreads();
 const threads = computed<ChatThreadSummaryDTO[]>(() => threadsQuery.data.value ?? []);
 const threadsLoading = computed(() => threadsQuery.isLoading.value);
 const threadsError = computed(() => threadsQuery.isError.value);
-const renameThreadMutation = useRenameThread();
+const updateThreadMutation = useUpdateThread();
 const deleteThreadMutation = useDeleteThread();
 const saveChatMessageMutation = useSaveChatMessage();
 const chatMessagesHelper = useChatMessages();
@@ -425,7 +425,7 @@ const onRenameThread = async ({ threadId, title }: { threadId: string; title: st
   if (chat.isLoading) return;
   const sessionGen = auth.sessionGeneration;
   try {
-    await renameThreadMutation.mutateAsync({
+    await updateThreadMutation.mutateAsync({
       threadId,
       patch: { title },
       userId: getUserId(),

@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { flushPromises } from '@vue/test-utils';
 import { ref } from 'vue';
+import { QueryClient } from '@tanstack/vue-query';
 import { chatKeys } from '@vela/common';
 import { withQueryClient } from 'src/test-utils/withQueryClient';
 import type { ChatThreadSummaryDTO } from 'src/services/chatHistoryService';
@@ -56,6 +57,17 @@ const thread = (id: string, title: string, updatedAt = 1_000): ChatThreadSummary
 });
 
 const threadsKey = (account: { id: string }) => chatKeys.threads(account.id);
+
+// The default test client uses gcTime 0, which garbage-collects unobserved
+// cache entries between a mutation settling and the assertion. Tests that
+// read cached thread data after a mutation keep entries alive instead.
+const cacheClient = () =>
+  new QueryClient({
+    defaultOptions: {
+      queries: { retry: false, gcTime: Infinity },
+      mutations: { retry: false, gcTime: Infinity },
+    },
+  });
 
 describe('useChatThreads', () => {
   let cleanup: (() => void) | undefined;
@@ -139,7 +151,7 @@ describe('useChatThreads', () => {
     });
   });
 
-  describe('useRenameThread', () => {
+  describe('useUpdateThread', () => {
     it('applies an optimistic title update then invalidates the list on success', async () => {
       signIn(userA);
       const existing = [thread('t-1', 'Old title'), thread('t-2', 'Other')];
@@ -150,8 +162,8 @@ describe('useChatThreads', () => {
             resolvePatch = resolve;
           }),
       );
-      const { useRenameThread } = await import('./useChatThreads');
-      const { result, queryClient, cleanup: qcCleanup } = withQueryClient(() => useRenameThread());
+      const { useUpdateThread } = await import('./useChatThreads');
+      const { result, queryClient, cleanup: qcCleanup } = withQueryClient(() => useUpdateThread());
       cleanup = qcCleanup;
       queryClient.setQueryData(threadsKey(userA), existing);
       const cancelSpy = vi.spyOn(queryClient, 'cancelQueries');
@@ -186,8 +198,8 @@ describe('useChatThreads', () => {
       signIn(userA);
       const existing = [thread('t-1', 'Old title'), thread('t-2', 'Other')];
       mockUpdateChatThread.mockRejectedValue(new Error('Rename failed'));
-      const { useRenameThread } = await import('./useChatThreads');
-      const { result, queryClient, cleanup: qcCleanup } = withQueryClient(() => useRenameThread());
+      const { useUpdateThread } = await import('./useChatThreads');
+      const { result, queryClient, cleanup: qcCleanup } = withQueryClient(() => useUpdateThread());
       cleanup = qcCleanup;
       queryClient.setQueryData(threadsKey(userA), existing);
       const setDataSpy = vi.spyOn(queryClient, 'setQueryData');
@@ -219,8 +231,8 @@ describe('useChatThreads', () => {
             rejectPatch = reject;
           }),
       );
-      const { useRenameThread } = await import('./useChatThreads');
-      const { result, queryClient, cleanup: qcCleanup } = withQueryClient(() => useRenameThread());
+      const { useUpdateThread } = await import('./useChatThreads');
+      const { result, queryClient, cleanup: qcCleanup } = withQueryClient(() => useUpdateThread());
       cleanup = qcCleanup;
       queryClient.setQueryData(threadsKey(userA), existingA);
       queryClient.setQueryData(threadsKey(userB), existingB);
@@ -250,6 +262,196 @@ describe('useChatThreads', () => {
       expect(setDataSpy.mock.calls[1]?.[1]).toEqual(existingA);
       expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: threadsKey(userA) });
       expect(invalidateSpy).not.toHaveBeenCalledWith({ queryKey: threadsKey(userB) });
+    });
+
+    it('clears cached lastLlmAt on an optimistic model patch', async () => {
+      signIn(userA);
+      const existing = thread('t-1', 'T');
+      existing.model = { provider: 'google', model: 'gemini-3.8-flash' };
+      existing.lastLlmAt = 1700000000000;
+      mockUpdateChatThread.mockResolvedValue({ ...existing, updatedAt: 2_000 });
+      const { useUpdateThread } = await import('./useChatThreads');
+      const {
+        result,
+        queryClient,
+        cleanup: qcCleanup,
+      } = withQueryClient(() => useUpdateThread(), cacheClient());
+      cleanup = qcCleanup;
+      queryClient.setQueryData(threadsKey(userA), [existing]);
+
+      await result.mutateAsync({
+        threadId: 't-1',
+        patch: { model: { provider: 'anthropic', model: 'claude-opus-4' } },
+        userId: 'user-a',
+      });
+      await flushPromises();
+
+      const cached = queryClient.getQueryData<ChatThreadSummaryDTO[]>(threadsKey(userA))![0]!;
+      expect(cached.model).toEqual({ provider: 'anthropic', model: 'claude-opus-4' });
+      expect(cached.lastLlmAt).toBeUndefined();
+    });
+
+    it('preserves cached lastLlmAt on a title-only patch', async () => {
+      signIn(userA);
+      const existing = thread('t-1', 'T');
+      existing.lastLlmAt = 1700000000000;
+      mockUpdateChatThread.mockResolvedValue({ ...existing, title: 'Renamed' });
+      const { useUpdateThread } = await import('./useChatThreads');
+      const {
+        result,
+        queryClient,
+        cleanup: qcCleanup,
+      } = withQueryClient(() => useUpdateThread(), cacheClient());
+      cleanup = qcCleanup;
+      queryClient.setQueryData(threadsKey(userA), [existing]);
+
+      await result.mutateAsync({ threadId: 't-1', patch: { title: 'Renamed' }, userId: 'user-a' });
+      await flushPromises();
+
+      expect(
+        queryClient.getQueryData<ChatThreadSummaryDTO[]>(threadsKey(userA))![0]!.lastLlmAt,
+      ).toBe(1700000000000);
+    });
+
+    it('rolls back the old model and timestamp when a model patch fails', async () => {
+      signIn(userA);
+      const existing = thread('t-1', 'T', 1_000);
+      existing.model = { provider: 'google', model: 'gemini-3.8-flash' };
+      existing.lastLlmAt = 1700000000000;
+      mockUpdateChatThread.mockRejectedValue(new Error('Patch failed'));
+      const { useUpdateThread } = await import('./useChatThreads');
+      const { result, queryClient, cleanup: qcCleanup } = withQueryClient(() => useUpdateThread());
+      cleanup = qcCleanup;
+      queryClient.setQueryData(threadsKey(userA), [existing]);
+      const setDataSpy = vi.spyOn(queryClient, 'setQueryData');
+
+      await expect(
+        result.mutateAsync({
+          threadId: 't-1',
+          patch: { model: { provider: 'anthropic', model: 'claude-opus-4' } },
+          userId: 'user-a',
+        }),
+      ).rejects.toThrow('Patch failed');
+      await flushPromises();
+
+      // The rollback restores the whole previous row — old model, cache
+      // evidence and updatedAt — exactly as stored before the patch.
+      const rollbackCall = setDataSpy.mock.calls[1];
+      expect(rollbackCall?.[0]).toEqual(threadsKey(userA));
+      expect(rollbackCall?.[1]).toEqual([existing]);
+    });
+  });
+
+  describe('useSaveChatMessage', () => {
+    it('updates the cached thread lastLlmAt in place after an assistant save without refetching', async () => {
+      signIn(userA);
+      mockSaveChatMessage.mockResolvedValue(undefined);
+      const t1 = thread('t-1', 'First', 500);
+      const t2 = thread('t-2', 'Second', 500);
+      t2.lastLlmAt = 111;
+      const { useSaveChatMessage } = await import('./useChatThreads');
+      const {
+        result,
+        queryClient,
+        cleanup: qcCleanup,
+      } = withQueryClient(() => useSaveChatMessage(), cacheClient());
+      cleanup = qcCleanup;
+      queryClient.setQueryData(threadsKey(userA), [t1, t2]);
+      const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries');
+
+      await result.mutateAsync({
+        threadId: 't-2',
+        userId: 'user-a',
+        message: 'ai reply',
+        isUser: false,
+        lastLlmAt: 222,
+      });
+
+      const cached = queryClient.getQueryData<ChatThreadSummaryDTO[]>(threadsKey(userA))!;
+      expect(cached[1]!.lastLlmAt).toBe(222);
+      expect(cached[1]!.updatedAt).toBe(500);
+      expect(cached[0]!.lastLlmAt).toBeUndefined();
+      expect(invalidateSpy).not.toHaveBeenCalled();
+      expect(mockListChatThreads).not.toHaveBeenCalled();
+    });
+
+    it('clears the cached thread lastLlmAt after an assistant save without cache evidence', async () => {
+      signIn(userA);
+      mockSaveChatMessage.mockResolvedValue(undefined);
+      const t1 = thread('t-1', 'First', 500);
+      t1.lastLlmAt = 111;
+      const { useSaveChatMessage } = await import('./useChatThreads');
+      const {
+        result,
+        queryClient,
+        cleanup: qcCleanup,
+      } = withQueryClient(() => useSaveChatMessage(), cacheClient());
+      cleanup = qcCleanup;
+      queryClient.setQueryData(threadsKey(userA), [t1]);
+
+      await result.mutateAsync({
+        threadId: 't-1',
+        userId: 'user-a',
+        message: 'ai reply',
+        isUser: false,
+      });
+
+      const cached = queryClient.getQueryData<ChatThreadSummaryDTO[]>(threadsKey(userA))![0]!;
+      expect(cached.lastLlmAt).toBeUndefined();
+      expect(cached.updatedAt).toBe(500);
+    });
+
+    it('does not touch the thread cache after a user save', async () => {
+      signIn(userA);
+      mockSaveChatMessage.mockResolvedValue(undefined);
+      const existing = [thread('t-1', 'First', 500)];
+      const { useSaveChatMessage } = await import('./useChatThreads');
+      const {
+        result,
+        queryClient,
+        cleanup: qcCleanup,
+      } = withQueryClient(() => useSaveChatMessage(), cacheClient());
+      cleanup = qcCleanup;
+      queryClient.setQueryData(threadsKey(userA), existing);
+
+      await result.mutateAsync({
+        threadId: 't-1',
+        userId: 'user-a',
+        message: 'hello',
+        isUser: true,
+        lastLlmAt: 222,
+      });
+
+      expect(queryClient.getQueryData(threadsKey(userA))).toEqual(existing);
+    });
+
+    it('scopes the assistant-save cache update to the initiating user', async () => {
+      signIn(userA);
+      mockSaveChatMessage.mockResolvedValue(undefined);
+      const threadsA = [thread('t-1', 'A', 500)];
+      const threadsB = [thread('t-1', 'B', 500)];
+      const { useSaveChatMessage } = await import('./useChatThreads');
+      const {
+        result,
+        queryClient,
+        cleanup: qcCleanup,
+      } = withQueryClient(() => useSaveChatMessage(), cacheClient());
+      cleanup = qcCleanup;
+      queryClient.setQueryData(threadsKey(userA), threadsA);
+      queryClient.setQueryData(threadsKey(userB), threadsB);
+
+      await result.mutateAsync({
+        threadId: 't-1',
+        userId: 'user-a',
+        message: 'ai reply',
+        isUser: false,
+        lastLlmAt: 222,
+      });
+
+      expect(
+        queryClient.getQueryData<ChatThreadSummaryDTO[]>(threadsKey(userA))![0]!.lastLlmAt,
+      ).toBe(222);
+      expect(queryClient.getQueryData(threadsKey(userB))).toEqual(threadsB);
     });
   });
 

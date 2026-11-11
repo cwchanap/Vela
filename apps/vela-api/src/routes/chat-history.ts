@@ -169,20 +169,26 @@ async function dynamodb_saveUserMessage(
                 TableName: TABLE_NAMES.CHAT_THREADS,
                 Key: key,
                 // Never rewind updatedAt: a delayed save must not overwrite a
-                // newer timestamp committed by another client.
+                // newer timestamp committed by another client. A supplied model
+                // is pinned only when absent, so a later picker PATCH (or a
+                // first-save retry race) is never overwritten here.
                 UpdateExpression:
-                  'SET #updatedAt = :now, #title = if_not_exists(#title, :title), #createdAt = if_not_exists(#createdAt, :now)',
+                  item.model !== undefined
+                    ? 'SET #updatedAt = :now, #title = if_not_exists(#title, :title), #createdAt = if_not_exists(#createdAt, :now), #model = if_not_exists(#model, :model)'
+                    : 'SET #updatedAt = :now, #title = if_not_exists(#title, :title), #createdAt = if_not_exists(#createdAt, :now)',
                 ConditionExpression:
                   'attribute_not_exists(#deleting) AND (attribute_not_exists(#updatedAt) OR #updatedAt <= :now)',
                 ExpressionAttributeNames: {
                   '#updatedAt': 'updatedAt',
                   '#title': 'title',
                   '#createdAt': 'createdAt',
+                  ...(item.model !== undefined ? { '#model': 'model' } : {}),
                   '#deleting': 'deleting',
                 },
                 ExpressionAttributeValues: {
                   ':now': now,
                   ':title': initialTitle,
+                  ...(item.model !== undefined ? { ':model': item.model } : {}),
                 },
               },
             },
@@ -238,19 +244,34 @@ async function dynamodb_saveAssistantMessage(
   userId: string,
   item: ChatHistoryItem,
 ): Promise<'ok' | 'rejected'> {
+  const key = { UserId: userId, ThreadId: item.ThreadId };
+  // The thread guard is a conditioned Update so the assistant turn can carry
+  // cache evidence in the same transaction: SET the timestamp when supplied,
+  // otherwise REMOVE it. updatedAt is untouched and the REMOVE branch omits
+  // ExpressionAttributeValues entirely — the alive condition needs no values.
+  const threadUpdate =
+    item.lastLlmAt !== undefined
+      ? {
+          TableName: TABLE_NAMES.CHAT_THREADS,
+          Key: key,
+          UpdateExpression: 'SET #lastLlmAt = :lastLlmAt',
+          ConditionExpression: THREAD_ALIVE_CONDITION,
+          ExpressionAttributeNames: { '#deleting': 'deleting', '#lastLlmAt': 'lastLlmAt' },
+          ExpressionAttributeValues: { ':lastLlmAt': item.lastLlmAt },
+        }
+      : {
+          TableName: TABLE_NAMES.CHAT_THREADS,
+          Key: key,
+          UpdateExpression: 'REMOVE #lastLlmAt',
+          ConditionExpression: THREAD_ALIVE_CONDITION,
+          ExpressionAttributeNames: { '#deleting': 'deleting', '#lastLlmAt': 'lastLlmAt' },
+        };
   try {
     await retryOnTransactionConflict(() =>
       docClient.send(
         new TransactWriteCommand({
           TransactItems: [
-            {
-              ConditionCheck: {
-                TableName: TABLE_NAMES.CHAT_THREADS,
-                Key: { UserId: userId, ThreadId: item.ThreadId },
-                ConditionExpression: THREAD_ALIVE_CONDITION,
-                ExpressionAttributeNames: { '#deleting': 'deleting' },
-              },
-            },
+            { Update: threadUpdate },
             { Put: { TableName: TABLE_NAMES.CHAT_HISTORY, Item: messageItem(item) } },
           ],
         }),
@@ -298,6 +319,7 @@ async function dynamodb_updateThread(
     const names: Record<string, string> = { '#deleting': 'deleting' };
     const values: Record<string, unknown> = {};
     const setClauses: string[] = [];
+    const removeClauses: string[] = [];
     let condition = THREAD_ALIVE_CONDITION;
 
     if (bumpUpdatedAt) {
@@ -317,12 +339,18 @@ async function dynamodb_updateThread(
       names['#model'] = 'model';
       values[':model'] = patch.model;
       setClauses.push('#model = :model');
+      // A model change invalidates the stored cache evidence.
+      names['#lastLlmAt'] = 'lastLlmAt';
+      removeClauses.push('#lastLlmAt');
     }
 
     const command = new UpdateCommand({
       TableName: TABLE_NAMES.CHAT_THREADS,
       Key: { UserId: userId, ThreadId: threadId },
-      UpdateExpression: `SET ${setClauses.join(', ')}`,
+      UpdateExpression:
+        removeClauses.length > 0
+          ? `SET ${setClauses.join(', ')} REMOVE ${removeClauses.join(', ')}`
+          : `SET ${setClauses.join(', ')}`,
       ConditionExpression: condition,
       ExpressionAttributeNames: names,
       ExpressionAttributeValues: values,
@@ -373,6 +401,7 @@ async function dynamodb_listThreads(userId: string): Promise<ChatThreadSummary[]
         createdAt: row.createdAt as number,
         updatedAt: row.updatedAt as number,
         ...(row.model !== undefined ? { model: row.model as ChatThreadModel } : {}),
+        ...(row.lastLlmAt !== undefined ? { lastLlmAt: row.lastLlmAt as number } : {}),
       }));
 
     return threads.sort(
