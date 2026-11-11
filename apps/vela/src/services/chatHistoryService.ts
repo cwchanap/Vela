@@ -13,6 +13,7 @@ export interface ChatThreadSummaryDTO {
   createdAt: number;
   updatedAt: number;
   model?: ChatThreadModelDTO;
+  lastLlmAt?: number;
 }
 
 export interface ChatHistoryItemDTO {
@@ -49,11 +50,17 @@ export async function getChatMessages(
   return data.items || [];
 }
 
+export interface SaveChatMessageMetadata {
+  model?: ChatThreadModelDTO;
+  lastLlmAt?: number;
+}
+
 export async function saveChatMessage(
   threadId: string,
   userId: string,
   message: string,
   isUser: boolean,
+  metadata?: SaveChatMessageMetadata,
 ): Promise<void> {
   const item: ChatHistoryItemDTO = {
     ThreadId: threadId,
@@ -66,7 +73,11 @@ export async function saveChatMessage(
     getApiUrl('chat-history/save'),
     {
       method: 'POST',
-      body: JSON.stringify(item),
+      body: JSON.stringify({
+        ...item,
+        ...(metadata?.model !== undefined ? { model: metadata.model } : {}),
+        ...(metadata?.lastLlmAt !== undefined ? { lastLlmAt: metadata.lastLlmAt } : {}),
+      }),
     },
     userId,
   );

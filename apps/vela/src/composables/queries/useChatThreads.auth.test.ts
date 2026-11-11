@@ -3,7 +3,7 @@ import { ref } from 'vue';
 import { QueryClient } from '@tanstack/vue-query';
 import { chatKeys } from '@vela/common';
 import { withQueryClient } from 'src/test-utils/withQueryClient';
-import { useChatThreads, useDeleteThread, useRenameThread } from './useChatThreads';
+import { useChatThreads, useDeleteThread, useUpdateThread } from './useChatThreads';
 import type { ChatThreadSummaryDTO } from 'src/services/chatHistoryService';
 
 vi.mock('aws-amplify/auth', () => ({
@@ -173,7 +173,7 @@ describe('chat thread identity binding', () => {
     ]);
   });
 
-  it('rolls back the optimistic rename and never fetches when the session switches mid-request', async () => {
+  it('rolls back the optimistic thread update and never fetches when the session switches mid-request', async () => {
     const existing = [thread('t-1', 'Old title'), thread('t-2', 'Other')];
     let resolveAuth!: (_value: unknown) => void;
     mockFetchAuthSession
@@ -190,7 +190,7 @@ describe('chat thread identity binding', () => {
       result,
       queryClient,
       cleanup: qcCleanup,
-    } = withQueryClient(() => useRenameThread(), retryingClient());
+    } = withQueryClient(() => useUpdateThread(), retryingClient());
     cleanup = qcCleanup;
     queryClient.setQueryData(keyA, existing);
 

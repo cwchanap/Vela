@@ -300,6 +300,77 @@ describe('Chat History Route', () => {
       expect(updateInput.ExpressionAttributeValues[':title']).toBe('New conversation');
     });
 
+    test('should pin the supplied model on the first user save inside the metadata transaction', async () => {
+      mockSend.mockResolvedValue({});
+      const app = createTestApp({});
+
+      const res = await app.request(
+        saveRequest(validSaveBody({ model: { provider: 'anthropic', model: 'claude-opus-4' } })),
+      );
+
+      expect(res.status).toBe(200);
+      expect(sentCommandTypes()).toEqual(['TransactWriteCommand']);
+      const [updateInput, putInput] = [sentTxnItems()[0][0].Update, sentTxnItems()[0][1].Put];
+      expect(sentTxnItems()[0]).toHaveLength(2);
+      expect(updateInput.UpdateExpression).toContain('#title = if_not_exists(#title, :title)');
+      expect(updateInput.UpdateExpression).toContain('#model = if_not_exists(#model, :model)');
+      expect(updateInput.ExpressionAttributeValues[':model']).toEqual({
+        provider: 'anthropic',
+        model: 'claude-opus-4',
+      });
+      // Metadata fields never leak into the message row.
+      expect(putInput.Item).not.toHaveProperty('model');
+      expect(putInput.Item).not.toHaveProperty('lastLlmAt');
+    });
+
+    test('should omit the model clause when a user save carries no model', async () => {
+      mockSend.mockResolvedValue({});
+      const app = createTestApp({});
+
+      const res = await app.request(saveRequest(validSaveBody()));
+
+      expect(res.status).toBe(200);
+      const updateInput = sentTxnItems()[0][0].Update;
+      expect(updateInput.UpdateExpression).not.toContain('#model');
+      expect(updateInput.ExpressionAttributeValues).not.toHaveProperty(':model');
+    });
+
+    test('should never overwrite a stored model on a later user save', async () => {
+      mockSend.mockResolvedValue({});
+      const app = createTestApp({});
+
+      await app.request(
+        saveRequest(
+          validSaveBody({
+            message: 'Follow-up',
+            model: { provider: 'google', model: 'gemini-3.8-flash' },
+          }),
+        ),
+      );
+
+      const updateInput = sentTxnItems()[0][0].Update;
+      expect(updateInput.UpdateExpression).toContain('#model = if_not_exists(#model, :model)');
+      expect(updateInput.UpdateExpression).not.toContain('#model = :model');
+    });
+
+    test('should keep the stale-updatedAt fallback an alive-thread message write that leaves model untouched', async () => {
+      mockSend.mockRejectedValueOnce(transactionConditionError()).mockResolvedValueOnce({});
+      const app = createTestApp({});
+
+      const res = await app.request(
+        saveRequest(validSaveBody({ model: { provider: 'anthropic', model: 'claude-opus-4' } })),
+      );
+
+      expect(res.status).toBe(200);
+      expect(mockSend).toHaveBeenCalledTimes(2);
+      const fallbackItems = sentTxnItems()[1];
+      expect(Object.keys(fallbackItems[0])).toEqual(['ConditionCheck']);
+      expect(fallbackItems[0].ConditionCheck.ConditionExpression).toContain(
+        'attribute_not_exists(#deleting)',
+      );
+      expect(fallbackItems[1].Put.Item).not.toHaveProperty('model');
+    });
+
     test('should preserve an existing title and model on later user saves while bumping updatedAt', async () => {
       mockSend.mockResolvedValue({});
       const app = createTestApp({});
@@ -337,7 +408,7 @@ describe('Chat History Route', () => {
       expect(fallbackItems[1].Put.Item.message).toBe('Hello world');
     });
 
-    test('should write only the message for an assistant save', async () => {
+    test('should guard the assistant message with a conditioned thread update that removes lastLlmAt', async () => {
       mockSend.mockResolvedValue({});
       const app = createTestApp({});
 
@@ -345,13 +416,23 @@ describe('Chat History Route', () => {
 
       expect(res.status).toBe(200);
       expect(sentCommandTypes()).toEqual(['TransactWriteCommand']);
-      const [conditionCheck, put] = sentTxnItems()[0];
-      expect(conditionCheck.ConditionCheck.TableName).toBe('vela-chat-threads');
-      expect(conditionCheck.ConditionCheck.Key).toEqual({
-        UserId: 'user-123',
-        ThreadId: 'thread-123',
+      expect(sentTxnItems()[0]).toHaveLength(2);
+      const [update, put] = [sentTxnItems()[0][0].Update, sentTxnItems()[0][1].Put];
+      expect(update.TableName).toBe('vela-chat-threads');
+      expect(update.Key).toEqual({ UserId: 'user-123', ThreadId: 'thread-123' });
+      expect(update.UpdateExpression).toBe('REMOVE #lastLlmAt');
+      expect(update.ConditionExpression).toBe(
+        'attribute_exists(ThreadId) AND attribute_not_exists(#deleting)',
+      );
+      expect(update.ExpressionAttributeNames).toEqual({
+        '#deleting': 'deleting',
+        '#lastLlmAt': 'lastLlmAt',
       });
-      expect(put.Put).toEqual(
+      // The REMOVE branch carries no values at all — no empty map, no unused
+      // placeholders — and never touches updatedAt.
+      expect(update).not.toHaveProperty('ExpressionAttributeValues');
+      expect(update.UpdateExpression).not.toContain('updatedAt');
+      expect(put).toEqual(
         expect.objectContaining({
           TableName: 'vela-chat-history',
           Item: expect.objectContaining({
@@ -361,6 +442,33 @@ describe('Chat History Route', () => {
           }),
         }),
       );
+    });
+
+    test('should SET only the supplied lastLlmAt on an assistant save without bumping updatedAt', async () => {
+      mockSend.mockResolvedValue({});
+      const app = createTestApp({});
+
+      const res = await app.request(
+        saveRequest(validSaveBody({ is_user: false, lastLlmAt: 1700000000000 })),
+      );
+
+      expect(res.status).toBe(200);
+      const update = sentTxnItems()[0][0].Update;
+      expect(update.UpdateExpression).toBe('SET #lastLlmAt = :lastLlmAt');
+      expect(update.ExpressionAttributeValues).toEqual({ ':lastLlmAt': 1700000000000 });
+      expect(update.UpdateExpression).not.toContain('updatedAt');
+      expect(sentTxnItems()[0]).toHaveLength(2);
+    });
+
+    test('should return 400 when an assistant save carries a non-positive lastLlmAt', async () => {
+      const app = createTestApp({});
+
+      const res = await app.request(saveRequest(validSaveBody({ is_user: false, lastLlmAt: 0 })));
+      const json = await res.json();
+
+      expect(res.status).toBe(400);
+      expect(json.error).toBeDefined();
+      expect(mockSend).not.toHaveBeenCalled();
     });
 
     test('should overwrite a stale client timestamp with the server time', async () => {
@@ -634,6 +742,25 @@ describe('Chat History Route', () => {
 
       expect(res.status).toBe(200);
       expect(json.threads[0].model).toEqual({ provider: 'google', model: 'gemini-3.8-flash' });
+    });
+
+    test('should include lastLlmAt on thread metadata when present and omit it on legacy rows', async () => {
+      mockSend.mockResolvedValueOnce({
+        Items: [threadRow({ ThreadId: 'thread-1', lastLlmAt: 1700000000000 })],
+      });
+      const app = createTestApp({});
+      const res = await app.request(new Request('http://localhost/threads'));
+      const json = await res.json();
+
+      expect(res.status).toBe(200);
+      expect(json.threads[0].lastLlmAt).toBe(1700000000000);
+
+      mockSend.mockResolvedValueOnce({
+        Items: [threadRow({ ThreadId: 'thread-2' })],
+      });
+      const legacyRes = await app.request(new Request('http://localhost/threads'));
+      const legacyJson = await legacyRes.json();
+      expect(legacyJson.threads[0]).not.toHaveProperty('lastLlmAt');
     });
 
     test('should return 500 when the metadata query fails', async () => {
@@ -915,10 +1042,53 @@ describe('Chat History Route', () => {
       expect(json.thread.model).toEqual({ provider: 'google', model: 'gemini-3.8-flash' });
       const updateInput = mockUpdateCommand.mock.calls[0][0];
       expect(updateInput.UpdateExpression).toContain('#model = :model');
+      expect(updateInput.UpdateExpression).toContain('REMOVE #lastLlmAt');
+      expect(updateInput.ExpressionAttributeNames['#lastLlmAt']).toBe('lastLlmAt');
+      expect(updateInput.ExpressionAttributeValues).not.toHaveProperty(':lastLlmAt');
       expect(updateInput.ExpressionAttributeValues[':model']).toEqual({
         provider: 'google',
         model: 'gemini-3.8-flash',
       });
+    });
+
+    test('should REMOVE lastLlmAt even when a model patch also renames the thread', async () => {
+      mockSend.mockResolvedValueOnce({ Attributes: threadRow() });
+      const app = createTestApp({});
+
+      const res = await app.request(
+        new Request('http://localhost/thread/thread-123', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            title: 'New title',
+            model: { provider: 'anthropic', model: 'claude-opus-4' },
+          }),
+        }),
+      );
+
+      expect(res.status).toBe(200);
+      const updateInput = mockUpdateCommand.mock.calls[0][0];
+      expect(updateInput.UpdateExpression).toContain('#model = :model');
+      expect(updateInput.UpdateExpression).toContain('#title = :title');
+      expect(updateInput.UpdateExpression).toContain('REMOVE #lastLlmAt');
+    });
+
+    test('should preserve lastLlmAt on a title-only patch', async () => {
+      mockSend.mockResolvedValueOnce({ Attributes: threadRow() });
+      const app = createTestApp({});
+
+      const res = await app.request(
+        new Request('http://localhost/thread/thread-123', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ title: 'Only renamed' }),
+        }),
+      );
+
+      expect(res.status).toBe(200);
+      const updateInput = mockUpdateCommand.mock.calls[0][0];
+      expect(updateInput.UpdateExpression).not.toContain('lastLlmAt');
+      expect(updateInput.ExpressionAttributeNames).not.toHaveProperty('#lastLlmAt');
     });
 
     test('should update title and model together', async () => {
@@ -1647,7 +1817,7 @@ describe('Chat History Route', () => {
       expect(firstPut.Item.ThreadId).not.toBe('shared-thread');
     });
 
-    test('should scope an assistant save to the caller partition without touching metadata', async () => {
+    test('should scope an assistant save to the caller partition and its thread row', async () => {
       mockSend.mockResolvedValue({});
       const app = createTestApp({});
 
@@ -1658,7 +1828,9 @@ describe('Chat History Route', () => {
 
       expect(res.status).toBe(200);
       expect(mockUpdateCommand).not.toHaveBeenCalled();
-      const putInput = sentTxnItems()[0][1].Put;
+      const [update, putInput] = [sentTxnItems()[0][0].Update, sentTxnItems()[0][1].Put];
+      expect(update.Key).toEqual({ UserId: 'user-456', ThreadId: 'shared-thread' });
+      expect(update.UpdateExpression).not.toContain('updatedAt');
       expect(putInput.Item.ThreadId).toBe(partitionKey('user-456', 'shared-thread'));
       expect(putInput.Item.UserId).toBe('user-456');
     });

@@ -2,17 +2,22 @@ import { z } from 'zod';
 import { LLM_PROVIDERS } from '@vela/common/contracts/llm';
 
 // Chat History Schemas
+export const ChatThreadModelSchema = z.object({
+  provider: z.enum(LLM_PROVIDERS),
+  model: z.string().min(1, 'model is required'),
+});
+
+// model is consumed only for a user turn and lastLlmAt only for an assistant
+// turn; the save route ignores the other pairing and messageItem never copies
+// metadata fields into message rows.
 export const ChatHistoryItemSchema = z.object({
   ThreadId: z.string().min(1, 'ThreadId is required'),
   Timestamp: z.number().int().positive('Timestamp must be a positive integer'),
   UserId: z.string().min(1, 'UserId is required'),
   message: z.string().min(1, 'Message is required'),
   is_user: z.boolean(),
-});
-
-export const ChatThreadModelSchema = z.object({
-  provider: z.enum(LLM_PROVIDERS),
-  model: z.string().min(1, 'model is required'),
+  model: ChatThreadModelSchema.optional(),
+  lastLlmAt: z.number().int().positive('lastLlmAt must be a positive integer').optional(),
 });
 
 export const ChatThreadSummarySchema = z.object({
@@ -21,6 +26,7 @@ export const ChatThreadSummarySchema = z.object({
   createdAt: z.number().int().positive('createdAt must be a positive integer'),
   updatedAt: z.number().int().positive('updatedAt must be a positive integer'),
   model: ChatThreadModelSchema.optional(),
+  lastLlmAt: z.number().int().positive().optional(),
 });
 
 export const PatchChatThreadSchema = z

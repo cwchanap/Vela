@@ -10,6 +10,7 @@ import {
   saveChatMessage,
   updateChatThread,
   type ChatHistoryItemDTO,
+  type ChatThreadModelDTO,
   type ChatThreadSummaryDTO,
   type PatchChatThreadDTO,
 } from 'src/services/chatHistoryService';
@@ -31,7 +32,10 @@ export function useChatThreads() {
   });
 }
 
-export function useRenameThread() {
+// One generic title/model mutation: a model change also drops the cached
+// cache-evidence timestamp (the server REMOVEs it in the same update) and a
+// failure restores the whole previous row, including old model/lastLlmAt.
+export function useUpdateThread() {
   const queryClient = useQueryClient();
 
   return useMutation({
@@ -51,7 +55,9 @@ export function useRenameThread() {
                   ...(variables.patch.title !== undefined
                     ? { title: variables.patch.title.trim() }
                     : {}),
-                  ...(variables.patch.model !== undefined ? { model: variables.patch.model } : {}),
+                  ...(variables.patch.model !== undefined
+                    ? { model: variables.patch.model, lastLlmAt: undefined }
+                    : {}),
                   updatedAt: Date.now(),
                 }
               : thread,
@@ -95,14 +101,34 @@ export function useDeleteThread() {
 }
 
 export function useSaveChatMessage() {
+  const queryClient = useQueryClient();
+
   return useMutation({
     mutationFn: (variables: {
       threadId: string;
       userId: string;
       message: string;
       isUser: boolean;
+      model?: ChatThreadModelDTO;
+      lastLlmAt?: number;
     }) =>
-      saveChatMessage(variables.threadId, variables.userId, variables.message, variables.isUser),
+      saveChatMessage(variables.threadId, variables.userId, variables.message, variables.isUser, {
+        model: variables.model,
+        lastLlmAt: variables.lastLlmAt,
+      }),
+    onSuccess: (_data, variables) => {
+      if (variables.isUser) return;
+      // Persisted cache evidence lands on the cached summary in place: no
+      // updatedAt bump and no redundant list refetch. Absent evidence clears
+      // the stored timestamp, matching the server's REMOVE.
+      queryClient.setQueryData<ChatThreadSummaryDTO[]>(chatKeys.threads(variables.userId), (old) =>
+        old?.map((thread) =>
+          thread.ThreadId === variables.threadId
+            ? { ...thread, lastLlmAt: variables.lastLlmAt }
+            : thread,
+        ),
+      );
+    },
   });
 }
 
