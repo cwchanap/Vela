@@ -22,7 +22,11 @@
         >
           {{ providerLabel(scope.opt.provider) }}
         </div>
-        <q-item :key="scope.index" v-bind="scope.itemProps">
+        <q-item
+          :key="scope.index"
+          v-bind="scope.itemProps"
+          :class="{ 'q-virtual-scroll--with-prev': isGroupStart(scope.index) }"
+        >
           <q-item-section>{{ scope.opt.label }}</q-item-section>
         </q-item>
       </template>
@@ -158,7 +162,9 @@ const currentUnavailable = computed(
 );
 
 // Provider sections render in the option slot at each group boundary; the
-// single OpenRouter custom entry is its own section.
+// single OpenRouter custom entry is its own section. The item after a header
+// carries q-virtual-scroll--with-prev so Quasar's virtual scroll measures
+// header+item as one logical option instead of shifting size/index accounting.
 const isGroupStart = (index: number) =>
   index === 0 || props.options[index]!.provider !== props.options[index - 1]!.provider;
 const providerLabel = (provider: LlmProvider) => LLM_PROVIDER_REGISTRY[provider].label;

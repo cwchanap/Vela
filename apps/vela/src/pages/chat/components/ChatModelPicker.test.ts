@@ -326,5 +326,45 @@ describe('ChatModelPicker', () => {
         [{ provider: 'google', model: 'gemini-4-argon' }],
       ]);
     });
+
+    it('merges each group header into the following item for virtual-scroll sizing', async () => {
+      const options = buildLlmModelOptions({ google: 'key', openai: 'key', openrouter: 'key' });
+      const mounted = mountRealPicker({
+        options,
+        pair: { provider: 'google', model: 'gemini-3.8-flash' },
+      });
+      await openMenu(mounted);
+
+      // Quasar measures the menu content element's children one-to-one
+      // against the option-size array: a header rendered before an item must
+      // be merged via q-virtual-scroll--with-prev, or the extra sibling
+      // shifts every subsequent size/index and writes past the array.
+      const children = Array.from(
+        document.querySelectorAll<HTMLElement>('.q-menu .q-virtual-scroll__content > *'),
+      );
+      expect(children.length).toBe(options.length + 3);
+
+      const headers = children.filter((el) => el.hasAttribute('data-testid'));
+      expect(headers.map((h) => h.textContent?.trim())).toEqual(['Google', 'OpenAI', 'OpenRouter']);
+      headers.forEach((header) => {
+        expect(header.nextElementSibling?.classList.contains('q-virtual-scroll--with-prev')).toBe(
+          true,
+        );
+      });
+
+      const items = children.filter((el) => !el.hasAttribute('data-testid'));
+      expect(items).toHaveLength(options.length);
+      items.forEach((item) => {
+        const followsHeader = item.previousElementSibling?.hasAttribute('data-testid') ?? false;
+        expect(item.classList.contains('q-virtual-scroll--with-prev')).toBe(followsHeader);
+      });
+
+      // Quasar counts children without the merge class as logical option
+      // slots, so after the fix it must equal options.length exactly.
+      const logicalSlots = children.filter(
+        (el) => !el.classList.contains('q-virtual-scroll--with-prev'),
+      ).length;
+      expect(logicalSlots).toBe(options.length);
+    });
   });
 });
