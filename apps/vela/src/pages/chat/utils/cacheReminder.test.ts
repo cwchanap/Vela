@@ -26,6 +26,18 @@ describe('cacheReminder', () => {
       );
     });
 
+    it('hides 1 ms past the TTL + 300 boundary, before rounding for display', () => {
+      const start = 1_700_000_000_000;
+      expect(
+        cacheReminder('anthropic', start, start + (300 + MAX_ELAPSED_WINDOW_SECONDS) * 1000 + 1)
+          .state,
+      ).toBe('hidden');
+      expect(
+        cacheReminder('openai', start, start + (1800 + MAX_ELAPSED_WINDOW_SECONDS) * 1000 + 1)
+          .state,
+      ).toBe('hidden');
+    });
+
     it('hides a historical thread reloaded long after its persisted timestamp', () => {
       const start = 1_700_000_000_000;
       expect(cacheReminder('openai', start, start + 30 * 60 * 1000 + 301 * 1000).state).toBe(
