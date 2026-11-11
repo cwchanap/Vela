@@ -1,25 +1,27 @@
 # HPA-758 — Chat model picker and cache reminder: single-PR implementation plan
 
-**Date:** 2026-11-10  
+**Date:** 2026-11-10; revised 2026-11-11  
 **Linear:** https://linear.app/cwchanap/issue/HPA-758/add-chat-model-picker-and-prompt-cache-expiry-reminder  
-**Design:** [HPA-758 chat model picker and cache reminder design](../specs/2026-11-10-hpa758-chat-model-picker-cache-reminder-design.md)  
-**Delivery rule:** One HPA-758 PR. This draft starts with the design + plan only. Commit all later code, test changes, and review revisions to this same branch/PR. No implementation PR or separate "phase" tickets.
+**Design:** [Reconciled HPA-758 design](../specs/2026-11-10-hpa758-chat-model-picker-cache-reminder-design.md)  
+**Review:** https://github.com/cwchanap/Vela/pull/84#pullrequestreview-5855374846  
+**Delivery:** This same draft PR #84 contains documentation now, implementation/tests/review fixes next. **One PR for this ticket**, no second implementation PR.
 
-## Why this task is next
+## Alignment and decisions
 
-HPA-754 (shared provider registry), HPA-755 (per-provider settings/keys), and HPA-756 (chat sidebar + thread model PATCH) are all Done and already merged. HPA-758 is Todo and has no dedicated PR. HPA-757 (TTS) is also unblocked but independent. HPA-824/HPA-833 remain backlog follow-ups, not prerequisites.
+HPA-754, HPA-755 and HPA-756 have merged; HPA-758 is In Progress. Keep HPA-757 (TTS), HPA-824 (profile CAS) and HPA-833 (preference tombstones) separate. Follow YAGNI: extend the existing chat store, model settings, thread save/patch endpoints and shared registry. No new dependency, DynamoDB table/GSI, API endpoint, LLM transport change, backfill, cache service or billing logic.
 
-## Design decisions to preserve
+The [design review](https://github.com/cwchanap/Vela/pull/84#pullrequestreview-5855374846) was **accepted in full**:
 
-- Use the existing LLM_PROVIDER_REGISTRY, settings store, capabilities query, chat page, LlmResponse usage, chat-history service, and thread metadata table.
-- Chat model is per-thread; new chats start from Settings. Optional thinking is a **temporary current-chat override**, not a new saved preference field. The backend already applies model defaults when thinking is omitted.
-- Model PATCH is already supported; extend only that contract for optional lastLlmAt. No new table, cache database, GSI, billing/cost API, event bus, or global settings mutation.
-- Show a cache **estimate** only when cachedInputTokens or cacheWriteTokens is positive and provider cacheTtlSeconds is non-null. Elapsed 30-minute OpenAI windows are not guaranteed actual eviction.
-- One PR for the entire ticket. Keep testable local helpers, but do not extract a generic model-picker framework or standalone caching subsystem.
+1. Active model, temporary thinking override and cache timestamp belong in the existing Pinia chat store, since that store survives route changes.
+2. Extract the already-shipped Settings model-option logic to one pure helper and add llmSettings.selectionFor(pair), reused by default Settings selection and the Chat picker. Do not fork provider rules, key/thinking lookup, custom OpenRouter ID or available-option handling.
+3. Store lastLlmAt in the **assistant-message save transaction**, not a second cache-only PATCH. Missing evidence removes the timestamp. The backend removes lastLlmAt automatically when model PATCH changes the model. PATCH schema stays unchanged.
+4. Include model on the **first user-message save** (if_not_exists), not a new-thread PATCH between save and generate. Existing saved-thread picker changes still use model PATCH.
+5. Replace root bun run typecheck (which only covers mobile in this repo) with the actual affected gates: vela-api compile and @vela/app build (vue-tsc via Vite checker).
+6. Rename useRenameThread to **useUpdateThread** (title + model), clear the optimistic lastLlmAt when model changes, and place the small chip **above ChatComposer**, not inside the header.
 
-## Task 1 — Extend existing thread metadata PATCH/list contract
+## Task 1 — API save/list metadata and mutation contract
 
-**Files**
+**Modify**
 
 - apps/vela-api/src/validation.ts
 - apps/vela-api/src/routes/chat-history.ts
@@ -28,104 +30,116 @@ HPA-754 (shared provider registry), HPA-755 (per-provider settings/keys), and HP
 - apps/vela/src/services/chatHistoryService.test.ts
 - apps/vela/src/composables/queries/useChatThreads.ts
 - apps/vela/src/composables/queries/useChatThreads.test.ts
+- apps/vela/src/composables/queries/useChatThreads.auth.test.ts (where affected)
+- apps/vela/src/composables/queries/index.ts (export rename)
 
 **Steps**
 
-1. Add optional lastLlmAt (positive epoch milliseconds) to thread list/response DTO. In PATCH, accept integer milliseconds or explicit null to clear; reject invalid values and empty patches.
-2. Reuse the existing conditional UpdateCommand keyed by authenticated user + thread ID. Build SET and REMOVE clauses for title, model, lastLlmAt. Model change should clear lastLlmAt **atomically** in the same PATCH from the UI. A cache-only timestamp update must not bump updatedAt or reorder the sidebar; title/model updates retain the current monotonic updatedAt semantics.
-3. Return lastLlmAt from GET /threads; DynamoDB is schemaless, so existing rows simply have no value. Do not touch message-table structure, API auth, user-scoped keys, or CDK.
-4. Extend PatchChatThreadDTO and ChatThreadSummaryDTO. Reuse the current thread mutation/optimistic list cache; rename useRenameThread to useUpdateThread if needed so model updates do not use misleading method names. Do not optimistically assign a cache timestamp before confirmed usage.
-5. Test: GET includes/missing timestamp; PATCH set/clear/combine with model/title; invalid/empty 400, unowned/missing 404, untouched title/model retained, cache-only PATCH leaves updatedAt unchanged, failed optimistic model update rolls back; existing rename/delete behavior remains green.
+1. Extend ChatHistoryItemSchema with optional model pair and positive-integer lastLlmAt. Consume model only for a user turn and lastLlmAt only for an assistant turn. The API continues to overwrite authenticated UserId and server Timestamp. No need to add either to messageItem.
+2. On **user** save, conditionally append model = if_not_exists(model, :model) to the current metadata Update inside the existing message/metadata transaction when supplied. Its fallback for a stale updatedAt still requires an alive thread. Keep server-derived title, monotonic updatedAt, and existing deletion fencing. A new row is created with its active model; an existing stored model is never overwritten by a later user save or by the first-save retry.
+3. On **assistant** save, replace the thread ConditionCheck in the current transaction with a conditioned Update carrying the unchanged THREAD_ALIVE_CONDITION. SET lastLlmAt when the optional positive timestamp is supplied; otherwise REMOVE lastLlmAt. Keep the separate message Put. Do **not** bump updatedAt or add a second request. Missing/deleted rows still reject with 404.
+4. In the existing model PATCH code, append REMOVE lastLlmAt when patch.model is present, regardless of whether title is also patched. Title-only updates retain timestamp. No lastLlmAt in PatchChatThreadSchema and no null semantics. Keep current 404/400 and identity conditions.
+5. Include optional lastLlmAt in GET /threads explicit projection and ChatThreadSummaryDTO; leave existing rows without it untouched. Update saveChatMessage and useSaveChatMessage to accept typed optional metadata. Keep user/query-key scope. On successful assistant save, update the cached thread list lastLlmAt in place, without changing updatedAt or triggering a redundant fetch.
+6. Rename the generic title/model mutation to useUpdateThread and update its callers/exports. Optimistic model patch clears the cached lastLlmAt, rolls back old model/timestamp on error, and invalidates on settle. Title-only rename still behaves as before.
+7. Tests: first user save sets model and title atomically; subsequent save cannot replace a manually chosen model; model omitted is legal; assistant save with/without cache evidence runs conditioned metadata SET/REMOVE + message Put, no updatedAt bump; delete barrier and 404; list fields; PATCH model clears timestamp, title-only preserves; optimistic update/rollback; user scope.
 
-**Gate:** API chat-history tests, API compile, chat-history service/mutation tests pass.
+**Gate:** Focused Bun API tests and vela-api compile; service/composable unit tests. No runtime code or tests are included in the current docs-only submission.
 
-## Task 2 — Wire per-thread model selection into the existing chat page
+## Task 2 — Shared options and Pinia-owned chat selection
 
-**Files**
+**Modify**
 
-- apps/vela/src/pages/chat/AIChatPage.vue
-- apps/vela/src/pages/chat/components/ChatModelPicker.vue (new, small feature-local UI)
-- apps/vela/src/pages/chat/components/ChatModelPicker.test.ts (new)
-- apps/vela/src/pages/chat/AIChatPage.test.ts
-- apps/vela/src/stores/chat.ts (only if current active selection must survive page remount; prefer existing state + thread query)
-- apps/vela/src/composables/queries/useLlmCapabilitiesQuery.ts (reuse unchanged if possible)
-
-**Steps**
-
-1. Derive grouped, available model options from the registry, saved provider keys, and affirmative capability results. Only Google/OpenRouter may rely on server keys. Show missing-capabilities retry and unavailable current-thread choice without silently switching it. Include a validated custom OpenRouter model-ID input.
-2. Add the compact model select and optional thinking select to the chat header without changing ChatComposer, global MainLayout drawer, or ChatSidebar. Use one narrow-screen layout and keep existing chat/test selectors intact.
-3. Maintain the active model as one { provider, model } value for the current chat; when selecting a thread, use row.model or Settings default. Starting a new chat resets to Settings default. On a saved thread, PATCH a model change before making it active; on rejection show an error and retain the old model. On a fresh thread, keep the choice locally until the first user save creates the row, then PATCH before calling the LLM.
-4. Resolve key and thinking for **the active selection**, not llmSettings.selection (which follows the global Settings default). Default thinking is saved per-model preference if present, otherwise the registry's default; explicit chat thinking is allowed only from that model's efforts and never writes Settings. Hide thinking for OpenRouter; reset the temporary override when model/thread changes.
-5. Keep onSend's existing user-save -> generate -> assistant-save ordering, loading lock, account/session generation guard, and full-history request. Snapshot provider/model/key/thinking immediately before generate; do not send a stale selection after an async thread switch. Preserve missing-key/server-capabilities errors as a visible actionable message.
-6. On restartDeletedChat, persist the active model on the fresh thread after the new user row exists. Ensure the new ID gets no cache indication inherited from the deleted thread.
-7. Test: new-chat default; provider-key and server-key option filtering (including failed capability lookup); OpenRouter ID; valid effort options and ephemeral override; persisted-thread reopen; model PATCH rollback; first user message PATCH ordering; mid-chat switch sends complete history to the new model with the right key; deleted-thread retry/account-switch race.
-
-**Gate:** Component and AIChatPage unit tests pass; existing sidebar and settings tests still pass.
-
-## Task 3 — Add the evidence-gated cache timer and persistence
-
-**Files**
-
-- apps/vela/src/pages/chat/utils/cacheReminder.ts (new, pure helper)
-- apps/vela/src/pages/chat/utils/cacheReminder.test.ts (new)
-- apps/vela/src/pages/chat/components/ChatCacheReminder.vue (new, small)
-- apps/vela/src/pages/chat/components/ChatCacheReminder.test.ts (new)
+- apps/vela/src/pages/settings/components/LlmProvidersSection.vue
+- apps/vela/src/pages/settings/components/LlmProviderCard.vue
+- apps/vela/src/stores/llmSettings.ts
+- apps/vela/src/stores/chat.ts
 - apps/vela/src/pages/chat/AIChatPage.vue
 - apps/vela/src/pages/chat/AIChatPage.test.ts
+- apps/vela/src/pages/settings/components/LlmProvidersSection.test.ts and LlmProviderCard.test.ts
+- apps/vela/src/stores/chat.test.ts and llmSettings.test.ts
+
+**Add**
+
+- apps/vela/src/utils/llmModelOptions.ts and llmModelOptions.test.ts
+- apps/vela/src/pages/chat/components/ChatModelPicker.vue and ChatModelPicker.test.ts
 
 **Steps**
 
-1. Implement a pure function accepting provider, lastLlmAt, and now. Return hidden/warm/warning/elapsed state, bounded remaining seconds, and M:SS. TTL comes only from LLM_PROVIDER_REGISTRY.cacheTtlSeconds. Hide for Google/OpenRouter or absent evidence.
-2. Drive the chip via one page-local clock tick (one-second interval while mounted, clean up on unmount). Small neutral warm state; warning for strictly less than 60 seconds; elapsed-window copy at zero. Do not present guaranteed cache hits, evictions, or billing claims.
-3. Record Date.now() **immediately before** llmClient.generate. After a successful response, inspect usage.cachedInputTokens/cacheWriteTokens. Positive usage on a supported provider permits lastLlmAt = requestStart; zero usage clears lastLlmAt; errors do not synthesize a refresh. Wait until assistant history is saved before PATCHing the timestamp to the existing thread; do not turn a cache PATCH failure into a failed response.
-4. Model PATCH includes lastLlmAt: null, clearing evidence on model switch. New chat, thread switch, deleted-thread restart, sign-out, and account changes also reset local chip state. A reloaded thread with lastLlmAt computes its current state from the persisted timestamp and selection.
-5. Test exact boundaries: no evidence; positive cached read and positive write independently; 5:00, 1:00, 0:59, 0:00; future clock skew; countdown while idle; OpenAI 30m, Anthropic 5m, Gemini/OpenRouter hidden; response-start vs completion timestamp; zero usage; request error; cache PATCH failure; new provider/model/thread/user isolation; persisted reload.
+1. Extract a **pure** utility from Settings for provider-encoded model options, registry model lists and efforts, available-key/capability filtering, an unavailable-current display option, and the OpenRouter custom-model entry. Share it with Settings and Chat without changing Settings save/draft behavior. Let /llm-chat/capabilities be the source of server-key eligibility; a failed lookup means no server-key-only choices.
+2. Add selectionFor({ provider, model }) in llmSettings to return provider/model, its saved key and that model's saved effort override. Have the existing computed selection delegate to selectionFor(global default). Avoid reimplementing this in the chat page; existing backend normalizer remains the validator.
+3. Add activeModel, thinkingOverride, cacheStartedAt plus small setters to the existing Pinia chat store. startNewChat/resetForUser reset all three. AIChatPage explicitly seeds fresh activeModel from Settings when creating a new chat / first mounting a new account; **do not reset an existing active model on route remount**. Selecting a thread, after existing stale checks, restores row.model (or Settings default) and row.lastLlmAt and clears its ephemeral thinking choice. restartDeletedChat retains selected model but clears stale cacheStartedAt.
+4. Show grouped model options in a compact ChatModelPicker in the chat **header** and optional native effort select next to it. For a free-form OpenRouter model ID require nonempty trimmed input. Render the unavailable current model clearly and prevent silent fallback. Thinking choices are Default (saved thinking/registry fallback) plus the model's supported efforts; OpenRouter hides effort control.
+5. Saved-thread model changes await the existing PATCH /thread/:id mutation before changing store.activeModel; disable sending/model edits while pending and rollback on error. Fresh-thread model changes update local store immediately; the **first user save carries the model** (no model PATCH). Subsequent user saves also may carry it as a harmless if_not_exists. Preserve full chat history across model changes.
+6. Snapshot selectionFor(activeModel), any temporary thinking override, correct provider key and authenticated identity right before llmClient.generate; never use llmSettings.selection for a thread-specific choice. Guard async updates by operation + session generation, and block send for unavailable choices with a helpful key/capabilities hint. Do not write global Settings.
+7. Tests: Settings reuse and defaults unchanged; capability success/error, user key vs confirmed server key, custom OpenRouter, effort options, unavailable stored model; fresh chat default; navigation away/back preserves model + transcript; reload from thread row; first user save carries model; saved-thread PATCH rollback; mid-chat complete-history request with new provider and key; pending locks, account switch and deleted-thread replacement.
 
-**Gate:** Cache pure-function/component tests and AIChatPage regression tests pass with fake clocks and mocked APIs.
+**Gate:** app unit/component suites for Settings, chat store and Chat page, plus existing sidebar tests.
 
-## Task 4 — Mocked browser verification and final acceptance
+## Task 3 — Cache evidence, one timer and assistant-save persistence
 
-**Files**
+**Add**
 
-- apps/vela/e2e/chat-sidebar.spec.ts (extend existing authenticated desktop/mobile scenario)
-- apps/vela/e2e/fixtures/syntheticAuth.ts (adjust only required mock responses)
-- apps/vela/e2e/llm-settings.spec.ts (keep existing Settings behavior unchanged)
-- docs/superpowers/specs/2026-11-10-hpa758-chat-model-picker-cache-reminder-design.md
-- docs/superpowers/plans/2026-11-10-hpa758-chat-model-picker-cache-reminder.md
+- apps/vela/src/pages/chat/utils/cacheReminder.ts and cacheReminder.test.ts
+- apps/vela/src/pages/chat/components/ChatCacheReminder.vue and ChatCacheReminder.test.ts
+
+**Modify**
+
+- apps/vela/src/pages/chat/AIChatPage.vue and AIChatPage.test.ts
+- apps/vela/src/stores/chat.ts and chat.test.ts
 
 **Steps**
 
-1. Mock registry-backed providers, user keys/capabilities, chat response usage, thread GET/PATCH and send history. Exercise desktop and ~375px mobile: model select, send, reload, restore, switch provider mid-chat, display near-expiry vs elapsed, and hide on zero usage/Gemini.
-2. Verify no hidden duplicate navigation, no regression to model Settings, and no overflow in the narrow header/composer. Confirm existing renamed/deleted thread behavior and authentication isolation remain intact.
-3. Run the applicable commands from repo root (use focused test files during development):
+1. Add pure cacheReminder(provider, cacheStartedAt, now) returning hidden/warm/warning/elapsed + bounded remaining seconds and M:SS. Use only LLM_PROVIDER_REGISTRY.cacheTtlSeconds (Anthropic 300 s / OpenAI 1800 s / null for Google and OpenRouter). At 60 s still warm, at 59 s warn, at 0 show elapsed.
+2. Place ChatCacheReminder **directly above the composer input** and below messages, rather than in the already busy mobile header. Use a **single page-local 1 s setInterval**, cleared on unmount. No library, background sync, keep-alive or polling.
+3. Capture Date.now() immediately before the LLM request. On successful response, cache evidence = cachedInputTokens > 0 OR cacheWriteTokens > 0. If positive and the provider has a TTL, set the chat store cacheStartedAt to the request-start time, and include lastLlmAt in the pending **assistant save**; otherwise clear cacheStartedAt and omit lastLlmAt so the same transaction REMOVEs old evidence. Errors don't synthesize a fresh timer.
+4. Keep the existing user-save → generate → assistant-save order and deletion-restart logic. The timestamp is persisted only when the assistant save commits; a successful response with failed history save can show a local estimate but cannot claim a durable cache marker. After a deleted-thread restart, first re-save the user turn with model, then replay assistant with this response's evidence; clear any old evidence before replay.
+5. On saved-thread model PATCH, the server clears lastLlmAt atomically, and the client optimistic row + chat store clear the current timer. Selecting a thread/reloading copies optional lastLlmAt into chat store after identity/staleness guards. Successful assistant save patches the local query cache without updating sidebar updatedAt.
+6. Tests with fake time: evidence only on positive reads/writes; 5:00, 1:00, 0:59, 0:00 and future skew; request start vs completion time; zero cache, request error and failed assistant save; model/thread/user switch, route navigation, reload; Gemini/OpenRouter hidden; no invalid optimistic cache timestamp or extra PATCH.
+
+**Gate:** Pure helper, component and AIChatPage tests pass with fake clocks and mocked API.
+
+## Task 4 — Mocked browser checks and acceptance
+
+**Modify**
+
+- apps/vela/e2e/chat-sidebar.spec.ts
+- apps/vela/e2e/fixtures/syntheticAuth.ts (only necessary request mocks)
+- apps/vela/e2e/llm-settings.spec.ts (verify regression, change only if needed)
+- these same spec/plan docs for tested receipts
+
+**Steps**
+
+1. Mock provider keys, capability GET, chat usage, thread list, PATCH and user/assistant saves. Exercise selection, mid-chat switching with full history, saved-thread persistence after reload, cache warm/near-expiry/elapsed/hidden, custom OpenRouter and failed capability lookup.
+2. **Explicitly call page.setViewportSize({ width: 375, height: 812 })** for mobile within chat-sidebar.spec.ts. The mocked Playwright config defines only a Desktop Chrome project; without a manual viewport change no mobile layout is exercised. Also verify desktop width, no header/composer overflow and existing rename/delete and Settings scenarios.
+3. Run affected gates (focused tests first, then project):
    - bun --filter vela-api test:unit
    - bun --filter vela-api compile
    - bun --filter @vela/app test:unit
    - bun --filter @vela/app test:e2e:mocked
    - bun run lint
-   - bun run typecheck
-   - bun --filter @vela/app build
-4. Optional live check with the user's own provider keys: two-turn Japanese chat under Anthropic/OpenAI, confirm usage is actually nonzero when long enough, verify stored model/timestamp after reload. This is an **acceptance check**, not a unit-test claim; do not require a paid provider call or silently send one without appropriate authorization. A synthetic browser check does not prove live cache hits.
-5. Update these same design/plan documents with review decisions and verification receipts, still on this single PR. Merge only once acceptance is satisfactory; do not move HPA-758 to Done from the docs-only submission.
+   - bun --filter @vela/app build (vue-tsc checker)
+   - **Do not list root bun run typecheck as verification for this ticket**; it currently only covers @vela/mobile.
+4. Optional explicitly authorized live Japanese two-turn provider checks verify real response usage and persistence. Do not claim mocked tests prove real cache hits, make paid calls without authorization or block the draft spec on an unavailable credential.
+5. Record real test outcomes and any review-driven revisions on this same PR. Keep the PR draft until implementation and acceptance; do not mark Linear Done from docs alone.
 
 ## Risk and deferral notes
 
-| Risk | Smallest acceptable handling |
+| Risk | Minimal handling |
 | --- | --- |
-| First message has no thread row yet | Persist user message first, then model PATCH before generate |
-| A model changes after a cache hit | Atomically set model and clear lastLlmAt |
-| Provider says zero cached tokens | Hide/clear chip; don't invent cache creation |
-| Provider may retain a cache beyond 30m or route to a different machine | Label as estimated window and say **may** miss cache |
-| Device clock differs across browsers | Best-effort epoch-ms timer; defer server clock synchronization |
-| Model selection PATCH fails | Retain old model on existing thread; notify if fresh-thread choice did not persist |
-| Other browser edits same thread concurrently | Defer precise cross-client CAS for this hobby-scale feature |
-| No credentials for live LLM smoke | Complete mocked automated gates and list live verification as pending |
+| Fresh chat has no metadata row | Carry model on first user save; no first-send PATCH |
+| Cache evidence and assistant message must agree | One existing transaction SETs/REMOVEs lastLlmAt with assistant Put |
+| Model change invalidates old cache marker | Model PATCH atomically REMOVEs lastLlmAt on server and optimistic client cache |
+| Route remount retains messages | Active model and cache timestamp live in Pinia next to transcript |
+| Failed capability fetch | Only saved user-key options; explicit retry and block unavailable model |
+| Provider eviction/billing is uncertain | Estimated-window copy, never guaranteed cost or expiry |
+| Same-thread concurrent client edits | Defer CAS, server clock sync and cross-client reconciliation |
+| Synthetic tests cannot verify live vendor caching | Report optional live check separately |
 
-## PR review checklist
+## Same-PR acceptance checklist
 
-- [ ] Every acceptance item in HPA-758 maps to one test or explicit manual check.
-- [ ] Shared provider registry and existing thread PATCH are reused; no new infrastructure or dependency.
-- [ ] Chat model selection is separate from Settings default; thinking override scope is explicit.
-- [ ] Only confirmed cache usage causes a timer; warning copy does not promise billing outcomes.
-- [ ] Model, timestamp and chat state are identity/thread scoped; no stale async result changes the current chat.
-- [ ] Focused tests, full relevant checks, and mocked mobile/desktop flow are recorded on this same PR.
+- [ ] Model/key availability and thinking choices share Settings implementation.
+- [ ] Active model sticks across navigation/reload and is sent on first user save.
+- [ ] Existing thread PATCH selection persists without silent fallback; rollback on error.
+- [ ] Assistant save transaction persists or clears cache evidence with no extra HTTP call.
+- [ ] Cache chip is evidence-gated, near composer, timer cleaned up, TTL registry-driven.
+- [ ] API/chat/Settings unit tests, API compile, web build, lint and desktop/mobile mocked browser checks completed and reported.
