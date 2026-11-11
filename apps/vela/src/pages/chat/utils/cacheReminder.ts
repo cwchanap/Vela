@@ -34,8 +34,11 @@ export const cacheReminder = (
   const ttlSeconds = LLM_PROVIDER_REGISTRY[provider].cacheTtlSeconds;
   if (ttlSeconds === null) return hidden;
 
-  const elapsedSeconds = Math.floor((now - cacheStartedAt) / 1000);
-  if (elapsedSeconds > ttlSeconds + MAX_ELAPSED_WINDOW_SECONDS) return hidden;
+  const elapsedMs = now - cacheStartedAt;
+  // Compare raw ms against the cutoff: flooring first would let a diff of
+  // TTL + 300 s + 1 ms round down and survive past the mandatory window.
+  if (elapsedMs > (ttlSeconds + MAX_ELAPSED_WINDOW_SECONDS) * 1000) return hidden;
+  const elapsedSeconds = Math.floor(elapsedMs / 1000);
 
   const remainingSeconds = Math.min(
     Math.max(ttlSeconds - Math.max(elapsedSeconds, 0), 0),
