@@ -51,6 +51,11 @@
           :is-typing="chat.isTyping"
         />
 
+        <ChatCacheReminder
+          :provider="chat.activeModel?.provider ?? null"
+          :cache-started-at="chat.cacheStartedAt"
+        />
+
         <ChatComposer
           v-model="input"
           :loading="chat.isLoading || chat.modelPatchPending"
@@ -122,6 +127,7 @@ import ChatMessageList from './components/ChatMessageList.vue';
 import ChatComposer from './components/ChatComposer.vue';
 import ChatSidebar from './components/ChatSidebar.vue';
 import ChatModelPicker from './components/ChatModelPicker.vue';
+import ChatCacheReminder from './components/ChatCacheReminder.vue';
 import {
   useChatThreads,
   useUpdateThread,
@@ -321,6 +327,7 @@ const persistMessage = async (
   isUser: boolean,
   isStale: () => boolean,
   model?: ChatModelPair,
+  lastLlmAt?: number,
 ): Promise<PersistResult> => {
   try {
     await saveChatMessageMutation.mutateAsync({
@@ -329,6 +336,9 @@ const persistMessage = async (
       message,
       isUser,
       ...(isUser && model ? { model: { ...model } } : {}),
+      // Only assistant turns carry cache evidence; omitting it makes the
+      // server's message-write transaction REMOVE any old timestamp.
+      ...(!isUser && lastLlmAt !== undefined ? { lastLlmAt } : {}),
     });
     if (isUser && !isStale() && chat.chatId === cid) {
       // The row now exists; a client UUID alone never proved persistence.
@@ -358,6 +368,7 @@ const restartDeletedChat = async (
   turns: Array<{ message: string; isUser: boolean }>,
   isStale: () => boolean,
   model?: ChatModelPair,
+  lastLlmAt?: number,
 ): Promise<string | null> => {
   const freshId = crypto.randomUUID();
   chat.setChatId(freshId);
@@ -387,9 +398,13 @@ const restartDeletedChat = async (
       turn.isUser,
       isStale,
       turn.isUser ? model : undefined,
+      turn.isUser ? undefined : lastLlmAt,
     );
     if (status !== 'saved' || isStale()) return null;
   }
+  // The recovered response's own evidence re-primes the replacement thread;
+  // a failed replay returns above without claiming it.
+  if (lastLlmAt !== undefined) chat.setCacheStartedAt(lastLlmAt);
   return freshId;
 };
 
@@ -528,6 +543,9 @@ const onSend = async (draft: string) => {
     // awaited save above must not leak into this request.
     const requestSelection = llmSettings.selectionFor(activePair);
     const thinking = chat.thinkingOverride ?? requestSelection.thinking;
+    // Snapshot immediately before generate: cache evidence is dated from
+    // request start, not response completion.
+    const requestStartedAt = Date.now();
     const resp = await llmClient.generate(
       {
         provider: requestSelection.provider,
@@ -549,12 +567,33 @@ const onSend = async (draft: string) => {
 
     chat.addMessage({ type: 'ai', content: resp.text });
     turns.push({ message: resp.text, isUser: false });
+
+    // Cache evidence only on positive reads/writes, and only for providers
+    // with a prompt-cache TTL: otherwise clear the timer and omit lastLlmAt
+    // so the assistant-save transaction REMOVEs any old timestamp. A failed
+    // history save below may keep this local estimate but claims nothing.
+    const usage = resp.usage;
+    const hasCacheEvidence = !!usage && (usage.cachedInputTokens > 0 || usage.cacheWriteTokens > 0);
+    const assistantLastLlmAt =
+      hasCacheEvidence && LLM_PROVIDER_REGISTRY[activePair.provider].cacheTtlSeconds !== null
+        ? requestStartedAt
+        : undefined;
+    chat.setCacheStartedAt(assistantLastLlmAt ?? null);
+
     // Skip the assistant save when the user save failed: the message would be
     // written without a companion user turn or surviving thread metadata.
     if (userSaved) {
-      const assistantSave = await persistMessage(saveCid, uid, resp.text, false, isStale);
+      const assistantSave = await persistMessage(
+        saveCid,
+        uid,
+        resp.text,
+        false,
+        isStale,
+        undefined,
+        assistantLastLlmAt,
+      );
       if (assistantSave === 'gone') {
-        await restartDeletedChat(uid, turns, isStale, activePair);
+        await restartDeletedChat(uid, turns, isStale, activePair, assistantLastLlmAt);
       }
     }
   } catch (e: unknown) {

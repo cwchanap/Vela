@@ -17,7 +17,8 @@ import { useChatStore } from '../../stores/chat';
 import { useLLMSettingsStore } from '../../stores/llmSettings';
 import { useAuthStore } from '../../stores/auth';
 import * as llmModule from '../../services/llm';
-import type { LlmResponse } from '@vela/common';
+import type { LlmResponse, LlmUsage } from '@vela/common';
+import type { ChatThreadSummaryDTO } from '../../services/chatHistoryService';
 import * as awsAmplify from 'aws-amplify/auth';
 
 // Mock modules
@@ -190,6 +191,12 @@ describe('AIChatPage', () => {
             }
             const body = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>;
             if (typeof body.title === 'string') thread.title = body.title.trim();
+            // Server contract: a model PATCH SETs model and REMOVEs lastLlmAt
+            // atomically; a title-only PATCH leaves both alone.
+            if (body.model !== undefined) {
+              thread.model = body.model as MockThread['model'];
+              delete thread.lastLlmAt;
+            }
             thread.updatedAt = Date.now();
             return okJson({ thread });
           };
@@ -3329,6 +3336,256 @@ describe('AIChatPage', () => {
       mountComponent();
       expect(wrapper.find('.chat-header--stacked').exists()).toBe(false);
       expect(wrapper.find('[data-testid="chat-model-picker"]').exists()).toBe(true);
+    });
+  });
+
+  describe('Chat cache reminder', () => {
+    const T0 = 1_700_000_000_000;
+
+    const anthropicUsage = (overrides: Partial<LlmUsage> = {}): LlmUsage => ({
+      inputTokens: 200,
+      outputTokens: 50,
+      cachedInputTokens: 150,
+      cacheWriteTokens: 0,
+      ...overrides,
+    });
+
+    // spyOn, not vi.mocked().mock*: earlier tests' spyOn+restoreAllMocks cycle
+    // leaves generate as a plain function without mock methods.
+    const mockLLMResponseWithUsage = (text: string, usage: LlmUsage) => {
+      vi.spyOn(llmModule.llmClient, 'generate').mockResolvedValue({ text, usage });
+    };
+
+    const enableAnthropic = () => {
+      useLLMSettingsStore().llm.keys.anthropic = 'test-anthropic-key';
+    };
+
+    const cacheChip = () => wrapper!.find('[data-testid="chat-cache-reminder"]');
+    const assistantSaveBody = () => saveBodies.find((b) => b.is_user === false);
+    const patchCalls = () =>
+      fetchMock.mock.calls.filter(
+        ([, init]) => (init as RequestInit | undefined)?.method === 'PATCH',
+      );
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    // Fake time must be installed before mounting: Quasar's QBtn click path
+    // stops dispatching when Date is swapped mid-mounted-component.
+    const mountWithFakeTime = (time = T0) => {
+      vi.useFakeTimers({ toFake: ['Date'] });
+      vi.setSystemTime(time);
+      mountComponent();
+      return flushPromises();
+    };
+
+    it('shows the chip and persists the request-start timestamp on positive cached reads', async () => {
+      enableAnthropic();
+      await mountWithFakeTime();
+      await chooseModel('anthropic::claude-opus-5-5');
+      mockLLMResponseWithUsage('Cached reply', anthropicUsage());
+
+      await sendMessage('cache me');
+      await flushPromises();
+
+      expect(cacheChip().text()).toBe('Cache likely warm · 5:00 left');
+      expect(useChatStore().cacheStartedAt).toBe(T0);
+      expect(assistantSaveBody()!.lastLlmAt).toBe(T0);
+    });
+
+    it('treats positive cache writes as evidence too', async () => {
+      enableAnthropic();
+      await mountWithFakeTime();
+      await chooseModel('anthropic::claude-opus-5-5');
+      mockLLMResponseWithUsage(
+        'Write-cached reply',
+        anthropicUsage({ cachedInputTokens: 0, cacheWriteTokens: 40 }),
+      );
+
+      await sendMessage('write cache');
+      await flushPromises();
+
+      expect(cacheChip().exists()).toBe(true);
+      expect(assistantSaveBody()!.lastLlmAt).toBe(T0);
+    });
+
+    it('omits lastLlmAt and clears a prior timer on a zero-cache response', async () => {
+      enableAnthropic();
+      await mountWithFakeTime();
+      await chooseModel('anthropic::claude-opus-5-5');
+      const chatStore = useChatStore();
+      chatStore.setCacheStartedAt(T0 - 30_000);
+      await flushPromises();
+      expect(cacheChip().exists()).toBe(true);
+      mockLLMResponseWithUsage(
+        'No cache reply',
+        anthropicUsage({ cachedInputTokens: 0, cacheWriteTokens: 0 }),
+      );
+
+      await sendMessage('zero cache');
+      await flushPromises();
+
+      expect(cacheChip().exists()).toBe(false);
+      expect(chatStore.cacheStartedAt).toBeNull();
+      expect(assistantSaveBody()).toBeTruthy();
+      expect('lastLlmAt' in assistantSaveBody()!).toBe(false);
+    });
+
+    it('keeps the previous estimate and synthesizes no evidence when the request errors', async () => {
+      enableAnthropic();
+      await mountWithFakeTime();
+      await chooseModel('anthropic::claude-opus-5-5');
+      const chatStore = useChatStore();
+      chatStore.setCacheStartedAt(T0 - 30_000);
+      vi.spyOn(llmModule.llmClient, 'generate').mockRejectedValue(new Error('provider down'));
+
+      await sendMessage('boom');
+      await flushPromises();
+
+      expect(chatStore.cacheStartedAt).toBe(T0 - 30_000);
+      expect(cacheChip().exists()).toBe(true);
+      expect(saveBodies.some((b) => b.is_user === false)).toBe(false);
+      expect(chatStore.error).toContain('provider down');
+    });
+
+    it('keeps a local chip but claims no durable marker when the assistant save fails', async () => {
+      enableAnthropic();
+      saveFailures.assistant = true;
+      await mountWithFakeTime();
+      await chooseModel('anthropic::claude-opus-5-5');
+      mockLLMResponseWithUsage('Unsaved reply', anthropicUsage());
+
+      await sendMessage('local only');
+      await flushPromises();
+
+      expect(useChatStore().cacheStartedAt).toBe(T0);
+      expect(cacheChip().exists()).toBe(true);
+      expect(notifyCreateSpy).toHaveBeenCalledWith(
+        expect.objectContaining({ type: 'warning', message: 'Failed to save chat history' }),
+      );
+    });
+
+    it('records the request-start time, not the completion time, as cache evidence', async () => {
+      enableAnthropic();
+      await mountWithFakeTime();
+      await chooseModel('anthropic::claude-opus-5-5');
+      const gen = deferred<{ text: string; usage: LlmUsage }>();
+      vi.spyOn(llmModule.llmClient, 'generate').mockImplementation(() => gen.promise);
+
+      await sendMessage('slow provider');
+      await flushPromises();
+      vi.setSystemTime(T0 + 5000);
+      gen.resolve({ text: 'Slow reply', usage: anthropicUsage() });
+      await flushPromises();
+
+      expect(assistantSaveBody()!.lastLlmAt).toBe(T0);
+      expect(useChatStore().cacheStartedAt).toBe(T0);
+    });
+
+    it('hides the chip and omits lastLlmAt for Gemini even with positive usage', async () => {
+      await mountWithFakeTime();
+      mockLLMResponseWithUsage('Gemini reply', anthropicUsage({ cachedInputTokens: 999 }));
+
+      await sendMessage('google cache');
+      await flushPromises();
+
+      expect(cacheChip().exists()).toBe(false);
+      expect(useChatStore().cacheStartedAt).toBeNull();
+      expect(assistantSaveBody()).toBeTruthy();
+      expect('lastLlmAt' in assistantSaveBody()!).toBe(false);
+    });
+
+    it('restores a recent persisted window on thread selection and hides a stale historical one', async () => {
+      threadRows = [
+        createMockThread({ ThreadId: 'thread-1', model: anthropicRow, lastLlmAt: T0 - 60_000 }),
+        createMockThread({ ThreadId: 'thread-2', model: anthropicRow, lastLlmAt: T0 - 601_000 }),
+      ];
+      messageRows = [createMockMessage('Hello', true)];
+      await mountWithFakeTime();
+
+      await wrapper.find('[data-testid="llm-chat-thread-item"]').trigger('click');
+      await flushPromises();
+      expect(cacheChip().text()).toBe('Cache likely warm · 4:00 left');
+      expect(useChatStore().cacheStartedAt).toBe(T0 - 60_000);
+
+      await wrapper.findAll('[data-testid="llm-chat-thread-item"]')[1]!.trigger('click');
+      await flushPromises();
+      // Display-only hide: the stored timestamp survives for the record.
+      expect(cacheChip().exists()).toBe(false);
+      expect(useChatStore().cacheStartedAt).toBe(T0 - 601_000);
+    });
+
+    it('clears the timer on a saved-thread model change without an extra PATCH or stale optimistic timestamp', async () => {
+      enableAnthropic();
+      useLLMSettingsStore().llm.keys.openai = 'test-openai-key';
+      threadRows = [
+        createMockThread({ ThreadId: 'thread-1', model: anthropicRow, lastLlmAt: T0 - 60_000 }),
+      ];
+      messageRows = [createMockMessage('Hello', true)];
+      await mountWithFakeTime();
+      await wrapper.find('[data-testid="llm-chat-thread-item"]').trigger('click');
+      await flushPromises();
+      expect(cacheChip().exists()).toBe(true);
+
+      await chooseModel('openai::gpt-6.1-sol');
+      await flushPromises();
+
+      expect(cacheChip().exists()).toBe(false);
+      expect(useChatStore().cacheStartedAt).toBeNull();
+      expect(patchCalls()).toHaveLength(1);
+      const patchBody = JSON.parse(String((patchCalls()[0]![1] as RequestInit).body));
+      expect(patchBody.model).toEqual(openaiPair);
+      expect('lastLlmAt' in patchBody).toBe(false);
+      const threads = queryClient.getQueryData<ChatThreadSummaryDTO[]>(
+        chatKeys.threads('user-123'),
+      );
+      expect(threads!.find((t) => t.ThreadId === 'thread-1')!.lastLlmAt).toBeUndefined();
+    });
+
+    it('keeps the chip across route navigation away and back', async () => {
+      enableAnthropic();
+      await mountWithFakeTime();
+      await chooseModel('anthropic::claude-opus-5-5');
+      mockLLMResponseWithUsage('Nav reply', anthropicUsage());
+      await sendMessage('persist me');
+      await flushPromises();
+      expect(cacheChip().exists()).toBe(true);
+
+      wrapper!.unmount();
+      wrapper = null;
+      mountComponent();
+      await flushPromises();
+
+      expect(cacheChip().text()).toBe('Cache likely warm · 5:00 left');
+    });
+
+    it('replays the user model and this response\u0027s evidence when the assistant save hits a deleted thread', async () => {
+      enableAnthropic();
+      await mountWithFakeTime();
+      await chooseModel('anthropic::claude-opus-5-5');
+      const chatStore = useChatStore();
+      chatStore.setChatId('dead-thread');
+      // Stale evidence from the doomed thread must not survive the restart.
+      chatStore.setCacheStartedAt(T0 - 10 * 60 * 1000);
+      const gen = deferred<{ text: string; usage: LlmUsage }>();
+      vi.spyOn(llmModule.llmClient, 'generate').mockImplementation(() => gen.promise);
+
+      await sendMessage('recover me');
+      await flushPromises();
+      // The user save landed; now the deleted thread also eats the assistant save.
+      saveNotFoundFor.add('dead-thread');
+      gen.resolve({ text: 'Recovered reply', usage: anthropicUsage() });
+      await flushPromises();
+
+      const freshId = chatStore.chatId!;
+      expect(freshId).not.toBe('dead-thread');
+      const freshUser = saveBodies.find((b) => b.ThreadId === freshId && b.is_user === true);
+      expect(freshUser!.model).toEqual(anthropicRow);
+      const freshAssistant = saveBodies.find((b) => b.ThreadId === freshId && b.is_user === false);
+      expect(freshAssistant!.lastLlmAt).toBe(T0);
+      expect(chatStore.cacheStartedAt).toBe(T0);
+      expect(cacheChip().text()).toBe('Cache likely warm · 5:00 left');
     });
   });
 
