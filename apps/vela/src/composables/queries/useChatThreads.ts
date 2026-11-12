@@ -33,12 +33,23 @@ export function useChatThreads() {
 }
 
 // Serialization state for confirmed PATCH cache writes, keyed per
-// user+thread. A sidebar rename and a header model change come from
-// different composable instances, so the chain lives at module scope;
-// entries exist only while a PATCH on that thread is in flight (deleted at
-// the last settle), keeping the map bounded.
+// user + session generation + thread. A sidebar rename and a header model
+// change come from different composable instances, so the chain lives at
+// module scope; entries exist only while a PATCH on that thread is in
+// flight for that session generation (deleted at the last settle), keeping
+// the map bounded. The generation component fences sessions from each
+// other: an old session's hung or queued request can never block a new
+// session's PATCH, and its settle callbacks cannot leak baselines.
 interface ThreadPatchChain {
+  // Settle callbacks (cache writes) run serialized in issue order.
   tail: Promise<unknown>;
+  // Actual PATCH HTTP requests run strictly in issue order per chain:
+  // a request is transmitted only after the previous request on the same
+  // thread settled, so server commit order matches the optimistic cache
+  // write order. The slot is released when the HTTP request settles —
+  // within one generation a hung PATCH blocks later same-thread PATCHes
+  // (the HTTP client has no timeout; a new generation is never affected).
+  requestTail: Promise<unknown>;
   pending: number;
   seq: number;
   // Issue-order seq of the newest mutation owning each field: a settle
@@ -46,13 +57,53 @@ interface ThreadPatchChain {
   // must never overwrite a newer confirmed value).
   lastWriter: { title: number; model: number };
   writers: { title: number; model: number };
-  // Row snapshot taken before the chain's first optimistic write — the value
-  // a rollback chain terminates at, even when sibling mutations stacked on
-  // the same fields. Successful commits advance it to server truth.
-  baselineRow?: ChatThreadSummaryDTO | undefined;
+  // Per-field baselines captured when that field FIRST becomes owned in
+  // the chain — the floor a rollback of that field terminates at, even
+  // when sibling mutations stacked on the same fields. Capturing per
+  // field (not per chain) keeps out-of-chain writers, notably completed
+  // assistant saves updating lastLlmAt, part of the floor for fields
+  // whose ownership starts after them.
+  baselineTitle?: { title: string; updatedAt: number } | undefined;
+  baselineModel?:
+    | { model: ChatThreadModelDTO | undefined; lastLlmAt: number | undefined; updatedAt: number }
+    | undefined;
+  baselineUpdatedAt?: number | undefined;
+  // Confirmed server truth advanced by EVERY successful predecessor —
+  // including ones superseded optimistically — so a later failure rolls
+  // back to the last confirmed commit, never to the pre-chain value.
+  confirmedTitle?: { title: string; updatedAt: number } | undefined;
+  confirmedModel?: { model: ChatThreadModelDTO | undefined; updatedAt: number } | undefined;
   confirmedUpdatedAt?: number | undefined;
 }
 const threadPatchChains = new Map<string, ThreadPatchChain>();
+
+interface UpdateThreadVariables {
+  threadId: string;
+  patch: PatchChatThreadDTO;
+  userId: string;
+}
+
+// Bridges onMutate's issue-time decisions (chain registration, staleness)
+// to mutationFn, which TanStack calls without context: a mutation whose
+// session ended before its queued request was dequeued must not be
+// transmitted. Entries die with their variables objects (WeakMap).
+interface IssuedPatch {
+  sessionGen: number;
+  chainKey: string | null;
+}
+const issuedPatchChains = new WeakMap<UpdateThreadVariables, IssuedPatch>();
+
+// A request whose session ended before it could be sent settles with an
+// unconsumed placeholder instead of an error: the operation never ran, so
+// there is nothing to report to the caller that issued it. Its settle
+// callbacks see a stale context and write nothing.
+const skippedPatchRow = (variables: UpdateThreadVariables): ChatThreadSummaryDTO => ({
+  ThreadId: variables.threadId,
+  title: variables.patch.title ?? '',
+  createdAt: 0,
+  updatedAt: 0,
+  ...(variables.patch.model !== undefined ? { model: variables.patch.model } : {}),
+});
 
 interface UpdateThreadContext {
   key: ReturnType<typeof chatKeys.threads>;
@@ -77,40 +128,81 @@ export function useUpdateThread() {
   };
 
   return useMutation({
-    mutationFn: (variables: { threadId: string; patch: PatchChatThreadDTO; userId: string }) =>
-      updateChatThread(variables.threadId, variables.patch, variables.userId),
+    mutationFn: async (variables: UpdateThreadVariables) => {
+      const issued = issuedPatchChains.get(variables);
+      if (!issued?.chainKey) return skippedPatchRow(variables);
+      const chain = threadPatchChains.get(issued.chainKey);
+      if (!chain) return skippedPatchRow(variables);
+      // Queue the actual network execution behind earlier same-generation
+      // same-thread PATCHes. The optimistic write already happened in
+      // onMutate at issue time and is never delayed by this queue.
+      let release!: () => void;
+      const slot = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const predecessor = chain.requestTail;
+      chain.requestTail = slot;
+      try {
+        await predecessor;
+        // A request queued behind an in-flight predecessor whose session
+        // has since ended must never be transmitted.
+        if (isStaleSession(variables.userId, issued.sessionGen)) {
+          return skippedPatchRow(variables);
+        }
+        return await updateChatThread(variables.threadId, variables.patch, variables.userId);
+      } finally {
+        release();
+      }
+    },
     onMutate: async (variables): Promise<UpdateThreadContext> => {
       const key = chatKeys.threads(variables.userId);
       const sessionGen = authStore.sessionGeneration;
       // Issued after a session/account change: register nowhere, write
       // nothing — its settle callbacks are no-ops too.
-      if (isStaleSession(variables.userId, sessionGen)) return { key, stale: true };
-      const chainKey = `${variables.userId}|${variables.threadId}`;
+      if (isStaleSession(variables.userId, sessionGen)) {
+        issuedPatchChains.set(variables, { sessionGen, chainKey: null });
+        return { key, stale: true };
+      }
+      const chainKey = `${variables.userId}:${sessionGen}|${variables.threadId}`;
+      const cachedRow = queryClient
+        .getQueryData<ChatThreadSummaryDTO[]>(key)
+        ?.find((thread) => thread.ThreadId === variables.threadId);
       let chain = threadPatchChains.get(chainKey);
       if (!chain) {
         chain = {
           tail: Promise.resolve(),
+          requestTail: Promise.resolve(),
           pending: 0,
           seq: 0,
           lastWriter: { title: 0, model: 0 },
           writers: { title: 0, model: 0 },
+          baselineUpdatedAt: cachedRow?.updatedAt,
         };
         threadPatchChains.set(chainKey, chain);
       }
-      const cachedRow = queryClient
-        .getQueryData<ChatThreadSummaryDTO[]>(key)
-        ?.find((thread) => thread.ThreadId === variables.threadId);
       const seq = ++chain.seq;
       chain.pending += 1;
       const fields = {
         title: variables.patch.title !== undefined,
         model: variables.patch.model !== undefined,
       };
-      if (chain.writers.title === 0 && chain.writers.model === 0) {
-        chain.baselineRow = cachedRow
-          ? { ...cachedRow, model: cachedRow.model ? { ...cachedRow.model } : undefined }
+      // Capture each field's baseline when that field first becomes owned:
+      // confirmed out-of-chain writers (completed assistant saves) that
+      // landed before this moment are part of the floor a later rollback
+      // must preserve.
+      if (fields.title && chain.writers.title === 0) {
+        chain.baselineTitle = cachedRow
+          ? { title: cachedRow.title, updatedAt: cachedRow.updatedAt }
           : undefined;
-        chain.confirmedUpdatedAt = undefined;
+      }
+      if (fields.model && chain.writers.model === 0) {
+        chain.baselineModel = cachedRow
+          ? {
+              model: cachedRow.model ? { ...cachedRow.model } : undefined,
+              lastLlmAt: cachedRow.lastLlmAt,
+              updatedAt: cachedRow.updatedAt,
+            }
+          : undefined;
       }
       if (fields.title) {
         chain.writers.title += 1;
@@ -120,7 +212,18 @@ export function useUpdateThread() {
         chain.writers.model += 1;
         chain.lastWriter.model = seq;
       }
+      issuedPatchChains.set(variables, { sessionGen, chainKey });
       await queryClient.cancelQueries({ queryKey: key });
+      // The staleness verdict may have expired while the cancel was
+      // pending: undo this registration completely and publish nothing.
+      if (isStaleSession(variables.userId, sessionGen)) {
+        if (fields.title) chain.writers.title -= 1;
+        if (fields.model) chain.writers.model -= 1;
+        chain.pending -= 1;
+        if (chain.pending === 0) threadPatchChains.delete(chainKey);
+        issuedPatchChains.set(variables, { sessionGen, chainKey: null });
+        return { key, stale: true };
+      }
       const previous = queryClient.getQueryData<ChatThreadSummaryDTO[]>(key);
       if (previous) {
         queryClient.setQueryData<ChatThreadSummaryDTO[]>(
@@ -159,16 +262,28 @@ export function useUpdateThread() {
           // it: superseded callbacks must not write their stale values.
           const ownsTitle = context.fields!.title && chain.lastWriter.title === context.seq;
           const ownsModel = context.fields!.model && chain.lastWriter.model === context.seq;
-          const baseline = chain.baselineRow;
-          if (!baseline || (!ownsTitle && !ownsModel)) return;
+          if (!ownsTitle && !ownsModel) return;
           queryClient.setQueryData<ChatThreadSummaryDTO[]>(context.key, (old) =>
             old?.map((thread) => {
               if (thread.ThreadId !== variables.threadId) return thread;
+              // A confirmed predecessor's commit beats the chain-start
+              // baseline: a failed rename restores the last confirmed
+              // title; a failed model change restores the last confirmed
+              // model with evidence left cleared (the confirmed PATCH
+              // removed it server-side), otherwise the captured baseline
+              // evidence.
+              const title = chain.confirmedTitle ?? chain.baselineTitle;
+              const model = chain.confirmedModel ?? chain.baselineModel;
               return {
                 ...thread,
-                ...(ownsTitle ? { title: baseline.title } : {}),
-                ...(ownsModel ? { model: baseline.model, lastLlmAt: baseline.lastLlmAt } : {}),
-                updatedAt: chain.confirmedUpdatedAt ?? baseline.updatedAt,
+                ...(ownsTitle && title ? { title: title.title } : {}),
+                ...(ownsModel && model
+                  ? {
+                      model: model.model,
+                      lastLlmAt: chain.confirmedModel ? undefined : chain.baselineModel?.lastLlmAt,
+                    }
+                  : {}),
+                updatedAt: chain.confirmedUpdatedAt ?? chain.baselineUpdatedAt ?? thread.updatedAt,
               };
             }),
           );
@@ -199,18 +314,18 @@ export function useUpdateThread() {
           if (isStaleSession(variables.userId, context.sessionGen)) return;
           const ownsTitle = context.fields!.title && chain.lastWriter.title === context.seq;
           const ownsModel = context.fields!.model && chain.lastWriter.model === context.seq;
-          if (ownsTitle && chain.baselineRow) {
-            chain.baselineRow = { ...chain.baselineRow, title: _data.title };
+          // Advance the confirmed floor for every committed field BEFORE
+          // the ownership check: a superseded commit is still server truth,
+          // and a later sibling's failure must roll back to it (never to
+          // the chain-start baseline).
+          if (context.fields!.title) {
+            chain.confirmedTitle = { title: _data.title, updatedAt: _data.updatedAt };
           }
-          if (ownsModel && chain.baselineRow) {
-            chain.baselineRow = {
-              ...chain.baselineRow,
-              model: _data.model,
-              lastLlmAt: undefined,
-            };
+          if (context.fields!.model) {
+            chain.confirmedModel = { model: _data.model, updatedAt: _data.updatedAt };
           }
-          if (!ownsTitle && !ownsModel) return;
           chain.confirmedUpdatedAt = _data.updatedAt;
+          if (!ownsTitle && !ownsModel) return;
           await queryClient.cancelQueries({ queryKey: context.key });
           queryClient.setQueryData<ChatThreadSummaryDTO[]>(context.key, (old) =>
             old?.map((thread) =>
