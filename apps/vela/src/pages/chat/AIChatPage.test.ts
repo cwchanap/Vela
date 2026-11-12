@@ -10,7 +10,7 @@ const mockIconSet = {
   field: { clear: 'clear', error: 'warning' },
   chip: { remove: 'cancel', selected: 'check' },
 };
-import { VueQueryPlugin, QueryClient } from '@tanstack/vue-query';
+import { VueQueryPlugin, QueryClient, focusManager } from '@tanstack/vue-query';
 import { chatKeys } from '@vela/common';
 import AIChatPage from './AIChatPage.vue';
 import { useChatStore } from '../../stores/chat';
@@ -3897,6 +3897,359 @@ describe('AIChatPage', () => {
           method: 'POST',
         }),
       );
+    });
+  });
+
+  // Regression coverage for the residual cache-evidence races investigated at
+  // 22f04f1 (.superpowers/sdd/2026-11-10-hpa758-chat-model-picker-cache-reminder/
+  // residual-findings.md). Production code reconciles confirmed assistant-save
+  // evidence in the threads queryFn and cancels pre-creation list GETs before
+  // the post-save refresh, so every test below states the expected behavior.
+  describe('Assistant cache evidence: same-client race regressions', () => {
+    const T0 = 1_700_000_000_000;
+
+    const anthropicUsage = (overrides: Partial<LlmUsage> = {}): LlmUsage => ({
+      inputTokens: 200,
+      outputTokens: 50,
+      cachedInputTokens: 150,
+      cacheWriteTokens: 0,
+      ...overrides,
+    });
+
+    const mockLLMResponseWithUsage = (text: string, usage: LlmUsage) => {
+      vi.spyOn(llmModule.llmClient, 'generate').mockResolvedValue({ text, usage });
+    };
+
+    const enableAnthropic = () => {
+      useLLMSettingsStore().llm.keys.anthropic = 'test-anthropic-key';
+    };
+
+    afterEach(() => {
+      vi.useRealTimers();
+      // Leave the shared focusManager unfocused: a later `setFocused(true)`
+      // must be a real transition to trigger the focus refetch.
+      focusManager.setFocused(false);
+    });
+
+    const mountWithFakeTime = (time = T0) => {
+      vi.useFakeTimers({ toFake: ['Date'] });
+      vi.setSystemTime(time);
+      mountComponent();
+      return flushPromises();
+    };
+
+    const selectPersistedThread = async () => {
+      await wrapper.find('[data-testid="llm-chat-thread-item"]').trigger('click');
+      await flushPromises();
+    };
+
+    const cachedThreads = () =>
+      queryClient.getQueryData<ChatThreadSummaryDTO[]>(chatKeys.threads('user-123'));
+
+    const threadRow = (id: string) => cachedThreads()?.find((t) => t.ThreadId === id);
+
+    const persistedThreadSetup = async () => {
+      enableAnthropic();
+      threadRows = [
+        createMockThread({
+          ThreadId: 't-1',
+          title: 'Persisted',
+          model: anthropicRow,
+          lastLlmAt: T0 - 120_000,
+        }),
+      ];
+      await mountWithFakeTime();
+      await selectPersistedThread();
+    };
+
+    // Finding 1A: a second same-client GET whose snapshot predates the
+    // assistant transaction but which lands after the onSuccess cache write
+    // must not revert the persisted evidence. Window-focus refetch,
+    // refetch-on-mount and a sidebar retry all enter through this same
+    // query-core fetch path, so reconciliation happens in the queryFn.
+    it('re-asserts the persisted timestamp when an untracked same-client GET lands after the assistant save', async () => {
+      await persistedThreadSetup();
+
+      // Hold generate so the turn stays mid-flight while the second GET starts.
+      const gen = deferred<{ text: string; usage: LlmUsage }>();
+      vi.spyOn(llmModule.llmClient, 'generate').mockImplementation(() => gen.promise);
+      await sendMessage('cache me');
+      await flushPromises();
+      // At this point the post-user-save refresh has already resolved with its
+      // pre-assistant snapshot.
+
+      // A new GET issued while generate is still pending: its snapshot
+      // predates the assistant transaction.
+      const fetchesBefore = threadFetches().length;
+      const gateB = deferred<void>();
+      listDelay = gateB.promise;
+      void queryClient.refetchQueries({ queryKey: chatKeys.threads('user-123') });
+      await flushPromises();
+      expect(threadFetches().length).toBe(fetchesBefore + 1);
+
+      gen.resolve({ text: 'Late race reply', usage: anthropicUsage() });
+      await flushPromises();
+      // The assistant save landed its write.
+      expect(threadRow('t-1')?.lastLlmAt).toBe(T0);
+
+      // The untracked stale snapshot lands afterwards: the queryFn
+      // reconciles it against the confirmed value instead of reverting.
+      gateB.resolve();
+      await flushPromises();
+
+      expect(threadRow('t-1')?.lastLlmAt).toBe(T0);
+    });
+
+    // Finding 2a: the deleted-thread restart used to let its list refresh
+    // dedupe into the still-pending pre-creation initial GET, so no snapshot
+    // containing the replacement row ever reached the cache. The refresh now
+    // cancels that GET and replaces it with one issued after the replayed
+    // user turn created the row.
+    it('restores the replacement thread row with server-derived title and evidence after the pre-creation GET is cancelled', async () => {
+      enableAnthropic();
+      const gate = deferred<void>();
+      listDelay = gate.promise;
+      // Any GET responding now would miss the replacement thread.
+      listThreadsOverride = [];
+      await mountWithFakeTime();
+      await chooseModel('anthropic::claude-opus-5-5');
+      mockLLMResponseWithUsage('Recovered reply', anthropicUsage());
+      const chatStore = useChatStore();
+      chatStore.setChatId('dead-thread');
+      saveNotFoundFor.add('dead-thread');
+
+      await sendMessage('recover me');
+      await flushPromises();
+
+      const freshId = chatStore.chatId!;
+      expect(freshId).not.toBe('dead-thread');
+      // The stalled pre-creation GET was cancelled at the user-save refresh
+      // and replaced by exactly one post-creation GET, not deduped into.
+      expect(threadFetches().length).toBe(2);
+      // The assistant save really persisted evidence server-side...
+      const freshAssistant = saveBodies.find((b) => b.ThreadId === freshId && b.is_user === false);
+      expect(freshAssistant?.lastLlmAt).toBe(T0);
+
+      // The replacement GET postdates row creation, so a real server returns
+      // the row: the frozen pre-creation override no longer applies.
+      listThreadsOverride = null;
+      gate.resolve();
+      await flushPromises();
+
+      const row = threadRow(freshId);
+      expect(row?.title).toBe('recover me'); // server-derived title
+      expect(row?.lastLlmAt).toBe(T0);
+    });
+
+    // Finding 2b: while the initial list GET was still pending (no cached
+    // data), the post-save invalidation deduped into it (Query.fetch returns
+    // the in-flight promise when state.data is undefined), so the
+    // pre-creation snapshot was all the cache ever received.
+    it('inserts the first thread row with evidence via the post-creation replacement GET instead of the pending pre-creation snapshot', async () => {
+      enableAnthropic();
+      const gate = deferred<void>();
+      listDelay = gate.promise;
+      // Any GET responding now would miss the first thread.
+      listThreadsOverride = [];
+      await mountWithFakeTime();
+      await chooseModel('anthropic::claude-opus-5-5');
+      mockLLMResponseWithUsage('First turn reply', anthropicUsage());
+
+      await sendMessage('first turn');
+      await flushPromises();
+
+      // The pending pre-creation initial GET was cancelled and replaced by
+      // exactly one post-creation GET instead of being deduped into.
+      expect(threadFetches().length).toBe(2);
+
+      listThreadsOverride = null;
+      gate.resolve();
+      await flushPromises();
+
+      const row = cachedThreads()?.find((t) => t.title === 'first turn');
+      expect(row?.title).toBe('first turn'); // server-derived title
+      expect(row?.lastLlmAt).toBe(T0);
+    });
+
+    // Finding 3: TanStack awaits the mutation onSuccess, so an await inside it
+    // on a stalled list GET kept mutateAsync pending: the page's finally never
+    // ran and the composer/picker/sidebar stayed locked despite a successful
+    // assistant save. The onSuccess no longer waits on any GET.
+    it('unlocks the page immediately after a successful assistant save even while a list GET stalls', async () => {
+      enableAnthropic();
+      threadRows = [createMockThread({ ThreadId: 't-1', title: 'Persisted', model: anthropicRow })];
+      await mountWithFakeTime();
+      await selectPersistedThread();
+
+      const gate = deferred<void>(); // never released: the GET stalls
+      listDelay = gate.promise;
+      mockLLMResponseWithUsage('Stalled reply', anthropicUsage());
+      await sendMessage('stall me');
+      await flushPromises();
+      await flushPromises();
+
+      const chatStore = useChatStore();
+      expect(chatStore.isLoading).toBe(false);
+      expect(chatStore.isTyping).toBe(false);
+    });
+
+    // Finding 1B: a save callback outliving a session reset must not write
+    // evidence over a transition. The mutation-level isStale guard plus the
+    // model PATCH's confirmed removal (recorded and re-asserted in the
+    // queryFn) keep the timestamp off the re-opened, re-modelled thread.
+    it('keeps cache evidence off the thread when a save callback outlives a session reset and a model change', async () => {
+      enableAnthropic();
+      useLLMSettingsStore().llm.keys.openai = 'test-openai-key';
+      threadRows = [
+        createMockThread({
+          ThreadId: 't-1',
+          title: 'Persisted',
+          model: anthropicRow,
+          lastLlmAt: T0 - 120_000,
+        }),
+      ];
+      messageRows = [createMockMessage('hello', true, 0, 't-1')];
+      await mountWithFakeTime();
+      await selectPersistedThread();
+
+      const gate = deferred<void>(); // the turn's list refresh stalls
+      listDelay = gate.promise;
+      mockLLMResponseWithUsage('Deferring reply', anthropicUsage());
+      await sendMessage('evidence me');
+      await flushPromises();
+      // Assistant save resolved; its write landed before any transition.
+
+      // Same-user session reset: generation bump re-runs resetForUser, which
+      // clears isLoading while the send continuation is still in flight.
+      const chatStore = useChatStore();
+      const authStore = useAuthStore();
+      authStore.clearAuth();
+      signIn();
+      await flushPromises();
+      expect(chatStore.isLoading).toBe(false); // premature unlock (the enabler)
+
+      // Reopen the thread and change its model while the turn's list refresh
+      // is still stalled: the PATCH records the confirmed removal so no
+      // snapshot can restore the old model's timestamp.
+      await wrapper.findAll('[data-testid="llm-chat-thread-item"]')[0]!.trigger('click');
+      await flushPromises();
+      await chooseModel('openai::gpt-6.1-sol'); // PATCH t-1: model=openai, evidence removed
+      await flushPromises();
+      expect(threadRow('t-1')?.model).toEqual(openaiPair);
+      expect(threadRow('t-1')?.lastLlmAt).toBeUndefined();
+
+      // Releasing the stall lets the PATCH onSettled GET (gated by the same
+      // listDelay) land and re-converge the cache to server truth.
+      gate.resolve();
+      await flushPromises();
+
+      expect(threadRow('t-1')?.lastLlmAt).toBeUndefined();
+    });
+
+    // REMOVE counterpart of the untracked-GET race: a zero-cache response
+    // removes the stored timestamp server-side, and a pre-commit snapshot
+    // must not resurrect it.
+    it('keeps the removed timestamp cleared when an untracked same-client GET lands after a zero-cache assistant save', async () => {
+      await persistedThreadSetup();
+
+      const gen = deferred<{ text: string; usage: LlmUsage }>();
+      vi.spyOn(llmModule.llmClient, 'generate').mockImplementation(() => gen.promise);
+      await sendMessage('clear cache');
+      await flushPromises();
+
+      // Untracked GET issued while generate is pending: its snapshot still
+      // carries the old timestamp.
+      const fetchesBefore = threadFetches().length;
+      const gateB = deferred<void>();
+      listDelay = gateB.promise;
+      void queryClient.refetchQueries({ queryKey: chatKeys.threads('user-123') });
+      await flushPromises();
+      expect(threadFetches().length).toBe(fetchesBefore + 1);
+
+      gen.resolve({
+        text: 'No cache reply',
+        usage: anthropicUsage({ cachedInputTokens: 0, cacheWriteTokens: 0 }),
+      });
+      await flushPromises();
+      // The save omitted lastLlmAt: the server transaction REMOVEs it...
+      expect('lastLlmAt' in saveBodies.find((b) => b.is_user === false)!).toBe(false);
+      // ...and the write cleared the cached timestamp.
+      expect(threadRow('t-1')?.lastLlmAt).toBeUndefined();
+
+      // The pre-commit snapshot lands afterwards: the confirmed removal is
+      // re-asserted over it instead of the old timestamp winning.
+      gateB.resolve();
+      await flushPromises();
+
+      expect(threadRow('t-1')?.lastLlmAt).toBeUndefined();
+    });
+
+    // A save resolving after an account switch is a stale operation: it must
+    // not write into the previous account's cached list.
+    it('suppresses the cache write when the assistant save resolves after an account switch', async () => {
+      await persistedThreadSetup();
+
+      const gen = deferred<{ text: string; usage: LlmUsage }>();
+      vi.spyOn(llmModule.llmClient, 'generate').mockImplementation(() => gen.promise);
+      await sendMessage('account me');
+      await flushPromises();
+      // Park the send inside generate: the assistant save has not been
+      // issued yet.
+      const saveGate = deferred<void>();
+      saveDelay = saveGate.promise;
+      gen.resolve({ text: 'Late reply', usage: anthropicUsage() });
+      await flushPromises();
+      // The assistant save POST is now in flight.
+
+      // Switch to a different account while the save is in flight.
+      const authStore = useAuthStore();
+      authStore.clearAuth();
+      signIn(createMockUser({ id: 'user-456', email: 'other@example.com', username: 'other' }));
+      await flushPromises();
+
+      saveGate.resolve();
+      await flushPromises();
+      // The save still committed server-side for the original account...
+      expect(saveBodies.find((b) => b.is_user === false)?.lastLlmAt).toBe(T0);
+      // ...but the stale callback must not touch the previous account's cache.
+      expect(threadRow('t-1')?.lastLlmAt).toBe(T0 - 120_000);
+    });
+
+    // Window-focus refetches use the same fetch path with cancelRefetch:
+    // false, so a focus-triggered GET started mid-turn lands after the write.
+    it('re-asserts the persisted timestamp when a window-focus refetch lands after the assistant save', async () => {
+      await persistedThreadSetup();
+
+      const gen = deferred<{ text: string; usage: LlmUsage }>();
+      vi.spyOn(llmModule.llmClient, 'generate').mockImplementation(() => gen.promise);
+      await sendMessage('focus me');
+      await flushPromises();
+
+      // A real focus transition refetches the invalidated threads query; gate
+      // the GET so its pre-assistant snapshot lands after the save. Mark the
+      // query stale without refetching (as after a failed refresh), so the
+      // focus event itself is what starts the GET.
+      queryClient.invalidateQueries({
+        queryKey: chatKeys.threads('user-123'),
+        refetchType: 'none',
+      });
+      focusManager.setFocused(false);
+      await flushPromises();
+      const fetchesBefore = threadFetches().length;
+      const gateB = deferred<void>();
+      listDelay = gateB.promise;
+      focusManager.setFocused(true);
+      await flushPromises();
+      expect(threadFetches().length).toBe(fetchesBefore + 1);
+
+      gen.resolve({ text: 'Focus race reply', usage: anthropicUsage() });
+      await flushPromises();
+      expect(threadRow('t-1')?.lastLlmAt).toBe(T0);
+
+      gateB.resolve();
+      await flushPromises();
+
+      expect(threadRow('t-1')?.lastLlmAt).toBe(T0);
     });
   });
 });
