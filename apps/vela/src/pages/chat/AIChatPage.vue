@@ -121,7 +121,7 @@ import { useQuasar } from 'quasar';
 import { useQueryClient } from '@tanstack/vue-query';
 import { chatKeys, LLM_PROVIDER_REGISTRY, type LlmEffort } from '@vela/common';
 import { useChatStore, type ChatModelPair } from '../../stores/chat';
-import { useLLMSettingsStore } from '../../stores/llmSettings';
+import { useLLMSettingsStore, type LlmSelection } from '../../stores/llmSettings';
 import { useAuthStore } from '../../stores/auth';
 import ChatMessageList from './components/ChatMessageList.vue';
 import ChatComposer from './components/ChatComposer.vue';
@@ -328,6 +328,7 @@ const persistMessage = async (
   isStale: () => boolean,
   model?: ChatModelPair,
   lastLlmAt?: number,
+  threadsRefreshed?: Promise<void>,
 ): Promise<PersistResult> => {
   try {
     await saveChatMessageMutation.mutateAsync({
@@ -339,6 +340,8 @@ const persistMessage = async (
       // Only assistant turns carry cache evidence; omitting it makes the
       // server's message-write transaction REMOVE any old timestamp.
       ...(!isUser && lastLlmAt !== undefined ? { lastLlmAt } : {}),
+      // Only assistant turns need the list-refresh ordering guard.
+      ...(!isUser && threadsRefreshed ? { threadsRefreshed } : {}),
     });
     if (isUser && !isStale() && chat.chatId === cid) {
       // The row now exists; a client UUID alone never proved persistence.
@@ -380,7 +383,11 @@ const restartDeletedChat = async (
   chat.setThinkingOverride(null);
   chat.setIsPersistedThread(false);
   chat.addMessage({ type: 'ai', content: GREETING_MESSAGE });
-  void queryClient.invalidateQueries({ queryKey: chatKeys.threads(uid) });
+  // Hold the refresh so the replayed assistant save's cache update is applied
+  // after this (older) list snapshot lands instead of being overwritten.
+  const threadsRefreshed = queryClient
+    .invalidateQueries({ queryKey: chatKeys.threads(uid) })
+    .catch(() => {});
   $q.notify({
     type: 'warning',
     message: 'This conversation was deleted. Started a new chat.',
@@ -399,6 +406,7 @@ const restartDeletedChat = async (
       isStale,
       turn.isUser ? model : undefined,
       turn.isUser ? undefined : lastLlmAt,
+      turn.isUser ? undefined : threadsRefreshed,
     );
     if (status !== 'saved' || isStale()) return null;
   }
@@ -473,6 +481,32 @@ const selectThread = async (t: ChatThreadSummaryDTO) => {
   }
 };
 
+// Availability must hold on the current snapshot both before saving and
+// again immediately before generate: the awaited save gives Settings time to
+// change (e.g. a removed key), and there is no silent fallback to a server
+// key that capabilities have not confirmed.
+const ensureSendable = (pair: ChatModelPair, selection: LlmSelection): boolean => {
+  if (!selection.apiKey && !serverKeyProviders.value.includes(selection.provider)) {
+    $q.notify({
+      type: 'warning',
+      message: `No API key for ${
+        LLM_PROVIDER_REGISTRY[selection.provider].label
+      } and no confirmed server key. Add a key in Settings or retry the availability check.`,
+    });
+    return false;
+  }
+  // A retired/unknown stored model id is display-only even with a provider
+  // key: block the send (before saving) while keeping the selection visible.
+  if (!isPairAvailable(modelOptions.value, pair)) {
+    $q.notify({
+      type: 'warning',
+      message: `The ${LLM_PROVIDER_REGISTRY[selection.provider].label} model ${selection.model} is no longer available. Pick another model in the header.`,
+    });
+    return false;
+  }
+  return true;
+};
+
 const onSend = async (draft: string) => {
   const content = draft.trim();
   if (!content || chat.isLoading) return;
@@ -487,24 +521,7 @@ const onSend = async (draft: string) => {
   // choice must never resolve through the global llmSettings.selection.
   const activePair: ChatModelPair = chat.activeModel ?? { ...llmSettings.llm.defaultModel };
   const activeSelection = llmSettings.selectionFor(activePair);
-  if (!activeSelection.apiKey && !serverKeyProviders.value.includes(activeSelection.provider)) {
-    $q.notify({
-      type: 'warning',
-      message: `No API key for ${
-        LLM_PROVIDER_REGISTRY[activeSelection.provider].label
-      } and no confirmed server key. Add a key in Settings or retry the availability check.`,
-    });
-    return;
-  }
-  // A retired/unknown stored model id is display-only even with a provider
-  // key: block the send (before saving) while keeping the selection visible.
-  if (!isPairAvailable(modelOptions.value, activePair)) {
-    $q.notify({
-      type: 'warning',
-      message: `The ${LLM_PROVIDER_REGISTRY[activeSelection.provider].label} model ${activeSelection.model} is no longer available. Pick another model in the header.`,
-    });
-    return;
-  }
+  if (!ensureSendable(activePair, activeSelection)) return;
 
   const opGen = chat.nextGeneration();
   const sessionGen = auth.sessionGeneration;
@@ -525,8 +542,14 @@ const onSend = async (draft: string) => {
       userSaved = restarted !== null;
       if (restarted !== null) saveCid = restarted;
     }
+    let threadsRefreshed: Promise<void> | null = null;
     if (userSaved) {
-      void queryClient.invalidateQueries({ queryKey: chatKeys.threads(uid) });
+      // The list GET reads the row before the assistant transaction; hold its
+      // promise so the assistant-save cache update below is applied after
+      // that (possibly stale) snapshot lands instead of being overwritten.
+      threadsRefreshed = queryClient
+        .invalidateQueries({ queryKey: chatKeys.threads(uid) })
+        .catch(() => {});
     }
     if (isStale()) return;
 
@@ -542,6 +565,7 @@ const onSend = async (draft: string) => {
     // immediately before generation: Settings key/effort edits during the
     // awaited save above must not leak into this request.
     const requestSelection = llmSettings.selectionFor(activePair);
+    if (!ensureSendable(activePair, requestSelection)) return;
     const thinking = chat.thinkingOverride ?? requestSelection.thinking;
     // Snapshot immediately before generate: cache evidence is dated from
     // request start, not response completion.
@@ -591,6 +615,7 @@ const onSend = async (draft: string) => {
         isStale,
         undefined,
         assistantLastLlmAt,
+        threadsRefreshed ?? undefined,
       );
       if (assistantSave === 'gone') {
         await restartDeletedChat(uid, turns, isStale, activePair, assistantLastLlmAt);
