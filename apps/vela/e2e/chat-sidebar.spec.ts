@@ -525,6 +525,51 @@ test.describe('Chat model picker and cache reminder - desktop (1280px)', () => {
     expect(typeof warmRow?.lastLlmAt).toBe('number');
     await expect(cacheChip(page)).toContainText(/Cache likely warm · [3-5]:[0-9]{2} left/);
 
+    // A zero-cache response omits lastLlmAt so the same transaction REMOVEs
+    // the evidence this thread still carries. Await the save response so the
+    // fixture row mutation has settled before asserting removal.
+    const assistantSaveDone = () =>
+      page.waitForResponse(
+        (r) =>
+          r.url().includes('/api/chat-history/save') &&
+          r.request().method() === 'POST' &&
+          (r.request().postDataJSON() as Record<string, unknown> | null)?.is_user === false,
+      );
+    apiMock.chatUsage = {
+      inputTokens: 5,
+      outputTokens: 7,
+      cachedInputTokens: 0,
+      cacheWriteTokens: 0,
+    };
+    const zeroSaveDone = assistantSaveDone();
+    await page.getByTestId('llm-chat-input').fill('No cache now');
+    await page.getByTestId('llm-chat-send').click();
+    const zeroSaveBody = (await zeroSaveDone).request().postDataJSON() as Record<string, unknown>;
+    expect(zeroSaveBody).not.toHaveProperty('lastLlmAt');
+    const clearedRow = apiMock
+      .threadsFor(SYNTHETIC_USER_A)
+      .find((t) => t.title === 'Warm this thread');
+    expect(clearedRow?.lastLlmAt).toBeUndefined();
+    await expect(cacheChip(page)).toHaveCount(0);
+
+    // Re-prime live evidence so the model switch below is proven against a
+    // present timestamp rather than an already-removed one.
+    apiMock.chatUsage = {
+      inputTokens: 10,
+      outputTokens: 6,
+      cachedInputTokens: 512,
+      cacheWriteTokens: 0,
+    };
+    const reprimedSaveDone = assistantSaveDone();
+    await page.getByTestId('llm-chat-input').fill('Warm again');
+    await page.getByTestId('llm-chat-send').click();
+    await reprimedSaveDone;
+    const reprimedRow = apiMock
+      .threadsFor(SYNTHETIC_USER_A)
+      .find((t) => t.title === 'Warm this thread');
+    expect(typeof reprimedRow?.lastLlmAt).toBe('number');
+    await expect(cacheChip(page)).toContainText(/Cache likely warm · [3-5]:[0-9]{2} left/);
+
     // A persisted-thread model switch PATCHes model only and drops evidence.
     const patchResponse = page.waitForResponse(
       (r) => r.url().includes('/api/chat-history/thread/') && r.request().method() === 'PATCH',
@@ -534,29 +579,10 @@ test.describe('Chat model picker and cache reminder - desktop (1280px)', () => {
     expect(patch.request().postDataJSON()).toEqual({
       model: { provider: 'anthropic', model: 'claude-sonnet-5-5' },
     });
-    await expect(cacheChip(page)).toHaveCount(0);
-
-    // A zero-cache response omits lastLlmAt so the same transaction REMOVEs it.
-    apiMock.chatUsage = {
-      inputTokens: 5,
-      outputTokens: 7,
-      cachedInputTokens: 0,
-      cacheWriteTokens: 0,
-    };
-    const zeroEvidenceSave = page.waitForRequest(
-      (r) =>
-        r.url().includes('/api/chat-history/save') &&
-        r.method() === 'POST' &&
-        (r.postDataJSON() as Record<string, unknown> | null)?.is_user === false,
-    );
-    await page.getByTestId('llm-chat-input').fill('No cache now');
-    await page.getByTestId('llm-chat-send').click();
-    const zeroSaveBody = (await zeroEvidenceSave).postDataJSON() as Record<string, unknown>;
-    expect(zeroSaveBody).not.toHaveProperty('lastLlmAt');
-    const clearedRow = apiMock
+    const switchedRow = apiMock
       .threadsFor(SYNTHETIC_USER_A)
       .find((t) => t.title === 'Warm this thread');
-    expect(clearedRow?.lastLlmAt).toBeUndefined();
+    expect(switchedRow?.lastLlmAt).toBeUndefined();
     await expect(cacheChip(page)).toHaveCount(0);
   });
 
