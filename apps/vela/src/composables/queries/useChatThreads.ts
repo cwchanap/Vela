@@ -74,6 +74,11 @@ interface ThreadPatchChain {
   confirmedTitle?: { title: string; updatedAt: number } | undefined;
   confirmedModel?: { model: ChatThreadModelDTO | undefined; updatedAt: number } | undefined;
   confirmedUpdatedAt?: number | undefined;
+  // The client stamp this chain last wrote optimistically (Date.now()).
+  // A rollback uses it to tell its own optimistic write apart from a
+  // fresher server-confirmed snapshot that a GET landed meanwhile, so a
+  // failure can never rewind the visible updatedAt backwards.
+  optimisticUpdatedAt?: number | undefined;
 }
 const threadPatchChains = new Map<string, ThreadPatchChain>();
 
@@ -90,6 +95,12 @@ interface UpdateThreadVariables {
 interface IssuedPatch {
   sessionGen: number;
   chainKey: string | null;
+  // The ordering slot is taken once per logical mutation and released at
+  // final settlement (onSettled), never per HTTP attempt: TanStack's retry
+  // re-runs only mutationFn (same variables), and releasing early would
+  // let a later PATCH overtake a retried earlier one.
+  queued?: boolean | undefined;
+  releaseSlot?: (() => void) | undefined;
 }
 const issuedPatchChains = new WeakMap<UpdateThreadVariables, IssuedPatch>();
 
@@ -135,24 +146,34 @@ export function useUpdateThread() {
       if (!chain) return skippedPatchRow(variables);
       // Queue the actual network execution behind earlier same-generation
       // same-thread PATCHes. The optimistic write already happened in
-      // onMutate at issue time and is never delayed by this queue.
-      let release!: () => void;
-      const slot = new Promise<void>((resolve) => {
-        release = resolve;
-      });
-      const predecessor = chain.requestTail;
-      chain.requestTail = slot;
-      try {
+      // onMutate at issue time and is never delayed by this queue. One
+      // slot per LOGICAL mutation: taken on the first attempt and held
+      // through TanStack's retries (retry re-runs only mutationFn, with
+      // the same variables) until final settlement (released in
+      // onSettled) — releasing per HTTP attempt would let a later PATCH
+      // overtake a retried earlier one and commit an older value last.
+      if (!issued.queued) {
+        issued.queued = true;
+        let release!: () => void;
+        const slot = new Promise<void>((resolve) => {
+          release = resolve;
+        });
+        issued.releaseSlot = release;
+        const predecessor = chain.requestTail;
+        chain.requestTail = slot;
         await predecessor;
         // A request queued behind an in-flight predecessor whose session
         // has since ended must never be transmitted.
         if (isStaleSession(variables.userId, issued.sessionGen)) {
           return skippedPatchRow(variables);
         }
-        return await updateChatThread(variables.threadId, variables.patch, variables.userId);
-      } finally {
-        release();
+      } else if (isStaleSession(variables.userId, issued.sessionGen)) {
+        // A retry re-runs mutationFn without re-joining the queue (the
+        // ordering slot is already held): the retransmission must still
+        // respect the ended-session fence the first dequeue enforced.
+        return skippedPatchRow(variables);
       }
+      return updateChatThread(variables.threadId, variables.patch, variables.userId);
     },
     onMutate: async (variables): Promise<UpdateThreadContext> => {
       const key = chatKeys.threads(variables.userId);
@@ -226,6 +247,8 @@ export function useUpdateThread() {
       }
       const previous = queryClient.getQueryData<ChatThreadSummaryDTO[]>(key);
       if (previous) {
+        const optimisticAt = Date.now();
+        chain.optimisticUpdatedAt = optimisticAt;
         queryClient.setQueryData<ChatThreadSummaryDTO[]>(
           key,
           previous.map((thread) =>
@@ -238,7 +261,7 @@ export function useUpdateThread() {
                   ...(variables.patch.model !== undefined
                     ? { model: variables.patch.model, lastLlmAt: undefined }
                     : {}),
-                  updatedAt: Date.now(),
+                  updatedAt: optimisticAt,
                 }
               : thread,
           ),
@@ -274,6 +297,17 @@ export function useUpdateThread() {
               // evidence.
               const title = chain.confirmedTitle ?? chain.baselineTitle;
               const model = chain.confirmedModel ?? chain.baselineModel;
+              const restoredUpdatedAt =
+                chain.confirmedUpdatedAt ?? chain.baselineUpdatedAt ?? thread.updatedAt;
+              // Never rewind a fresher server-confirmed snapshot (e.g. a
+              // user save that committed meanwhile and landed via a GET):
+              // anything in the row that is not this chain's own optimistic
+              // stamp came from a newer source and must win.
+              const updatedAt =
+                chain.optimisticUpdatedAt !== undefined &&
+                thread.updatedAt !== chain.optimisticUpdatedAt
+                  ? Math.max(restoredUpdatedAt, thread.updatedAt)
+                  : restoredUpdatedAt;
               return {
                 ...thread,
                 ...(ownsTitle && title ? { title: title.title } : {}),
@@ -283,7 +317,7 @@ export function useUpdateThread() {
                       lastLlmAt: chain.confirmedModel ? undefined : chain.baselineModel?.lastLlmAt,
                     }
                   : {}),
-                updatedAt: chain.confirmedUpdatedAt ?? chain.baselineUpdatedAt ?? thread.updatedAt,
+                updatedAt,
               };
             }),
           );
@@ -327,14 +361,25 @@ export function useUpdateThread() {
           chain.confirmedUpdatedAt = _data.updatedAt;
           if (!ownsTitle && !ownsModel) return;
           await queryClient.cancelQueries({ queryKey: context.key });
+          // Revalidate both verdicts after the await: the session may have
+          // ended or a newer sibling mutation may have claimed a field while
+          // the cancel was pending — publishing the pre-await verdict here
+          // would overwrite newer state with stale captured values. The
+          // cleanup below stays unconditional.
+          if (isStaleSession(variables.userId, context.sessionGen)) return;
+          const stillOwnsTitle = context.fields!.title && chain.lastWriter.title === context.seq;
+          const stillOwnsModel = context.fields!.model && chain.lastWriter.model === context.seq;
+          if (!stillOwnsTitle && !stillOwnsModel) return;
           queryClient.setQueryData<ChatThreadSummaryDTO[]>(context.key, (old) =>
             old?.map((thread) =>
               thread.ThreadId === variables.threadId
                 ? {
                     ...thread,
-                    ...(ownsTitle ? { title: variables.patch.title!.trim() } : {}),
-                    ...(ownsModel ? { model: variables.patch.model!, lastLlmAt: undefined } : {}),
-                    updatedAt: Date.now(),
+                    ...(stillOwnsTitle ? { title: variables.patch.title!.trim() } : {}),
+                    ...(stillOwnsModel
+                      ? { model: variables.patch.model!, lastLlmAt: undefined }
+                      : {}),
+                    updatedAt: _data.updatedAt,
                   }
                 : thread,
             ),
@@ -353,6 +398,9 @@ export function useUpdateThread() {
       await settled;
     },
     onSettled: (_data, _error, variables, context) => {
+      // Final settlement of the logical mutation (after retries): only now
+      // is the ordering slot released for the next queued PATCH.
+      issuedPatchChains.get(variables)?.releaseSlot?.();
       // A callback that outlived its session must not trigger fetches:
       // the invalidate would refetch the old key with the new session's
       // credentials.

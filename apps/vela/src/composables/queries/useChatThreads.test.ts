@@ -74,6 +74,17 @@ const cacheClient = () =>
     },
   });
 
+// The production client (packages/common/src/config.ts) retries mutations
+// once. Only the delay differs here (0 instead of TanStack's exponential
+// backoff) to keep the retry window deterministic.
+const retryClient = () =>
+  new QueryClient({
+    defaultOptions: {
+      queries: { retry: false, gcTime: Infinity },
+      mutations: { retry: 1, retryDelay: 0, gcTime: Infinity },
+    },
+  });
+
 describe('useChatThreads', () => {
   let cleanup: (() => void) | undefined;
 
@@ -649,7 +660,7 @@ describe('useChatThreads', () => {
       });
     };
 
-    const mountComposables = async (uid: string) => {
+    const mountComposables = async (uid: string, client?: QueryClient) => {
       mockUser.value = { id: uid };
       mockSession.value = { user: { id: uid } };
       const { useChatThreads, useSaveChatMessage, useUpdateThread } =
@@ -660,12 +671,13 @@ describe('useChatThreads', () => {
           save: useSaveChatMessage(),
           update: useUpdateThread(),
         }),
-        new QueryClient({
-          defaultOptions: {
-            queries: { retry: false, gcTime: Infinity },
-            mutations: { retry: false, gcTime: Infinity },
-          },
-        }),
+        client ??
+          new QueryClient({
+            defaultOptions: {
+              queries: { retry: false, gcTime: Infinity },
+              mutations: { retry: false, gcTime: Infinity },
+            },
+          }),
       );
       cleanups.push(harness.cleanup);
       await flushPromises();
@@ -1676,6 +1688,324 @@ describe('useChatThreads', () => {
         await flushPromises();
         expect(server.rows.get('t-1')!.title).toBe('NewGen');
         expect(cachedRow(queryClient, uid, 't-1')?.title).toBe('NewGen');
+      });
+
+      // Findings from patch-order-final-review.md (review of 5131965).
+
+      it('keeps a retried rename ahead of a later same-thread rename under the production retry count', async () => {
+        const uid = 'po-retry-user';
+        server.seed({ ThreadId: 't-1', title: 'Original', createdAt: 500, updatedAt: 1000 });
+        // The production client retries mutations once; retryDelay 0 keeps
+        // the retry window deterministic.
+        const { result, queryClient } = await mountComposables(uid, retryClient());
+        const callsFor = (threadId: string) =>
+          mockUpdateChatThread.mock.calls.filter(([id]) => id === threadId).length;
+
+        // Attempt 1 fails transiently; TanStack re-runs mutationFn (retry: 1)
+        // without re-running onMutate.
+        const failRespond = deferred<void>();
+        const retryRespond = deferred<void>();
+        const patch2Respond = deferred<void>();
+        patchGates = {
+          't-1': [
+            { fail: new Error('flaky'), respond: failRespond.promise },
+            { respond: retryRespond.promise },
+            { respond: patch2Respond.promise },
+          ],
+        };
+        const patch1 = result.update.mutateAsync({
+          threadId: 't-1',
+          patch: { title: 'First' },
+          userId: uid,
+        });
+        await flushPromises();
+        expect(cachedRow(queryClient, uid, 't-1')?.title).toBe('First'); // optimistic
+        const patch2 = result.update.mutateAsync({
+          threadId: 't-1',
+          patch: { title: 'Second' },
+          userId: uid,
+        });
+        await flushPromises();
+        expect(cachedRow(queryClient, uid, 't-1')?.title).toBe('Second'); // optimistic
+
+        failRespond.resolve();
+        // The retry must transmit and commit while the later rename is still
+        // queued: the logical mutation keeps its ordering slot through the
+        // retry instead of releasing it with the failed HTTP attempt.
+        await vi.waitFor(() => expect(callsFor('t-1')).toBe(2));
+        expect(server.rows.get('t-1')!.title).toBe('First');
+
+        // Hold the follow-up refresh GETs: no fetch may heal the cache.
+        listGates = [
+          new Promise<void>(() => {}),
+          new Promise<void>(() => {}),
+          new Promise<void>(() => {}),
+          new Promise<void>(() => {}),
+        ];
+        retryRespond.resolve();
+        patch2Respond.resolve();
+        await patch1;
+        await patch2;
+        await flushPromises();
+
+        // The server must end at the user's latest rename — the cached
+        // value's exact counterpart. A retry that commits behind a later
+        // rename would end at the older 'First'.
+        expect(server.rows.get('t-1')!.title).toBe('Second');
+        expect(cachedRow(queryClient, uid, 't-1')?.title).toBe('Second');
+      });
+
+      it('never transmits a retried rename whose session ended after the first attempt failed', async () => {
+        const uid = 'po-retry-stale-user';
+        server.seed({ ThreadId: 't-1', title: 'Original', createdAt: 500, updatedAt: 1000 });
+        const { result } = await mountComposables(uid, retryClient());
+        const callsFor = (threadId: string) =>
+          mockUpdateChatThread.mock.calls.filter(([id]) => id === threadId).length;
+
+        // Attempt 1 is on the wire when the session ends; its retry must not
+        // retransmit under the ended session's identity.
+        const failRespond = deferred<void>();
+        patchGates = { 't-1': [{ fail: new Error('flaky'), respond: failRespond.promise }] };
+        const patch = result.update.mutateAsync({
+          threadId: 't-1',
+          patch: { title: 'Renamed' },
+          userId: uid,
+        });
+        await flushPromises();
+        expect(callsFor('t-1')).toBe(1);
+
+        mockUser.value = { id: 'user-b' };
+        mockSession.value = { user: { id: 'user-b' } };
+        failRespond.resolve();
+        await patch;
+        await flushPromises();
+
+        // The retry re-runs mutationFn with no further gates queued: a
+        // retransmission would commit 'Renamed' server-side. The stale
+        // retry must resolve with the unconsumed placeholder instead —
+        // never transmitted and never invalidated (its dead old-session
+        // cache entry heals nowhere and is keyed out by the session).
+        expect(callsFor('t-1')).toBe(1);
+        expect(server.rows.get('t-1')!.title).toBe('Original');
+      });
+
+      it('does not publish the confirmed rename when the session changes during the onSuccess cancel await', async () => {
+        const uid = 'po-confirm-session-user';
+        server.seed({ ThreadId: 't-1', title: 'Original', createdAt: 500, updatedAt: 1000 });
+        const { result, queryClient } = await mountComposables(uid);
+
+        const respond = deferred<void>();
+        patchGates = { 't-1': [{ respond: respond.promise }] };
+
+        // Widen the onSuccess cancelQueries window: the first call (onMutate)
+        // passes, the second (onSuccess) holds until the test releases it.
+        const cancelGate = deferred<void>();
+        let cancelCalls = 0;
+        const originalCancel = queryClient.cancelQueries.bind(queryClient);
+        const cancelSpy = vi
+          .spyOn(queryClient, 'cancelQueries')
+          .mockImplementation(async (...args: Parameters<QueryClient['cancelQueries']>) => {
+            cancelCalls += 1;
+            if (cancelCalls === 1) return originalCancel(...args);
+            await cancelGate.promise;
+            return originalCancel(...args);
+          });
+        const setDataSpy = vi.spyOn(queryClient, 'setQueryData');
+        const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries');
+
+        const patch = result.update.mutateAsync({
+          threadId: 't-1',
+          patch: { title: 'Renamed' },
+          userId: uid,
+        });
+        await flushPromises();
+        respond.resolve();
+        await flushPromises(); // onSuccess is parked at the cancel await
+
+        // The session ends while the confirmed callback sits between its
+        // staleness/ownership checks and its cache publication.
+        mockUser.value = { id: 'user-b' };
+        mockSession.value = { user: { id: 'user-b' } };
+        cancelGate.resolve();
+        await patch;
+        await flushPromises();
+        cancelSpy.mockRestore();
+
+        // The post-await publication must never land: only the optimistic
+        // write may have touched the initiating user's cache, and the stale
+        // callback must not trigger a refetch.
+        const writes = setDataSpy.mock.calls.filter(
+          ([key]) => String(key) === String(threadsKey({ id: uid })),
+        );
+        expect(writes.length).toBe(1);
+        expect(invalidateSpy).not.toHaveBeenCalled();
+        // The already-dispatched commit landing server-side stays an accepted
+        // tradeoff (no cross-generation server-order guarantee).
+        expect(server.rows.get('t-1')!.title).toBe('Renamed');
+      });
+
+      it('does not republish an older confirmed rename over a newer writer that claimed the field during the onSuccess cancel await', async () => {
+        const uid = 'po-confirm-owner-user';
+        server.seed({ ThreadId: 't-1', title: 'Original', createdAt: 500, updatedAt: 1000 });
+        const { result, queryClient } = await mountComposables(uid);
+        const callsFor = (threadId: string) =>
+          mockUpdateChatThread.mock.calls.filter(([id]) => id === threadId).length;
+
+        const respond1 = deferred<void>();
+        const respond2 = deferred<void>();
+        patchGates = { 't-1': [{ respond: respond1.promise }, { respond: respond2.promise }] };
+
+        // The first call (onMutate of the first rename) passes; the second
+        // (its onSuccess) holds until a newer same-field rename was issued.
+        const cancelGate = deferred<void>();
+        let cancelCalls = 0;
+        const originalCancel = queryClient.cancelQueries.bind(queryClient);
+        const cancelSpy = vi
+          .spyOn(queryClient, 'cancelQueries')
+          .mockImplementation(async (...args: Parameters<QueryClient['cancelQueries']>) => {
+            cancelCalls += 1;
+            if (cancelCalls === 2) await cancelGate.promise;
+            return originalCancel(...args);
+          });
+
+        const patch1 = result.update.mutateAsync({
+          threadId: 't-1',
+          patch: { title: 'First' },
+          userId: uid,
+        });
+        await flushPromises();
+        // Hold every follow-up refresh GET: no fetch may heal the cache.
+        listGates = [
+          new Promise<void>(() => {}),
+          new Promise<void>(() => {}),
+          new Promise<void>(() => {}),
+          new Promise<void>(() => {}),
+        ];
+        respond1.resolve();
+        await flushPromises(); // patch1's onSuccess parked at the cancel await, owning the title
+
+        // While it awaits, a newer rename claims the field optimistically and
+        // queues behind the still-held slot.
+        const patch2 = result.update.mutateAsync({
+          threadId: 't-1',
+          patch: { title: 'Second' },
+          userId: uid,
+        });
+        await flushPromises();
+        expect(cachedRow(queryClient, uid, 't-1')?.title).toBe('Second');
+        expect(callsFor('t-1')).toBe(1); // patch2 queued behind patch1's settlement
+        expect(server.rows.get('t-1')!.title).toBe('First'); // patch1 committed; patch2 not
+
+        cancelGate.resolve();
+        await flushPromises();
+        // The resumed callback must recompute ownership after the await: it
+        // may NOT republish the older 'First' over the newer optimistic write.
+        expect(cachedRow(queryClient, uid, 't-1')?.title).toBe('Second');
+
+        respond2.resolve();
+        await patch1;
+        await patch2;
+        await flushPromises();
+        cancelSpy.mockRestore();
+
+        expect(server.rows.get('t-1')!.title).toBe('Second');
+        expect(cachedRow(queryClient, uid, 't-1')?.title).toBe('Second');
+      });
+
+      it('publishes the server-derived updatedAt when a confirmed rename re-applies over a landed snapshot', async () => {
+        const uid = 'po-ts-confirm-user';
+        server.seed({ ThreadId: 't-1', title: 'Original', createdAt: 500, updatedAt: 1000 });
+        const { result, queryClient } = await mountComposables(uid);
+
+        const commitGate = deferred<void>();
+        const respondGate = deferred<void>();
+        patchGates = { 't-1': [{ commit: commitGate.promise, respond: respondGate.promise }] };
+        const patch = result.update.mutateAsync({
+          threadId: 't-1',
+          patch: { title: 'First' },
+          userId: uid,
+        });
+        await flushPromises();
+
+        // A user save commits meanwhile (server updatedAt → 2000) and its
+        // snapshot lands via a GET, reverting the optimistic title.
+        await result.save.mutateAsync({
+          threadId: 't-1',
+          userId: uid,
+          message: 'hello',
+          isUser: true,
+        });
+        expect(server.rows.get('t-1')!.updatedAt).toBe(2_000);
+        const getGate = deferred<void>();
+        listGates = [getGate.promise];
+        void queryClient.invalidateQueries({ queryKey: chatKeys.threads(uid) });
+        await flushPromises();
+        getGate.resolve();
+        await flushPromises();
+        expect(cachedRow(queryClient, uid, 't-1')?.title).toBe('Original');
+        expect(cachedRow(queryClient, uid, 't-1')?.updatedAt).toBe(2_000);
+
+        // Hold the follow-up refresh GET: the confirmed publication itself is
+        // under test, not a later fetch.
+        listGates = [new Promise<void>(() => {})];
+        commitGate.resolve(); // server commits First @5000; response frozen at commit
+        respondGate.resolve();
+        await patch;
+        await flushPromises();
+
+        expect(server.rows.get('t-1')!.title).toBe('First');
+        expect(cachedRow(queryClient, uid, 't-1')?.title).toBe('First');
+        // The confirmed write must carry the server-derived timestamp of the
+        // response, not a client Date.now() stamp.
+        expect(cachedRow(queryClient, uid, 't-1')?.updatedAt).toBe(5_000);
+      });
+
+      it('does not rewind a landed server snapshot updatedAt when a rename fails after a user save', async () => {
+        const uid = 'po-ts-rollback-user';
+        server.seed({ ThreadId: 't-1', title: 'Original', createdAt: 500, updatedAt: 1000 });
+        const { result, queryClient } = await mountComposables(uid);
+
+        const respondGate = deferred<void>();
+        patchGates = {
+          't-1': [{ fail: new Error('rename failed'), respond: respondGate.promise }],
+        };
+        const patch = result.update.mutateAsync({
+          threadId: 't-1',
+          patch: { title: 'Renamed' },
+          userId: uid,
+        });
+        await flushPromises();
+        expect(cachedRow(queryClient, uid, 't-1')?.title).toBe('Renamed'); // optimistic
+
+        // A user save commits while the PATCH is uncommitted (server
+        // updatedAt → 2000) and its snapshot lands via a GET, overwriting the
+        // optimistic row with server truth.
+        await result.save.mutateAsync({
+          threadId: 't-1',
+          userId: uid,
+          message: 'hello',
+          isUser: true,
+        });
+        const getGate = deferred<void>();
+        listGates = [getGate.promise];
+        void queryClient.invalidateQueries({ queryKey: chatKeys.threads(uid) });
+        await flushPromises();
+        getGate.resolve();
+        await flushPromises();
+        expect(cachedRow(queryClient, uid, 't-1')?.title).toBe('Original');
+        expect(cachedRow(queryClient, uid, 't-1')?.updatedAt).toBe(2_000);
+
+        // Hold the follow-up refresh GET: the rollback itself is under test.
+        listGates = [new Promise<void>(() => {})];
+        respondGate.resolve();
+        await expect(patch).rejects.toThrow('rename failed');
+        await flushPromises();
+
+        // The rollback restores the baseline title but must not rewind the
+        // row's updatedAt below the later server-confirmed snapshot.
+        expect(cachedRow(queryClient, uid, 't-1')?.title).toBe('Original');
+        expect(cachedRow(queryClient, uid, 't-1')?.updatedAt).toBe(2_000);
+        expect(server.rows.get('t-1')!.updatedAt).toBe(2_000);
       });
     });
   });
