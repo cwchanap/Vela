@@ -124,26 +124,32 @@ The [design review](https://github.com/cwchanap/Vela/pull/84#pullrequestreview-5
 
 ## Risk and deferral notes
 
-| Risk | Minimal handling |
-| --- | --- |
-| Fresh chat has no metadata row | Pinia isPersistedThread is false until successful first save; UUID alone never triggers PATCH, stale thread list cannot block a real persisted-thread PATCH |
-| Cache evidence and assistant message must agree | One existing transaction SETs/REMOVEs lastLlmAt with assistant Put |
-| Model change invalidates old cache marker | Model PATCH atomically REMOVEs lastLlmAt on server and optimistic client cache |
-| Route remount retains messages | Active model and cache timestamp live in Pinia next to transcript |
-| Failed capability fetch | Only saved user-key options; explicit retry and block unavailable model |
-| Provider eviction/billing is uncertain | Estimated-window copy, never guaranteed cost or expiry |
-| Same-thread concurrent client edits | Defer CAS, server clock sync and cross-client reconciliation |
-| Synthetic tests cannot verify live vendor caching | Report optional live check separately |
+| Risk                                              | Minimal handling                                                                                                                                            |
+| ------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Fresh chat has no metadata row                    | Pinia isPersistedThread is false until successful first save; UUID alone never triggers PATCH, stale thread list cannot block a real persisted-thread PATCH |
+| Cache evidence and assistant message must agree   | One existing transaction SETs/REMOVEs lastLlmAt with assistant Put                                                                                          |
+| Model change invalidates old cache marker         | Model PATCH atomically REMOVEs lastLlmAt on server and optimistic client cache                                                                              |
+| Route remount retains messages                    | Active model and cache timestamp live in Pinia next to transcript                                                                                           |
+| Failed capability fetch                           | Only saved user-key options; explicit retry and block unavailable model                                                                                     |
+| Provider eviction/billing is uncertain            | Estimated-window copy, never guaranteed cost or expiry                                                                                                      |
+| Same-thread concurrent client edits               | Defer CAS, server clock sync and cross-client reconciliation                                                                                                |
+| Synthetic tests cannot verify live vendor caching | Report optional live check separately                                                                                                                       |
 
 ## Same-PR acceptance checklist
 
-- [ ] Model/key availability and thinking choices share Settings implementation.
-- [ ] Active model sticks across navigation/reload and is sent on first user save.
-- [ ] Existing thread PATCH selection persists without silent fallback; rollback on error.
-- [ ] Assistant save transaction persists or clears cache evidence with no extra HTTP call.
-- [ ] Cache chip is evidence-gated, near composer, timer cleaned up, TTL registry-driven.
-- [ ] API/chat/Settings unit tests, API compile, web build, lint and desktop/mobile mocked browser checks completed and reported.
+- [x] Model/key availability and thinking choices share Settings implementation.
+- [x] Active model sticks across navigation/reload and is sent on first user save.
+- [x] Existing thread PATCH selection persists without silent fallback; rollback on error.
+- [x] Assistant save transaction persists or clears cache evidence without a cache-only PATCH.
+- [x] Cache chip is evidence-gated, near composer, timer cleaned up, TTL registry-driven.
+- [x] API/chat/Settings unit tests, API compile, web build, lint and desktop/mobile mocked browser checks completed and reported.
 
 ## Second review reconciliation (2026-11-11)
 
 [Latest review](https://github.com/cwchanap/Vela/pull/84#pullrequestreview-5863703520): all four edge-case findings are valid. The persistence guard is adjusted from the suggested `threads.some(...)` to one tiny `chat.isPersistedThread` flag: the sidebar list may be stale immediately after a successful save. The rest is adopted: five-minute elapsed warning cutoff, 375px two-row header, and no empty DynamoDB ExpressionAttributeValues on REMOVE. These changes remain inside the original four tasks on **this single PR #84**, with no extra infrastructure.
+
+## Final verification (2026-11-12 UTC)
+
+On implementation commit `1a04239`: API unit tests **772/772**, API compile, app unit tests **2166/2166**, root lint **5/5**, app build (vue-tsc), and mocked browser tests **34/34** passed. The mocked browser suite includes desktop and an explicit 375px viewport; no live or paid provider check was performed. App unit output included the expected missing-Cognito-configuration warning in this environment.
+
+A superseded in-flight thread-list fetch may be canceled and replaced to preserve server-derived rows and ordering; this is not a cache-only PATCH. Per the user's decision, PATCHes are serialized per session: an already-dispatched old-session write can still commit after a new session's write. A paused or stalled old-session mutation may retain queue state until page reload, but does not block a new session. Under unusual overlapping edits, cached sidebar `updatedAt` can temporarily lag server truth until the next successful refresh.
