@@ -111,13 +111,19 @@ export function useSaveChatMessage() {
       isUser: boolean;
       model?: ChatThreadModelDTO;
       lastLlmAt?: number;
+      threadsRefreshed?: Promise<void>;
     }) =>
       saveChatMessage(variables.threadId, variables.userId, variables.message, variables.isUser, {
         model: variables.model,
         lastLlmAt: variables.lastLlmAt,
       }),
-    onSuccess: (_data, variables) => {
+    onSuccess: async (_data, variables) => {
       if (variables.isUser) return;
+      // The user-save list refresh may still be in flight with a snapshot read
+      // before this assistant transaction; let the older snapshot land first
+      // so the persisted evidence wins, without cancelling the refresh (which
+      // carries newly created rows) or adding a fetch.
+      await variables.threadsRefreshed?.catch(() => {});
       // Persisted cache evidence lands on the cached summary in place: no
       // updatedAt bump and no redundant list refetch. Absent evidence clears
       // the stored timestamp, matching the server's REMOVE.

@@ -3255,6 +3255,43 @@ describe('AIChatPage', () => {
       );
     });
 
+    it('rechecks key availability before generate when the key is removed during the awaited save', async () => {
+      const llmSettingsStore = useLLMSettingsStore();
+      llmSettingsStore.llm = {
+        keys: { anthropic: 'test-anthropic-key' },
+        thinking: {},
+        defaultModel: { provider: 'anthropic', model: 'claude-opus-5-5' },
+      };
+      // Only Google is server-key eligible: it must not authorize Anthropic.
+      vi.mocked(llmModule.llmClient.capabilities).mockResolvedValue({
+        serverKeyProviders: ['google'],
+      });
+      mockLLMResponse();
+      mountComponent();
+      await flushPromises();
+
+      const saveGate = deferred<void>();
+      saveDelay = saveGate.promise;
+      const sendPromise = sendMessage('key removed mid-save');
+      await flushPromises();
+      // Removal (not rotation) while the user save is in flight.
+      delete llmSettingsStore.llm.keys.anthropic;
+      saveGate.resolve();
+      await sendPromise;
+      await flushPromises();
+
+      expect(llmModule.llmClient.generate).not.toHaveBeenCalled();
+      expect(notifyCreateSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: 'warning',
+          message: expect.stringContaining('No API key for Anthropic'),
+        }),
+      );
+      expect(saveBodies.some((b) => b.is_user === true)).toBe(true);
+      expect(saveBodies.some((b) => b.is_user === false)).toBe(false);
+      expect(useChatStore().isLoading).toBe(false);
+    });
+
     it('sends without a user key when capabilities confirm the server key', async () => {
       const llmSettingsStore = useLLMSettingsStore();
       llmSettingsStore.llm = {
@@ -3451,9 +3488,22 @@ describe('AIChatPage', () => {
 
     it('keeps a local chip but claims no durable marker when the assistant save fails', async () => {
       enableAnthropic();
-      saveFailures.assistant = true;
+      // The cached summary already carries durable evidence: a failed save
+      // must leave it untouched while the local chip reflects the response.
+      const priorEvidence = T0 - 60_000;
+      threadRows = [
+        createMockThread({
+          ThreadId: 't-1',
+          title: 'Persisted',
+          model: anthropicRow,
+          lastLlmAt: priorEvidence,
+        }),
+      ];
       await mountWithFakeTime();
-      await chooseModel('anthropic::claude-opus-5-5');
+      await wrapper.find('[data-testid="llm-chat-thread-item"]').trigger('click');
+      await flushPromises();
+      expect(useChatStore().cacheStartedAt).toBe(priorEvidence);
+      saveFailures.assistant = true;
       mockLLMResponseWithUsage('Unsaved reply', anthropicUsage());
 
       await sendMessage('local only');
@@ -3461,9 +3511,92 @@ describe('AIChatPage', () => {
 
       expect(useChatStore().cacheStartedAt).toBe(T0);
       expect(cacheChip().exists()).toBe(true);
+      const cached = queryClient.getQueryData<ChatThreadSummaryDTO[]>(chatKeys.threads('user-123'));
+      expect(cached?.find((t) => t.ThreadId === 't-1')?.lastLlmAt).toBe(priorEvidence);
       expect(notifyCreateSpy).toHaveBeenCalledWith(
         expect.objectContaining({ type: 'warning', message: 'Failed to save chat history' }),
       );
+    });
+
+    // Regression: the user-save list refresh reads the row before the
+    // assistant transaction, so its response can land after the assistant
+    // save and must not overwrite the freshly persisted evidence.
+    const sendWithDelayedThreadList = async (
+      usage: LlmUsage,
+      text: string,
+    ): Promise<{ resolveList: () => void }> => {
+      const listGate = deferred<void>();
+      listDelay = listGate.promise;
+      mockLLMResponseWithUsage('Delayed refresh reply', usage);
+      await sendMessage(text);
+      await flushPromises();
+      return { resolveList: () => listGate.resolve() };
+    };
+
+    it('keeps the persisted timestamp when a delayed thread-list GET lands after the assistant save', async () => {
+      enableAnthropic();
+      threadRows = [
+        createMockThread({
+          ThreadId: 't-1',
+          title: 'Persisted',
+          model: anthropicRow,
+          lastLlmAt: T0 - 120_000,
+        }),
+      ];
+      await mountWithFakeTime();
+      await wrapper.find('[data-testid="llm-chat-thread-item"]').trigger('click');
+      await flushPromises();
+
+      const { resolveList } = await sendWithDelayedThreadList(anthropicUsage(), 'cache me');
+      resolveList();
+      await flushPromises();
+
+      const cached = queryClient.getQueryData<ChatThreadSummaryDTO[]>(chatKeys.threads('user-123'));
+      expect(cached?.find((t) => t.ThreadId === 't-1')?.lastLlmAt).toBe(T0);
+      expect(useChatStore().cacheStartedAt).toBe(T0);
+    });
+
+    it('keeps a cleared timestamp when a delayed thread-list GET lands after the assistant save', async () => {
+      enableAnthropic();
+      threadRows = [
+        createMockThread({
+          ThreadId: 't-1',
+          title: 'Persisted',
+          model: anthropicRow,
+          lastLlmAt: T0 - 60_000,
+        }),
+      ];
+      await mountWithFakeTime();
+      await wrapper.find('[data-testid="llm-chat-thread-item"]').trigger('click');
+      await flushPromises();
+
+      const { resolveList } = await sendWithDelayedThreadList(
+        anthropicUsage({ cachedInputTokens: 0, cacheWriteTokens: 0 }),
+        'zero cache',
+      );
+      resolveList();
+      await flushPromises();
+
+      const cached = queryClient.getQueryData<ChatThreadSummaryDTO[]>(chatKeys.threads('user-123'));
+      expect(cached?.find((t) => t.ThreadId === 't-1')?.lastLlmAt).toBeUndefined();
+      expect(useChatStore().cacheStartedAt).toBeNull();
+      expect(cacheChip().exists()).toBe(false);
+    });
+
+    it('preserves evidence on a newly created thread when its first list GET lands late', async () => {
+      enableAnthropic();
+      await mountWithFakeTime();
+      await chooseModel('anthropic::claude-opus-5-5');
+
+      const { resolveList } = await sendWithDelayedThreadList(anthropicUsage(), 'first turn');
+      resolveList();
+      await flushPromises();
+
+      const cached = queryClient.getQueryData<ChatThreadSummaryDTO[]>(chatKeys.threads('user-123'));
+      const row = cached?.find((t) => t.title === 'first turn');
+      expect(row).toBeTruthy();
+      expect(row?.lastLlmAt).toBe(T0);
+      expect(useChatStore().cacheStartedAt).toBe(T0);
     });
 
     it('records the request-start time, not the completion time, as cache evidence', async () => {
