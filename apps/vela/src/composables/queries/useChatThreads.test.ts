@@ -4,7 +4,7 @@ import { ref } from 'vue';
 import { QueryClient } from '@tanstack/vue-query';
 import { chatKeys } from '@vela/common';
 import { withQueryClient } from 'src/test-utils/withQueryClient';
-import type { ChatThreadSummaryDTO } from 'src/services/chatHistoryService';
+import type { ChatThreadModelDTO, ChatThreadSummaryDTO } from 'src/services/chatHistoryService';
 
 const mockListChatThreads = vi.fn();
 const mockGetChatMessages = vi.fn();
@@ -514,6 +514,510 @@ describe('useChatThreads', () => {
 
       expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: threadsKey(userA) });
       expect(invalidateSpy).not.toHaveBeenCalledWith({ queryKey: threadsKey(userB) });
+    });
+  });
+
+  // Cache-consistency contracts for the assistant-save / model-PATCH write
+  // path. The fake server mirrors the design spec's Minimal HTTP contract:
+  // every GET answers with an immutable snapshot taken when the request
+  // ARRIVES (never live rows at response time), assistant saves SET/REMOVE
+  // lastLlmAt transactionally, and a model PATCH commits model+REMOVE
+  // together. Assistant saves and PATCHes expose independent commit/response
+  // gates so a slow HTTP response can be separated from the server-side
+  // commit, exactly like the real server transaction contract.
+  describe('cache consistency: cancel-and-replace write path', () => {
+    const T0 = 1_700_000_000_000;
+    const anthropicRow: ChatThreadModelDTO = { provider: 'anthropic', model: 'claude-opus-5-5' };
+    const openaiPair: ChatThreadModelDTO = { provider: 'openai', model: 'gpt-6.1-sol' };
+
+    const cloneRow = (row: ChatThreadSummaryDTO): ChatThreadSummaryDTO => ({
+      ...row,
+      model: row.model ? { ...row.model } : undefined,
+    });
+
+    const makeServer = () => {
+      const rows = new Map<string, ChatThreadSummaryDTO>();
+      return {
+        rows,
+        seed(row: ChatThreadSummaryDTO) {
+          rows.set(row.ThreadId, cloneRow(row));
+        },
+        list(): ChatThreadSummaryDTO[] {
+          return [...rows.values()].map(cloneRow);
+        },
+        // User-save transaction: creates the row with a server-derived title.
+        commitUser(threadId: string, message: string, at: number) {
+          const existing = rows.get(threadId);
+          if (existing) {
+            existing.updatedAt = at;
+            return;
+          }
+          rows.set(threadId, {
+            ThreadId: threadId,
+            title: message.trim().slice(0, 60) || 'New conversation',
+            createdAt: at,
+            updatedAt: at,
+          });
+        },
+        // Assistant-save transaction: SET lastLlmAt when present, REMOVE it
+        // otherwise; missing thread is a server 404.
+        commitAssistant(threadId: string, lastLlmAt: number | undefined) {
+          const row = rows.get(threadId);
+          if (!row) throw new Error(`fake server: assistant save 404 for ${threadId}`);
+          if (lastLlmAt === undefined) delete row.lastLlmAt;
+          else row.lastLlmAt = lastLlmAt;
+        },
+        // Model PATCH: SET model and REMOVE lastLlmAt in the same update.
+        commitModelPatch(threadId: string, model: ChatThreadModelDTO) {
+          const row = rows.get(threadId);
+          if (!row) throw new Error(`fake server: PATCH 404 for ${threadId}`);
+          row.model = { ...model };
+          delete row.lastLlmAt;
+        },
+      };
+    };
+
+    type Server = ReturnType<typeof makeServer>;
+    let server: Server;
+    let listGates: Array<Promise<void>>;
+    let patchGatePromise: Promise<void> | null;
+    let assistantGates: Array<{ commit?: Promise<void>; respond?: Promise<void> }>;
+    const cleanups: Array<() => void> = [];
+
+    const installMocks = () => {
+      mockListChatThreads.mockImplementation(() => {
+        const snapshot = server.list(); // immutable request-time snapshot
+        const gate = listGates.length > 0 ? listGates.shift()! : Promise.resolve();
+        return gate.then(() => snapshot.map(cloneRow));
+      });
+      mockSaveChatMessage.mockImplementation(
+        async (
+          threadId: string,
+          _userId: string,
+          message: string,
+          isUser: boolean,
+          metadata?: { lastLlmAt?: number | undefined },
+        ) => {
+          if (isUser) {
+            server.commitUser(threadId, message, 2_000);
+            return;
+          }
+          const gates = assistantGates.shift();
+          if (gates?.commit) await gates.commit;
+          server.commitAssistant(threadId, metadata?.lastLlmAt);
+          if (gates?.respond) await gates.respond;
+        },
+      );
+      mockUpdateChatThread.mockImplementation(async (threadId: string, patch) => {
+        if (patchGatePromise) await patchGatePromise;
+        if (patch.model !== undefined) server.commitModelPatch(threadId, patch.model);
+        return cloneRow(server.rows.get(threadId)!);
+      });
+    };
+
+    const mountComposables = async (uid: string) => {
+      mockUser.value = { id: uid };
+      mockSession.value = { user: { id: uid } };
+      const { useChatThreads, useSaveChatMessage, useUpdateThread } =
+        await import('./useChatThreads');
+      const harness = withQueryClient(
+        () => ({
+          threads: useChatThreads(),
+          save: useSaveChatMessage(),
+          update: useUpdateThread(),
+        }),
+        new QueryClient({
+          defaultOptions: {
+            queries: { retry: false, gcTime: Infinity },
+            mutations: { retry: false, gcTime: Infinity },
+          },
+        }),
+      );
+      cleanups.push(harness.cleanup);
+      await flushPromises();
+      return { result: harness.result, queryClient: harness.queryClient };
+    };
+
+    const cachedRow = (
+      client: QueryClient,
+      userId: string,
+      threadId: string,
+    ): ChatThreadSummaryDTO | undefined =>
+      client
+        .getQueryData<ChatThreadSummaryDTO[]>(threadsKey({ id: userId }))
+        ?.find((row) => row.ThreadId === threadId);
+
+    beforeEach(() => {
+      server = makeServer();
+      installMocks();
+      listGates = [];
+      patchGatePromise = null;
+      assistantGates = [];
+    });
+
+    afterEach(() => {
+      cleanups.splice(0).forEach((cleanup) => cleanup());
+    });
+
+    const deferred = <T>() => {
+      let resolve!: (_value: T) => void;
+      const promise = new Promise<T>((res) => {
+        resolve = res;
+      });
+      return { promise, resolve };
+    };
+
+    it('applies the confirmed SET over a cancelled pre-write GET and replaces it with exactly one post-commit GET', async () => {
+      const uid = 'cr-set-user';
+      server.seed({
+        ThreadId: 't-1',
+        title: 'Persisted',
+        createdAt: 500,
+        updatedAt: 1000,
+        model: anthropicRow,
+        lastLlmAt: 111,
+      });
+      const { result, queryClient } = await mountComposables(uid);
+      expect(cachedRow(queryClient, uid, 't-1')?.lastLlmAt).toBe(111);
+
+      // A same-client list GET is in flight while the assistant transaction
+      // commits: its request-time snapshot predates the commit.
+      const staleGet = deferred<void>();
+      listGates = [staleGet.promise];
+      void queryClient.invalidateQueries({ queryKey: chatKeys.threads(uid) });
+      await flushPromises();
+
+      const commitGate = deferred<void>();
+      const respondGate = deferred<void>();
+      assistantGates = [{ commit: commitGate.promise, respond: respondGate.promise }];
+      const save = result.save.mutateAsync({
+        threadId: 't-1',
+        userId: uid,
+        message: 'ai reply',
+        isUser: false,
+        lastLlmAt: T0,
+      });
+      await flushPromises();
+      expect(server.rows.get('t-1')!.lastLlmAt).toBe(111); // not committed yet
+
+      commitGate.resolve();
+      await flushPromises();
+      expect(server.rows.get('t-1')!.lastLlmAt).toBe(T0); // transaction committed
+
+      respondGate.resolve();
+      await save;
+      await flushPromises();
+
+      // The stale snapshot never publishes: the save cancelled it and issued
+      // exactly one replacement GET whose snapshot postdates the commit. No
+      // other fetch is added.
+      expect(mockListChatThreads.mock.calls.length).toBe(3);
+      expect(cachedRow(queryClient, uid, 't-1')?.lastLlmAt).toBe(T0);
+
+      staleGet.resolve();
+      await flushPromises();
+      // The cancelled GET's dropped result cannot revert the confirmed value.
+      expect(cachedRow(queryClient, uid, 't-1')?.lastLlmAt).toBe(T0);
+    });
+
+    it('applies the confirmed REMOVE and issues no fetch when no list GET is in flight', async () => {
+      const uid = 'cr-remove-user';
+      server.seed({
+        ThreadId: 't-1',
+        title: 'Persisted',
+        createdAt: 500,
+        updatedAt: 1000,
+        model: anthropicRow,
+        lastLlmAt: 111,
+      });
+      const { result, queryClient } = await mountComposables(uid);
+
+      await result.save.mutateAsync({
+        threadId: 't-1',
+        userId: uid,
+        message: 'ai reply',
+        isUser: false,
+      });
+
+      expect(server.rows.get('t-1')!.lastLlmAt).toBeUndefined();
+      expect(cachedRow(queryClient, uid, 't-1')?.lastLlmAt).toBeUndefined();
+      expect(cachedRow(queryClient, uid, 't-1')?.updatedAt).toBe(1000); // no updatedAt bump
+      // Nothing was in flight at success: nothing to replace — no redundant
+      // post-assistant fetch (spec constraint).
+      expect(mockListChatThreads.mock.calls.length).toBe(1);
+    });
+
+    it('inserts the first thread row with server-derived title, updatedAt and evidence via the replacement GET', async () => {
+      const uid = 'cr-row-user';
+      const { result, queryClient } = await mountComposables(uid);
+      expect(result.threads.data.value).toEqual([]);
+
+      // First user save creates the row with a server-derived title.
+      await result.save.mutateAsync({
+        threadId: 't-1',
+        userId: uid,
+        message: 'こんにちは、元気ですか？',
+        isUser: true,
+      });
+      expect(server.rows.get('t-1')!.title).toBe('こんにちは、元気ですか？');
+
+      // The page's post-user-save refresh GET snapshots the new row (without
+      // evidence — the assistant turn has not committed) and is still
+      // pending when the assistant save commits. A cancelled GET is the only
+      // fetch that could have carried the row itself, so it must be
+      // replaced, not merely dropped.
+      const refresh = deferred<void>();
+      listGates = [refresh.promise];
+      void queryClient.invalidateQueries({ queryKey: chatKeys.threads(uid) });
+      await flushPromises();
+
+      const commitGate = deferred<void>();
+      const respondGate = deferred<void>();
+      assistantGates = [{ commit: commitGate.promise, respond: respondGate.promise }];
+      const save = result.save.mutateAsync({
+        threadId: 't-1',
+        userId: uid,
+        message: 'ai reply',
+        isUser: false,
+        lastLlmAt: T0,
+      });
+      await flushPromises();
+      commitGate.resolve();
+      await flushPromises();
+      respondGate.resolve();
+      await save;
+      await flushPromises();
+
+      // The superseded refresh never lands; the row reaches the cache
+      // through the replacement GET with server-derived title, updatedAt
+      // ordering and the committed evidence.
+      expect(mockListChatThreads.mock.calls.length).toBe(3);
+      const row = cachedRow(queryClient, uid, 't-1');
+      expect(row?.title).toBe('こんにちは、元気ですか？');
+      expect(row?.updatedAt).toBe(2_000);
+      expect(row?.lastLlmAt).toBe(T0);
+
+      refresh.resolve();
+      await flushPromises();
+      expect(cachedRow(queryClient, uid, 't-1')?.title).toBe('こんにちは、元気ですか？');
+      expect(cachedRow(queryClient, uid, 't-1')?.lastLlmAt).toBe(T0);
+    });
+
+    it('settles the save while list GETs hang and issues the replacement instead of waiting', async () => {
+      const uid = 'cr-hang-user';
+      server.seed({
+        ThreadId: 't-1',
+        title: 'Persisted',
+        createdAt: 500,
+        updatedAt: 1000,
+        model: anthropicRow,
+        lastLlmAt: 111,
+      });
+      const { result, queryClient } = await mountComposables(uid);
+
+      // The page's post-user-save refresh hangs (no HTTP timeout) and is
+      // still pending when the assistant save resolves. The replacement
+      // hangs too: the save must never wait on either.
+      listGates = [new Promise<void>(() => {}), new Promise<void>(() => {})];
+      void queryClient.invalidateQueries({ queryKey: chatKeys.threads(uid) });
+      await flushPromises();
+
+      await result.save.mutateAsync({
+        threadId: 't-1',
+        userId: uid,
+        message: 'ai reply',
+        isUser: false,
+      });
+
+      // The save settled without waiting on any GET, the confirmed REMOVE is
+      // on the cache, and exactly one replacement GET was issued.
+      expect(mockListChatThreads.mock.calls.length).toBe(3);
+      expect(cachedRow(queryClient, uid, 't-1')?.lastLlmAt).toBeUndefined();
+      expect(server.rows.get('t-1')!.lastLlmAt).toBeUndefined();
+    });
+
+    it('keeps evidence off the thread when a stale callback resolves after a model PATCH committed', async () => {
+      const uid = 'cr-stale-user';
+      server.seed({
+        ThreadId: 't-1',
+        title: 'Persisted',
+        createdAt: 500,
+        updatedAt: 1000,
+        model: anthropicRow,
+        lastLlmAt: T0 - 120_000,
+      });
+      const { result, queryClient } = await mountComposables(uid);
+
+      // A delayed old-session assistant save: the transaction commits before
+      // the PATCH, but its response only reaches the client afterwards.
+      const commitGate = deferred<void>();
+      const respondGate = deferred<void>();
+      assistantGates = [{ commit: commitGate.promise, respond: respondGate.promise }];
+      const save = result.save.mutateAsync({
+        threadId: 't-1',
+        userId: uid,
+        message: 'late ai reply',
+        isUser: false,
+        lastLlmAt: T0,
+        // In the app this closure is isStaleOperation(opGen, sessionGen);
+        // true here = the save belongs to an operation/session that ended.
+        isStale: () => true,
+      });
+      await flushPromises();
+
+      // While the save is unobserved the user re-opens the thread and PATCHes
+      // the model. Server commit order: assistant SET first, PATCH second —
+      // final server truth is "no evidence on the new model".
+      const patchGate = deferred<void>();
+      patchGatePromise = patchGate.promise;
+      const patch = result.update.mutateAsync({
+        threadId: 't-1',
+        patch: { model: openaiPair },
+        userId: uid,
+      });
+      await flushPromises();
+      expect(cachedRow(queryClient, uid, 't-1')?.model).toEqual(openaiPair); // optimistic
+
+      const heldGet = deferred<void>();
+      listGates = [heldGet.promise]; // hold the PATCH's onSettled refresh
+      commitGate.resolve();
+      await flushPromises();
+      expect(server.rows.get('t-1')!.lastLlmAt).toBe(T0);
+
+      patchGate.resolve();
+      await flushPromises();
+      expect(server.rows.get('t-1')!.lastLlmAt).toBeUndefined(); // final server truth
+      expect(cachedRow(queryClient, uid, 't-1')?.model).toEqual(openaiPair);
+      expect(cachedRow(queryClient, uid, 't-1')?.lastLlmAt).toBeUndefined();
+
+      respondGate.resolve(); // only now does the stale callback resolve
+      await save;
+      await patch;
+      await flushPromises();
+
+      heldGet.resolve(); // the PATCH's refresh lands its truthful snapshot
+      await flushPromises();
+
+      // The stale callback touched nothing: the confirmed removal survives
+      // and the truthful snapshot is not re-modelled by older evidence.
+      expect(cachedRow(queryClient, uid, 't-1')?.model).toEqual(openaiPair);
+      expect(cachedRow(queryClient, uid, 't-1')?.lastLlmAt).toBeUndefined();
+      expect(server.rows.get('t-1')!.model).toEqual(openaiPair);
+    });
+
+    it('converges when the save resolves before the PATCH commits', async () => {
+      const uid = 'cr-order-user';
+      server.seed({
+        ThreadId: 't-1',
+        title: 'Persisted',
+        createdAt: 500,
+        updatedAt: 1000,
+        model: anthropicRow,
+        lastLlmAt: T0 - 120_000,
+      });
+      const { result, queryClient } = await mountComposables(uid);
+
+      await result.save.mutateAsync({
+        threadId: 't-1',
+        userId: uid,
+        message: 'ai reply',
+        isUser: false,
+        lastLlmAt: T0,
+        isStale: () => true,
+      });
+      expect(server.rows.get('t-1')!.lastLlmAt).toBe(T0);
+
+      await result.update.mutateAsync({
+        threadId: 't-1',
+        patch: { model: openaiPair },
+        userId: uid,
+      });
+      await flushPromises();
+
+      expect(server.rows.get('t-1')!.lastLlmAt).toBeUndefined();
+      expect(cachedRow(queryClient, uid, 't-1')?.model).toEqual(openaiPair);
+      expect(cachedRow(queryClient, uid, 't-1')?.lastLlmAt).toBeUndefined();
+    });
+
+    it('re-applies the confirmed model and cleared evidence after a mid-flight pre-PATCH GET landed and the follow-up refresh stalls', async () => {
+      const uid = 'cr-patch-user';
+      server.seed({
+        ThreadId: 't-1',
+        title: 'Persisted',
+        createdAt: 500,
+        updatedAt: 1000,
+        model: anthropicRow,
+        lastLlmAt: 111,
+      });
+      const { result, queryClient } = await mountComposables(uid);
+
+      const patchGate = deferred<void>();
+      patchGatePromise = patchGate.promise;
+      const patch = result.update.mutateAsync({
+        threadId: 't-1',
+        patch: { model: openaiPair },
+        userId: uid,
+      });
+      await flushPromises();
+      expect(cachedRow(queryClient, uid, 't-1')?.model).toEqual(openaiPair); // optimistic
+
+      // A GET that flew during the PATCH lands the pre-PATCH snapshot after
+      // the optimistic write, reverting the row (last write wins).
+      const midGet = deferred<void>();
+      listGates = [midGet.promise];
+      void queryClient.invalidateQueries({ queryKey: chatKeys.threads(uid) });
+      await flushPromises();
+      midGet.resolve();
+      await flushPromises();
+      expect(cachedRow(queryClient, uid, 't-1')?.model).toEqual(anthropicRow);
+      expect(cachedRow(queryClient, uid, 't-1')?.lastLlmAt).toBe(111);
+
+      // The PATCH succeeds server-side while its onSettled refresh hangs
+      // forever (no HTTP timeout): the confirmed response must be applied to
+      // the cache without waiting for it.
+      listGates = [new Promise<void>(() => {})];
+      patchGate.resolve();
+      await flushPromises();
+      await patch;
+
+      expect(server.rows.get('t-1')!.model).toEqual(openaiPair);
+      expect(server.rows.get('t-1')!.lastLlmAt).toBeUndefined();
+      expect(cachedRow(queryClient, uid, 't-1')?.model).toEqual(openaiPair);
+      expect(cachedRow(queryClient, uid, 't-1')?.lastLlmAt).toBeUndefined();
+    });
+
+    it('lets a fetched snapshot with genuinely newer server truth win over the last write', async () => {
+      const uid = 'cr-newer-user';
+      server.seed({
+        ThreadId: 't-1',
+        title: 'Persisted',
+        createdAt: 500,
+        updatedAt: 1000,
+        model: anthropicRow,
+      });
+      const { result, queryClient } = await mountComposables(uid);
+
+      await result.save.mutateAsync({
+        threadId: 't-1',
+        userId: uid,
+        message: 'ai reply',
+        isUser: false,
+        lastLlmAt: T0,
+      });
+      expect(cachedRow(queryClient, uid, 't-1')?.lastLlmAt).toBe(T0);
+
+      // Evidence disappears server-side through a channel this client did
+      // not observe (e.g. another device — cross-client CAS stays deferred).
+      // The contract under test: a fetch that READ the newer truth must
+      // publish it; the client's last write value must not mask it based on
+      // write/request ordering.
+      server.commitAssistant('t-1', undefined);
+
+      void queryClient.invalidateQueries({ queryKey: chatKeys.threads(uid) });
+      await flushPromises();
+
+      expect(cachedRow(queryClient, uid, 't-1')?.lastLlmAt).toBeUndefined();
+      expect(mockListChatThreads.mock.calls.length).toBe(2);
     });
   });
 });

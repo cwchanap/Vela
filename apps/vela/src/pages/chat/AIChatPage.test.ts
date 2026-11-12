@@ -138,6 +138,15 @@ describe('AIChatPage', () => {
                 updatedAt: Date.now(),
               });
             }
+          } else {
+            // Server contract: the assistant-save transaction SETs lastLlmAt
+            // on the thread row when present and REMOVEs it otherwise, in the
+            // same transaction as the message write.
+            const row = threadRows.find((t) => t.ThreadId === String(body.ThreadId ?? ''));
+            if (row) {
+              if (body.lastLlmAt === undefined) delete row.lastLlmAt;
+              else row.lastLlmAt = body.lastLlmAt as number;
+            }
           }
           return Promise.resolve(okJson({ ok: true }));
         };
@@ -151,7 +160,12 @@ describe('AIChatPage', () => {
           const sorted = [...threadRows].sort(
             (a, b) => b.updatedAt - a.updatedAt || a.ThreadId.localeCompare(b.ThreadId),
           );
-          return okJson({ threads: sorted });
+          // Clone the rows: the client must not hold references that later
+          // server-side commits (assistant SET/REMOVE, PATCH) would mutate
+          // in place — a landed response is a snapshot of its read.
+          return okJson({
+            threads: sorted.map((t) => ({ ...t, model: t.model ? { ...t.model } : undefined })),
+          });
         };
         return (listDelay ?? Promise.resolve()).then(respond);
       }
@@ -3519,8 +3533,9 @@ describe('AIChatPage', () => {
     });
 
     // Regression: the user-save list refresh reads the row before the
-    // assistant transaction, so its response can land after the assistant
-    // save and must not overwrite the freshly persisted evidence.
+    // assistant transaction. A GET still in flight at save success is
+    // cancelled and replaced, so its pre-commit snapshot can never overwrite
+    // the freshly persisted evidence.
     const sendWithDelayedThreadList = async (
       usage: LlmUsage,
       text: string,
@@ -3902,9 +3917,11 @@ describe('AIChatPage', () => {
 
   // Regression coverage for the residual cache-evidence races investigated at
   // 22f04f1 (.superpowers/sdd/2026-11-10-hpa758-chat-model-picker-cache-reminder/
-  // residual-findings.md). Production code reconciles confirmed assistant-save
-  // evidence in the threads queryFn and cancels pre-creation list GETs before
-  // the post-save refresh, so every test below states the expected behavior.
+  // residual-findings.md). Production code cancels any in-flight list GET at
+  // each confirmed write (assistant save, model PATCH) and re-applies the
+  // confirmed response to the cache, superseding stale snapshots with exactly
+  // one replacement GET when a fetch was actually cancelled, so every test
+  // below states the expected behavior.
   describe('Assistant cache evidence: same-client race regressions', () => {
     const T0 = 1_700_000_000_000;
 
@@ -3963,11 +3980,13 @@ describe('AIChatPage', () => {
     };
 
     // Finding 1A: a second same-client GET whose snapshot predates the
-    // assistant transaction but which lands after the onSuccess cache write
-    // must not revert the persisted evidence. Window-focus refetch,
+    // assistant transaction but which is still in flight when the save
+    // resolves must not revert the persisted evidence. Window-focus refetch,
     // refetch-on-mount and a sidebar retry all enter through this same
-    // query-core fetch path, so reconciliation happens in the queryFn.
-    it('re-asserts the persisted timestamp when an untracked same-client GET lands after the assistant save', async () => {
+    // query-core fetch path: the save cancels it (publication-suppressed)
+    // and issues exactly one replacement GET whose post-commit snapshot
+    // carries the confirmed evidence.
+    it('supersedes a stale mid-flight GET at the assistant save and lands the evidence via the replacement GET', async () => {
       await persistedThreadSetup();
 
       // Hold generate so the turn stays mid-flight while the second GET starts.
@@ -3989,11 +4008,13 @@ describe('AIChatPage', () => {
 
       gen.resolve({ text: 'Late race reply', usage: anthropicUsage() });
       await flushPromises();
-      // The assistant save landed its write.
+      // The assistant save landed its write; the stale snapshot was
+      // cancelled and replaced by a post-commit GET.
       expect(threadRow('t-1')?.lastLlmAt).toBe(T0);
 
-      // The untracked stale snapshot lands afterwards: the queryFn
-      // reconciles it against the confirmed value instead of reverting.
+      // Releasing the stale GET's response changes nothing: the cancelled
+      // fetch never publishes (retryer revert), and the replacement already
+      // published the confirmed value.
       gateB.resolve();
       await flushPromises();
 
@@ -4023,9 +4044,12 @@ describe('AIChatPage', () => {
 
       const freshId = chatStore.chatId!;
       expect(freshId).not.toBe('dead-thread');
-      // The stalled pre-creation GET was cancelled at the user-save refresh
-      // and replaced by exactly one post-creation GET, not deduped into.
-      expect(threadFetches().length).toBe(2);
+      // The stalled pre-creation GET was cancelled at the user-save refresh;
+      // the post-user-save refresh (snapshot without the evidence) was in
+      // turn cancelled at the assistant save and replaced by exactly one
+      // post-commit GET — stale snapshots are superseded, never deduped
+      // into, and the replacement is the only extra request.
+      expect(threadFetches().length).toBe(3);
       // The assistant save really persisted evidence server-side...
       const freshAssistant = saveBodies.find((b) => b.ThreadId === freshId && b.is_user === false);
       expect(freshAssistant?.lastLlmAt).toBe(T0);
@@ -4058,9 +4082,10 @@ describe('AIChatPage', () => {
       await sendMessage('first turn');
       await flushPromises();
 
-      // The pending pre-creation initial GET was cancelled and replaced by
-      // exactly one post-creation GET instead of being deduped into.
-      expect(threadFetches().length).toBe(2);
+      // The pending pre-creation initial GET was cancelled at the user-save
+      // refresh; its post-creation replacement was cancelled at the
+      // assistant save and replaced by exactly one post-commit GET.
+      expect(threadFetches().length).toBe(3);
 
       listThreadsOverride = null;
       gate.resolve();
@@ -4095,8 +4120,8 @@ describe('AIChatPage', () => {
 
     // Finding 1B: a save callback outliving a session reset must not write
     // evidence over a transition. The mutation-level isStale guard plus the
-    // model PATCH's confirmed removal (recorded and re-asserted in the
-    // queryFn) keep the timestamp off the re-opened, re-modelled thread.
+    // model PATCH's confirmed re-apply keep the timestamp off the
+    // re-opened, re-modelled thread.
     it('keeps cache evidence off the thread when a save callback outlives a session reset and a model change', async () => {
       enableAnthropic();
       useLLMSettingsStore().llm.keys.openai = 'test-openai-key';
@@ -4129,8 +4154,8 @@ describe('AIChatPage', () => {
       expect(chatStore.isLoading).toBe(false); // premature unlock (the enabler)
 
       // Reopen the thread and change its model while the turn's list refresh
-      // is still stalled: the PATCH records the confirmed removal so no
-      // snapshot can restore the old model's timestamp.
+      // is still stalled: the PATCH re-applies the confirmed removal to the
+      // cache, so no snapshot can restore the old model's timestamp.
       await wrapper.findAll('[data-testid="llm-chat-thread-item"]')[0]!.trigger('click');
       await flushPromises();
       await chooseModel('openai::gpt-6.1-sol'); // PATCH t-1: model=openai, evidence removed
@@ -4146,9 +4171,10 @@ describe('AIChatPage', () => {
       expect(threadRow('t-1')?.lastLlmAt).toBeUndefined();
     });
 
-    // REMOVE counterpart of the untracked-GET race: a zero-cache response
+    // REMOVE counterpart of the mid-flight race: a zero-cache response
     // removes the stored timestamp server-side, and a pre-commit snapshot
-    // must not resurrect it.
+    // must not resurrect it — the save cancels the GET and the replacement
+    // GET publishes the post-commit truth (no timestamp).
     it('keeps the removed timestamp cleared when an untracked same-client GET lands after a zero-cache assistant save', async () => {
       await persistedThreadSetup();
 
@@ -4173,11 +4199,13 @@ describe('AIChatPage', () => {
       await flushPromises();
       // The save omitted lastLlmAt: the server transaction REMOVEs it...
       expect('lastLlmAt' in saveBodies.find((b) => b.is_user === false)!).toBe(false);
-      // ...and the write cleared the cached timestamp.
+      // ...and the write cleared the cached timestamp; the stale GET was
+      // cancelled and replaced by a post-commit GET.
       expect(threadRow('t-1')?.lastLlmAt).toBeUndefined();
 
-      // The pre-commit snapshot lands afterwards: the confirmed removal is
-      // re-asserted over it instead of the old timestamp winning.
+      // Releasing the stale GET's response cannot resurrect the timestamp:
+      // the cancelled fetch never publishes, and the replacement already
+      // published the confirmed removal.
       gateB.resolve();
       await flushPromises();
 
@@ -4216,8 +4244,9 @@ describe('AIChatPage', () => {
     });
 
     // Window-focus refetches use the same fetch path with cancelRefetch:
-    // false, so a focus-triggered GET started mid-turn lands after the write.
-    it('re-asserts the persisted timestamp when a window-focus refetch lands after the assistant save', async () => {
+    // false, so a focus-triggered GET started mid-turn is superseded at the
+    // assistant save exactly like any other same-client GET.
+    it('supersedes a mid-turn window-focus refetch at the assistant save', async () => {
       await persistedThreadSetup();
 
       const gen = deferred<{ text: string; usage: LlmUsage }>();
