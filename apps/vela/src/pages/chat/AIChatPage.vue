@@ -328,7 +328,6 @@ const persistMessage = async (
   isStale: () => boolean,
   model?: ChatModelPair,
   lastLlmAt?: number,
-  threadsRefreshed?: Promise<void>,
 ): Promise<PersistResult> => {
   try {
     await saveChatMessageMutation.mutateAsync({
@@ -340,8 +339,8 @@ const persistMessage = async (
       // Only assistant turns carry cache evidence; omitting it makes the
       // server's message-write transaction REMOVE any old timestamp.
       ...(!isUser && lastLlmAt !== undefined ? { lastLlmAt } : {}),
-      // Only assistant turns need the list-refresh ordering guard.
-      ...(!isUser && threadsRefreshed ? { threadsRefreshed } : {}),
+      // Only assistant turns touch the cached summary on success.
+      ...(!isUser ? { isStale } : {}),
     });
     if (isUser && !isStale() && chat.chatId === cid) {
       // The row now exists; a client UUID alone never proved persistence.
@@ -383,16 +382,11 @@ const restartDeletedChat = async (
   chat.setThinkingOverride(null);
   chat.setIsPersistedThread(false);
   chat.addMessage({ type: 'ai', content: GREETING_MESSAGE });
-  // Hold the refresh so the replayed assistant save's cache update is applied
-  // after this (older) list snapshot lands instead of being overwritten.
-  const threadsRefreshed = queryClient
-    .invalidateQueries({ queryKey: chatKeys.threads(uid) })
-    .catch(() => {});
   $q.notify({
     type: 'warning',
     message: 'This conversation was deleted. Started a new chat.',
   });
-  for (const turn of turns) {
+  for (const [index, turn] of turns.entries()) {
     // A save that resolves after an account switch must not replay the next
     // turn into the new account's freshly reset transcript. Successful saves
     // bypass persistMessage's stale check, so recheck around each await.
@@ -406,9 +400,16 @@ const restartDeletedChat = async (
       isStale,
       turn.isUser ? model : undefined,
       turn.isUser ? undefined : lastLlmAt,
-      turn.isUser ? undefined : threadsRefreshed,
     );
     if (status !== 'saved' || isStale()) return null;
+    // After the replayed user turn the replacement row exists server-side;
+    // only a fetch issued from here on can carry it (an in-flight one may
+    // predate creation). Needed only when an assistant turn is replayed too —
+    // otherwise the caller's own post-user-save refresh covers it.
+    if (index === 0 && turns.length > 1) {
+      await queryClient.cancelQueries({ queryKey: chatKeys.threads(uid) });
+      void queryClient.invalidateQueries({ queryKey: chatKeys.threads(uid) });
+    }
   }
   // The recovered response's own evidence re-primes the replacement thread;
   // a failed replay returns above without claiming it.
@@ -542,14 +543,14 @@ const onSend = async (draft: string) => {
       userSaved = restarted !== null;
       if (restarted !== null) saveCid = restarted;
     }
-    let threadsRefreshed: Promise<void> | null = null;
     if (userSaved) {
-      // The list GET reads the row before the assistant transaction; hold its
-      // promise so the assistant-save cache update below is applied after
-      // that (possibly stale) snapshot lands instead of being overwritten.
-      threadsRefreshed = queryClient
-        .invalidateQueries({ queryKey: chatKeys.threads(uid) })
-        .catch(() => {});
+      // Cancel any in-flight list GET first: with no cached data a bare
+      // invalidate dedupes into that pending snapshot, which can predate this
+      // turn's row (initial load) and would then never carry it. Cancelling
+      // forces exactly one replacement GET whose snapshot postdates the row;
+      // the cancelled request never lands, so no extra request is issued.
+      await queryClient.cancelQueries({ queryKey: chatKeys.threads(uid) });
+      void queryClient.invalidateQueries({ queryKey: chatKeys.threads(uid) });
     }
     if (isStale()) return;
 
@@ -615,7 +616,6 @@ const onSend = async (draft: string) => {
         isStale,
         undefined,
         assistantLastLlmAt,
-        threadsRefreshed ?? undefined,
       );
       if (assistantSave === 'gone') {
         await restartDeletedChat(uid, turns, isStale, activePair, assistantLastLlmAt);
