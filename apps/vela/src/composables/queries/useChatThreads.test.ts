@@ -22,11 +22,16 @@ vi.mock('src/services/chatHistoryService', () => ({
 
 const mockUser = ref<{ id: string } | null>(null);
 const mockSession = ref<{ user: { id: string } | null } | null>(null);
+let mockSessionGeneration = 0;
 
 vi.mock('src/stores/auth', () => ({
   useAuthStore: () => ({
     user: mockUser,
     session: mockSession,
+    // Read dynamically, like the real Pinia store's unwrapped state.
+    get sessionGeneration() {
+      return mockSessionGeneration;
+    },
   }),
 }));
 
@@ -76,6 +81,7 @@ describe('useChatThreads', () => {
     vi.clearAllMocks();
     mockUser.value = null;
     mockSession.value = null;
+    mockSessionGeneration = 0;
   });
 
   afterEach(() => {
@@ -194,7 +200,7 @@ describe('useChatThreads', () => {
       expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: threadsKey(userA) });
     });
 
-    it('restores the previous list when the rename fails', async () => {
+    it('restores the failed rename without discarding unrelated rows', async () => {
       signIn(userA);
       const existing = [thread('t-1', 'Old title'), thread('t-2', 'Other')];
       mockUpdateChatThread.mockRejectedValue(new Error('Rename failed'));
@@ -202,21 +208,16 @@ describe('useChatThreads', () => {
       const { result, queryClient, cleanup: qcCleanup } = withQueryClient(() => useUpdateThread());
       cleanup = qcCleanup;
       queryClient.setQueryData(threadsKey(userA), existing);
-      const setDataSpy = vi.spyOn(queryClient, 'setQueryData');
       const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries');
 
       await expect(
         result.mutateAsync({ threadId: 't-1', patch: { title: 'New title' }, userId: 'user-a' }),
       ).rejects.toThrow('Rename failed');
+      await flushPromises();
 
-      const optimisticCall = setDataSpy.mock.calls[0];
-      const rollbackCall = setDataSpy.mock.calls[1];
-      expect(optimisticCall?.[0]).toEqual(threadsKey(userA));
-      expect(optimisticCall?.[1]).toEqual(
-        expect.arrayContaining([expect.objectContaining({ ThreadId: 't-1', title: 'New title' })]),
-      );
-      expect(rollbackCall?.[0]).toEqual(threadsKey(userA));
-      expect(rollbackCall?.[1]).toEqual(existing);
+      // The rollback restores the failed mutation's own change; the
+      // untouched sibling row must survive byte-for-byte.
+      expect(queryClient.getQueryData(threadsKey(userA))).toEqual(existing);
       expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: threadsKey(userA) });
     });
 
@@ -256,12 +257,14 @@ describe('useChatThreads', () => {
       signIn(userB);
       rejectPatch(new Error('Rename failed'));
       await expect(pending).rejects.toThrow('Rename failed');
+      await flushPromises();
 
+      // The rename belongs to a session that already ended: its callbacks
+      // must not write any cache (userA's rollback included) and must not
+      // trigger or cancel fetches for either user.
       const keysWritten = setDataSpy.mock.calls.map((call) => call[0]);
-      expect(keysWritten).toEqual([threadsKey(userA), threadsKey(userA)]);
-      expect(setDataSpy.mock.calls[1]?.[1]).toEqual(existingA);
-      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: threadsKey(userA) });
-      expect(invalidateSpy).not.toHaveBeenCalledWith({ queryKey: threadsKey(userB) });
+      expect(keysWritten).toEqual([threadsKey(userA)]);
+      expect(invalidateSpy).not.toHaveBeenCalled();
     });
 
     it('clears cached lastLlmAt on an optimistic model patch', async () => {
@@ -320,10 +323,13 @@ describe('useChatThreads', () => {
       existing.lastLlmAt = 1700000000000;
       mockUpdateChatThread.mockRejectedValue(new Error('Patch failed'));
       const { useUpdateThread } = await import('./useChatThreads');
-      const { result, queryClient, cleanup: qcCleanup } = withQueryClient(() => useUpdateThread());
+      const {
+        result,
+        queryClient,
+        cleanup: qcCleanup,
+      } = withQueryClient(() => useUpdateThread(), cacheClient());
       cleanup = qcCleanup;
       queryClient.setQueryData(threadsKey(userA), [existing]);
-      const setDataSpy = vi.spyOn(queryClient, 'setQueryData');
 
       await expect(
         result.mutateAsync({
@@ -336,9 +342,7 @@ describe('useChatThreads', () => {
 
       // The rollback restores the whole previous row — old model, cache
       // evidence and updatedAt — exactly as stored before the patch.
-      const rollbackCall = setDataSpy.mock.calls[1];
-      expect(rollbackCall?.[0]).toEqual(threadsKey(userA));
-      expect(rollbackCall?.[1]).toEqual([existing]);
+      expect(queryClient.getQueryData(threadsKey(userA))).toEqual([existing]);
     });
   });
 
@@ -574,13 +578,24 @@ describe('useChatThreads', () => {
           row.model = { ...model };
           delete row.lastLlmAt;
         },
+        // Title PATCH: SET the confirmed title and bump updatedAt.
+        commitTitlePatch(threadId: string, title: string, at: number) {
+          const row = rows.get(threadId);
+          if (!row) throw new Error(`fake server: title PATCH 404 for ${threadId}`);
+          row.title = title;
+          row.updatedAt = at;
+        },
       };
     };
 
     type Server = ReturnType<typeof makeServer>;
     let server: Server;
     let listGates: Array<Promise<void>>;
-    let patchGatePromise: Promise<void> | null;
+    let patchGates: Array<{
+      commit?: Promise<void>;
+      fail?: Error;
+      respond?: Promise<void>;
+    }>;
     let assistantGates: Array<{ commit?: Promise<void>; respond?: Promise<void> }>;
     const cleanups: Array<() => void> = [];
 
@@ -609,8 +624,15 @@ describe('useChatThreads', () => {
         },
       );
       mockUpdateChatThread.mockImplementation(async (threadId: string, patch) => {
-        if (patchGatePromise) await patchGatePromise;
+        const gates = patchGates.shift();
+        if (gates?.commit) await gates.commit;
+        if (gates?.fail) {
+          if (gates.respond) await gates.respond;
+          throw gates.fail;
+        }
         if (patch.model !== undefined) server.commitModelPatch(threadId, patch.model);
+        if (patch.title !== undefined) server.commitTitlePatch(threadId, patch.title, 5_000);
+        if (gates?.respond) await gates.respond;
         return cloneRow(server.rows.get(threadId)!);
       });
     };
@@ -651,7 +673,7 @@ describe('useChatThreads', () => {
       server = makeServer();
       installMocks();
       listGates = [];
-      patchGatePromise = null;
+      patchGates = [];
       assistantGates = [];
     });
 
@@ -869,7 +891,7 @@ describe('useChatThreads', () => {
       // the model. Server commit order: assistant SET first, PATCH second —
       // final server truth is "no evidence on the new model".
       const patchGate = deferred<void>();
-      patchGatePromise = patchGate.promise;
+      patchGates = [{ commit: patchGate.promise }];
       const patch = result.update.mutateAsync({
         threadId: 't-1',
         patch: { model: openaiPair },
@@ -952,7 +974,7 @@ describe('useChatThreads', () => {
       const { result, queryClient } = await mountComposables(uid);
 
       const patchGate = deferred<void>();
-      patchGatePromise = patchGate.promise;
+      patchGates = [{ commit: patchGate.promise }];
       const patch = result.update.mutateAsync({
         threadId: 't-1',
         patch: { model: openaiPair },
@@ -1018,6 +1040,226 @@ describe('useChatThreads', () => {
 
       expect(cachedRow(queryClient, uid, 't-1')?.lastLlmAt).toBeUndefined();
       expect(mockListChatThreads.mock.calls.length).toBe(2);
+    });
+
+    // Reviewer findings on the PATCH path (residual review of 7c3314f):
+    // same-thread PATCH callbacks must not overwrite newer confirmed metadata
+    // when they resolve late, must not act after a session/account change, and
+    // rollback must be scoped to the failed mutation's own thread/fields
+    // instead of restoring a historical list snapshot.
+    describe('PATCH ordering, session guards and rollback scope', () => {
+      const anthropicRow: ChatThreadModelDTO = { provider: 'anthropic', model: 'claude-opus-5-5' };
+      const openaiPair: ChatThreadModelDTO = { provider: 'openai', model: 'gpt-6.1-sol' };
+
+      it('keeps the later rename confirmed when an earlier same-thread rename responds last', async () => {
+        const uid = 'po-order-user';
+        server.seed({ ThreadId: 't-1', title: 'Original', createdAt: 500, updatedAt: 1000 });
+        const { result, queryClient } = await mountComposables(uid);
+
+        const respond1 = deferred<void>();
+        const respond2 = deferred<void>();
+        patchGates = [{ respond: respond1.promise }, { respond: respond2.promise }];
+        const patch1 = result.update.mutateAsync({
+          threadId: 't-1',
+          patch: { title: 'First' },
+          userId: uid,
+        });
+        await flushPromises();
+        expect(server.rows.get('t-1')!.title).toBe('First'); // commits in issue order
+        const patch2 = result.update.mutateAsync({
+          threadId: 't-1',
+          patch: { title: 'Second' },
+          userId: uid,
+        });
+        await flushPromises();
+        expect(server.rows.get('t-1')!.title).toBe('Second');
+        expect(cachedRow(queryClient, uid, 't-1')?.title).toBe('Second'); // optimistic
+
+        // Responses return in reverse commit order. Hold the onSettled
+        // refresh GETs forever: the callbacks must resolve the conflict
+        // locally instead of relying on a refetch.
+        listGates = [new Promise<void>(() => {}), new Promise<void>(() => {})];
+        respond2.resolve();
+        await flushPromises();
+        respond1.resolve();
+        await patch1;
+        await patch2;
+        await flushPromises();
+
+        expect(server.rows.get('t-1')!.title).toBe('Second');
+        expect(cachedRow(queryClient, uid, 't-1')?.title).toBe('Second');
+      });
+
+      it('restores only the failed rename and preserves a confirmed model change on another thread', async () => {
+        const uid = 'po-cross-user';
+        server.seed({ ThreadId: 't-1', title: 'Original', createdAt: 500, updatedAt: 1000 });
+        server.seed({
+          ThreadId: 't-2',
+          title: 'Other',
+          createdAt: 500,
+          updatedAt: 1000,
+          model: anthropicRow,
+          lastLlmAt: 111,
+        });
+        const { result, queryClient } = await mountComposables(uid);
+
+        const renameFail = deferred<void>();
+        patchGates = [{ fail: new Error('rename failed'), respond: renameFail.promise }];
+        const rename = result.update.mutateAsync({
+          threadId: 't-1',
+          patch: { title: 'Renamed' },
+          userId: uid,
+        });
+        await flushPromises();
+        expect(cachedRow(queryClient, uid, 't-1')?.title).toBe('Renamed'); // optimistic
+
+        // A model change on another thread commits and confirms meanwhile.
+        await result.update.mutateAsync({
+          threadId: 't-2',
+          patch: { model: openaiPair },
+          userId: uid,
+        });
+        await flushPromises();
+        expect(cachedRow(queryClient, uid, 't-2')?.model).toEqual(openaiPair);
+        expect(cachedRow(queryClient, uid, 't-2')?.lastLlmAt).toBeUndefined();
+
+        // The rename now fails: its rollback must not resurrect t-2's old
+        // model or cache evidence. Its follow-up refresh GET is held
+        // forever, so no fetch can heal a whole-list rollback afterwards.
+        listGates = [new Promise<void>(() => {})];
+        renameFail.resolve();
+        await expect(rename).rejects.toThrow('rename failed');
+        await flushPromises();
+
+        expect(cachedRow(queryClient, uid, 't-1')?.title).toBe('Original');
+        expect(cachedRow(queryClient, uid, 't-2')?.model).toEqual(openaiPair);
+        expect(cachedRow(queryClient, uid, 't-2')?.lastLlmAt).toBeUndefined();
+      });
+
+      it('preserves a confirmed model change on the same thread when an earlier rename fails', async () => {
+        const uid = 'po-same-user';
+        server.seed({
+          ThreadId: 't-1',
+          title: 'Original',
+          createdAt: 500,
+          updatedAt: 1000,
+          model: anthropicRow,
+          lastLlmAt: 111,
+        });
+        const { result, queryClient } = await mountComposables(uid);
+
+        const renameFail = deferred<void>();
+        patchGates = [{ fail: new Error('rename failed'), respond: renameFail.promise }];
+        const rename = result.update.mutateAsync({
+          threadId: 't-1',
+          patch: { title: 'Renamed' },
+          userId: uid,
+        });
+        await flushPromises();
+        expect(cachedRow(queryClient, uid, 't-1')?.title).toBe('Renamed');
+
+        // A model change on the SAME thread commits and confirms while the
+        // rename response is still outstanding; both follow-up refresh GETs
+        // are held forever so no fetch can repair the cache afterwards.
+        listGates = [new Promise<void>(() => {}), new Promise<void>(() => {})];
+        await result.update.mutateAsync({
+          threadId: 't-1',
+          patch: { model: openaiPair },
+          userId: uid,
+        });
+        await flushPromises();
+        expect(cachedRow(queryClient, uid, 't-1')?.model).toEqual(openaiPair);
+        expect(cachedRow(queryClient, uid, 't-1')?.lastLlmAt).toBeUndefined();
+
+        renameFail.resolve();
+        await expect(rename).rejects.toThrow('rename failed');
+        await flushPromises();
+
+        expect(cachedRow(queryClient, uid, 't-1')?.title).toBe('Original');
+        expect(cachedRow(queryClient, uid, 't-1')?.model).toEqual(openaiPair);
+        expect(cachedRow(queryClient, uid, 't-1')?.lastLlmAt).toBeUndefined();
+      });
+
+      it('leaves the cache and in-flight fetches alone when a PATCH callback outlives its session', async () => {
+        const uid = 'po-session-user';
+        server.seed({ ThreadId: 't-1', title: 'Original', createdAt: 500, updatedAt: 1000 });
+        const { result, queryClient } = await mountComposables(uid);
+
+        const commit = deferred<void>();
+        const respond = deferred<void>();
+        patchGates = [{ commit: commit.promise, respond: respond.promise }];
+        const patch = result.update.mutateAsync({
+          threadId: 't-1',
+          patch: { title: 'Renamed' },
+          userId: uid,
+        });
+        await flushPromises();
+        expect(cachedRow(queryClient, uid, 't-1')?.title).toBe('Renamed'); // optimistic
+
+        // Same-user session reset while the PATCH is uncommitted.
+        mockSessionGeneration += 1;
+
+        // A new-session list GET is in flight when the old callback resolves.
+        const newGet = deferred<void>();
+        listGates = [newGet.promise];
+        void queryClient.invalidateQueries({ queryKey: chatKeys.threads(uid) });
+        await flushPromises();
+        const fetchesAtCallback = mockListChatThreads.mock.calls.length;
+
+        commit.resolve();
+        respond.resolve();
+        await patch;
+        await flushPromises();
+
+        // The stale callback must not trigger another fetch, must not cancel
+        // the in-flight one, and must not write the cache.
+        expect(mockListChatThreads.mock.calls.length).toBe(fetchesAtCallback);
+        newGet.resolve();
+        await flushPromises();
+        expect(cachedRow(queryClient, uid, 't-1')?.title).toBe('Original');
+        expect(server.rows.get('t-1')!.title).toBe('Renamed'); // commit landed server-side
+      });
+
+      it('returns the title to the original value when both stacked renames fail', async () => {
+        const uid = 'po-double-user';
+        server.seed({ ThreadId: 't-1', title: 'Original', createdAt: 500, updatedAt: 1000 });
+        const { result, queryClient } = await mountComposables(uid);
+
+        const fail1 = deferred<void>();
+        const fail2 = deferred<void>();
+        patchGates = [
+          { fail: new Error('rename failed'), respond: fail1.promise },
+          { fail: new Error('rename failed'), respond: fail2.promise },
+        ];
+        const patch1 = result.update.mutateAsync({
+          threadId: 't-1',
+          patch: { title: 'First' },
+          userId: uid,
+        });
+        await flushPromises();
+        const patch2 = result.update.mutateAsync({
+          threadId: 't-1',
+          patch: { title: 'Second' },
+          userId: uid,
+        });
+        await flushPromises();
+        expect(cachedRow(queryClient, uid, 't-1')?.title).toBe('Second'); // optimistic
+
+        // Hold both follow-up refresh GETs forever: the rollbacks must leave
+        // the original title without relying on a refetch.
+        listGates = [new Promise<void>(() => {}), new Promise<void>(() => {})];
+
+        fail1.resolve();
+        await expect(patch1).rejects.toThrow('rename failed');
+        fail2.resolve();
+        await expect(patch2).rejects.toThrow('rename failed');
+        await flushPromises();
+
+        // No rollback may resurrect a sibling's optimistic title: both failed,
+        // so the chain terminates at the pre-optimistic value.
+        expect(cachedRow(queryClient, uid, 't-1')?.title).toBe('Original');
+        expect(server.rows.get('t-1')!.title).toBe('Original');
+      });
     });
   });
 });

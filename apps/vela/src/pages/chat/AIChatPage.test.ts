@@ -3943,9 +3943,10 @@ describe('AIChatPage', () => {
 
     afterEach(() => {
       vi.useRealTimers();
-      // Leave the shared focusManager unfocused: a later `setFocused(true)`
-      // must be a real transition to trigger the focus refetch.
-      focusManager.setFocused(false);
+      // Reset the shared focusManager to its neutral override (undefined =
+      // follow real focus events): pinning `false` here would leak into
+      // later tests and suppress their window-focus refetches.
+      focusManager.setFocused(undefined);
     });
 
     const mountWithFakeTime = (time = T0) => {
