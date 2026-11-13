@@ -3,17 +3,20 @@
     v-if="reminder.state !== 'hidden'"
     class="chat-cache-reminder"
     :data-state="reminder.state"
-    role="status"
     data-testid="chat-cache-reminder"
   >
-    {{ reminder.label }}
+    <!-- role="status" would announce every 1s countdown tick; role="timer" is
+         not a live region. State transitions announce once via this hidden
+         status region whose text only changes with the state. -->
+    <span class="chat-cache-reminder__announce" role="status">{{ announcement }}</span>
+    <span role="timer">{{ reminder.label }}</span>
   </div>
 </template>
 
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
 import type { LlmProvider } from '@vela/common';
-import { cacheReminder } from '../utils/cacheReminder';
+import { cacheReminder, type CacheReminderState } from '../utils/cacheReminder';
 
 const props = defineProps<{
   provider: LlmProvider | null;
@@ -46,6 +49,16 @@ onUnmounted(() => {
 });
 
 const reminder = computed(() => cacheReminder(props.provider, props.cacheStartedAt, now.value));
+
+const STATE_ANNOUNCEMENTS: Record<Exclude<CacheReminderState, 'hidden'>, string> = {
+  warm: 'Prompt cache likely warm',
+  warning: 'Cache window nearly elapsed',
+  elapsed: 'Cache window elapsed · next message may miss cache',
+};
+
+const announcement = computed(() =>
+  reminder.value.state === 'hidden' ? '' : STATE_ANNOUNCEMENTS[reminder.value.state],
+);
 </script>
 
 <style scoped lang="scss">
@@ -59,5 +72,17 @@ const reminder = computed(() => cacheReminder(props.provider, props.cacheStarted
   &[data-state='elapsed'] {
     color: var(--q-warning, #f2c037);
   }
+}
+
+.chat-cache-reminder__announce {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
 }
 </style>
