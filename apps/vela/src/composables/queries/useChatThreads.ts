@@ -210,13 +210,18 @@ export function useUpdateThread() {
       // Capture each field's baseline when that field first becomes owned:
       // confirmed out-of-chain writers (completed assistant saves) that
       // landed before this moment are part of the floor a later rollback
-      // must preserve.
+      // must preserve. A prior ownership epoch's confirmed value dies with
+      // its baseline: once the last writer settled, this fresh capture is at
+      // least as new, and keeping the old confirmed entry would discard
+      // evidence the new baseline recorded (e.g. a post-PATCH assistant save).
       if (fields.title && chain.writers.title === 0) {
+        chain.confirmedTitle = undefined;
         chain.baselineTitle = cachedRow
           ? { title: cachedRow.title, updatedAt: cachedRow.updatedAt }
           : undefined;
       }
       if (fields.model && chain.writers.model === 0) {
+        chain.confirmedModel = undefined;
         chain.baselineModel = cachedRow
           ? {
               model: cachedRow.model ? { ...cachedRow.model } : undefined,
@@ -462,6 +467,9 @@ export function useSaveChatMessage() {
       // queryFn, so a hung GET cannot hold the save open.
       const supersededGet = queryClient.getQueryState(key)?.fetchStatus !== 'idle';
       await queryClient.cancelQueries({ queryKey: key });
+      // The pre-await guard expired while the cancel was pending: an
+      // operation/session change since forbids both side effects below.
+      if (variables.isStale?.()) return;
       // The transaction committed: persisted evidence lands on the cached
       // summary in place — no updatedAt bump. Absent evidence clears the
       // stored timestamp, matching the server's REMOVE. A row-less cached

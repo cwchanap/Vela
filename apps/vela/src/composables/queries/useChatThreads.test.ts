@@ -1524,6 +1524,95 @@ describe('useChatThreads', () => {
         expect(server.rows.get('t-1')!.model).toEqual(anthropicRow);
       });
 
+      // A confirmedModel entry is the floor of ITS ownership epoch only: once
+      // the last model writer settles, the next model PATCH captures a fresh
+      // baseline that already reflects the confirmed commit plus any newer
+      // evidence. Carrying the old confirmed entry into the new epoch would
+      // discard that evidence on rollback.
+      it('does not roll a failed model patch back to a stale confirmed value after fresh evidence lands', async () => {
+        const uid = 'po-model-epoch-user';
+        server.seed({
+          ThreadId: 't-1',
+          title: 'Persisted',
+          createdAt: 500,
+          updatedAt: 1000,
+          model: anthropicRow,
+          lastLlmAt: 111,
+        });
+        const { result, queryClient } = await mountComposables(uid);
+
+        // rename1's held response keeps the request slot; rename2's held
+        // response keeps the chain (and the first epoch's confirmedModel)
+        // alive across the second model PATCH's baseline capture.
+        const respondRename1 = deferred<void>();
+        const respondRename2 = deferred<void>();
+        patchGates = {
+          't-1': [
+            { respond: respondRename1.promise }, // rename1: commits, response held
+            {}, // model1: commits and responds freely once dequeued
+            { respond: respondRename2.promise }, // rename2: commits, response held
+            { fail: new Error('patch failed') }, // model2: transmitted, then fails
+          ],
+        };
+        void result.update.mutateAsync({
+          threadId: 't-1',
+          patch: { title: 'First' },
+          userId: uid,
+        });
+        const modelPatch1 = result.update.mutateAsync({
+          threadId: 't-1',
+          patch: { model: openaiPair },
+          userId: uid,
+        });
+        void result.update.mutateAsync({
+          threadId: 't-1',
+          patch: { title: 'Second' },
+          userId: uid,
+        });
+        await flushPromises();
+
+        // rename1 settles → model1 is transmitted, commits and settles:
+        // confirmedModel=openai, writers.model back to 0, chain alive via rename2.
+        respondRename1.resolve();
+        await modelPatch1;
+        await flushPromises();
+        expect(cachedRow(queryClient, uid, 't-1')?.model).toEqual(openaiPair);
+
+        // Fresh evidence lands between the two model epochs.
+        await result.save.mutateAsync({
+          threadId: 't-1',
+          userId: uid,
+          message: 'ai reply',
+          isUser: false,
+          lastLlmAt: 222,
+        });
+        expect(cachedRow(queryClient, uid, 't-1')?.lastLlmAt).toBe(222);
+
+        // model2 captures its baseline now (writers.model === 0): model=openai
+        // with lastLlmAt=222. Its request queues behind rename2.
+        const modelPatch2 = result.update.mutateAsync({
+          threadId: 't-1',
+          patch: { model: anthropicRow },
+          userId: uid,
+        });
+        await flushPromises();
+
+        // Hold the follow-up refresh GETs: no fetch may heal the cache.
+        listGates = [new Promise<void>(() => {}), new Promise<void>(() => {})];
+        // rename2 settles → model2 is transmitted and fails.
+        respondRename2.resolve();
+        await expect(modelPatch2).rejects.toThrow('patch failed');
+        await flushPromises();
+
+        // Server truth never changed: openai plus the assistant save's 222.
+        expect(server.rows.get('t-1')!.model).toEqual(openaiPair);
+        expect(server.rows.get('t-1')!.lastLlmAt).toBe(222);
+        // The rollback must land exactly that: the stale confirmed entry from
+        // model1's epoch must not discard the baseline's fresh evidence.
+        expect(cachedRow(queryClient, uid, 't-1')?.model).toEqual(openaiPair);
+        expect(cachedRow(queryClient, uid, 't-1')?.lastLlmAt).toBe(222);
+      });
+
       it('does not roll a new-session rename back to a pre-reset baseline after the prior session commit', async () => {
         const uid = 'po-fence-user';
         server.seed({ ThreadId: 't-1', title: 'Original', createdAt: 500, updatedAt: 1000 });

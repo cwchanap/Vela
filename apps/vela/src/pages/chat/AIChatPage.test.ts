@@ -167,7 +167,11 @@ describe('AIChatPage', () => {
             threads: sorted.map((t) => ({ ...t, model: t.model ? { ...t.model } : undefined })),
           });
         };
-        return (listDelay ?? Promise.resolve()).then(respond);
+        // The server reads when the request arrives; a slow response can
+        // still land after a concurrent save commits, so snapshot it up
+        // front and delay only delivery — like the messages GET below.
+        const response = respond();
+        return (listDelay ?? Promise.resolve()).then(() => response);
       }
 
       if (url.includes('/api/chat-history/messages') && method === 'GET') {
@@ -2380,6 +2384,10 @@ describe('AIChatPage', () => {
 
       const listGate = deferred<void>();
       listDelay = listGate.promise;
+      // The post-delete refresh snapshots its response when the request
+      // reaches the server: a row recreated before that read is part of the
+      // snapshot it lands.
+      listThreadsOverride = [createMockThread({ ThreadId: 't-1', title: 'Recreated row' })];
 
       await openThreadMenu(0);
       await wrapper.find('[data-testid="llm-chat-delete-thread"]').trigger('click');
@@ -2388,7 +2396,10 @@ describe('AIChatPage', () => {
       await flushPromises();
       expect(deleteFetches().length).toBe(1);
 
+      // The messages endpoint reads threadRows, so the recreated row must
+      // exist there once the landed refresh makes it selectable.
       threadRows.push(createMockThread({ ThreadId: 't-1', title: 'Recreated row' }));
+      listThreadsOverride = null;
       listGate.resolve();
       await flushPromises();
       expect(wrapper.text()).toContain('Recreated row');
@@ -2859,6 +2870,80 @@ describe('AIChatPage', () => {
         provider: 'google',
         model: 'gemini-3.8-flash',
       });
+    });
+
+    // The mount-time seed can read the unhydrated emptyLlm default when the
+    // session exists but auth.user has not landed yet. Hydration leaves
+    // getUserId() unchanged, so the identity watcher never reseeds — the
+    // default-model watcher must follow the arriving preference instead.
+    const hydratedUser = () =>
+      createMockUser({
+        preferences: {
+          dailyGoal: 20,
+          difficulty: 'Beginner' as const,
+          notifications: false,
+          llm: {
+            keys: { openai: 'test-openai-key' },
+            thinking: {},
+            defaultModel: { provider: 'openai', model: 'gpt-6.1-sol' },
+          },
+        },
+      });
+
+    it('reseeds an untouched fresh chat when the hydrated default arrives', async () => {
+      const authStore = useAuthStore();
+      authStore.user = null; // session remains; llm falls back to emptyLlm
+      await flushPromises();
+      mountComponent();
+      await flushPromises();
+      const chatStore = useChatStore();
+      expect(chatStore.activeModel).toEqual({ provider: 'google', model: 'gemini-3.8-flash' });
+
+      authStore.user = hydratedUser();
+      await flushPromises();
+
+      expect(chatStore.activeModel).toEqual(openaiPair);
+    });
+
+    it('keeps an explicit model pick when the hydrated default arrives', async () => {
+      const authStore = useAuthStore();
+      authStore.user = null;
+      await flushPromises();
+      mountComponent();
+      await flushPromises();
+      const chatStore = useChatStore();
+      await chooseModel('openai::gpt-6.1-sol');
+      expect(chatStore.activeModel).toEqual(openaiPair);
+
+      authStore.user = hydratedUser();
+      await flushPromises();
+
+      expect(chatStore.activeModel).toEqual(openaiPair);
+    });
+
+    it('keeps the seeded model for a started turn when the hydrated default arrives', async () => {
+      const authStore = useAuthStore();
+      authStore.user = null;
+      await flushPromises();
+      // The seeded default needs a key or the send is blocked before any
+      // message is added.
+      useLLMSettingsStore().llm.keys.google = 'test-google-key';
+      // A failed first save leaves isPersistedThread false: only the user
+      // turn's presence may veto the reseed.
+      saveFailures.user = true;
+      mountComponent();
+      await flushPromises();
+      const chatStore = useChatStore();
+      mockLLMResponse();
+      await sendMessage('started turn');
+      await flushPromises();
+      expect(chatStore.messages.some((m) => m.type === 'user')).toBe(true);
+      expect(chatStore.isPersistedThread).toBe(false);
+
+      authStore.user = hydratedUser();
+      await flushPromises();
+
+      expect(chatStore.activeModel).toEqual({ provider: 'google', model: 'gemini-3.8-flash' });
     });
 
     it('preserves the active model and transcript when navigating away and back', async () => {
@@ -3440,7 +3525,7 @@ describe('AIChatPage', () => {
       await sendMessage('cache me');
       await flushPromises();
 
-      expect(cacheChip().text()).toBe('Cache likely warm · 5:00 left');
+      expect(cacheChip().find('[role="timer"]').text()).toBe('Cache likely warm · 5:00 left');
       expect(useChatStore().cacheStartedAt).toBe(T0);
       expect(assistantSaveBody()!.lastLlmAt).toBe(T0);
     });
@@ -3654,7 +3739,7 @@ describe('AIChatPage', () => {
 
       await wrapper.find('[data-testid="llm-chat-thread-item"]').trigger('click');
       await flushPromises();
-      expect(cacheChip().text()).toBe('Cache likely warm · 4:00 left');
+      expect(cacheChip().find('[role="timer"]').text()).toBe('Cache likely warm · 4:00 left');
       expect(useChatStore().cacheStartedAt).toBe(T0 - 60_000);
 
       await wrapper.findAll('[data-testid="llm-chat-thread-item"]')[1]!.trigger('click');
@@ -3705,7 +3790,7 @@ describe('AIChatPage', () => {
       mountComponent();
       await flushPromises();
 
-      expect(cacheChip().text()).toBe('Cache likely warm · 5:00 left');
+      expect(cacheChip().find('[role="timer"]').text()).toBe('Cache likely warm · 5:00 left');
     });
 
     it('replays the user model and this response\u0027s evidence when the assistant save hits a deleted thread', async () => {
@@ -3733,7 +3818,7 @@ describe('AIChatPage', () => {
       const freshAssistant = saveBodies.find((b) => b.ThreadId === freshId && b.is_user === false);
       expect(freshAssistant!.lastLlmAt).toBe(T0);
       expect(chatStore.cacheStartedAt).toBe(T0);
-      expect(cacheChip().text()).toBe('Cache likely warm · 5:00 left');
+      expect(cacheChip().find('[role="timer"]').text()).toBe('Cache likely warm · 5:00 left');
     });
   });
 
@@ -4031,9 +4116,13 @@ describe('AIChatPage', () => {
       enableAnthropic();
       const gate = deferred<void>();
       listDelay = gate.promise;
-      // Any GET responding now would miss the replacement thread.
+      // The initial GET arrives before the thread exists: its snapshot is
+      // frozen at request arrival, so it can never carry the row.
       listThreadsOverride = [];
       await mountWithFakeTime();
+      // Later GETs must snapshot real rows: their requests arrive after the
+      // replayed save commits.
+      listThreadsOverride = null;
       await chooseModel('anthropic::claude-opus-5-5');
       mockLLMResponseWithUsage('Recovered reply', anthropicUsage());
       const chatStore = useChatStore();
@@ -4055,9 +4144,8 @@ describe('AIChatPage', () => {
       const freshAssistant = saveBodies.find((b) => b.ThreadId === freshId && b.is_user === false);
       expect(freshAssistant?.lastLlmAt).toBe(T0);
 
-      // The replacement GET postdates row creation, so a real server returns
-      // the row: the frozen pre-creation override no longer applies.
-      listThreadsOverride = null;
+      // Releasing the stall lets the replacement GET — whose arrival-time
+      // snapshot postdates row creation — land the row and the evidence.
       gate.resolve();
       await flushPromises();
 
@@ -4074,9 +4162,13 @@ describe('AIChatPage', () => {
       enableAnthropic();
       const gate = deferred<void>();
       listDelay = gate.promise;
-      // Any GET responding now would miss the first thread.
+      // The initial GET arrives before the thread exists: its snapshot is
+      // frozen at request arrival, so it can never carry the row.
       listThreadsOverride = [];
       await mountWithFakeTime();
+      // Later GETs must snapshot real rows: their requests arrive after the
+      // first turn's save commits.
+      listThreadsOverride = null;
       await chooseModel('anthropic::claude-opus-5-5');
       mockLLMResponseWithUsage('First turn reply', anthropicUsage());
 
@@ -4088,7 +4180,6 @@ describe('AIChatPage', () => {
       // assistant save and replaced by exactly one post-commit GET.
       expect(threadFetches().length).toBe(3);
 
-      listThreadsOverride = null;
       gate.resolve();
       await flushPromises();
 

@@ -211,12 +211,40 @@ watch(
 );
 
 // A fresh chat starts from the Settings default; an existing chat keeps its
-// model across remounts and thread switches.
+// model across remounts and thread switches. activeModelIsSeed records that
+// the current activeModel is the seed applied here — an explicit picker
+// choice or a thread restore ends the seed's ownership, so a later
+// preference sync must not overwrite it.
+let activeModelIsSeed = false;
 const seedActiveModel = () => {
   if (!chat.activeModel) {
     chat.setActiveModel({ ...llmSettings.llm.defaultModel });
+    activeModelIsSeed = true;
   }
 };
+
+// The seed can predate preference hydration: mounting while a session exists
+// but auth.user has not landed reads the emptyLlm default, and getUserId()
+// does not change when the profile arrives, so the identity watcher never
+// reseeds. Reseed an untouched fresh chat when the default actually changes;
+// explicit picks, started turns, and restored threads keep their model.
+watch(
+  () => llmSettings.llm.defaultModel,
+  (next, prev) => {
+    if (next.provider === prev?.provider && next.model === prev?.model) return;
+    if (!chat.activeModel) {
+      seedActiveModel();
+      return;
+    }
+    if (
+      activeModelIsSeed &&
+      !chat.isPersistedThread &&
+      !chat.messages.some((m) => m.type === 'user')
+    ) {
+      chat.setActiveModel({ provider: next.provider, model: next.model });
+    }
+  },
+);
 
 // Server-key eligibility comes only from an affirmative capabilities response.
 const serverKeyProviders = computed(() =>
@@ -255,6 +283,7 @@ const onModelSelect = async (pair: ChatModelPair) => {
   }
   // A switch always drops the session thinking choice and prior cache evidence.
   const applyLocally = () => {
+    activeModelIsSeed = false;
     chat.setActiveModel(pair);
     chat.setThinkingOverride(null);
     chat.setCacheStartedAt(null);
@@ -408,6 +437,9 @@ const restartDeletedChat = async (
     // otherwise the caller's own post-user-save refresh covers it.
     if (index === 0 && turns.length > 1) {
       await queryClient.cancelQueries({ queryKey: chatKeys.threads(uid) });
+      // The awaited cancel gives an account switch room to land; a stale
+      // replay must not invalidate the replacement session's list.
+      if (isStale()) return null;
       void queryClient.invalidateQueries({ queryKey: chatKeys.threads(uid) });
     }
   }
@@ -434,6 +466,7 @@ const selectThread = async (t: ChatThreadSummaryDTO) => {
     // Restore the thread's own choice: stored model (or the Settings default
     // for legacy rows) and its cache evidence; the session thinking pick is
     // per-chat and never carries across threads.
+    activeModelIsSeed = false;
     chat.setActiveModel(
       t.model
         ? { provider: t.model.provider, model: t.model.model }
@@ -543,14 +576,16 @@ const onSend = async (draft: string) => {
       userSaved = restarted !== null;
       if (restarted !== null) saveCid = restarted;
     }
-    if (userSaved) {
+    if (userSaved && !isStale()) {
       // Cancel any in-flight list GET first: with no cached data a bare
       // invalidate dedupes into that pending snapshot, which can predate this
       // turn's row (initial load) and would then never carry it. Cancelling
       // forces exactly one replacement GET whose snapshot postdates the row;
       // the cancelled request never lands, so no extra request is issued.
       await queryClient.cancelQueries({ queryKey: chatKeys.threads(uid) });
-      void queryClient.invalidateQueries({ queryKey: chatKeys.threads(uid) });
+      // The awaited save and cancel both give a session reset room to land;
+      // a stale continuation must not touch the replacement session's list.
+      if (!isStale()) void queryClient.invalidateQueries({ queryKey: chatKeys.threads(uid) });
     }
     if (isStale()) return;
 

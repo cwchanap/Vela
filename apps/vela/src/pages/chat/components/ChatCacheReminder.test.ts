@@ -34,7 +34,7 @@ describe('ChatCacheReminder', () => {
     const wrapper = mountReminder('anthropic', START);
     const chip = wrapper.find('[data-testid="chat-cache-reminder"]');
     expect(chip.exists()).toBe(true);
-    expect(chip.text()).toBe('Cache likely warm · 5:00 left');
+    expect(chip.find('[role="timer"]').text()).toBe('Cache likely warm · 5:00 left');
     expect(chip.attributes('data-state')).toBe('warm');
   });
 
@@ -44,8 +44,24 @@ describe('ChatCacheReminder', () => {
     const wrapper = mountReminder('anthropic', START);
     // Advancing the timers also advances the fake clock by the same amount.
     await vi.advanceTimersByTimeAsync(1000);
-    expect(wrapper.find('[data-testid="chat-cache-reminder"]').text()).toBe(
+    expect(wrapper.find('[data-testid="chat-cache-reminder"] [role="timer"]').text()).toBe(
       'Cache likely warm · 4:59 left',
+    );
+  });
+
+  it('keeps the ticking countdown out of the live region but announces each state once', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(START);
+    const wrapper = mountReminder('anthropic', START);
+    const status = wrapper.find('[role="status"]');
+    expect(status.exists()).toBe(true);
+    expect(status.text()).toBe('Prompt cache likely warm');
+    await vi.advanceTimersByTimeAsync(1000);
+    // A countdown tick changes the timer but not the announcement.
+    expect(status.text()).toBe('Prompt cache likely warm');
+    await vi.advanceTimersByTimeAsync(299 * 1000);
+    expect(wrapper.find('[role="status"]').text()).toBe(
+      'Cache window elapsed · next message may miss cache',
     );
   });
 
@@ -55,7 +71,9 @@ describe('ChatCacheReminder', () => {
     const wrapper = mountReminder('anthropic', START);
     await vi.advanceTimersByTimeAsync(300 * 1000);
     const chip = wrapper.find('[data-testid="chat-cache-reminder"]');
-    expect(chip.text()).toBe('Cache window elapsed · next message may miss cache');
+    expect(chip.find('[role="timer"]').text()).toBe(
+      'Cache window elapsed · next message may miss cache',
+    );
     expect(chip.attributes('data-state')).toBe('elapsed');
   });
 
