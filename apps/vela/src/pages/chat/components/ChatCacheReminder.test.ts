@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { mount, VueWrapper } from '@vue/test-utils';
+import { nextTick } from 'vue';
 import type { LlmProvider } from '@vela/common';
 import ChatCacheReminder from './ChatCacheReminder.vue';
 
@@ -19,6 +20,16 @@ describe('ChatCacheReminder', () => {
     vi.useFakeTimers();
     const wrapper = mountReminder('anthropic', null);
     expect(wrapper.find('[data-testid="chat-cache-reminder"]').exists()).toBe(false);
+  });
+
+  it('keeps the live region mounted but empty while hidden', () => {
+    vi.useFakeTimers();
+    const wrapper = mountReminder('anthropic', null);
+    // The region must exist before any text lands: a live region inserted
+    // already holding its message is not reliably announced.
+    const status = wrapper.find('[role="status"]');
+    expect(status.exists()).toBe(true);
+    expect(status.text()).toBe('');
   });
 
   it('renders nothing for a provider without a prompt-cache TTL', () => {
@@ -49,10 +60,34 @@ describe('ChatCacheReminder', () => {
     );
   });
 
+  it('announces a state that becomes active after mount', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(START);
+    const wrapper = mountReminder('anthropic', null);
+    await nextTick();
+    expect(wrapper.find('[role="status"]').text()).toBe('');
+
+    await wrapper.setProps({ cacheStartedAt: START });
+    await nextTick();
+    expect(wrapper.find('[role="status"]').text()).toBe('Prompt cache likely warm');
+  });
+
+  it('writes a state already active at mount as a post-mount update', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(START);
+    const wrapper = mountReminder('anthropic', START);
+    // Mounted empty, then filled: the announcement must arrive as a text
+    // change to the existing region, not as initial insertion content.
+    expect(wrapper.find('[role="status"]').text()).toBe('');
+    await nextTick();
+    expect(wrapper.find('[role="status"]').text()).toBe('Prompt cache likely warm');
+  });
+
   it('keeps the ticking countdown out of the live region but announces each state once', async () => {
     vi.useFakeTimers();
     vi.setSystemTime(START);
     const wrapper = mountReminder('anthropic', START);
+    await nextTick();
     const status = wrapper.find('[role="status"]');
     expect(status.exists()).toBe(true);
     expect(status.text()).toBe('Prompt cache likely warm');

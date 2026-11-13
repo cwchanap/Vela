@@ -295,12 +295,14 @@ describe('useChatStore', () => {
   describe('chat model state', () => {
     const seedModelState = async (store: {
       setActiveModel: (_pair: { provider: 'google'; model: string } | null) => void;
+      setActiveModelIsSeed: (_isSeed: boolean) => void;
       setThinkingOverride: (_effort: 'high' | null) => void;
       setCacheStartedAt: (_timestamp: number | null) => void;
       setIsPersistedThread: (_persisted: boolean) => void;
       setModelPatching: (_pending: boolean) => void;
     }) => {
       store.setActiveModel({ provider: 'google', model: 'gemini-3.8-flash' });
+      store.setActiveModelIsSeed(true);
       store.setThinkingOverride('high');
       store.setCacheStartedAt(1700000000000);
       store.setIsPersistedThread(true);
@@ -311,6 +313,7 @@ describe('useChatStore', () => {
       const { useChatStore } = await import('./chat');
       const store = useChatStore();
       expect(store.activeModel).toBeNull();
+      expect(store.activeModelIsSeed).toBe(false);
       expect(store.thinkingOverride).toBeNull();
       expect(store.cacheStartedAt).toBeNull();
       expect(store.isPersistedThread).toBe(false);
@@ -322,6 +325,7 @@ describe('useChatStore', () => {
       const store = useChatStore();
       seedModelState(store);
       expect(store.activeModel).toEqual({ provider: 'google', model: 'gemini-3.8-flash' });
+      expect(store.activeModelIsSeed).toBe(true);
       expect(store.thinkingOverride).toBe('high');
       expect(store.cacheStartedAt).toBe(1700000000000);
       expect(store.isPersistedThread).toBe(true);
@@ -334,6 +338,7 @@ describe('useChatStore', () => {
       seedModelState(store);
       store.startNewChat();
       expect(store.activeModel).toBeNull();
+      expect(store.activeModelIsSeed).toBe(false);
       expect(store.thinkingOverride).toBeNull();
       expect(store.cacheStartedAt).toBeNull();
       expect(store.isPersistedThread).toBe(false);
@@ -346,6 +351,7 @@ describe('useChatStore', () => {
       seedModelState(store);
       store.resetForUser('user-2', 3);
       expect(store.activeModel).toBeNull();
+      expect(store.activeModelIsSeed).toBe(false);
       expect(store.thinkingOverride).toBeNull();
       expect(store.cacheStartedAt).toBeNull();
       expect(store.isPersistedThread).toBe(false);

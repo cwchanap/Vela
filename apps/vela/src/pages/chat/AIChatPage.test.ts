@@ -2912,13 +2912,80 @@ describe('AIChatPage', () => {
       mountComponent();
       await flushPromises();
       const chatStore = useChatStore();
-      await chooseModel('openai::gpt-6.1-sol');
+      // Pick a model that differs from the arriving preference: choosing the
+      // hydrated default itself could not detect an unwanted reseed.
+      await chooseModel('google::gemini-4-argon');
+      expect(chatStore.activeModel).toEqual({ provider: 'google', model: 'gemini-4-argon' });
+
+      authStore.user = hydratedUser();
+      await flushPromises();
+
+      expect(chatStore.activeModel).toEqual({ provider: 'google', model: 'gemini-4-argon' });
+    });
+
+    it('reseeds an untouched fresh chat when hydration lands while unmounted', async () => {
+      const authStore = useAuthStore();
+      authStore.user = null;
+      await flushPromises();
+      mountComponent();
+      await flushPromises();
+      const chatStore = useChatStore();
+      expect(chatStore.activeModel).toEqual({ provider: 'google', model: 'gemini-3.8-flash' });
+
+      // The profile arrives while no page is mounted: the default-model
+      // watcher cannot run, so the remount must reconcile the seed that
+      // survived in the store.
+      wrapper!.unmount();
+      wrapper = null;
+      authStore.user = hydratedUser();
+      await flushPromises();
+
+      mountComponent();
+      await flushPromises();
+
       expect(chatStore.activeModel).toEqual(openaiPair);
+    });
+
+    it('reseeds an untouched fresh chat when hydration lands after a remount', async () => {
+      const authStore = useAuthStore();
+      authStore.user = null;
+      await flushPromises();
+      mountComponent();
+      await flushPromises();
+      const chatStore = useChatStore();
+
+      // Remount still unhydrated: the seed ownership recorded in the store
+      // must survive so the arriving preference can still reseed.
+      wrapper!.unmount();
+      wrapper = null;
+      mountComponent();
+      await flushPromises();
+      expect(chatStore.activeModel).toEqual({ provider: 'google', model: 'gemini-3.8-flash' });
 
       authStore.user = hydratedUser();
       await flushPromises();
 
       expect(chatStore.activeModel).toEqual(openaiPair);
+    });
+
+    it('keeps an explicit model pick across a remount when hydration lands while unmounted', async () => {
+      const authStore = useAuthStore();
+      authStore.user = null;
+      await flushPromises();
+      mountComponent();
+      await flushPromises();
+      const chatStore = useChatStore();
+      await chooseModel('google::gemini-4-argon');
+
+      wrapper!.unmount();
+      wrapper = null;
+      authStore.user = hydratedUser();
+      await flushPromises();
+
+      mountComponent();
+      await flushPromises();
+
+      expect(chatStore.activeModel).toEqual({ provider: 'google', model: 'gemini-4-argon' });
     });
 
     it('keeps the seeded model for a started turn when the hydrated default arrives', async () => {
