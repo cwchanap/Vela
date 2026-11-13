@@ -28,11 +28,15 @@ export const useChatStore = defineStore('chat', () => {
 
   // Chat-specific selection state that must survive route changes but reset
   // with the conversation. activeModel is seeded from Settings for fresh
-  // chats; isPersistedThread tracks whether a thread metadata row exists (a
-  // client UUID alone does not) and gates model PATCHes. modelPatchPending
-  // guards the in-flight saved-thread model transition alongside the
-  // conversation state so a route remount cannot unlock it.
+  // chats; activeModelIsSeed records that the current model is still that
+  // seed (an explicit pick or thread restore ends its ownership) and lives
+  // here because page-local state would forget it on a route remount.
+  // isPersistedThread tracks whether a thread metadata row exists (a client
+  // UUID alone does not) and gates model PATCHes. modelPatchPending guards
+  // the in-flight saved-thread model transition alongside the conversation
+  // state so a route remount cannot unlock it.
   const activeModel = ref<ChatModelPair | null>(null);
+  const activeModelIsSeed = ref(false);
   const thinkingOverride = ref<LlmEffort | null>(null);
   const cacheStartedAt = ref<number | null>(null);
   const isPersistedThread = ref(false);
@@ -40,6 +44,10 @@ export const useChatStore = defineStore('chat', () => {
 
   const setActiveModel = (pair: ChatModelPair | null) => {
     activeModel.value = pair;
+  };
+
+  const setActiveModelIsSeed = (isSeed: boolean) => {
+    activeModelIsSeed.value = isSeed;
   };
 
   const setThinkingOverride = (effort: LlmEffort | null) => {
@@ -99,6 +107,7 @@ export const useChatStore = defineStore('chat', () => {
     isTyping.value = false;
     isLoading.value = false;
     activeModel.value = null;
+    activeModelIsSeed.value = false;
     thinkingOverride.value = null;
     cacheStartedAt.value = null;
     isPersistedThread.value = false;
@@ -133,6 +142,7 @@ export const useChatStore = defineStore('chat', () => {
     error,
     chatId,
     activeModel,
+    activeModelIsSeed,
     thinkingOverride,
     cacheStartedAt,
     isPersistedThread,
@@ -150,6 +160,7 @@ export const useChatStore = defineStore('chat', () => {
     setError,
     setChatId,
     setActiveModel,
+    setActiveModelIsSeed,
     setThinkingOverride,
     setCacheStartedAt,
     setIsPersistedThread,

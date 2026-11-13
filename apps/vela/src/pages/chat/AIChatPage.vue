@@ -211,16 +211,34 @@ watch(
 );
 
 // A fresh chat starts from the Settings default; an existing chat keeps its
-// model across remounts and thread switches. activeModelIsSeed records that
-// the current activeModel is the seed applied here — an explicit picker
-// choice or a thread restore ends the seed's ownership, so a later
-// preference sync must not overwrite it.
-let activeModelIsSeed = false;
+// model across remounts and thread switches. The store's activeModelIsSeed
+// records that the current activeModel is still the seed applied here — an
+// explicit picker choice or a thread restore ends the seed's ownership, so a
+// later preference sync must not overwrite it.
 const seedActiveModel = () => {
   if (!chat.activeModel) {
     chat.setActiveModel({ ...llmSettings.llm.defaultModel });
-    activeModelIsSeed = true;
+    chat.setActiveModelIsSeed(true);
   }
+};
+
+// A seed follows the Settings default only while the chat is untouched: no
+// persisted row and no user turn yet. Running this on mount reconciles a
+// seed that survived a remount with a default that may have hydrated while
+// the page was unmounted, when the watcher below could not fire.
+const reseedUntouchedSeed = () => {
+  const next = llmSettings.llm.defaultModel;
+  const current = chat.activeModel;
+  if (
+    !current ||
+    !chat.activeModelIsSeed ||
+    chat.isPersistedThread ||
+    chat.messages.some((m) => m.type === 'user') ||
+    (current.provider === next.provider && current.model === next.model)
+  ) {
+    return;
+  }
+  chat.setActiveModel({ provider: next.provider, model: next.model });
 };
 
 // The seed can predate preference hydration: mounting while a session exists
@@ -236,13 +254,7 @@ watch(
       seedActiveModel();
       return;
     }
-    if (
-      activeModelIsSeed &&
-      !chat.isPersistedThread &&
-      !chat.messages.some((m) => m.type === 'user')
-    ) {
-      chat.setActiveModel({ provider: next.provider, model: next.model });
-    }
+    reseedUntouchedSeed();
   },
 );
 
@@ -283,7 +295,7 @@ const onModelSelect = async (pair: ChatModelPair) => {
   }
   // A switch always drops the session thinking choice and prior cache evidence.
   const applyLocally = () => {
-    activeModelIsSeed = false;
+    chat.setActiveModelIsSeed(false);
     chat.setActiveModel(pair);
     chat.setThinkingOverride(null);
     chat.setCacheStartedAt(null);
@@ -466,7 +478,7 @@ const selectThread = async (t: ChatThreadSummaryDTO) => {
     // Restore the thread's own choice: stored model (or the Settings default
     // for legacy rows) and its cache evidence; the session thinking pick is
     // per-chat and never carries across threads.
-    activeModelIsSeed = false;
+    chat.setActiveModelIsSeed(false);
     chat.setActiveModel(
       t.model
         ? { provider: t.model.provider, model: t.model.model }
@@ -766,8 +778,11 @@ onMounted(() => {
   } else if (chat.ownerId !== uid || chat.ownerSessionGen !== sessionGen) {
     chat.resetForUser(uid, sessionGen);
   }
-  // Seed only a fresh chat's model; keep any existing model on remount.
+  // Seed only a fresh chat's model; keep any existing model on remount. A
+  // surviving seed is then reconciled with the current default, which may
+  // have hydrated while the page was away.
   seedActiveModel();
+  reseedUntouchedSeed();
   // Warm greeting if empty
   if (chat.messages.length === 0) {
     chat.addMessage({

@@ -1,14 +1,16 @@
 <template>
+  <!-- role="status" would announce every 1s countdown tick, so the countdown
+       uses role="timer" (not a live region) and state transitions announce
+       once via this hidden status region. The region stays mounted — a live
+       region inserted already holding text is not reliably announced — and
+       its text is only written after mount. -->
+  <span class="chat-cache-reminder__announce" role="status">{{ announced }}</span>
   <div
     v-if="reminder.state !== 'hidden'"
     class="chat-cache-reminder"
     :data-state="reminder.state"
     data-testid="chat-cache-reminder"
   >
-    <!-- role="status" would announce every 1s countdown tick; role="timer" is
-         not a live region. State transitions announce once via this hidden
-         status region whose text only changes with the state. -->
-    <span class="chat-cache-reminder__announce" role="status">{{ announcement }}</span>
     <span role="timer">{{ reminder.label }}</span>
   </div>
 </template>
@@ -59,6 +61,22 @@ const STATE_ANNOUNCEMENTS: Record<Exclude<CacheReminderState, 'hidden'>, string>
 const announcement = computed(() =>
   reminder.value.state === 'hidden' ? '' : STATE_ANNOUNCEMENTS[reminder.value.state],
 );
+
+// Screen readers announce text changes to an existing live region, not a
+// region inserted already holding text: render the region empty and only
+// start mirroring the state copy after mount, so a reminder that is already
+// visible when the component mounts (e.g. a remount with warm cache) is
+// still announced.
+const announced = ref('');
+onMounted(() => {
+  watch(
+    announcement,
+    (text) => {
+      announced.value = text;
+    },
+    { immediate: true },
+  );
+});
 </script>
 
 <style scoped lang="scss">
