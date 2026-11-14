@@ -246,7 +246,7 @@ async function dynamodb_saveUserMessage(
 async function dynamodb_saveAssistantMessage(
   userId: string,
   item: ChatHistoryItem,
-): Promise<'ok' | 'rejected'> {
+): Promise<'ok' | 'skipped' | 'rejected'> {
   const key = { UserId: userId, ThreadId: item.ThreadId };
   const put = { TableName: TABLE_NAMES.CHAT_HISTORY, Item: messageItem(item) };
   // The thread guard is a conditioned Update so the assistant turn can carry
@@ -321,6 +321,8 @@ async function dynamodb_saveAssistantMessage(
 
   // The metadata update was skipped either because the thread is being deleted
   // or because its model/lastLlmAt moved ahead. Write the message when alive.
+  // The caller reports the row's authoritative evidence to the client, so this
+  // path returns 'skipped' rather than 'ok'.
   try {
     await retryOnTransactionConflict(() =>
       docClient.send(
@@ -339,7 +341,7 @@ async function dynamodb_saveAssistantMessage(
         }),
       ),
     );
-    return 'ok';
+    return 'skipped';
   } catch (error) {
     if (isTransactionConditionFailed(error)) {
       return 'rejected';
@@ -404,12 +406,16 @@ async function dynamodb_updateThread(
       // A model change invalidates the stored cache evidence. The clear also
       // advances the request-order watermark so a delayed save whose request
       // predates this patch cannot reinstate evidence once an A→B→A change
-      // leaves the model matching again.
+      // leaves the model matching again. The watermark write stays monotonic
+      // on the fields-only retry too: a patch that stalls past a newer
+      // evidence write must fail outright rather than lower lastLlmReqAt and
+      // reopen the window for a superseded save.
       names['#lastLlmAt'] = 'lastLlmAt';
       removeClauses.push('#lastLlmAt');
       names['#lastLlmReqAt'] = 'lastLlmReqAt';
       values[':lastLlmReqAt'] = now;
       setClauses.push('#lastLlmReqAt = :lastLlmReqAt');
+      condition += ' AND (attribute_not_exists(#lastLlmReqAt) OR #lastLlmReqAt <= :lastLlmReqAt)';
     }
 
     const command = new UpdateCommand({
@@ -774,7 +780,18 @@ chatHistory.post('/save', createValidator('json', ChatHistoryItemSchema), async 
     if (result === 'rejected') {
       return c.json({ error: 'Thread not found' }, 404);
     }
-    return c.json({ ok: true });
+    if (body.is_user) {
+      return c.json({ ok: true });
+    }
+    // A guarded assistant save can commit the message while the ordering
+    // guards skip the evidence write. Report the thread row's authoritative
+    // lastLlmAt so the client publishes what was stored — never the supplied
+    // timestamp a newer request already superseded.
+    const lastLlmAt =
+      result === 'ok'
+        ? (item.lastLlmAt ?? null)
+        : ((await dynamodb_getThread(authenticatedUserId, item.ThreadId))?.lastLlmAt ?? null);
+    return c.json({ ok: true, lastLlmAt });
   } catch (e) {
     console.error('chat-history save error', e);
     const msg = e instanceof Error ? e.message : 'Unknown error';

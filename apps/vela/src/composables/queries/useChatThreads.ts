@@ -484,13 +484,20 @@ export function useSaveChatMessage() {
             thread.model === undefined ||
             (thread.model.provider === variables.model.provider &&
               thread.model.model === variables.model.model);
-          const effectiveAt = variables.lastLlmAt ?? variables.requestStartedAt;
+          // The response echoes the row's authoritative evidence: a guarded
+          // save can commit the message while the ordering guards skip the
+          // metadata write, so the supplied timestamp is not necessarily
+          // what stored. A missing field means the contract did not report
+          // it — fall back to the supplied value.
+          const committed =
+            _data?.lastLlmAt === undefined ? variables.lastLlmAt : (_data.lastLlmAt ?? undefined);
+          const effectiveAt = committed ?? variables.requestStartedAt;
           const notOlder =
             effectiveAt === undefined ||
             thread.lastLlmAt === undefined ||
             thread.lastLlmAt <= effectiveAt;
           if (!modelMatches || !notOlder) return thread;
-          return { ...thread, lastLlmAt: variables.lastLlmAt };
+          return { ...thread, lastLlmAt: committed };
         }),
       );
       // The superseded GET was the only fetch that could carry the row

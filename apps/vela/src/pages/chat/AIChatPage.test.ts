@@ -143,7 +143,9 @@ describe('AIChatPage', () => {
             // on a cache hit and REMOVEs it on a clear, in the same
             // transaction as the message write. Both branches are fenced by
             // the lastLlmReqAt request-order watermark so a delayed save
-            // cannot undo a newer clear.
+            // cannot undo a newer clear. The response echoes the row's
+            // authoritative evidence — a skipped write reports the stored
+            // value, not the supplied one.
             const row = threadRows.find((t) => t.ThreadId === String(body.ThreadId ?? ''));
             if (row) {
               const reqAt = (body.requestStartedAt ?? body.lastLlmAt) as number | undefined;
@@ -168,6 +170,7 @@ describe('AIChatPage', () => {
                 row.lastLlmReqAt = reqAt as number;
               }
             }
+            return Promise.resolve(okJson({ ok: true, lastLlmAt: row?.lastLlmAt ?? null }));
           }
           return Promise.resolve(okJson({ ok: true }));
         };
