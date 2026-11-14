@@ -401,9 +401,15 @@ async function dynamodb_updateThread(
       names['#model'] = 'model';
       values[':model'] = patch.model;
       setClauses.push('#model = :model');
-      // A model change invalidates the stored cache evidence.
+      // A model change invalidates the stored cache evidence. The clear also
+      // advances the request-order watermark so a delayed save whose request
+      // predates this patch cannot reinstate evidence once an A→B→A change
+      // leaves the model matching again.
       names['#lastLlmAt'] = 'lastLlmAt';
       removeClauses.push('#lastLlmAt');
+      names['#lastLlmReqAt'] = 'lastLlmReqAt';
+      values[':lastLlmReqAt'] = now;
+      setClauses.push('#lastLlmReqAt = :lastLlmReqAt');
     }
 
     const command = new UpdateCommand({

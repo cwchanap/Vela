@@ -592,8 +592,13 @@ const handleApiRoute = async (state: MockApi, route: Route): Promise<void> => {
       ...(patch.model !== undefined ? { model: patch.model } : {}),
       updatedAt: Date.now(),
     };
-    // A model PATCH always removes stored cache evidence; title patches keep it.
-    if (patch.model !== undefined) delete updated.lastLlmAt;
+    // A model PATCH always removes stored cache evidence; title patches keep
+    // it. The clear also advances the request-order watermark so a delayed
+    // save predating the patch stays fenced after an A→B→A change.
+    if (patch.model !== undefined) {
+      delete updated.lastLlmAt;
+      updated.lastLlmReqAt = Date.now();
+    }
     state.chatThreads.get(authUser.userId)?.set(threadId, updated);
     return jsonResponse(route, { thread: updated });
   }
