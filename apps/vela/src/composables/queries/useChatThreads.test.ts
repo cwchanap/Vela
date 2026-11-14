@@ -501,6 +501,40 @@ describe('useChatThreads', () => {
       ).toBeUndefined();
     });
 
+    it('clears stale cached evidence when a skipped save echoes an authoritative null', async () => {
+      signIn(userA);
+      // Cross-tab: a refresh left this cache holding evidence that a newer
+      // request already cleared server-side. The delayed save's guarded
+      // write is skipped and the response echoes the row's authoritative
+      // empty evidence. The cached timestamp must clear even though it is
+      // newer than this request's start — the null reports stored truth,
+      // not a value to order against requestStartedAt.
+      mockSaveChatMessage.mockResolvedValue({ ok: true, lastLlmAt: null });
+      const t1 = thread('t-1', 'First', 500);
+      t1.lastLlmAt = 200;
+      const { useSaveChatMessage } = await import('./useChatThreads');
+      const {
+        result,
+        queryClient,
+        cleanup: qcCleanup,
+      } = withQueryClient(() => useSaveChatMessage(), cacheClient());
+      cleanup = qcCleanup;
+      queryClient.setQueryData(threadsKey(userA), [t1]);
+
+      await result.mutateAsync({
+        threadId: 't-1',
+        userId: 'user-a',
+        message: 'ai reply',
+        isUser: false,
+        lastLlmAt: 222,
+        requestStartedAt: 100,
+      });
+
+      expect(
+        queryClient.getQueryData<ChatThreadSummaryDTO[]>(threadsKey(userA))![0]!.lastLlmAt,
+      ).toBeUndefined();
+    });
+
     it('publishes the winning timestamp when the server skipped the supplied write', async () => {
       signIn(userA);
       // A newer request's evidence won the ordering race; the skipped save's
