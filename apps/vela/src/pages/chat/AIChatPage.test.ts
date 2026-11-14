@@ -140,12 +140,33 @@ describe('AIChatPage', () => {
             }
           } else {
             // Server contract: the assistant-save transaction SETs lastLlmAt
-            // on the thread row when present and REMOVEs it otherwise, in the
-            // same transaction as the message write.
+            // on a cache hit and REMOVEs it on a clear, in the same
+            // transaction as the message write. Both branches are fenced by
+            // the lastLlmReqAt request-order watermark so a delayed save
+            // cannot undo a newer clear.
             const row = threadRows.find((t) => t.ThreadId === String(body.ThreadId ?? ''));
             if (row) {
-              if (body.lastLlmAt === undefined) delete row.lastLlmAt;
-              else row.lastLlmAt = body.lastLlmAt as number;
+              const reqAt = (body.requestStartedAt ?? body.lastLlmAt) as number | undefined;
+              const superseded =
+                reqAt !== undefined && row.lastLlmReqAt !== undefined && row.lastLlmReqAt > reqAt;
+              if (body.lastLlmAt === undefined) {
+                if (body.requestStartedAt === undefined) {
+                  delete row.lastLlmAt;
+                } else if (
+                  !superseded &&
+                  (row.lastLlmAt === undefined ||
+                    row.lastLlmAt <= (body.requestStartedAt as number))
+                ) {
+                  delete row.lastLlmAt;
+                  row.lastLlmReqAt = body.requestStartedAt as number;
+                }
+              } else if (
+                !superseded &&
+                (row.lastLlmAt === undefined || row.lastLlmAt <= (body.lastLlmAt as number))
+              ) {
+                row.lastLlmAt = body.lastLlmAt as number;
+                row.lastLlmReqAt = reqAt as number;
+              }
             }
           }
           return Promise.resolve(okJson({ ok: true }));
@@ -164,7 +185,10 @@ describe('AIChatPage', () => {
           // server-side commits (assistant SET/REMOVE, PATCH) would mutate
           // in place — a landed response is a snapshot of its read.
           return okJson({
-            threads: sorted.map((t) => ({ ...t, model: t.model ? { ...t.model } : undefined })),
+            threads: sorted.map(({ lastLlmReqAt: _wm, ...t }) => ({
+              ...t,
+              model: t.model ? { ...t.model } : undefined,
+            })),
           });
         };
         // The server reads when the request arrives; a slow response can
@@ -396,6 +420,8 @@ describe('AIChatPage', () => {
     updatedAt: number;
     model?: { provider: 'google' | 'openai' | 'anthropic' | 'openrouter'; model: string };
     lastLlmAt?: number;
+    // Server-internal request-order watermark; never returned to clients.
+    lastLlmReqAt?: number;
   };
 
   type MockMessage = {

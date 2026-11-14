@@ -444,7 +444,7 @@ describe('Chat History Route', () => {
       );
     });
 
-    test('should SET only the supplied lastLlmAt on an assistant save without bumping updatedAt', async () => {
+    test('should SET the supplied lastLlmAt and the request-order watermark on an assistant save without bumping updatedAt', async () => {
       mockSend.mockResolvedValue({});
       const app = createTestApp({});
 
@@ -454,8 +454,14 @@ describe('Chat History Route', () => {
 
       expect(res.status).toBe(200);
       const update = sentTxnItems()[0][0].Update;
-      expect(update.UpdateExpression).toBe('SET #lastLlmAt = :lastLlmAt');
-      expect(update.ExpressionAttributeValues).toEqual({ ':lastLlmAt': 1700000000000 });
+      expect(update.UpdateExpression).toBe(
+        'SET #lastLlmAt = :lastLlmAt, #lastLlmReqAt = :lastLlmReqAt',
+      );
+      expect(update.ExpressionAttributeValues).toEqual({
+        ':lastLlmAt': 1700000000000,
+        ':lastLlmReqAt': 1700000000000,
+      });
+      expect(update.ExpressionAttributeNames['#lastLlmReqAt']).toBe('lastLlmReqAt');
       expect(update.UpdateExpression).not.toContain('updatedAt');
       expect(sentTxnItems()[0]).toHaveLength(2);
     });
@@ -479,19 +485,27 @@ describe('Chat History Route', () => {
 
       expect(res.status).toBe(200);
       const update = sentTxnItems()[0][0].Update;
-      expect(update.UpdateExpression).toBe('SET #lastLlmAt = :lastLlmAt');
+      expect(update.UpdateExpression).toBe(
+        'SET #lastLlmAt = :lastLlmAt, #lastLlmReqAt = :lastLlmReqAt',
+      );
       expect(update.ConditionExpression).toContain(
         '(attribute_not_exists(#model) OR #model = :model)',
       );
       expect(update.ConditionExpression).toContain(
         '(attribute_not_exists(#lastLlmAt) OR #lastLlmAt <= :lastLlmAt)',
       );
+      expect(update.ConditionExpression).toContain(
+        '(attribute_not_exists(#lastLlmReqAt) OR #lastLlmReqAt <= :lastLlmReqAt)',
+      );
       const committedAt = update.ExpressionAttributeValues[':lastLlmAt'] as number;
       expect(committedAt).toBeGreaterThanOrEqual(before);
       expect(committedAt).toBeLessThanOrEqual(after);
+      // No requestStartedAt supplied: the watermark falls back to the
+      // (clamped) evidence timestamp.
+      expect(update.ExpressionAttributeValues[':lastLlmReqAt']).toBe(committedAt);
     });
 
-    test('should condition assistant REMOVE lastLlmAt on model and requestStartedAt', async () => {
+    test('should condition assistant REMOVE lastLlmAt on model and requestStartedAt and advance the request-order watermark', async () => {
       mockSend.mockResolvedValue({});
       const app = createTestApp({});
       const startedAt = Date.now() - 5000;
@@ -508,17 +522,38 @@ describe('Chat History Route', () => {
 
       expect(res.status).toBe(200);
       const update = sentTxnItems()[0][0].Update;
-      expect(update.UpdateExpression).toBe('REMOVE #lastLlmAt');
+      expect(update.UpdateExpression).toBe(
+        'SET #lastLlmReqAt = :requestStartedAt REMOVE #lastLlmAt',
+      );
       expect(update.ConditionExpression).toContain(
         '(attribute_not_exists(#model) OR #model = :model)',
       );
       expect(update.ConditionExpression).toContain(
         '(attribute_not_exists(#lastLlmAt) OR #lastLlmAt <= :requestStartedAt)',
       );
+      // The watermark survives the clear: a delayed hit save from an older
+      // request can no longer pass attribute_not_exists(#lastLlmAt) and
+      // reinstate the evidence this save just removed.
+      expect(update.ConditionExpression).toContain(
+        '(attribute_not_exists(#lastLlmReqAt) OR #lastLlmReqAt <= :requestStartedAt)',
+      );
+      expect(update.ExpressionAttributeNames['#lastLlmReqAt']).toBe('lastLlmReqAt');
       expect(update.ExpressionAttributeValues).toEqual({
         ':model': { provider: 'anthropic', model: 'claude-opus-5-5' },
         ':requestStartedAt': startedAt,
       });
+    });
+
+    test('should not write the request-order watermark when a clear carries no requestStartedAt', async () => {
+      mockSend.mockResolvedValue({});
+      const app = createTestApp({});
+
+      const res = await app.request(saveRequest(validSaveBody({ is_user: false })));
+
+      expect(res.status).toBe(200);
+      const update = sentTxnItems()[0][0].Update;
+      expect(update.UpdateExpression).toBe('REMOVE #lastLlmAt');
+      expect(update.ExpressionAttributeNames).not.toHaveProperty('#lastLlmReqAt');
     });
 
     test('should fall back to an alive-only message write when a guarded assistant save fails its metadata condition', async () => {
