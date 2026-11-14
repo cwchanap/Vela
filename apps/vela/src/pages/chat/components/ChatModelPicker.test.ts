@@ -170,6 +170,40 @@ describe('ChatModelPicker', () => {
       expect(input.exists()).toBe(true);
       expect((input.element as HTMLInputElement).value).toBe('');
     });
+
+    it('resets a rejected custom draft back to props.pair when a pending PATCH unlocks unchanged', async () => {
+      const options = buildLlmModelOptions({ google: 'key', openrouter: 'key' });
+      const wrapper = mountPicker({
+        options,
+        pair: { provider: 'openrouter', model: 'acme/old:free' },
+      });
+      const input = wrapper.find('[data-testid="chat-custom-model-input"] input');
+      await input.setValue('acme/bad-id');
+      await wrapper.find('[data-testid="chat-custom-model-apply"]').trigger('click');
+      expect(wrapper.emitted('update:pair')).toEqual([
+        [{ provider: 'openrouter', model: 'acme/bad-id' }],
+      ]);
+
+      // Parent locks while PATCH is in flight, then unlocks with props.pair still on the old model.
+      await wrapper.setProps({ disabled: true });
+      await wrapper.setProps({ disabled: false });
+      expect(
+        (wrapper.find('[data-testid="chat-custom-model-input"] input').element as HTMLInputElement)
+          .value,
+      ).toBe('acme/old:free');
+
+      // Also cancels a custom draft back to a non-custom active provider on unlock.
+      const switched = mountPicker({
+        options,
+        pair: { provider: 'google', model: 'gemini-3.8-flash' },
+      });
+      await switched.find('select').setValue(OPENROUTER_CUSTOM_VALUE);
+      await switched.find('[data-testid="chat-custom-model-input"] input').setValue('acme/failed');
+      await switched.find('[data-testid="chat-custom-model-apply"]').trigger('click');
+      await switched.setProps({ disabled: true });
+      await switched.setProps({ disabled: false });
+      expect(switched.find('[data-testid="chat-custom-model-input"]').exists()).toBe(false);
+    });
   });
 
   describe('thinking control', () => {

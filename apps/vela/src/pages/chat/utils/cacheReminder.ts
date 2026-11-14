@@ -6,6 +6,13 @@ import { LLM_PROVIDER_REGISTRY, type LlmProvider } from '@vela/common';
  */
 export const MAX_ELAPSED_WINDOW_SECONDS = 300;
 
+/**
+ * Maximum tolerated negative clock skew (cacheStartedAt slightly ahead of now).
+ * Timestamps further in the future than this are treated as invalid/skewed
+ * and hidden so a fast-clock device cannot freeze the chip at full window.
+ */
+export const MAX_FUTURE_SKEW_SECONDS = 60;
+
 export type CacheReminderState = 'hidden' | 'warm' | 'warning' | 'elapsed';
 
 export interface CacheReminderResult {
@@ -30,14 +37,19 @@ export const cacheReminder = (
   now: number,
 ): CacheReminderResult => {
   const hidden: CacheReminderResult = { state: 'hidden', remainingSeconds: 0, label: '' };
-  if (!provider || cacheStartedAt === null) return hidden;
+  if (!provider || cacheStartedAt === null || !Number.isFinite(cacheStartedAt)) return hidden;
   const ttlSeconds = LLM_PROVIDER_REGISTRY[provider].cacheTtlSeconds;
   if (ttlSeconds === null) return hidden;
 
   const elapsedMs = now - cacheStartedAt;
   // Compare raw ms against the cutoff: flooring first would let a diff of
   // TTL + 300 s + 1 ms round down and survive past the mandatory window.
-  if (elapsedMs > (ttlSeconds + MAX_ELAPSED_WINDOW_SECONDS) * 1000) return hidden;
+  if (
+    elapsedMs < -MAX_FUTURE_SKEW_SECONDS * 1000 ||
+    elapsedMs > (ttlSeconds + MAX_ELAPSED_WINDOW_SECONDS) * 1000
+  ) {
+    return hidden;
+  }
   const elapsedSeconds = Math.floor(elapsedMs / 1000);
 
   const remainingSeconds = Math.min(

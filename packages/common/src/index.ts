@@ -39,6 +39,7 @@ export {
   type LlmEvent,
   type LlmMessage,
   type LlmModelInfo,
+  type LlmModelPair,
   type LlmPreferences,
   type LlmProvider,
   type LlmProviderInfo,

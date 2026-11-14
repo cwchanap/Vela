@@ -18,6 +18,11 @@ export const ChatHistoryItemSchema = z.object({
   is_user: z.boolean(),
   model: ChatThreadModelSchema.optional(),
   lastLlmAt: z.number().int().positive('lastLlmAt must be a positive integer').optional(),
+  requestStartedAt: z
+    .number()
+    .int()
+    .positive('requestStartedAt must be a positive integer')
+    .optional(),
 });
 
 export const ChatThreadSummarySchema = z.object({

@@ -3,6 +3,7 @@ import {
   LLM_PROVIDERS,
   type LlmEffort,
   type LlmModelInfo,
+  type LlmModelPair,
   type LlmProvider,
 } from '@vela/common';
 
@@ -13,10 +14,7 @@ import {
  * No store or query access — callers pass plain data.
  */
 
-export interface LlmModelPair {
-  provider: LlmProvider;
-  model: string;
-}
+export type { LlmModelPair };
 
 export interface LlmModelOption {
   label: string;

@@ -38,7 +38,7 @@
               :pair="chat.activeModel"
               :options="modelOptions"
               :thinking="chat.thinkingOverride"
-              :disabled="chat.isLoading || chat.modelPatchPending"
+              :disabled="chat.isLoading || chat.modelPatchPending || threadSelectPending"
               @update:pair="onModelSelect"
               @update:thinking="onThinkingSelect"
             />
@@ -119,8 +119,15 @@
 import { ref, computed, watch, onMounted } from 'vue';
 import { useQuasar } from 'quasar';
 import { useQueryClient } from '@tanstack/vue-query';
-import { chatKeys, LLM_PROVIDER_REGISTRY, type LlmEffort } from '@vela/common';
-import { useChatStore, type ChatModelPair } from '../../stores/chat';
+import {
+  chatKeys,
+  LLM_PROVIDERS,
+  LLM_PROVIDER_REGISTRY,
+  type LlmEffort,
+  type LlmMessage,
+  type LlmModelPair,
+} from '@vela/common';
+import { useChatStore } from '../../stores/chat';
 import { useLLMSettingsStore, type LlmSelection } from '../../stores/llmSettings';
 import { useAuthStore } from '../../stores/auth';
 import ChatMessageList from './components/ChatMessageList.vue';
@@ -135,26 +142,28 @@ import {
   useSaveChatMessage,
   useChatMessages,
 } from '../../composables/queries';
-import { useLlmCapabilitiesQuery } from '../../composables/queries/useLlmCapabilitiesQuery';
+import { useServerKeyProviders } from '../../composables/queries/useServerKeyProviders';
 import type { ChatThreadSummaryDTO } from '../../services/chatHistoryService';
 import { llmClient, describeLlmError } from '../../services/llm';
 import { isAccountChangedError } from '../../utils/httpClient';
 import {
   buildLlmModelOptions,
-  confirmedServerKeyProviders,
   isPairAvailable,
   llmPairOption,
   pairToOptionValue,
   type LlmModelOption,
 } from '../../utils/llmModelOptions';
-import type { LlmMessage } from '@vela/common';
 
 const $q = useQuasar();
 const chat = useChatStore();
 const llmSettings = useLLMSettingsStore();
 const auth = useAuthStore();
 const queryClient = useQueryClient();
-const capabilitiesQuery = useLlmCapabilitiesQuery();
+const { serverKeyProviders } = useServerKeyProviders();
+const activeSelectGen = ref<number | null>(null);
+const threadSelectPending = computed(
+  () => activeSelectGen.value !== null && activeSelectGen.value === chat.generation,
+);
 
 // Greeting message constant
 const GREETING_MESSAGE =
@@ -239,6 +248,7 @@ const reseedUntouchedSeed = () => {
     return;
   }
   chat.setActiveModel({ provider: next.provider, model: next.model });
+  chat.setThinkingOverride(null);
 };
 
 // The seed can predate preference hydration: mounting while a session exists
@@ -258,14 +268,6 @@ watch(
   },
 );
 
-// Server-key eligibility comes only from an affirmative capabilities response.
-const serverKeyProviders = computed(() =>
-  confirmedServerKeyProviders(capabilitiesQuery.data.value, {
-    isAuthenticated: auth.isAuthenticated,
-    isError: capabilitiesQuery.isError.value,
-  }),
-);
-
 const modelOptions = computed<LlmModelOption[]>(() => {
   const options = buildLlmModelOptions(llmSettings.llm.keys, serverKeyProviders.value);
   const pair = chat.activeModel;
@@ -273,8 +275,32 @@ const modelOptions = computed<LlmModelOption[]>(() => {
     const value = pairToOptionValue(pair.provider, pair.model);
     if (!options.some((option) => option.value === value)) {
       // Keep an unusable stored/current model visible instead of silently
-      // substituting another choice.
-      options.push({ ...llmPairOption(pair.provider, pair.model), disabled: true });
+      // substituting another choice, placed in its own provider group so
+      // isGroupStart never renders a duplicate provider header later.
+      const disabledOption: LlmModelOption = {
+        ...llmPairOption(pair.provider, pair.model),
+        disabled: true,
+      };
+      let lastProviderIdx = -1;
+      for (let i = options.length - 1; i >= 0; i -= 1) {
+        if (options[i]?.provider === pair.provider) {
+          lastProviderIdx = i;
+          break;
+        }
+      }
+      if (lastProviderIdx >= 0) {
+        options.splice(lastProviderIdx + 1, 0, disabledOption);
+      } else {
+        const targetOrder = LLM_PROVIDERS.indexOf(pair.provider);
+        const insertBeforeIdx = options.findIndex(
+          (option) => LLM_PROVIDERS.indexOf(option.provider) > targetOrder,
+        );
+        if (insertBeforeIdx >= 0) {
+          options.splice(insertBeforeIdx, 0, disabledOption);
+        } else {
+          options.push(disabledOption);
+        }
+      }
     }
   }
   return options;
@@ -282,10 +308,11 @@ const modelOptions = computed<LlmModelOption[]>(() => {
 
 const onThinkingSelect = (value: LlmEffort | null) => {
   chat.setThinkingOverride(value);
+  if (value !== null) chat.setActiveModelIsSeed(false);
 };
 
-const onModelSelect = async (pair: ChatModelPair) => {
-  if (chat.isLoading || chat.modelPatchPending) return;
+const onModelSelect = async (pair: LlmModelPair) => {
+  if (chat.isLoading || chat.modelPatchPending || threadSelectPending.value) return;
   if (
     chat.activeModel &&
     chat.activeModel.provider === pair.provider &&
@@ -312,7 +339,7 @@ const onModelSelect = async (pair: ChatModelPair) => {
   // generation-guarded transitions that are already in flight must not land
   // over it once it resolves.
   const opGen = chat.nextGeneration();
-  chat.setModelPatching(true);
+  const patchToken = chat.startModelPatch();
   try {
     await updateThreadMutation.mutateAsync({
       threadId,
@@ -328,9 +355,7 @@ const onModelSelect = async (pair: ChatModelPair) => {
       $q.notify({ type: 'negative', message: 'Failed to change model' });
     }
   } finally {
-    // Only a still-current transition may release the lock; a conversation
-    // reset already cleared it for the replacement chat.
-    if (!chat.isStale(opGen)) chat.setModelPatching(false);
+    chat.finishModelPatch(patchToken);
   }
 };
 
@@ -367,8 +392,9 @@ const persistMessage = async (
   message: string,
   isUser: boolean,
   isStale: () => boolean,
-  model?: ChatModelPair,
+  model?: LlmModelPair,
   lastLlmAt?: number,
+  requestStartedAt?: number,
 ): Promise<PersistResult> => {
   try {
     await saveChatMessageMutation.mutateAsync({
@@ -376,10 +402,12 @@ const persistMessage = async (
       userId: uid,
       message,
       isUser,
-      ...(isUser && model ? { model: { ...model } } : {}),
+      ...(model ? { model: { ...model } } : {}),
       // Only assistant turns carry cache evidence; omitting it makes the
-      // server's message-write transaction REMOVE any old timestamp.
+      // server's message-write transaction REMOVE any old timestamp when
+      // requestStartedAt permits.
       ...(!isUser && lastLlmAt !== undefined ? { lastLlmAt } : {}),
+      ...(!isUser && requestStartedAt !== undefined ? { requestStartedAt } : {}),
       // Only assistant turns touch the cached summary on success.
       ...(!isUser ? { isStale } : {}),
     });
@@ -410,9 +438,11 @@ const restartDeletedChat = async (
   uid: string,
   turns: Array<{ message: string; isUser: boolean }>,
   isStale: () => boolean,
-  model?: ChatModelPair,
+  model?: LlmModelPair,
   lastLlmAt?: number,
+  requestStartedAt?: number,
 ): Promise<string | null> => {
+  const deadThreadId = chat.chatId;
   const freshId = crypto.randomUUID();
   chat.setChatId(freshId);
   chat.clearMessages();
@@ -427,6 +457,14 @@ const restartDeletedChat = async (
     type: 'warning',
     message: 'This conversation was deleted. Started a new chat.',
   });
+  let refreshedThreads = false;
+  const refreshThreadsList = async () => {
+    await queryClient.cancelQueries({ queryKey: chatKeys.threads(uid) });
+    // The awaited cancel gives an account switch room to land; a stale
+    // replay must not invalidate the replacement session's list.
+    if (isStale()) return;
+    void queryClient.invalidateQueries({ queryKey: chatKeys.threads(uid) });
+  };
   for (const [index, turn] of turns.entries()) {
     // A save that resolves after an account switch must not replay the next
     // turn into the new account's freshly reset transcript. Successful saves
@@ -439,20 +477,30 @@ const restartDeletedChat = async (
       turn.message,
       turn.isUser,
       isStale,
-      turn.isUser ? model : undefined,
+      model,
       turn.isUser ? undefined : lastLlmAt,
+      turn.isUser ? undefined : requestStartedAt,
     );
-    if (status !== 'saved' || isStale()) return null;
+    if (status !== 'saved' || isStale()) {
+      if (status !== 'saved' && !isStale()) {
+        if (deadThreadId) {
+          queryClient.setQueryData<ChatThreadSummaryDTO[]>(chatKeys.threads(uid), (old) =>
+            old ? old.filter((thread) => thread.ThreadId !== deadThreadId) : old,
+          );
+        }
+        if (!refreshedThreads) {
+          await refreshThreadsList();
+        }
+      }
+      return null;
+    }
     // After the replayed user turn the replacement row exists server-side;
     // only a fetch issued from here on can carry it (an in-flight one may
     // predate creation). Needed only when an assistant turn is replayed too —
     // otherwise the caller's own post-user-save refresh covers it.
     if (index === 0 && turns.length > 1) {
-      await queryClient.cancelQueries({ queryKey: chatKeys.threads(uid) });
-      // The awaited cancel gives an account switch room to land; a stale
-      // replay must not invalidate the replacement session's list.
-      if (isStale()) return null;
-      void queryClient.invalidateQueries({ queryKey: chatKeys.threads(uid) });
+      await refreshThreadsList();
+      refreshedThreads = true;
     }
   }
   // The recovered response's own evidence re-primes the replacement thread;
@@ -470,6 +518,7 @@ const selectThread = async (t: ChatThreadSummaryDTO) => {
   const uid = getUserId();
   const opGen = chat.nextGeneration();
   const sessionGen = auth.sessionGeneration;
+  activeSelectGen.value = opGen;
   try {
     const items = await chatMessagesHelper.getMessages(t.ThreadId, uid);
     if (isStaleOperation(opGen, sessionGen) || isThreadUnavailable(t.ThreadId)) return;
@@ -524,6 +573,8 @@ const selectThread = async (t: ChatThreadSummaryDTO) => {
     if (isStaleOperation(opGen, sessionGen) || isThreadUnavailable(t.ThreadId)) return;
     console.error(e);
     $q.notify({ type: 'negative', message: 'Failed to load conversation' });
+  } finally {
+    if (activeSelectGen.value === opGen) activeSelectGen.value = null;
   }
 };
 
@@ -531,7 +582,7 @@ const selectThread = async (t: ChatThreadSummaryDTO) => {
 // again immediately before generate: the awaited save gives Settings time to
 // change (e.g. a removed key), and there is no silent fallback to a server
 // key that capabilities have not confirmed.
-const ensureSendable = (pair: ChatModelPair, selection: LlmSelection): boolean => {
+const ensureSendable = (pair: LlmModelPair, selection: LlmSelection): boolean => {
   if (!selection.apiKey && !serverKeyProviders.value.includes(selection.provider)) {
     $q.notify({
       type: 'warning',
@@ -555,7 +606,7 @@ const ensureSendable = (pair: ChatModelPair, selection: LlmSelection): boolean =
 
 const onSend = async (draft: string) => {
   const content = draft.trim();
-  if (!content || chat.isLoading) return;
+  if (!content || chat.isLoading || chat.modelPatchPending) return;
 
   chat.clearError();
 
@@ -565,7 +616,8 @@ const onSend = async (draft: string) => {
 
   // Per-request snapshot for both persistence and generation; a thread-specific
   // choice must never resolve through the global llmSettings.selection.
-  const activePair: ChatModelPair = chat.activeModel ?? { ...llmSettings.llm.defaultModel };
+  const activePair: LlmModelPair = chat.activeModel ?? { ...llmSettings.llm.defaultModel };
+  const thinkingOverride = chat.thinkingOverride;
   const activeSelection = llmSettings.selectionFor(activePair);
   if (!ensureSendable(activePair, activeSelection)) return;
 
@@ -614,7 +666,7 @@ const onSend = async (draft: string) => {
     // awaited save above must not leak into this request.
     const requestSelection = llmSettings.selectionFor(activePair);
     if (!ensureSendable(activePair, requestSelection)) return;
-    const thinking = chat.thinkingOverride ?? requestSelection.thinking;
+    const thinking = thinkingOverride ?? requestSelection.thinking;
     // Snapshot immediately before generate: cache evidence is dated from
     // request start, not response completion.
     const requestStartedAt = Date.now();
@@ -661,11 +713,19 @@ const onSend = async (draft: string) => {
         resp.text,
         false,
         isStale,
-        undefined,
+        activePair,
         assistantLastLlmAt,
+        requestStartedAt,
       );
       if (assistantSave === 'gone') {
-        await restartDeletedChat(uid, turns, isStale, activePair, assistantLastLlmAt);
+        await restartDeletedChat(
+          uid,
+          turns,
+          isStale,
+          activePair,
+          assistantLastLlmAt,
+          requestStartedAt,
+        );
       }
     }
   } catch (e: unknown) {
@@ -684,7 +744,7 @@ const onSend = async (draft: string) => {
 };
 
 const onNewChat = () => {
-  if (chat.isLoading) return;
+  if (chat.isLoading || chat.modelPatchPending) return;
   chat.startNewChat();
   seedActiveModel();
   // Add a fresh greeting for the new chat
@@ -697,7 +757,7 @@ const onNewChat = () => {
 };
 
 const onRenameThread = async ({ threadId, title }: { threadId: string; title: string }) => {
-  if (chat.isLoading) return;
+  if (chat.isLoading || chat.modelPatchPending) return;
   const sessionGen = auth.sessionGeneration;
   try {
     await updateThreadMutation.mutateAsync({
@@ -713,7 +773,7 @@ const onRenameThread = async ({ threadId, title }: { threadId: string; title: st
 };
 
 const confirmDelete = (t: ChatThreadSummaryDTO) => {
-  if (chat.isLoading || isDeletePending(t.ThreadId)) return;
+  if (chat.isLoading || chat.modelPatchPending || isDeletePending(t.ThreadId)) return;
   threadToDelete.value = t;
   showDeleteConfirm.value = true;
   dialogGen.value += 1;
@@ -721,7 +781,7 @@ const confirmDelete = (t: ChatThreadSummaryDTO) => {
 
 const deleteThread = async () => {
   const thread = threadToDelete.value;
-  if (!thread || chat.isLoading) return;
+  if (!thread || chat.isLoading || chat.modelPatchPending) return;
 
   isDeleting.value = true;
   const uid = getUserId();

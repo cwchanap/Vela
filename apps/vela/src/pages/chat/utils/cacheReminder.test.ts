@@ -1,5 +1,9 @@
 import { describe, it, expect } from 'vitest';
-import { cacheReminder, MAX_ELAPSED_WINDOW_SECONDS } from './cacheReminder';
+import {
+  cacheReminder,
+  MAX_ELAPSED_WINDOW_SECONDS,
+  MAX_FUTURE_SKEW_SECONDS,
+} from './cacheReminder';
 
 describe('cacheReminder', () => {
   describe('hidden cases', () => {
@@ -43,6 +47,22 @@ describe('cacheReminder', () => {
       expect(cacheReminder('openai', start, start + 30 * 60 * 1000 + 301 * 1000).state).toBe(
         'hidden',
       );
+    });
+
+    it('hides when cacheStartedAt is non-finite', () => {
+      const now = 1_700_000_000_000;
+      expect(cacheReminder('anthropic', Number.NaN, now).state).toBe('hidden');
+      expect(cacheReminder('anthropic', Number.POSITIVE_INFINITY, now).state).toBe('hidden');
+    });
+
+    it('hides when cacheStartedAt is beyond the allowed future skew', () => {
+      const now = 1_700_000_000_000;
+      const future = now + (MAX_FUTURE_SKEW_SECONDS + 1) * 1000;
+      expect(cacheReminder('anthropic', future, now)).toEqual({
+        state: 'hidden',
+        remainingSeconds: 0,
+        label: '',
+      });
     });
   });
 

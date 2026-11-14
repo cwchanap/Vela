@@ -5,7 +5,7 @@ vi.mock('aws-amplify/auth', () => ({
 }));
 
 import { fetchAuthSession } from 'aws-amplify/auth';
-import { httpJson, httpJsonAuth } from './httpClient';
+import { DEFAULT_HTTP_TIMEOUT_MS, httpJson, httpJsonAuth } from './httpClient';
 
 const mockFetchAuthSession = vi.mocked(fetchAuthSession);
 
@@ -15,6 +15,7 @@ describe('httpJson', () => {
   });
 
   afterEach(() => {
+    vi.useRealTimers();
     vi.unstubAllGlobals();
   });
 
@@ -325,6 +326,51 @@ describe('httpJsonAuth', () => {
         /account changed/i,
       );
       expect(fetchMock).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('timeout handling', () => {
+    it('aborts and rejects stalled httpJson requests after DEFAULT_HTTP_TIMEOUT_MS', async () => {
+      vi.useFakeTimers();
+      let capturedSignal: AbortSignal | undefined;
+      vi.stubGlobal(
+        'fetch',
+        vi.fn().mockImplementation((_url: string, init?: RequestInit) => {
+          capturedSignal = init?.signal as AbortSignal | undefined;
+          return new Promise(() => {});
+        }),
+      );
+
+      const pending = httpJson('/api/stalled');
+      const assertion = expect(pending).rejects.toThrow('Request timed out');
+      await vi.advanceTimersByTimeAsync(DEFAULT_HTTP_TIMEOUT_MS);
+      await assertion;
+      expect(capturedSignal?.aborted).toBe(true);
+      expect(vi.getTimerCount()).toBe(0);
+    });
+
+    it('aborts and rejects stalled httpJsonAuth requests and clears timers on success', async () => {
+      vi.useFakeTimers();
+      mockFetchAuthSession.mockResolvedValue({
+        tokens: { idToken: { toString: () => 'token' } },
+      } as any);
+      vi.stubGlobal(
+        'fetch',
+        vi.fn().mockResolvedValue({ ok: true, json: async () => ({ ok: true }) }),
+      );
+
+      await expect(httpJsonAuth('/api/fast')).resolves.toEqual({ ok: true });
+      expect(vi.getTimerCount()).toBe(0);
+
+      vi.stubGlobal(
+        'fetch',
+        vi.fn().mockImplementation(() => new Promise(() => {})),
+      );
+      const stalled = httpJsonAuth('/api/stalled-auth');
+      const assertion = expect(stalled).rejects.toThrow('Request timed out');
+      await vi.advanceTimersByTimeAsync(DEFAULT_HTTP_TIMEOUT_MS);
+      await assertion;
+      expect(vi.getTimerCount()).toBe(0);
     });
   });
 });

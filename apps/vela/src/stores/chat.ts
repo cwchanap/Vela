@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia';
 import { ref } from 'vue';
-import type { LlmEffort, LlmProvider } from '@vela/common';
+import type { LlmEffort, LlmModelPair } from '@vela/common';
 
 export interface ChatMessage {
   id: string;
@@ -8,11 +8,6 @@ export interface ChatMessage {
   content: string;
   timestamp: Date;
   context?: Record<string, unknown>;
-}
-
-export interface ChatModelPair {
-  provider: LlmProvider;
-  model: string;
 }
 
 export const useChatStore = defineStore('chat', () => {
@@ -35,14 +30,15 @@ export const useChatStore = defineStore('chat', () => {
   // UUID alone does not) and gates model PATCHes. modelPatchPending guards
   // the in-flight saved-thread model transition alongside the conversation
   // state so a route remount cannot unlock it.
-  const activeModel = ref<ChatModelPair | null>(null);
+  const activeModel = ref<LlmModelPair | null>(null);
   const activeModelIsSeed = ref(false);
   const thinkingOverride = ref<LlmEffort | null>(null);
   const cacheStartedAt = ref<number | null>(null);
   const isPersistedThread = ref(false);
   const modelPatchPending = ref(false);
+  let activeModelPatchToken: symbol | null = null;
 
-  const setActiveModel = (pair: ChatModelPair | null) => {
+  const setActiveModel = (pair: LlmModelPair | null) => {
     activeModel.value = pair;
   };
 
@@ -63,7 +59,21 @@ export const useChatStore = defineStore('chat', () => {
   };
 
   const setModelPatching = (pending: boolean) => {
+    if (!pending) activeModelPatchToken = null;
     modelPatchPending.value = pending;
+  };
+
+  const startModelPatch = (): symbol => {
+    const token = Symbol('modelPatch');
+    activeModelPatchToken = token;
+    modelPatchPending.value = true;
+    return token;
+  };
+
+  const finishModelPatch = (token: symbol) => {
+    if (activeModelPatchToken !== token) return;
+    activeModelPatchToken = null;
+    modelPatchPending.value = false;
   };
 
   const nextGeneration = () => ++generation.value;
@@ -111,6 +121,7 @@ export const useChatStore = defineStore('chat', () => {
     thinkingOverride.value = null;
     cacheStartedAt.value = null;
     isPersistedThread.value = false;
+    activeModelPatchToken = null;
     modelPatchPending.value = false;
   };
 
@@ -165,6 +176,8 @@ export const useChatStore = defineStore('chat', () => {
     setCacheStartedAt,
     setIsPersistedThread,
     setModelPatching,
+    startModelPatch,
+    finishModelPatch,
     startNewChat,
     resetForUser,
     bindOwner,

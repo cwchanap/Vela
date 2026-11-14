@@ -887,6 +887,54 @@ describe('AIChatPage', () => {
       ]);
     });
 
+    it('preserves explicit thinkingOverride captured at send start when first save 404 restarts the chat', async () => {
+      mockLLMResponse('Recovered thinking reply');
+      mountComponent();
+      const chatStore = useChatStore();
+      await flushPromises();
+
+      chatStore.setChatId('dead-thread');
+      saveNotFoundFor.add('dead-thread');
+      wrapper.findComponent({ name: 'ChatModelPicker' }).vm.$emit('update:thinking', 'high');
+      await flushPromises();
+      expect(chatStore.thinkingOverride).toBe('high');
+
+      await sendMessage('hello');
+      await flushPromises();
+
+      // The in-flight turn kept the explicit override even though restartDeletedChat cleared store override.
+      expect(vi.mocked(llmModule.llmClient.generate).mock.calls[0]![0].thinking).toBe('high');
+      expect(chatStore.thinkingOverride).toBeNull();
+    });
+
+    it('removes the deleted thread from the sidebar when deleted-chat replay fails', async () => {
+      threadRows = [
+        createMockThread({ ThreadId: 'dead-thread', title: 'Dead thread', updatedAt: 2000 }),
+        createMockThread({ ThreadId: 'live-thread', title: 'Live thread', updatedAt: 1000 }),
+      ];
+      mountComponent();
+      await flushPromises();
+
+      expect(wrapper.findAll('[data-testid="llm-chat-thread-item"]')).toHaveLength(2);
+
+      const chatStore = useChatStore();
+      chatStore.setChatId('dead-thread');
+      saveNotFound = true;
+      // Simulate server having already deleted dead-thread when refresh runs.
+      threadRows = [
+        createMockThread({ ThreadId: 'live-thread', title: 'Live thread', updatedAt: 1000 }),
+      ];
+
+      await sendMessage('replay will fail');
+      await flushPromises();
+
+      const remainingIds = wrapper
+        .findAll('[data-testid="llm-chat-thread-item"]')
+        .map((el) => el.text());
+      expect(remainingIds).toHaveLength(1);
+      expect(remainingIds[0]).toContain('Live thread');
+    });
+
     it('preserves the initial greeting message when sending the first message', async () => {
       mockLLMResponse('Welcome reply');
       mountComponent();
@@ -3013,6 +3061,70 @@ describe('AIChatPage', () => {
       expect(chatStore.activeModel).toEqual({ provider: 'google', model: 'gemini-3.8-flash' });
     });
 
+    it('stops reseeding once the user picks a thinking effort and clears thinkingOverride on any reseed', async () => {
+      const authStore = useAuthStore();
+      authStore.user = null;
+      await flushPromises();
+
+      mountComponent();
+      await flushPromises();
+      const chatStore = useChatStore();
+      expect(chatStore.activeModel).toEqual({ provider: 'google', model: 'gemini-3.8-flash' });
+      expect(chatStore.activeModelIsSeed).toBe(true);
+
+      // Explicit thinking pick ends seed ownership, so arriving hydration won't swap the model underneath.
+      wrapper.findComponent({ name: 'ChatModelPicker' }).vm.$emit('update:thinking', 'low');
+      await flushPromises();
+      expect(chatStore.activeModelIsSeed).toBe(false);
+      expect(chatStore.thinkingOverride).toBe('low');
+
+      authStore.user = hydratedUser();
+      await flushPromises();
+      expect(chatStore.activeModel).toEqual({ provider: 'google', model: 'gemini-3.8-flash' });
+      expect(chatStore.thinkingOverride).toBe('low');
+
+      // Defensive guard: if thinkingOverride were somehow set while still seeded, reseed clears it.
+      chatStore.startNewChat();
+      chatStore.setActiveModelIsSeed(true);
+      chatStore.setActiveModel({ provider: 'google', model: 'gemini-3.8-flash' });
+      chatStore.setThinkingOverride('high');
+      useLLMSettingsStore().llm.defaultModel = { provider: 'google', model: 'gemini-4-argon' };
+      await flushPromises();
+      expect(chatStore.activeModel).toEqual({ provider: 'google', model: 'gemini-4-argon' });
+      expect(chatStore.thinkingOverride).toBeNull();
+    });
+
+    it('groups an unavailable current model with its provider instead of appending at the end', async () => {
+      enableOpenai();
+      useLLMSettingsStore().llm.keys.google = 'test-google-key';
+      threadRows = [
+        createMockThread({
+          ThreadId: 'thread-retired-google',
+          model: { provider: 'google', model: 'gemini-retired' },
+        }),
+      ];
+      messageRows = [createMockMessage('Hello', true, 0, 'thread-retired-google')];
+      mountComponent();
+      await flushPromises();
+      await wrapper.find('[data-testid="llm-chat-thread-item"]').trigger('click');
+      await flushPromises();
+
+      const pickerOptions = wrapper
+        .findComponent({ name: 'ChatModelPicker' })
+        .props('options') as Array<{ provider: string; value: string; disabled?: boolean }>;
+      const googleIndices = pickerOptions
+        .map((opt, idx) => (opt.provider === 'google' ? idx : -1))
+        .filter((idx) => idx >= 0);
+      // All Google options (enabled + disabled retired one) must remain contiguous.
+      expect(googleIndices.length).toBeGreaterThan(1);
+      for (let i = 1; i < googleIndices.length; i += 1) {
+        expect(googleIndices[i]).toBe(googleIndices[i - 1]! + 1);
+      }
+      expect(pickerOptions.find((opt) => opt.value === 'google::gemini-retired')?.disabled).toBe(
+        true,
+      );
+    });
+
     it('preserves the active model and transcript when navigating away and back', async () => {
       enableOpenai();
       mountComponent();
@@ -3211,11 +3323,11 @@ describe('AIChatPage', () => {
       expect(notifyCreateSpy).toHaveBeenCalledWith(expect.objectContaining({ type: 'negative' }));
     });
 
-    it('does not let a selection that lands during a model PATCH install over the patched model', async () => {
+    it('locks the model picker while selecting a thread and unlocks once the selection finishes or is superseded', async () => {
       enableOpenai();
       threadRows = [
-        createMockThread({ ThreadId: 'thread-1' }),
-        createMockThread({ ThreadId: 'thread-2', model: anthropicRow }),
+        createMockThread({ ThreadId: 'thread-1', updatedAt: 2000 }),
+        createMockThread({ ThreadId: 'thread-2', updatedAt: 1000, model: anthropicRow }),
       ];
       messageRows = [
         createMockMessage('one', true, 0, 'thread-1'),
@@ -3233,25 +3345,61 @@ describe('AIChatPage', () => {
       await wrapper.findAll('[data-testid="llm-chat-thread-item"]')[1]!.trigger('click');
       await flushPromises();
 
-      // Start a model PATCH for thread-1 while the selection is in flight.
-      const patchDeferred = deferred();
-      patchDelay = patchDeferred.promise;
+      const chatStore = useChatStore();
+      // Model picker must be disabled during thread load so edits cannot target thread-1,
+      // while composer/sidebar stay interactive and an attempted chooseModel is ignored.
+      expect(modelSelect()!.props('disable')).toBe(true);
       await chooseModel('openai::gpt-6.1-sol');
-      expect(patchFetches().length).toBe(1);
+      expect(patchFetches().length).toBe(0);
 
       selectionDeferred.resolve();
       await flushPromises();
+      expect(chatStore.chatId).toBe('thread-2');
+      expect(chatStore.activeModel).toEqual(anthropicRow);
+      expect(modelSelect()!.props('disable')).toBe(false);
+
+      // A superseding New Chat unlocks the picker immediately before an old selection settles.
+      const selection2 = deferred();
+      messagesDelays['thread-1'] = selection2.promise;
+      await wrapper.findAll('[data-testid="llm-chat-thread-item"]')[0]!.trigger('click');
+      await flushPromises();
+      expect(modelSelect()!.props('disable')).toBe(true);
+
+      await wrapper.find('[data-testid="llm-chat-new"]').trigger('click');
+      await flushPromises();
+      expect(modelSelect()!.props('disable')).toBe(false);
+      const freshChatId = chatStore.chatId;
+      expect(freshChatId).not.toBe('thread-1');
+      expect(freshChatId).not.toBe('thread-2');
+
+      selection2.resolve();
+      await flushPromises();
+      expect(chatStore.chatId).toBe(freshChatId);
+      expect(modelSelect()!.props('disable')).toBe(false);
+    });
+
+    it('releases modelPatchPending even if chat.generation bumps during an in-flight PATCH', async () => {
+      enableOpenai();
+      threadRows = [createMockThread({ ThreadId: 'thread-1', model: anthropicRow })];
+      messageRows = [createMockMessage('Hello', true)];
+      mountComponent();
+      await flushPromises();
+      await wrapper.find('[data-testid="llm-chat-thread-item"]').trigger('click');
+      await flushPromises();
+
+      const patchDeferred = deferred();
+      patchDelay = patchDeferred.promise;
+      await chooseModel('openai::gpt-6.1-sol');
       const chatStore = useChatStore();
-      // The operation-generation stale check must discard the delayed
-      // selection instead of installing thread-2's stored model.
-      expect(chatStore.chatId).toBe('thread-1');
-      expect(chatStore.activeModel).not.toEqual(anthropicRow);
       expect(chatStore.modelPatchPending).toBe(true);
 
+      // Even if a generation bump occurred mid-PATCH, settling releases the token-held lock.
+      chatStore.nextGeneration();
       patchDeferred.resolve();
       await flushPromises();
-      expect(chatStore.activeModel).toEqual(openaiPair);
       expect(chatStore.modelPatchPending).toBe(false);
+      // Stale PATCH does not overwrite activeModel locally.
+      expect(chatStore.activeModel).toEqual(anthropicRow);
     });
 
     it('keeps a pending model PATCH locked across a remount until it resolves', async () => {
