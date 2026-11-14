@@ -137,6 +137,8 @@ export interface MockChatThread {
   updatedAt: number;
   model?: { provider: string; model: string };
   lastLlmAt?: number;
+  // Server-internal request-order watermark; never returned to clients.
+  lastLlmReqAt?: number;
 }
 
 export interface MockChatMessage {
@@ -473,18 +475,45 @@ const handleApiRoute = async (state: MockApi, route: Route): Promise<void> => {
         updatedAt: now,
         ...(pinnedModel ? { model: pinnedModel } : {}),
         ...(existing?.lastLlmAt !== undefined ? { lastLlmAt: existing.lastLlmAt } : {}),
+        ...(existing?.lastLlmReqAt !== undefined ? { lastLlmReqAt: existing.lastLlmReqAt } : {}),
       });
     } else {
       // Mirror the server's conditioned metadata update: positive integer
-      // lastLlmAt is SET on the thread row, its absence REMOVEs it.
+      // lastLlmAt is SET on the thread row, its absence REMOVEs it. Both
+      // branches are fenced by the lastLlmReqAt request-order watermark so
+      // a delayed save cannot undo a newer clear.
       const threadRow = state.chatThreads.get(authUser.userId)?.get(threadId);
       if (threadRow) {
+        const reqAt =
+          typeof body.requestStartedAt === 'number'
+            ? body.requestStartedAt
+            : typeof body.lastLlmAt === 'number'
+              ? body.lastLlmAt
+              : undefined;
+        const superseded =
+          reqAt !== undefined &&
+          threadRow.lastLlmReqAt !== undefined &&
+          threadRow.lastLlmReqAt > reqAt;
         if (
           typeof body.lastLlmAt === 'number' &&
           Number.isInteger(body.lastLlmAt) &&
           body.lastLlmAt > 0
         ) {
-          threadRow.lastLlmAt = body.lastLlmAt;
+          if (
+            !superseded &&
+            (threadRow.lastLlmAt === undefined || threadRow.lastLlmAt <= body.lastLlmAt)
+          ) {
+            threadRow.lastLlmAt = body.lastLlmAt;
+            threadRow.lastLlmReqAt = reqAt ?? body.lastLlmAt;
+          }
+        } else if (typeof body.requestStartedAt === 'number') {
+          if (
+            !superseded &&
+            (threadRow.lastLlmAt === undefined || threadRow.lastLlmAt <= body.requestStartedAt)
+          ) {
+            delete threadRow.lastLlmAt;
+            threadRow.lastLlmReqAt = body.requestStartedAt;
+          }
         } else {
           delete threadRow.lastLlmAt;
         }
@@ -508,7 +537,9 @@ const handleApiRoute = async (state: MockApi, route: Route): Promise<void> => {
   }
 
   if (path === '/api/chat-history/threads' && method === 'GET') {
-    return jsonResponse(route, { threads: state.threadsFor(authUser) });
+    // The server DTO maps explicit fields; the internal watermark never leaks.
+    const threads = state.threadsFor(authUser).map(({ lastLlmReqAt: _wm, ...t }) => t);
+    return jsonResponse(route, { threads });
   }
 
   if (path === '/api/chat-history/messages' && method === 'GET') {

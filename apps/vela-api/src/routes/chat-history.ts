@@ -147,6 +147,9 @@ type StoredChatThread = ChatThreadSummary & {
   deleting?: boolean;
   deleteToken?: string;
   deleteLease?: number;
+  // Request-order watermark for cache evidence; survives lastLlmAt clears so
+  // a delayed save cannot undo a newer request's evidence state.
+  lastLlmReqAt?: number;
 };
 
 const THREAD_ALIVE_CONDITION = 'attribute_exists(ThreadId) AND attribute_not_exists(#deleting)';
@@ -250,7 +253,11 @@ async function dynamodb_saveAssistantMessage(
   // cache evidence in the same transaction: SET the timestamp when supplied,
   // otherwise REMOVE it. Ordering and model guards prevent a delayed or
   // cross-tab save from attaching stale evidence after a model PATCH or
-  // overwriting newer evidence.
+  // overwriting newer evidence. A clear deletes lastLlmAt itself, so the
+  // monotonic lastLlmAt check alone cannot stop a delayed hit save from
+  // reinstating evidence a newer clear already superseded — the separate
+  // lastLlmReqAt watermark survives the REMOVE and is checked in both
+  // branches.
   const names: Record<string, string> = { '#deleting': 'deleting', '#lastLlmAt': 'lastLlmAt' };
   const values: Record<string, unknown> = {};
   const conditions: string[] = [THREAD_ALIVE_CONDITION];
@@ -263,14 +270,22 @@ async function dynamodb_saveAssistantMessage(
 
   let updateExpression: string;
   if (item.lastLlmAt !== undefined) {
-    updateExpression = 'SET #lastLlmAt = :lastLlmAt';
+    names['#lastLlmReqAt'] = 'lastLlmReqAt';
+    updateExpression = 'SET #lastLlmAt = :lastLlmAt, #lastLlmReqAt = :lastLlmReqAt';
     values[':lastLlmAt'] = item.lastLlmAt;
+    values[':lastLlmReqAt'] = item.requestStartedAt ?? item.lastLlmAt;
     conditions.push('(attribute_not_exists(#lastLlmAt) OR #lastLlmAt <= :lastLlmAt)');
+    conditions.push('(attribute_not_exists(#lastLlmReqAt) OR #lastLlmReqAt <= :lastLlmReqAt)');
   } else {
     updateExpression = 'REMOVE #lastLlmAt';
     if (item.requestStartedAt !== undefined) {
+      names['#lastLlmReqAt'] = 'lastLlmReqAt';
+      updateExpression = 'SET #lastLlmReqAt = :requestStartedAt REMOVE #lastLlmAt';
       values[':requestStartedAt'] = item.requestStartedAt;
       conditions.push('(attribute_not_exists(#lastLlmAt) OR #lastLlmAt <= :requestStartedAt)');
+      conditions.push(
+        '(attribute_not_exists(#lastLlmReqAt) OR #lastLlmReqAt <= :requestStartedAt)',
+      );
     }
   }
 
