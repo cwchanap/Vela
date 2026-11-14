@@ -29,14 +29,17 @@ export const useChatStore = defineStore('chat', () => {
   // isPersistedThread tracks whether a thread metadata row exists (a client
   // UUID alone does not) and gates model PATCHes. modelPatchPending guards
   // the in-flight saved-thread model transition alongside the conversation
-  // state so a route remount cannot unlock it.
+  // state so a route remount cannot unlock it; threadSelectPending does the
+  // same for an in-flight saved-thread restore.
   const activeModel = ref<LlmModelPair | null>(null);
   const activeModelIsSeed = ref(false);
   const thinkingOverride = ref<LlmEffort | null>(null);
   const cacheStartedAt = ref<number | null>(null);
   const isPersistedThread = ref(false);
   const modelPatchPending = ref(false);
+  const threadSelectPending = ref(false);
   let activeModelPatchToken: symbol | null = null;
+  let activeThreadSelectToken: symbol | null = null;
 
   const setActiveModel = (pair: LlmModelPair | null) => {
     activeModel.value = pair;
@@ -74,6 +77,19 @@ export const useChatStore = defineStore('chat', () => {
     if (activeModelPatchToken !== token) return;
     activeModelPatchToken = null;
     modelPatchPending.value = false;
+  };
+
+  const startThreadSelect = (): symbol => {
+    const token = Symbol('threadSelect');
+    activeThreadSelectToken = token;
+    threadSelectPending.value = true;
+    return token;
+  };
+
+  const finishThreadSelect = (token: symbol) => {
+    if (activeThreadSelectToken !== token) return;
+    activeThreadSelectToken = null;
+    threadSelectPending.value = false;
   };
 
   const nextGeneration = () => ++generation.value;
@@ -123,6 +139,8 @@ export const useChatStore = defineStore('chat', () => {
     isPersistedThread.value = false;
     activeModelPatchToken = null;
     modelPatchPending.value = false;
+    activeThreadSelectToken = null;
+    threadSelectPending.value = false;
   };
 
   const resetForUser = (uid: string | null, sessionGen: number | null) => {
@@ -158,6 +176,7 @@ export const useChatStore = defineStore('chat', () => {
     cacheStartedAt,
     isPersistedThread,
     modelPatchPending,
+    threadSelectPending,
     ownerId,
     ownerSessionGen,
     generation,
@@ -178,6 +197,8 @@ export const useChatStore = defineStore('chat', () => {
     setModelPatching,
     startModelPatch,
     finishModelPatch,
+    startThreadSelect,
+    finishThreadSelect,
     startNewChat,
     resetForUser,
     bindOwner,
