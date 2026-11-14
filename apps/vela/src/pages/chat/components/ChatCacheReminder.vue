@@ -25,32 +25,56 @@ const props = defineProps<{
   cacheStartedAt: number | null;
 }>();
 
-// The page's single 1-second tick lives here; nothing else polls.
+// The page's single 1-second tick lives here and runs only while the chip is visible.
 const now = ref(Date.now());
+const isMounted = ref(false);
 let interval: ReturnType<typeof setInterval> | null = null;
+
+const reminder = computed(() => cacheReminder(props.provider, props.cacheStartedAt, now.value));
+
+const stopTimer = () => {
+  if (interval !== null) {
+    clearInterval(interval);
+    interval = null;
+  }
+};
+
+const syncTimer = () => {
+  if (!isMounted.value || reminder.value.state === 'hidden') {
+    stopTimer();
+    return;
+  }
+  if (interval === null) {
+    interval = setInterval(() => {
+      now.value = Date.now();
+    }, 1000);
+  }
+};
 
 // Fresh or restored evidence must render immediately, not wait for the next tick.
 watch(
-  () => props.cacheStartedAt,
+  () => [props.provider, props.cacheStartedAt] as const,
   () => {
     now.value = Date.now();
   },
 );
 
+watch(
+  () => reminder.value.state === 'hidden',
+  () => {
+    syncTimer();
+  },
+);
+
 onMounted(() => {
-  interval = setInterval(() => {
-    now.value = Date.now();
-  }, 1000);
+  isMounted.value = true;
+  syncTimer();
 });
 
 onUnmounted(() => {
-  if (interval !== null) {
-    clearInterval(interval);
-    interval = null;
-  }
+  isMounted.value = false;
+  stopTimer();
 });
-
-const reminder = computed(() => cacheReminder(props.provider, props.cacheStartedAt, now.value));
 
 const STATE_ANNOUNCEMENTS: Record<Exclude<CacheReminderState, 'hidden'>, string> = {
   warm: 'Prompt cache likely warm',

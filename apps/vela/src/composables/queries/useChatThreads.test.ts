@@ -2097,5 +2097,56 @@ describe('useChatThreads', () => {
         expect(server.rows.get('t-1')!.updatedAt).toBe(2_000);
       });
     });
+
+    describe('useSaveChatMessage cache evidence guards', () => {
+      it('does not attach stale assistant evidence when cached thread model changed or has newer evidence', async () => {
+        const uid = 'save-evidence-guard-user';
+        server.seed({
+          ThreadId: 't-1',
+          title: 'Thread 1',
+          model: { provider: 'anthropic', model: 'claude-opus-5-5' },
+          lastLlmAt: 5_000,
+          createdAt: 500,
+          updatedAt: 1_000,
+        });
+        const { result, queryClient } = await mountComposables(uid);
+        listGates = [new Promise<void>(() => {})];
+
+        // Older evidence for the same model must not rewind lastLlmAt.
+        await result.save.mutateAsync({
+          threadId: 't-1',
+          userId: uid,
+          message: 'older reply',
+          isUser: false,
+          model: { provider: 'anthropic', model: 'claude-opus-5-5' },
+          lastLlmAt: 3_000,
+          requestStartedAt: 3_000,
+        });
+        expect(cachedRow(queryClient, uid, 't-1')?.lastLlmAt).toBe(5_000);
+
+        // Stale assistant save from another model must not clear or overwrite cached evidence.
+        await result.save.mutateAsync({
+          threadId: 't-1',
+          userId: uid,
+          message: 'wrong model reply',
+          isUser: false,
+          model: { provider: 'openai', model: 'gpt-6.1-sol' },
+          requestStartedAt: 10_000,
+        });
+        expect(cachedRow(queryClient, uid, 't-1')?.lastLlmAt).toBe(5_000);
+
+        // Newer evidence for the matching model updates cached lastLlmAt.
+        await result.save.mutateAsync({
+          threadId: 't-1',
+          userId: uid,
+          message: 'newer reply',
+          isUser: false,
+          model: { provider: 'anthropic', model: 'claude-opus-5-5' },
+          lastLlmAt: 8_000,
+          requestStartedAt: 8_000,
+        });
+        expect(cachedRow(queryClient, uid, 't-1')?.lastLlmAt).toBe(8_000);
+      });
+    });
   });
 });

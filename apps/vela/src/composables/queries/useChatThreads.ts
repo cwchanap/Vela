@@ -448,11 +448,13 @@ export function useSaveChatMessage() {
       isUser: boolean;
       model?: ChatThreadModelDTO;
       lastLlmAt?: number;
+      requestStartedAt?: number;
       isStale?: () => boolean;
     }) =>
       saveChatMessage(variables.threadId, variables.userId, variables.message, variables.isUser, {
         model: variables.model,
         lastLlmAt: variables.lastLlmAt,
+        requestStartedAt: variables.requestStartedAt,
       }),
     // The stale guard precedes every cache side effect: a save resolving
     // after an operation/session change must never touch the cache (e.g.
@@ -475,11 +477,21 @@ export function useSaveChatMessage() {
       // stored timestamp, matching the server's REMOVE. A row-less cached
       // list stays untouched (no fabricated row).
       queryClient.setQueryData<ChatThreadSummaryDTO[]>(key, (old) =>
-        old?.map((thread) =>
-          thread.ThreadId === variables.threadId
-            ? { ...thread, lastLlmAt: variables.lastLlmAt }
-            : thread,
-        ),
+        old?.map((thread) => {
+          if (thread.ThreadId !== variables.threadId) return thread;
+          const modelMatches =
+            variables.model === undefined ||
+            thread.model === undefined ||
+            (thread.model.provider === variables.model.provider &&
+              thread.model.model === variables.model.model);
+          const effectiveAt = variables.lastLlmAt ?? variables.requestStartedAt;
+          const notOlder =
+            effectiveAt === undefined ||
+            thread.lastLlmAt === undefined ||
+            thread.lastLlmAt <= effectiveAt;
+          if (!modelMatches || !notOlder) return thread;
+          return { ...thread, lastLlmAt: variables.lastLlmAt };
+        }),
       );
       // The superseded GET was the only fetch that could carry the row
       // itself (first save / deleted-thread restart) or its server-derived

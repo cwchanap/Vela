@@ -245,34 +245,81 @@ async function dynamodb_saveAssistantMessage(
   item: ChatHistoryItem,
 ): Promise<'ok' | 'rejected'> {
   const key = { UserId: userId, ThreadId: item.ThreadId };
+  const put = { TableName: TABLE_NAMES.CHAT_HISTORY, Item: messageItem(item) };
   // The thread guard is a conditioned Update so the assistant turn can carry
   // cache evidence in the same transaction: SET the timestamp when supplied,
-  // otherwise REMOVE it. updatedAt is untouched and the REMOVE branch omits
-  // ExpressionAttributeValues entirely — the alive condition needs no values.
-  const threadUpdate =
-    item.lastLlmAt !== undefined
-      ? {
-          TableName: TABLE_NAMES.CHAT_THREADS,
-          Key: key,
-          UpdateExpression: 'SET #lastLlmAt = :lastLlmAt',
-          ConditionExpression: THREAD_ALIVE_CONDITION,
-          ExpressionAttributeNames: { '#deleting': 'deleting', '#lastLlmAt': 'lastLlmAt' },
-          ExpressionAttributeValues: { ':lastLlmAt': item.lastLlmAt },
-        }
-      : {
-          TableName: TABLE_NAMES.CHAT_THREADS,
-          Key: key,
-          UpdateExpression: 'REMOVE #lastLlmAt',
-          ConditionExpression: THREAD_ALIVE_CONDITION,
-          ExpressionAttributeNames: { '#deleting': 'deleting', '#lastLlmAt': 'lastLlmAt' },
-        };
+  // otherwise REMOVE it. Ordering and model guards prevent a delayed or
+  // cross-tab save from attaching stale evidence after a model PATCH or
+  // overwriting newer evidence.
+  const names: Record<string, string> = { '#deleting': 'deleting', '#lastLlmAt': 'lastLlmAt' };
+  const values: Record<string, unknown> = {};
+  const conditions: string[] = [THREAD_ALIVE_CONDITION];
+
+  if (item.model !== undefined) {
+    names['#model'] = 'model';
+    values[':model'] = item.model;
+    conditions.push('(attribute_not_exists(#model) OR #model = :model)');
+  }
+
+  let updateExpression: string;
+  if (item.lastLlmAt !== undefined) {
+    updateExpression = 'SET #lastLlmAt = :lastLlmAt';
+    values[':lastLlmAt'] = item.lastLlmAt;
+    conditions.push('(attribute_not_exists(#lastLlmAt) OR #lastLlmAt <= :lastLlmAt)');
+  } else {
+    updateExpression = 'REMOVE #lastLlmAt';
+    if (item.requestStartedAt !== undefined) {
+      values[':requestStartedAt'] = item.requestStartedAt;
+      conditions.push('(attribute_not_exists(#lastLlmAt) OR #lastLlmAt <= :requestStartedAt)');
+    }
+  }
+
+  const hasMetadataGuard = conditions.length > 1;
+  const threadUpdate = {
+    TableName: TABLE_NAMES.CHAT_THREADS,
+    Key: key,
+    UpdateExpression: updateExpression,
+    ConditionExpression: conditions.join(' AND '),
+    ExpressionAttributeNames: names,
+    ...(Object.keys(values).length > 0 ? { ExpressionAttributeValues: values } : {}),
+  };
+  try {
+    await retryOnTransactionConflict(() =>
+      docClient.send(
+        new TransactWriteCommand({
+          TransactItems: [{ Update: threadUpdate }, { Put: put }],
+        }),
+      ),
+    );
+    return 'ok';
+  } catch (error) {
+    if (!isTransactionConditionFailed(error)) {
+      console.error('DynamoDB save assistant message error:', error);
+      throw new Error(
+        `Failed to save message: ${error instanceof Error ? error.message : 'Unknown error'}`,
+      );
+    }
+    if (!hasMetadataGuard) {
+      return 'rejected';
+    }
+  }
+
+  // The metadata update was skipped either because the thread is being deleted
+  // or because its model/lastLlmAt moved ahead. Write the message when alive.
   try {
     await retryOnTransactionConflict(() =>
       docClient.send(
         new TransactWriteCommand({
           TransactItems: [
-            { Update: threadUpdate },
-            { Put: { TableName: TABLE_NAMES.CHAT_HISTORY, Item: messageItem(item) } },
+            {
+              ConditionCheck: {
+                TableName: TABLE_NAMES.CHAT_THREADS,
+                Key: key,
+                ConditionExpression: THREAD_ALIVE_CONDITION,
+                ExpressionAttributeNames: { '#deleting': 'deleting' },
+              },
+            },
+            { Put: put },
           ],
         }),
       ),
@@ -681,11 +728,17 @@ chatHistory.post('/save', createValidator('json', ChatHistoryItemSchema), async 
     const body = c.req.valid('json');
     const now = Date.now();
 
-    // Always trust server-side identity/timestamp over client payload.
+    // Always trust server-side identity/timestamp over client payload, and clamp
+    // client-supplied cache timestamps to server time so a fast-clock client
+    // cannot freeze the reminder window or outrank future saves.
     const item: ChatHistoryItem = {
       ...body,
       UserId: authenticatedUserId,
       Timestamp: now,
+      ...(body.lastLlmAt !== undefined ? { lastLlmAt: Math.min(body.lastLlmAt, now) } : {}),
+      ...(body.requestStartedAt !== undefined
+        ? { requestStartedAt: Math.min(body.requestStartedAt, now) }
+        : {}),
     };
 
     const result = body.is_user

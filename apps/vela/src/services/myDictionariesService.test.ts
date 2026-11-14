@@ -71,13 +71,16 @@ describe('myDictionariesService', () => {
       const result = await getMyDictionaries(50);
 
       expect(fetchAuthSession).toHaveBeenCalled();
-      expect(mockFetch).toHaveBeenCalledWith('/api/my-dictionaries?limit=50', {
-        method: 'GET',
-        headers: {
-          Authorization: `Bearer ${mockIdToken}`,
-          'Content-Type': 'application/json',
-        },
-      });
+      expect(mockFetch).toHaveBeenCalledWith(
+        '/api/my-dictionaries?limit=50',
+        expect.objectContaining({
+          method: 'GET',
+          headers: {
+            Authorization: `Bearer ${mockIdToken}`,
+            'Content-Type': 'application/json',
+          },
+        }),
+      );
       expect(result).toEqual(mockDictionaryEntries);
     });
 
@@ -89,13 +92,16 @@ describe('myDictionariesService', () => {
 
       await getMyDictionaries();
 
-      expect(mockFetch).toHaveBeenCalledWith('/api/my-dictionaries?limit=50', {
-        method: 'GET',
-        headers: {
-          Authorization: `Bearer ${mockIdToken}`,
-          'Content-Type': 'application/json',
-        },
-      });
+      expect(mockFetch).toHaveBeenCalledWith(
+        '/api/my-dictionaries?limit=50',
+        expect.objectContaining({
+          method: 'GET',
+          headers: {
+            Authorization: `Bearer ${mockIdToken}`,
+            'Content-Type': 'application/json',
+          },
+        }),
+      );
     });
 
     it('should use custom limit when provided', async () => {
@@ -106,13 +112,16 @@ describe('myDictionariesService', () => {
 
       await getMyDictionaries(20);
 
-      expect(mockFetch).toHaveBeenCalledWith('/api/my-dictionaries?limit=20', {
-        method: 'GET',
-        headers: {
-          Authorization: `Bearer ${mockIdToken}`,
-          'Content-Type': 'application/json',
-        },
-      });
+      expect(mockFetch).toHaveBeenCalledWith(
+        '/api/my-dictionaries?limit=20',
+        expect.objectContaining({
+          method: 'GET',
+          headers: {
+            Authorization: `Bearer ${mockIdToken}`,
+            'Content-Type': 'application/json',
+          },
+        }),
+      );
     });
 
     it('should return empty array when data property is missing', async () => {
@@ -229,13 +238,16 @@ describe('myDictionariesService', () => {
       await deleteDictionaryEntry(sentenceId);
 
       expect(fetchAuthSession).toHaveBeenCalled();
-      expect(mockFetch).toHaveBeenCalledWith(`/api/my-dictionaries/${sentenceId}`, {
-        method: 'DELETE',
-        headers: {
-          Authorization: `Bearer ${mockIdToken}`,
-          'Content-Type': 'application/json',
-        },
-      });
+      expect(mockFetch).toHaveBeenCalledWith(
+        `/api/my-dictionaries/${sentenceId}`,
+        expect.objectContaining({
+          method: 'DELETE',
+          headers: {
+            Authorization: `Bearer ${mockIdToken}`,
+            'Content-Type': 'application/json',
+          },
+        }),
+      );
     });
 
     it('should throw error when not authenticated', async () => {

@@ -81,7 +81,7 @@
 
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue';
-import type { LlmEffort, LlmProvider } from '@vela/common';
+import type { LlmEffort, LlmModelPair, LlmProvider } from '@vela/common';
 import { LLM_PROVIDER_REGISTRY } from '@vela/common';
 import {
   OPENROUTER_CUSTOM_VALUE,
@@ -94,14 +94,14 @@ import {
 } from 'src/utils/llmModelOptions';
 
 const props = defineProps<{
-  pair: { provider: LlmProvider; model: string } | null;
+  pair: LlmModelPair | null;
   options: LlmModelOption[];
   thinking?: LlmEffort | null;
   disabled?: boolean;
 }>();
 
 const emit = defineEmits<{
-  'update:pair': [pair: { provider: LlmProvider; model: string }];
+  'update:pair': [pair: LlmModelPair];
   'update:thinking': [effort: LlmEffort | null];
 }>();
 
@@ -113,21 +113,46 @@ const customDraftActive = ref(false);
 const showCustomInput = computed(() => isCustomSelected.value || customDraftActive.value);
 
 const customModelId = ref(props.pair?.provider === 'openrouter' ? props.pair.model : '');
+const customApplyPending = ref(false);
+
+const syncCustomFromPair = (pair: LlmModelPair | null) => {
+  customApplyPending.value = false;
+  if (pair?.provider === 'openrouter') {
+    customModelId.value = pair.model;
+  } else {
+    customDraftActive.value = false;
+    customModelId.value = '';
+  }
+};
 
 watch(
   () => props.pair,
   (pair) => {
-    if (pair?.provider === 'openrouter') {
-      customModelId.value = pair.model;
-    } else {
-      customDraftActive.value = false;
+    syncCustomFromPair(pair);
+  },
+  { flush: 'sync' },
+);
+
+watch(
+  () => props.disabled,
+  (disabled, wasDisabled) => {
+    // A pending cycle that ends without updating props.pair means the commit
+    // failed/rejected: revert the unaccepted custom ID back to the active pair.
+    if (wasDisabled && !disabled && customApplyPending.value) {
+      syncCustomFromPair(props.pair);
     }
   },
+  { flush: 'sync' },
 );
 
 const confirmCustom = () => {
   const model = customModelId.value.trim();
   if (!model) return;
+  if (props.pair?.provider === 'openrouter' && props.pair.model === model) {
+    customModelId.value = model;
+    return;
+  }
+  customApplyPending.value = true;
   emit('update:pair', { provider: 'openrouter', model });
 };
 

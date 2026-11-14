@@ -88,12 +88,15 @@ describe('srsService', () => {
 
       const result = await srsService.getDueItems();
 
-      expect(mockFetch).toHaveBeenCalledWith('/api/srs/due?limit=20', {
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${mockIdToken}`,
-        },
-      });
+      expect(mockFetch).toHaveBeenCalledWith(
+        '/api/srs/due?limit=20',
+        expect.objectContaining({
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${mockIdToken}`,
+          },
+        }),
+      );
       expect(result).toEqual(mockResponse);
     });
 
@@ -107,12 +110,15 @@ describe('srsService', () => {
 
       await srsService.getDueItems(10);
 
-      expect(mockFetch).toHaveBeenCalledWith('/api/srs/due?limit=10', {
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${mockIdToken}`,
-        },
-      });
+      expect(mockFetch).toHaveBeenCalledWith(
+        '/api/srs/due?limit=10',
+        expect.objectContaining({
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${mockIdToken}`,
+          },
+        }),
+      );
     });
 
     it('should filter by JLPT levels', async () => {
@@ -125,12 +131,15 @@ describe('srsService', () => {
 
       await srsService.getDueItems(20, [5, 4]);
 
-      expect(mockFetch).toHaveBeenCalledWith('/api/srs/due?limit=20&jlpt=5,4', {
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${mockIdToken}`,
-        },
-      });
+      expect(mockFetch).toHaveBeenCalledWith(
+        '/api/srs/due?limit=20&jlpt=5,4',
+        expect.objectContaining({
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${mockIdToken}`,
+          },
+        }),
+      );
     });
 
     it('should throw error on API failure', async () => {
@@ -159,12 +168,15 @@ describe('srsService', () => {
 
       const result = await srsService.getStats();
 
-      expect(mockFetch).toHaveBeenCalledWith('/api/srs/stats', {
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${mockIdToken}`,
-        },
-      });
+      expect(mockFetch).toHaveBeenCalledWith(
+        '/api/srs/stats',
+        expect.objectContaining({
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${mockIdToken}`,
+          },
+        }),
+      );
       expect(result).toEqual(statsResponse);
     });
 
@@ -190,12 +202,15 @@ describe('srsService', () => {
 
       await srsService.getStats([5, 4]);
 
-      expect(mockFetch).toHaveBeenCalledWith('/api/srs/stats?jlpt=5,4', {
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${mockIdToken}`,
-        },
-      });
+      expect(mockFetch).toHaveBeenCalledWith(
+        '/api/srs/stats?jlpt=5,4',
+        expect.objectContaining({
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${mockIdToken}`,
+          },
+        }),
+      );
     });
 
     it('should throw error when fetching stats fails', async () => {
@@ -227,14 +242,17 @@ describe('srsService', () => {
 
       const result = await srsService.recordReview('vocab-1', 4);
 
-      expect(mockFetch).toHaveBeenCalledWith('/api/srs/review', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${mockIdToken}`,
-        },
-        body: JSON.stringify({ vocabulary_id: 'vocab-1', quality: 4 }),
-      });
+      expect(mockFetch).toHaveBeenCalledWith(
+        '/api/srs/review',
+        expect.objectContaining({
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${mockIdToken}`,
+          },
+          body: JSON.stringify({ vocabulary_id: 'vocab-1', quality: 4 }),
+        }),
+      );
       expect(result).toEqual(mockResult);
     });
 
@@ -270,14 +288,17 @@ describe('srsService', () => {
 
       const result = await srsService.recordBatchReview(reviews);
 
-      expect(mockFetch).toHaveBeenCalledWith('/api/srs/batch-review', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${mockIdToken}`,
-        },
-        body: JSON.stringify({ reviews }),
-      });
+      expect(mockFetch).toHaveBeenCalledWith(
+        '/api/srs/batch-review',
+        expect.objectContaining({
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${mockIdToken}`,
+          },
+          body: JSON.stringify({ reviews }),
+        }),
+      );
       expect(result).toEqual(mockResult);
     });
   });
@@ -292,12 +313,15 @@ describe('srsService', () => {
 
       const result = await srsService.getProgress(vocabularyId);
 
-      expect(mockFetch).toHaveBeenCalledWith('/api/srs/progress/vocab%2F1', {
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${mockIdToken}`,
-        },
-      });
+      expect(mockFetch).toHaveBeenCalledWith(
+        '/api/srs/progress/vocab%2F1',
+        expect.objectContaining({
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${mockIdToken}`,
+          },
+        }),
+      );
       expect(result).toEqual({ progress: mockProgress });
     });
 
@@ -332,13 +356,16 @@ describe('srsService', () => {
 
       const result = await srsService.deleteProgress(vocabularyId);
 
-      expect(mockFetch).toHaveBeenCalledWith('/api/srs/progress/vocab%2F1', {
-        method: 'DELETE',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${mockIdToken}`,
-        },
-      });
+      expect(mockFetch).toHaveBeenCalledWith(
+        '/api/srs/progress/vocab%2F1',
+        expect.objectContaining({
+          method: 'DELETE',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${mockIdToken}`,
+          },
+        }),
+      );
       expect(result.success).toBe(true);
     });
 

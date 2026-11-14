@@ -80,31 +80,28 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue';
 import { Notify } from 'quasar';
-import { LLM_PROVIDER_REGISTRY, LLM_PROVIDERS, type LlmProvider } from '@vela/common';
+import {
+  LLM_PROVIDER_REGISTRY,
+  LLM_PROVIDERS,
+  type LlmModelPair,
+  type LlmProvider,
+} from '@vela/common';
 import { useLLMSettingsStore } from 'src/stores/llmSettings';
 import { useAuthStore } from 'src/stores/auth';
 import {
   OPENROUTER_CUSTOM_VALUE,
   buildLlmModelOptions,
-  confirmedServerKeyProviders,
   decodeModelValue,
   llmPairOption,
   pairToOptionValue,
 } from '../../../utils/llmModelOptions';
-import { useLlmCapabilitiesQuery } from '../../../composables/queries/useLlmCapabilitiesQuery';
+import { useServerKeyProviders } from '../../../composables/queries/useServerKeyProviders';
 import LlmProviderCard from './LlmProviderCard.vue';
 
 const store = useLLMSettingsStore();
 const authStore = useAuthStore();
 const isAuthenticated = computed(() => authStore.isAuthenticated);
-const capabilitiesQuery = useLlmCapabilitiesQuery();
-
-const serverKeyProviders = computed<LlmProvider[]>(() =>
-  confirmedServerKeyProviders(capabilitiesQuery.data.value, {
-    isAuthenticated: isAuthenticated.value,
-    isError: capabilitiesQuery.isError.value,
-  }),
-);
+const { capabilitiesQuery, serverKeyProviders } = useServerKeyProviders();
 const serverKeyProviderLabels = computed(() =>
   serverKeyProviders.value.map((provider) => LLM_PROVIDER_REGISTRY[provider].label),
 );
@@ -169,7 +166,7 @@ const hasSelectionServerKey = computed(() =>
 );
 
 const saveDefault = async () => {
-  let pair: { provider: LlmProvider; model: string };
+  let pair: LlmModelPair;
   if (draftPairValue.value === OPENROUTER_CUSTOM_VALUE) {
     const model = customModelId.value.trim();
     if (!model) {

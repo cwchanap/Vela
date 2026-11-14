@@ -460,6 +460,91 @@ describe('Chat History Route', () => {
       expect(sentTxnItems()[0]).toHaveLength(2);
     });
 
+    test('should condition assistant SET lastLlmAt on matching model and monotonic timestamp, and clamp future timestamps', async () => {
+      mockSend.mockResolvedValue({});
+      const app = createTestApp({});
+      const futureAt = Date.now() + 3_600_000;
+
+      const before = Date.now();
+      const res = await app.request(
+        saveRequest(
+          validSaveBody({
+            is_user: false,
+            model: { provider: 'anthropic', model: 'claude-opus-5-5' },
+            lastLlmAt: futureAt,
+          }),
+        ),
+      );
+      const after = Date.now();
+
+      expect(res.status).toBe(200);
+      const update = sentTxnItems()[0][0].Update;
+      expect(update.UpdateExpression).toBe('SET #lastLlmAt = :lastLlmAt');
+      expect(update.ConditionExpression).toContain(
+        '(attribute_not_exists(#model) OR #model = :model)',
+      );
+      expect(update.ConditionExpression).toContain(
+        '(attribute_not_exists(#lastLlmAt) OR #lastLlmAt <= :lastLlmAt)',
+      );
+      const committedAt = update.ExpressionAttributeValues[':lastLlmAt'] as number;
+      expect(committedAt).toBeGreaterThanOrEqual(before);
+      expect(committedAt).toBeLessThanOrEqual(after);
+    });
+
+    test('should condition assistant REMOVE lastLlmAt on model and requestStartedAt', async () => {
+      mockSend.mockResolvedValue({});
+      const app = createTestApp({});
+      const startedAt = Date.now() - 5000;
+
+      const res = await app.request(
+        saveRequest(
+          validSaveBody({
+            is_user: false,
+            model: { provider: 'anthropic', model: 'claude-opus-5-5' },
+            requestStartedAt: startedAt,
+          }),
+        ),
+      );
+
+      expect(res.status).toBe(200);
+      const update = sentTxnItems()[0][0].Update;
+      expect(update.UpdateExpression).toBe('REMOVE #lastLlmAt');
+      expect(update.ConditionExpression).toContain(
+        '(attribute_not_exists(#model) OR #model = :model)',
+      );
+      expect(update.ConditionExpression).toContain(
+        '(attribute_not_exists(#lastLlmAt) OR #lastLlmAt <= :requestStartedAt)',
+      );
+      expect(update.ExpressionAttributeValues).toEqual({
+        ':model': { provider: 'anthropic', model: 'claude-opus-5-5' },
+        ':requestStartedAt': startedAt,
+      });
+    });
+
+    test('should fall back to an alive-only message write when a guarded assistant save fails its metadata condition', async () => {
+      mockSend.mockRejectedValueOnce(transactionConditionError()).mockResolvedValueOnce({});
+      const app = createTestApp({});
+
+      const res = await app.request(
+        saveRequest(
+          validSaveBody({
+            is_user: false,
+            model: { provider: 'anthropic', model: 'claude-opus-5-5' },
+            lastLlmAt: Date.now() - 10_000,
+          }),
+        ),
+      );
+
+      expect(res.status).toBe(200);
+      expect(mockSend).toHaveBeenCalledTimes(2);
+      const fallbackItems = sentTxnItems()[1];
+      expect(fallbackItems[0]).toHaveProperty('ConditionCheck');
+      expect(fallbackItems[0].ConditionCheck.ConditionExpression).toBe(
+        'attribute_exists(ThreadId) AND attribute_not_exists(#deleting)',
+      );
+      expect(fallbackItems[1]).toHaveProperty('Put');
+    });
+
     test('should return 400 when an assistant save carries a non-positive lastLlmAt', async () => {
       const app = createTestApp({});
 

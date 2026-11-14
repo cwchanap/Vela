@@ -128,4 +128,22 @@ describe('ChatCacheReminder', () => {
     wrapper.unmount();
     expect(vi.getTimerCount()).toBe(0);
   });
+
+  it('does not schedule an interval while hidden and stops it once the grace window elapses', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(START);
+
+    const noEvidence = mountReminder('anthropic', null);
+    expect(vi.getTimerCount()).toBe(0);
+
+    await noEvidence.setProps({ provider: 'google', cacheStartedAt: START });
+    expect(vi.getTimerCount()).toBe(0);
+
+    await noEvidence.setProps({ provider: 'anthropic', cacheStartedAt: START });
+    expect(vi.getTimerCount()).toBe(1);
+
+    await vi.advanceTimersByTimeAsync(601 * 1000);
+    expect(noEvidence.find('[data-testid="chat-cache-reminder"]').exists()).toBe(false);
+    expect(vi.getTimerCount()).toBe(0);
+  });
 });

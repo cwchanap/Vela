@@ -4,6 +4,7 @@ import {
   LLM_PROVIDER_REGISTRY,
   LLM_PROVIDERS,
   MAX_LLM_THINKING_OVERRIDES,
+  type LlmModelPair,
   type LlmProvider,
   type LlmEffort,
 } from '@vela/common';
@@ -68,7 +69,7 @@ export const useLLMSettingsStore = defineStore('llmSettings', () => {
 
   // Single source of pair → { key, saved effort } lookup; the global selection
   // and thread-specific chat choices both resolve through it.
-  const selectionFor = (pair: { provider: LlmProvider; model: string }): LlmSelection => {
+  const selectionFor = (pair: LlmModelPair): LlmSelection => {
     const { provider, model } = pair;
     return {
       provider,
@@ -133,7 +134,7 @@ export const useLLMSettingsStore = defineStore('llmSettings', () => {
     });
   };
 
-  const saveDefault = async (pair: { provider: LlmProvider; model: string }): Promise<boolean> => {
+  const saveDefault = async (pair: LlmModelPair): Promise<boolean> => {
     if (!auth.user) return false;
     return await auth.updatePreferences((current) => {
       const next = isLlmPreferences(current.llm) ? cloneLlm(current.llm) : emptyLlm();

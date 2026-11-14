@@ -1,11 +1,8 @@
 import { getApiUrl } from 'src/utils/api';
 import { httpJsonAuth } from 'src/utils/httpClient';
-import type { LlmProvider } from '@vela/common';
+import type { LlmModelPair } from '@vela/common';
 
-export interface ChatThreadModelDTO {
-  provider: LlmProvider;
-  model: string;
-}
+export type ChatThreadModelDTO = LlmModelPair;
 
 export interface ChatThreadSummaryDTO {
   ThreadId: string;
@@ -55,6 +52,7 @@ export async function getChatMessages(
 export interface SaveChatMessageMetadata {
   model?: ChatThreadModelDTO | undefined;
   lastLlmAt?: number | undefined;
+  requestStartedAt?: number | undefined;
 }
 
 export async function saveChatMessage(
@@ -79,6 +77,9 @@ export async function saveChatMessage(
         ...item,
         ...(metadata?.model !== undefined ? { model: metadata.model } : {}),
         ...(metadata?.lastLlmAt !== undefined ? { lastLlmAt: metadata.lastLlmAt } : {}),
+        ...(metadata?.requestStartedAt !== undefined
+          ? { requestStartedAt: metadata.requestStartedAt }
+          : {}),
       }),
     },
     userId,
