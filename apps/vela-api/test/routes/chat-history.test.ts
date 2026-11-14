@@ -1171,6 +1171,29 @@ describe('Chat History Route', () => {
       });
     });
 
+    test('should advance the request-order watermark when a model patch clears evidence', async () => {
+      mockSend.mockResolvedValueOnce({ Attributes: threadRow() });
+      const app = createTestApp({});
+
+      const res = await app.request(
+        new Request('http://localhost/thread/thread-123', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ model: { provider: 'anthropic', model: 'claude-opus-4' } }),
+        }),
+      );
+
+      expect(res.status).toBe(200);
+      const updateInput = mockUpdateCommand.mock.calls[0][0];
+      // A delayed save whose request predates an A→B→A change must stay
+      // fenced: the model matches again, so only the advanced watermark
+      // rejects it.
+      expect(updateInput.UpdateExpression).toContain('#lastLlmReqAt = :lastLlmReqAt');
+      expect(updateInput.UpdateExpression).toContain('REMOVE #lastLlmAt');
+      expect(updateInput.ExpressionAttributeNames['#lastLlmReqAt']).toBe('lastLlmReqAt');
+      expect(updateInput.ExpressionAttributeValues[':lastLlmReqAt']).toEqual(expect.any(Number));
+    });
+
     test('should REMOVE lastLlmAt even when a model patch also renames the thread', async () => {
       mockSend.mockResolvedValueOnce({ Attributes: threadRow() });
       const app = createTestApp({});
@@ -1209,6 +1232,7 @@ describe('Chat History Route', () => {
       const updateInput = mockUpdateCommand.mock.calls[0][0];
       expect(updateInput.UpdateExpression).not.toContain('lastLlmAt');
       expect(updateInput.ExpressionAttributeNames).not.toHaveProperty('#lastLlmAt');
+      expect(updateInput.ExpressionAttributeNames).not.toHaveProperty('#lastLlmReqAt');
     });
 
     test('should update title and model together', async () => {
