@@ -140,9 +140,18 @@ describe('httpJson', () => {
   });
 
   describe('caller cancellation', () => {
+    // The test environment's Request (injected from the host runtime) may
+    // reject an AbortSignal from the jsdom realm, so attach the caller's
+    // signal as an own property instead of via RequestInit.
+    const requestWithSignal = (signal: AbortSignal): Request => {
+      const request = new Request('http://localhost/api/test');
+      Object.defineProperty(request, 'signal', { value: signal });
+      return request;
+    };
+
     it('rejects when the signal stored on a Request input aborts', async () => {
       const caller = new AbortController();
-      const request = new Request('http://localhost/api/test', { signal: caller.signal });
+      const request = requestWithSignal(caller.signal);
       vi.stubGlobal(
         'fetch',
         vi.fn().mockImplementation(() => new Promise(() => {})),
@@ -156,7 +165,7 @@ describe('httpJson', () => {
 
     it('ignores the Request input signal when init.signal is explicitly null', async () => {
       const caller = new AbortController();
-      const request = new Request('http://localhost/api/test', { signal: caller.signal });
+      const request = requestWithSignal(caller.signal);
       let capturedSignal: AbortSignal | undefined;
       vi.stubGlobal(
         'fetch',
