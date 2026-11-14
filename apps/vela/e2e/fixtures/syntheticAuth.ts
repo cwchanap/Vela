@@ -481,7 +481,9 @@ const handleApiRoute = async (state: MockApi, route: Route): Promise<void> => {
       // Mirror the server's conditioned metadata update: positive integer
       // lastLlmAt is SET on the thread row, its absence REMOVEs it. Both
       // branches are fenced by the lastLlmReqAt request-order watermark so
-      // a delayed save cannot undo a newer clear.
+      // a delayed save cannot undo a newer clear. The response echoes the
+      // row's authoritative evidence — a skipped write reports the stored
+      // value, not the supplied one.
       const threadRow = state.chatThreads.get(authUser.userId)?.get(threadId);
       if (threadRow) {
         const reqAt =
@@ -533,7 +535,14 @@ const handleApiRoute = async (state: MockApi, route: Route): Promise<void> => {
       is_user: body.is_user,
     });
     userMessages.set(threadId, list);
-    return jsonResponse(route, { ok: true });
+    const committedLastLlmAt =
+      body.is_user === true
+        ? undefined
+        : (state.chatThreads.get(authUser.userId)?.get(threadId)?.lastLlmAt ?? null);
+    return jsonResponse(route, {
+      ok: true,
+      ...(committedLastLlmAt !== undefined ? { lastLlmAt: committedLastLlmAt } : {}),
+    });
   }
 
   if (path === '/api/chat-history/threads' && method === 'GET') {

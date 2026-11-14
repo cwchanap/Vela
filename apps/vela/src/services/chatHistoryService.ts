@@ -55,13 +55,22 @@ export interface SaveChatMessageMetadata {
   requestStartedAt?: number | undefined;
 }
 
+export interface SaveChatMessageResult {
+  ok: boolean;
+  // Assistant saves echo the thread row's authoritative cache evidence: a
+  // committed timestamp, or null when the row carries none — including when
+  // the ordering guards skipped the supplied write, so a superseded
+  // timestamp can never be published by the caller. User saves omit it.
+  lastLlmAt?: number | null;
+}
+
 export async function saveChatMessage(
   threadId: string,
   userId: string,
   message: string,
   isUser: boolean,
   metadata?: SaveChatMessageMetadata,
-): Promise<void> {
+): Promise<SaveChatMessageResult> {
   const item: ChatHistoryItemDTO = {
     ThreadId: threadId,
     Timestamp: Date.now(),
@@ -69,7 +78,7 @@ export async function saveChatMessage(
     message,
     is_user: isUser,
   };
-  await httpJsonAuth<{ ok: boolean }>(
+  return await httpJsonAuth<SaveChatMessageResult>(
     getApiUrl('chat-history/save'),
     {
       method: 'POST',

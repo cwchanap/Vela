@@ -360,7 +360,7 @@ describe('useChatThreads', () => {
   describe('useSaveChatMessage', () => {
     it('updates the cached thread lastLlmAt in place after an assistant save without refetching', async () => {
       signIn(userA);
-      mockSaveChatMessage.mockResolvedValue(undefined);
+      mockSaveChatMessage.mockResolvedValue({ ok: true, lastLlmAt: 222 });
       const t1 = thread('t-1', 'First', 500);
       const t2 = thread('t-2', 'Second', 500);
       t2.lastLlmAt = 111;
@@ -392,7 +392,7 @@ describe('useChatThreads', () => {
 
     it('clears the cached thread lastLlmAt after an assistant save without cache evidence', async () => {
       signIn(userA);
-      mockSaveChatMessage.mockResolvedValue(undefined);
+      mockSaveChatMessage.mockResolvedValue({ ok: true, lastLlmAt: null });
       const t1 = thread('t-1', 'First', 500);
       t1.lastLlmAt = 111;
       const { useSaveChatMessage } = await import('./useChatThreads');
@@ -418,7 +418,7 @@ describe('useChatThreads', () => {
 
     it('does not touch the thread cache after a user save', async () => {
       signIn(userA);
-      mockSaveChatMessage.mockResolvedValue(undefined);
+      mockSaveChatMessage.mockResolvedValue({ ok: true });
       const existing = [thread('t-1', 'First', 500)];
       const { useSaveChatMessage } = await import('./useChatThreads');
       const {
@@ -442,7 +442,7 @@ describe('useChatThreads', () => {
 
     it('scopes the assistant-save cache update to the initiating user', async () => {
       signIn(userA);
-      mockSaveChatMessage.mockResolvedValue(undefined);
+      mockSaveChatMessage.mockResolvedValue({ ok: true, lastLlmAt: 222 });
       const threadsA = [thread('t-1', 'A', 500)];
       const threadsB = [thread('t-1', 'B', 500)];
       const { useSaveChatMessage } = await import('./useChatThreads');
@@ -467,6 +467,68 @@ describe('useChatThreads', () => {
         queryClient.getQueryData<ChatThreadSummaryDTO[]>(threadsKey(userA))![0]!.lastLlmAt,
       ).toBe(222);
       expect(queryClient.getQueryData(threadsKey(userB))).toEqual(threadsB);
+    });
+
+    it('does not republish supplied evidence when the server skipped the metadata write', async () => {
+      signIn(userA);
+      // Cross-tab: a newer zero-cache save cleared the server's evidence and
+      // a thread-list refresh brought that clear into this cache. The delayed
+      // save still commits the message but the ordering guards skip its
+      // evidence write — the response reports the row's authoritative
+      // (empty) evidence, so the supplied timestamp must not land.
+      mockSaveChatMessage.mockResolvedValue({ ok: true, lastLlmAt: null });
+      const t1 = thread('t-1', 'First', 500);
+      const { useSaveChatMessage } = await import('./useChatThreads');
+      const {
+        result,
+        queryClient,
+        cleanup: qcCleanup,
+      } = withQueryClient(() => useSaveChatMessage(), cacheClient());
+      cleanup = qcCleanup;
+      queryClient.setQueryData(threadsKey(userA), [t1]);
+
+      await result.mutateAsync({
+        threadId: 't-1',
+        userId: 'user-a',
+        message: 'ai reply',
+        isUser: false,
+        lastLlmAt: 222,
+        requestStartedAt: 220,
+      });
+
+      expect(
+        queryClient.getQueryData<ChatThreadSummaryDTO[]>(threadsKey(userA))![0]!.lastLlmAt,
+      ).toBeUndefined();
+    });
+
+    it('publishes the winning timestamp when the server skipped the supplied write', async () => {
+      signIn(userA);
+      // A newer request's evidence won the ordering race; the skipped save's
+      // response echoes it, reconciling a cache that missed the refresh.
+      mockSaveChatMessage.mockResolvedValue({ ok: true, lastLlmAt: 999 });
+      const t1 = thread('t-1', 'First', 500);
+      t1.lastLlmAt = 111;
+      const { useSaveChatMessage } = await import('./useChatThreads');
+      const {
+        result,
+        queryClient,
+        cleanup: qcCleanup,
+      } = withQueryClient(() => useSaveChatMessage(), cacheClient());
+      cleanup = qcCleanup;
+      queryClient.setQueryData(threadsKey(userA), [t1]);
+
+      await result.mutateAsync({
+        threadId: 't-1',
+        userId: 'user-a',
+        message: 'ai reply',
+        isUser: false,
+        lastLlmAt: 222,
+        requestStartedAt: 220,
+      });
+
+      expect(
+        queryClient.getQueryData<ChatThreadSummaryDTO[]>(threadsKey(userA))![0]!.lastLlmAt,
+      ).toBe(999);
     });
   });
 
@@ -634,12 +696,16 @@ describe('useChatThreads', () => {
         ) => {
           if (isUser) {
             server.commitUser(threadId, message, 2_000);
-            return;
+            return { ok: true };
           }
           const gates = assistantGates.shift();
           if (gates?.commit) await gates.commit;
           server.commitAssistant(threadId, metadata?.lastLlmAt);
+          // The save response echoes the row's authoritative evidence, read
+          // at commit time — before any respond delay.
+          const committed = server.rows.get(threadId)?.lastLlmAt ?? null;
           if (gates?.respond) await gates.respond;
+          return { ok: true, lastLlmAt: committed };
         },
       );
       mockUpdateChatThread.mockImplementation(async (threadId: string, patch) => {
