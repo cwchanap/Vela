@@ -83,7 +83,11 @@ async function fetchJsonWithTimeout<T>(
   timeoutMs = DEFAULT_HTTP_TIMEOUT_MS,
 ): Promise<T> {
   const controller = new AbortController();
-  const callerSignal = init?.signal;
+  // A Request input carries its own signal; an init signal overrides it per
+  // the Fetch Standard, while an explicit null opts out of caller
+  // cancellation entirely.
+  const callerSignal =
+    init?.signal !== undefined ? init.signal : input instanceof Request ? input.signal : undefined;
   let onCallerAbort: (() => void) | undefined;
   let onControllerAbort: (() => void) | undefined;
   let timeoutId: ReturnType<typeof setTimeout> | undefined;

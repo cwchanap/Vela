@@ -138,6 +138,39 @@ describe('httpJson', () => {
       status: 200,
     });
   });
+
+  describe('caller cancellation', () => {
+    it('rejects when the signal stored on a Request input aborts', async () => {
+      const caller = new AbortController();
+      const request = new Request('http://localhost/api/test', { signal: caller.signal });
+      vi.stubGlobal(
+        'fetch',
+        vi.fn().mockImplementation(() => new Promise(() => {})),
+      );
+
+      const pending = httpJson(request);
+      const assertion = expect(pending).rejects.toThrow(/abort/i);
+      caller.abort();
+      await assertion;
+    });
+
+    it('ignores the Request input signal when init.signal is explicitly null', async () => {
+      const caller = new AbortController();
+      const request = new Request('http://localhost/api/test', { signal: caller.signal });
+      let capturedSignal: AbortSignal | undefined;
+      vi.stubGlobal(
+        'fetch',
+        vi.fn().mockImplementation((_input: RequestInfo, init?: RequestInit) => {
+          capturedSignal = init?.signal as AbortSignal | undefined;
+          return Promise.resolve({ ok: true, json: async () => ({}) });
+        }),
+      );
+
+      await httpJson(request, { signal: null });
+      caller.abort();
+      expect(capturedSignal?.aborted).toBe(false);
+    });
+  });
 });
 
 describe('httpJsonAuth', () => {
