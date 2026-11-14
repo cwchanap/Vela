@@ -357,6 +357,35 @@ describe('useChatStore', () => {
       expect(store.isPersistedThread).toBe(false);
       expect(store.modelPatchPending).toBe(false);
     });
+
+    it('holds the thread-select lock until its owning selection finishes', async () => {
+      const { useChatStore } = await import('./chat');
+      const store = useChatStore();
+      expect(store.threadSelectPending).toBe(false);
+
+      const token = store.startThreadSelect();
+      expect(store.threadSelectPending).toBe(true);
+
+      // A newer selection replaces the token; the stale owner's finish must
+      // not release the lock early.
+      const newer = store.startThreadSelect();
+      store.finishThreadSelect(token);
+      expect(store.threadSelectPending).toBe(true);
+
+      store.finishThreadSelect(newer);
+      expect(store.threadSelectPending).toBe(false);
+    });
+
+    it('clears the thread-select lock on startNewChat', async () => {
+      const { useChatStore } = await import('./chat');
+      const store = useChatStore();
+      const token = store.startThreadSelect();
+      store.startNewChat();
+      expect(store.threadSelectPending).toBe(false);
+      // The abandoned owner's finish is a no-op on the fresh chat.
+      store.finishThreadSelect(token);
+      expect(store.threadSelectPending).toBe(false);
+    });
   });
 
   describe('clearError', () => {

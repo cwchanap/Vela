@@ -233,11 +233,13 @@ describe('AIChatPage', () => {
             }
             const body = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>;
             if (typeof body.title === 'string') thread.title = body.title.trim();
-            // Server contract: a model PATCH SETs model and REMOVEs lastLlmAt
-            // atomically; a title-only PATCH leaves both alone.
+            // Server contract: a model PATCH SETs model, REMOVEs lastLlmAt
+            // and advances the request-order watermark atomically; a
+            // title-only PATCH leaves all three alone.
             if (body.model !== undefined) {
               thread.model = body.model as MockThread['model'];
               delete thread.lastLlmAt;
+              thread.lastLlmReqAt = Date.now();
             }
             thread.updatedAt = Date.now();
             return okJson({ thread });
@@ -3462,6 +3464,47 @@ describe('AIChatPage', () => {
       expect(chatStore.activeModel).toEqual(openaiPair);
       expect(chatStore.modelPatchPending).toBe(false);
       expect(modelSelect()!.props('disable')).toBe(false);
+    });
+
+    it('keeps a pending thread selection locked across a remount until it resolves', async () => {
+      enableOpenai();
+      threadRows = [createMockThread({ ThreadId: 'thread-1', model: anthropicRow })];
+      messageRows = [createMockMessage('Hello', true)];
+      const selectGate = deferred<void>();
+      messagesDelays['thread-1'] = selectGate.promise;
+
+      mountComponent();
+      await flushPromises();
+      await wrapper.find('[data-testid="llm-chat-thread-item"]').trigger('click');
+      await flushPromises();
+
+      const chatStore = useChatStore();
+      expect(chatStore.threadSelectPending).toBe(true);
+      expect(modelSelect()!.props('disable')).toBe(true);
+
+      // Route remount while the restore GET is still in flight: the
+      // replacement page must inherit the pending lock from the shared
+      // store, not page-local state.
+      wrapper!.unmount();
+      wrapper = null;
+      mountComponent();
+      await flushPromises();
+
+      expect(chatStore.threadSelectPending).toBe(true);
+      expect(modelSelect()!.props('disable')).toBe(true);
+
+      // A pick attempted during the pending restore must not land: the
+      // in-flight GET would otherwise overwrite it when it resolves.
+      await chooseModel('openai::gpt-6.1-sol');
+      expect(chatStore.activeModel).toEqual({ provider: 'google', model: 'gemini-3.8-flash' });
+      expect(patchFetches().length).toBe(0);
+
+      selectGate.resolve();
+      await flushPromises();
+
+      expect(chatStore.threadSelectPending).toBe(false);
+      expect(chatStore.chatId).toBe('thread-1');
+      expect(chatStore.activeModel).toEqual(anthropicRow);
     });
 
     it('sends the new provider, key and complete history after a mid-chat model change', async () => {

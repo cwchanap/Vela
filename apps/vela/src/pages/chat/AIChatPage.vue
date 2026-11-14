@@ -38,7 +38,7 @@
               :pair="chat.activeModel"
               :options="modelOptions"
               :thinking="chat.thinkingOverride"
-              :disabled="chat.isLoading || chat.modelPatchPending || threadSelectPending"
+              :disabled="chat.isLoading || chat.modelPatchPending || chat.threadSelectPending"
               @update:pair="onModelSelect"
               @update:thinking="onThinkingSelect"
             />
@@ -160,10 +160,6 @@ const llmSettings = useLLMSettingsStore();
 const auth = useAuthStore();
 const queryClient = useQueryClient();
 const { serverKeyProviders } = useServerKeyProviders();
-const activeSelectGen = ref<number | null>(null);
-const threadSelectPending = computed(
-  () => activeSelectGen.value !== null && activeSelectGen.value === chat.generation,
-);
 
 // Greeting message constant
 const GREETING_MESSAGE =
@@ -312,7 +308,7 @@ const onThinkingSelect = (value: LlmEffort | null) => {
 };
 
 const onModelSelect = async (pair: LlmModelPair) => {
-  if (chat.isLoading || chat.modelPatchPending || threadSelectPending.value) return;
+  if (chat.isLoading || chat.modelPatchPending || chat.threadSelectPending) return;
   if (
     chat.activeModel &&
     chat.activeModel.provider === pair.provider &&
@@ -518,7 +514,9 @@ const selectThread = async (t: ChatThreadSummaryDTO) => {
   const uid = getUserId();
   const opGen = chat.nextGeneration();
   const sessionGen = auth.sessionGeneration;
-  activeSelectGen.value = opGen;
+  // The pending lock lives in the store: a route remount must not drop it
+  // and let a model pick race the in-flight restore.
+  const selectToken = chat.startThreadSelect();
   try {
     const items = await chatMessagesHelper.getMessages(t.ThreadId, uid);
     if (isStaleOperation(opGen, sessionGen) || isThreadUnavailable(t.ThreadId)) return;
@@ -574,7 +572,7 @@ const selectThread = async (t: ChatThreadSummaryDTO) => {
     console.error(e);
     $q.notify({ type: 'negative', message: 'Failed to load conversation' });
   } finally {
-    if (activeSelectGen.value === opGen) activeSelectGen.value = null;
+    chat.finishThreadSelect(selectToken);
   }
 };
 
