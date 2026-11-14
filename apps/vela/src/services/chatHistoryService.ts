@@ -1,18 +1,18 @@
 import { getApiUrl } from 'src/utils/api';
 import { httpJsonAuth } from 'src/utils/httpClient';
-import type { LlmProvider } from '@vela/common';
+import type { LlmModelPair } from '@vela/common';
 
-export interface ChatThreadModelDTO {
-  provider: LlmProvider;
-  model: string;
-}
+export type ChatThreadModelDTO = LlmModelPair;
 
 export interface ChatThreadSummaryDTO {
   ThreadId: string;
   title: string;
   createdAt: number;
   updatedAt: number;
-  model?: ChatThreadModelDTO;
+  // `| undefined` keeps the optimistic-clear `{ lastLlmAt: undefined }` idiom
+  // valid under exactOptionalPropertyTypes.
+  model?: ChatThreadModelDTO | undefined;
+  lastLlmAt?: number | undefined;
 }
 
 export interface ChatHistoryItemDTO {
@@ -49,12 +49,28 @@ export async function getChatMessages(
   return data.items || [];
 }
 
+export interface SaveChatMessageMetadata {
+  model?: ChatThreadModelDTO | undefined;
+  lastLlmAt?: number | undefined;
+  requestStartedAt?: number | undefined;
+}
+
+export interface SaveChatMessageResult {
+  ok: boolean;
+  // Assistant saves echo the thread row's authoritative cache evidence: a
+  // committed timestamp, or null when the row carries none — including when
+  // the ordering guards skipped the supplied write, so a superseded
+  // timestamp can never be published by the caller. User saves omit it.
+  lastLlmAt?: number | null;
+}
+
 export async function saveChatMessage(
   threadId: string,
   userId: string,
   message: string,
   isUser: boolean,
-): Promise<void> {
+  metadata?: SaveChatMessageMetadata,
+): Promise<SaveChatMessageResult> {
   const item: ChatHistoryItemDTO = {
     ThreadId: threadId,
     Timestamp: Date.now(),
@@ -62,11 +78,18 @@ export async function saveChatMessage(
     message,
     is_user: isUser,
   };
-  await httpJsonAuth<{ ok: boolean }>(
+  return await httpJsonAuth<SaveChatMessageResult>(
     getApiUrl('chat-history/save'),
     {
       method: 'POST',
-      body: JSON.stringify(item),
+      body: JSON.stringify({
+        ...item,
+        ...(metadata?.model !== undefined ? { model: metadata.model } : {}),
+        ...(metadata?.lastLlmAt !== undefined ? { lastLlmAt: metadata.lastLlmAt } : {}),
+        ...(metadata?.requestStartedAt !== undefined
+          ? { requestStartedAt: metadata.requestStartedAt }
+          : {}),
+      }),
     },
     userId,
   );

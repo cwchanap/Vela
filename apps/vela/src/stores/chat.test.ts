@@ -292,6 +292,102 @@ describe('useChatStore', () => {
     });
   });
 
+  describe('chat model state', () => {
+    const seedModelState = async (store: {
+      setActiveModel: (_pair: { provider: 'google'; model: string } | null) => void;
+      setActiveModelIsSeed: (_isSeed: boolean) => void;
+      setThinkingOverride: (_effort: 'high' | null) => void;
+      setCacheStartedAt: (_timestamp: number | null) => void;
+      setIsPersistedThread: (_persisted: boolean) => void;
+      setModelPatching: (_pending: boolean) => void;
+    }) => {
+      store.setActiveModel({ provider: 'google', model: 'gemini-3.8-flash' });
+      store.setActiveModelIsSeed(true);
+      store.setThinkingOverride('high');
+      store.setCacheStartedAt(1700000000000);
+      store.setIsPersistedThread(true);
+      store.setModelPatching(true);
+    };
+
+    it('starts with a fresh model state', async () => {
+      const { useChatStore } = await import('./chat');
+      const store = useChatStore();
+      expect(store.activeModel).toBeNull();
+      expect(store.activeModelIsSeed).toBe(false);
+      expect(store.thinkingOverride).toBeNull();
+      expect(store.cacheStartedAt).toBeNull();
+      expect(store.isPersistedThread).toBe(false);
+      expect(store.modelPatchPending).toBe(false);
+    });
+
+    it('stores provider/model, effort override, cache timestamp and persistence via setters', async () => {
+      const { useChatStore } = await import('./chat');
+      const store = useChatStore();
+      seedModelState(store);
+      expect(store.activeModel).toEqual({ provider: 'google', model: 'gemini-3.8-flash' });
+      expect(store.activeModelIsSeed).toBe(true);
+      expect(store.thinkingOverride).toBe('high');
+      expect(store.cacheStartedAt).toBe(1700000000000);
+      expect(store.isPersistedThread).toBe(true);
+      expect(store.modelPatchPending).toBe(true);
+    });
+
+    it('clears model, thinking, cache timestamp, the persistence flag and the PATCH lock on startNewChat', async () => {
+      const { useChatStore } = await import('./chat');
+      const store = useChatStore();
+      seedModelState(store);
+      store.startNewChat();
+      expect(store.activeModel).toBeNull();
+      expect(store.activeModelIsSeed).toBe(false);
+      expect(store.thinkingOverride).toBeNull();
+      expect(store.cacheStartedAt).toBeNull();
+      expect(store.isPersistedThread).toBe(false);
+      expect(store.modelPatchPending).toBe(false);
+    });
+
+    it('clears the model state on resetForUser', async () => {
+      const { useChatStore } = await import('./chat');
+      const store = useChatStore();
+      seedModelState(store);
+      store.resetForUser('user-2', 3);
+      expect(store.activeModel).toBeNull();
+      expect(store.activeModelIsSeed).toBe(false);
+      expect(store.thinkingOverride).toBeNull();
+      expect(store.cacheStartedAt).toBeNull();
+      expect(store.isPersistedThread).toBe(false);
+      expect(store.modelPatchPending).toBe(false);
+    });
+
+    it('holds the thread-select lock until its owning selection finishes', async () => {
+      const { useChatStore } = await import('./chat');
+      const store = useChatStore();
+      expect(store.threadSelectPending).toBe(false);
+
+      const token = store.startThreadSelect();
+      expect(store.threadSelectPending).toBe(true);
+
+      // A newer selection replaces the token; the stale owner's finish must
+      // not release the lock early.
+      const newer = store.startThreadSelect();
+      store.finishThreadSelect(token);
+      expect(store.threadSelectPending).toBe(true);
+
+      store.finishThreadSelect(newer);
+      expect(store.threadSelectPending).toBe(false);
+    });
+
+    it('clears the thread-select lock on startNewChat', async () => {
+      const { useChatStore } = await import('./chat');
+      const store = useChatStore();
+      const token = store.startThreadSelect();
+      store.startNewChat();
+      expect(store.threadSelectPending).toBe(false);
+      // The abandoned owner's finish is a no-op on the fresh chat.
+      store.finishThreadSelect(token);
+      expect(store.threadSelectPending).toBe(false);
+    });
+  });
+
   describe('clearError', () => {
     it('clears error', async () => {
       const { useChatStore } = await import('./chat');

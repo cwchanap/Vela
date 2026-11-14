@@ -108,11 +108,14 @@ describe('gameService', () => {
 
       const questions = await gameService.getVocabularyQuestions(5);
 
-      expect(mockFetch).toHaveBeenCalledWith('/api/games/vocabulary?limit=15', {
-        headers: {
-          'Content-Type': 'application/json',
-        },
-      });
+      expect(mockFetch).toHaveBeenCalledWith(
+        '/api/games/vocabulary?limit=15',
+        expect.objectContaining({
+          headers: {
+            'Content-Type': 'application/json',
+          },
+        }),
+      );
       expect(questions).toHaveLength(5);
       expect(questions[0]).toHaveProperty('word');
       expect(questions[0]).toHaveProperty('options');
@@ -127,11 +130,14 @@ describe('gameService', () => {
 
       await gameService.getVocabularyQuestions();
 
-      expect(mockFetch).toHaveBeenCalledWith('/api/games/vocabulary?limit=30', {
-        headers: {
-          'Content-Type': 'application/json',
-        },
-      });
+      expect(mockFetch).toHaveBeenCalledWith(
+        '/api/games/vocabulary?limit=30',
+        expect.objectContaining({
+          headers: {
+            'Content-Type': 'application/json',
+          },
+        }),
+      );
     });
 
     it('should create questions with 4 options each', async () => {
@@ -523,11 +529,14 @@ describe('gameService', () => {
 
       await gameService.getVocabularyQuestions(5, [5, 4]);
 
-      expect(mockFetch).toHaveBeenCalledWith('/api/games/vocabulary?limit=15&jlpt=5,4', {
-        headers: {
-          'Content-Type': 'application/json',
-        },
-      });
+      expect(mockFetch).toHaveBeenCalledWith(
+        '/api/games/vocabulary?limit=15&jlpt=5,4',
+        expect.objectContaining({
+          headers: {
+            'Content-Type': 'application/json',
+          },
+        }),
+      );
     });
 
     it('should not include JLPT filter when empty array provided', async () => {
@@ -538,11 +547,14 @@ describe('gameService', () => {
 
       await gameService.getVocabularyQuestions(5, []);
 
-      expect(mockFetch).toHaveBeenCalledWith('/api/games/vocabulary?limit=15', {
-        headers: {
-          'Content-Type': 'application/json',
-        },
-      });
+      expect(mockFetch).toHaveBeenCalledWith(
+        '/api/games/vocabulary?limit=15',
+        expect.objectContaining({
+          headers: {
+            'Content-Type': 'application/json',
+          },
+        }),
+      );
     });
 
     it('should handle single JLPT level filter', async () => {
@@ -553,11 +565,14 @@ describe('gameService', () => {
 
       await gameService.getVocabularyQuestions(10, [5]);
 
-      expect(mockFetch).toHaveBeenCalledWith('/api/games/vocabulary?limit=30&jlpt=5', {
-        headers: {
-          'Content-Type': 'application/json',
-        },
-      });
+      expect(mockFetch).toHaveBeenCalledWith(
+        '/api/games/vocabulary?limit=30&jlpt=5',
+        expect.objectContaining({
+          headers: {
+            'Content-Type': 'application/json',
+          },
+        }),
+      );
     });
   });
 
@@ -600,11 +615,14 @@ describe('gameService', () => {
 
       const questions = await gameService.getSentenceQuestions(3);
 
-      expect(mockFetch).toHaveBeenCalledWith('/api/games/sentences?limit=3', {
-        headers: {
-          'Content-Type': 'application/json',
-        },
-      });
+      expect(mockFetch).toHaveBeenCalledWith(
+        '/api/games/sentences?limit=3',
+        expect.objectContaining({
+          headers: {
+            'Content-Type': 'application/json',
+          },
+        }),
+      );
       expect(questions).toHaveLength(3);
       expect(questions[0]).toHaveProperty('sentence');
       expect(questions[0]).toHaveProperty('scrambled');
@@ -619,11 +637,14 @@ describe('gameService', () => {
 
       await gameService.getSentenceQuestions();
 
-      expect(mockFetch).toHaveBeenCalledWith('/api/games/sentences?limit=5', {
-        headers: {
-          'Content-Type': 'application/json',
-        },
-      });
+      expect(mockFetch).toHaveBeenCalledWith(
+        '/api/games/sentences?limit=5',
+        expect.objectContaining({
+          headers: {
+            'Content-Type': 'application/json',
+          },
+        }),
+      );
     });
 
     it('should create scrambled array from words_array', async () => {
@@ -873,11 +894,14 @@ describe('gameService', () => {
 
       await gameService.getSentenceQuestionsWithJlpt(5, [5, 4]);
 
-      expect(mockFetch).toHaveBeenCalledWith('/api/games/sentences?limit=5&jlpt=5,4', {
-        headers: {
-          'Content-Type': 'application/json',
-        },
-      });
+      expect(mockFetch).toHaveBeenCalledWith(
+        '/api/games/sentences?limit=5&jlpt=5,4',
+        expect.objectContaining({
+          headers: {
+            'Content-Type': 'application/json',
+          },
+        }),
+      );
     });
 
     it('should not include JLPT filter when empty array provided', async () => {
@@ -888,11 +912,14 @@ describe('gameService', () => {
 
       await gameService.getSentenceQuestionsWithJlpt(5, []);
 
-      expect(mockFetch).toHaveBeenCalledWith('/api/games/sentences?limit=5', {
-        headers: {
-          'Content-Type': 'application/json',
-        },
-      });
+      expect(mockFetch).toHaveBeenCalledWith(
+        '/api/games/sentences?limit=5',
+        expect.objectContaining({
+          headers: {
+            'Content-Type': 'application/json',
+          },
+        }),
+      );
     });
 
     it('should return scrambled sentence questions', async () => {

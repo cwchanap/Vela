@@ -300,6 +300,77 @@ describe('Chat History Route', () => {
       expect(updateInput.ExpressionAttributeValues[':title']).toBe('New conversation');
     });
 
+    test('should pin the supplied model on the first user save inside the metadata transaction', async () => {
+      mockSend.mockResolvedValue({});
+      const app = createTestApp({});
+
+      const res = await app.request(
+        saveRequest(validSaveBody({ model: { provider: 'anthropic', model: 'claude-opus-4' } })),
+      );
+
+      expect(res.status).toBe(200);
+      expect(sentCommandTypes()).toEqual(['TransactWriteCommand']);
+      const [updateInput, putInput] = [sentTxnItems()[0][0].Update, sentTxnItems()[0][1].Put];
+      expect(sentTxnItems()[0]).toHaveLength(2);
+      expect(updateInput.UpdateExpression).toContain('#title = if_not_exists(#title, :title)');
+      expect(updateInput.UpdateExpression).toContain('#model = if_not_exists(#model, :model)');
+      expect(updateInput.ExpressionAttributeValues[':model']).toEqual({
+        provider: 'anthropic',
+        model: 'claude-opus-4',
+      });
+      // Metadata fields never leak into the message row.
+      expect(putInput.Item).not.toHaveProperty('model');
+      expect(putInput.Item).not.toHaveProperty('lastLlmAt');
+    });
+
+    test('should omit the model clause when a user save carries no model', async () => {
+      mockSend.mockResolvedValue({});
+      const app = createTestApp({});
+
+      const res = await app.request(saveRequest(validSaveBody()));
+
+      expect(res.status).toBe(200);
+      const updateInput = sentTxnItems()[0][0].Update;
+      expect(updateInput.UpdateExpression).not.toContain('#model');
+      expect(updateInput.ExpressionAttributeValues).not.toHaveProperty(':model');
+    });
+
+    test('should never overwrite a stored model on a later user save', async () => {
+      mockSend.mockResolvedValue({});
+      const app = createTestApp({});
+
+      await app.request(
+        saveRequest(
+          validSaveBody({
+            message: 'Follow-up',
+            model: { provider: 'google', model: 'gemini-3.8-flash' },
+          }),
+        ),
+      );
+
+      const updateInput = sentTxnItems()[0][0].Update;
+      expect(updateInput.UpdateExpression).toContain('#model = if_not_exists(#model, :model)');
+      expect(updateInput.UpdateExpression).not.toContain('#model = :model');
+    });
+
+    test('should keep the stale-updatedAt fallback an alive-thread message write that leaves model untouched', async () => {
+      mockSend.mockRejectedValueOnce(transactionConditionError()).mockResolvedValueOnce({});
+      const app = createTestApp({});
+
+      const res = await app.request(
+        saveRequest(validSaveBody({ model: { provider: 'anthropic', model: 'claude-opus-4' } })),
+      );
+
+      expect(res.status).toBe(200);
+      expect(mockSend).toHaveBeenCalledTimes(2);
+      const fallbackItems = sentTxnItems()[1];
+      expect(Object.keys(fallbackItems[0])).toEqual(['ConditionCheck']);
+      expect(fallbackItems[0].ConditionCheck.ConditionExpression).toContain(
+        'attribute_not_exists(#deleting)',
+      );
+      expect(fallbackItems[1].Put.Item).not.toHaveProperty('model');
+    });
+
     test('should preserve an existing title and model on later user saves while bumping updatedAt', async () => {
       mockSend.mockResolvedValue({});
       const app = createTestApp({});
@@ -337,7 +408,7 @@ describe('Chat History Route', () => {
       expect(fallbackItems[1].Put.Item.message).toBe('Hello world');
     });
 
-    test('should write only the message for an assistant save', async () => {
+    test('should guard the assistant message with a conditioned thread update that removes lastLlmAt', async () => {
       mockSend.mockResolvedValue({});
       const app = createTestApp({});
 
@@ -345,13 +416,23 @@ describe('Chat History Route', () => {
 
       expect(res.status).toBe(200);
       expect(sentCommandTypes()).toEqual(['TransactWriteCommand']);
-      const [conditionCheck, put] = sentTxnItems()[0];
-      expect(conditionCheck.ConditionCheck.TableName).toBe('vela-chat-threads');
-      expect(conditionCheck.ConditionCheck.Key).toEqual({
-        UserId: 'user-123',
-        ThreadId: 'thread-123',
+      expect(sentTxnItems()[0]).toHaveLength(2);
+      const [update, put] = [sentTxnItems()[0][0].Update, sentTxnItems()[0][1].Put];
+      expect(update.TableName).toBe('vela-chat-threads');
+      expect(update.Key).toEqual({ UserId: 'user-123', ThreadId: 'thread-123' });
+      expect(update.UpdateExpression).toBe('REMOVE #lastLlmAt');
+      expect(update.ConditionExpression).toBe(
+        'attribute_exists(ThreadId) AND attribute_not_exists(#deleting)',
+      );
+      expect(update.ExpressionAttributeNames).toEqual({
+        '#deleting': 'deleting',
+        '#lastLlmAt': 'lastLlmAt',
       });
-      expect(put.Put).toEqual(
+      // The REMOVE branch carries no values at all — no empty map, no unused
+      // placeholders — and never touches updatedAt.
+      expect(update).not.toHaveProperty('ExpressionAttributeValues');
+      expect(update.UpdateExpression).not.toContain('updatedAt');
+      expect(put).toEqual(
         expect.objectContaining({
           TableName: 'vela-chat-history',
           Item: expect.objectContaining({
@@ -361,6 +442,201 @@ describe('Chat History Route', () => {
           }),
         }),
       );
+    });
+
+    test('should SET the supplied lastLlmAt and the request-order watermark on an assistant save without bumping updatedAt', async () => {
+      mockSend.mockResolvedValue({});
+      const app = createTestApp({});
+
+      const res = await app.request(
+        saveRequest(validSaveBody({ is_user: false, lastLlmAt: 1700000000000 })),
+      );
+      const json = await res.json();
+
+      expect(res.status).toBe(200);
+      // The response echoes the committed evidence so the client publishes
+      // what stored, not what it supplied.
+      expect(json).toEqual({ ok: true, lastLlmAt: 1700000000000 });
+      const update = sentTxnItems()[0][0].Update;
+      expect(update.UpdateExpression).toBe(
+        'SET #lastLlmAt = :lastLlmAt, #lastLlmReqAt = :lastLlmReqAt',
+      );
+      expect(update.ExpressionAttributeValues).toEqual({
+        ':lastLlmAt': 1700000000000,
+        ':lastLlmReqAt': 1700000000000,
+      });
+      expect(update.ExpressionAttributeNames['#lastLlmReqAt']).toBe('lastLlmReqAt');
+      expect(update.UpdateExpression).not.toContain('updatedAt');
+      expect(sentTxnItems()[0]).toHaveLength(2);
+    });
+
+    test('should condition assistant SET lastLlmAt on matching model and monotonic timestamp, and clamp future timestamps', async () => {
+      mockSend.mockResolvedValue({});
+      const app = createTestApp({});
+      const futureAt = Date.now() + 3_600_000;
+
+      const before = Date.now();
+      const res = await app.request(
+        saveRequest(
+          validSaveBody({
+            is_user: false,
+            model: { provider: 'anthropic', model: 'claude-opus-5-5' },
+            lastLlmAt: futureAt,
+          }),
+        ),
+      );
+      const after = Date.now();
+
+      expect(res.status).toBe(200);
+      const update = sentTxnItems()[0][0].Update;
+      expect(update.UpdateExpression).toBe(
+        'SET #lastLlmAt = :lastLlmAt, #lastLlmReqAt = :lastLlmReqAt',
+      );
+      expect(update.ConditionExpression).toContain(
+        '(attribute_not_exists(#model) OR #model = :model)',
+      );
+      expect(update.ConditionExpression).toContain(
+        '(attribute_not_exists(#lastLlmAt) OR #lastLlmAt <= :lastLlmAt)',
+      );
+      expect(update.ConditionExpression).toContain(
+        '(attribute_not_exists(#lastLlmReqAt) OR #lastLlmReqAt <= :lastLlmReqAt)',
+      );
+      const committedAt = update.ExpressionAttributeValues[':lastLlmAt'] as number;
+      expect(committedAt).toBeGreaterThanOrEqual(before);
+      expect(committedAt).toBeLessThanOrEqual(after);
+      // No requestStartedAt supplied: the watermark falls back to the
+      // (clamped) evidence timestamp.
+      expect(update.ExpressionAttributeValues[':lastLlmReqAt']).toBe(committedAt);
+    });
+
+    test('should condition assistant REMOVE lastLlmAt on model and requestStartedAt and advance the request-order watermark', async () => {
+      mockSend.mockResolvedValue({});
+      const app = createTestApp({});
+      const startedAt = Date.now() - 5000;
+
+      const res = await app.request(
+        saveRequest(
+          validSaveBody({
+            is_user: false,
+            model: { provider: 'anthropic', model: 'claude-opus-5-5' },
+            requestStartedAt: startedAt,
+          }),
+        ),
+      );
+
+      expect(res.status).toBe(200);
+      const update = sentTxnItems()[0][0].Update;
+      expect(update.UpdateExpression).toBe(
+        'SET #lastLlmReqAt = :requestStartedAt REMOVE #lastLlmAt',
+      );
+      expect(update.ConditionExpression).toContain(
+        '(attribute_not_exists(#model) OR #model = :model)',
+      );
+      expect(update.ConditionExpression).toContain(
+        '(attribute_not_exists(#lastLlmAt) OR #lastLlmAt <= :requestStartedAt)',
+      );
+      // The watermark survives the clear: a delayed hit save from an older
+      // request can no longer pass attribute_not_exists(#lastLlmAt) and
+      // reinstate the evidence this save just removed.
+      expect(update.ConditionExpression).toContain(
+        '(attribute_not_exists(#lastLlmReqAt) OR #lastLlmReqAt <= :requestStartedAt)',
+      );
+      expect(update.ExpressionAttributeNames['#lastLlmReqAt']).toBe('lastLlmReqAt');
+      expect(update.ExpressionAttributeValues).toEqual({
+        ':model': { provider: 'anthropic', model: 'claude-opus-5-5' },
+        ':requestStartedAt': startedAt,
+      });
+    });
+
+    test('should not write the request-order watermark when a clear carries no requestStartedAt', async () => {
+      mockSend.mockResolvedValue({});
+      const app = createTestApp({});
+
+      const res = await app.request(saveRequest(validSaveBody({ is_user: false })));
+
+      expect(res.status).toBe(200);
+      const update = sentTxnItems()[0][0].Update;
+      expect(update.UpdateExpression).toBe('REMOVE #lastLlmAt');
+      expect(update.ExpressionAttributeNames).not.toHaveProperty('#lastLlmReqAt');
+    });
+
+    test('should fall back to an alive-only message write when a guarded assistant save fails its metadata condition', async () => {
+      mockSend
+        .mockRejectedValueOnce(transactionConditionError())
+        .mockResolvedValueOnce({})
+        .mockResolvedValueOnce({ Item: threadRow() });
+      const app = createTestApp({});
+
+      const res = await app.request(
+        saveRequest(
+          validSaveBody({
+            is_user: false,
+            model: { provider: 'anthropic', model: 'claude-opus-5-5' },
+            lastLlmAt: Date.now() - 10_000,
+          }),
+        ),
+      );
+
+      expect(res.status).toBe(200);
+      expect(mockSend).toHaveBeenCalledTimes(3);
+      const fallbackItems = sentTxnItems()[1];
+      expect(fallbackItems[0]).toHaveProperty('ConditionCheck');
+      expect(fallbackItems[0].ConditionCheck.ConditionExpression).toBe(
+        'attribute_exists(ThreadId) AND attribute_not_exists(#deleting)',
+      );
+      expect(fallbackItems[1]).toHaveProperty('Put');
+    });
+
+    test('should echo the stored evidence when a guarded assistant save skips its metadata write', async () => {
+      mockSend
+        .mockRejectedValueOnce(transactionConditionError())
+        .mockResolvedValueOnce({})
+        .mockResolvedValueOnce({ Item: threadRow({ lastLlmAt: 1700000123456 }) });
+      const app = createTestApp({});
+
+      const res = await app.request(
+        saveRequest(validSaveBody({ is_user: false, lastLlmAt: 1700000000000 })),
+      );
+      const json = await res.json();
+
+      expect(res.status).toBe(200);
+      // The message committed through the fallback while a newer write owns
+      // the evidence: the response reports the row's authoritative
+      // lastLlmAt, never the superseded timestamp this save supplied.
+      expect(json).toEqual({ ok: true, lastLlmAt: 1700000123456 });
+      expect(sentCommandTypes()).toEqual([
+        'TransactWriteCommand',
+        'TransactWriteCommand',
+        'GetCommand',
+      ]);
+      expect(mockGetCommand.mock.calls[0][0].ConsistentRead).toBe(true);
+    });
+
+    test('should echo null when a skipped assistant save leaves the row without evidence', async () => {
+      mockSend
+        .mockRejectedValueOnce(transactionConditionError())
+        .mockResolvedValueOnce({})
+        .mockResolvedValueOnce({ Item: threadRow() });
+      const app = createTestApp({});
+
+      const res = await app.request(
+        saveRequest(validSaveBody({ is_user: false, lastLlmAt: 1700000000000 })),
+      );
+      const json = await res.json();
+
+      expect(res.status).toBe(200);
+      expect(json).toEqual({ ok: true, lastLlmAt: null });
+    });
+
+    test('should return 400 when an assistant save carries a non-positive lastLlmAt', async () => {
+      const app = createTestApp({});
+
+      const res = await app.request(saveRequest(validSaveBody({ is_user: false, lastLlmAt: 0 })));
+      const json = await res.json();
+
+      expect(res.status).toBe(400);
+      expect(json.error).toBeDefined();
+      expect(mockSend).not.toHaveBeenCalled();
     });
 
     test('should overwrite a stale client timestamp with the server time', async () => {
@@ -634,6 +910,25 @@ describe('Chat History Route', () => {
 
       expect(res.status).toBe(200);
       expect(json.threads[0].model).toEqual({ provider: 'google', model: 'gemini-3.8-flash' });
+    });
+
+    test('should include lastLlmAt on thread metadata when present and omit it on legacy rows', async () => {
+      mockSend.mockResolvedValueOnce({
+        Items: [threadRow({ ThreadId: 'thread-1', lastLlmAt: 1700000000000 })],
+      });
+      const app = createTestApp({});
+      const res = await app.request(new Request('http://localhost/threads'));
+      const json = await res.json();
+
+      expect(res.status).toBe(200);
+      expect(json.threads[0].lastLlmAt).toBe(1700000000000);
+
+      mockSend.mockResolvedValueOnce({
+        Items: [threadRow({ ThreadId: 'thread-2' })],
+      });
+      const legacyRes = await app.request(new Request('http://localhost/threads'));
+      const legacyJson = await legacyRes.json();
+      expect(legacyJson.threads[0]).not.toHaveProperty('lastLlmAt');
     });
 
     test('should return 500 when the metadata query fails', async () => {
@@ -915,10 +1210,82 @@ describe('Chat History Route', () => {
       expect(json.thread.model).toEqual({ provider: 'google', model: 'gemini-3.8-flash' });
       const updateInput = mockUpdateCommand.mock.calls[0][0];
       expect(updateInput.UpdateExpression).toContain('#model = :model');
+      expect(updateInput.UpdateExpression).toContain('REMOVE #lastLlmAt');
+      expect(updateInput.ExpressionAttributeNames['#lastLlmAt']).toBe('lastLlmAt');
+      expect(updateInput.ExpressionAttributeValues).not.toHaveProperty(':lastLlmAt');
       expect(updateInput.ExpressionAttributeValues[':model']).toEqual({
         provider: 'google',
         model: 'gemini-3.8-flash',
       });
+    });
+
+    test('should advance the request-order watermark when a model patch clears evidence', async () => {
+      mockSend.mockResolvedValueOnce({ Attributes: threadRow() });
+      const app = createTestApp({});
+
+      const res = await app.request(
+        new Request('http://localhost/thread/thread-123', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ model: { provider: 'anthropic', model: 'claude-opus-4' } }),
+        }),
+      );
+
+      expect(res.status).toBe(200);
+      const updateInput = mockUpdateCommand.mock.calls[0][0];
+      // A delayed save whose request predates an A→B→A change must stay
+      // fenced: the model matches again, so only the advanced watermark
+      // rejects it.
+      expect(updateInput.UpdateExpression).toContain('#lastLlmReqAt = :lastLlmReqAt');
+      expect(updateInput.UpdateExpression).toContain('REMOVE #lastLlmAt');
+      expect(updateInput.ExpressionAttributeNames['#lastLlmReqAt']).toBe('lastLlmReqAt');
+      expect(updateInput.ExpressionAttributeValues[':lastLlmReqAt']).toEqual(expect.any(Number));
+      // The write is monotonic: a patch stalling past a newer evidence
+      // write fails outright instead of lowering the watermark.
+      expect(updateInput.ConditionExpression).toContain(
+        '(attribute_not_exists(#lastLlmReqAt) OR #lastLlmReqAt <= :lastLlmReqAt)',
+      );
+    });
+
+    test('should REMOVE lastLlmAt even when a model patch also renames the thread', async () => {
+      mockSend.mockResolvedValueOnce({ Attributes: threadRow() });
+      const app = createTestApp({});
+
+      const res = await app.request(
+        new Request('http://localhost/thread/thread-123', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            title: 'New title',
+            model: { provider: 'anthropic', model: 'claude-opus-4' },
+          }),
+        }),
+      );
+
+      expect(res.status).toBe(200);
+      const updateInput = mockUpdateCommand.mock.calls[0][0];
+      expect(updateInput.UpdateExpression).toContain('#model = :model');
+      expect(updateInput.UpdateExpression).toContain('#title = :title');
+      expect(updateInput.UpdateExpression).toContain('REMOVE #lastLlmAt');
+    });
+
+    test('should preserve lastLlmAt on a title-only patch', async () => {
+      mockSend.mockResolvedValueOnce({ Attributes: threadRow() });
+      const app = createTestApp({});
+
+      const res = await app.request(
+        new Request('http://localhost/thread/thread-123', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ title: 'Only renamed' }),
+        }),
+      );
+
+      expect(res.status).toBe(200);
+      const updateInput = mockUpdateCommand.mock.calls[0][0];
+      expect(updateInput.UpdateExpression).not.toContain('lastLlmAt');
+      expect(updateInput.ExpressionAttributeNames).not.toHaveProperty('#lastLlmAt');
+      expect(updateInput.ExpressionAttributeNames).not.toHaveProperty('#lastLlmReqAt');
     });
 
     test('should update title and model together', async () => {
@@ -1011,6 +1378,64 @@ describe('Chat History Route', () => {
       expect(retryInput.UpdateExpression).not.toContain('#updatedAt');
       expect(retryInput.UpdateExpression).toContain('#title = :title');
       expect(retryInput.ConditionExpression).toContain('attribute_exists');
+    });
+
+    test('should keep the request-order watermark monotonic on the fields-only retry of a model patch', async () => {
+      const conditionalError = Object.assign(new Error('Condition check failed'), {
+        name: 'ConditionalCheckFailedException',
+      });
+      const updatedRow = threadRow({
+        model: { provider: 'anthropic', model: 'claude-opus-4' },
+        updatedAt: 1693440009999,
+      });
+      mockSend.mockRejectedValueOnce(conditionalError).mockResolvedValueOnce({
+        Attributes: updatedRow,
+      });
+
+      const app = createTestApp({});
+      const res = await app.request(
+        new Request('http://localhost/thread/thread-123', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ model: { provider: 'anthropic', model: 'claude-opus-4' } }),
+        }),
+      );
+
+      expect(res.status).toBe(200);
+      expect(mockSend).toHaveBeenCalledTimes(2);
+      // The stalled-patch retry still fences the watermark: landing after a
+      // newer evidence write must not lower lastLlmReqAt and reopen the
+      // window for a superseded save to restore cleared evidence.
+      const retryInput = mockUpdateCommand.mock.calls[1][0];
+      expect(retryInput.UpdateExpression).not.toContain('#updatedAt');
+      expect(retryInput.UpdateExpression).toContain('#lastLlmReqAt = :lastLlmReqAt');
+      expect(retryInput.UpdateExpression).toContain('REMOVE #lastLlmAt');
+      expect(retryInput.ConditionExpression).toContain(
+        '(attribute_not_exists(#lastLlmReqAt) OR #lastLlmReqAt <= :lastLlmReqAt)',
+      );
+    });
+
+    test('should reject a stale model patch whose watermark the stored row already passed', async () => {
+      const conditionalError = Object.assign(new Error('Condition check failed'), {
+        name: 'ConditionalCheckFailedException',
+      });
+      // Both the timestamp-bumping attempt and the monotonic-fenced retry
+      // fail: the patch's evidence ordering is stale, so it cannot land.
+      mockSend.mockRejectedValue(conditionalError);
+
+      const app = createTestApp({});
+      const res = await app.request(
+        new Request('http://localhost/thread/thread-123', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ model: { provider: 'anthropic', model: 'claude-opus-4' } }),
+        }),
+      );
+      const json = await res.json();
+
+      expect(res.status).toBe(404);
+      expect(json.error).toBe('Thread not found');
+      expect(mockSend).toHaveBeenCalledTimes(2);
     });
 
     test('should return 404 Thread not found when the thread row does not exist', async () => {
@@ -1647,7 +2072,7 @@ describe('Chat History Route', () => {
       expect(firstPut.Item.ThreadId).not.toBe('shared-thread');
     });
 
-    test('should scope an assistant save to the caller partition without touching metadata', async () => {
+    test('should scope an assistant save to the caller partition and its thread row', async () => {
       mockSend.mockResolvedValue({});
       const app = createTestApp({});
 
@@ -1658,7 +2083,9 @@ describe('Chat History Route', () => {
 
       expect(res.status).toBe(200);
       expect(mockUpdateCommand).not.toHaveBeenCalled();
-      const putInput = sentTxnItems()[0][1].Put;
+      const [update, putInput] = [sentTxnItems()[0][0].Update, sentTxnItems()[0][1].Put];
+      expect(update.Key).toEqual({ UserId: 'user-456', ThreadId: 'shared-thread' });
+      expect(update.UpdateExpression).not.toContain('updatedAt');
       expect(putInput.Item.ThreadId).toBe(partitionKey('user-456', 'shared-thread'));
       expect(putInput.Item.UserId).toBe('user-456');
     });

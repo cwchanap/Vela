@@ -97,6 +97,36 @@ describe('chatHistoryService', () => {
       is_user: true,
     });
     expect(typeof body.Timestamp).toBe('number');
+    expect(body).not.toHaveProperty('model');
+    expect(body).not.toHaveProperty('lastLlmAt');
+  });
+
+  it('forwards optional model metadata on a user save', async () => {
+    fetchMock.mockResolvedValue(okJson({ ok: true }));
+
+    await saveChatMessage('t-1', 'user-a', 'hello', true, {
+      model: { provider: 'anthropic', model: 'claude-opus-4' },
+    });
+
+    const body = JSON.parse(fetchMock.mock.calls[0]![1]!.body as string);
+    expect(body.model).toEqual({ provider: 'anthropic', model: 'claude-opus-4' });
+    expect(body).not.toHaveProperty('lastLlmAt');
+  });
+
+  it('forwards optional lastLlmAt on an assistant save', async () => {
+    fetchMock.mockResolvedValue(okJson({ ok: true, lastLlmAt: 1700000000000 }));
+
+    const result = await saveChatMessage('t-1', 'user-a', 'こんにちは', false, {
+      lastLlmAt: 1700000000000,
+    });
+
+    const body = JSON.parse(fetchMock.mock.calls[0]![1]!.body as string);
+    expect(body.is_user).toBe(false);
+    expect(body.lastLlmAt).toBe(1700000000000);
+    expect(body).not.toHaveProperty('model');
+    // The response echoes the row's authoritative evidence: a skipped
+    // metadata write reports the stored value (or null), not the supplied one.
+    expect(result).toEqual({ ok: true, lastLlmAt: 1700000000000 });
   });
 
   it('patches a thread via the path-parameter endpoint', async () => {

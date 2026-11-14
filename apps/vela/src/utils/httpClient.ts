@@ -1,5 +1,7 @@
 import { fetchAuthSession } from 'aws-amplify/auth';
 
+export const DEFAULT_HTTP_TIMEOUT_MS = 30_000;
+
 export interface HttpError extends Error {
   status: number;
 }
@@ -74,25 +76,77 @@ async function getErrorMessage(res: Response): Promise<string> {
   return msg;
 }
 
+async function fetchJsonWithTimeout<T>(
+  input: RequestInfo,
+  init: RequestInit | undefined,
+  headers: Record<string, string>,
+  timeoutMs = DEFAULT_HTTP_TIMEOUT_MS,
+): Promise<T> {
+  const controller = new AbortController();
+  // A Request input carries its own signal; an init signal overrides it per
+  // the Fetch Standard, while an explicit null opts out of caller
+  // cancellation entirely.
+  const callerSignal =
+    init?.signal !== undefined ? init.signal : input instanceof Request ? input.signal : undefined;
+  let onCallerAbort: (() => void) | undefined;
+  let onControllerAbort: (() => void) | undefined;
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+
+  const abortPromise = new Promise<never>((_resolve, reject) => {
+    onControllerAbort = () => {
+      const reason = controller.signal.reason;
+      reject(reason instanceof Error ? reason : new Error(String(reason ?? 'Request aborted')));
+    };
+    controller.signal.addEventListener('abort', onControllerAbort, { once: true });
+  });
+  // Prevent an unhandled rejection if fetch rejects first or resolves normally.
+  abortPromise.catch(() => {});
+
+  if (callerSignal) {
+    if (callerSignal.aborted) {
+      controller.abort(callerSignal.reason);
+    } else {
+      onCallerAbort = () => controller.abort(callerSignal.reason);
+      callerSignal.addEventListener('abort', onCallerAbort, { once: true });
+    }
+  }
+
+  timeoutId = setTimeout(() => {
+    controller.abort(new Error('Request timed out'));
+  }, timeoutMs);
+
+  try {
+    const res = await Promise.race([
+      fetch(input, {
+        ...init,
+        signal: controller.signal,
+        headers,
+      }),
+      abortPromise,
+    ]);
+
+    if (!res.ok) {
+      const msg = await Promise.race([getErrorMessage(res), abortPromise]);
+      throw createHttpError(msg, res.status);
+    }
+
+    return await Promise.race([readJsonResponse<T>(res), abortPromise]);
+  } finally {
+    if (timeoutId !== undefined) clearTimeout(timeoutId);
+    if (callerSignal && onCallerAbort) callerSignal.removeEventListener('abort', onCallerAbort);
+    if (onControllerAbort) controller.signal.removeEventListener('abort', onControllerAbort);
+  }
+}
+
 /**
  * Make an unauthenticated JSON request
  */
 export async function httpJson<T = unknown>(input: RequestInfo, init?: RequestInit): Promise<T> {
   const normalizedHeaders = normalizeHeaders(init?.headers);
-  const res = await fetch(input, {
-    ...init,
-    headers: {
-      'Content-Type': 'application/json',
-      ...normalizedHeaders,
-    },
+  return fetchJsonWithTimeout<T>(input, init, {
+    'Content-Type': 'application/json',
+    ...normalizedHeaders,
   });
-
-  if (!res.ok) {
-    const msg = await getErrorMessage(res);
-    throw createHttpError(msg, res.status);
-  }
-
-  return readJsonResponse<T>(res);
 }
 
 async function getAuthSession(): Promise<{
@@ -155,18 +209,8 @@ export async function httpJsonAuth<T = unknown>(
 
   const normalizedHeaders = normalizeHeaders(init?.headers);
 
-  const res = await fetch(input, {
-    ...init,
-    headers: {
-      ...authHeaders,
-      ...normalizedHeaders,
-    },
+  return fetchJsonWithTimeout<T>(input, init, {
+    ...authHeaders,
+    ...normalizedHeaders,
   });
-
-  if (!res.ok) {
-    const msg = await getErrorMessage(res);
-    throw createHttpError(msg, res.status);
-  }
-
-  return readJsonResponse<T>(res);
 }

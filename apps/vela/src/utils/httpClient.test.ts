@@ -5,7 +5,7 @@ vi.mock('aws-amplify/auth', () => ({
 }));
 
 import { fetchAuthSession } from 'aws-amplify/auth';
-import { httpJson, httpJsonAuth } from './httpClient';
+import { DEFAULT_HTTP_TIMEOUT_MS, httpJson, httpJsonAuth } from './httpClient';
 
 const mockFetchAuthSession = vi.mocked(fetchAuthSession);
 
@@ -15,6 +15,7 @@ describe('httpJson', () => {
   });
 
   afterEach(() => {
+    vi.useRealTimers();
     vi.unstubAllGlobals();
   });
 
@@ -135,6 +136,48 @@ describe('httpJson', () => {
     await expect(httpJson('/api/test')).rejects.toMatchObject({
       message: expect.stringContaining('Expected JSON response'),
       status: 200,
+    });
+  });
+
+  describe('caller cancellation', () => {
+    // The test environment's Request (injected from the host runtime) may
+    // reject an AbortSignal from the jsdom realm, so attach the caller's
+    // signal as an own property instead of via RequestInit.
+    const requestWithSignal = (signal: AbortSignal): Request => {
+      const request = new Request('http://localhost/api/test');
+      Object.defineProperty(request, 'signal', { value: signal });
+      return request;
+    };
+
+    it('rejects when the signal stored on a Request input aborts', async () => {
+      const caller = new AbortController();
+      const request = requestWithSignal(caller.signal);
+      vi.stubGlobal(
+        'fetch',
+        vi.fn().mockImplementation(() => new Promise(() => {})),
+      );
+
+      const pending = httpJson(request);
+      const assertion = expect(pending).rejects.toThrow(/abort/i);
+      caller.abort();
+      await assertion;
+    });
+
+    it('ignores the Request input signal when init.signal is explicitly null', async () => {
+      const caller = new AbortController();
+      const request = requestWithSignal(caller.signal);
+      let capturedSignal: AbortSignal | undefined;
+      vi.stubGlobal(
+        'fetch',
+        vi.fn().mockImplementation((_input: RequestInfo, init?: RequestInit) => {
+          capturedSignal = init?.signal as AbortSignal | undefined;
+          return Promise.resolve({ ok: true, json: async () => ({}) });
+        }),
+      );
+
+      await httpJson(request, { signal: null });
+      caller.abort();
+      expect(capturedSignal?.aborted).toBe(false);
     });
   });
 });
@@ -325,6 +368,51 @@ describe('httpJsonAuth', () => {
         /account changed/i,
       );
       expect(fetchMock).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('timeout handling', () => {
+    it('aborts and rejects stalled httpJson requests after DEFAULT_HTTP_TIMEOUT_MS', async () => {
+      vi.useFakeTimers();
+      let capturedSignal: AbortSignal | undefined;
+      vi.stubGlobal(
+        'fetch',
+        vi.fn().mockImplementation((_url: string, init?: RequestInit) => {
+          capturedSignal = init?.signal as AbortSignal | undefined;
+          return new Promise(() => {});
+        }),
+      );
+
+      const pending = httpJson('/api/stalled');
+      const assertion = expect(pending).rejects.toThrow('Request timed out');
+      await vi.advanceTimersByTimeAsync(DEFAULT_HTTP_TIMEOUT_MS);
+      await assertion;
+      expect(capturedSignal?.aborted).toBe(true);
+      expect(vi.getTimerCount()).toBe(0);
+    });
+
+    it('aborts and rejects stalled httpJsonAuth requests and clears timers on success', async () => {
+      vi.useFakeTimers();
+      mockFetchAuthSession.mockResolvedValue({
+        tokens: { idToken: { toString: () => 'token' } },
+      } as any);
+      vi.stubGlobal(
+        'fetch',
+        vi.fn().mockResolvedValue({ ok: true, json: async () => ({ ok: true }) }),
+      );
+
+      await expect(httpJsonAuth('/api/fast')).resolves.toEqual({ ok: true });
+      expect(vi.getTimerCount()).toBe(0);
+
+      vi.stubGlobal(
+        'fetch',
+        vi.fn().mockImplementation(() => new Promise(() => {})),
+      );
+      const stalled = httpJsonAuth('/api/stalled-auth');
+      const assertion = expect(stalled).rejects.toThrow('Request timed out');
+      await vi.advanceTimersByTimeAsync(DEFAULT_HTTP_TIMEOUT_MS);
+      await assertion;
+      expect(vi.getTimerCount()).toBe(0);
     });
   });
 });

@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia';
 import { ref } from 'vue';
+import type { LlmEffort, LlmModelPair } from '@vela/common';
 
 export interface ChatMessage {
   id: string;
@@ -19,6 +20,77 @@ export const useChatStore = defineStore('chat', () => {
   const ownerId = ref<string | null>(null);
   const ownerSessionGen = ref<number | null>(null);
   const generation = ref(0);
+
+  // Chat-specific selection state that must survive route changes but reset
+  // with the conversation. activeModel is seeded from Settings for fresh
+  // chats; activeModelIsSeed records that the current model is still that
+  // seed (an explicit pick or thread restore ends its ownership) and lives
+  // here because page-local state would forget it on a route remount.
+  // isPersistedThread tracks whether a thread metadata row exists (a client
+  // UUID alone does not) and gates model PATCHes. modelPatchPending guards
+  // the in-flight saved-thread model transition alongside the conversation
+  // state so a route remount cannot unlock it; threadSelectPending does the
+  // same for an in-flight saved-thread restore.
+  const activeModel = ref<LlmModelPair | null>(null);
+  const activeModelIsSeed = ref(false);
+  const thinkingOverride = ref<LlmEffort | null>(null);
+  const cacheStartedAt = ref<number | null>(null);
+  const isPersistedThread = ref(false);
+  const modelPatchPending = ref(false);
+  const threadSelectPending = ref(false);
+  let activeModelPatchToken: symbol | null = null;
+  let activeThreadSelectToken: symbol | null = null;
+
+  const setActiveModel = (pair: LlmModelPair | null) => {
+    activeModel.value = pair;
+  };
+
+  const setActiveModelIsSeed = (isSeed: boolean) => {
+    activeModelIsSeed.value = isSeed;
+  };
+
+  const setThinkingOverride = (effort: LlmEffort | null) => {
+    thinkingOverride.value = effort;
+  };
+
+  const setCacheStartedAt = (timestamp: number | null) => {
+    cacheStartedAt.value = timestamp;
+  };
+
+  const setIsPersistedThread = (persisted: boolean) => {
+    isPersistedThread.value = persisted;
+  };
+
+  const setModelPatching = (pending: boolean) => {
+    if (!pending) activeModelPatchToken = null;
+    modelPatchPending.value = pending;
+  };
+
+  const startModelPatch = (): symbol => {
+    const token = Symbol('modelPatch');
+    activeModelPatchToken = token;
+    modelPatchPending.value = true;
+    return token;
+  };
+
+  const finishModelPatch = (token: symbol) => {
+    if (activeModelPatchToken !== token) return;
+    activeModelPatchToken = null;
+    modelPatchPending.value = false;
+  };
+
+  const startThreadSelect = (): symbol => {
+    const token = Symbol('threadSelect');
+    activeThreadSelectToken = token;
+    threadSelectPending.value = true;
+    return token;
+  };
+
+  const finishThreadSelect = (token: symbol) => {
+    if (activeThreadSelectToken !== token) return;
+    activeThreadSelectToken = null;
+    threadSelectPending.value = false;
+  };
 
   const nextGeneration = () => ++generation.value;
   const isStale = (gen: number) => gen !== generation.value;
@@ -60,6 +132,15 @@ export const useChatStore = defineStore('chat', () => {
     error.value = null;
     isTyping.value = false;
     isLoading.value = false;
+    activeModel.value = null;
+    activeModelIsSeed.value = false;
+    thinkingOverride.value = null;
+    cacheStartedAt.value = null;
+    isPersistedThread.value = false;
+    activeModelPatchToken = null;
+    modelPatchPending.value = false;
+    activeThreadSelectToken = null;
+    threadSelectPending.value = false;
   };
 
   const resetForUser = (uid: string | null, sessionGen: number | null) => {
@@ -89,6 +170,13 @@ export const useChatStore = defineStore('chat', () => {
     isLoading,
     error,
     chatId,
+    activeModel,
+    activeModelIsSeed,
+    thinkingOverride,
+    cacheStartedAt,
+    isPersistedThread,
+    modelPatchPending,
+    threadSelectPending,
     ownerId,
     ownerSessionGen,
     generation,
@@ -101,6 +189,16 @@ export const useChatStore = defineStore('chat', () => {
     setLoading,
     setError,
     setChatId,
+    setActiveModel,
+    setActiveModelIsSeed,
+    setThinkingOverride,
+    setCacheStartedAt,
+    setIsPersistedThread,
+    setModelPatching,
+    startModelPatch,
+    finishModelPatch,
+    startThreadSelect,
+    finishThreadSelect,
     startNewChat,
     resetForUser,
     bindOwner,

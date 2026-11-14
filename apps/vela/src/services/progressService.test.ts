@@ -131,12 +131,15 @@ describe('progressService', () => {
 
       const result = await progressService.getProgressAnalytics();
 
-      expect(mockFetch).toHaveBeenCalledWith('/api/progress/analytics?user_id=user-123', {
-        headers: {
-          Authorization: 'Bearer mock-id-token',
-          'Content-Type': 'application/json',
-        },
-      });
+      expect(mockFetch).toHaveBeenCalledWith(
+        '/api/progress/analytics?user_id=user-123',
+        expect.objectContaining({
+          headers: {
+            Authorization: 'Bearer mock-id-token',
+            'Content-Type': 'application/json',
+          },
+        }),
+      );
       expect(result).toEqual(mockProgressAnalytics);
     });
 
@@ -278,22 +281,25 @@ describe('progressService', () => {
         gameSessionData.experienceGained,
       );
 
-      expect(mockFetch).toHaveBeenCalledWith('/api/progress/game-session', {
-        method: 'POST',
-        headers: {
-          Authorization: 'Bearer mock-id-token',
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          user_id: 'user-123',
-          game_type: 'vocabulary',
-          score: 85,
-          duration_seconds: 120,
-          questions_answered: 10,
-          correct_answers: 8,
-          experience_gained: 150,
+      expect(mockFetch).toHaveBeenCalledWith(
+        '/api/progress/game-session',
+        expect.objectContaining({
+          method: 'POST',
+          headers: {
+            Authorization: 'Bearer mock-id-token',
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            user_id: 'user-123',
+            game_type: 'vocabulary',
+            score: 85,
+            duration_seconds: 120,
+            questions_answered: 10,
+            correct_answers: 8,
+            experience_gained: 150,
+          }),
         }),
-      });
+      );
     });
 
     it('should not record game session when user is not logged in', async () => {

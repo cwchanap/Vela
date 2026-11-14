@@ -136,6 +136,9 @@ export interface MockChatThread {
   createdAt: number;
   updatedAt: number;
   model?: { provider: string; model: string };
+  lastLlmAt?: number;
+  // Server-internal request-order watermark; never returned to clients.
+  lastLlmReqAt?: number;
 }
 
 export interface MockChatMessage {
@@ -161,6 +164,12 @@ export interface MockApi {
   deletedThreadIds: Array<{ userId: string; threadId: string }>;
   dictionaryEntries: MockDictionaryEntry[];
   chatReply: string;
+  chatUsage: {
+    inputTokens: number;
+    outputTokens: number;
+    cachedInputTokens: number;
+    cacheWriteTokens: number;
+  };
   ttsSettings: {
     provider: string;
     voiceId: string | null;
@@ -220,6 +229,7 @@ const createMockApi = (): MockApi => {
     deletedThreadIds: [],
     dictionaryEntries: [],
     chatReply: 'Mock AI reply (synthetic)',
+    chatUsage: { inputTokens: 5, outputTokens: 7, cachedInputTokens: 0, cacheWriteTokens: 0 },
     ttsSettings: { provider: 'elevenlabs', voiceId: null, model: null, hasApiKey: false },
     seedProfile(user, preferences) {
       const profile = makeProfile(user, preferences);
@@ -425,7 +435,7 @@ const handleApiRoute = async (state: MockApi, route: Route): Promise<void> => {
     state.chatBodies.push(body);
     return jsonResponse(route, {
       text: state.chatReply,
-      usage: { inputTokens: 5, outputTokens: 7, cachedInputTokens: 0, cacheWriteTokens: 0 },
+      usage: { ...state.chatUsage },
     });
   }
 
@@ -448,13 +458,68 @@ const handleApiRoute = async (state: MockApi, route: Route): Promise<void> => {
       }
       const existing = userThreads.get(threadId);
       const initialTitle = message.trim().slice(0, 60) || 'New conversation';
+      // Mirror the server's if_not_exists(model, suppliedModel) metadata update.
+      const bodyModel = body.model as { provider?: unknown; model?: unknown } | undefined;
+      const pinnedModel =
+        existing?.model ??
+        (typeof bodyModel?.provider === 'string' &&
+        bodyModel.provider.length > 0 &&
+        typeof bodyModel?.model === 'string' &&
+        bodyModel.model.length > 0
+          ? { provider: bodyModel.provider, model: bodyModel.model }
+          : undefined);
       userThreads.set(threadId, {
         ThreadId: threadId,
         title: existing?.title ?? initialTitle,
         createdAt: existing?.createdAt ?? now,
         updatedAt: now,
-        ...(existing?.model ? { model: existing.model } : {}),
+        ...(pinnedModel ? { model: pinnedModel } : {}),
+        ...(existing?.lastLlmAt !== undefined ? { lastLlmAt: existing.lastLlmAt } : {}),
+        ...(existing?.lastLlmReqAt !== undefined ? { lastLlmReqAt: existing.lastLlmReqAt } : {}),
       });
+    } else {
+      // Mirror the server's conditioned metadata update: positive integer
+      // lastLlmAt is SET on the thread row, its absence REMOVEs it. Both
+      // branches are fenced by the lastLlmReqAt request-order watermark so
+      // a delayed save cannot undo a newer clear. The response echoes the
+      // row's authoritative evidence — a skipped write reports the stored
+      // value, not the supplied one.
+      const threadRow = state.chatThreads.get(authUser.userId)?.get(threadId);
+      if (threadRow) {
+        const reqAt =
+          typeof body.requestStartedAt === 'number'
+            ? body.requestStartedAt
+            : typeof body.lastLlmAt === 'number'
+              ? body.lastLlmAt
+              : undefined;
+        const superseded =
+          reqAt !== undefined &&
+          threadRow.lastLlmReqAt !== undefined &&
+          threadRow.lastLlmReqAt > reqAt;
+        if (
+          typeof body.lastLlmAt === 'number' &&
+          Number.isInteger(body.lastLlmAt) &&
+          body.lastLlmAt > 0
+        ) {
+          if (
+            !superseded &&
+            (threadRow.lastLlmAt === undefined || threadRow.lastLlmAt <= body.lastLlmAt)
+          ) {
+            threadRow.lastLlmAt = body.lastLlmAt;
+            threadRow.lastLlmReqAt = reqAt ?? body.lastLlmAt;
+          }
+        } else if (typeof body.requestStartedAt === 'number') {
+          if (
+            !superseded &&
+            (threadRow.lastLlmAt === undefined || threadRow.lastLlmAt <= body.requestStartedAt)
+          ) {
+            delete threadRow.lastLlmAt;
+            threadRow.lastLlmReqAt = body.requestStartedAt;
+          }
+        } else {
+          delete threadRow.lastLlmAt;
+        }
+      }
     }
     let userMessages = state.chatMessages.get(authUser.userId);
     if (!userMessages) {
@@ -470,11 +535,20 @@ const handleApiRoute = async (state: MockApi, route: Route): Promise<void> => {
       is_user: body.is_user,
     });
     userMessages.set(threadId, list);
-    return jsonResponse(route, { ok: true });
+    const committedLastLlmAt =
+      body.is_user === true
+        ? undefined
+        : (state.chatThreads.get(authUser.userId)?.get(threadId)?.lastLlmAt ?? null);
+    return jsonResponse(route, {
+      ok: true,
+      ...(committedLastLlmAt !== undefined ? { lastLlmAt: committedLastLlmAt } : {}),
+    });
   }
 
   if (path === '/api/chat-history/threads' && method === 'GET') {
-    return jsonResponse(route, { threads: state.threadsFor(authUser) });
+    // The server DTO maps explicit fields; the internal watermark never leaks.
+    const threads = state.threadsFor(authUser).map(({ lastLlmReqAt: _wm, ...t }) => t);
+    return jsonResponse(route, { threads });
   }
 
   if (path === '/api/chat-history/messages' && method === 'GET') {
@@ -527,6 +601,13 @@ const handleApiRoute = async (state: MockApi, route: Route): Promise<void> => {
       ...(patch.model !== undefined ? { model: patch.model } : {}),
       updatedAt: Date.now(),
     };
+    // A model PATCH always removes stored cache evidence; title patches keep
+    // it. The clear also advances the request-order watermark so a delayed
+    // save predating the patch stays fenced after an A→B→A change.
+    if (patch.model !== undefined) {
+      delete updated.lastLlmAt;
+      updated.lastLlmReqAt = Date.now();
+    }
     state.chatThreads.get(authUser.userId)?.set(threadId, updated);
     return jsonResponse(route, { thread: updated });
   }
