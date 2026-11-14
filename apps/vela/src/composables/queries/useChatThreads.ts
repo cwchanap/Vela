@@ -487,11 +487,13 @@ export function useSaveChatMessage() {
           // The response echoes the row's authoritative evidence: a guarded
           // save can commit the message while the ordering guards skip the
           // metadata write, so the supplied timestamp is not necessarily
-          // what stored. A missing field means the contract did not report
-          // it — fall back to the supplied value.
-          const committed =
-            _data?.lastLlmAt === undefined ? variables.lastLlmAt : (_data.lastLlmAt ?? undefined);
-          const effectiveAt = committed ?? variables.requestStartedAt;
+          // what stored. An explicit null is authoritative — the row carries
+          // no evidence — so it must clear the cache rather than fall back
+          // to this request's timestamps. A missing field means the contract
+          // did not report it — fall back to the supplied value.
+          const authoritative = _data?.lastLlmAt !== undefined;
+          const committed = authoritative ? (_data?.lastLlmAt ?? undefined) : variables.lastLlmAt;
+          const effectiveAt = authoritative ? committed : (committed ?? variables.requestStartedAt);
           const notOlder =
             effectiveAt === undefined ||
             thread.lastLlmAt === undefined ||
