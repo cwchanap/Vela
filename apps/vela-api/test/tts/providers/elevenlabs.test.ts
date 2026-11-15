@@ -1,7 +1,15 @@
 import { describe, test, expect, beforeEach, afterEach, vi } from 'bun:test';
 import { ElevenLabsProvider } from '../../../src/tts/providers/elevenlabs';
+import { REQUEST_TIMEOUT_MS } from '../../../src/llm/types';
 
 const originalFetch = globalThis.fetch;
+
+const request = {
+  text: '日本語',
+  apiKey: 'test-key',
+  voiceId: 'ErXwobaYiN019PkySvjV',
+  model: 'eleven_v4',
+};
 
 describe('ElevenLabsProvider', () => {
   let provider: ElevenLabsProvider;
@@ -21,26 +29,41 @@ describe('ElevenLabsProvider', () => {
     expect(provider.name).toBe('elevenlabs');
   });
 
-  test('uses provided voice and model', async () => {
-    const audioData = new Uint8Array([1, 2, 3, 4]);
+  test('sends the resolved voice and model in the request body', async () => {
     mockFetch.mockResolvedValueOnce({
       ok: true,
-      arrayBuffer: async () => audioData.buffer,
+      arrayBuffer: async () => new Uint8Array([1, 2, 3, 4]).buffer,
     });
 
-    await provider.generate({
-      text: '日本語',
-      apiKey: 'test-key',
-      voiceId: 'custom-voice-id',
-      model: 'custom-model',
+    await provider.generate({ ...request, text: '図書館', voiceId: 'custom-voice-id' });
+
+    const [url, init] = mockFetch.mock.calls[0] as [
+      string,
+      { method: string; headers: Record<string, string>; body: string; signal?: AbortSignal },
+    ];
+    expect(url).toBe('https://api.elevenlabs.io/v1/text-to-speech/custom-voice-id');
+    expect(init.headers).toMatchObject({
+      Accept: 'audio/mpeg',
+      'Content-Type': 'application/json',
+      'xi-api-key': 'test-key',
+    });
+    expect(JSON.parse(init.body as string)).toEqual({
+      text: '図書館',
+      model_id: 'eleven_v4',
+      voice_settings: { stability: 0.5, similarity_boost: 0.75 },
+    });
+  });
+
+  test('sends the alternate resolved model without adapter defaults', async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      arrayBuffer: async () => new Uint8Array([1]).buffer,
     });
 
-    expect(mockFetch).toHaveBeenCalledWith(
-      'https://api.elevenlabs.io/v1/text-to-speech/custom-voice-id',
-      expect.any(Object),
-    );
+    await provider.generate({ ...request, model: 'eleven_multilingual_v2' });
+
     const callBody = JSON.parse((mockFetch.mock.calls[0] as any[])[1].body);
-    expect(callBody.model_id).toBe('custom-model');
+    expect(callBody.model_id).toBe('eleven_multilingual_v2');
   });
 
   test('returns audio buffer and audio/mpeg content type', async () => {
@@ -50,33 +73,10 @@ describe('ElevenLabsProvider', () => {
       arrayBuffer: async () => audioData.buffer,
     });
 
-    const result = await provider.generate({
-      text: 'hello',
-      apiKey: 'test-key',
-      voiceId: 'ErXwobaYiN019PkySvjV',
-      model: 'eleven_v4',
-    });
+    const result = await provider.generate(request);
 
     expect(result.contentType).toBe('audio/mpeg');
     expect(result.audioBuffer).toBeInstanceOf(Buffer);
-  });
-
-  test('sends correct voice settings in request body', async () => {
-    mockFetch.mockResolvedValueOnce({
-      ok: true,
-      arrayBuffer: async () => new Uint8Array([]).buffer,
-    });
-
-    await provider.generate({
-      text: 'hello',
-      apiKey: 'key',
-      voiceId: 'ErXwobaYiN019PkySvjV',
-      model: 'eleven_v4',
-    });
-
-    const callBody = JSON.parse((mockFetch.mock.calls[0] as any[])[1].body);
-    expect(callBody.voice_settings).toEqual({ stability: 0.5, similarity_boost: 0.75 });
-    expect(callBody.text).toBe('hello');
   });
 
   test('throws error on non-ok response', async () => {
@@ -86,41 +86,33 @@ describe('ElevenLabsProvider', () => {
       text: async () => 'Unauthorized',
     });
 
-    await expect(
-      provider.generate({
-        text: 'hello',
-        apiKey: 'bad-key',
-        voiceId: 'ErXwobaYiN019PkySvjV',
-        model: 'eleven_v4',
-      }),
-    ).rejects.toThrow('ElevenLabs API error 401');
+    await expect(provider.generate({ ...request, apiKey: 'bad-key' })).rejects.toThrow(
+      'ElevenLabs API error 401',
+    );
   });
 
-  test('throws timeout error on AbortError', async () => {
-    const abortError = new Error('Aborted');
-    abortError.name = 'AbortError';
-    mockFetch.mockRejectedValueOnce(abortError);
+  test('applies the shared 25 s deadline and propagates TimeoutError', async () => {
+    const timeoutSpy = vi.spyOn(AbortSignal, 'timeout');
+    const timeoutError = new Error('The operation timed out');
+    timeoutError.name = 'TimeoutError';
+    mockFetch.mockImplementationOnce(async (_url: string, init: { signal?: AbortSignal }) => {
+      expect(init.signal).toBeInstanceOf(AbortSignal);
+      throw timeoutError;
+    });
 
-    await expect(
-      provider.generate({
-        text: 'hello',
-        apiKey: 'test-key',
-        voiceId: 'ErXwobaYiN019PkySvjV',
-        model: 'eleven_v4',
-      }),
-    ).rejects.toThrow('Request timeout');
+    try {
+      const error = await provider.generate(request).catch((failure) => failure);
+
+      expect(error.name).toBe('TimeoutError');
+      expect(timeoutSpy).toHaveBeenCalledWith(REQUEST_TIMEOUT_MS);
+    } finally {
+      timeoutSpy.mockRestore();
+    }
   });
 
   test('rethrows non-abort errors', async () => {
     mockFetch.mockRejectedValueOnce(new Error('Network error'));
 
-    await expect(
-      provider.generate({
-        text: 'hello',
-        apiKey: 'test-key',
-        voiceId: 'ErXwobaYiN019PkySvjV',
-        model: 'eleven_v4',
-      }),
-    ).rejects.toThrow('Network error');
+    await expect(provider.generate(request)).rejects.toThrow('Network error');
   });
 });

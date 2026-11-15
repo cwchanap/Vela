@@ -1,114 +1,102 @@
+import { withRequestTimeout } from '../../llm/types';
 import type { TTSProvider, TTSGenerateRequest, TTSGenerateResult } from '../types';
+import { MAX_TTS_AUDIO_BYTES } from '../types';
+import { pcm16ToWav } from '../wav';
 
-const FORMAT_TO_CONTENT_TYPE: Record<string, string> = {
-  MP3: 'audio/mpeg',
-  MPEG: 'audio/mpeg',
-  AUDIO_MPEG: 'audio/mpeg',
-  OGG_OPUS: 'audio/ogg',
-  OGG: 'audio/ogg',
-  AUDIO_OGG: 'audio/ogg',
-  AUDIO_OPUS: 'audio/ogg',
-  WAV: 'audio/wav',
-  AUDIO_WAV: 'audio/wav',
-  WAV_L16: 'audio/wav',
-  L16: 'audio/L16',
-  AUDIO_L16: 'audio/L16',
-  PCM: 'audio/pcm',
-  AUDIO_PCM: 'audio/pcm',
-  PCM_L16: 'audio/pcm',
-  ALAW: 'audio/PCMA',
-  AUDIO_PCMA: 'audio/PCMA',
-  MULAW: 'audio/PCMU',
-  MU_LAW: 'audio/PCMU',
-  AUDIO_PCMU: 'audio/PCMU',
-};
+const GEMINI_INTERACTIONS_URL = 'https://generativelanguage.googleapis.com/v1beta/interactions';
+const PCM_MIME_TYPES = new Set(['audio/pcm', 'audio/l16']);
 
-function normalizeFormat(value: string): string {
-  return value
-    .trim()
-    .toUpperCase()
-    .replace(/[^A-Z0-9]+/g, '_');
+interface InteractionAudioPart {
+  type?: unknown;
+  data?: unknown;
+  mime_type?: unknown;
 }
 
-function resolveContentType(
-  requestedFormat?: string,
-  responseFormat?: string,
-  mimeType?: string,
-): string {
-  const candidates = [requestedFormat, responseFormat, mimeType]
-    .filter((candidate): candidate is string => !!candidate)
-    .map((candidate) => candidate.split(';')[0]?.trim() ?? candidate)
-    .map(normalizeFormat);
+/** Find the first audio content part without exposing the untyped vendor body. */
+function findAudioPart(payload: unknown): InteractionAudioPart | null {
+  const steps = (payload as { steps?: unknown } | null)?.steps;
+  if (!Array.isArray(steps)) return null;
 
-  for (const candidate of candidates) {
-    const mapped = FORMAT_TO_CONTENT_TYPE[candidate];
-    if (mapped) {
-      return mapped;
+  for (const step of steps) {
+    const content = (step as { content?: unknown } | null)?.content;
+    if (!Array.isArray(content)) continue;
+    for (const part of content as InteractionAudioPart[]) {
+      if (part?.type === 'audio' && typeof part.data === 'string' && part.data.length > 0) {
+        return part;
+      }
     }
   }
-
-  return 'audio/mpeg';
+  return null;
 }
 
+function mimeEssence(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  return value.split(';')[0]?.trim().toLowerCase() || null;
+}
+
+/**
+ * The 3.8 unary endpoint returns complete 24 kHz mono RIFF/WAVE files (with a
+ * trailing C2PA chunk), so valid WAV passes through untouched. Headerless raw
+ * PCM has no magic bytes and is accepted only when the response also declares a
+ * PCM/L16 MIME. Live unary responses always carried `audio/wav`; the
+ * absent-MIME raw-PCM branch stays disabled until a real response confirms it.
+ */
 export class GeminiProvider implements TTSProvider {
   readonly name = 'gemini' as const;
 
   async generate(request: TTSGenerateRequest): Promise<TTSGenerateResult> {
-    const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${request.model}:generateContent`;
-
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 30_000);
-
-    let response: Response;
-    try {
-      response = await fetch(endpoint, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-goog-api-key': request.apiKey,
-        },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: request.text }] }],
-          generationConfig: {
-            responseModalities: ['AUDIO'],
-            speechConfig: {
-              voiceConfig: {
-                prebuiltVoiceConfig: { voiceName: request.voiceId },
-              },
-            },
-          },
-        }),
-        signal: controller.signal,
-      });
-    } catch (error: any) {
-      clearTimeout(timeoutId);
-      if (error.name === 'AbortError') {
-        throw new Error('Request timeout: TTS generation took too long');
-      }
-      throw error;
-    }
-    clearTimeout(timeoutId);
+    const response = await fetch(GEMINI_INTERACTIONS_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-goog-api-key': request.apiKey,
+      },
+      body: JSON.stringify({
+        model: request.model,
+        input: [{ type: 'user_input', content: [{ type: 'text', text: request.text }] }],
+        response_format: { type: 'audio' },
+        generation_config: { speech_config: [{ voice: request.voiceId }] },
+      }),
+      signal: withRequestTimeout(),
+    });
 
     if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(`Gemini TTS API error ${response.status}: ${errorText}`);
+      throw new Error(`Gemini TTS API error ${response.status}`);
     }
 
-    const data: any = await response.json();
-    const inlineData = data?.candidates?.[0]?.content?.parts?.[0]?.inlineData;
-    const b64 = inlineData?.data as string | undefined;
-
-    if (!b64) {
+    const payload: unknown = await response.json();
+    const part = findAudioPart(payload);
+    if (!part || typeof part.data !== 'string') {
       throw new Error('Gemini TTS: no audio data in response');
     }
 
-    const mimeType = inlineData?.mimeType as string | undefined;
-    const responseFormat = inlineData?.outputFormat as string | undefined;
-    const contentType = resolveContentType(request.outputFormat, responseFormat, mimeType);
+    const audio = Buffer.from(part.data, 'base64');
+    if (audio.length === 0) {
+      throw new Error('Gemini TTS: empty audio data in response');
+    }
+    if (audio.length > MAX_TTS_AUDIO_BYTES) {
+      throw new Error('Gemini TTS: audio response too large');
+    }
 
-    return {
-      audioBuffer: Buffer.from(b64, 'base64'),
-      contentType,
-    };
+    if (audio.subarray(0, 4).toString('ascii') === 'RIFF') {
+      if (audio.length <= 44 || audio.subarray(8, 12).toString('ascii') !== 'WAVE') {
+        throw new Error('Gemini TTS: malformed WAV response');
+      }
+      return { audioBuffer: audio, contentType: 'audio/wav' };
+    }
+
+    if (audio.length % 2 !== 0) {
+      throw new Error('Gemini TTS: invalid PCM16LE audio data');
+    }
+
+    const mimeType = mimeEssence(part.mime_type);
+    if (!mimeType) {
+      throw new Error('Gemini TTS: missing MIME type for non-WAV audio');
+    }
+    if (!PCM_MIME_TYPES.has(mimeType)) {
+      throw new Error('Gemini TTS: unsupported audio format');
+    }
+
+    return { audioBuffer: pcm16ToWav(audio, 24_000), contentType: 'audio/wav' };
   }
 }
