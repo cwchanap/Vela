@@ -299,6 +299,31 @@ describe('TtsSection', () => {
 
       expect(wrapper.vm.ttsProvider).toBe('elevenlabs');
     });
+
+    it('applies the deferred saved selection once the entered key is cleared', async () => {
+      // The GET is still pending (data null) while the user types a key.
+      wrapper.vm.ttsApiKeyInput = 'typed-key';
+      await wrapper.vm.$nextTick();
+
+      settingsData.value = {
+        provider: 'elevenlabs',
+        voiceId: 'saved-custom-voice',
+        model: 'eleven_multilingual_v2',
+        hasApiKey: true,
+      };
+      await flushPromises();
+
+      // Hydration is skipped over the unsaved key; defaults remain.
+      expect(wrapper.vm.ttsVoiceId).toBe('ErXwobaYiN019PkySvjV');
+      expect(wrapper.vm.ttsModel).toBe('eleven_v4');
+
+      wrapper.vm.ttsApiKeyInput = '';
+      await flushPromises();
+
+      expect(wrapper.vm.ttsProvider).toBe('elevenlabs');
+      expect(wrapper.vm.ttsVoiceId).toBe('saved-custom-voice');
+      expect(wrapper.vm.ttsModel).toBe('eleven_multilingual_v2');
+    });
   });
 
   describe('saved key for the selected provider', () => {
