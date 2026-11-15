@@ -2,7 +2,7 @@
   <q-card flat bordered class="q-pa-md q-mb-lg">
     <div class="text-subtitle1 q-mb-sm">Text-to-Speech</div>
     <div class="text-caption text-grey q-mb-md">
-      Configure a TTS provider for pronunciation features
+      Configure a TTS provider for pronunciation features. Audio is AI-generated.
     </div>
 
     <div class="row q-col-gutter-md">
@@ -38,32 +38,20 @@
         </q-input>
       </div>
       <div class="col-12 col-md-6">
-        <!-- ElevenLabs: free-text voice ID -->
+        <!-- ElevenLabs keeps a free-form voice ID; other providers use their official list. -->
         <q-input
-          v-if="ttsProvider === 'elevenlabs'"
+          v-if="!ttsVoiceOptions"
           v-model="ttsVoiceId"
           label="Voice ID (optional)"
           dense
           outlined
-          hint="Default: ErXwobaYiN019PkySvjV"
+          :hint="`Default: ${selectedProviderInfo.defaultVoice}`"
           data-testid="tts-voice-id-input"
         />
-        <!-- OpenAI: preset voice dropdown -->
         <q-select
-          v-else-if="ttsProvider === 'openai'"
+          v-else
           v-model="ttsVoiceId"
-          :options="openaiVoiceOptions"
-          label="Voice"
-          dense
-          emit-value
-          map-options
-          data-testid="tts-voice-id-input"
-        />
-        <!-- Gemini: preset voice dropdown -->
-        <q-select
-          v-else-if="ttsProvider === 'gemini'"
-          v-model="ttsVoiceId"
-          :options="geminiVoiceOptions"
+          :options="ttsVoiceOptions"
           label="Voice"
           dense
           emit-value
@@ -71,15 +59,14 @@
           data-testid="tts-voice-id-input"
         />
       </div>
-      <!-- Model: only shown for ElevenLabs (OpenAI/Gemini models are fixed) -->
       <div class="col-12 col-md-6">
-        <q-input
-          v-if="ttsProvider === 'elevenlabs'"
+        <q-select
           v-model="ttsModel"
-          label="Model (optional)"
+          :options="ttsModelOptions"
+          label="Model"
           dense
-          outlined
-          hint="Default: eleven_multilingual_v2"
+          emit-value
+          map-options
           data-testid="tts-model-input"
         />
       </div>
@@ -88,7 +75,7 @@
           class="full-width"
           color="primary"
           label="Save TTS Settings"
-          :disable="!canSaveTTS || !ttsApiKeyInput"
+          :disable="!canSaveTTS || !canSubmitTTS"
           @click="saveSettingsHandler"
           data-testid="tts-save"
         />
@@ -99,18 +86,12 @@
 
     <div class="row items-center">
       <div class="col">
-        <div class="text-caption">
-          {{
-            isAuthenticated
-              ? hasTTSKey
-                ? `TTS configured: ${ttsProvider}`
-                : 'No TTS API key configured'
-              : 'Sign in to configure TTS settings'
-          }}
-        </div>
+        <div class="text-caption">{{ ttsStatusLabel }}</div>
       </div>
       <div class="col-auto">
-        <q-badge v-if="hasTTSKey" color="positive" outline>Configured</q-badge>
+        <q-badge v-if="hasSavedKeyForSelectedProvider" color="positive" outline>
+          Configured
+        </q-badge>
         <q-badge v-else color="grey" outline>Not configured</q-badge>
       </div>
     </div>
@@ -121,6 +102,12 @@
 import { computed, ref, watch } from 'vue';
 import { useAuthStore } from '../../../stores/auth';
 import { Notify } from 'quasar';
+import {
+  resolveTtsSelection,
+  TTS_PROVIDER_REGISTRY,
+  TTS_PROVIDERS,
+  type TtsProvider,
+} from '@vela/common';
 import {
   useTTSSettingsQuery,
   useUpdateTTSSettingsMutation,
@@ -133,10 +120,11 @@ const currentUserId = computed(() => authStore.user?.id || authStore.session?.us
 const canSaveTTS = computed(() => !!currentUserId.value);
 
 // TTS Settings
-const ttsProvider = ref<string>('elevenlabs');
+const initialSelection = resolveTtsSelection('elevenlabs', null, null);
+const ttsProvider = ref<TtsProvider>('elevenlabs');
 const ttsApiKeyInput = ref('');
-const ttsVoiceId = ref('');
-const ttsModel = ref('');
+const ttsVoiceId = ref(initialSelection.voiceId);
+const ttsModel = ref(initialSelection.model);
 const showTtsApiKey = ref(false);
 
 // TanStack Query hooks for TTS
@@ -144,37 +132,39 @@ const { data: ttsSettingsData } = useTTSSettingsQuery();
 const { mutate: saveTTSSettings } = useUpdateTTSSettingsMutation();
 
 // Computed from query data
-const hasTTSKey = computed(() => ttsSettingsData.value?.hasApiKey ?? false);
+const selectedProviderInfo = computed(() => TTS_PROVIDER_REGISTRY[ttsProvider.value]);
 
-const ttsProviderOptions = [
-  { label: 'ElevenLabs', value: 'elevenlabs' },
-  { label: 'OpenAI (tts-1)', value: 'openai' },
-  { label: 'Google Gemini (gemini-2.5-flash-preview-tts)', value: 'gemini' },
-];
+// A key only counts for the provider that currently owns it: a newly selected,
+// unsaved provider must not be shown or treated as configured.
+const hasSavedKeyForSelectedProvider = computed(() =>
+  Boolean(
+    ttsSettingsData.value?.hasApiKey && ttsSettingsData.value?.provider === ttsProvider.value,
+  ),
+);
 
-const openaiVoiceOptions = [
-  { label: 'Alloy', value: 'alloy' },
-  { label: 'Echo', value: 'echo' },
-  { label: 'Fable', value: 'fable' },
-  { label: 'Onyx', value: 'onyx' },
-  { label: 'Nova', value: 'nova' },
-  { label: 'Shimmer', value: 'shimmer' },
-];
+const ttsProviderOptions = TTS_PROVIDERS.map((provider) => ({
+  label: TTS_PROVIDER_REGISTRY[provider].label,
+  value: provider,
+}));
 
-const geminiVoiceOptions = [
-  { label: 'Kore', value: 'Kore' },
-  { label: 'Puck', value: 'Puck' },
-  { label: 'Charon', value: 'Charon' },
-  { label: 'Fenrir', value: 'Fenrir' },
-  { label: 'Aoede', value: 'Aoede' },
-  { label: 'Leda', value: 'Leda' },
-  { label: 'Orus', value: 'Orus' },
-  { label: 'Zephyr', value: 'Zephyr' },
-  { label: 'Callirrhoe', value: 'Callirrhoe' },
-  { label: 'Autonoe', value: 'Autonoe' },
-  { label: 'Enceladus', value: 'Enceladus' },
-  { label: 'Iocaste', value: 'Iocaste' },
-];
+const ttsModelOptions = computed(() =>
+  selectedProviderInfo.value.models.map(({ id, label }) => ({
+    label: id === selectedProviderInfo.value.defaultModel ? `${label} (default)` : label,
+    value: id,
+  })),
+);
+
+// null means user-entered voice IDs (ElevenLabs).
+const ttsVoiceOptions = computed(
+  () => selectedProviderInfo.value.voices?.map((voice) => ({ label: voice, value: voice })) ?? null,
+);
+
+// The input is clearable, so it can hold null at runtime despite the ref type.
+const enteredApiKey = computed(() => (ttsApiKeyInput.value ?? '').trim());
+
+const canSubmitTTS = computed(
+  () => Boolean(enteredApiKey.value) || hasSavedKeyForSelectedProvider.value,
+);
 
 const ttsApiKeyLabel = computed(() => {
   if (ttsProvider.value === 'openai') return 'OpenAI API Key';
@@ -183,53 +173,63 @@ const ttsApiKeyLabel = computed(() => {
 });
 
 const ttsApiKeyHint = computed(() => {
+  if (hasSavedKeyForSelectedProvider.value) {
+    return `Leave blank to keep the saved ${selectedProviderInfo.value.label} key`;
+  }
   if (ttsProvider.value === 'openai') return 'Your OpenAI API key (sk-...)';
   if (ttsProvider.value === 'gemini') return 'Your Google AI Studio API key';
   return 'Your ElevenLabs API key';
 });
 
-// Set provider-appropriate defaults when provider changes
-watch(ttsProvider, (newProvider) => {
-  if (newProvider === 'openai') {
-    if (!openaiVoiceOptions.find((o) => o.value === ttsVoiceId.value)) {
-      ttsVoiceId.value = 'alloy';
-    }
-    ttsModel.value = 'tts-1';
-  } else if (newProvider === 'gemini') {
-    if (!geminiVoiceOptions.find((o) => o.value === ttsVoiceId.value)) {
-      ttsVoiceId.value = 'Kore';
-    }
-    ttsModel.value = 'gemini-2.5-flash-preview-tts';
-  } else if (newProvider === 'elevenlabs') {
-    // Clear voice/model if they contain values from other providers
-    const openaiVoices = openaiVoiceOptions.map((o) => o.value);
-    const geminiVoices = geminiVoiceOptions.map((o) => o.value);
-    if (openaiVoices.includes(ttsVoiceId.value) || geminiVoices.includes(ttsVoiceId.value)) {
-      ttsVoiceId.value = '';
-    }
-    if (ttsModel.value === 'tts-1' || ttsModel.value === 'gemini-2.5-flash-preview-tts') {
-      ttsModel.value = '';
-    }
-  }
+const ttsStatusLabel = computed(() => {
+  if (!isAuthenticated.value) return 'Sign in to configure TTS settings';
+  return hasSavedKeyForSelectedProvider.value
+    ? `TTS configured: ${selectedProviderInfo.value.label}`
+    : `No TTS API key saved for ${selectedProviderInfo.value.label}`;
 });
+
+// Hydration assigns ttsProvider; a stored selection must not be replaced by defaults.
+let applyingStoredSettings = false;
+
+// A provider switch starts from that provider's registry defaults instead of
+// carrying a model/voice from another provider.
+watch(
+  ttsProvider,
+  (provider) => {
+    if (applyingStoredSettings) return;
+    const selection = resolveTtsSelection(provider, null, null);
+    ttsVoiceId.value = selection.voiceId;
+    ttsModel.value = selection.model;
+    // A key typed for the previous provider must not be submitted for this one.
+    ttsApiKeyInput.value = '';
+  },
+  { flush: 'sync' },
+);
+
+// Snapshot of the settings last applied to the form, so a refetch does not
+// clobber edits the user has made since. Starts at the initial defaults.
+let appliedSettings: { provider: TtsProvider; voiceId: string; model: string } = initialSelection;
 
 // Sync local form state with query data when it loads/changes
 watch(
   () => ttsSettingsData.value,
   (data) => {
-    if (data) {
-      // Only overwrite voice/model when API returns non-null values
-      // to preserve provider watcher defaults
-      if (data.voiceId != null) {
-        ttsVoiceId.value = data.voiceId;
-      }
-      if (data.model != null) {
-        ttsModel.value = data.model;
-      }
-      // Set provider last so its watch applies appropriate defaults
-      // for voice/model when API returns null
-      ttsProvider.value = data.provider || 'elevenlabs';
-    }
+    if (!data) return;
+    // The saved provider is authoritative; unknown values fall back to defaults.
+    const provider = TTS_PROVIDERS.find((candidate) => candidate === data.provider) ?? 'elevenlabs';
+    const selection = resolveTtsSelection(provider, data.model, data.voiceId);
+    const hasUnsavedEdits =
+      appliedSettings.provider !== ttsProvider.value ||
+      appliedSettings.voiceId !== ttsVoiceId.value ||
+      appliedSettings.model !== ttsModel.value;
+    if (hasUnsavedEdits) return;
+
+    applyingStoredSettings = true;
+    ttsProvider.value = selection.provider;
+    applyingStoredSettings = false;
+    ttsVoiceId.value = selection.voiceId;
+    ttsModel.value = selection.model;
+    appliedSettings = selection;
   },
   { immediate: true },
 );
@@ -247,7 +247,10 @@ const saveSettingsHandler = async () => {
     return;
   }
 
-  if (!ttsApiKeyInput.value) {
+  const apiKey = enteredApiKey.value;
+
+  // A blank key only retains the saved key of this same provider.
+  if (!apiKey && !hasSavedKeyForSelectedProvider.value) {
     Notify.create({
       type: 'negative',
       message: 'Please enter an API key',
@@ -259,12 +262,18 @@ const saveSettingsHandler = async () => {
   saveTTSSettings(
     {
       provider: ttsProvider.value,
-      apiKey: ttsApiKeyInput.value,
+      ...(apiKey ? { apiKey } : {}),
       voiceId: ttsVoiceId.value || undefined,
       model: ttsModel.value || undefined,
     },
     {
       onSuccess: () => {
+        // The form now matches what the server stored, so a later refetch is safe.
+        appliedSettings = {
+          provider: ttsProvider.value,
+          voiceId: ttsVoiceId.value,
+          model: ttsModel.value,
+        };
         Notify.create({
           type: 'positive',
           message: 'TTS settings saved successfully',

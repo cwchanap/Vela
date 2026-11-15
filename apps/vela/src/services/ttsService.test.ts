@@ -768,6 +768,37 @@ describe('ttsService', () => {
       );
     });
 
+    it('omits apiKey from the request body when no key is supplied', async () => {
+      mockFetch.mockResolvedValue({
+        ok: true,
+        json: vi.fn().mockResolvedValue({ success: true }),
+      });
+
+      await saveTTSSettings('elevenlabs', undefined, 'voice-id-1', 'eleven_multilingual_v2');
+
+      const [, requestInit] = mockFetch.mock.calls[0] as [string, RequestInit];
+      const body = JSON.parse(String(requestInit.body)) as Record<string, unknown>;
+      expect(body).toEqual({
+        provider: 'elevenlabs',
+        voiceId: 'voice-id-1',
+        model: 'eleven_multilingual_v2',
+      });
+      expect(body).not.toHaveProperty('apiKey');
+    });
+
+    it('omits a whitespace-only apiKey from the request body', async () => {
+      mockFetch.mockResolvedValue({
+        ok: true,
+        json: vi.fn().mockResolvedValue({ success: true }),
+      });
+
+      await saveTTSSettings('elevenlabs', '   ', 'voice-id-1', 'eleven_v4');
+
+      const [, requestInit] = mockFetch.mock.calls[0] as [string, RequestInit];
+      const body = JSON.parse(String(requestInit.body)) as Record<string, unknown>;
+      expect(body).not.toHaveProperty('apiKey');
+    });
+
     it('should not send userId in request body', async () => {
       mockFetch.mockResolvedValue({
         ok: true,

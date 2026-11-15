@@ -26,7 +26,8 @@ export function useTTSSettingsQuery() {
 
 export interface TTSSettingsPayload {
   provider: string;
-  apiKey: string;
+  /** Omitted to keep the same provider's saved key. */
+  apiKey?: string | undefined;
   voiceId?: string | undefined;
   model?: string | undefined;
 }

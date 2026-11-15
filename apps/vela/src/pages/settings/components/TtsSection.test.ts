@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { mount, VueWrapper, flushPromises } from '@vue/test-utils';
 import { createPinia, setActivePinia } from 'pinia';
 import { Quasar, Notify } from 'quasar';
+import { ref } from 'vue';
 import TtsSection from './TtsSection.vue';
 import { useAuthStore } from 'src/stores/auth';
 import {
@@ -138,54 +139,107 @@ describe('TtsSection', () => {
   });
 
   describe('TTS provider watcher', () => {
-    it('sets default voice for openai when changing to openai', async () => {
+    it('sets default voice and model for openai when changing to openai', async () => {
       wrapper.vm.ttsProvider = 'openai';
       await wrapper.vm.$nextTick();
       expect(wrapper.vm.ttsVoiceId).toBe('alloy');
+      expect(wrapper.vm.ttsModel).toBe('gpt-realtime-2.1-mini');
     });
 
-    it('sets default voice for gemini when changing to gemini', async () => {
+    it('sets default voice and model for gemini when changing to gemini', async () => {
       wrapper.vm.ttsProvider = 'gemini';
       await wrapper.vm.$nextTick();
       expect(wrapper.vm.ttsVoiceId).toBe('Kore');
+      expect(wrapper.vm.ttsModel).toBe('gemini-3.8-flash-tts');
     });
 
-    it('clears openai voice when switching to elevenlabs', async () => {
+    it('resets an openai voice and model to the elevenlabs defaults when switching back', async () => {
       wrapper.vm.ttsProvider = 'openai';
       await wrapper.vm.$nextTick();
-      // ttsVoiceId should be 'alloy'
       wrapper.vm.ttsProvider = 'elevenlabs';
       await wrapper.vm.$nextTick();
-      expect(wrapper.vm.ttsVoiceId).toBe('');
+      expect(wrapper.vm.ttsVoiceId).toBe('ErXwobaYiN019PkySvjV');
+      expect(wrapper.vm.ttsModel).toBe('eleven_v4');
     });
 
-    it('clears gemini voice when switching to elevenlabs', async () => {
-      wrapper.vm.ttsProvider = 'gemini';
-      await wrapper.vm.$nextTick();
-      // ttsVoiceId should be 'Kore' (default gemini voice)
-      expect(wrapper.vm.ttsVoiceId).toBe('Kore');
-      wrapper.vm.ttsProvider = 'elevenlabs';
-      await wrapper.vm.$nextTick();
-      expect(wrapper.vm.ttsVoiceId).toBe('');
-    });
-
-    it('clears openai model when switching to elevenlabs', async () => {
+    it('does not carry an elevenlabs model or voice into openai', async () => {
+      wrapper.vm.ttsModel = 'eleven_multilingual_v2';
+      wrapper.vm.ttsVoiceId = 'custom-elevenlabs-voice';
       wrapper.vm.ttsProvider = 'openai';
       await wrapper.vm.$nextTick();
-      // openai sets default model 'tts-1'
-      expect(wrapper.vm.ttsModel).toBe('tts-1');
-      wrapper.vm.ttsProvider = 'elevenlabs';
-      await wrapper.vm.$nextTick();
-      expect(wrapper.vm.ttsModel).toBe('');
+      expect(wrapper.vm.ttsModel).toBe('gpt-realtime-2.1-mini');
+      expect(wrapper.vm.ttsVoiceId).toBe('alloy');
     });
 
-    it('clears gemini model when switching to elevenlabs', async () => {
+    it('clears a key typed for the previous provider on a provider switch', async () => {
+      wrapper.vm.ttsApiKeyInput = 'typed-for-elevenlabs';
+      wrapper.vm.ttsProvider = 'openai';
+      await wrapper.vm.$nextTick();
+      expect(wrapper.vm.ttsApiKeyInput).toBe('');
+    });
+  });
+
+  describe('registry-backed options', () => {
+    it('renders one provider option per registry provider', () => {
+      expect(wrapper.vm.ttsProviderOptions).toEqual([
+        { label: 'ElevenLabs', value: 'elevenlabs' },
+        { label: 'OpenAI', value: 'openai' },
+        { label: 'Google Gemini', value: 'gemini' },
+      ]);
+    });
+
+    it('renders the elevenlabs models with the default marked', () => {
+      expect(wrapper.vm.ttsModelOptions).toEqual([
+        { label: 'Eleven v4 (default)', value: 'eleven_v4' },
+        { label: 'Eleven Multilingual v2', value: 'eleven_multilingual_v2' },
+      ]);
+    });
+
+    it('renders the single OpenAI model as the only choice', async () => {
+      wrapper.vm.ttsProvider = 'openai';
+      await wrapper.vm.$nextTick();
+      expect(wrapper.vm.ttsModelOptions).toEqual([
+        { label: 'GPT Realtime 2.1 Mini (default)', value: 'gpt-realtime-2.1-mini' },
+      ]);
+    });
+
+    it('renders the gemini models with the default marked', async () => {
       wrapper.vm.ttsProvider = 'gemini';
       await wrapper.vm.$nextTick();
-      expect(wrapper.vm.ttsModel).toBe('gemini-2.5-flash-preview-tts');
-      wrapper.vm.ttsProvider = 'elevenlabs';
+      expect(wrapper.vm.ttsModelOptions).toEqual([
+        { label: 'Gemini 3.8 Flash TTS (default)', value: 'gemini-3.8-flash-tts' },
+        { label: 'Gemini 3.8 Flash-Lite TTS', value: 'gemini-3.8-flash-lite-tts' },
+      ]);
+    });
+
+    it('keeps elevenlabs voice free-form (no option list)', () => {
+      expect(wrapper.vm.ttsVoiceOptions).toBeNull();
+    });
+
+    it('renders the official OpenAI voice list', async () => {
+      wrapper.vm.ttsProvider = 'openai';
       await wrapper.vm.$nextTick();
-      expect(wrapper.vm.ttsModel).toBe('');
+      expect(wrapper.vm.ttsVoiceOptions?.map((option) => option.value)).toEqual([
+        'alloy',
+        'ash',
+        'ballad',
+        'coral',
+        'echo',
+        'sage',
+        'shimmer',
+        'verse',
+        'marin',
+        'cedar',
+      ]);
+    });
+
+    it('renders the official Gemini voices without the removed Iocaste', async () => {
+      wrapper.vm.ttsProvider = 'gemini';
+      await wrapper.vm.$nextTick();
+      const values = wrapper.vm.ttsVoiceOptions?.map((option) => option.value) ?? [];
+      expect(values).toHaveLength(30);
+      expect(values).toContain('Kore');
+      expect(values).not.toContain('Iocaste');
     });
   });
 
@@ -209,7 +263,48 @@ describe('TtsSection', () => {
       expect(wrapper.vm.ttsProvider).toBe('elevenlabs');
       expect(wrapper.vm.ttsVoiceId).toBe('voice-123');
       expect(wrapper.vm.ttsModel).toBe('eleven_multilingual_v2');
-      expect(wrapper.vm.hasTTSKey).toBe(true);
+      expect(wrapper.vm.hasSavedKeyForSelectedProvider).toBe(true);
+    });
+
+    it('resolves an unsupported stored model to the registry default', async () => {
+      wrapper.unmount();
+      vi.mocked(useTTSSettingsQuery).mockReturnValue({
+        data: {
+          value: {
+            provider: 'elevenlabs',
+            voiceId: 'voice-123',
+            model: 'eleven_turbo_v2',
+            hasApiKey: true,
+          },
+        },
+      } as never);
+
+      wrapper = mountComponent();
+      await flushPromises();
+
+      expect(wrapper.vm.ttsModel).toBe('eleven_v4');
+    });
+
+    it('does not clobber an in-progress model edit when the query refetches', async () => {
+      wrapper.unmount();
+      const settingsData = ref<unknown>(null);
+      vi.mocked(useTTSSettingsQuery).mockReturnValue({ data: settingsData } as never);
+
+      wrapper = mountComponent();
+      await flushPromises();
+
+      wrapper.vm.ttsModel = 'eleven_multilingual_v2';
+      await wrapper.vm.$nextTick();
+
+      settingsData.value = {
+        provider: 'elevenlabs',
+        voiceId: 'ErXwobaYiN019PkySvjV',
+        model: 'eleven_v4',
+        hasApiKey: true,
+      };
+      await flushPromises();
+
+      expect(wrapper.vm.ttsModel).toBe('eleven_multilingual_v2');
     });
 
     it('falls back to elevenlabs when loaded query data has no provider', async () => {
@@ -229,6 +324,108 @@ describe('TtsSection', () => {
       await flushPromises();
 
       expect(wrapper.vm.ttsProvider).toBe('elevenlabs');
+    });
+  });
+
+  describe('saved key for the selected provider', () => {
+    const SAVED_ELEVENLABS = {
+      provider: 'elevenlabs',
+      voiceId: 'ErXwobaYiN019PkySvjV',
+      model: 'eleven_v4',
+      hasApiKey: true,
+    };
+
+    const seedSettings = (settings: unknown, mutate: ReturnType<typeof vi.fn>) => {
+      wrapper.unmount();
+      vi.mocked(useTTSSettingsQuery).mockReturnValue({ data: { value: settings } } as never);
+      vi.mocked(useUpdateTTSSettingsMutation).mockReturnValue({ mutate } as never);
+      wrapper = mountComponent();
+    };
+
+    const signIn = () => {
+      authStore.user = {
+        id: 'user-1',
+        email: 'test@example.com',
+        avatar_url: null,
+        preferences: null,
+      };
+    };
+
+    it('enables saving a same-provider model change without a new key', async () => {
+      const mutate = vi.fn();
+      seedSettings(SAVED_ELEVENLABS, mutate);
+      signIn();
+      await flushPromises();
+
+      wrapper.vm.ttsModel = 'eleven_multilingual_v2';
+      await wrapper.vm.$nextTick();
+
+      expect(wrapper.vm.hasSavedKeyForSelectedProvider).toBe(true);
+      expect(wrapper.find('[data-testid="tts-save"]').attributes('disabled')).toBeUndefined();
+
+      await wrapper.vm.saveSettingsHandler();
+
+      expect(mutate).toHaveBeenCalledTimes(1);
+      const [payload] = mutate.mock.calls[0] as [Record<string, unknown>, unknown];
+      expect(payload).toEqual({
+        provider: 'elevenlabs',
+        voiceId: 'ErXwobaYiN019PkySvjV',
+        model: 'eleven_multilingual_v2',
+      });
+      expect(payload).not.toHaveProperty('apiKey');
+    });
+
+    it('does not treat a saved ElevenLabs key as a key for an unsaved OpenAI selection', async () => {
+      const mutate = vi.fn();
+      seedSettings(SAVED_ELEVENLABS, mutate);
+      signIn();
+      await flushPromises();
+
+      wrapper.vm.ttsProvider = 'openai';
+      await wrapper.vm.$nextTick();
+
+      expect(wrapper.vm.hasSavedKeyForSelectedProvider).toBe(false);
+      expect(wrapper.find('[data-testid="tts-save"]').attributes('disabled')).toBeDefined();
+      expect(wrapper.text()).toContain('Not configured');
+
+      await wrapper.vm.saveSettingsHandler();
+
+      expect(mutate).not.toHaveBeenCalled();
+      expect(Notify.create).toHaveBeenCalledWith({
+        type: 'negative',
+        message: 'Please enter an API key',
+        position: 'top',
+      });
+    });
+
+    it('treats a cleared key input as blank and retains the saved key', async () => {
+      const mutate = vi.fn();
+      seedSettings(SAVED_ELEVENLABS, mutate);
+      signIn();
+      await flushPromises();
+
+      // q-input clearable can write null despite the string ref type.
+      wrapper.vm.ttsApiKeyInput = null as unknown as string;
+      await wrapper.vm.$nextTick();
+
+      expect(wrapper.find('[data-testid="tts-save"]').attributes('disabled')).toBeUndefined();
+
+      await wrapper.vm.saveSettingsHandler();
+
+      const [payload] = mutate.mock.calls[0] as [Record<string, unknown>, unknown];
+      expect(payload).not.toHaveProperty('apiKey');
+    });
+
+    it('shows the retention hint only for the provider that has a saved key', async () => {
+      seedSettings(SAVED_ELEVENLABS, vi.fn());
+      await flushPromises();
+
+      expect(wrapper.vm.ttsApiKeyHint).toContain('Leave blank to keep the saved ElevenLabs key');
+
+      wrapper.vm.ttsProvider = 'openai';
+      await wrapper.vm.$nextTick();
+
+      expect(wrapper.vm.ttsApiKeyHint).not.toContain('Leave blank');
     });
   });
 
@@ -332,6 +529,7 @@ describe('TtsSection', () => {
         message: 'Failed to save TTS settings',
         position: 'top',
       });
+      expect(Notify.create).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'positive' }));
     });
 
     it('shows the error message when the mutation fails with an Error instance', async () => {
