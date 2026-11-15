@@ -896,6 +896,9 @@ interface TTSSSettings {
   updated_at?: number;
 }
 
+/** Result of retaining a stored key without rewriting it. */
+export type TtsKeyRetentionResult = 'retained' | 'stale';
+
 export const ttsSettings = {
   async get(userId: string) {
     try {
@@ -940,6 +943,55 @@ export const ttsSettings = {
       });
       await docClient.send(command);
     } catch (error) {
+      handleDynamoError(error);
+    }
+  },
+
+  /**
+   * Save provider/voice/model without rewriting the credential, only while the
+   * row still carries the observed provider and key. DynamoDB evaluates the
+   * condition atomically, so a blank-key save cannot restore a key or provider
+   * that another request replaced after this request's read. A failed condition
+   * returns `'stale'` instead of throwing; the key is never logged here.
+   */
+  async putRetainingKey(settings: {
+    user_id: string;
+    provider: string;
+    expected_api_key: string;
+    voice_id: string | null;
+    model: string | null;
+  }): Promise<TtsKeyRetentionResult> {
+    try {
+      // Validate required user_id
+      if (!settings.user_id || typeof settings.user_id !== 'string') {
+        throw new Error('user_id is required and must be a string');
+      }
+
+      const now = Date.now();
+
+      const command = new UpdateCommand({
+        TableName: TABLE_NAMES.TTS_SETTINGS,
+        Key: { user_id: settings.user_id },
+        UpdateExpression:
+          'SET #provider = :provider, voice_id = :voice_id, #model = :model, updated_at = :updated_at, created_at = if_not_exists(created_at, :created_at)',
+        ConditionExpression: '#provider = :provider AND api_key = :expected_api_key',
+        ExpressionAttributeNames: {
+          '#provider': 'provider',
+          '#model': 'model',
+        },
+        ExpressionAttributeValues: {
+          ':provider': settings.provider,
+          ':expected_api_key': settings.expected_api_key,
+          ':voice_id': settings.voice_id,
+          ':model': settings.model,
+          ':updated_at': now,
+          ':created_at': now,
+        },
+      });
+      await docClient.send(command);
+      return 'retained';
+    } catch (error) {
+      if (isConditionalCheckFailedError(error)) return 'stale';
       handleDynamoError(error);
     }
   },

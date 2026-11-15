@@ -1296,6 +1296,182 @@ describe('DynamoDB Operations', () => {
         }),
       ).rejects.toThrow('user_id is required');
     });
+
+    const conditionalCheckFailed = () =>
+      Object.assign(new Error('The conditional request failed'), {
+        name: 'ConditionalCheckFailedException',
+      });
+
+    // Applies the command's emitted ConditionExpression and SET clause to an
+    // in-memory row, so these tests exercise the real condition semantics
+    // rather than only the helper's return value.
+    function useStatefulTtsItem(initial: Record<string, any>) {
+      const state = { item: { ...initial } };
+      mockSend.mockImplementation(async (command: { input: any }) => {
+        const { input } = command;
+        const holds = input.ConditionExpression.split(' AND ').every((term: string) => {
+          const [rawAttribute, placeholder] = term.trim().split(/\s*=\s*/);
+          const attribute = rawAttribute.startsWith('#')
+            ? input.ExpressionAttributeNames[rawAttribute]
+            : rawAttribute;
+          return state.item[attribute] === input.ExpressionAttributeValues[placeholder];
+        });
+        if (!holds) throw conditionalCheckFailed();
+
+        const setClause = input.UpdateExpression.replace(/^SET\s+/, '');
+        for (const assignment of setClause.split(/,\s*(?=[#\w]+\s*=)/)) {
+          const [target, value] = assignment.split(/\s*=\s*/);
+          if (value.startsWith('if_not_exists')) continue;
+          const attribute = target.startsWith('#')
+            ? input.ExpressionAttributeNames[target]
+            : target;
+          state.item[attribute] = input.ExpressionAttributeValues[value];
+        }
+        return {};
+      });
+      return state;
+    }
+
+    test('putRetainingKey updates settings without rewriting a matching stored key', async () => {
+      const state = useStatefulTtsItem({
+        user_id: mockUserId,
+        provider: 'elevenlabs',
+        api_key: 'key-123',
+        voice_id: 'voice-1',
+        model: 'eleven_v4',
+      });
+
+      const result = await ttsSettings.putRetainingKey({
+        user_id: mockUserId,
+        provider: 'elevenlabs',
+        expected_api_key: 'key-123',
+        voice_id: 'voice-2',
+        model: 'eleven_multilingual_v2',
+      });
+
+      expect(result).toBe('retained');
+      expect(state.item).toMatchObject({
+        user_id: mockUserId,
+        provider: 'elevenlabs',
+        api_key: 'key-123',
+        voice_id: 'voice-2',
+        model: 'eleven_multilingual_v2',
+      });
+      const input = mockUpdateCommand.mock.calls[0][0];
+      expect(input.TableName).toBe('vela-tts-settings');
+      expect(input.ConditionExpression).toContain('api_key');
+      expect(input.UpdateExpression).not.toContain('api_key');
+    });
+
+    test('putRetainingKey preserves credential bytes for a valid retained key', async () => {
+      const state = useStatefulTtsItem({
+        user_id: mockUserId,
+        provider: 'elevenlabs',
+        api_key: ' padded-key ',
+        voice_id: 'voice-1',
+        model: 'eleven_v4',
+      });
+
+      const result = await ttsSettings.putRetainingKey({
+        user_id: mockUserId,
+        provider: 'elevenlabs',
+        expected_api_key: ' padded-key ',
+        voice_id: 'voice-2',
+        model: 'eleven_multilingual_v2',
+      });
+
+      expect(result).toBe('retained');
+      expect(state.item.api_key).toBe(' padded-key ');
+    });
+
+    test('putRetainingKey returns stale and leaves a key replaced after the read', async () => {
+      const state = useStatefulTtsItem({
+        user_id: mockUserId,
+        provider: 'elevenlabs',
+        api_key: 'newer-key',
+        voice_id: 'voice-1',
+        model: 'eleven_v4',
+      });
+
+      const result = await ttsSettings.putRetainingKey({
+        user_id: mockUserId,
+        provider: 'elevenlabs',
+        expected_api_key: 'observed-key',
+        voice_id: 'voice-2',
+        model: 'eleven_multilingual_v2',
+      });
+
+      expect(result).toBe('stale');
+      expect(state.item).toMatchObject({
+        provider: 'elevenlabs',
+        api_key: 'newer-key',
+        voice_id: 'voice-1',
+        model: 'eleven_v4',
+      });
+    });
+
+    test('putRetainingKey returns stale when the row switched provider after the read', async () => {
+      const state = useStatefulTtsItem({
+        user_id: mockUserId,
+        provider: 'openai',
+        api_key: 'openai-key',
+        voice_id: 'alloy',
+        model: 'gpt-realtime-2.1-mini',
+      });
+
+      const result = await ttsSettings.putRetainingKey({
+        user_id: mockUserId,
+        provider: 'elevenlabs',
+        expected_api_key: 'elevenlabs-key',
+        voice_id: 'voice-2',
+        model: 'eleven_multilingual_v2',
+      });
+
+      expect(result).toBe('stale');
+      expect(state.item).toMatchObject({
+        provider: 'openai',
+        api_key: 'openai-key',
+        voice_id: 'alloy',
+        model: 'gpt-realtime-2.1-mini',
+      });
+    });
+
+    test('putRetainingKey does not log the credential when the condition fails', async () => {
+      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      useStatefulTtsItem({
+        user_id: mockUserId,
+        provider: 'elevenlabs',
+        api_key: 'newer-key',
+        voice_id: null,
+        model: null,
+      });
+
+      const result = await ttsSettings.putRetainingKey({
+        user_id: mockUserId,
+        provider: 'elevenlabs',
+        expected_api_key: 'observed-key',
+        voice_id: null,
+        model: null,
+      });
+
+      expect(result).toBe('stale');
+      expect(errorSpy).not.toHaveBeenCalled();
+      errorSpy.mockRestore();
+    });
+
+    test('putRetainingKey still surfaces unexpected storage errors', async () => {
+      mockSend.mockRejectedValueOnce(new Error('boom'));
+
+      await expect(
+        ttsSettings.putRetainingKey({
+          user_id: mockUserId,
+          provider: 'elevenlabs',
+          expected_api_key: 'key-123',
+          voice_id: null,
+          model: null,
+        }),
+      ).rejects.toThrow('DynamoDB operation failed: boom');
+    });
   });
 
   describe('UserVocabularyProgress extended', () => {

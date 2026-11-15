@@ -407,29 +407,50 @@ const createTTSRoute = (env: Env) => {
 
       // A blank/omitted key means "keep the stored key", but only for the same
       // saved provider. Never reuse a credential across providers, and never
-      // treat a non-string stored value as a key.
+      // treat a whitespace or non-string stored value as a key.
       const providedKey = typeof apiKey === 'string' && apiKey.trim() ? apiKey : null;
-      const existing = providedKey ? null : await ttsSettingsDB.get(userId);
-      const retainedKey =
-        existing?.provider === provider && typeof existing.api_key === 'string'
-          ? existing.api_key
-          : '';
-      const savedKey = providedKey ?? retainedKey;
 
-      if (!savedKey) {
-        return c.json(
-          ttsError('TTS API key required. Enter a key for this provider.', 'tts_not_configured'),
-          400,
-        );
+      if (providedKey) {
+        // A supplied key replaces the stored credential unconditionally.
+        await ttsSettingsDB.put({
+          user_id: userId,
+          provider,
+          api_key: providedKey,
+          voice_id: voiceId || null,
+          model: model || null,
+        });
+      } else {
+        const existing = await ttsSettingsDB.get(userId);
+        const retainedKey =
+          existing?.provider === provider && typeof existing.api_key === 'string'
+            ? existing.api_key
+            : '';
+
+        if (!retainedKey.trim()) {
+          return c.json(
+            ttsError('TTS API key required. Enter a key for this provider.', 'tts_not_configured'),
+            400,
+          );
+        }
+
+        // Settings-only conditional write: the stored credential is never
+        // rewritten, and the write fails if the row no longer carries the
+        // provider and key this request observed (a concurrent replacement or
+        // provider switch, or a stale read).
+        const retention = await ttsSettingsDB.putRetainingKey({
+          user_id: userId,
+          provider,
+          expected_api_key: retainedKey,
+          voice_id: voiceId || null,
+          model: model || null,
+        });
+        if (retention === 'stale') {
+          return c.json(
+            { error: 'TTS settings changed while saving. Please reload and try again.' },
+            409,
+          );
+        }
       }
-
-      await ttsSettingsDB.put({
-        user_id: userId,
-        provider,
-        api_key: savedKey,
-        voice_id: voiceId || null,
-        model: model || null,
-      });
 
       return c.json({ success: true, message: 'TTS settings saved successfully' });
     } catch (error) {
