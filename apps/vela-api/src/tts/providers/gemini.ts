@@ -17,10 +17,11 @@ interface InteractionAudioPart {
 
 /**
  * Locate exactly one completed model-output audio part. Runtime payloads are
- * untrusted: non-completed interactions and multiple audio results must fail
- * before any candidate is uploaded.
+ * untrusted: every model-output audio part is counted before inspecting its
+ * data, so a valid part plus an empty/malformed sibling still counts as an
+ * ambiguous multi-part response rather than being silently discarded.
  */
-function findSingleAudioPart(payload: unknown): InteractionAudioPart {
+function findSingleAudioPart(payload: unknown): InteractionAudioPart & { data: string } {
   const root = payload as { status?: unknown; steps?: unknown } | null;
   if (root?.status !== 'completed') {
     throw new Error('Gemini TTS: interaction did not complete');
@@ -36,7 +37,7 @@ function findSingleAudioPart(payload: unknown): InteractionAudioPart {
       continue;
     }
     for (const part of candidate.content as InteractionAudioPart[]) {
-      if (part?.type === 'audio' && typeof part.data === 'string' && part.data.length > 0) {
+      if (part?.type === 'audio') {
         audioParts.push(part);
       }
     }
@@ -48,7 +49,12 @@ function findSingleAudioPart(payload: unknown): InteractionAudioPart {
   if (audioParts.length > 1) {
     throw new Error('Gemini TTS: ambiguous audio response');
   }
-  return audioParts[0]!;
+
+  const part = audioParts[0]!;
+  if (typeof part.data !== 'string' || part.data.length === 0) {
+    throw new Error('Gemini TTS: invalid audio data');
+  }
+  return part as InteractionAudioPart & { data: string };
 }
 
 function mimeEssence(value: unknown): string | null {
@@ -95,7 +101,7 @@ export class GeminiProvider implements TTSProvider {
     }
 
     const part = findSingleAudioPart(payload);
-    const encoded = part.data as string;
+    const encoded = part.data;
     if (encoded.length > MAX_TTS_AUDIO_BASE64_CHARS) {
       throw new Error('Gemini TTS: audio response too large');
     }

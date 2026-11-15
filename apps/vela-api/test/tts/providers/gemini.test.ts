@@ -214,12 +214,59 @@ describe('GeminiProvider', () => {
     }
   });
 
-  test('rejects an empty audio part', async () => {
-    mockFetch.mockResolvedValueOnce(
-      makeInteractionsResponse([{ type: 'audio', data: '', mime_type: 'audio/wav' }]),
-    );
+  test('rejects a sole audio part without usable string data', async () => {
+    const invalidParts = [
+      { type: 'audio', data: '', mime_type: 'audio/wav' },
+      { type: 'audio', data: null, mime_type: 'audio/wav' },
+      { type: 'audio', mime_type: 'audio/wav' },
+      { type: 'audio', data: 42, mime_type: 'audio/wav' },
+    ];
 
-    await expect(provider.generate(request)).rejects.toThrow('no audio data');
+    for (const part of invalidParts) {
+      mockFetch.mockResolvedValueOnce(makeInteractionsResponse([part as any]));
+
+      await expect(provider.generate(request)).rejects.toThrow('invalid audio data');
+    }
+  });
+
+  test('rejects a valid audio part with an invalid audio sibling in the same step', async () => {
+    const invalidSiblings = [
+      { type: 'audio', data: '', mime_type: 'audio/wav' },
+      { type: 'audio', data: null, mime_type: 'audio/wav' },
+      { type: 'audio', mime_type: 'audio/wav' },
+      { type: 'audio', data: 42, mime_type: 'audio/wav' },
+    ];
+
+    for (const sibling of invalidSiblings) {
+      mockFetch.mockResolvedValueOnce(
+        makeInteractionsResponse([audioPart(validWav(), 'audio/wav'), sibling as any]),
+      );
+
+      await expect(provider.generate(request)).rejects.toThrow('ambiguous audio response');
+    }
+  });
+
+  test('rejects a valid audio part with an invalid audio sibling in a separate model-output step', async () => {
+    const invalidSiblings = [
+      { type: 'audio', data: '', mime_type: 'audio/wav' },
+      { type: 'audio', data: null, mime_type: 'audio/wav' },
+      { type: 'audio', mime_type: 'audio/wav' },
+      { type: 'audio', data: 42, mime_type: 'audio/wav' },
+    ];
+
+    for (const sibling of invalidSiblings) {
+      mockFetch.mockResolvedValueOnce(
+        makeResponse({
+          status: 'completed',
+          steps: [
+            { type: 'model_output', content: [audioPart(validWav(), 'audio/wav')] },
+            { type: 'model_output', content: [sibling] },
+          ],
+        }),
+      );
+
+      await expect(provider.generate(request)).rejects.toThrow('ambiguous audio response');
+    }
   });
 
   test('rejects encoded audio above the base64 budget', async () => {
