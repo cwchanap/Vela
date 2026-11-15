@@ -9,6 +9,9 @@ export type TTSProviderName = TtsProvider;
  */
 export const MAX_TTS_AUDIO_BYTES = 2 * 1024 * 1024;
 
+/** Base64 length of the largest accepted decoded audio buffer. */
+export const MAX_TTS_AUDIO_BASE64_CHARS = Math.ceil(MAX_TTS_AUDIO_BYTES / 3) * 4;
+
 export interface TTSGenerateRequest {
   text: string;
   apiKey: string;

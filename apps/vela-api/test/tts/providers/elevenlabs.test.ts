@@ -79,6 +79,24 @@ describe('ElevenLabsProvider', () => {
     expect(result.audioBuffer).toBeInstanceOf(Buffer);
   });
 
+  test('stops an oversized streamed audio body before full allocation', async () => {
+    let cancelled = false;
+    const stream = new ReadableStream({
+      pull(controller) {
+        controller.enqueue(new Uint8Array(64 * 1024));
+      },
+      cancel() {
+        cancelled = true;
+      },
+    });
+    mockFetch.mockResolvedValueOnce(new Response(stream));
+
+    const error = await provider.generate(request).catch((failure) => failure);
+
+    expect(error.message).toContain('too large');
+    expect(cancelled).toBe(true);
+  });
+
   test('throws error on non-ok response', async () => {
     mockFetch.mockResolvedValueOnce({
       ok: false,

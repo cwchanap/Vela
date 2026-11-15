@@ -1,10 +1,13 @@
 import { withRequestTimeout } from '../../llm/types';
 import type { TTSProvider, TTSGenerateRequest, TTSGenerateResult } from '../types';
-import { MAX_TTS_AUDIO_BYTES } from '../types';
+import { MAX_TTS_AUDIO_BASE64_CHARS, MAX_TTS_AUDIO_BYTES } from '../types';
+import { isValidBase64, readBoundedBody } from '../transport';
 import { pcm16ToWav } from '../wav';
 
 const GEMINI_INTERACTIONS_URL = 'https://generativelanguage.googleapis.com/v1beta/interactions';
 const PCM_MIME_TYPES = new Set(['audio/pcm', 'audio/l16']);
+/** Base64 audio plus the small interaction envelope (id, status, usage, MIME). */
+const MAX_GEMINI_RESPONSE_BYTES = MAX_TTS_AUDIO_BASE64_CHARS + 64 * 1024;
 
 interface InteractionAudioPart {
   type?: unknown;
@@ -12,21 +15,40 @@ interface InteractionAudioPart {
   mime_type?: unknown;
 }
 
-/** Find the first audio content part without exposing the untyped vendor body. */
-function findAudioPart(payload: unknown): InteractionAudioPart | null {
-  const steps = (payload as { steps?: unknown } | null)?.steps;
-  if (!Array.isArray(steps)) return null;
+/**
+ * Locate exactly one completed model-output audio part. Runtime payloads are
+ * untrusted: non-completed interactions and multiple audio results must fail
+ * before any candidate is uploaded.
+ */
+function findSingleAudioPart(payload: unknown): InteractionAudioPart {
+  const root = payload as { status?: unknown; steps?: unknown } | null;
+  if (root?.status !== 'completed') {
+    throw new Error('Gemini TTS: interaction did not complete');
+  }
+  if (!Array.isArray(root.steps)) {
+    throw new Error('Gemini TTS: no audio data in response');
+  }
 
-  for (const step of steps) {
-    const content = (step as { content?: unknown } | null)?.content;
-    if (!Array.isArray(content)) continue;
-    for (const part of content as InteractionAudioPart[]) {
+  const audioParts: InteractionAudioPart[] = [];
+  for (const step of root.steps) {
+    const candidate = step as { type?: unknown; content?: unknown } | null;
+    if (!candidate || candidate.type !== 'model_output' || !Array.isArray(candidate.content)) {
+      continue;
+    }
+    for (const part of candidate.content as InteractionAudioPart[]) {
       if (part?.type === 'audio' && typeof part.data === 'string' && part.data.length > 0) {
-        return part;
+        audioParts.push(part);
       }
     }
   }
-  return null;
+
+  if (audioParts.length === 0) {
+    throw new Error('Gemini TTS: no audio data in response');
+  }
+  if (audioParts.length > 1) {
+    throw new Error('Gemini TTS: ambiguous audio response');
+  }
+  return audioParts[0]!;
 }
 
 function mimeEssence(value: unknown): string | null {
@@ -64,13 +86,24 @@ export class GeminiProvider implements TTSProvider {
       throw new Error(`Gemini TTS API error ${response.status}`);
     }
 
-    const payload: unknown = await response.json();
-    const part = findAudioPart(payload);
-    if (!part || typeof part.data !== 'string') {
-      throw new Error('Gemini TTS: no audio data in response');
+    const body = await readBoundedBody(response, MAX_GEMINI_RESPONSE_BYTES);
+    let payload: unknown;
+    try {
+      payload = JSON.parse(body.toString('utf8'));
+    } catch {
+      throw new Error('Gemini TTS: invalid JSON response');
     }
 
-    const audio = Buffer.from(part.data, 'base64');
+    const part = findSingleAudioPart(payload);
+    const encoded = part.data as string;
+    if (encoded.length > MAX_TTS_AUDIO_BASE64_CHARS) {
+      throw new Error('Gemini TTS: audio response too large');
+    }
+    if (!isValidBase64(encoded)) {
+      throw new Error('Gemini TTS: invalid base64 audio data');
+    }
+
+    const audio = Buffer.from(encoded, 'base64');
     if (audio.length === 0) {
       throw new Error('Gemini TTS: empty audio data in response');
     }
