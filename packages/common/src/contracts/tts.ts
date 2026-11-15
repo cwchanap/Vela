@@ -107,18 +107,20 @@ export const TTS_PROVIDER_REGISTRY: Readonly<Record<TtsProvider, TtsProviderInfo
 };
 
 /**
- * Resolve stored (possibly null, legacy or unsupported) settings to the values
- * a request must actually use. New saves are validated at the route; this
- * helper only normalizes what is already persisted.
+ * Resolve stored (possibly null, legacy, unsupported or wrong-type) settings to
+ * the values a request must actually use. DynamoDB returns raw Items, so the
+ * model/voice boundary is `unknown`: only strings are candidates, and anything
+ * else is treated as absent. New saves are validated at the route; this helper
+ * only normalizes what is already persisted.
  */
 export function resolveTtsSelection(
   provider: TtsProvider,
-  model: string | null,
-  voiceId: string | null,
+  model: unknown,
+  voiceId: unknown,
 ): TtsSelection {
   const info = TTS_PROVIDER_REGISTRY[provider];
-  const storedModel = model?.trim() ?? '';
-  const storedVoice = voiceId?.trim() ?? '';
+  const storedModel = typeof model === 'string' ? model.trim() : '';
+  const storedVoice = typeof voiceId === 'string' ? voiceId.trim() : '';
 
   return {
     provider,
