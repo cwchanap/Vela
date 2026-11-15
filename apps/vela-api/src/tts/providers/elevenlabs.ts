@@ -1,5 +1,7 @@
 import { withRequestTimeout } from '../../llm/types';
 import type { TTSProvider, TTSGenerateRequest, TTSGenerateResult } from '../types';
+import { MAX_TTS_AUDIO_BYTES } from '../types';
+import { readBoundedBody } from '../transport';
 
 export class ElevenLabsProvider implements TTSProvider {
   readonly name = 'elevenlabs' as const;
@@ -25,7 +27,7 @@ export class ElevenLabsProvider implements TTSProvider {
     }
 
     return {
-      audioBuffer: Buffer.from(await response.arrayBuffer()),
+      audioBuffer: await readBoundedBody(response, MAX_TTS_AUDIO_BYTES),
       contentType: 'audio/mpeg',
     };
   }

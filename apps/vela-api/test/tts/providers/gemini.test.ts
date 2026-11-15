@@ -20,16 +20,20 @@ function audioPart(data: Buffer, mimeType?: string): AudioPart {
   };
 }
 
-function makeInteractionsResponse(parts: AudioPart[]) {
-  return {
-    ok: true,
-    json: async () => ({
-      id: 'int_1',
-      object: 'interaction',
-      status: 'completed',
-      steps: [{ type: 'model_output', content: parts }],
-    }),
-  };
+function makeResponse(payload: unknown, status = 200): Response {
+  return new Response(JSON.stringify(payload), {
+    status,
+    headers: { 'content-type': 'application/json' },
+  });
+}
+
+function makeInteractionsResponse(parts: AudioPart[], status = 'completed'): Response {
+  return makeResponse({
+    id: 'int_1',
+    object: 'interaction',
+    status,
+    steps: [{ type: 'model_output', content: parts }],
+  });
 }
 
 function validWav(pcm = Buffer.alloc(8)): Buffer {
@@ -149,6 +153,49 @@ describe('GeminiProvider', () => {
     }
   });
 
+  test('rejects a non-completed interaction even when valid audio is present', async () => {
+    for (const status of ['failed', 'incomplete', 'cancelled']) {
+      mockFetch.mockResolvedValueOnce(
+        makeInteractionsResponse([audioPart(validWav(), 'audio/wav')], status),
+      );
+
+      await expect(provider.generate(request)).rejects.toThrow('interaction did not complete');
+    }
+
+    mockFetch.mockResolvedValueOnce(
+      makeResponse({
+        steps: [{ type: 'model_output', content: [audioPart(validWav(), 'audio/wav')] }],
+      }),
+    );
+
+    await expect(provider.generate(request)).rejects.toThrow('interaction did not complete');
+  });
+
+  test('rejects multiple audio parts in one model-output step as ambiguous', async () => {
+    mockFetch.mockResolvedValueOnce(
+      makeInteractionsResponse([
+        audioPart(validWav(), 'audio/wav'),
+        audioPart(validWav(), 'audio/wav'),
+      ]),
+    );
+
+    await expect(provider.generate(request)).rejects.toThrow('ambiguous audio response');
+  });
+
+  test('rejects audio parts across multiple model-output steps as ambiguous', async () => {
+    mockFetch.mockResolvedValueOnce(
+      makeResponse({
+        status: 'completed',
+        steps: [
+          { type: 'model_output', content: [audioPart(validWav(), 'audio/wav')] },
+          { type: 'model_output', content: [audioPart(validWav(), 'audio/wav')] },
+        ],
+      }),
+    );
+
+    await expect(provider.generate(request)).rejects.toThrow('ambiguous audio response');
+  });
+
   test('rejects odd-length non-RIFF bytes', async () => {
     mockFetch.mockResolvedValueOnce(
       makeInteractionsResponse([audioPart(Buffer.alloc(3), 'audio/pcm')]),
@@ -157,15 +204,25 @@ describe('GeminiProvider', () => {
     await expect(provider.generate(request)).rejects.toThrow('invalid PCM16LE');
   });
 
-  test('rejects empty decoded audio', async () => {
-    mockFetch.mockResolvedValueOnce(
-      makeInteractionsResponse([{ type: 'audio', data: '====', mime_type: 'audio/wav' }]),
-    );
+  test('rejects malformed base64 before decoding', async () => {
+    for (const data of ['AQ!!I=', 'AQI', 'AQID!!!!', 'AQIDBA=']) {
+      mockFetch.mockResolvedValueOnce(
+        makeInteractionsResponse([{ type: 'audio', data, mime_type: 'audio/wav' }]),
+      );
 
-    await expect(provider.generate(request)).rejects.toThrow('empty audio data');
+      await expect(provider.generate(request)).rejects.toThrow('invalid base64 audio data');
+    }
   });
 
-  test('rejects audio above the bounded pronunciation buffer', async () => {
+  test('rejects an empty audio part', async () => {
+    mockFetch.mockResolvedValueOnce(
+      makeInteractionsResponse([{ type: 'audio', data: '', mime_type: 'audio/wav' }]),
+    );
+
+    await expect(provider.generate(request)).rejects.toThrow('no audio data');
+  });
+
+  test('rejects encoded audio above the base64 budget', async () => {
     mockFetch.mockResolvedValueOnce(
       makeInteractionsResponse([audioPart(Buffer.alloc(MAX_TTS_AUDIO_BYTES + 2), 'audio/pcm')]),
     );
@@ -173,13 +230,31 @@ describe('GeminiProvider', () => {
     await expect(provider.generate(request)).rejects.toThrow('too large');
   });
 
+  test('stops an oversized streamed response before full allocation', async () => {
+    let cancelled = false;
+    const stream = new ReadableStream({
+      pull(controller) {
+        controller.enqueue(new Uint8Array(64 * 1024));
+      },
+      cancel() {
+        cancelled = true;
+      },
+    });
+    mockFetch.mockResolvedValueOnce(new Response(stream, { status: 200 }));
+
+    const error = await provider.generate(request).catch((failure) => failure);
+
+    expect(error.message).toContain('too large');
+    expect(cancelled).toBe(true);
+  });
+
   test('throws error when no audio data in response', async () => {
-    mockFetch.mockResolvedValueOnce({
-      ok: true,
-      json: async () => ({
+    mockFetch.mockResolvedValueOnce(
+      makeResponse({
+        status: 'completed',
         steps: [{ type: 'model_output', content: [{ type: 'text', text: 'hi' }] }],
       }),
-    });
+    );
 
     await expect(provider.generate(request)).rejects.toThrow(
       'Gemini TTS: no audio data in response',
@@ -187,7 +262,7 @@ describe('GeminiProvider', () => {
   });
 
   test('throws error on non-ok response', async () => {
-    mockFetch.mockResolvedValueOnce({ ok: false, status: 400 });
+    mockFetch.mockResolvedValueOnce(new Response('Bad Request', { status: 400 }));
 
     const failure = provider.generate({ ...request, apiKey: 'bad-key' }).catch((error) => error);
     const error = await failure;

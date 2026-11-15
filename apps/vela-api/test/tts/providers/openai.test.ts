@@ -1,19 +1,53 @@
 import { describe, test, expect, beforeEach, afterEach, vi } from 'bun:test';
 import { EventEmitter } from 'node:events';
 import type { OpenAIRealtimeWS } from 'openai/realtime/ws';
-import { OpenAIProvider } from '../../../src/tts/providers/openai';
-import { MAX_TTS_AUDIO_BYTES } from '../../../src/tts/types';
+import {
+  OpenAIProvider,
+  OPENAI_REALTIME_MAX_PAYLOAD_BYTES,
+} from '../../../src/tts/providers/openai';
+import { MAX_TTS_AUDIO_BASE64_CHARS, MAX_TTS_AUDIO_BYTES } from '../../../src/tts/types';
 import { REQUEST_TIMEOUT_MS } from '../../../src/llm/types';
 
+/**
+ * Models the installed `ws`/SDK behaviour the DOM EventEmitter fake used to
+ * miss: CONNECTING termination emits a transport error asynchronously, and the
+ * SDK turns an error with no listener into an unhandled rejected promise.
+ */
 class FakeSocket extends EventEmitter {
   readyState = 0; // CONNECTING
-  terminate = vi.fn();
+  close = vi.fn();
+  terminate = vi.fn(() => {
+    setImmediate(() => {
+      this.emit('error', new Error('WebSocket was closed before the connection was established'));
+      this.emit('close');
+    });
+  });
 }
 
 class FakeRealtime extends EventEmitter {
   socket = new FakeSocket();
   send = vi.fn();
-  close = vi.fn();
+  close = vi.fn(() => {
+    this.socket.close();
+  });
+
+  constructor() {
+    super();
+    this.socket.on('error', (error: Error) => this.forwardSocketError(error));
+  }
+
+  /** Mirrors the SDK's no-listener unhandled rejection. */
+  emitLateError(error: Error) {
+    this.forwardSocketError(error);
+  }
+
+  private forwardSocketError(error: Error) {
+    if (this.listenerCount('error') === 0) {
+      void Promise.reject(error);
+      return;
+    }
+    this.emit('error', error);
+  }
 }
 
 const request = {
@@ -24,6 +58,10 @@ const request = {
 };
 
 const tick = () => new Promise<void>((resolve) => setImmediate(resolve));
+const drain = async () => {
+  await tick();
+  await tick();
+};
 
 function captureRejection(promise: Promise<unknown>): Promise<any> {
   return promise.then(
@@ -34,38 +72,71 @@ function captureRejection(promise: Promise<unknown>): Promise<any> {
   );
 }
 
+async function collectUnhandled(run: () => Promise<void>): Promise<unknown[]> {
+  const unhandled: unknown[] = [];
+  const onUnhandled = (reason: unknown) => unhandled.push(reason);
+  process.on('unhandledRejection', onUnhandled);
+  try {
+    await run();
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  } finally {
+    process.off('unhandledRejection', onUnhandled);
+  }
+  return unhandled;
+}
+
+function emitDelta(fake: FakeRealtime, pcm: Buffer) {
+  fake.emit('response.output_audio.delta', {
+    type: 'response.output_audio.delta',
+    delta: pcm.toString('base64'),
+  });
+}
+
+function emitTranscript(fake: FakeRealtime, transcript: string) {
+  fake.emit('response.output_audio_transcript.done', {
+    type: 'response.output_audio_transcript.done',
+    transcript,
+  });
+}
+
+function emitDone(
+  fake: FakeRealtime,
+  options: {
+    status?: 'completed' | 'failed' | 'incomplete';
+    output?: unknown;
+  } = {},
+) {
+  fake.emit('response.done', {
+    type: 'response.done',
+    response: { status: options.status ?? 'completed', output: options.output ?? [] },
+  });
+}
+
+async function openSession(fake: FakeRealtime) {
+  await tick();
+  fake.emit('session.created', { type: 'session.created' });
+  fake.emit('session.updated', { type: 'session.updated' });
+}
+
 function emitCompleted(
   fake: FakeRealtime,
   options: {
     pcm?: Buffer;
+    pcmChunks?: Buffer[];
     transcript?: string | null;
-    status?: 'completed' | 'failed';
-    output?: unknown[];
+    status?: 'completed' | 'failed' | 'incomplete';
+    output?: unknown;
   },
 ) {
-  const { pcm, transcript, status = 'completed', output = [] } = options;
-  if (pcm && pcm.length > 0) {
-    fake.emit('response.output_audio.delta', {
-      type: 'response.output_audio.delta',
-      delta: pcm.toString('base64'),
-    });
-  }
-  if (transcript !== null && transcript !== undefined) {
-    fake.emit('response.output_audio_transcript.done', {
-      type: 'response.output_audio_transcript.done',
-      transcript,
-    });
-  }
-  fake.emit('response.done', {
-    type: 'response.done',
-    response: { status, output },
-  });
+  const { pcm, pcmChunks = [], transcript, status, output } = options;
+  if (pcm && pcm.length > 0) emitDelta(fake, pcm);
+  for (const chunk of pcmChunks) emitDelta(fake, chunk);
+  if (transcript !== null && transcript !== undefined) emitTranscript(fake, transcript);
+  emitDone(fake, { status, output });
 }
 
 async function completeSession(fake: FakeRealtime, options: Parameters<typeof emitCompleted>[1]) {
-  await tick();
-  fake.emit('session.created', { type: 'session.created' });
-  fake.emit('session.updated', { type: 'session.updated' });
+  await openSession(fake);
   emitCompleted(fake, options);
 }
 
@@ -86,6 +157,11 @@ describe('OpenAIProvider', () => {
 
   test('has correct name', () => {
     expect(provider.name).toBe('openai');
+  });
+
+  test('exposes a finite ws message cap above the encoded audio envelope', () => {
+    expect(Number.isFinite(OPENAI_REALTIME_MAX_PAYLOAD_BYTES)).toBe(true);
+    expect(OPENAI_REALTIME_MAX_PAYLOAD_BYTES).toBe(MAX_TTS_AUDIO_BASE64_CHARS + 64 * 1024);
   });
 
   test('does not send while the socket is CONNECTING and opens on session.created', async () => {
@@ -163,21 +239,27 @@ describe('OpenAIProvider', () => {
     await generation;
   });
 
-  test('returns a 24 kHz WAV on a completed response and cleans up', async () => {
-    const pcm = Buffer.from([1, 2, 3, 4, 5, 6]);
+  test('returns a 24 kHz WAV with ordered chunks and finalizes listeners on close', async () => {
+    const pcmChunks = [Buffer.from([1, 2]), Buffer.from([3, 4, 5, 6])];
     const generation = provider.generate({ ...request, text: 'ひらがな' });
-    await completeSession(fake, { pcm, transcript: 'ひらがな' });
+    await completeSession(fake, { pcmChunks, transcript: 'ひらがな' });
 
     const result = await generation;
 
     expect(result.contentType).toBe('audio/wav');
     expect(result.audioBuffer.subarray(0, 4).toString('ascii')).toBe('RIFF');
     expect(result.audioBuffer.readUInt32LE(24)).toBe(24_000);
-    expect(result.audioBuffer.readUInt32LE(40)).toBe(pcm.length);
-    expect(result.audioBuffer.subarray(44).equals(pcm)).toBe(true);
+    expect(result.audioBuffer.readUInt32LE(40)).toBe(6);
+    expect(result.audioBuffer.subarray(44).equals(Buffer.concat(pcmChunks))).toBe(true);
     expect(fake.close).toHaveBeenCalledTimes(1);
     expect(fake.socket.terminate).not.toHaveBeenCalled();
     expect(fake.listenerCount('response.done')).toBe(0);
+    // The SDK error/transport-close listeners stay until the socket closes.
+    expect(fake.listenerCount('error')).toBe(1);
+    expect(fake.socket.listenerCount('close')).toBe(1);
+
+    fake.socket.emit('close');
+
     expect(fake.listenerCount('error')).toBe(0);
     expect(fake.socket.listenerCount('close')).toBe(0);
   });
@@ -202,6 +284,15 @@ describe('OpenAIProvider', () => {
     }
   });
 
+  test('accepts a kana transcript for kanji input because equality is not required', async () => {
+    const generation = provider.generate({ ...request, text: '漢字' });
+    await completeSession(fake, { pcm: Buffer.from([1, 2]), transcript: 'かんじ' });
+
+    const result = await generation;
+
+    expect(result.contentType).toBe('audio/wav');
+  });
+
   test('fails promptly when the underlying socket closes before completion', async () => {
     const generation = provider.generate(request);
     const rejection = captureRejection(generation);
@@ -211,37 +302,184 @@ describe('OpenAIProvider', () => {
 
     const error = await rejection;
     expect(error.message).toContain('socket closed before response completed');
-    expect(fake.socket.terminate).toHaveBeenCalledTimes(1);
+    // The socket is already closed, so it must not schedule another teardown.
+    expect(fake.socket.terminate).not.toHaveBeenCalled();
     expect(fake.listenerCount('error')).toBe(0);
+    expect(fake.socket.listenerCount('close')).toBe(0);
   });
 
-  test('rejects on an SDK error', async () => {
+  test('rejects on an SDK error and retains the listener through asynchronous teardown', async () => {
     const generation = provider.generate(request);
     const rejection = captureRejection(generation);
-    await tick();
 
-    fake.emit('error', new Error('upstream 500 with secret material'));
+    const unhandled = await collectUnhandled(async () => {
+      await tick();
+      fake.emit('error', new Error('upstream 500 with secret material'));
 
-    const error = await rejection;
-    expect(error.message).toBe('OpenAI Realtime TTS session failed');
-    expect(fake.socket.terminate).toHaveBeenCalledTimes(1);
+      const error = await rejection;
+      expect(error.message).toBe('OpenAI Realtime TTS session failed');
+      expect(fake.socket.terminate).toHaveBeenCalledTimes(1);
+      expect(fake.listenerCount('error')).toBe(1);
+
+      await drain();
+      expect(fake.listenerCount('error')).toBe(0);
+      expect(fake.socket.listenerCount('close')).toBe(0);
+    });
+
+    expect(unhandled).toEqual([]);
   });
 
-  test('bridges the shared 25 s deadline to socket cleanup and a TimeoutError', async () => {
+  test('bridges the shared 25 s deadline to a CONNECTING terminate without unhandled rejections', async () => {
     const controller = new AbortController();
     const timeoutSpy = vi.spyOn(AbortSignal, 'timeout').mockReturnValue(controller.signal);
     const generation = provider.generate(request);
     const rejection = captureRejection(generation);
-    await tick();
-    fake.emit('session.created', { type: 'session.created' });
 
-    controller.abort();
+    const unhandled = await collectUnhandled(async () => {
+      await tick();
+      controller.abort();
+
+      const error = await rejection;
+      expect(error.name).toBe('TimeoutError');
+      expect(timeoutSpy).toHaveBeenCalledWith(REQUEST_TIMEOUT_MS);
+      expect(fake.socket.terminate).toHaveBeenCalledTimes(1);
+      // ws emits the handshake-abort error asynchronously; the SDK listener
+      // must remain attached until its close event.
+      expect(fake.listenerCount('error')).toBe(1);
+
+      await drain();
+      expect(fake.listenerCount('error')).toBe(0);
+      expect(fake.socket.listenerCount('close')).toBe(0);
+    });
+
+    expect(unhandled).toEqual([]);
+  });
+
+  test('keeps the listener through a late error after success and does not log it', async () => {
+    const consoleError = vi.spyOn(console, 'error');
+    const generation = provider.generate({ ...request, text: 'ひらがな' });
+    await completeSession(fake, { pcm: Buffer.from([1, 2]), transcript: 'ひらがな' });
+    await generation;
+
+    expect(fake.listenerCount('error')).toBe(1);
+
+    const unhandled = await collectUnhandled(async () => {
+      fake.emitLateError(new Error('late upstream secret'));
+      expect(fake.listenerCount('error')).toBe(1);
+
+      fake.socket.emit('close');
+      expect(fake.listenerCount('error')).toBe(0);
+      expect(fake.socket.listenerCount('close')).toBe(0);
+    });
+
+    expect(unhandled).toEqual([]);
+    expect(consoleError).not.toHaveBeenCalled();
+  });
+
+  test('rejects a malformed audio delta without throwing out of the emitter', async () => {
+    const generation = provider.generate(request);
+    const rejection = captureRejection(generation);
+    await openSession(fake);
+
+    fake.emit('response.output_audio.delta', {
+      type: 'response.output_audio.delta',
+      delta: null,
+    } as any);
 
     const error = await rejection;
-    expect(error.name).toBe('TimeoutError');
-    expect(timeoutSpy).toHaveBeenCalledWith(REQUEST_TIMEOUT_MS);
+    expect(error.message).toContain('malformed audio event');
     expect(fake.socket.terminate).toHaveBeenCalledTimes(1);
-    expect(fake.listenerCount('response.done')).toBe(0);
+    await drain();
+    expect(fake.listenerCount('error')).toBe(0);
+  });
+
+  test('rejects a non-string transcript event', async () => {
+    const generation = provider.generate(request);
+    const rejection = captureRejection(generation);
+    await openSession(fake);
+
+    fake.emit('response.output_audio_transcript.done', {
+      type: 'response.output_audio_transcript.done',
+      transcript: 42,
+    } as any);
+
+    const error = await rejection;
+    expect(error.message).toContain('malformed transcript event');
+    await drain();
+    expect(fake.listenerCount('error')).toBe(0);
+  });
+
+  test('rejects a terminal event with no response object', async () => {
+    const generation = provider.generate(request);
+    const rejection = captureRejection(generation);
+    await openSession(fake);
+
+    fake.emit('response.done', { type: 'response.done' } as any);
+
+    const error = await rejection;
+    expect(error.message).toContain('malformed done event');
+    await drain();
+    expect(fake.listenerCount('error')).toBe(0);
+  });
+
+  test('rejects malformed fallback output without throwing', async () => {
+    const generation = provider.generate(request);
+    const rejection = captureRejection(generation);
+    await openSession(fake);
+    emitDelta(fake, Buffer.from([1, 2]));
+    emitDone(fake, { output: 'not-an-array' });
+
+    const error = await rejection;
+    expect(error.message).toContain('transcript');
+    await drain();
+    expect(fake.listenerCount('error')).toBe(0);
+  });
+
+  test('rejects malformed base64 audio before decoding', async () => {
+    const generation = provider.generate(request);
+    const rejection = captureRejection(generation);
+    await openSession(fake);
+
+    fake.emit('response.output_audio.delta', {
+      type: 'response.output_audio.delta',
+      delta: 'AQ!!I=',
+    });
+
+    const error = await rejection;
+    expect(error.message).toContain('malformed base64');
+    await drain();
+    expect(fake.listenerCount('error')).toBe(0);
+  });
+
+  test('rejects one encoded delta above the base64 budget before decoding', async () => {
+    const generation = provider.generate(request);
+    const rejection = captureRejection(generation);
+    await openSession(fake);
+
+    fake.emit('response.output_audio.delta', {
+      type: 'response.output_audio.delta',
+      delta: 'A'.repeat(MAX_TTS_AUDIO_BASE64_CHARS + 4),
+    });
+
+    const error = await rejection;
+    expect(error.message).toContain('too large');
+    await drain();
+    expect(fake.listenerCount('error')).toBe(0);
+  });
+
+  test('rejects cumulative decoded audio above the bounded buffer', async () => {
+    const chunk = Buffer.alloc(Math.floor(MAX_TTS_AUDIO_BYTES / 2) + 2);
+    const generation = provider.generate(request);
+    const rejection = captureRejection(generation);
+    await openSession(fake);
+
+    emitDelta(fake, chunk);
+    emitDelta(fake, chunk);
+
+    const error = await rejection;
+    expect(error.message).toContain('too large');
+    await drain();
+    expect(fake.listenerCount('error')).toBe(0);
   });
 
   test('rejects a completed response with empty audio', async () => {
@@ -297,21 +535,5 @@ describe('OpenAIProvider', () => {
 
     const error = await rejection;
     expect(error.message).toContain('did not complete');
-  });
-
-  test('rejects audio above the bounded pronunciation buffer', async () => {
-    const generation = provider.generate(request);
-    const rejection = captureRejection(generation);
-    await tick();
-    fake.emit('session.created', { type: 'session.created' });
-    fake.emit('session.updated', { type: 'session.updated' });
-    fake.emit('response.output_audio.delta', {
-      type: 'response.output_audio.delta',
-      delta: Buffer.alloc(MAX_TTS_AUDIO_BYTES + 2).toString('base64'),
-    });
-
-    const error = await rejection;
-    expect(error.message).toContain('too large');
-    expect(fake.socket.terminate).toHaveBeenCalledTimes(1);
   });
 });
