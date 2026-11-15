@@ -735,7 +735,8 @@ describe('TTS Route', () => {
       const notFoundError = new Error('Not found');
       (notFoundError as any).name = 'NotFound';
       mockS3Client.send.mockRejectedValueOnce(notFoundError);
-      const timeoutError = new Error('Request timeout: TTS generation took too long');
+      const timeoutError = new Error('The operation was aborted');
+      timeoutError.name = 'TimeoutError';
       mockTTSProvider.generate.mockRejectedValueOnce(timeoutError);
 
       const app = createTestApp();
@@ -749,6 +750,33 @@ describe('TTS Route', () => {
       expect(await res.json()).toEqual({
         error: 'TTS generation timed out',
         code: 'tts_generation_timeout',
+      });
+    });
+
+    test('returns 500 when a provider error only mentions timeout in its message', async () => {
+      mockTtsSettingsDB.get.mockResolvedValueOnce({
+        user_id: 'test-user-id',
+        provider: 'elevenlabs',
+        api_key: 'test-api-key',
+        voice_id: null,
+        model: null,
+      });
+      const notFoundError = new Error('Not found');
+      (notFoundError as any).name = 'NotFound';
+      mockS3Client.send.mockRejectedValueOnce(notFoundError);
+      mockTTSProvider.generate.mockRejectedValueOnce(new Error('upstream said timeout'));
+
+      const app = createTestApp();
+      const res = await app.request('/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ vocabularyId: 'vocab-1', text: '日本語' }),
+      });
+
+      expect(res.status).toBe(500);
+      expect(await res.json()).toEqual({
+        error: 'Failed to generate TTS audio',
+        code: 'tts_generation_failed',
       });
     });
 

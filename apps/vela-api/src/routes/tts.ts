@@ -239,8 +239,9 @@ const createTTSRoute = (env: Env) => {
           model: selection.model,
         });
       } catch (error: any) {
-        const errorMessage = error instanceof Error ? error.message : String(error);
-        if (errorMessage.toLowerCase().includes('timeout')) {
+        // Named class, never a message substring: upstream bodies commonly
+        // contain the word "timeout" and must not be reclassified.
+        if (extractErrorName(error) === 'TimeoutError') {
           console.error('TTS provider timeout', {
             ...sanitizeError(error, 'provider_timeout'),
             provider,

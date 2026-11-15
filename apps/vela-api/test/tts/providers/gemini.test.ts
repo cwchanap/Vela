@@ -1,29 +1,47 @@
 import { describe, test, expect, beforeEach, afterEach, vi } from 'bun:test';
 import { GeminiProvider } from '../../../src/tts/providers/gemini';
+import { MAX_TTS_AUDIO_BYTES } from '../../../src/tts/types';
+import { REQUEST_TIMEOUT_MS } from '../../../src/llm/types';
+import { pcm16ToWav } from '../../../src/tts/wav';
 
 const originalFetch = globalThis.fetch;
 
-function makeGeminiResponse(b64Data: string, mimeType = 'audio/mpeg') {
+interface AudioPart {
+  type: string;
+  data: string;
+  mime_type?: string;
+}
+
+function audioPart(data: Buffer, mimeType?: string): AudioPart {
+  return {
+    type: 'audio',
+    data: data.toString('base64'),
+    ...(mimeType === undefined ? {} : { mime_type: mimeType }),
+  };
+}
+
+function makeInteractionsResponse(parts: AudioPart[]) {
   return {
     ok: true,
     json: async () => ({
-      candidates: [
-        {
-          content: {
-            parts: [
-              {
-                inlineData: {
-                  data: b64Data,
-                  mimeType,
-                },
-              },
-            ],
-          },
-        },
-      ],
+      id: 'int_1',
+      object: 'interaction',
+      status: 'completed',
+      steps: [{ type: 'model_output', content: parts }],
     }),
   };
 }
+
+function validWav(pcm = Buffer.alloc(8)): Buffer {
+  return pcm16ToWav(pcm, 24_000);
+}
+
+const request = {
+  text: '日本語',
+  apiKey: 'test-key',
+  voiceId: 'Kore',
+  model: 'gemini-3.8-flash-tts',
+};
 
 describe('GeminiProvider', () => {
   let provider: GeminiProvider;
@@ -43,178 +61,162 @@ describe('GeminiProvider', () => {
     expect(provider.name).toBe('gemini');
   });
 
-  test('uses provided voice and model', async () => {
-    const b64 = Buffer.from('audio-data').toString('base64');
-    mockFetch.mockResolvedValueOnce(makeGeminiResponse(b64));
+  for (const model of ['gemini-3.8-flash-tts', 'gemini-3.8-flash-lite-tts']) {
+    test(`posts the Interactions contract for ${model}`, async () => {
+      mockFetch.mockResolvedValueOnce(
+        makeInteractionsResponse([audioPart(validWav(), 'audio/wav')]),
+      );
 
-    await provider.generate({
-      text: '日本語',
-      apiKey: 'test-key',
-      voiceId: 'Zephyr',
-      model: 'gemini-3.8-flash-lite-tts',
+      const result = await provider.generate({ ...request, model });
+
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+      const [url, init] = mockFetch.mock.calls[0] as [
+        string,
+        { method: string; headers: Record<string, string>; body: string; signal?: AbortSignal },
+      ];
+      expect(url).toBe('https://generativelanguage.googleapis.com/v1beta/interactions');
+      expect(init.method).toBe('POST');
+      expect(init.headers).toMatchObject({
+        'Content-Type': 'application/json',
+        'x-goog-api-key': 'test-key',
+      });
+      expect(JSON.parse(init.body as string)).toEqual({
+        model,
+        input: [{ type: 'user_input', content: [{ type: 'text', text: '日本語' }] }],
+        response_format: { type: 'audio' },
+        generation_config: { speech_config: [{ voice: 'Kore' }] },
+      });
+      expect(result.contentType).toBe('audio/wav');
     });
+  }
 
-    expect(mockFetch).toHaveBeenCalledWith(
-      expect.stringContaining('gemini-3.8-flash-lite-tts'),
-      expect.any(Object),
-    );
-    const callBody = JSON.parse((mockFetch.mock.calls[0] as any[])[1].body);
-    expect(callBody.generationConfig.speechConfig.voiceConfig.prebuiltVoiceConfig.voiceName).toBe(
-      'Zephyr',
-    );
-  });
+  test('passes a complete RIFF/WAVE file through unchanged, including trailing chunks', async () => {
+    const wav = validWav(Buffer.from([1, 2, 3, 4]));
+    const withC2pa = Buffer.concat([wav, Buffer.from('C2PA trailing manifest bytes')]);
+    mockFetch.mockResolvedValueOnce(makeInteractionsResponse([audioPart(withC2pa, 'audio/wav')]));
 
-  test('returns audio buffer from base64 response', async () => {
-    const audioData = Buffer.from('hello audio');
-    const b64 = audioData.toString('base64');
-    mockFetch.mockResolvedValueOnce(makeGeminiResponse(b64));
-
-    const result = await provider.generate({
-      text: 'hello',
-      apiKey: 'key',
-      voiceId: 'Kore',
-      model: 'gemini-3.8-flash-tts',
-    });
-
-    expect(result.audioBuffer).toBeInstanceOf(Buffer);
-    expect(result.audioBuffer.toString()).toBe('hello audio');
-  });
-
-  test('resolves content type from mimeType audio/ogg in response', async () => {
-    const b64 = Buffer.from('data').toString('base64');
-    mockFetch.mockResolvedValueOnce(makeGeminiResponse(b64, 'audio/ogg'));
-
-    const result = await provider.generate({
-      text: 'hello',
-      apiKey: 'key',
-      voiceId: 'Kore',
-      model: 'gemini-3.8-flash-tts',
-    });
-
-    expect(result.contentType).toBe('audio/ogg');
-  });
-
-  test('resolves content type from mimeType audio/wav in response', async () => {
-    const b64 = Buffer.from('data').toString('base64');
-    mockFetch.mockResolvedValueOnce(makeGeminiResponse(b64, 'audio/wav'));
-
-    const result = await provider.generate({
-      text: 'hello',
-      apiKey: 'key',
-      voiceId: 'Kore',
-      model: 'gemini-3.8-flash-tts',
-    });
+    const result = await provider.generate(request);
 
     expect(result.contentType).toBe('audio/wav');
+    expect(result.audioBuffer.equals(withC2pa)).toBe(true);
   });
 
-  test('falls back to audio/mpeg for unknown content type', async () => {
-    const b64 = Buffer.from('data').toString('base64');
-    mockFetch.mockResolvedValueOnce({
-      ok: true,
-      json: async () => ({
-        candidates: [
-          {
-            content: {
-              parts: [
-                {
-                  inlineData: {
-                    data: b64,
-                    mimeType: 'audio/completely-unknown-format',
-                  },
-                },
-              ],
-            },
-          },
-        ],
-      }),
-    });
+  test('rejects malformed RIFF instead of wrapping it as PCM', async () => {
+    const tooShort = Buffer.concat([Buffer.from('RIFF'), Buffer.alloc(20)]);
+    const notWave = Buffer.alloc(48);
+    notWave.write('RIFF', 0, 'ascii');
+    notWave.write('XXXX', 8, 'ascii');
 
-    const result = await provider.generate({
-      text: 'hello',
-      apiKey: 'key',
-      voiceId: 'Kore',
-      model: 'gemini-3.8-flash-tts',
-    });
+    mockFetch
+      .mockResolvedValueOnce(makeInteractionsResponse([audioPart(tooShort, 'audio/wav')]))
+      .mockResolvedValueOnce(makeInteractionsResponse([audioPart(notWave, 'audio/wav')]));
 
-    expect(result.contentType).toBe('audio/mpeg');
+    await expect(provider.generate(request)).rejects.toThrow('malformed WAV');
+    await expect(provider.generate(request)).rejects.toThrow('malformed WAV');
+  });
+
+  test('wraps non-RIFF PCM16LE with accepted PCM/L16 MIME metadata', async () => {
+    for (const mimeType of ['audio/pcm', 'audio/pcm; rate=24000', 'AUDIO/L16']) {
+      const pcm = Buffer.from([1, 2, 3, 4]);
+      mockFetch.mockResolvedValueOnce(makeInteractionsResponse([audioPart(pcm, mimeType)]));
+
+      const result = await provider.generate(request);
+
+      expect(result.contentType).toBe('audio/wav');
+      expect(result.audioBuffer.subarray(0, 4).toString('ascii')).toBe('RIFF');
+      expect(result.audioBuffer.length).toBe(pcm.length + 44);
+      expect(result.audioBuffer.subarray(44).equals(pcm)).toBe(true);
+    }
+  });
+
+  test('rejects non-RIFF audio without confirmed PCM metadata', async () => {
+    const pcm = Buffer.alloc(4);
+    mockFetch
+      .mockResolvedValueOnce(makeInteractionsResponse([audioPart(pcm)]))
+      .mockResolvedValueOnce(makeInteractionsResponse([audioPart(pcm, 'audio/wav')]));
+
+    await expect(provider.generate(request)).rejects.toThrow('missing MIME type');
+    await expect(provider.generate(request)).rejects.toThrow('unsupported audio format');
+  });
+
+  test('rejects explicitly compressed MIME types', async () => {
+    for (const mimeType of ['audio/mpeg', 'audio/mp3', 'audio/ogg', 'audio/opus']) {
+      mockFetch.mockResolvedValueOnce(
+        makeInteractionsResponse([audioPart(Buffer.alloc(4), mimeType)]),
+      );
+
+      await expect(provider.generate(request)).rejects.toThrow('unsupported audio format');
+    }
+  });
+
+  test('rejects odd-length non-RIFF bytes', async () => {
+    mockFetch.mockResolvedValueOnce(
+      makeInteractionsResponse([audioPart(Buffer.alloc(3), 'audio/pcm')]),
+    );
+
+    await expect(provider.generate(request)).rejects.toThrow('invalid PCM16LE');
+  });
+
+  test('rejects empty decoded audio', async () => {
+    mockFetch.mockResolvedValueOnce(
+      makeInteractionsResponse([{ type: 'audio', data: '====', mime_type: 'audio/wav' }]),
+    );
+
+    await expect(provider.generate(request)).rejects.toThrow('empty audio data');
+  });
+
+  test('rejects audio above the bounded pronunciation buffer', async () => {
+    mockFetch.mockResolvedValueOnce(
+      makeInteractionsResponse([audioPart(Buffer.alloc(MAX_TTS_AUDIO_BYTES + 2), 'audio/pcm')]),
+    );
+
+    await expect(provider.generate(request)).rejects.toThrow('too large');
   });
 
   test('throws error when no audio data in response', async () => {
     mockFetch.mockResolvedValueOnce({
       ok: true,
       json: async () => ({
-        candidates: [{ content: { parts: [{ text: 'no audio here' }] } }],
+        steps: [{ type: 'model_output', content: [{ type: 'text', text: 'hi' }] }],
       }),
     });
 
-    await expect(
-      provider.generate({
-        text: 'hello',
-        apiKey: 'key',
-        voiceId: 'Kore',
-        model: 'gemini-3.8-flash-tts',
-      }),
-    ).rejects.toThrow('Gemini TTS: no audio data in response');
+    await expect(provider.generate(request)).rejects.toThrow(
+      'Gemini TTS: no audio data in response',
+    );
   });
 
   test('throws error on non-ok response', async () => {
-    mockFetch.mockResolvedValueOnce({
-      ok: false,
-      status: 400,
-      text: async () => 'Bad Request',
-    });
+    mockFetch.mockResolvedValueOnce({ ok: false, status: 400 });
 
-    await expect(
-      provider.generate({
-        text: 'hello',
-        apiKey: 'bad-key',
-        voiceId: 'Kore',
-        model: 'gemini-3.8-flash-tts',
-      }),
-    ).rejects.toThrow('Gemini TTS API error 400');
+    const failure = provider.generate({ ...request, apiKey: 'bad-key' }).catch((error) => error);
+    const error = await failure;
+
+    expect(error.message).toContain('Gemini TTS API error 400');
   });
 
-  test('throws timeout error on AbortError', async () => {
-    const abortError = new Error('Aborted');
-    abortError.name = 'AbortError';
-    mockFetch.mockRejectedValueOnce(abortError);
+  test('applies the shared 25 s deadline and propagates TimeoutError', async () => {
+    const timeoutSpy = vi.spyOn(AbortSignal, 'timeout');
+    const timeoutError = new Error('The operation timed out');
+    timeoutError.name = 'TimeoutError';
+    mockFetch.mockImplementationOnce(async (_url: string, init: { signal?: AbortSignal }) => {
+      expect(init.signal).toBeInstanceOf(AbortSignal);
+      throw timeoutError;
+    });
 
-    await expect(
-      provider.generate({
-        text: 'hello',
-        apiKey: 'test-key',
-        voiceId: 'Kore',
-        model: 'gemini-3.8-flash-tts',
-      }),
-    ).rejects.toThrow('Request timeout');
+    try {
+      const error = await provider.generate(request).catch((failure) => failure);
+
+      expect(error.name).toBe('TimeoutError');
+      expect(timeoutSpy).toHaveBeenCalledWith(REQUEST_TIMEOUT_MS);
+    } finally {
+      timeoutSpy.mockRestore();
+    }
   });
 
   test('rethrows non-abort errors', async () => {
     mockFetch.mockRejectedValueOnce(new Error('DNS resolution failed'));
 
-    await expect(
-      provider.generate({
-        text: 'hello',
-        apiKey: 'test-key',
-        voiceId: 'Kore',
-        model: 'gemini-3.8-flash-tts',
-      }),
-    ).rejects.toThrow('DNS resolution failed');
-  });
-
-  test('sends AUDIO responseModalities in request body', async () => {
-    const b64 = Buffer.from('data').toString('base64');
-    mockFetch.mockResolvedValueOnce(makeGeminiResponse(b64));
-
-    await provider.generate({
-      text: 'hello',
-      apiKey: 'key',
-      voiceId: 'Kore',
-      model: 'gemini-3.8-flash-tts',
-    });
-
-    const callBody = JSON.parse((mockFetch.mock.calls[0] as any[])[1].body);
-    expect(callBody.generationConfig.responseModalities).toContain('AUDIO');
+    await expect(provider.generate(request)).rejects.toThrow('DNS resolution failed');
   });
 });
