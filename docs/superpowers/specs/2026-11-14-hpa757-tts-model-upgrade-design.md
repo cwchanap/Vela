@@ -1,6 +1,6 @@
 # HPA-757 — TTS Model Upgrade (Design Spec)
 
-**Status:** Proposed, documentation-only draft PR (implementation follows in this same PR)  
+**Status:** Implementation present on this draft PR; acceptance incomplete — macOS/Windows browser and iOS Safari/WKWebView playback, live deployed S3/DynamoDB checks, pronunciation sign-off and release readiness remain outstanding.  
 **Linear:** https://linear.app/cwchanap/issue/HPA-757/update-tts-models-and-move-openai-tts-to-the-realtime-api  
 **Dependency:** HPA-755 is Done; its extracted `TtsSection` exists on `main`.  
 **Baseline:** `main` inspected on 2026-11-14 (`b1baf1c`).
@@ -52,13 +52,13 @@ Keep `POST https://api.elevenlabs.io/v1/text-to-speech/{voiceId}` and MP3 output
 
 ### Gemini
 
-The existing adapter uses the 2.5 `models/{id}:generateContent` contract; switching to 3.8 needs the documented AI Studio API-key `POST https://generativelanguage.googleapis.com/v1beta/interactions` JSON contract: `input`, `response_format:{type:'audio'}`, and `generation_config.speech_config`. Decode `output_audio.data`. Both `gemini-3.8-flash-tts` and Flash-Lite use this same contract.
+The existing adapter uses the 2.5 `models/{id}:generateContent` contract; switching to 3.8 needs the documented AI Studio API-key `POST https://generativelanguage.googleapis.com/v1beta/interactions` JSON contract: `input`, `response_format:{type:'audio'}`, and `generation_config.speech_config`. The observed completed REST response carries audio in `steps[].content[]`: exactly one `model_output` step content part of `type:"audio"` with base64 `data` and a `mime_type` field. There is no top-level `output_audio.data` object — that is an SDK-only convenience (Step 0 evidence, `.superpowers/sdd/2026-11-14-hpa757-tts-model-upgrade/task-0-report.md`, "Gemini results"). Both `gemini-3.8-flash-tts` and Flash-Lite use this same contract. Accept only a completed interaction containing exactly one model-output audio part; zero or multiple parts is an ambiguous response.
 
-Unary 3.8 output is **documented** as complete 24 kHz mono RIFF/WAV; save valid WAV unchanged, or use the shared `pcm16ToWav(buffer, 24_000)` helper only for a credible raw PCM16LE response. **Raw PCM has no magic bytes**, so byte parity alone cannot distinguish it from compressed audio. Apply this small decision rule to the decoded `output_audio.data`:
+Unary 3.8 output was **observed** as a complete 24 kHz mono RIFF/WAV part with `mime_type: "audio/wav"` (including a trailing C2PA chunk after the `data` chunk); save valid WAV unchanged, or use the shared `pcm16ToWav(buffer, 24_000)` helper only for a credible raw PCM16LE part. **Raw PCM has no magic bytes**, so byte parity alone cannot distinguish it from compressed audio. Apply this small decision rule to the single decoded audio part:
 
 1. Reject an empty buffer.
 2. If its first four bytes are `RIFF`, require `buffer.length > 44` and bytes 8–11 equal `WAVE`; malformed RIFF must fail (never attempt to wrap it as PCM).
-3. Otherwise, require an even byte length and audio response MIME metadata, **when present**, matching `audio/pcm` or `audio/L16` (ignore case and permit MIME parameters). If metadata is absent, accept raw PCM only if the Step 0 live Gemini 3.8 test confirms that this specific response path returns headerless PCM; otherwise fail the ambiguous result. Reject explicitly compressed/unsupported MIME types, including MP3/OGG.
+3. Otherwise, require an even byte length and the part's `mime_type` matching `audio/pcm` or `audio/L16` (ignore case and permit MIME parameters). **Absent-MIME raw PCM is disabled**: no live Gemini 3.8 response returned headerless PCM, so a non-RIFF part without a PCM/L16 `mime_type` must fail as ambiguous rather than be wrapped. Reject explicitly compressed/unsupported MIME types, including MP3/OGG.
 
 Return `audio/wav` for both supported representations. Drop the old format-to-content-type map and obsolete tests, and remove the unused `outputFormat` request property. Keep the MIME check local to this adapter; do not reinstate the old generic MIME registry.
 
@@ -104,7 +104,7 @@ OpenAI `gpt-realtime-2.1-mini` published pricing at planning time is about **$0.
 
 ## Verification and acceptance
 
-**Automated:** shared registry/resolver Bun tests; provider tests including Gemini Interactions response shape, valid/malformed RIFF, metadata-confirmed PCM, compressed MIME rejection and absent-metadata behavior; SDK-mocked OpenAI Realtime `CONNECTING` handshake, `session.created`, underlying `rt.socket` premature close, error/timeout/transcript checks and WAV headers; route tests for same-provider key retention, model validation, effective settings and S3 key separation; Vitest `TtsSection` model/voice/save tests. Check errors are sanitized and do not store a rejected transcript. Extend the **existing** `apps/vela/e2e/llm-settings.spec.ts` TTS regression case using its `e2e/fixtures/syntheticAuth.ts` mock: test blank-key save for `hasApiKey:true` on the same provider, preserve keys in the mock state, and retain the unconfigured/save-disabled case. No new TTS Playwright suite/framework.
+**Automated:** shared registry/resolver Bun tests; provider tests including Gemini Interactions response shape, valid/malformed RIFF, metadata-confirmed PCM, absent-MIME rejection, compressed MIME rejection; SDK-mocked OpenAI Realtime `CONNECTING` handshake, `session.created`, underlying `rt.socket` premature close, error/timeout/transcript checks and WAV headers; route tests for same-provider key retention, model validation, effective settings and S3 key separation; Vitest `TtsSection` model/voice/save tests. Check errors are sanitized and do not store a rejected transcript. Extend the **existing** `apps/vela/e2e/llm-settings.spec.ts` TTS regression case using its `e2e/fixtures/syntheticAuth.ts` mock: test blank-key save for `hasApiKey:true` on the same provider, preserve keys in the mock state, and retain the unconfigured/save-disabled case. No new TTS Playwright suite/framework.
 
 **Build checks:** first run **`bun run build --filter=@vela/common`** after adding the new contract subpath, so `packages/common/dist/contracts/tts.*` exists before API typecheck and Lambda bundling. Then run API tests/typecheck, web tests/build, and crucially **`bun run lambda:build` from `packages/cdk`** (production Node 20 esbuild CJS output). Verify the SDK/`ws` import bundles there; a Bun-target build is not sufficient.
 
