@@ -6,6 +6,7 @@ import type { Env } from '../../src/types';
 const mockTtsSettingsDB = {
   get: vi.fn(),
   put: vi.fn(),
+  putRetainingKey: vi.fn(),
 };
 
 const mockS3Client = {
@@ -82,6 +83,31 @@ function expectedCacheKey(provider: string, voiceId: string, model: string): str
   return `tts/${mockAuthConfig.userId}/vocab-1/${settingsHash}`;
 }
 
+// Mirrors the conditional settings-only write the DynamoDB helper performs, so
+// interleaving tests can prove a blank-key save does not overwrite a newer row.
+function installConditionalRetention(state: { current: Record<string, any> }) {
+  mockTtsSettingsDB.putRetainingKey.mockImplementation(
+    async (settings: {
+      provider: string;
+      expected_api_key: string;
+      voice_id: string | null;
+      model: string | null;
+    }) => {
+      const current = state.current;
+      if (current.provider !== settings.provider || current.api_key !== settings.expected_api_key) {
+        return 'stale';
+      }
+      state.current = {
+        ...current,
+        provider: settings.provider,
+        voice_id: settings.voice_id,
+        model: settings.model,
+      };
+      return 'retained';
+    },
+  );
+}
+
 // Serialize every argument of a console call to a single string so a test can
 // assert that a secret or identity-bearing value does not appear anywhere in
 // the logged payload (not just as a top-level property).
@@ -146,6 +172,7 @@ describe('TTS Route', () => {
     // to a clean slate per test.
     mockTtsSettingsDB.get.mockReset();
     mockTtsSettingsDB.put.mockReset();
+    mockTtsSettingsDB.putRetainingKey.mockReset();
     mockS3Client.send.mockReset();
     mockGetSignedUrl.mockReset();
     mockTTSProvider.generate.mockReset();
@@ -342,7 +369,7 @@ describe('TTS Route', () => {
         voice_id: 'ErXwobaYiN019PkySvjV',
         model: 'eleven_v4',
       });
-      mockTtsSettingsDB.put.mockResolvedValueOnce(undefined);
+      mockTtsSettingsDB.putRetainingKey.mockResolvedValueOnce('retained');
 
       const app = createTestApp();
       const res = await app.request('/settings', {
@@ -356,10 +383,12 @@ describe('TTS Route', () => {
       });
 
       expect(res.status).toBe(200);
-      expect(mockTtsSettingsDB.put).toHaveBeenCalledWith({
+      // The settings-only conditional write leaves the credential untouched.
+      expect(mockTtsSettingsDB.put).not.toHaveBeenCalled();
+      expect(mockTtsSettingsDB.putRetainingKey).toHaveBeenCalledWith({
         user_id: 'test-user-id',
         provider: 'elevenlabs',
-        api_key: 'stored-secret-key',
+        expected_api_key: 'stored-secret-key',
         voice_id: 'ErXwobaYiN019PkySvjV',
         model: 'eleven_multilingual_v2',
       });
@@ -374,7 +403,7 @@ describe('TTS Route', () => {
         voice_id: 'alloy',
         model: 'gpt-realtime-2.1-mini',
       });
-      mockTtsSettingsDB.put.mockResolvedValueOnce(undefined);
+      mockTtsSettingsDB.putRetainingKey.mockResolvedValueOnce('retained');
 
       const app = createTestApp();
       const res = await app.request('/settings', {
@@ -389,8 +418,9 @@ describe('TTS Route', () => {
       });
 
       expect(res.status).toBe(200);
-      expect(mockTtsSettingsDB.put).toHaveBeenCalledWith(
-        expect.objectContaining({ provider: 'openai', api_key: 'stored-openai-key' }),
+      expect(mockTtsSettingsDB.put).not.toHaveBeenCalled();
+      expect(mockTtsSettingsDB.putRetainingKey).toHaveBeenCalledWith(
+        expect.objectContaining({ provider: 'openai', expected_api_key: 'stored-openai-key' }),
       );
     });
 
@@ -464,6 +494,53 @@ describe('TTS Route', () => {
 
       expect(res.status).toBe(400);
       expect(mockTtsSettingsDB.put).not.toHaveBeenCalled();
+      expect(mockTtsSettingsDB.putRetainingKey).not.toHaveBeenCalled();
+    });
+
+    test('rejects a same-provider save when the stored key is whitespace only', async () => {
+      mockTtsSettingsDB.get.mockResolvedValueOnce({
+        user_id: 'test-user-id',
+        provider: 'elevenlabs',
+        api_key: '   ',
+        voice_id: null,
+        model: null,
+      });
+
+      const app = createTestApp();
+      const res = await app.request('/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ provider: 'elevenlabs' }),
+      });
+
+      expect(res.status).toBe(400);
+      expect(await res.json()).toEqual({
+        error: 'TTS API key required. Enter a key for this provider.',
+        code: 'tts_not_configured',
+      });
+      expect(mockTtsSettingsDB.put).not.toHaveBeenCalled();
+      expect(mockTtsSettingsDB.putRetainingKey).not.toHaveBeenCalled();
+    });
+
+    test('rejects a same-provider save when the stored key is not a string', async () => {
+      mockTtsSettingsDB.get.mockResolvedValueOnce({
+        user_id: 'test-user-id',
+        provider: 'elevenlabs',
+        api_key: 42,
+        voice_id: null,
+        model: null,
+      });
+
+      const app = createTestApp();
+      const res = await app.request('/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ provider: 'elevenlabs' }),
+      });
+
+      expect(res.status).toBe(400);
+      expect(mockTtsSettingsDB.put).not.toHaveBeenCalled();
+      expect(mockTtsSettingsDB.putRetainingKey).not.toHaveBeenCalled();
     });
 
     test('a supplied key replaces the stored key for the same provider', async () => {
@@ -497,7 +574,7 @@ describe('TTS Route', () => {
         voice_id: 'ErXwobaYiN019PkySvjV',
         model: 'eleven_v4',
       });
-      mockTtsSettingsDB.put.mockResolvedValueOnce(undefined);
+      mockTtsSettingsDB.putRetainingKey.mockResolvedValueOnce('retained');
       const notFoundError = new Error('Not found');
       (notFoundError as any).name = 'NotFound';
       mockS3Client.send.mockRejectedValueOnce(notFoundError);
@@ -515,8 +592,9 @@ describe('TTS Route', () => {
         body: JSON.stringify({ provider: 'elevenlabs', model: 'eleven_v4' }),
       });
       expect(saveRes.status).toBe(200);
-      expect(mockTtsSettingsDB.put).toHaveBeenCalledWith(
-        expect.objectContaining({ api_key: 'stored-secret-key' }),
+      expect(mockTtsSettingsDB.put).not.toHaveBeenCalled();
+      expect(mockTtsSettingsDB.putRetainingKey).toHaveBeenCalledWith(
+        expect.objectContaining({ expected_api_key: 'stored-secret-key' }),
       );
 
       const settingsRes = await app.request('/settings');
@@ -537,6 +615,158 @@ describe('TTS Route', () => {
       expect(generateRes.status).toBe(200);
       expect(mockTTSProvider.generate).toHaveBeenCalledWith(
         expect.objectContaining({ apiKey: 'stored-secret-key' }),
+      );
+    });
+
+    test('a key replacement completed after the read is not overwritten', async () => {
+      const state = {
+        current: {
+          user_id: 'test-user-id',
+          provider: 'elevenlabs',
+          api_key: 'old-key',
+          voice_id: 'ErXwobaYiN019PkySvjV',
+          model: 'eleven_v4',
+        } as Record<string, any>,
+      };
+      installConditionalRetention(state);
+      mockTtsSettingsDB.put.mockImplementationOnce(async (settings: Record<string, any>) => {
+        state.current = { ...settings };
+      });
+
+      // Hold the blank-key save after it has read the row, so the replacement
+      // can commit before its conditional write runs.
+      let releaseRead!: () => void;
+      const readGate = new Promise<void>((resolve) => {
+        releaseRead = resolve;
+      });
+      let readObserved!: () => void;
+      const readDone = new Promise<void>((resolve) => {
+        readObserved = resolve;
+      });
+      mockTtsSettingsDB.get.mockImplementationOnce(async () => {
+        const observed = { ...state.current };
+        readObserved();
+        await readGate;
+        return observed;
+      });
+
+      const app = createTestApp();
+      const blankSave = app.request('/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ provider: 'elevenlabs', model: 'eleven_multilingual_v2' }),
+      });
+      await readDone;
+
+      const replacement = await app.request('/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ provider: 'elevenlabs', apiKey: 'new-key' }),
+      });
+      expect(replacement.status).toBe(200);
+
+      releaseRead();
+      const blankRes = await blankSave;
+
+      expect(blankRes.status).toBe(409);
+      expect(await blankRes.json()).toEqual({
+        error: 'TTS settings changed while saving. Please reload and try again.',
+      });
+      expect(state.current.api_key).toBe('new-key');
+      expect(mockTtsSettingsDB.put).toHaveBeenCalledTimes(1);
+    });
+
+    test('a provider switch completed after the read is not restored without a key', async () => {
+      const state = {
+        current: {
+          user_id: 'test-user-id',
+          provider: 'elevenlabs',
+          api_key: 'old-key',
+          voice_id: 'ErXwobaYiN019PkySvjV',
+          model: 'eleven_v4',
+        } as Record<string, any>,
+      };
+      installConditionalRetention(state);
+      mockTtsSettingsDB.put.mockImplementationOnce(async (settings: Record<string, any>) => {
+        state.current = { ...settings };
+      });
+
+      let releaseRead!: () => void;
+      const readGate = new Promise<void>((resolve) => {
+        releaseRead = resolve;
+      });
+      let readObserved!: () => void;
+      const readDone = new Promise<void>((resolve) => {
+        readObserved = resolve;
+      });
+      mockTtsSettingsDB.get.mockImplementationOnce(async () => {
+        const observed = { ...state.current };
+        readObserved();
+        await readGate;
+        return observed;
+      });
+
+      const app = createTestApp();
+      const blankSave = app.request('/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ provider: 'elevenlabs', model: 'eleven_multilingual_v2' }),
+      });
+      await readDone;
+
+      const replacement = await app.request('/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          provider: 'openai',
+          apiKey: 'openai-key',
+          voiceId: 'alloy',
+          model: 'gpt-realtime-2.1-mini',
+        }),
+      });
+      expect(replacement.status).toBe(200);
+
+      releaseRead();
+      const blankRes = await blankSave;
+
+      expect(blankRes.status).toBe(409);
+      expect(state.current.provider).toBe('openai');
+      expect(state.current.api_key).toBe('openai-key');
+    });
+
+    test('rejects retention when the observed row is already stale', async () => {
+      const state = {
+        current: {
+          user_id: 'test-user-id',
+          provider: 'elevenlabs',
+          api_key: 'new-key',
+          voice_id: 'ErXwobaYiN019PkySvjV',
+          model: 'eleven_v4',
+        } as Record<string, any>,
+      };
+      installConditionalRetention(state);
+      // A stale (eventually consistent) read hands the route an obsolete row.
+      mockTtsSettingsDB.get.mockResolvedValueOnce({
+        user_id: 'test-user-id',
+        provider: 'elevenlabs',
+        api_key: 'old-key',
+        voice_id: 'ErXwobaYiN019PkySvjV',
+        model: 'eleven_v4',
+      });
+
+      const app = createTestApp();
+      const res = await app.request('/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ provider: 'elevenlabs', model: 'eleven_multilingual_v2' }),
+      });
+
+      expect(res.status).toBe(409);
+      expect(state.current.api_key).toBe('new-key');
+      expect(state.current.model).toBe('eleven_v4');
+      expect(mockTtsSettingsDB.put).not.toHaveBeenCalled();
+      expect(mockTtsSettingsDB.putRetainingKey).toHaveBeenCalledWith(
+        expect.objectContaining({ expected_api_key: 'old-key' }),
       );
     });
 
