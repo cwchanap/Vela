@@ -264,22 +264,27 @@ export async function getAudioUrl(vocabularyId: string, userId: string): Promise
 }
 
 /**
- * Save TTS settings for a user
+ * Save TTS settings for a user.
+ *
+ * A blank `apiKey` is omitted from the request body: the backend retains the
+ * stored key only when it belongs to the same saved provider, and rejects the
+ * save otherwise.
  */
 export async function saveTTSSettings(
   provider: string,
-  apiKey: string,
+  apiKey?: string,
   voiceId?: string,
   model?: string,
 ): Promise<void> {
   const headers = await getAuthHeader();
+  const key = apiKey?.trim();
 
   const response = await fetch(getApiUrl('tts/settings'), {
     method: 'POST',
     headers,
     body: JSON.stringify({
       provider,
-      apiKey,
+      ...(key ? { apiKey: key } : {}),
       voiceId: voiceId || null,
       model: model || null,
     }),

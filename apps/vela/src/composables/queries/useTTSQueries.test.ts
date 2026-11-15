@@ -116,6 +116,25 @@ describe('useTTSQueries', () => {
       );
     });
 
+    it('calls saveTTSSettings without an apiKey when the key is omitted', async () => {
+      mockUser.value = { id: 'user-123' };
+      mockSaveTTSSettings.mockResolvedValueOnce({ success: true });
+      const { useUpdateTTSSettingsMutation } = await import('./useTTSQueries');
+      const { result, cleanup: qcCleanup } = withQueryClient(() => useUpdateTTSSettingsMutation());
+      cleanup = qcCleanup;
+      await result.mutateAsync({
+        provider: 'elevenlabs',
+        voiceId: 'voice-1',
+        model: 'eleven_multilingual_v2',
+      });
+      expect(mockSaveTTSSettings).toHaveBeenCalledWith(
+        'elevenlabs',
+        undefined,
+        'voice-1',
+        'eleven_multilingual_v2',
+      );
+    });
+
     it('invalidates TTS settings queries on success', async () => {
       mockUser.value = { id: 'user-123' };
       mockSaveTTSSettings.mockResolvedValueOnce({ success: true });
