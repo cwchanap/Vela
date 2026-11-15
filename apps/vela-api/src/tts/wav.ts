@@ -32,3 +32,41 @@ export function pcm16ToWav(pcm: Buffer, sampleRate: number): Buffer {
 
   return Buffer.concat([header, pcm]);
 }
+
+/**
+ * Structural RIFF/WAVE check for provider-returned files: chunks inside the
+ * declared RIFF bounds must fit the buffer, a `fmt ` chunk of at least 16
+ * bytes (WAVEFORMATEX) and a nonempty `data` chunk must both be present.
+ * Ancillary chunks (e.g. C2PA) and bytes beyond the declared RIFF size are
+ * skipped, so files with trailing metadata still pass.
+ */
+export function isValidWav(audio: Buffer): boolean {
+  if (
+    audio.length < 20 ||
+    audio.subarray(0, 4).toString('ascii') !== 'RIFF' ||
+    audio.subarray(8, 12).toString('ascii') !== 'WAVE'
+  ) {
+    return false;
+  }
+  const riffEnd = 8 + audio.readUInt32LE(4);
+  if (riffEnd > audio.length) return false;
+
+  let sawFmt = false;
+  let sawData = false;
+  for (let offset = 12; offset + 8 <= riffEnd;) {
+    const chunkId = audio.subarray(offset, offset + 4).toString('ascii');
+    const chunkSize = audio.readUInt32LE(offset + 4);
+    const chunkDataStart = offset + 8;
+    if (chunkSize > riffEnd - chunkDataStart) return false;
+    if (chunkId === 'fmt ') {
+      if (chunkSize < 16) return false;
+      sawFmt = true;
+    } else if (chunkId === 'data') {
+      if (chunkSize === 0) return false;
+      sawData = true;
+    }
+    // RIFF chunks are word-aligned: odd sizes carry one pad byte.
+    offset = chunkDataStart + chunkSize + (chunkSize % 2);
+  }
+  return sawFmt && sawData;
+}

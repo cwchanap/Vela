@@ -1,5 +1,5 @@
 import { describe, test, expect } from 'bun:test';
-import { pcm16ToWav } from '../../src/tts/wav';
+import { isValidWav, pcm16ToWav } from '../../src/tts/wav';
 
 describe('pcm16ToWav', () => {
   test('writes a 44-byte RIFF/WAVE PCM16 mono header with matching chunk sizes', () => {
@@ -33,5 +33,75 @@ describe('pcm16ToWav', () => {
   test('rejects empty or odd-length PCM16LE input', () => {
     expect(() => pcm16ToWav(Buffer.alloc(0), 24_000)).toThrow('Invalid PCM16LE');
     expect(() => pcm16ToWav(Buffer.alloc(3), 24_000)).toThrow('Invalid PCM16LE');
+  });
+});
+
+describe('isValidWav', () => {
+  test('accepts a pcm16ToWav file', () => {
+    expect(isValidWav(pcm16ToWav(Buffer.from([1, 2, 3, 4]), 24_000))).toBe(true);
+  });
+
+  test('accepts an ancillary chunk inside RIFF and trailing bytes beyond it', () => {
+    const wav = pcm16ToWav(Buffer.from([1, 2]), 24_000);
+    const c2pa = Buffer.alloc(12);
+    c2pa.write('c2pa', 0, 'ascii');
+    c2pa.writeUInt32LE(4, 4);
+    c2pa.writeUInt32LE(0xdeadbeef, 8);
+    const inside = Buffer.concat([wav, c2pa]);
+    inside.writeUInt32LE(inside.length - 8, 4);
+    expect(isValidWav(inside)).toBe(true);
+
+    const trailing = Buffer.concat([wav, Buffer.from('C2PA trailing manifest bytes')]);
+    expect(isValidWav(trailing)).toBe(true);
+  });
+
+  test('rejects RIFF/WAVE magic with no fmt or data chunks', () => {
+    const fake = Buffer.alloc(48);
+    fake.write('RIFF', 0, 'ascii');
+    fake.writeUInt32LE(40, 4);
+    fake.write('WAVE', 8, 'ascii');
+    expect(isValidWav(fake)).toBe(false);
+  });
+
+  test('rejects a WAV missing either required chunk', () => {
+    const noData = Buffer.alloc(36);
+    noData.write('RIFF', 0, 'ascii');
+    noData.writeUInt32LE(28, 4);
+    noData.write('WAVE', 8, 'ascii');
+    noData.write('fmt ', 12, 'ascii');
+    noData.writeUInt32LE(16, 16);
+    expect(isValidWav(noData)).toBe(false);
+
+    const noFmt = pcm16ToWav(Buffer.from([1, 2]), 24_000);
+    noFmt.write('JUNK', 12, 'ascii');
+    expect(isValidWav(noFmt)).toBe(false);
+  });
+
+  test('rejects an undersized fmt chunk or empty data chunk', () => {
+    const tinyFmt = pcm16ToWav(Buffer.from([1, 2]), 24_000);
+    tinyFmt.writeUInt32LE(8, 16);
+    expect(isValidWav(tinyFmt)).toBe(false);
+
+    const emptyData = pcm16ToWav(Buffer.from([1, 2]), 24_000);
+    emptyData.writeUInt32LE(0, 40);
+    emptyData.writeUInt32LE(emptyData.length - 8 - 2, 4);
+    expect(isValidWav(emptyData)).toBe(false);
+  });
+
+  test('rejects chunks whose declared size exceeds the RIFF bounds', () => {
+    const wav = pcm16ToWav(Buffer.from([1, 2]), 24_000);
+    wav.writeUInt32LE(wav.length, 40);
+    expect(isValidWav(wav)).toBe(false);
+
+    const truncated = pcm16ToWav(Buffer.from([1, 2]), 24_000).subarray(0, 30);
+    expect(isValidWav(truncated)).toBe(false);
+  });
+
+  test('rejects non-RIFF and undersized buffers', () => {
+    expect(isValidWav(Buffer.alloc(4))).toBe(false);
+    const notWave = Buffer.alloc(48);
+    notWave.write('RIFF', 0, 'ascii');
+    notWave.write('XXXX', 8, 'ascii');
+    expect(isValidWav(notWave)).toBe(false);
   });
 });
