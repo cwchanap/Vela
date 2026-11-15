@@ -12,7 +12,12 @@ import {
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { requireAuth, type AuthContext } from '../middleware/auth';
 import { createHash } from 'crypto';
-import type { TtsApiErrorCode } from '@vela/common';
+import {
+  resolveTtsSelection,
+  TTS_PROVIDER_REGISTRY,
+  TTS_PROVIDERS,
+  type TtsApiErrorCode,
+} from '@vela/common/contracts/tts';
 import { createTTSProvider } from '../tts/factory';
 
 function ttsError(error: string, code: TtsApiErrorCode) {
@@ -99,19 +104,30 @@ function generateCacheKey(
   return `tts/${userId}/${vocabularyId}/${settingsHash}`;
 }
 
-const TTSProviderSchema = z.enum(['elevenlabs', 'openai', 'gemini']);
+const TTSProviderSchema = z.enum(TTS_PROVIDERS);
 
 const GenerateTTSSchema = z.object({
   vocabularyId: z.string().min(1),
   text: z.string().min(1),
 });
 
-const SaveTTSSettingsSchema = z.object({
-  provider: TTSProviderSchema,
-  apiKey: z.string().min(1),
-  voiceId: z.string().nullable().optional(),
-  model: z.string().nullable().optional(),
-});
+const SaveTTSSettingsSchema = z
+  .object({
+    provider: TTSProviderSchema,
+    apiKey: z.string().min(1),
+    voiceId: z.string().nullable().optional(),
+    model: z.string().nullable().optional(),
+  })
+  // Stored settings are normalized on read; new writes must be supported now.
+  .superRefine(({ provider, voiceId, model }, ctx) => {
+    const providerInfo = TTS_PROVIDER_REGISTRY[provider];
+    if (model != null && !providerInfo.models.some(({ id }) => id === model)) {
+      ctx.addIssue({ code: 'custom', path: ['model'], message: 'Unsupported TTS model' });
+    }
+    if (voiceId != null && providerInfo.voices !== null && !providerInfo.voices.includes(voiceId)) {
+      ctx.addIssue({ code: 'custom', path: ['voiceId'], message: 'Unsupported TTS voice' });
+    }
+  });
 
 const VocabularyIdParamSchema = z.object({
   vocabularyId: z.string().min(1),
@@ -167,19 +183,22 @@ const createTTSRoute = (env: Env) => {
       }
       const provider = providerParse.data;
       const ttsProvider = createTTSProvider(provider);
-      const voiceId = settings.voice_id || '';
-      const model = settings.model || '';
-      const s3Key = generateCacheKey(userId, vocabularyId, provider, voiceId, model);
+      // Resolve persisted null/legacy/unsupported values once, then use exactly
+      // these values for the cache key, adapter call and client echo.
+      const selection = resolveTtsSelection(provider, settings.model, settings.voice_id);
+      const s3Key = generateCacheKey(
+        userId,
+        vocabularyId,
+        selection.provider,
+        selection.voiceId,
+        selection.model,
+      );
 
       // The effective settings the backend used to derive the cache key. The
       // client compares these against its GET /tts/settings snapshot to detect
       // a settings change between the two requests and avoid caching under a
-      // stale identity. Uses the same null/empty convention as GET settings.
-      const effectiveSettings = {
-        provider,
-        voiceId: settings.voice_id || null,
-        model: settings.model || null,
-      };
+      // stale identity.
+      const effectiveSettings = selection;
 
       // Check S3 cache first
       try {
@@ -216,8 +235,8 @@ const createTTSRoute = (env: Env) => {
         result = await ttsProvider.generate({
           text,
           apiKey: settings.api_key,
-          voiceId: settings.voice_id,
-          model: settings.model,
+          voiceId: selection.voiceId,
+          model: selection.model,
         });
       } catch (error: any) {
         const errorMessage = error instanceof Error ? error.message : String(error);
@@ -328,23 +347,20 @@ const createTTSRoute = (env: Env) => {
           );
         }
         const provider = providerParse.data;
+        const selection = resolveTtsSelection(provider, settings.model, settings.voice_id);
         const s3Key = generateCacheKey(
           userId,
           vocabularyId,
-          provider,
-          settings.voice_id || '',
-          settings.model || '',
+          selection.provider,
+          selection.voiceId,
+          selection.model,
         );
 
         // The effective settings the backend used to derive the cache key. The
         // client compares these against its GET /tts/settings snapshot to detect
         // a settings change between the two requests and avoid caching under a
-        // stale identity. Uses the same null/empty convention as GET settings.
-        const effectiveSettings = {
-          provider,
-          voiceId: settings.voice_id || null,
-          model: settings.model || null,
-        };
+        // stale identity.
+        const effectiveSettings = selection;
 
         try {
           await s3Client.send(new HeadObjectCommand({ Bucket: bucketName, Key: s3Key }));
@@ -415,16 +431,7 @@ const createTTSRoute = (env: Env) => {
 
       const settings = await ttsSettingsDB.get(userId);
 
-      if (!settings) {
-        return c.json({
-          hasApiKey: false,
-          provider: 'elevenlabs',
-          voiceId: null,
-          model: null,
-        });
-      }
-
-      const providerValue = settings.provider || 'elevenlabs';
+      const providerValue = settings?.provider || 'elevenlabs';
       const providerParse = TTSProviderSchema.safeParse(providerValue);
       if (!providerParse.success) {
         // `storedValue` is a malformed provider enum, not identity-bearing or
@@ -436,10 +443,8 @@ const createTTSRoute = (env: Env) => {
       const provider = providerParse.success ? providerParse.data : 'elevenlabs';
 
       return c.json({
-        hasApiKey: !!settings.api_key,
-        provider,
-        voiceId: settings.voice_id || null,
-        model: settings.model || null,
+        hasApiKey: !!settings?.api_key,
+        ...resolveTtsSelection(provider, settings?.model ?? null, settings?.voice_id ?? null),
       });
     } catch (error) {
       console.error('Get TTS settings error', sanitizeError(error, 'unexpected'));

@@ -1,17 +1,9 @@
 import type { TTSProvider, TTSGenerateRequest, TTSGenerateResult } from '../types';
 
-export const DEFAULT_VOICE_ID = 'alloy';
-export const DEFAULT_MODEL = 'tts-1';
-
-export const VOICES = ['alloy', 'echo', 'fable', 'onyx', 'nova', 'shimmer'] as const;
-
 export class OpenAIProvider implements TTSProvider {
   readonly name = 'openai' as const;
 
   async generate(request: TTSGenerateRequest): Promise<TTSGenerateResult> {
-    const voice = request.voiceId || DEFAULT_VOICE_ID;
-    const model = request.model || DEFAULT_MODEL;
-
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 30_000);
 
@@ -24,9 +16,9 @@ export class OpenAIProvider implements TTSProvider {
           Authorization: `Bearer ${request.apiKey}`,
         },
         body: JSON.stringify({
-          model,
+          model: request.model,
           input: request.text,
-          voice,
+          voice: request.voiceId,
           response_format: 'mp3',
         }),
         signal: controller.signal,

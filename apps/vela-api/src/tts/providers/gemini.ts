@@ -1,23 +1,5 @@
 import type { TTSProvider, TTSGenerateRequest, TTSGenerateResult } from '../types';
 
-export const DEFAULT_VOICE_ID = 'Kore';
-export const DEFAULT_MODEL = 'gemini-2.5-flash-preview-tts';
-
-export const VOICES = [
-  'Zephyr',
-  'Puck',
-  'Charon',
-  'Kore',
-  'Fenrir',
-  'Leda',
-  'Orus',
-  'Aoede',
-  'Callirrhoe',
-  'Autonoe',
-  'Enceladus',
-  'Iocaste',
-] as const;
-
 const FORMAT_TO_CONTENT_TYPE: Record<string, string> = {
   MP3: 'audio/mpeg',
   MPEG: 'audio/mpeg',
@@ -72,9 +54,7 @@ export class GeminiProvider implements TTSProvider {
   readonly name = 'gemini' as const;
 
   async generate(request: TTSGenerateRequest): Promise<TTSGenerateResult> {
-    const voiceName = request.voiceId || DEFAULT_VOICE_ID;
-    const model = request.model || DEFAULT_MODEL;
-    const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
+    const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${request.model}:generateContent`;
 
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 30_000);
@@ -93,7 +73,7 @@ export class GeminiProvider implements TTSProvider {
             responseModalities: ['AUDIO'],
             speechConfig: {
               voiceConfig: {
-                prebuiltVoiceConfig: { voiceName },
+                prebuiltVoiceConfig: { voiceName: request.voiceId },
               },
             },
           },

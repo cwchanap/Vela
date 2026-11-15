@@ -1,10 +1,5 @@
 import { describe, test, expect, beforeEach, afterEach, vi } from 'bun:test';
-import {
-  OpenAIProvider,
-  DEFAULT_VOICE_ID,
-  DEFAULT_MODEL,
-  VOICES,
-} from '../../../src/tts/providers/openai';
+import { OpenAIProvider } from '../../../src/tts/providers/openai';
 
 const originalFetch = globalThis.fetch;
 
@@ -26,35 +21,6 @@ describe('OpenAIProvider', () => {
     expect(provider.name).toBe('openai');
   });
 
-  test('VOICES contains expected values', () => {
-    expect(VOICES).toContain('alloy');
-    expect(VOICES).toContain('echo');
-    expect(VOICES).toContain('nova');
-  });
-
-  test('uses default voice and model when not specified', async () => {
-    const audioData = new Uint8Array([1, 2, 3]);
-    mockFetch.mockResolvedValueOnce({
-      ok: true,
-      arrayBuffer: async () => audioData.buffer,
-    });
-
-    await provider.generate({ text: '日本語', apiKey: 'test-key', voiceId: null, model: null });
-
-    expect(mockFetch).toHaveBeenCalledWith(
-      'https://api.openai.com/v1/audio/speech',
-      expect.objectContaining({
-        method: 'POST',
-        headers: expect.objectContaining({
-          Authorization: 'Bearer test-key',
-        }),
-      }),
-    );
-    const callBody = JSON.parse((mockFetch.mock.calls[0] as any[])[1].body);
-    expect(callBody.voice).toBe(DEFAULT_VOICE_ID);
-    expect(callBody.model).toBe(DEFAULT_MODEL);
-  });
-
   test('uses provided voice and model', async () => {
     mockFetch.mockResolvedValueOnce({
       ok: true,
@@ -64,13 +30,13 @@ describe('OpenAIProvider', () => {
     await provider.generate({
       text: '日本語',
       apiKey: 'test-key',
-      voiceId: 'nova',
-      model: 'tts-1-hd',
+      voiceId: 'marin',
+      model: 'gpt-realtime-2.1-mini',
     });
 
     const callBody = JSON.parse((mockFetch.mock.calls[0] as any[])[1].body);
-    expect(callBody.voice).toBe('nova');
-    expect(callBody.model).toBe('tts-1-hd');
+    expect(callBody.voice).toBe('marin');
+    expect(callBody.model).toBe('gpt-realtime-2.1-mini');
   });
 
   test('sends mp3 response format', async () => {
@@ -79,7 +45,12 @@ describe('OpenAIProvider', () => {
       arrayBuffer: async () => new Uint8Array([]).buffer,
     });
 
-    await provider.generate({ text: 'hello', apiKey: 'key', voiceId: null, model: null });
+    await provider.generate({
+      text: 'hello',
+      apiKey: 'key',
+      voiceId: 'alloy',
+      model: 'gpt-realtime-2.1-mini',
+    });
 
     const callBody = JSON.parse((mockFetch.mock.calls[0] as any[])[1].body);
     expect(callBody.response_format).toBe('mp3');
@@ -91,7 +62,12 @@ describe('OpenAIProvider', () => {
       arrayBuffer: async () => new Uint8Array([]).buffer,
     });
 
-    await provider.generate({ text: '日本語テスト', apiKey: 'key', voiceId: null, model: null });
+    await provider.generate({
+      text: '日本語テスト',
+      apiKey: 'key',
+      voiceId: 'alloy',
+      model: 'gpt-realtime-2.1-mini',
+    });
 
     const callBody = JSON.parse((mockFetch.mock.calls[0] as any[])[1].body);
     expect(callBody.input).toBe('日本語テスト');
@@ -107,8 +83,8 @@ describe('OpenAIProvider', () => {
     const result = await provider.generate({
       text: 'hello',
       apiKey: 'key',
-      voiceId: null,
-      model: null,
+      voiceId: 'alloy',
+      model: 'gpt-realtime-2.1-mini',
     });
 
     expect(result.contentType).toBe('audio/mpeg');
@@ -123,7 +99,12 @@ describe('OpenAIProvider', () => {
     });
 
     await expect(
-      provider.generate({ text: 'hello', apiKey: 'bad-key', voiceId: null, model: null }),
+      provider.generate({
+        text: 'hello',
+        apiKey: 'bad-key',
+        voiceId: 'alloy',
+        model: 'gpt-realtime-2.1-mini',
+      }),
     ).rejects.toThrow('OpenAI TTS API error 403');
   });
 
@@ -133,7 +114,12 @@ describe('OpenAIProvider', () => {
     mockFetch.mockRejectedValueOnce(abortError);
 
     await expect(
-      provider.generate({ text: 'hello', apiKey: 'test-key', voiceId: null, model: null }),
+      provider.generate({
+        text: 'hello',
+        apiKey: 'test-key',
+        voiceId: 'alloy',
+        model: 'gpt-realtime-2.1-mini',
+      }),
     ).rejects.toThrow('Request timeout');
   });
 
@@ -141,7 +127,12 @@ describe('OpenAIProvider', () => {
     mockFetch.mockRejectedValueOnce(new Error('Connection refused'));
 
     await expect(
-      provider.generate({ text: 'hello', apiKey: 'test-key', voiceId: null, model: null }),
+      provider.generate({
+        text: 'hello',
+        apiKey: 'test-key',
+        voiceId: 'alloy',
+        model: 'gpt-realtime-2.1-mini',
+      }),
     ).rejects.toThrow('Connection refused');
   });
 });

@@ -1,9 +1,5 @@
 import { describe, test, expect, beforeEach, afterEach, vi } from 'bun:test';
-import {
-  ElevenLabsProvider,
-  DEFAULT_VOICE_ID,
-  DEFAULT_MODEL,
-} from '../../../src/tts/providers/elevenlabs';
+import { ElevenLabsProvider } from '../../../src/tts/providers/elevenlabs';
 
 const originalFetch = globalThis.fetch;
 
@@ -23,28 +19,6 @@ describe('ElevenLabsProvider', () => {
 
   test('has correct name', () => {
     expect(provider.name).toBe('elevenlabs');
-  });
-
-  test('uses default voice and model when not specified', async () => {
-    const audioData = new Uint8Array([1, 2, 3, 4]);
-    mockFetch.mockResolvedValueOnce({
-      ok: true,
-      arrayBuffer: async () => audioData.buffer,
-    });
-
-    await provider.generate({ text: '日本語', apiKey: 'test-key', voiceId: null, model: null });
-
-    expect(mockFetch).toHaveBeenCalledWith(
-      `https://api.elevenlabs.io/v1/text-to-speech/${DEFAULT_VOICE_ID}`,
-      expect.objectContaining({
-        method: 'POST',
-        headers: expect.objectContaining({
-          'xi-api-key': 'test-key',
-        }),
-      }),
-    );
-    const callBody = JSON.parse((mockFetch.mock.calls[0] as any[])[1].body);
-    expect(callBody.model_id).toBe(DEFAULT_MODEL);
   });
 
   test('uses provided voice and model', async () => {
@@ -79,8 +53,8 @@ describe('ElevenLabsProvider', () => {
     const result = await provider.generate({
       text: 'hello',
       apiKey: 'test-key',
-      voiceId: null,
-      model: null,
+      voiceId: 'ErXwobaYiN019PkySvjV',
+      model: 'eleven_v4',
     });
 
     expect(result.contentType).toBe('audio/mpeg');
@@ -93,7 +67,12 @@ describe('ElevenLabsProvider', () => {
       arrayBuffer: async () => new Uint8Array([]).buffer,
     });
 
-    await provider.generate({ text: 'hello', apiKey: 'key', voiceId: null, model: null });
+    await provider.generate({
+      text: 'hello',
+      apiKey: 'key',
+      voiceId: 'ErXwobaYiN019PkySvjV',
+      model: 'eleven_v4',
+    });
 
     const callBody = JSON.parse((mockFetch.mock.calls[0] as any[])[1].body);
     expect(callBody.voice_settings).toEqual({ stability: 0.5, similarity_boost: 0.75 });
@@ -108,7 +87,12 @@ describe('ElevenLabsProvider', () => {
     });
 
     await expect(
-      provider.generate({ text: 'hello', apiKey: 'bad-key', voiceId: null, model: null }),
+      provider.generate({
+        text: 'hello',
+        apiKey: 'bad-key',
+        voiceId: 'ErXwobaYiN019PkySvjV',
+        model: 'eleven_v4',
+      }),
     ).rejects.toThrow('ElevenLabs API error 401');
   });
 
@@ -118,7 +102,12 @@ describe('ElevenLabsProvider', () => {
     mockFetch.mockRejectedValueOnce(abortError);
 
     await expect(
-      provider.generate({ text: 'hello', apiKey: 'test-key', voiceId: null, model: null }),
+      provider.generate({
+        text: 'hello',
+        apiKey: 'test-key',
+        voiceId: 'ErXwobaYiN019PkySvjV',
+        model: 'eleven_v4',
+      }),
     ).rejects.toThrow('Request timeout');
   });
 
@@ -126,7 +115,12 @@ describe('ElevenLabsProvider', () => {
     mockFetch.mockRejectedValueOnce(new Error('Network error'));
 
     await expect(
-      provider.generate({ text: 'hello', apiKey: 'test-key', voiceId: null, model: null }),
+      provider.generate({
+        text: 'hello',
+        apiKey: 'test-key',
+        voiceId: 'ErXwobaYiN019PkySvjV',
+        model: 'eleven_v4',
+      }),
     ).rejects.toThrow('Network error');
   });
 });

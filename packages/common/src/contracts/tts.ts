@@ -1,5 +1,134 @@
-const TTS_PROVIDERS = ['elevenlabs', 'openai', 'gemini'] as const;
+/** Closed list of supported providers; the single source for provider unions. */
+export const TTS_PROVIDERS = ['elevenlabs', 'openai', 'gemini'] as const;
 export type TtsProvider = (typeof TTS_PROVIDERS)[number];
+
+export interface TtsModelInfo {
+  /** Model ID exactly as the provider API expects it. */
+  id: string;
+  /** Single display label for pickers. */
+  label: string;
+}
+
+export interface TtsProviderInfo {
+  /** Single display label for the provider — UI selects, API error messages. */
+  label: string;
+  /** Model used when a stored value is null, legacy or unsupported. */
+  defaultModel: string;
+  /** Models a new save may select. */
+  models: readonly TtsModelInfo[];
+  /** Voice used when a stored value is null, legacy or unsupported. */
+  defaultVoice: string;
+  /** Fixed voice IDs, or null for free-form providers (ElevenLabs). */
+  voices: readonly string[] | null;
+}
+
+/** The provider/voice/model a request actually uses; never null after resolution. */
+export type TtsSelection = {
+  provider: TtsProvider;
+  voiceId: string;
+  model: string;
+};
+
+// Defaults and voice lists verified against provider docs on 2026-11-15:
+// ElevenLabs https://elevenlabs.io/docs/overview/models,
+// OpenAI Realtime https://developers.openai.com/api/docs/guides/voice-websockets,
+// Gemini https://ai.google.dev/gemini-api/docs/speech-generation.
+export const TTS_PROVIDER_REGISTRY: Readonly<Record<TtsProvider, TtsProviderInfo>> = {
+  elevenlabs: {
+    label: 'ElevenLabs',
+    defaultModel: 'eleven_v4',
+    models: [
+      { id: 'eleven_v4', label: 'Eleven v4' },
+      { id: 'eleven_multilingual_v2', label: 'Eleven Multilingual v2' },
+    ],
+    defaultVoice: 'ErXwobaYiN019PkySvjV',
+    voices: null,
+  },
+  openai: {
+    label: 'OpenAI',
+    defaultModel: 'gpt-realtime-2.1-mini',
+    models: [{ id: 'gpt-realtime-2.1-mini', label: 'GPT Realtime 2.1 Mini' }],
+    defaultVoice: 'alloy',
+    voices: [
+      'alloy',
+      'ash',
+      'ballad',
+      'coral',
+      'echo',
+      'sage',
+      'shimmer',
+      'verse',
+      'marin',
+      'cedar',
+    ],
+  },
+  gemini: {
+    label: 'Google Gemini',
+    defaultModel: 'gemini-3.8-flash-tts',
+    models: [
+      { id: 'gemini-3.8-flash-tts', label: 'Gemini 3.8 Flash TTS' },
+      { id: 'gemini-3.8-flash-lite-tts', label: 'Gemini 3.8 Flash-Lite TTS' },
+    ],
+    defaultVoice: 'Kore',
+    // Official 30 prebuilt voices; Iocaste is not in the current list.
+    voices: [
+      'Zephyr',
+      'Puck',
+      'Charon',
+      'Kore',
+      'Fenrir',
+      'Leda',
+      'Orus',
+      'Aoede',
+      'Callirrhoe',
+      'Autonoe',
+      'Enceladus',
+      'Iapetus',
+      'Umbriel',
+      'Algieba',
+      'Despina',
+      'Erinome',
+      'Algenib',
+      'Rasalgethi',
+      'Laomedeia',
+      'Achernar',
+      'Alnilam',
+      'Schedar',
+      'Gacrux',
+      'Pulcherrima',
+      'Achird',
+      'Zubenelgenubi',
+      'Vindemiatrix',
+      'Sadachbia',
+      'Sadaltager',
+      'Sulafat',
+    ],
+  },
+};
+
+/**
+ * Resolve stored (possibly null, legacy or unsupported) settings to the values
+ * a request must actually use. New saves are validated at the route; this
+ * helper only normalizes what is already persisted.
+ */
+export function resolveTtsSelection(
+  provider: TtsProvider,
+  model: string | null,
+  voiceId: string | null,
+): TtsSelection {
+  const info = TTS_PROVIDER_REGISTRY[provider];
+  const storedModel = model?.trim() ?? '';
+  const storedVoice = voiceId?.trim() ?? '';
+
+  return {
+    provider,
+    model: info.models.some(({ id }) => id === storedModel) ? storedModel : info.defaultModel,
+    voiceId:
+      storedVoice && (info.voices === null || info.voices.includes(storedVoice))
+        ? storedVoice
+        : info.defaultVoice,
+  };
+}
 
 export type TtsSettings = {
   provider: TtsProvider;
