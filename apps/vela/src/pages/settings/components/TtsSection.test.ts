@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { mount, VueWrapper, flushPromises } from '@vue/test-utils';
 import { createPinia, setActivePinia } from 'pinia';
 import { Quasar, Notify } from 'quasar';
-import { ref } from 'vue';
+import { ref, type Ref } from 'vue';
 import TtsSection from './TtsSection.vue';
 import { useAuthStore } from 'src/stores/auth';
 import {
@@ -43,6 +43,7 @@ const stubs = {
 describe('TtsSection', () => {
   let wrapper: VueWrapper;
   let authStore: ReturnType<typeof useAuthStore>;
+  let settingsData: Ref<unknown>;
 
   const mountComponent = () =>
     mount(TtsSection, {
@@ -55,9 +56,8 @@ describe('TtsSection', () => {
 
     vi.clearAllMocks();
     Notify.create = vi.fn() as never;
-    vi.mocked(useTTSSettingsQuery).mockReturnValue({
-      data: { value: null },
-    } as never);
+    settingsData = ref<unknown>(null);
+    vi.mocked(useTTSSettingsQuery).mockReturnValue({ data: settingsData } as never);
     vi.mocked(useUpdateTTSSettingsMutation).mockReturnValue({
       mutate: vi.fn(),
     } as never);
@@ -245,19 +245,12 @@ describe('TtsSection', () => {
 
   describe('TTS settings query sync', () => {
     it('hydrates the local TTS form from loaded query data', async () => {
-      wrapper.unmount();
-      vi.mocked(useTTSSettingsQuery).mockReturnValue({
-        data: {
-          value: {
-            provider: 'elevenlabs',
-            voiceId: 'voice-123',
-            model: 'eleven_multilingual_v2',
-            hasApiKey: true,
-          },
-        },
-      } as never);
-
-      wrapper = mountComponent();
+      settingsData.value = {
+        provider: 'elevenlabs',
+        voiceId: 'voice-123',
+        model: 'eleven_multilingual_v2',
+        hasApiKey: true,
+      };
       await flushPromises();
 
       expect(wrapper.vm.ttsProvider).toBe('elevenlabs');
@@ -267,30 +260,18 @@ describe('TtsSection', () => {
     });
 
     it('resolves an unsupported stored model to the registry default', async () => {
-      wrapper.unmount();
-      vi.mocked(useTTSSettingsQuery).mockReturnValue({
-        data: {
-          value: {
-            provider: 'elevenlabs',
-            voiceId: 'voice-123',
-            model: 'eleven_turbo_v2',
-            hasApiKey: true,
-          },
-        },
-      } as never);
-
-      wrapper = mountComponent();
+      settingsData.value = {
+        provider: 'elevenlabs',
+        voiceId: 'voice-123',
+        model: 'eleven_turbo_v2',
+        hasApiKey: true,
+      };
       await flushPromises();
 
       expect(wrapper.vm.ttsModel).toBe('eleven_v4');
     });
 
     it('does not clobber an in-progress model edit when the query refetches', async () => {
-      wrapper.unmount();
-      const settingsData = ref<unknown>(null);
-      vi.mocked(useTTSSettingsQuery).mockReturnValue({ data: settingsData } as never);
-
-      wrapper = mountComponent();
       await flushPromises();
 
       wrapper.vm.ttsModel = 'eleven_multilingual_v2';
@@ -308,19 +289,12 @@ describe('TtsSection', () => {
     });
 
     it('falls back to elevenlabs when loaded query data has no provider', async () => {
-      wrapper.unmount();
-      vi.mocked(useTTSSettingsQuery).mockReturnValue({
-        data: {
-          value: {
-            provider: null,
-            voiceId: 'voice-abc',
-            model: null,
-            hasApiKey: false,
-          },
-        },
-      } as never);
-
-      wrapper = mountComponent();
+      settingsData.value = {
+        provider: null,
+        voiceId: 'voice-abc',
+        model: null,
+        hasApiKey: false,
+      };
       await flushPromises();
 
       expect(wrapper.vm.ttsProvider).toBe('elevenlabs');
@@ -335,11 +309,17 @@ describe('TtsSection', () => {
       hasApiKey: true,
     };
 
-    const seedSettings = (settings: unknown, mutate: ReturnType<typeof vi.fn>) => {
-      wrapper.unmount();
-      vi.mocked(useTTSSettingsQuery).mockReturnValue({ data: { value: settings } } as never);
+    const seedSettings = async (
+      settings: unknown,
+      mutate: ReturnType<typeof vi.fn> = vi.fn(),
+    ): Promise<void> => {
+      // The component captures `mutate` at setup, so install the mock before mounting.
       vi.mocked(useUpdateTTSSettingsMutation).mockReturnValue({ mutate } as never);
+      settingsData.value = null;
+      wrapper.unmount();
       wrapper = mountComponent();
+      settingsData.value = settings;
+      await flushPromises();
     };
 
     const signIn = () => {
@@ -353,7 +333,7 @@ describe('TtsSection', () => {
 
     it('enables saving a same-provider model change without a new key', async () => {
       const mutate = vi.fn();
-      seedSettings(SAVED_ELEVENLABS, mutate);
+      await seedSettings(SAVED_ELEVENLABS, mutate);
       signIn();
       await flushPromises();
 
@@ -377,7 +357,7 @@ describe('TtsSection', () => {
 
     it('does not treat a saved ElevenLabs key as a key for an unsaved OpenAI selection', async () => {
       const mutate = vi.fn();
-      seedSettings(SAVED_ELEVENLABS, mutate);
+      await seedSettings(SAVED_ELEVENLABS, mutate);
       signIn();
       await flushPromises();
 
@@ -400,7 +380,7 @@ describe('TtsSection', () => {
 
     it('treats a cleared key input as blank and retains the saved key', async () => {
       const mutate = vi.fn();
-      seedSettings(SAVED_ELEVENLABS, mutate);
+      await seedSettings(SAVED_ELEVENLABS, mutate);
       signIn();
       await flushPromises();
 
@@ -417,7 +397,7 @@ describe('TtsSection', () => {
     });
 
     it('shows the retention hint only for the provider that has a saved key', async () => {
-      seedSettings(SAVED_ELEVENLABS, vi.fn());
+      await seedSettings(SAVED_ELEVENLABS);
       await flushPromises();
 
       expect(wrapper.vm.ttsApiKeyHint).toContain('Leave blank to keep the saved ElevenLabs key');
@@ -426,6 +406,121 @@ describe('TtsSection', () => {
       await wrapper.vm.$nextTick();
 
       expect(wrapper.vm.ttsApiKeyHint).not.toContain('Leave blank');
+    });
+
+    it('keeps a voice edit made while a save is in flight after the refetch', async () => {
+      const pending: { options?: { onSuccess: () => void } } = {};
+      const mutate = vi.fn((_payload: unknown, options: { onSuccess: () => void }) => {
+        pending.options = options;
+      });
+      await seedSettings(SAVED_ELEVENLABS, mutate);
+      signIn();
+      await flushPromises();
+
+      wrapper.vm.ttsModel = 'eleven_multilingual_v2';
+      await wrapper.vm.saveSettingsHandler();
+      expect(pending.options).toBeDefined();
+
+      // Inputs stay editable during the request; this edit was not submitted.
+      wrapper.vm.ttsVoiceId = 'voice-edited-during-save';
+      await wrapper.vm.$nextTick();
+
+      pending.options?.onSuccess();
+      await flushPromises();
+
+      // Invalidation refetch: the submitted model with the original voice.
+      settingsData.value = { ...SAVED_ELEVENLABS, model: 'eleven_multilingual_v2' };
+      await flushPromises();
+
+      expect(wrapper.vm.ttsModel).toBe('eleven_multilingual_v2');
+      expect(wrapper.vm.ttsVoiceId).toBe('voice-edited-during-save');
+    });
+
+    it('does not mark a provider switch made during a save as saved', async () => {
+      const pending: { options?: { onSuccess: () => void } } = {};
+      const mutate = vi.fn((_payload: unknown, options: { onSuccess: () => void }) => {
+        pending.options = options;
+      });
+      await seedSettings(SAVED_ELEVENLABS, mutate);
+      signIn();
+      await flushPromises();
+
+      wrapper.vm.ttsModel = 'eleven_multilingual_v2';
+      await wrapper.vm.saveSettingsHandler();
+
+      wrapper.vm.ttsProvider = 'openai';
+      await wrapper.vm.$nextTick();
+
+      pending.options?.onSuccess();
+      await flushPromises();
+
+      settingsData.value = { ...SAVED_ELEVENLABS, model: 'eleven_multilingual_v2' };
+      await flushPromises();
+
+      expect(wrapper.vm.ttsProvider).toBe('openai');
+      expect(wrapper.vm.ttsModel).toBe('gpt-realtime-2.1-mini');
+    });
+
+    it('does not move a key typed while the settings GET is pending to another provider', async () => {
+      const mutate = vi.fn();
+      await seedSettings(null, mutate);
+
+      wrapper.vm.ttsApiKeyInput = 'eleven-key-typed';
+      await wrapper.vm.$nextTick();
+
+      settingsData.value = {
+        provider: 'openai',
+        voiceId: 'alloy',
+        model: 'gpt-realtime-2.1-mini',
+        hasApiKey: true,
+      };
+      await flushPromises();
+
+      expect(wrapper.vm.ttsProvider).toBe('elevenlabs');
+      expect(wrapper.vm.ttsApiKeyInput).toBe('eleven-key-typed');
+      expect(wrapper.vm.ttsModel).toBe('eleven_v4');
+      expect(wrapper.vm.ttsVoiceId).toBe('ErXwobaYiN019PkySvjV');
+      expect(wrapper.vm.hasSavedKeyForSelectedProvider).toBe(false);
+    });
+
+    it('does not clear a newer key typed while the save is in flight', async () => {
+      const pending: { options?: { onSuccess: () => void } } = {};
+      const mutate = vi.fn((_payload: unknown, options: { onSuccess: () => void }) => {
+        pending.options = options;
+      });
+      await seedSettings(SAVED_ELEVENLABS, mutate);
+      signIn();
+      await flushPromises();
+
+      wrapper.vm.ttsApiKeyInput = 'submitted-key';
+      await wrapper.vm.saveSettingsHandler();
+      expect(pending.options).toBeDefined();
+
+      wrapper.vm.ttsApiKeyInput = 'newer-key';
+      await wrapper.vm.$nextTick();
+
+      pending.options?.onSuccess();
+      await flushPromises();
+
+      expect(wrapper.vm.ttsApiKeyInput).toBe('newer-key');
+    });
+
+    it('clears an unchanged submitted key after success so later hydration applies', async () => {
+      const mutate = vi.fn((_payload: unknown, options: { onSuccess: () => void }) => {
+        options.onSuccess();
+      });
+      await seedSettings(null, mutate);
+      signIn();
+
+      wrapper.vm.ttsApiKeyInput = 'first-key';
+      await wrapper.vm.saveSettingsHandler();
+
+      expect(wrapper.vm.ttsApiKeyInput).toBe('');
+
+      settingsData.value = { ...SAVED_ELEVENLABS, model: 'eleven_multilingual_v2' };
+      await flushPromises();
+
+      expect(wrapper.vm.ttsModel).toBe('eleven_multilingual_v2');
     });
   });
 

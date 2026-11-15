@@ -219,6 +219,9 @@ watch(
     const provider = TTS_PROVIDERS.find((candidate) => candidate === data.provider) ?? 'elevenlabs';
     const selection = resolveTtsSelection(provider, data.model, data.voiceId);
     const hasUnsavedEdits =
+      // A nonblank key is unsaved and belongs to the provider it was typed in,
+      // so hydration must not switch providers underneath it.
+      Boolean(enteredApiKey.value) ||
       appliedSettings.provider !== ttsProvider.value ||
       appliedSettings.voiceId !== ttsVoiceId.value ||
       appliedSettings.model !== ttsModel.value;
@@ -259,21 +262,34 @@ const saveSettingsHandler = async () => {
     return;
   }
 
+  // The post-save baseline must be what was submitted: the refs can change
+  // while the request is in flight, and those edits are not saved.
+  const submitted = {
+    provider: ttsProvider.value,
+    voiceId: ttsVoiceId.value,
+    model: ttsModel.value,
+    apiKey,
+  };
+
   saveTTSSettings(
     {
-      provider: ttsProvider.value,
-      ...(apiKey ? { apiKey } : {}),
-      voiceId: ttsVoiceId.value || undefined,
-      model: ttsModel.value || undefined,
+      provider: submitted.provider,
+      ...(submitted.apiKey ? { apiKey: submitted.apiKey } : {}),
+      voiceId: submitted.voiceId || undefined,
+      model: submitted.model || undefined,
     },
     {
       onSuccess: () => {
-        // The form now matches what the server stored, so a later refetch is safe.
         appliedSettings = {
-          provider: ttsProvider.value,
-          voiceId: ttsVoiceId.value,
-          model: ttsModel.value,
+          provider: submitted.provider,
+          voiceId: submitted.voiceId,
+          model: submitted.model,
         };
+        // Clear the key only while it is still the submitted one; a newer key
+        // typed during the request is unsaved and must survive.
+        if (enteredApiKey.value === submitted.apiKey) {
+          ttsApiKeyInput.value = '';
+        }
         Notify.create({
           type: 'positive',
           message: 'TTS settings saved successfully',
