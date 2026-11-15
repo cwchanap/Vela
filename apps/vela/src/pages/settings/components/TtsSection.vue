@@ -210,10 +210,19 @@ watch(
 // clobber edits the user has made since. Starts at the initial defaults.
 let appliedSettings: { provider: TtsProvider; voiceId: string; model: string } = initialSelection;
 
-// Sync local form state with query data when it loads/changes
+// Sync local form state with query data when it loads/changes. The form refs
+// are tracked too: hydration skipped over unsaved edits runs again once the
+// edits are reverted, and the live query data is the deferred selection.
 watch(
-  () => ttsSettingsData.value,
-  (data) => {
+  () => [
+    ttsSettingsData.value,
+    enteredApiKey.value,
+    ttsProvider.value,
+    ttsVoiceId.value,
+    ttsModel.value,
+  ],
+  () => {
+    const data = ttsSettingsData.value;
     if (!data) return;
     // The saved provider is authoritative; unknown values fall back to defaults.
     const provider = TTS_PROVIDERS.find((candidate) => candidate === data.provider) ?? 'elevenlabs';
