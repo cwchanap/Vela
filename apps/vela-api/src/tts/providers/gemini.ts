@@ -2,7 +2,7 @@ import { withRequestTimeout } from '../../llm/types';
 import type { TTSProvider, TTSGenerateRequest, TTSGenerateResult } from '../types';
 import { MAX_TTS_AUDIO_BASE64_CHARS, MAX_TTS_AUDIO_BYTES } from '../types';
 import { isValidBase64, readBoundedBody } from '../transport';
-import { pcm16ToWav } from '../wav';
+import { isValidWav, pcm16ToWav } from '../wav';
 
 const GEMINI_INTERACTIONS_URL = 'https://generativelanguage.googleapis.com/v1beta/interactions';
 const PCM_MIME_TYPES = new Set(['audio/pcm', 'audio/l16']);
@@ -89,6 +89,8 @@ export class GeminiProvider implements TTSProvider {
     });
 
     if (!response.ok) {
+      // An unconsumed error body holds the connection until the request deadline.
+      await response.body?.cancel().catch(() => {});
       throw new Error(`Gemini TTS API error ${response.status}`);
     }
 
@@ -118,7 +120,7 @@ export class GeminiProvider implements TTSProvider {
     }
 
     if (audio.subarray(0, 4).toString('ascii') === 'RIFF') {
-      if (audio.length <= 44 || audio.subarray(8, 12).toString('ascii') !== 'WAVE') {
+      if (!isValidWav(audio)) {
         throw new Error('Gemini TTS: malformed WAV response');
       }
       return { audioBuffer: audio, contentType: 'audio/wav' };
