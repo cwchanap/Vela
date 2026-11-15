@@ -97,6 +97,33 @@ describe('isValidWav', () => {
     expect(isValidWav(truncated)).toBe(false);
   });
 
+  test('rejects an odd-sized final chunk missing its pad byte', () => {
+    const wav = pcm16ToWav(Buffer.from([1, 2]), 24_000);
+    const junk = Buffer.alloc(11);
+    junk.write('JUNK', 0, 'ascii');
+    junk.writeUInt32LE(3, 4);
+    const buf = Buffer.concat([wav, junk]);
+    buf.writeUInt32LE(buf.length - 8, 4);
+    expect(isValidWav(buf)).toBe(false);
+  });
+
+  test('rejects a partial chunk header inside the RIFF bounds', () => {
+    const wav = pcm16ToWav(Buffer.from([1, 2]), 24_000);
+    const buf = Buffer.concat([wav, Buffer.alloc(4)]);
+    buf.writeUInt32LE(buf.length - 8, 4);
+    expect(isValidWav(buf)).toBe(false);
+  });
+
+  test('accepts an odd-sized ancillary chunk with its pad byte', () => {
+    const wav = pcm16ToWav(Buffer.from([1, 2]), 24_000);
+    const junk = Buffer.alloc(12);
+    junk.write('JUNK', 0, 'ascii');
+    junk.writeUInt32LE(3, 4);
+    const buf = Buffer.concat([wav, junk]);
+    buf.writeUInt32LE(buf.length - 8, 4);
+    expect(isValidWav(buf)).toBe(true);
+  });
+
   test('rejects non-RIFF and undersized buffers', () => {
     expect(isValidWav(Buffer.alloc(4))).toBe(false);
     const notWave = Buffer.alloc(48);
