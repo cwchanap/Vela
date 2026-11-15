@@ -648,13 +648,27 @@ const handleApiRoute = async (state: MockApi, route: Route): Promise<void> => {
 
   if (path === '/api/tts/settings' && method === 'POST') {
     const body = readJsonBody(route);
+    const provider = typeof body.provider === 'string' ? body.provider : 'elevenlabs';
+    // Mirror the API route: a blank/omitted key retains the stored key only
+    // for the provider that owns it; any other provider needs a new key.
+    const providedKey = typeof body.apiKey === 'string' && body.apiKey.trim().length > 0;
+    if (!providedKey && !(state.ttsSettings.provider === provider && state.ttsSettings.hasApiKey)) {
+      return jsonResponse(
+        route,
+        {
+          error: 'TTS API key required. Enter a key for this provider.',
+          code: 'tts_not_configured',
+        },
+        400,
+      );
+    }
     state.ttsSettings = {
-      provider: typeof body.provider === 'string' ? body.provider : 'elevenlabs',
+      provider,
       voiceId: typeof body.voiceId === 'string' ? body.voiceId : null,
       model: typeof body.model === 'string' ? body.model : null,
-      hasApiKey: typeof body.apiKey === 'string' && body.apiKey.length > 0,
+      hasApiKey: true,
     };
-    return jsonResponse(route, { success: true });
+    return jsonResponse(route, { success: true, message: 'TTS settings saved successfully' });
   }
 
   if (path === '/api/dictionary/lookup' && method === 'GET') {
