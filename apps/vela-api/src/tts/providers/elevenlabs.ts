@@ -23,6 +23,8 @@ export class ElevenLabsProvider implements TTSProvider {
     });
 
     if (!response.ok) {
+      // An unconsumed error body holds the connection until the request deadline.
+      await response.body?.cancel().catch(() => {});
       throw new Error(`ElevenLabs API error ${response.status}`);
     }
 
