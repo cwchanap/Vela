@@ -5,90 +5,106 @@
 **Design:** [HPA-757 design spec](../specs/2026-11-14-hpa757-tts-model-upgrade-design.md)  
 **Delivery rule:** **One PR per ticket:** implement, test and address review comments on this same HPA-757 draft PR. Do not create separate implementation or refactor PRs.
 
+
 ## Ground truth on current main (2026-11-14)
 
-- `packages/common/src/contracts/tts.ts` defines the existing client settings and audio response contracts, but not a TTS model catalog.
-- `apps/vela-api/src/tts/providers/{elevenlabs,openai,gemini}.ts` use the old defaults; the OpenAI adapter calls `/v1/audio/speech`, and the Gemini adapter uses `:generateContent`.
-- `apps/vela-api/src/routes/tts.ts` already hashes **provider, voice and model** into its S3 cache key. `apps/vela/src/services/ttsService.ts` already includes these in the short-lived client URL cache. Focus on effective-default normalization and test separation, **not** new cache infrastructure.
-- `apps/vela/src/pages/settings/components/TtsSection.vue` currently supports only free-form ElevenLabs model selection; its save button requires entering a key on every edit, including when a key exists.
-- `packages/cdk/lib/api-stack.ts` already has a 60s Lambda deadline. Prefer a provider-level limit comfortably within API Gateway's 29s default integration budget; do not modify CDK unless measured evidence requires it.
+- `packages/common/src/contracts/tts.ts` defines existing client settings/audio contracts, but not a TTS registry. `contracts/llm.ts` already has a provider registry; follow its simple shape. `packages/common/package.json` has an `./contracts/llm` subpath, but no `./contracts/tts`; using the common root barrel in Lambda at runtime can import frontend query-client code.
+- `apps/vela-api/src/tts/providers/{elevenlabs,openai,gemini}.ts` contain their **own** default models/voices and take nullable requests. Remove duplicate defaults so the route uses one effective selection throughout.
+- `apps/vela-api/src/routes/tts.ts` already hashes **provider, voice and model** into its S3 key. `apps/vela/src/services/ttsService.ts` already includes those dimensions in its client URL cache. Pass resolved selection and test separation; no new cache infrastructure.
+- `apps/vela/src/pages/settings/components/TtsSection.vue` currently supports only free-form ElevenLabs model input; saving requires a new API key every time.
+- `apps/vela-api/src/llm/types.ts` already contains `REQUEST_TIMEOUT_MS = 25_000` and `withRequestTimeout()`. Current TTS adapters use 30s and the route infers timeouts by searching upstream-derived error messages.
+- The already-installed `openai@7.53.0` SDK provides `openai/realtime/ws` and typed events. Add a compatible direct `ws` peer (`^8.21.0`) for Node 20; don't hand-roll Realtime events.
+- API's Bun-target build is **not** the deployed artifact. Production is `packages/cdk` `bun run lambda:build` via esbuild Node 20/CJS; add this gate.
+- Existing mocked browser Settings regression is `apps/vela/e2e/llm-settings.spec.ts` around line 816, with TTS mock state in `e2e/fixtures/syntheticAuth.ts`. Extend it; don't invent a new suite.
 
 ## Implementation sequence
 
-### 0. First: OpenAI live Japanese quality and latency gate
 
-Before implementing every downstream OpenAI change, run a minimal, local server-side smoke call using a test key (never commit keys, generated audio, or full responses). Send a small Japanese test set: kana, kanji, a vocabulary term, a number, and a short sentence. Confirm: (a) the model accepts session and text events, (b) received delta audio is nonempty, (c) 24k PCM decodes to intelligible Japanese, (d) it reads the specified text rather than answering or paraphrasing, and (e) the end-to-end response leaves headroom for S3 and API Gateway.
+### 0. First: OpenAI **and Gemini** live contract/quality gate
 
-**Stop condition:** If the speech changes the text, adds commentary, has unacceptable Japanese pronunciation, or consistently exceeds the deadline, document the observed result in this PR/Linear issue and stop the OpenAI migration pending a product decision. Do not substitute another model without updating the design. This is an engineering gate, not a human acceptance criterion.
+Before implementing every downstream OpenAI change, run a minimal server-side sample with an authorized test API key; never commit keys, generated audio or full upstream messages. Test OpenAI Realtime with kana, kanji, vocabulary, a number and a short Japanese sentence. Confirm (a) accepted typed session/text events, (b) nonempty 24k PCM, (c) usable output transcript (from `response.output_audio_transcript.done` or `response.done`), (d) literal Japanese reading without commentary, and (e) completion within the shared 25s deadline with S3/gateway headroom.
 
-### 1. Add one common model/voice catalog and resolve effective selections
+Also run **at least one Gemini 3.8 unary `/v1beta/interactions`** sample and inspect the actual `output_audio.data` payload/header, correct request schema and playback. Vendor-document-based mocks alone cannot establish that a new transport works.
 
-**Files:** `packages/common/src/contracts/tts.ts`, its exports and focused tests; small API resolver as needed.
+**Stop condition:** If OpenAI changes the text, adds commentary, has unacceptable Japanese pronunciation or consistently exceeds the deadline, record the finding in this PR/Linear and stop the OpenAI migration pending a product decision. Do not silently swap models or delete the provider. The per-request transcript guard in Step 2 does *not* replace this gate.
 
-- Add `TTS_MODELS`, model labels, default IDs, and provider voice data in the existing contract module. Keep types inferred from `as const` where practical.
-- ElevenLabs: `eleven_v4` default, existing `eleven_multilingual_v2` optional alternative. OpenAI: `gpt-realtime-2.1-mini` only. Gemini: `gemini-3.8-flash-tts` default and `gemini-3.8-flash-lite-tts` as a cheaper option with the same request shape.
-- Include the official 30 Gemini voice names and ticket-listed OpenAI voices, removing `Iocaste`. Keep ElevenLabs' custom voice ID.
-- Create one small helper that resolves `provider + stored model/voice` to an effective valid selection. Unknown/null stored model resolves to that provider's new default; invalid selections **on new writes** get a 400. No separate registry framework, migrations or per-provider setting tables.
 
-**Tests:** exhaustive provider default coverage; unsupported new model rejection; null/old model fallback; official voices and IDs match UI/server.
+### 1. Add one shared provider registry and pure effective-selection helper
 
-### 2. Update the existing three adapters (no shared abstraction)
+**Files:** `packages/common/src/contracts/tts.ts`, `packages/common/src/contracts/tts.test.ts`, `packages/common/package.json`, barrel exports; minimal API import updates.
 
-**ElevenLabs:** change the default model to `eleven_v4`, retain current REST endpoint, output and timeout, test default and alternate model request bodies.
+- Export `TTS_PROVIDERS`, `TTS_PROVIDER_REGISTRY` and `resolveTtsSelection(provider, model, voiceId)`. Match `LLM_PROVIDER_REGISTRY`'s small shape: `{label, defaultModel, models:[{id,label}], defaultVoice, voices:string[] | null}`. `voices:null` means ElevenLabs' free-form ID. No new registry framework.
+- ElevenLabs defaults to `eleven_v4` with `eleven_multilingual_v2` selectable; OpenAI has `gpt-realtime-2.1-mini`; Gemini defaults to `gemini-3.8-flash-tts` with Flash-Lite selectable. Copy the official 30 Gemini voices and listed ten OpenAI voices, removing `Iocaste`.
+- Resolve null/old/unknown **stored** model and voice to provider defaults consistently. Reject unsupported **new writes**. For the API's `TTSGenerateRequest`, make `voiceId`/`model` non-nullable, delete adapters' duplicated `DEFAULT_MODEL`/`DEFAULT_VOICE_ID`/`VOICES` constants and their outdated pinning tests, and derive `TTSProviderName`/`z.enum` from shared `TtsProvider`/`TTS_PROVIDERS`.
+- Add a runtime `@vela/common/contracts/tts` subpath export to avoid importing root-barrel QueryClient/Vue code into Lambda; frontend may keep root-barrel re-exports.
 
-**Gemini:** switch from `models/{id}:generateContent` to the documented 3.8 **`/v1beta/interactions`** endpoint. Send the documented audio response format, `generation_config.speech_config` with selected prebuilt voice, and selected 3.8 model. Read `output_audio.data` from the response. Store the complete WAV bytes as-is (`audio/wav`); **do not** add another RIFF header. Test Flash and Flash-Lite requests, missing/invalid output, upstream failure, timeout and RIFF content type.
+**Tests:** one common resolver test suite covering each provider's defaults, old/null stored values and optional custom ElevenLabs voice, plus strict write-validation tests at the route. Typechecking rejects adapters that reintroduce nullable/internal defaults.
 
-**OpenAI:** replace the Speech REST call with a fresh `ws` server-side WebSocket each request to `wss://api.openai.com/v1/realtime?model=...`. Authenticate using the existing stored key, send `session.update` with 24 kHz PCM output, voice and Japanese verbatim-read instructions, await `session.updated`, then send `conversation.item.create` with an `input_text` item and `response.create` with audio output. Buffer sequential base64 `response.output_audio.delta` chunks, accept only a completed `response.done` with audio, wrap PCM16LE/24k mono in a WAV header, and close the socket.
 
-- Add only the small runtime `ws` dependency and types required by Node 20 Lambda; no realtime session manager or streaming-to-browser path.
-- One bounded timeout (~22–24s including connection setup), and deterministic cleanup on success, error, non-completed response, early close and timeout.
-- Do not log API keys, upstream error bodies, user text, or raw event payloads.
-- Mock the socket/event stream in unit tests. Verify ordered chunks, WAV header sizes/sample rate, empty audio, unsuccessful `response.done`, error events, early close and timeout. A successful mock is not evidence of Japanese speech quality (Step 0 covers that).
+### 2. Update adapters with shared deadline, verified audio and cheap transcript guard
 
-### 3. Normalize TTS settings and retain existing keys for settings-only edits
+**ElevenLabs:** route passes resolved non-null `voiceId`/`model` (default `eleven_v4`); retain existing REST endpoint and MP3, use `withRequestTimeout()`'s 25s signal. Replace tests of adapter-owned defaults with tests of the resolved request body and content type.
 
-**Files:** `apps/vela-api/src/routes/tts.ts`, small helper if appropriate, existing route tests.
+**Gemini:** use the 3.8 **`/v1beta/interactions`** API-key endpoint with `model`, `input`, `response_format:{type:'audio'}` and `generation_config.speech_config`; decode `output_audio.data`. For a complete RIFF/WAVE return bytes unchanged. For a confirmed raw 16-bit mono PCM result, call the small shared `pcm16ToWav(data, 24_000)` utility and return `audio/wav`. Reject empty/odd-byte/malformed or unknown compressed data. Remove unused `outputFormat` and the ~50-line old MIME map/tests. Test Flash and Flash-Lite requests, RIFF/pass-through, PCM/wrapping, errors and timeouts.
 
-- Resolve the effective model and voice **before both** `POST /generate` and `GET /audio/:vocabularyId`; feed them consistently into `createTTSProvider.generate`, S3 key, and `effectiveSettings`.
-- `GET /settings` must expose resolved model/voice so the client-side URL cache and screen display agree with what the API actually generates. Never return the key.
-- Extend `POST /settings` to accept an omitted/empty API key **only if a previously saved key exists for the same provider**; retain it on the DynamoDB row. Require a key for a new user or provider switch. Validate provider/model and preset voices using the shared catalog before writing.
-- Preserve the existing single-row storage, authentication, sanitized errors, S3 caching and presigned URL behavior. Do not widen the scope to multiple provider secrets or concurrency infrastructure.
+**OpenAI:** import `OpenAIRealtimeWS` from `openai/realtime/ws`; use its typed events and an injected SDK-client factory/test seam analogous to `src/llm/providers/openai.ts`. Add direct `ws@^8.21.0` and needed typings for Node 20; keep one short-lived **server-side socket per request**. Send `session.update` with 24k mono PCM, selected voice and verbatim-Japanese instructions; after `session.updated` send one `conversation.item.create` `input_text` and `response.create`. Collect `response.output_audio.delta` PCM bytes and the output transcript (`response.output_audio_transcript.done` or `response.done` output item). At `response.done`, require completed status, nonempty PCM, nonempty transcript, and a **plausible** read-back. Use a deliberately small normalized length-guard calibrated by Step 0 (e.g. transcript >2× input length + slight slack fails); not strict Japanese text equality, since kanji can be transcribed as kana. Add a `ponytail:` comment explaining the heuristic's limited ability to detect short paraphrases. Rejected transcripts **must not be uploaded to S3**. Wrap PCM in the shared WAV helper, return `audio/wav`, and close/terminate the socket on all outcomes.
 
-**Tests:** settings-only save retains key; changing provider without a new key fails; new users must supply key; invalid model 400; model-only change produces distinct S3 object key and `cached:false` then a hit; model null resolves deterministically; generated and looked-up `effectiveSettings` agree.
+**Timeout integration for all three:** reuse `REQUEST_TIMEOUT_MS = 25_000` / `withRequestTimeout()` from `apps/vela-api/src/llm/types.ts` rather than adding another timer policy. For WebSocket, connect the abort signal to explicit socket cleanup and named `TimeoutError`. REST fetch uses the signal directly. Change `routes/tts.ts` to recognize `error.name === 'TimeoutError'`, **not** `error.message.includes('timeout')`; avoid re-wrapping timeout errors as a generic `Error`. Keep existing sanitized logging.
 
-### 4. Expose provider models in existing Quasar Settings UI
+**Tests:** SDK-mocked completed/error/close/timeout/partial-response/empty-audio streams; output transcript missing, valid Japanese kana transcription, obvious commentary/paraphrase rejected; WAV header chunk-size/sample-rate; Gemini RIFF/PCM; abort behavior for ElevenLabs and Gemini. No generic realtime abstraction or new background worker.
 
-**Files:** `apps/vela/src/pages/settings/components/TtsSection.vue`, `TtsSection.test.ts`, `apps/vela/src/composables/queries/useTTSQueries.ts`, `apps/vela/src/services/ttsService.ts` and related tests only as required.
 
-- Keep provider, API key, voice, model and Save in the current `TtsSection`; show one `q-select` for model across all providers, populated by the common registry. Do not create extra provider cards or a settings framework.
-- Use the official preset voices for OpenAI/Gemini, leave ElevenLabs as custom voice ID. On provider change choose that provider's default model and voice; do not silently reuse another provider's model. Hydration of stored settings must not overwrite in-progress edits.
-- Show a short hint that a blank API key retains the saved key for the **same provider**. Allow a model/voice-only Save if that provider has an existing key. A provider switch must prompt for the new provider's key. Show success only on successful mutation.
-- Keep `useTTSSettingsQuery` invalidation and existing client-side `effectiveSettingsMatch` logic. No new network API endpoints.
+### 3. Normalize TTS settings and retain same-provider keys
 
-**Tests:** options for each provider; correct model/voice on switch; persisted model after refetch/reload; blank-key model-only save; provider-switch key requirement; failure toast; responsive UI test hooks.
+**Files:** `apps/vela-api/src/routes/tts.ts`, `apps/vela-api/src/tts/types.ts` and existing route tests.
 
-### 5. Focused regression and end-to-end verification
+- Resolve effective model/voice via the **common pure helper** before both `POST /generate` and `GET /audio/:vocabularyId`; pass them to the adapters, S3 key, and `effectiveSettings`. `GET /settings` exposes the same resolved model/voice so client URL cache identity matches generation. Never return API keys.
+- Import runtime registry and `TTS_PROVIDERS` from `@vela/common/contracts/tts`, not the root barrel. Use `z.enum(TTS_PROVIDERS)` and strict model/prebuilt-voice validation for new saves.
+- `POST /settings` accepts a blank/omitted API key only when an existing key belongs to the **same provider**, retaining that key in DynamoDB. A provider switch or new user requires a key. Keep one row/one active provider, no migration or key vault.
+- Preserve existing authenticated route, sanitized errors, S3 bucket, presigned URL lifetime and frontend `effectiveSettingsMatch`; cache identity uses the resolved model.
+- Apply named `TimeoutError` detection to return the existing 504 `tts_generation_timeout`; all other provider failures, including suspect transcript, return `tts_generation_failed` without S3 upload.
 
-Run the repository's affected Bun API tests, Vitest Settings/service tests, lint, API compile and web build. Run the existing mocked Playwright TTS/Settings tests, adapting their provider fixtures and assertions. Do not add a second E2E framework. Verify the real-provider Japanese audio path with authorized test keys; do not conflate adapter mocks with provider acceptance.
+**Tests:** same-provider no-key save, provider-switch/no-key failure, fresh-user failure, invalid model 400; null/old persisted settings resolve to active default; same model hits same cache key, changed model causes distinct key and `cached:false`, successful generation then lookup returns matching `effectiveSettings`; failed transcript never uploads.
 
-**Acceptance matrix (automated and observable, no human sign-off):**
+
+### 4. Expose registry-backed models in existing Quasar Settings UI
+
+**Files:** `apps/vela/src/pages/settings/components/TtsSection.vue`, `TtsSection.test.ts`, existing `useTTSQueries.ts` and `ttsService.ts` only if needed.
+
+- Keep the current `TtsSection` provider/key/voice/model/Save surface; render one `q-select` for every provider's model from the common `TTS_PROVIDER_REGISTRY` (OpenAI has one choice). Remove component-local duplicated model/voice constants. ElevenLabs keeps free-form voice ID; other providers use official lists.
+- Call `resolveTtsSelection()` on provider switch to set valid model/voice. Hydrate stored settings without clobbering in-progress changes. Show a hint that blank key retains the **same** provider's saved key.
+- Enable Save for same-provider model/voice-only edits if `hasApiKey` is true; provider switch requires a freshly entered key. Keep mutation success/error UI and query invalidation as-is.
+
+**Tests:** model/voice options from registry; switching resets incompatible selections; reload shows saved model; same-provider model edit with blank key submits omission; provider-switch without key stays disabled; no false success on save failure. Avoid extra settings framework.
+
+
+### 5. Focused regression, production build and end-to-end verification
+
+Run common Bun tests, API Bun provider/route tests, API compile, Vitest Settings/service tests, lint and web build. Crucially run **`bun run lambda:build` in `packages/cdk`**, using the actual Node 20/CJS esbuild packaging path: new OpenAI Realtime `ws` imports must work in production, not just Bun-target builds.
+
+Extend **`apps/vela/e2e/llm-settings.spec.ts`** around its existing TTS save regression, not a nonexistent TTS Playwright file or separate test suite. Update **`apps/vela/e2e/fixtures/syntheticAuth.ts`** to model same-provider blank-key retention. Test both unconfigured `hasApiKey:false` -> Save disabled and configured `hasApiKey:true` -> model-change Save enabled without key; assert updated choice persisted after query reload.
+
+**End-to-end acceptance matrix (automated/observable; no human sign-off):**
 
 | Platform | End-to-end acceptance |
 | --- | --- |
-| **macOS browser** | Authenticated Settings shows the correct provider/model/voice options; selecting a different ElevenLabs model, saving with a retained API key and refreshing preserves the choice; Japanese pronunciation plays, and model switching does not reuse the prior audio cache key/URL. A Settings screenshot is captured and visually inspected. |
-| **Windows browser** | Same authenticated model-save-reload-playback flow; both MP3 and WAV playback remain usable as selected; desktop screenshot shows no clipped labels, overflow or misleading provider/model defaults. |
-| **iOS** | Existing available mobile pronunciation playback path (Capacitor Simulator) works with the upgraded backend. For Settings controls, responsive iOS Safari can select provider/model/voice, save, reload and play audio. Narrow-screen screenshot shows accessible dropdowns and Save action without overlaps. |
+| **macOS browser** | Authenticated Settings model/voice selection, same-provider blank-key save and reload, Japanese pronunciation playback and model-aware cache miss when the model changes. Capture Settings screenshot for visual checks. |
+| **Windows browser** | Same model/save/reload path; applicable MP3/WAV playback and desktop screenshot without overflow or misleading labels. |
+| **iOS** | Existing Capacitor **WKWebView audio path must play 24 kHz mono WAV** produced by OpenAI/Gemini and preserve interruption/completion behavior. iOS Safari narrow Settings dropdowns can save/reload/play as applicable. Capture a narrow-layout screenshot. |
 
-**Visual comparison:** HPA-757 has **no attached Linear UI mockup** at plan creation. If one is attached before implementation review, compare captured screenshots against that mockup. Otherwise compare with the current Settings section and the documented model/voice/retained-key behavior. Android/Linux: rely on CI only, no platform acceptance tasks.
+**Visual check:** HPA-757 had no attached Linear UI mockup at plan creation. Compare captured screenshots to a mockup if attached later, otherwise verify provider/model labels, voice options, key-retention hint, Save state and responsive layout. Android/Linux: CI only.
 
-**Critical E2E assertions:** every provider returns playable Japanese audio with its current model; generating once then repeating with the same effective settings hits S3; changing model produces a miss and new audio; editing model alone never discards the stored API key; signs of OpenAI paraphrasing or invalid Japanese cause the gate to fail.
+**Critical assertions:** each provider passes real Japanese playback/quality smoke checks; repeated effective settings use S3 cached audio; model change generates a new object; model-only save retains the same-provider key; Realtime obviously non-verbatim transcript fails **before** caching; no secrets leak into logs. Mock tests are not a substitute for real-provider evaluation.
+
 
 ## Risk controls and scope discipline
 
-- **OpenAI literal reading:** the realtime model may paraphrase and Japanese quality is not guaranteed. Test early; stop and record findings if it does.
-- **Runtime budget:** existing Lambda 60s is already adequate; API Gateway REST integration often defaults to 29s. Target <25s provider generation, leaving room for S3. Avoid CDK changes until measured latency requires them.
-- **Cache correctness:** already model-aware; normalize effective model/voice values and keep server/client identity aligned. Avoid a new cache or broad invalidation system.
-- **Costs:** OpenAI realtime is roughly $0.60 / million input text tokens and $20 / million output audio tokens at plan time; keep tests short and record representative cost/latency. No jobs, streaming gateway or larger infrastructure.
+- **OpenAI literal reading + permanent cache:** the early gate evaluates quality once; the per-request transcript heuristic rejects obvious non-read-back responses before S3 upload. It cannot guarantee semantic equivalence (e.g. kanji-to-kana readings or short paraphrases), so document that limit and avoid a new LLM verifier.
+- **Single source:** null/legacy model/voice selection uses the pure common resolver; adapters cannot override defaults or create cache mismatches. No migration.
+- **Deadline:** reuse the existing 25s API-side timeout for all three providers. Named `TimeoutError` maps to existing 504; no CDK change unless measured evidence demands it.
+- **Gemini format:** vendor documents unary WAV, but sniff actual bytes; wrap only confirmed raw PCM16, not arbitrary unsupported formats. Include live 3.8 smoke testing.
+- **Bundle:** Node 20 deployed Lambda is esbuild/CJS, not Bun; validate SDK Realtime and `ws` peer through `packages/cdk` build. Node runtime modernization is a separate maintenance task.
+- **Cost and architecture:** OpenAI is about $0.60 / 1M text input tokens and $20 / 1M audio output tokens at planning time. Record small-sample latency/cost. No queue, streaming-to-browser, plugin framework, new key storage or second PR.
 
 ## Delivery and definition of done
 
