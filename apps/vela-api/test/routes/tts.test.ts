@@ -140,6 +140,15 @@ describe('serializeLogArgs', () => {
 describe('TTS Route', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // `clearAllMocks` keeps implementations and one-shot queues. POST /settings
+    // now reads before writing, so a leaked `...Once` value from a failing test
+    // would silently change the next test's stored settings. Reset these mocks
+    // to a clean slate per test.
+    mockTtsSettingsDB.get.mockReset();
+    mockTtsSettingsDB.put.mockReset();
+    mockS3Client.send.mockReset();
+    mockGetSignedUrl.mockReset();
+    mockTTSProvider.generate.mockReset();
     mockAuthConfig.userId = 'test-user-id';
     mockAuthConfig.userEmail = 'test@example.com';
   });
@@ -325,6 +334,212 @@ describe('TTS Route', () => {
       });
     });
 
+    test('retains the stored key when apiKey is omitted for the same provider', async () => {
+      mockTtsSettingsDB.get.mockResolvedValueOnce({
+        user_id: 'test-user-id',
+        provider: 'elevenlabs',
+        api_key: 'stored-secret-key',
+        voice_id: 'ErXwobaYiN019PkySvjV',
+        model: 'eleven_v4',
+      });
+      mockTtsSettingsDB.put.mockResolvedValueOnce(undefined);
+
+      const app = createTestApp();
+      const res = await app.request('/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          provider: 'elevenlabs',
+          voiceId: 'ErXwobaYiN019PkySvjV',
+          model: 'eleven_multilingual_v2',
+        }),
+      });
+
+      expect(res.status).toBe(200);
+      expect(mockTtsSettingsDB.put).toHaveBeenCalledWith({
+        user_id: 'test-user-id',
+        provider: 'elevenlabs',
+        api_key: 'stored-secret-key',
+        voice_id: 'ErXwobaYiN019PkySvjV',
+        model: 'eleven_multilingual_v2',
+      });
+      expect(JSON.stringify(await res.json())).not.toContain('stored-secret-key');
+    });
+
+    test('retains the stored key when apiKey is blank for the same provider', async () => {
+      mockTtsSettingsDB.get.mockResolvedValueOnce({
+        user_id: 'test-user-id',
+        provider: 'openai',
+        api_key: 'stored-openai-key',
+        voice_id: 'alloy',
+        model: 'gpt-realtime-2.1-mini',
+      });
+      mockTtsSettingsDB.put.mockResolvedValueOnce(undefined);
+
+      const app = createTestApp();
+      const res = await app.request('/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          provider: 'openai',
+          apiKey: '   ',
+          voiceId: 'alloy',
+          model: 'gpt-realtime-2.1-mini',
+        }),
+      });
+
+      expect(res.status).toBe(200);
+      expect(mockTtsSettingsDB.put).toHaveBeenCalledWith(
+        expect.objectContaining({ provider: 'openai', api_key: 'stored-openai-key' }),
+      );
+    });
+
+    test('rejects a provider switch without an API key and keeps the old secret', async () => {
+      mockTtsSettingsDB.get.mockResolvedValueOnce({
+        user_id: 'test-user-id',
+        provider: 'elevenlabs',
+        api_key: 'stored-secret-key',
+        voice_id: 'ErXwobaYiN019PkySvjV',
+        model: 'eleven_v4',
+      });
+
+      const app = createTestApp();
+      const res = await app.request('/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          provider: 'openai',
+          voiceId: 'alloy',
+          model: 'gpt-realtime-2.1-mini',
+        }),
+      });
+
+      expect(res.status).toBe(400);
+      const body = await res.json();
+      expect(body).toEqual({
+        error: 'TTS API key required. Enter a key for this provider.',
+        code: 'tts_not_configured',
+      });
+      expect(JSON.stringify(body)).not.toContain('stored-secret-key');
+      expect(mockTtsSettingsDB.put).not.toHaveBeenCalled();
+    });
+
+    test('rejects a first-time save without an API key', async () => {
+      mockTtsSettingsDB.get.mockResolvedValueOnce(null);
+
+      const app = createTestApp();
+      const res = await app.request('/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          provider: 'elevenlabs',
+          voiceId: 'ErXwobaYiN019PkySvjV',
+          model: 'eleven_v4',
+        }),
+      });
+
+      expect(res.status).toBe(400);
+      expect(await res.json()).toEqual({
+        error: 'TTS API key required. Enter a key for this provider.',
+        code: 'tts_not_configured',
+      });
+      expect(mockTtsSettingsDB.put).not.toHaveBeenCalled();
+    });
+
+    test('rejects a same-provider save when the stored row has no key', async () => {
+      mockTtsSettingsDB.get.mockResolvedValueOnce({
+        user_id: 'test-user-id',
+        provider: 'elevenlabs',
+        api_key: '',
+        voice_id: null,
+        model: null,
+      });
+
+      const app = createTestApp();
+      const res = await app.request('/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ provider: 'elevenlabs' }),
+      });
+
+      expect(res.status).toBe(400);
+      expect(mockTtsSettingsDB.put).not.toHaveBeenCalled();
+    });
+
+    test('a supplied key replaces the stored key for the same provider', async () => {
+      mockTtsSettingsDB.get.mockResolvedValueOnce({
+        user_id: 'test-user-id',
+        provider: 'elevenlabs',
+        api_key: 'old-secret-key',
+        voice_id: null,
+        model: null,
+      });
+      mockTtsSettingsDB.put.mockResolvedValueOnce(undefined);
+
+      const app = createTestApp();
+      const res = await app.request('/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ provider: 'elevenlabs', apiKey: 'new-secret-key' }),
+      });
+
+      expect(res.status).toBe(200);
+      expect(mockTtsSettingsDB.put).toHaveBeenCalledWith(
+        expect.objectContaining({ api_key: 'new-secret-key' }),
+      );
+    });
+
+    test('a retained key is used by generation and never exposed by GET /settings', async () => {
+      mockTtsSettingsDB.get.mockResolvedValue({
+        user_id: 'test-user-id',
+        provider: 'elevenlabs',
+        api_key: 'stored-secret-key',
+        voice_id: 'ErXwobaYiN019PkySvjV',
+        model: 'eleven_v4',
+      });
+      mockTtsSettingsDB.put.mockResolvedValueOnce(undefined);
+      const notFoundError = new Error('Not found');
+      (notFoundError as any).name = 'NotFound';
+      mockS3Client.send.mockRejectedValueOnce(notFoundError);
+      mockTTSProvider.generate.mockResolvedValueOnce({
+        audioBuffer: Buffer.from('audio-data'),
+        contentType: 'audio/mpeg',
+      });
+      mockS3Client.send.mockResolvedValueOnce({});
+      mockGetSignedUrl.mockResolvedValueOnce('https://s3.example.com/new-audio.mp3');
+
+      const app = createTestApp();
+      const saveRes = await app.request('/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ provider: 'elevenlabs', model: 'eleven_v4' }),
+      });
+      expect(saveRes.status).toBe(200);
+      expect(mockTtsSettingsDB.put).toHaveBeenCalledWith(
+        expect.objectContaining({ api_key: 'stored-secret-key' }),
+      );
+
+      const settingsRes = await app.request('/settings');
+      const settingsBody = (await settingsRes.json()) as Record<string, unknown>;
+      expect(settingsBody).toEqual({
+        hasApiKey: true,
+        provider: 'elevenlabs',
+        voiceId: 'ErXwobaYiN019PkySvjV',
+        model: 'eleven_v4',
+      });
+      expect(JSON.stringify(settingsBody)).not.toContain('stored-secret-key');
+
+      const generateRes = await app.request('/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ vocabularyId: 'vocab-1', text: '日本語' }),
+      });
+      expect(generateRes.status).toBe(200);
+      expect(mockTTSProvider.generate).toHaveBeenCalledWith(
+        expect.objectContaining({ apiKey: 'stored-secret-key' }),
+      );
+    });
+
     test('saves settings with null voiceId and model', async () => {
       mockTtsSettingsDB.put.mockResolvedValueOnce(undefined);
 
@@ -433,7 +648,7 @@ describe('TTS Route', () => {
       expect(res.status).toBe(400);
     });
 
-    test('returns 400 when apiKey is missing', async () => {
+    test('returns 400 when apiKey is missing for a user with no stored settings', async () => {
       const app = createTestApp();
       const res = await app.request('/settings', {
         method: 'POST',
@@ -597,6 +812,283 @@ describe('TTS Route', () => {
       });
       const headCommand = mockS3Client.send.mock.calls[0][0] as { Key: string };
       expect(headCommand.Key).toBe(expectedCacheKey('gemini', 'Kore', 'gemini-3.8-flash-tts'));
+    });
+
+    test('reuses the same cache key for the same resolved model and reports the hit', async () => {
+      const settings = {
+        user_id: 'test-user-id',
+        provider: 'elevenlabs',
+        api_key: 'test-api-key',
+        voice_id: null,
+        model: 'eleven_v4',
+      };
+      mockTtsSettingsDB.get.mockResolvedValue(settings);
+      const notFoundError = new Error('Not found');
+      (notFoundError as any).name = 'NotFound';
+      mockS3Client.send
+        .mockRejectedValueOnce(notFoundError) // first request: cache miss
+        .mockResolvedValueOnce({}) // first request: upload
+        .mockResolvedValueOnce({}); // second request: cache hit
+      mockTTSProvider.generate.mockResolvedValueOnce({
+        audioBuffer: Buffer.from('audio-data'),
+        contentType: 'audio/mpeg',
+      });
+      mockGetSignedUrl
+        .mockResolvedValueOnce('https://s3.example.com/generated.mp3')
+        .mockResolvedValueOnce('https://s3.example.com/cached.mp3');
+
+      const app = createTestApp();
+      const generate = () =>
+        app.request('/generate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ vocabularyId: 'vocab-1', text: '日本語' }),
+        });
+
+      const firstRes = await generate();
+      expect(firstRes.status).toBe(200);
+      expect(((await firstRes.json()) as { cached: boolean }).cached).toBe(false);
+
+      const secondRes = await generate();
+      expect(secondRes.status).toBe(200);
+      const secondBody = (await secondRes.json()) as { cached: boolean };
+      expect(secondBody.cached).toBe(true);
+      expect(mockTTSProvider.generate).toHaveBeenCalledTimes(1);
+
+      const commands = mockS3Client.send.mock.calls.map(
+        ([command]) => command as { _type: string; Key: string },
+      );
+      expect(commands.map(({ _type }) => _type)).toEqual(['HeadObject', 'PutObject', 'HeadObject']);
+      const expectedKey = expectedCacheKey('elevenlabs', 'ErXwobaYiN019PkySvjV', 'eleven_v4');
+      expect(commands[0].Key).toBe(expectedKey);
+      expect(commands[1].Key).toBe(expectedKey);
+      expect(commands[2].Key).toBe(expectedKey);
+    });
+
+    test('a changed model uses a distinct cache key and misses the old cached object', async () => {
+      mockTtsSettingsDB.get
+        .mockResolvedValueOnce({
+          user_id: 'test-user-id',
+          provider: 'elevenlabs',
+          api_key: 'test-api-key',
+          voice_id: null,
+          model: 'eleven_v4',
+        })
+        .mockResolvedValueOnce({
+          user_id: 'test-user-id',
+          provider: 'elevenlabs',
+          api_key: 'test-api-key',
+          voice_id: null,
+          model: 'eleven_multilingual_v2',
+        });
+      const notFoundError = new Error('Not found');
+      (notFoundError as any).name = 'NotFound';
+      // The changed model is a different S3 object, so it also misses.
+      mockS3Client.send
+        .mockRejectedValueOnce(notFoundError)
+        .mockResolvedValueOnce({})
+        .mockRejectedValueOnce(notFoundError)
+        .mockResolvedValueOnce({});
+      mockTTSProvider.generate.mockResolvedValue({
+        audioBuffer: Buffer.from('audio-data'),
+        contentType: 'audio/mpeg',
+      });
+      mockGetSignedUrl
+        .mockResolvedValueOnce('https://s3.example.com/v4.mp3')
+        .mockResolvedValueOnce('https://s3.example.com/multilingual.mp3');
+
+      const app = createTestApp();
+      const generate = () =>
+        app.request('/generate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ vocabularyId: 'vocab-1', text: '日本語' }),
+        });
+
+      const firstBody = (await (await generate()).json()) as {
+        cached: boolean;
+        effectiveSettings: { model: string };
+      };
+      const secondBody = (await (await generate()).json()) as {
+        cached: boolean;
+        effectiveSettings: { model: string };
+      };
+      expect(firstBody.cached).toBe(false);
+      expect(firstBody.effectiveSettings.model).toBe('eleven_v4');
+      expect(secondBody.cached).toBe(false);
+      expect(secondBody.effectiveSettings.model).toBe('eleven_multilingual_v2');
+
+      const headKeys = mockS3Client.send.mock.calls
+        .map(([command]) => command as { _type: string; Key: string })
+        .filter(({ _type }) => _type === 'HeadObject')
+        .map(({ Key }) => Key);
+      expect(headKeys).toHaveLength(2);
+      expect(headKeys[0]).toBe(expectedCacheKey('elevenlabs', 'ErXwobaYiN019PkySvjV', 'eleven_v4'));
+      expect(headKeys[1]).toBe(
+        expectedCacheKey('elevenlabs', 'ErXwobaYiN019PkySvjV', 'eleven_multilingual_v2'),
+      );
+      expect(headKeys[0]).not.toBe(headKeys[1]);
+    });
+
+    test('generation then lookup share the cache key and report matching effectiveSettings', async () => {
+      const settings = {
+        user_id: 'test-user-id',
+        provider: 'gemini',
+        api_key: 'gemini-key',
+        voice_id: null,
+        model: null,
+      };
+      mockTtsSettingsDB.get.mockResolvedValue(settings);
+      const notFoundError = new Error('Not found');
+      (notFoundError as any).name = 'NotFound';
+      mockS3Client.send
+        .mockRejectedValueOnce(notFoundError) // generate: cache miss
+        .mockResolvedValueOnce({}) // generate: upload
+        .mockResolvedValueOnce({}); // lookup: cache hit
+      mockTTSProvider.generate.mockResolvedValueOnce({
+        audioBuffer: Buffer.from('audio-data'),
+        contentType: 'audio/wav',
+      });
+      mockGetSignedUrl
+        .mockResolvedValueOnce('https://s3.example.com/generated.wav')
+        .mockResolvedValueOnce('https://s3.example.com/looked-up.wav');
+
+      const app = createTestApp();
+      const generateRes = await app.request('/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ vocabularyId: 'vocab-1', text: '日本語' }),
+      });
+      const generateBody = (await generateRes.json()) as {
+        cached: boolean;
+        effectiveSettings: { provider: string; voiceId: string; model: string };
+      };
+      expect(generateBody.cached).toBe(false);
+      expect(generateBody.effectiveSettings).toEqual({
+        provider: 'gemini',
+        voiceId: 'Kore',
+        model: 'gemini-3.8-flash-tts',
+      });
+
+      const lookupRes = await app.request('/audio/vocab-1');
+      expect(lookupRes.status).toBe(200);
+      const lookupBody = (await lookupRes.json()) as {
+        effectiveSettings: { provider: string; voiceId: string; model: string };
+      };
+      expect(lookupBody.effectiveSettings).toEqual(generateBody.effectiveSettings);
+
+      const headKeys = mockS3Client.send.mock.calls
+        .map(([command]) => command as { _type: string; Key: string })
+        .filter(({ _type }) => _type === 'HeadObject')
+        .map(({ Key }) => Key);
+      expect(headKeys).toEqual([
+        expectedCacheKey('gemini', 'Kore', 'gemini-3.8-flash-tts'),
+        expectedCacheKey('gemini', 'Kore', 'gemini-3.8-flash-tts'),
+      ]);
+    });
+
+    test('concurrent generations under different settings keep separate cache identities', async () => {
+      mockTtsSettingsDB.get
+        .mockResolvedValueOnce({
+          user_id: 'test-user-id',
+          provider: 'openai',
+          api_key: 'openai-key',
+          voice_id: 'alloy',
+          model: 'gpt-realtime-2.1-mini',
+        })
+        .mockResolvedValueOnce({
+          user_id: 'test-user-id',
+          provider: 'gemini',
+          api_key: 'gemini-key',
+          voice_id: 'Puck',
+          model: 'gemini-3.8-flash-lite-tts',
+        });
+      const notFoundError = new Error('Not found');
+      (notFoundError as any).name = 'NotFound';
+      // Concurrent requests interleave, so key each response by command type
+      // instead of relying on a fixed call order.
+      mockS3Client.send.mockImplementation(async (command: { _type: string }) => {
+        if (command._type === 'HeadObject') throw notFoundError;
+        return {};
+      });
+      mockTTSProvider.generate.mockResolvedValue({
+        audioBuffer: Buffer.from('audio-data'),
+        contentType: 'audio/wav',
+      });
+      mockGetSignedUrl.mockResolvedValue('https://s3.example.com/audio.wav');
+
+      const app = createTestApp();
+      const generate = () =>
+        app.request('/generate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ vocabularyId: 'vocab-1', text: '日本語' }),
+        });
+
+      const [openAiRes, geminiRes] = await Promise.all([generate(), generate()]);
+      const openAiBody = (await openAiRes.json()) as {
+        cached: boolean;
+        effectiveSettings: { provider: string; voiceId: string; model: string };
+      };
+      const geminiBody = (await geminiRes.json()) as {
+        cached: boolean;
+        effectiveSettings: { provider: string; voiceId: string; model: string };
+      };
+      expect(openAiBody.cached).toBe(false);
+      expect(geminiBody.cached).toBe(false);
+      expect(openAiBody.effectiveSettings).toEqual({
+        provider: 'openai',
+        voiceId: 'alloy',
+        model: 'gpt-realtime-2.1-mini',
+      });
+      expect(geminiBody.effectiveSettings).toEqual({
+        provider: 'gemini',
+        voiceId: 'Puck',
+        model: 'gemini-3.8-flash-lite-tts',
+      });
+
+      const headKeys = new Set(
+        mockS3Client.send.mock.calls
+          .map(([command]) => command as { _type: string; Key: string })
+          .filter(({ _type }) => _type === 'HeadObject')
+          .map(({ Key }) => Key),
+      );
+      expect(headKeys.size).toBe(2);
+    });
+
+    test('a rejected transcript fails without uploading audio and without leaking the body', async () => {
+      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      mockTtsSettingsDB.get.mockResolvedValueOnce({
+        user_id: 'test-user-id',
+        provider: 'openai',
+        api_key: 'openai-key',
+        voice_id: 'alloy',
+        model: 'gpt-realtime-2.1-mini',
+      });
+      const notFoundError = new Error('Not found');
+      (notFoundError as any).name = 'NotFound';
+      mockS3Client.send.mockRejectedValueOnce(notFoundError);
+      mockTTSProvider.generate.mockRejectedValueOnce(
+        new Error('OpenAI Realtime TTS transcript was missing or implausible'),
+      );
+
+      const app = createTestApp();
+      const res = await app.request('/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ vocabularyId: 'vocab-1', text: '日本語' }),
+      });
+
+      expect(res.status).toBe(500);
+      expect(await res.json()).toEqual({
+        error: 'Failed to generate TTS audio',
+        code: 'tts_generation_failed',
+      });
+      expect(mockS3Client.send).toHaveBeenCalledTimes(1);
+      expect((mockS3Client.send.mock.calls[0][0] as { _type: string })._type).toBe('HeadObject');
+      expect(mockGetSignedUrl).not.toHaveBeenCalled();
+      expect(serializeLogArgs(errorSpy.mock.calls[0])).not.toContain('transcript was missing');
+      errorSpy.mockRestore();
     });
 
     test('returns a stable code when TTS is not configured', async () => {

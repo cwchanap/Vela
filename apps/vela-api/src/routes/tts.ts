@@ -114,7 +114,9 @@ const GenerateTTSSchema = z.object({
 const SaveTTSSettingsSchema = z
   .object({
     provider: TTSProviderSchema,
-    apiKey: z.string().min(1),
+    // Blank/omitted is allowed only when the stored row already holds a key for
+    // this same provider; the handler retains that key.
+    apiKey: z.string().optional(),
     voiceId: z.string().nullable().optional(),
     model: z.string().nullable().optional(),
   })
@@ -403,10 +405,28 @@ const createTTSRoute = (env: Env) => {
         return c.json({ error: 'Unauthorized: User ID not found' }, 401);
       }
 
+      // A blank/omitted key means "keep the stored key", but only for the same
+      // saved provider. Never reuse a credential across providers, and never
+      // treat a non-string stored value as a key.
+      const providedKey = typeof apiKey === 'string' && apiKey.trim() ? apiKey : null;
+      const existing = providedKey ? null : await ttsSettingsDB.get(userId);
+      const retainedKey =
+        existing?.provider === provider && typeof existing.api_key === 'string'
+          ? existing.api_key
+          : '';
+      const savedKey = providedKey ?? retainedKey;
+
+      if (!savedKey) {
+        return c.json(
+          ttsError('TTS API key required. Enter a key for this provider.', 'tts_not_configured'),
+          400,
+        );
+      }
+
       await ttsSettingsDB.put({
         user_id: userId,
         provider,
-        api_key: apiKey,
+        api_key: savedKey,
         voice_id: voiceId || null,
         model: model || null,
       });
