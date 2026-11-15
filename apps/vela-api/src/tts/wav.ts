@@ -53,11 +53,14 @@ export function isValidWav(audio: Buffer): boolean {
 
   let sawFmt = false;
   let sawData = false;
-  for (let offset = 12; offset + 8 <= riffEnd;) {
+  let offset = 12;
+  while (offset + 8 <= riffEnd) {
     const chunkId = audio.subarray(offset, offset + 4).toString('ascii');
     const chunkSize = audio.readUInt32LE(offset + 4);
     const chunkDataStart = offset + 8;
-    if (chunkSize > riffEnd - chunkDataStart) return false;
+    // RIFF chunks are word-aligned: odd sizes carry one pad byte inside the
+    // declared RIFF bounds, so the padded size is what must fit.
+    if (chunkSize + (chunkSize & 1) > riffEnd - chunkDataStart) return false;
     if (chunkId === 'fmt ') {
       if (chunkSize < 16) return false;
       sawFmt = true;
@@ -65,8 +68,10 @@ export function isValidWav(audio: Buffer): boolean {
       if (chunkSize === 0) return false;
       sawData = true;
     }
-    // RIFF chunks are word-aligned: odd sizes carry one pad byte.
-    offset = chunkDataStart + chunkSize + (chunkSize % 2);
+    offset = chunkDataStart + chunkSize + (chunkSize & 1);
   }
+  // Chunks must tile the declared bounds exactly; leftover bytes are a
+  // truncated chunk header, not trailing metadata (that lives beyond riffEnd).
+  if (offset !== riffEnd) return false;
   return sawFmt && sawData;
 }
