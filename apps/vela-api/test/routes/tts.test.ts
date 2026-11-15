@@ -1,4 +1,5 @@
 import { describe, test, expect, beforeEach, vi } from 'bun:test';
+import { createHash } from 'crypto';
 import { Hono } from 'hono';
 import type { Env } from '../../src/types';
 
@@ -69,6 +70,16 @@ function createTestApp(env: Env = TEST_ENV) {
   const ttsRoute = createTTSRoute(env);
   app.route('/', ttsRoute);
   return app;
+}
+
+// Mirrors generateCacheKey in src/routes/tts.ts so route tests can prove the
+// resolved effective selection is what the S3 cache identity uses.
+function expectedCacheKey(provider: string, voiceId: string, model: string): string {
+  const settingsHash = createHash('sha256')
+    .update(`${provider}:${voiceId}:${model}`)
+    .digest('hex')
+    .substring(0, 16);
+  return `tts/${mockAuthConfig.userId}/vocab-1/${settingsHash}`;
 }
 
 // Serialize every argument of a console call to a single string so a test can
@@ -234,6 +245,27 @@ describe('TTS Route', () => {
       expect(loggedArg).not.toHaveProperty('userId');
       expect(serializeLogArgs(warnSpy.mock.calls[0])).not.toContain('test-user-id');
       warnSpy.mockRestore();
+    });
+
+    test('resolves malformed stored model and voice to provider defaults', async () => {
+      mockTtsSettingsDB.get.mockResolvedValueOnce({
+        user_id: 'test-user-id',
+        provider: 'gemini',
+        api_key: 'gemini-key',
+        voice_id: {},
+        model: 42,
+      });
+
+      const app = createTestApp();
+      const res = await app.request('/settings');
+
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({
+        hasApiKey: true,
+        provider: 'gemini',
+        voiceId: 'Kore',
+        model: 'gemini-3.8-flash-tts',
+      });
     });
 
     test('returns 500 on database error', async () => {
@@ -521,6 +553,50 @@ describe('TTS Route', () => {
         model: 'eleven_v4',
       });
       expect(mockTTSProvider.generate).toHaveBeenCalledTimes(1);
+    });
+
+    test('resolves malformed stored model and voice and uses one effective selection', async () => {
+      mockTtsSettingsDB.get.mockResolvedValueOnce({
+        user_id: 'test-user-id',
+        provider: 'gemini',
+        api_key: 'gemini-key',
+        voice_id: {},
+        model: 42,
+      });
+      const notFoundError = new Error('Not found');
+      (notFoundError as any).name = 'NotFound';
+      mockS3Client.send.mockRejectedValueOnce(notFoundError);
+      mockTTSProvider.generate.mockResolvedValueOnce({
+        audioBuffer: Buffer.from('audio-data'),
+        contentType: 'audio/wav',
+      });
+      mockS3Client.send.mockResolvedValueOnce({});
+      mockGetSignedUrl.mockResolvedValueOnce('https://s3.example.com/new-audio.wav');
+
+      const app = createTestApp();
+      const res = await app.request('/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ vocabularyId: 'vocab-1', text: '日本語' }),
+      });
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as {
+        effectiveSettings?: { provider: string; voiceId: string; model: string };
+      };
+      expect(body.effectiveSettings).toEqual({
+        provider: 'gemini',
+        voiceId: 'Kore',
+        model: 'gemini-3.8-flash-tts',
+      });
+      expect(mockTTSProvider.generate).toHaveBeenCalledWith({
+        text: '日本語',
+        apiKey: 'gemini-key',
+        voiceId: 'Kore',
+        model: 'gemini-3.8-flash-tts',
+      });
+      const headCommand = mockS3Client.send.mock.calls[0][0] as { Key: string };
+      expect(headCommand.Key).toBe(expectedCacheKey('gemini', 'Kore', 'gemini-3.8-flash-tts'));
     });
 
     test('returns a stable code when TTS is not configured', async () => {
@@ -938,6 +1014,33 @@ describe('TTS Route', () => {
         voiceId: 'Kore',
         model: 'gemini-3.8-flash-tts',
       });
+    });
+
+    test('resolves malformed stored settings on audio lookup to the same effective selection', async () => {
+      mockTtsSettingsDB.get.mockResolvedValueOnce({
+        user_id: 'test-user-id',
+        provider: 'gemini',
+        api_key: 'test-api-key',
+        voice_id: 99,
+        model: true,
+      });
+      mockS3Client.send.mockResolvedValueOnce({}); // HeadObject succeeds
+      mockGetSignedUrl.mockResolvedValueOnce('https://s3.example.com/cached-audio.wav');
+
+      const app = createTestApp();
+      const res = await app.request('/audio/vocab-1');
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as {
+        effectiveSettings?: { provider: string; voiceId: string; model: string };
+      };
+      expect(body.effectiveSettings).toEqual({
+        provider: 'gemini',
+        voiceId: 'Kore',
+        model: 'gemini-3.8-flash-tts',
+      });
+      const headCommand = mockS3Client.send.mock.calls[0][0] as { Key: string };
+      expect(headCommand.Key).toBe(expectedCacheKey('gemini', 'Kore', 'gemini-3.8-flash-tts'));
     });
 
     test('returns 404 when audio is not cached', async () => {

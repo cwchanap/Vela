@@ -140,6 +140,22 @@ describe('resolveTtsSelection', () => {
       model: 'gemini-3.8-flash-tts',
     });
   });
+
+  // DynamoDB returns raw Items, so a malformed row can contain any type.
+  it.each([
+    ['gemini', 42, {}, 'gemini-3.8-flash-tts', 'Kore'],
+    ['openai', { id: 'tts-1' }, true, 'gpt-realtime-2.1-mini', 'alloy'],
+    ['elevenlabs', false, 12.5, 'eleven_v4', ELEVENLABS_DEFAULT_VOICE],
+  ] as const)(
+    'resolves wrong-type stored model and voice for %s to defaults',
+    (provider, model, voiceId, resolvedModel, resolvedVoice) => {
+      expect(resolveTtsSelection(provider, model, voiceId)).toEqual({
+        provider,
+        model: resolvedModel,
+        voiceId: resolvedVoice,
+      });
+    },
+  );
 });
 
 describe('TTS contracts', () => {
