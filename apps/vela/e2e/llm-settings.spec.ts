@@ -43,6 +43,11 @@ const waitForProfilePut = (page: Page) =>
     (r) => r.url().includes('/api/profiles/update') && r.request().method() === 'PUT',
   );
 
+const waitForTtsSettingsGet = (page: Page) =>
+  page.waitForResponse(
+    (r) => r.url().includes('/api/tts/settings') && r.request().method() === 'GET',
+  );
+
 const llmOf = (body: Record<string, unknown> | undefined) => {
   const prefs = (body?.preferences ?? {}) as Record<string, unknown>;
   return (prefs.llm ?? {}) as {
@@ -818,11 +823,14 @@ test.describe('LLM Settings - Theme and TTS regression', () => {
     apiMock,
   }) => {
     apiMock.seedProfile(SYNTHETIC_USER_A, {});
+    const ttsLoaded = waitForTtsSettingsGet(page);
     await gotoSettings(page);
+    await ttsLoaded;
 
     await expect(page.getByTestId('tts-provider-select')).toBeVisible();
     await expect(page.getByTestId('tts-save')).toBeDisabled();
     await expect(page.getByText('Not configured')).toBeVisible();
+    await expect(page.getByText('Your ElevenLabs API key')).toBeVisible();
 
     await page.getByTestId('tts-api-key-input').fill('e2e-tts-key-0001');
     await expect(page.getByTestId('tts-save')).toBeEnabled();
@@ -833,5 +841,96 @@ test.describe('LLM Settings - Theme and TTS regression', () => {
     await page.getByTestId('tts-save').click();
     await ttsPost;
     await expect(page.getByText('Configured', { exact: true })).toBeVisible();
+
+    // The saved key belongs to ElevenLabs only: an unsaved provider must not
+    // inherit it, and returning restores the retained-key state.
+    await page.getByTestId('tts-provider-select').click();
+    await page.getByRole('option', { name: 'OpenAI', exact: true }).click();
+    await expect(page.getByTestId('tts-save')).toBeDisabled();
+    await expect(page.getByText('Not configured')).toBeVisible();
+    await expect(page.getByText('Leave blank to keep the saved ElevenLabs key')).toBeHidden();
+
+    await page.getByTestId('tts-provider-select').click();
+    await page.getByRole('option', { name: 'ElevenLabs', exact: true }).click();
+    await expect(page.getByTestId('tts-save')).toBeEnabled();
+    await expect(page.getByText('Leave blank to keep the saved ElevenLabs key')).toBeVisible();
+  });
+
+  test('should retain the same-provider key on a model-only save and persist it', async ({
+    authedPage: page,
+    apiMock,
+  }) => {
+    apiMock.seedProfile(SYNTHETIC_USER_A, {});
+    apiMock.ttsSettings = {
+      provider: 'elevenlabs',
+      voiceId: 'ErXwobaYiN019PkySvjV',
+      model: 'eleven_v4',
+      hasApiKey: true,
+    };
+    await gotoSettings(page);
+
+    // Configured: a model-only change needs no key.
+    await expect(page.getByTestId('tts-save')).toBeEnabled();
+    await expect(page.getByText('Configured', { exact: true })).toBeVisible();
+    await expect(page.getByText('Leave blank to keep the saved ElevenLabs key')).toBeVisible();
+
+    await page.getByTestId('tts-model-input').click();
+    await page.getByRole('option', { name: 'Eleven Multilingual v2', exact: true }).click();
+    await expect(page.getByTestId('tts-model-input')).toHaveValue('Eleven Multilingual v2');
+
+    const ttsPost = page.waitForResponse(
+      (r) => r.url().includes('/api/tts/settings') && r.request().method() === 'POST',
+    );
+    const settingsRefetch = waitForTtsSettingsGet(page);
+    await page.getByTestId('tts-save').click();
+    const postBody = JSON.parse((await (await ttsPost).request().postData()) ?? '{}') as Record<
+      string,
+      unknown
+    >;
+    // A blank key is omitted so the API retains the same-provider key.
+    expect(postBody).toEqual({
+      provider: 'elevenlabs',
+      voiceId: 'ErXwobaYiN019PkySvjV',
+      model: 'eleven_multilingual_v2',
+    });
+
+    // The mutation invalidates the settings query; the refetch must return the
+    // saved model and the retained key so the form does not fall back.
+    const refetched = (await (await settingsRefetch).json()) as Record<string, unknown>;
+    expect(refetched).toEqual({
+      provider: 'elevenlabs',
+      voiceId: 'ErXwobaYiN019PkySvjV',
+      model: 'eleven_multilingual_v2',
+      hasApiKey: true,
+    });
+    await expect(page.getByTestId('tts-model-input')).toHaveValue('Eleven Multilingual v2');
+    await expect(page.getByText('Configured', { exact: true })).toBeVisible();
+    await expect(page.getByTestId('tts-save')).toBeEnabled();
+
+    // Blank-key retention is same-provider only, mirroring the API route.
+    const crossProvider = await page.evaluate(
+      async ([auth]) => {
+        const response = await fetch('/api/tts/settings', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: auth ?? '' },
+          body: JSON.stringify({ provider: 'openai' }),
+        });
+        return { status: response.status, body: await response.json() };
+      },
+      [apiMock.expectedAuthorization] as const,
+    );
+    expect(crossProvider.status).toBe(400);
+    expect(crossProvider.body).toMatchObject({ code: 'tts_not_configured' });
+
+    await page.reload();
+    await waitForPageLoad(page);
+    await expect(page.getByTestId('tts-model-input')).toHaveValue('Eleven Multilingual v2');
+    await expect(page.getByText('Configured', { exact: true })).toBeVisible();
+    expect(apiMock.ttsSettings).toEqual({
+      provider: 'elevenlabs',
+      voiceId: 'ErXwobaYiN019PkySvjV',
+      model: 'eleven_multilingual_v2',
+      hasApiKey: true,
+    });
   });
 });
