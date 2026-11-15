@@ -17,6 +17,10 @@
     "./contracts/llm": {
       "types": "./dist/contracts/llm.d.ts",
       "import": "./dist/contracts/llm.js"
+    },
+    "./contracts/tts": {
+      "types": "./dist/contracts/tts.d.ts",
+      "import": "./dist/contracts/tts.js"
     }
   },
   "files": [

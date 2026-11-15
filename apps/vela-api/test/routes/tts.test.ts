@@ -144,13 +144,14 @@ describe('TTS Route', () => {
       const body = (await res.json()) as {
         hasApiKey: boolean;
         provider: string;
-        voiceId: null;
-        model: null;
+        voiceId: string;
+        model: string;
       };
       expect(body.hasApiKey).toBe(false);
       expect(body.provider).toBe('elevenlabs');
-      expect(body.voiceId).toBeNull();
-      expect(body.model).toBeNull();
+      // Unconfigured users see the same resolved defaults generation would use.
+      expect(body.voiceId).toBe('ErXwobaYiN019PkySvjV');
+      expect(body.model).toBe('eleven_v4');
     });
 
     test('returns settings without exposing api key', async () => {
@@ -159,7 +160,7 @@ describe('TTS Route', () => {
         provider: 'openai',
         api_key: 'secret-key',
         voice_id: 'alloy',
-        model: 'tts-1',
+        model: 'gpt-realtime-2.1-mini',
       });
 
       const app = createTestApp();
@@ -175,8 +176,26 @@ describe('TTS Route', () => {
       expect(body.hasApiKey).toBe(true);
       expect(body.provider).toBe('openai');
       expect(body.voiceId).toBe('alloy');
-      expect(body.model).toBe('tts-1');
+      expect(body.model).toBe('gpt-realtime-2.1-mini');
       expect((body as any).api_key).toBeUndefined();
+    });
+
+    test('resolves legacy stored model and voice to current defaults', async () => {
+      mockTtsSettingsDB.get.mockResolvedValueOnce({
+        user_id: 'test-user-id',
+        provider: 'openai',
+        api_key: 'secret-key',
+        voice_id: 'nova',
+        model: 'tts-1',
+      });
+
+      const app = createTestApp();
+      const res = await app.request('/settings');
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { voiceId: string; model: string };
+      expect(body.voiceId).toBe('alloy');
+      expect(body.model).toBe('gpt-realtime-2.1-mini');
     });
 
     test('falls back to elevenlabs for invalid provider value', async () => {
@@ -232,7 +251,7 @@ describe('TTS Route', () => {
         provider: 'gemini',
         api_key: 'gemini-key',
         voice_id: 'Kore',
-        model: 'gemini-2.5-flash-preview-tts',
+        model: 'gemini-3.8-flash-tts',
       });
 
       const app = createTestApp();
@@ -294,6 +313,78 @@ describe('TTS Route', () => {
           model: null,
         }),
       );
+    });
+
+    test('saves an optional custom ElevenLabs voice ID', async () => {
+      mockTtsSettingsDB.put.mockResolvedValueOnce(undefined);
+
+      const app = createTestApp();
+      const res = await app.request('/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          provider: 'elevenlabs',
+          apiKey: 'test-api-key',
+          voiceId: '21m00Tcm4TlvDq8ikWAM',
+          model: 'eleven_v4',
+        }),
+      });
+
+      expect(res.status).toBe(200);
+      expect(mockTtsSettingsDB.put).toHaveBeenCalledWith(
+        expect.objectContaining({ voice_id: '21m00Tcm4TlvDq8ikWAM', model: 'eleven_v4' }),
+      );
+    });
+
+    test('rejects an unsupported model for the provider', async () => {
+      const app = createTestApp();
+      const res = await app.request('/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          provider: 'openai',
+          apiKey: 'test-api-key',
+          voiceId: 'alloy',
+          model: 'tts-1',
+        }),
+      });
+
+      expect(res.status).toBe(400);
+      expect(mockTtsSettingsDB.put).not.toHaveBeenCalled();
+    });
+
+    test('rejects an unsupported voice for the provider', async () => {
+      const app = createTestApp();
+      const res = await app.request('/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          provider: 'gemini',
+          apiKey: 'test-api-key',
+          voiceId: 'Iocaste',
+          model: 'gemini-3.8-flash-tts',
+        }),
+      });
+
+      expect(res.status).toBe(400);
+      expect(mockTtsSettingsDB.put).not.toHaveBeenCalled();
+    });
+
+    test('rejects a model that belongs to another provider', async () => {
+      const app = createTestApp();
+      const res = await app.request('/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          provider: 'elevenlabs',
+          apiKey: 'test-api-key',
+          voiceId: '21m00Tcm4TlvDq8ikWAM',
+          model: 'gpt-realtime-2.1-mini',
+        }),
+      });
+
+      expect(res.status).toBe(400);
+      expect(mockTtsSettingsDB.put).not.toHaveBeenCalled();
     });
 
     test('returns 400 for invalid provider', async () => {
@@ -368,11 +459,12 @@ describe('TTS Route', () => {
       expect(body.audioUrl).toBe('https://s3.example.com/audio.mp3');
       expect(body.cached).toBe(true);
       // The cache-hit response echoes the effective settings used to derive the
-      // S3 key so clients can detect a GET/POST settings race.
+      // S3 key so clients can detect a GET/POST settings race. Legacy nulls are
+      // resolved to the current provider defaults.
       expect(body.effectiveSettings).toEqual({
         provider: 'elevenlabs',
-        voiceId: null,
-        model: null,
+        voiceId: 'ErXwobaYiN019PkySvjV',
+        model: 'eleven_v4',
       });
       expect(mockTTSProvider.generate).not.toHaveBeenCalled();
     });
@@ -418,8 +510,15 @@ describe('TTS Route', () => {
       // used, so the mobile client can skip caching on a GET/POST race.
       expect(body.effectiveSettings).toEqual({
         provider: 'elevenlabs',
-        voiceId: null,
-        model: null,
+        voiceId: 'ErXwobaYiN019PkySvjV',
+        model: 'eleven_v4',
+      });
+      // Adapters receive resolved, non-null values and never choose defaults.
+      expect(mockTTSProvider.generate).toHaveBeenCalledWith({
+        text: '日本語',
+        apiKey: 'test-api-key',
+        voiceId: 'ErXwobaYiN019PkySvjV',
+        model: 'eleven_v4',
       });
       expect(mockTTSProvider.generate).toHaveBeenCalledTimes(1);
     });
@@ -785,8 +884,8 @@ describe('TTS Route', () => {
       // the S3 key so clients can detect a GET settings / GET audio race.
       expect(body.effectiveSettings).toEqual({
         provider: 'elevenlabs',
-        voiceId: null,
-        model: null,
+        voiceId: 'ErXwobaYiN019PkySvjV',
+        model: 'eleven_v4',
       });
     });
 
@@ -796,7 +895,7 @@ describe('TTS Route', () => {
         provider: 'openai',
         api_key: 'test-api-key',
         voice_id: 'alloy',
-        model: 'tts-1',
+        model: 'gpt-realtime-2.1-mini',
       });
       mockS3Client.send.mockResolvedValueOnce({}); // HeadObject succeeds
       mockGetSignedUrl.mockResolvedValueOnce('https://s3.example.com/cached-audio.mp3');
@@ -812,7 +911,32 @@ describe('TTS Route', () => {
       expect(body.effectiveSettings).toEqual({
         provider: 'openai',
         voiceId: 'alloy',
-        model: 'tts-1',
+        model: 'gpt-realtime-2.1-mini',
+      });
+    });
+
+    test('resolves legacy stored audio settings to current defaults', async () => {
+      mockTtsSettingsDB.get.mockResolvedValueOnce({
+        user_id: 'test-user-id',
+        provider: 'gemini',
+        api_key: 'test-api-key',
+        voice_id: 'Iocaste',
+        model: 'gemini-2.5-flash-preview-tts',
+      });
+      mockS3Client.send.mockResolvedValueOnce({}); // HeadObject succeeds
+      mockGetSignedUrl.mockResolvedValueOnce('https://s3.example.com/cached-audio.mp3');
+
+      const app = createTestApp();
+      const res = await app.request('/audio/vocab-1');
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as {
+        effectiveSettings?: { provider: string; voiceId: string; model: string };
+      };
+      expect(body.effectiveSettings).toEqual({
+        provider: 'gemini',
+        voiceId: 'Kore',
+        model: 'gemini-3.8-flash-tts',
       });
     });
 

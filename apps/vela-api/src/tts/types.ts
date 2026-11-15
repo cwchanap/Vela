@@ -1,10 +1,13 @@
-export type TTSProviderName = 'elevenlabs' | 'openai' | 'gemini';
+import type { TtsProvider } from '@vela/common/contracts/tts';
+
+export type TTSProviderName = TtsProvider;
 
 export interface TTSGenerateRequest {
   text: string;
   apiKey: string;
-  voiceId: string | null;
-  model: string | null;
+  /** Resolved by the route from the shared registry; adapters never default it. */
+  voiceId: string;
+  model: string;
   outputFormat?: string;
 }
 

@@ -5,9 +5,142 @@ import {
   parseTtsApiErrorResponse,
   parseTtsAudioUrlResponse,
   parseTtsSettings,
+  resolveTtsSelection,
+  TTS_PROVIDER_REGISTRY,
+  TTS_PROVIDERS,
 } from './tts';
 
 const HTTPS_AUDIO = 'https://audio.example.test/mizu.mp3';
+
+const ELEVENLABS_DEFAULT_VOICE = 'ErXwobaYiN019PkySvjV';
+
+describe('TTS provider registry', () => {
+  it('lists the supported providers', () => {
+    expect(TTS_PROVIDERS).toEqual(['elevenlabs', 'openai', 'gemini']);
+  });
+
+  it('has a registry entry for every provider', () => {
+    expect(Object.keys(TTS_PROVIDER_REGISTRY).sort()).toEqual([...TTS_PROVIDERS].sort());
+  });
+
+  it('publishes every default as a selectable model and voice', () => {
+    for (const provider of TTS_PROVIDERS) {
+      const info = TTS_PROVIDER_REGISTRY[provider];
+      expect(info.models.map((model) => model.id)).toContain(info.defaultModel);
+      if (info.voices) expect(info.voices).toContain(info.defaultVoice);
+    }
+  });
+
+  it('keeps ElevenLabs on eleven_v4 with multilingual v2 selectable', () => {
+    const info = TTS_PROVIDER_REGISTRY.elevenlabs;
+    expect(info.defaultModel).toBe('eleven_v4');
+    expect(info.models.map((model) => model.id)).toEqual(['eleven_v4', 'eleven_multilingual_v2']);
+    expect(info.defaultVoice).toBe(ELEVENLABS_DEFAULT_VOICE);
+    expect(info.voices).toBeNull();
+  });
+
+  it('lists the ten OpenAI Realtime voices and no Speech API models', () => {
+    const info = TTS_PROVIDER_REGISTRY.openai;
+    expect(info.defaultModel).toBe('gpt-realtime-2.1-mini');
+    expect(info.models.map((model) => model.id)).toEqual(['gpt-realtime-2.1-mini']);
+    expect(info.defaultVoice).toBe('alloy');
+    expect(info.voices).toEqual([
+      'alloy',
+      'ash',
+      'ballad',
+      'coral',
+      'echo',
+      'sage',
+      'shimmer',
+      'verse',
+      'marin',
+      'cedar',
+    ]);
+  });
+
+  it('copies the official 30 Gemini voices without Iocaste', () => {
+    const info = TTS_PROVIDER_REGISTRY.gemini;
+    expect(info.defaultModel).toBe('gemini-3.8-flash-tts');
+    expect(info.models.map((model) => model.id)).toEqual([
+      'gemini-3.8-flash-tts',
+      'gemini-3.8-flash-lite-tts',
+    ]);
+    expect(info.defaultVoice).toBe('Kore');
+    expect(info.voices).toHaveLength(30);
+    expect(info.voices).toContain('Iapetus');
+    expect(info.voices).not.toContain('Iocaste');
+  });
+});
+
+describe('resolveTtsSelection', () => {
+  it.each([
+    ['elevenlabs', ELEVENLABS_DEFAULT_VOICE, 'eleven_v4'],
+    ['openai', 'alloy', 'gpt-realtime-2.1-mini'],
+    ['gemini', 'Kore', 'gemini-3.8-flash-tts'],
+  ] as const)(
+    'resolves null stored settings for %s to its defaults',
+    (provider, voiceId, model) => {
+      expect(resolveTtsSelection(provider, null, null)).toEqual({ provider, voiceId, model });
+    },
+  );
+
+  it('keeps supported stored models and voices', () => {
+    expect(resolveTtsSelection('gemini', 'gemini-3.8-flash-lite-tts', 'Puck')).toEqual({
+      provider: 'gemini',
+      voiceId: 'Puck',
+      model: 'gemini-3.8-flash-lite-tts',
+    });
+    expect(resolveTtsSelection('elevenlabs', 'eleven_multilingual_v2', 'custom-voice')).toEqual({
+      provider: 'elevenlabs',
+      voiceId: 'custom-voice',
+      model: 'eleven_multilingual_v2',
+    });
+  });
+
+  it.each([
+    ['elevenlabs', 'eleven_turbo_v2', ELEVENLABS_DEFAULT_VOICE, 'eleven_v4'],
+    ['openai', 'tts-1', 'alloy', 'gpt-realtime-2.1-mini'],
+    ['gemini', 'gemini-2.5-flash-preview-tts', 'Kore', 'gemini-3.8-flash-tts'],
+  ] as const)(
+    'resolves a legacy %s model and voice to current defaults',
+    (provider, legacyModel, voiceId, model) => {
+      expect(resolveTtsSelection(provider, legacyModel, voiceId)).toEqual({
+        provider,
+        voiceId,
+        model,
+      });
+    },
+  );
+
+  it.each([
+    ['openai', 'nova', 'alloy'],
+    ['openai', 'fable', 'alloy'],
+    ['gemini', 'Iocaste', 'Kore'],
+  ] as const)(
+    'replaces the retired %s voice %s with its default',
+    (provider, voiceId, fallback) => {
+      expect(
+        resolveTtsSelection(provider, TTS_PROVIDER_REGISTRY[provider].defaultModel, voiceId),
+      ).toMatchObject({ voiceId: fallback });
+    },
+  );
+
+  it('keeps an optional custom ElevenLabs voice and trims stored values', () => {
+    expect(resolveTtsSelection('elevenlabs', ' eleven_v4 ', ' 21m00Tcm4TlvDq8ikWAM ')).toEqual({
+      provider: 'elevenlabs',
+      voiceId: '21m00Tcm4TlvDq8ikWAM',
+      model: 'eleven_v4',
+    });
+  });
+
+  it('falls back for blank stored voice and model', () => {
+    expect(resolveTtsSelection('gemini', '', '  ')).toEqual({
+      provider: 'gemini',
+      voiceId: 'Kore',
+      model: 'gemini-3.8-flash-tts',
+    });
+  });
+});
 
 describe('TTS contracts', () => {
   it('parses valid settings and ignores unknown fields', () => {

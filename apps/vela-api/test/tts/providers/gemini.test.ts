@@ -1,10 +1,5 @@
 import { describe, test, expect, beforeEach, afterEach, vi } from 'bun:test';
-import {
-  GeminiProvider,
-  DEFAULT_VOICE_ID,
-  DEFAULT_MODEL,
-  VOICES,
-} from '../../../src/tts/providers/gemini';
+import { GeminiProvider } from '../../../src/tts/providers/gemini';
 
 const originalFetch = globalThis.fetch;
 
@@ -48,30 +43,6 @@ describe('GeminiProvider', () => {
     expect(provider.name).toBe('gemini');
   });
 
-  test('VOICES contains expected values', () => {
-    expect(VOICES).toContain('Kore');
-    expect(VOICES).toContain('Zephyr');
-    expect(VOICES).toContain('Puck');
-  });
-
-  test('uses default voice and model when not specified', async () => {
-    const b64 = Buffer.from('audio-data').toString('base64');
-    mockFetch.mockResolvedValueOnce(makeGeminiResponse(b64));
-
-    await provider.generate({ text: '日本語', apiKey: 'test-key', voiceId: null, model: null });
-
-    expect(mockFetch).toHaveBeenCalledWith(
-      expect.stringContaining(DEFAULT_MODEL),
-      expect.objectContaining({
-        headers: expect.objectContaining({ 'x-goog-api-key': 'test-key' }),
-      }),
-    );
-    const callBody = JSON.parse((mockFetch.mock.calls[0] as any[])[1].body);
-    expect(callBody.generationConfig.speechConfig.voiceConfig.prebuiltVoiceConfig.voiceName).toBe(
-      DEFAULT_VOICE_ID,
-    );
-  });
-
   test('uses provided voice and model', async () => {
     const b64 = Buffer.from('audio-data').toString('base64');
     mockFetch.mockResolvedValueOnce(makeGeminiResponse(b64));
@@ -80,11 +51,11 @@ describe('GeminiProvider', () => {
       text: '日本語',
       apiKey: 'test-key',
       voiceId: 'Zephyr',
-      model: 'custom-model',
+      model: 'gemini-3.8-flash-lite-tts',
     });
 
     expect(mockFetch).toHaveBeenCalledWith(
-      expect.stringContaining('custom-model'),
+      expect.stringContaining('gemini-3.8-flash-lite-tts'),
       expect.any(Object),
     );
     const callBody = JSON.parse((mockFetch.mock.calls[0] as any[])[1].body);
@@ -101,8 +72,8 @@ describe('GeminiProvider', () => {
     const result = await provider.generate({
       text: 'hello',
       apiKey: 'key',
-      voiceId: null,
-      model: null,
+      voiceId: 'Kore',
+      model: 'gemini-3.8-flash-tts',
     });
 
     expect(result.audioBuffer).toBeInstanceOf(Buffer);
@@ -116,8 +87,8 @@ describe('GeminiProvider', () => {
     const result = await provider.generate({
       text: 'hello',
       apiKey: 'key',
-      voiceId: null,
-      model: null,
+      voiceId: 'Kore',
+      model: 'gemini-3.8-flash-tts',
     });
 
     expect(result.contentType).toBe('audio/ogg');
@@ -130,8 +101,8 @@ describe('GeminiProvider', () => {
     const result = await provider.generate({
       text: 'hello',
       apiKey: 'key',
-      voiceId: null,
-      model: null,
+      voiceId: 'Kore',
+      model: 'gemini-3.8-flash-tts',
     });
 
     expect(result.contentType).toBe('audio/wav');
@@ -162,8 +133,8 @@ describe('GeminiProvider', () => {
     const result = await provider.generate({
       text: 'hello',
       apiKey: 'key',
-      voiceId: null,
-      model: null,
+      voiceId: 'Kore',
+      model: 'gemini-3.8-flash-tts',
     });
 
     expect(result.contentType).toBe('audio/mpeg');
@@ -178,7 +149,12 @@ describe('GeminiProvider', () => {
     });
 
     await expect(
-      provider.generate({ text: 'hello', apiKey: 'key', voiceId: null, model: null }),
+      provider.generate({
+        text: 'hello',
+        apiKey: 'key',
+        voiceId: 'Kore',
+        model: 'gemini-3.8-flash-tts',
+      }),
     ).rejects.toThrow('Gemini TTS: no audio data in response');
   });
 
@@ -190,7 +166,12 @@ describe('GeminiProvider', () => {
     });
 
     await expect(
-      provider.generate({ text: 'hello', apiKey: 'bad-key', voiceId: null, model: null }),
+      provider.generate({
+        text: 'hello',
+        apiKey: 'bad-key',
+        voiceId: 'Kore',
+        model: 'gemini-3.8-flash-tts',
+      }),
     ).rejects.toThrow('Gemini TTS API error 400');
   });
 
@@ -200,7 +181,12 @@ describe('GeminiProvider', () => {
     mockFetch.mockRejectedValueOnce(abortError);
 
     await expect(
-      provider.generate({ text: 'hello', apiKey: 'test-key', voiceId: null, model: null }),
+      provider.generate({
+        text: 'hello',
+        apiKey: 'test-key',
+        voiceId: 'Kore',
+        model: 'gemini-3.8-flash-tts',
+      }),
     ).rejects.toThrow('Request timeout');
   });
 
@@ -208,7 +194,12 @@ describe('GeminiProvider', () => {
     mockFetch.mockRejectedValueOnce(new Error('DNS resolution failed'));
 
     await expect(
-      provider.generate({ text: 'hello', apiKey: 'test-key', voiceId: null, model: null }),
+      provider.generate({
+        text: 'hello',
+        apiKey: 'test-key',
+        voiceId: 'Kore',
+        model: 'gemini-3.8-flash-tts',
+      }),
     ).rejects.toThrow('DNS resolution failed');
   });
 
@@ -216,7 +207,12 @@ describe('GeminiProvider', () => {
     const b64 = Buffer.from('data').toString('base64');
     mockFetch.mockResolvedValueOnce(makeGeminiResponse(b64));
 
-    await provider.generate({ text: 'hello', apiKey: 'key', voiceId: null, model: null });
+    await provider.generate({
+      text: 'hello',
+      apiKey: 'key',
+      voiceId: 'Kore',
+      model: 'gemini-3.8-flash-tts',
+    });
 
     const callBody = JSON.parse((mockFetch.mock.calls[0] as any[])[1].body);
     expect(callBody.generationConfig.responseModalities).toContain('AUDIO');

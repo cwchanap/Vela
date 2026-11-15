@@ -1,15 +1,10 @@
 import type { TTSProvider, TTSGenerateRequest, TTSGenerateResult } from '../types';
 
-export const DEFAULT_VOICE_ID = 'ErXwobaYiN019PkySvjV';
-export const DEFAULT_MODEL = 'eleven_multilingual_v2';
-
 export class ElevenLabsProvider implements TTSProvider {
   readonly name = 'elevenlabs' as const;
 
   async generate(request: TTSGenerateRequest): Promise<TTSGenerateResult> {
-    const voiceId = request.voiceId || DEFAULT_VOICE_ID;
-    const model = request.model || DEFAULT_MODEL;
-    const url = `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`;
+    const url = `https://api.elevenlabs.io/v1/text-to-speech/${request.voiceId}`;
 
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 30_000);
@@ -25,7 +20,7 @@ export class ElevenLabsProvider implements TTSProvider {
         },
         body: JSON.stringify({
           text: request.text,
-          model_id: model,
+          model_id: request.model,
           voice_settings: { stability: 0.5, similarity_boost: 0.75 },
         }),
         signal: controller.signal,

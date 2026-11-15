@@ -13,6 +13,7 @@
     // build step is needed anywhere this package consumes it.
     "paths": {
       "@vela/common/contracts/llm": ["../../packages/common/src/contracts/llm.ts"],
+      "@vela/common/contracts/tts": ["../../packages/common/src/contracts/tts.ts"],
       "@vela/common": ["../../packages/common/src/index.ts"]
     }
   }
