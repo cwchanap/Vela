@@ -90,9 +90,12 @@ jobs:
 
       - name: Run API unit tests with coverage
         shell: bash
+        # Single run: bun has no --exclude flag (it's silently ignored), and
+        # bunfig.toml regenerates coverage for every `bun test`, so a second
+        # `||` command would clobber lcov.info with a narrower report.
         run: |
           cd apps/vela-api
-          bun test --coverage --exclude=test/routes/chat-history.test.ts || bun test test/routes/chat-history.test.ts
+          bun test --coverage
 
       - name: Check coverage file exists (api)
         run: |

@@ -1,28 +1,12 @@
-import { describe, test, expect, beforeAll, mock } from 'bun:test';
-import type { SRSItem } from '../../src/utils/srs';
-
-type SrsModule = typeof import('../../src/utils/srs');
-
-// Lazy references — populated in beforeAll after restoring real module
-let calculateNextReview: SrsModule['calculateNextReview'];
-let srsItemToResult: SrsModule['srsItemToResult'];
-let isDue: SrsModule['isDue'];
-let calculateDueItems: SrsModule['calculateDueItems'];
-let SRS_DEFAULTS: SrsModule['SRS_DEFAULTS'];
-
-beforeAll(async () => {
-  // Bun's module registry is shared across test files in the same worker process.
-  // Other test files (e.g. test/routes/srs.test.ts) mock this module via mock.module().
-  // Calling mock.restore() here resets the registry so the dynamic import below
-  // resolves to the real implementation, not the mock.
-  mock.restore();
-  const srsModule = await import('../../src/utils/srs');
-  calculateNextReview = srsModule.calculateNextReview;
-  srsItemToResult = srsModule.srsItemToResult;
-  isDue = srsModule.isDue;
-  calculateDueItems = srsModule.calculateDueItems;
-  SRS_DEFAULTS = srsModule.SRS_DEFAULTS;
-});
+import { describe, test, expect } from 'bun:test';
+import {
+  calculateNextReview,
+  srsItemToResult,
+  isDue,
+  calculateDueItems,
+  SRS_DEFAULTS,
+  type SRSItem,
+} from '../../src/utils/srs';
 
 const FIXED_NOW = new Date('2026-01-15T12:00:00.000Z');
 
