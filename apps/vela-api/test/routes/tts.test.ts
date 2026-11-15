@@ -1,7 +1,8 @@
-import { describe, test, expect, beforeEach, vi } from 'bun:test';
+import { describe, test, expect, beforeEach, afterAll, vi } from 'bun:test';
 import { createHash } from 'crypto';
 import { Hono } from 'hono';
 import type { Env } from '../../src/types';
+import * as ttsFactory from '../../src/tts/factory';
 
 const mockTtsSettingsDB = {
   get: vi.fn(),
@@ -35,9 +36,12 @@ vi.mock('@aws-sdk/s3-request-presigner', () => ({
   getSignedUrl: mockGetSignedUrl,
 }));
 
-vi.mock('../../src/tts/factory', () => ({
-  createTTSProvider: vi.fn().mockReturnValue(mockTTSProvider),
-}));
+// spyOn instead of vi.mock: module mocks are process-global in bun and leak
+// into test/tts/factory.test.ts, which needs the real implementation.
+const mockCreateTTSProvider = vi
+  .spyOn(ttsFactory, 'createTTSProvider')
+  .mockReturnValue(mockTTSProvider as any);
+afterAll(() => mockCreateTTSProvider.mockRestore());
 
 const mockAuthConfig = {
   userId: 'test-user-id',

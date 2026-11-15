@@ -1,6 +1,7 @@
-import { describe, test, expect, beforeEach, vi } from 'bun:test';
+import { describe, test, expect, beforeEach, afterAll, vi } from 'bun:test';
 import { Hono } from 'hono';
 import type { Context, Next } from 'hono';
+import * as srsUtils from '../../src/utils/srs';
 
 const mockUserVocabularyProgress = {
   get: vi.fn(),
@@ -31,22 +32,16 @@ vi.mock('../../src/middleware/auth', () => ({
   AuthContext: {},
 }));
 
-const mockCalculateNextReview = vi.fn().mockReturnValue({
+// spyOn instead of vi.mock: module mocks are process-global in bun and leak
+// into test/utils/srs.test.ts, which needs the real implementation.
+const mockCalculateNextReview = vi.spyOn(srsUtils, 'calculateNextReview').mockReturnValue({
   easeFactor: 2.6,
   interval: 1,
   repetitions: 1,
   nextReviewDate: '2026-02-22T00:00:00.000Z',
 });
 
-vi.mock('../../src/utils/srs', () => ({
-  calculateNextReview: mockCalculateNextReview,
-  SRS_DEFAULTS: {
-    EASE_FACTOR: 2.5,
-    MIN_EASE_FACTOR: 1.3,
-    INITIAL_INTERVAL: 1,
-    SECOND_INTERVAL: 6,
-  },
-}));
+afterAll(() => mockCalculateNextReview.mockRestore());
 
 // Import AFTER mocks are declared
 const { default: srsRouter, processWithConcurrency } = await import('../../src/routes/srs');
