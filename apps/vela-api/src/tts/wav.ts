@@ -39,7 +39,10 @@ export function pcm16ToWav(pcm: Buffer, sampleRate: number): Buffer {
 /**
  * Structural RIFF/WAVE check for provider-returned files: chunks inside the
  * declared RIFF bounds must fit the buffer, a `fmt ` chunk of at least 16
- * bytes (WAVEFORMATEX) and a nonempty `data` chunk must both be present.
+ * bytes (WAVEFORMATEX) and a nonempty `data` chunk must both be present. The
+ * fmt fields must be plausible — nonzero channels, sample rate and block
+ * alignment, and for PCM the documented block-align/byte-rate relationships —
+ * so a well-formed container carrying a corrupt format is still rejected.
  * Ancillary chunks (e.g. C2PA) and bytes beyond the declared RIFF size are
  * skipped, so files with trailing metadata still pass.
  */
@@ -64,6 +67,17 @@ export function isValidWav(audio: Buffer): boolean {
     if (chunkSize > riffEnd - chunkDataStart) return false;
     if (chunkId === 'fmt ') {
       if (chunkSize < 16) return false;
+      const channels = audio.readUInt16LE(chunkDataStart + 2);
+      const sampleRate = audio.readUInt32LE(chunkDataStart + 4);
+      const byteRate = audio.readUInt32LE(chunkDataStart + 8);
+      const blockAlign = audio.readUInt16LE(chunkDataStart + 12);
+      if (channels === 0 || sampleRate === 0 || blockAlign === 0) return false;
+      if (audio.readUInt16LE(chunkDataStart) === PCM_FORMAT) {
+        const expectedAlign = (channels * audio.readUInt16LE(chunkDataStart + 14)) / 8;
+        if (blockAlign !== expectedAlign || byteRate !== sampleRate * blockAlign) {
+          return false;
+        }
+      }
       sawFmt = true;
     } else if (chunkId === 'data') {
       if (chunkSize === 0) return false;
