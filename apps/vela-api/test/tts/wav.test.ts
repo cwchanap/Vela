@@ -88,6 +88,24 @@ describe('isValidWav', () => {
     expect(isValidWav(emptyData)).toBe(false);
   });
 
+  test('rejects a fmt chunk whose format fields are corrupt', () => {
+    const zeroChannels = pcm16ToWav(Buffer.from([1, 2]), 24_000);
+    zeroChannels.writeUInt16LE(0, 22);
+    expect(isValidWav(zeroChannels)).toBe(false);
+
+    const zeroRate = pcm16ToWav(Buffer.from([1, 2]), 24_000);
+    zeroRate.writeUInt32LE(0, 24);
+    expect(isValidWav(zeroRate)).toBe(false);
+
+    const badAlign = pcm16ToWav(Buffer.from([1, 2]), 24_000);
+    badAlign.writeUInt16LE(4, 32); // PCM16 mono requires block align 2
+    expect(isValidWav(badAlign)).toBe(false);
+
+    const badByteRate = pcm16ToWav(Buffer.from([1, 2]), 24_000);
+    badByteRate.writeUInt32LE(96_000, 28); // PCM requires rate x block align
+    expect(isValidWav(badByteRate)).toBe(false);
+  });
+
   test('rejects chunks whose declared size exceeds the RIFF bounds', () => {
     const wav = pcm16ToWav(Buffer.from([1, 2]), 24_000);
     wav.writeUInt32LE(wav.length, 40);
