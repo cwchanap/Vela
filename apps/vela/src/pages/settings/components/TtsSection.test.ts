@@ -495,6 +495,32 @@ describe('TtsSection', () => {
       expect(wrapper.vm.ttsVoiceId).toBe('voice-edited-during-save');
     });
 
+    it('keeps the submitted selection while the post-save refetch is pending', async () => {
+      const pending: { options?: { onSuccess: () => void } } = {};
+      const mutate = vi.fn((_payload: unknown, options: { onSuccess: () => void }) => {
+        pending.options = options;
+      });
+      await seedSettings(SAVED_ELEVENLABS, mutate);
+      signIn();
+      await flushPromises();
+
+      wrapper.vm.ttsApiKeyInput = 'replacement-key';
+      wrapper.vm.ttsModel = 'eleven_multilingual_v2';
+      await wrapper.vm.saveSettingsHandler();
+
+      // The invalidation refetch is still in flight, so the query snapshot
+      // still holds the pre-save selection when the key is cleared.
+      pending.options?.onSuccess();
+      await flushPromises();
+
+      expect(wrapper.vm.ttsModel).toBe('eleven_multilingual_v2');
+
+      settingsData.value = { ...SAVED_ELEVENLABS, model: 'eleven_multilingual_v2' };
+      await flushPromises();
+
+      expect(wrapper.vm.ttsModel).toBe('eleven_multilingual_v2');
+    });
+
     it('does not mark a provider switch made during a save as saved', async () => {
       const pending: { options?: { onSuccess: () => void } } = {};
       const mutate = vi.fn((_payload: unknown, options: { onSuccess: () => void }) => {
