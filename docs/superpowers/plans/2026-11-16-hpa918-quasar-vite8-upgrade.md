@@ -5,98 +5,94 @@
 **Design:** [HPA-918 design spec](../specs/2026-11-16-hpa918-quasar-vite8-upgrade-design.md)  
 **Delivery:** **One PR for this entire ticket.** Continue implementation, tests, review replies, and acceptance evidence on this same draft PR. Never open a separate implementation PR for HPA-918.
 
-## Current main findings (2026-11-16)
+## Current main findings and revised decisions (2026-11-16)
 
-- `apps/vela/package.json`: `@quasar/app-vite@^2.1.0`, `@quasar/vite-plugin@^1.8.0`, `vue-router@^4.3.0`, `vitest@^3.2.4`, `@vitest/coverage-v8@^3.2.4`; web unit config imports the direct plugin.
-- `apps/vela-mobile/package.json`: `@quasar/app-vite@^2.4.0`, plugin v1, Router 4, Vitest/coverage 3 and explicit `dotenv-expand@11.0.7`; its tests also import the plugin.
-- `apps/vela-ext/package.json`: Vitest/coverage 3, independent WXT entrypoint. Preserve its behavior when changing the shared Bun lockfile.
-- `apps/vela*/quasar.config.ts` use `#q-app/wrappers` and Node 20 build targets. Web config also has `build.env`, manual Rollup chunks and a Vite checker. Mobile build hooks validate production API/OAuth env.
-- `apps/vela*/src/router/index.ts` use `process.env.SERVER` and `process.env.VUE_ROUTER_MODE`; both will need the Quasar v3 form.
-- `apps/vela-mobile/scripts/sync-ios-version.mjs` and `build/validate-mobile-api-url.ts` use dotenv expansion. The former's `sync-ios-version.test.mjs` covers empty overrides; the latter's `validate-mobile-api-url.test.ts` covers production keys.
-- `.github/workflows/unit-test.yml` **skips draft PRs**, so a green/skipped draft status is not test evidence. Use reproducible local/agent execution, or dispatch a CI run for the branch, and record outputs.
-- Open Vitest [PR #89](https://github.com/cwchanap/Vela/pull/89) changes the runner without the matching coverage provider; open #90/#91 concern separate DOM dependency majors. The previous Quasar and dotenv PRs [#76](https://github.com/cwchanap/Vela/pull/76) and [#75](https://github.com/cwchanap/Vela/pull/75) are closed without merging.
+- Both `apps/vela` and `apps/vela-mobile` run Quasar app-vite v2 / Vite 7, `@quasar/vite-plugin` v1 in their Vitest configs, Vue Router 4, and Vitest/coverage 3. The WXT extension uses its own toolchain. Previous [#76](https://github.com/cwchanap/Vela/pull/76) tried an isolated plugin bump and failed with `parseSync`.
+- Quasar CLI v3 **disables Vite's env loader**. Its default env inputs are `.env` and `.env.local` (the latter outside CI), and its default client prefix is `QCLI_`. `packages/cdk/scripts/inject-env.ts` instead writes `.env.production` and `VITE_*` values for **both** apps. A v3 build can pass while embedding *no* Cognito data if this isn't explicitly addressed.
+- Quasar v3's `build.env` is a loader settings object, not the old per-key client env map. In **both** `quasar.config.ts` files, use `build.env: { clientPrefix: 'VITE_', file: ctx.prod ? '.env.production' : [] }`. Existing default `.env`/local files remain eligible; this is an **additional** production file. Preserve the deployed env writer and current `VITE_*` API.
+- Mobile's `scripts/sync-ios-version.mjs` and `build/validate-mobile-api-url.ts` each implement old Vite dotenv semantics via direct `dotenv`/`dotenv-expand`. **Remove both loaders and both direct dependencies**, not pin v11 as a third engine and not upgrade to v1000. Use the Quasar-resolved values supplied in `config.define` by the existing build plugin for both production validation and Capacitor MARKETING_VERSION sync. An empty explicit override or `$BASE` interpolation must be checked against the *real* build, not guessed from v2 tests.
+- Quasar v3 requires Vue Router 5, `#q-app` instead of `#q-app/wrappers`, imports via `@/`, and a supported Node version. Pin Node **22.22.0**. Two web boot files still use `quasar/wrappers`. The SPA routers do not need the old SSR/hash history ternary.
+- Remove unsupported or dead pieces rather than porting them: unused `@quasar/quasar-app-extension-testing` and web `test` block, dead web `manualChunks`, irrelevant web SSR/PWA/Cordova/Electron/BEX mode config, redundant Capacitor Quasar config aliases, and `coverage.all` in both Vitest configs.
+- `.github/workflows/build-lint.yml` and `unit-test.yml` support `workflow_dispatch` but skip draft PR triggers. `e2e.yml`'s `mocked-settings` job runs even on drafts. Open [#89](https://github.com/cwchanap/Vela/pull/89) bumps Vitest without matching coverage-v8; do not merge this incomplete change into the migration as-is. #90/#91 are unrelated.
 
-## Task 0 — Rebase and establish baseline
+Review: [GitHub PR #93 design review](https://github.com/cwchanap/Vela/pull/93#pullrequestreview-5925171471). Vendor: [Quasar v3 upgrade guide](https://quasar.dev/quasar-cli-vite/upgrade-guide/) and [new env behavior](https://quasar.dev/quasar-cli-vite/handling-import-meta-env/).
 
-1. Rebase this draft PR onto the latest main before editing code. Inspect whether PR #89 merged; do not cherry-pick a partially compatible runner upgrade or create a separate Vitest migration PR.
-2. Record the installed Vite/Quasar plugin/CLI/Vitest/coverage graph from `bun.lock` or `bun pm why`; check the app's existing Node/tooling requirements and the GitHub Actions runner.
-3. Run existing focused `sync-ios-version` and production-env validation tests; capture baseline behavior and current web/mobile screenshots via an MCP-controlled browser (there is no mockup in HPA-918).
-4. Locate remaining `#q-app/wrappers`, obsolete import aliases, Quasar-specific `process.env`, `build.env`, and `rollupOptions` usages. Search real source and tests, not archived docs.
+## Task 0 — Baseline and the mechanical alias commit (same PR)
 
-**Gate:** Document current dependency resolution and baseline screenshots in the PR. Do not claim test success if not executed.
+**Files:** active app imports and mocks, `apps/vela*/quasar.config.ts`, `apps/vela*/vitest.config.ts`.
 
-## Task 1 — One compatible dependency graph
+1. Record the current branch HEAD, existing Quasar/Vite/Router/Vitest graph, and the existing unit-test plus env/version regression results. Do not mark unexecuted commands passed.
+2. While dependencies are **still v2**, add a simple `'@' -> src` alias to the two Quasar app configs and to each Vitest alias map. Mechanically convert real `src/`, `pages/`, `layouts/`, `components/`, `boot/`, etc. imports and test mocks to `@/` equivalents. Preserve `@vela/common` and special native dependency aliases needed by unit tests.
+3. Keep this rewrite as **commit 1 on this same HPA-918 PR** and verify it with the v2 unit/coverage and builds before updating dependencies. The purpose is an independently diagnosable commit, **not a separate PR**. Do not rewrite archived docs.
+4. Confirm route and boot imports for both Quasar apps (especially `apps/vela/src/boot/{main,query}.ts`, which use `quasar/wrappers`) in the remaining migration inventory.
 
-**Files:** `apps/vela/package.json`, `apps/vela-mobile/package.json`, `apps/vela-ext/package.json` only if necessary, `bun.lock`, app engine settings and affected CI tooling.
+**Gate:** alias-only commit preserves v2 behavior and unit/build checks. Record failures and their exact causes if the gate cannot be executed.
 
-1. Move both apps to Quasar CLI `@quasar/app-vite@3.x`, `@quasar/vite-plugin@2.x`, Vite 8, and Vue Router 5. Keep a compatible `@vitejs/plugin-vue@6.x`. Use one Node 22.22+ runtime for affected frontend tooling; do not touch the API Lambda Node 20 deployment contract.
-2. Upgrade the two Quasar apps' `vitest` **together with** `@vitest/coverage-v8` to compatible 5.x versions. Reconcile the extension workspace: keep its existing isolated Vite/Vitest/coverage graph only if resolution/tests remain valid, otherwise align its Vitest+coverage pair in this same PR.
-3. Re-run Bun installation to commit one lockfile. Verify that the CLI build and the direct Quasar Vite plugin used by Vitest both resolve Vite 8; neither app may load Vite 7 when importing plugin v2.
-4. Check whether the legacy `@quasar/quasar-app-extension-testing` dependency actually executes in the app; remove it if unused/incompatible, instead of adding a shim.
-5. Leave unrelated jsdom/happy-dom Dependabot majors to their existing PRs. Address overlap with PR #89 in this PR description rather than introducing duplicate code PRs.
+## Task 1 — Smallest runnable v3 upgrade (atomic config + versions + Node)
 
-**Gate:** Clean frozen install, supported Node/peer versions, both unit-test configs load (no `parseSync` error).
+**Files:** both app package manifests and Quasar configs; `bun.lock`; root `.node-version`; affected CI workflows and app engines; Vitest configs.
 
-## Task 2 — Upgrade the two Quasar configurations and runtime imports
+1. Patch the following **together before running install**:
+   - Upgrade the two apps to `@quasar/app-vite@3`, `@quasar/vite-plugin@2`, Vue Router 5, Vite 8 through the CLI, compatible Vue plugin and matching **Vitest 5 + `@vitest/coverage-v8` 5**.
+   - Replace `#q-app/wrappers` with `#q-app` in both `quasar.config.ts` files, and `quasar/wrappers` in web boots. Update test mocks accordingly.
+   - Add the **v3 env-loader settings** to both app configs: `build.env.clientPrefix = 'VITE_'` and `build.env.file = ctx.prod ? '.env.production' : []`. Replace the old web `build.env` key/value object.
+   - Pin `22.22.0` in root `.node-version`, update app `engines.node` appropriately, and run frontend build tooling under that Node version. Add `actions/setup-node` with `node-version-file: .node-version` to `build-lint.yml`, `unit-test.yml`, `e2e.yml` and the deploy workflow(s) that build the SPA/mobile assets; do not alter the Node 20 Lambda runtime.
+2. Only after those changes, regenerate and commit `bun.lock`. Postinstall executes `quasar prepare`, so **a versions-only commit cannot pass install**; do not add a broken intermediate install gate.
+3. Verify both Quasar configs load, lockfile/peer resolution shows Vite 8 for Quasar/vite-plugin v2 and Vitest, no `parseSync` error, and `bun install --frozen-lockfile` succeeds on the patched commit.
+4. Keep WXT extension's Vitest 3 + coverage 3 untouched if tests and dependency graph remain supported; do not fold in the unrelated DOM dependency majors. Coordinate open Dependabot #89 through the same PR, not a separate feature PR.
 
-**Files:** `apps/vela/quasar.config.ts`, `apps/vela-mobile/quasar.config.ts`, both routers/boot files, affected source aliases and `vitest.config.ts`, test mocks, env types.
+**Gate:** frozen install, both Vitest config loads, web/mobile + extension unit suites and matching coverage provider checks on the migrated Node runtime. A failed postinstall is a blocker, not a reason to skip tests.
 
-1. Use the official [Quasar CLI v3 migration guide](https://quasar.dev/quasar-cli-vite/upgrade-guide/). Replace `#q-app/wrappers` with `#q-app`; update route/boot wrappers and their test doubles. Use Vue Router 5 APIs as required by the actual code.
-2. Replace generated `process.env.SERVER`/`VUE_ROUTER_MODE` checks with the v3-supported `import.meta.env.QUASAR_*` values. Preserve history-mode URLs, back navigation, authentication gate, and mobile resume/deep-link routing.
-3. Replace removed `src/`, `pages/`, `boot/`, etc. app aliases in active source with v3 `@/` imports. Preserve only legitimate workspace and Capacitor path aliases. Do not install a blanket old-alias compatibility map.
-4. Rework web `build.env` to avoid leaking environment variables while preserving the intended `VITE_*` runtime contract. Check web auth/API client configuration and mobile production config checks after the new CLI env handling.
-5. Remove unused legacy Rollup chunk customization if it is no longer valid under Vite 8/Rolldown; only adapt needed optimizations. Keep the `@vela/common`/tokenizer and `path-browserify` alias behavior, Vite checker if compatible, and mobile `validateMobileApiUrlPlugin` invocation.
-6. Update browser build targets to those supported by the new Quasar tooling and generated types; do not attempt to support old versions by preserving duplicate config paths.
+## Task 2 — Remove obsolete Quasar config, router, alias and test surfaces
 
-**Gate:** Web and mobile `quasar prepare`, typechecks, and production SPA builds pass; native Capacitor assets build; generated env and route behavior are unchanged at the feature level.
+1. Convert remaining runtime `#q-app/wrappers` imports/mocks into `#q-app` exports. In both SPA-only history routers, replace `process.env.SERVER`/`VUE_ROUTER_MODE` ternaries with one `createWebHistory(import.meta.env.QUASAR_VUE_ROUTER_BASE)`; preserve auth checks, native deep links and history navigation.
+2. Delete unused `@quasar/quasar-app-extension-testing` and the obsolete web `quasar.config.ts` `test:` block; use the existing direct Vitest configs (do **not** adopt Quasar's extension-only `@quasar/app-vite/testing` helper just for alias deduplication).
+3. Remove web `manualChunks` rather than recreating dead Rolldown tuning; remove unused web SSR/PWA/Cordova/Electron/BEX configuration, and remove redundant Capacitor aliases in mobile **Quasar config**. Keep aliases in Vitest config only if the unit tests need them, and trim old ones after `@/` rewrite.
+4. Delete `coverage.all` from web/mobile Vitest configs (removed in recent Vitest) while retaining their `coverage.include` and existing **95% lines** thresholds.
+5. Fix `apps/vela/src/config/index.ts` `VITE_DEV_MODE` comparison for Quasar's boolean-coercing env loader; test both boolean and string inputs if needed. Update types and migrate any remaining old `src/` imports.
+6. Build the actual production SPA outputs with synthetic valid env (not `MOBILE_SKIP_ENV_VALIDATION`), run typechecks/lint, exercise the existing web/mobile router tests and the mocked Playwright auth settings flow.
 
-## Task 3 — Decide the dotenv-expand hold and prove mobile env parity
+**Gate:** both apps build and route correctly under v3. No obsolete alias, test-extension, or removed Vitest config option remains in active sources.
 
-**Default decision:** Keep the direct mobile pin at `dotenv-expand@11.0.7`. Do **not** upgrade it to v1000 simply because Vite/Quasar is moving. No command substitution/decryption feature is needed.
+## Task 3 — Use one Quasar-resolved env for validation and native version
 
-1. Retain the current `sync-ios-version.mjs` / `validate-mobile-api-url.ts` behavior unless tests demonstrate Quasar v3 requires a focused adjustment.
-2. Extend or adapt existing tests to cover: nonempty process override, **empty** process override + nonempty `.env.production`, absent override, mode-specific file, no file, referenced variable, and all production API/Cognito required keys including explicit empty values.
-3. Compare `sync:ios-version`'s resolved `MARKETING_VERSION` with the actual compiled mobile UI's `import.meta.env.VITE_APP_VERSION || package version` under representative synthetic env combinations. Do not assume the old Vite 7 expansion implementation still describes v3.
-4. If v3 semantics cannot be matched while retaining the direct parser, consider **removing** both direct dotenv expansion callsites in favor of the actual build tool's env loader (with tests); otherwise explicitly retain the v11 dependency and document the v1000 hold. Never introduce a second abstraction just for this migration.
-5. Add the final retain/remove decision and regression evidence to HPA-918. Do not unignore v1000 or dismiss Dependabot alerts as a substitute for code validation.
+**Files:** `apps/vela-mobile/build/validate-mobile-api-url.ts` + focused tests, `apps/vela-mobile/quasar.config.ts` and `package.json`, remove `scripts/sync-ios-version.mjs` and `scripts/sync-ios-version.test.mjs`, update `CLAUDE.md` and mobile README.
 
-**Gate:** The iOS marketing version equals the Home page's displayed version for every supported precedence case. Production build validation rejects explicit empty required values.
+1. Preserve the existing `validateMobileBuildEnv` contract (required OAuth keys, valid absolute URL/HTTPS in production, region matching). Replace `loadMobileBuildEnv` and its file parsing with a small helper that reads **`config.define['import.meta.env.VITE_*']`** in `configResolved(config)`. Confirm the actual v3 shape/encoding (JSON-encoded string or literal) before implementing the decoder. This is exactly what the client bundle receives; avoid any direct Vite import during Quasar postinstall.
+2. Keep validation on for production **SPA** and Capacitor builds. Independently of prod validation, pass `isCapacitor: ctx.modeName === 'capacitor'` to the plugin and sync MARKETING_VERSION **only for Capacitor mode**, including development. Reuse the existing normalization to three numeric semver segments; skip pbxproj writes if unchanged. Version source: resolved client `VITE_APP_VERSION` if a nonempty usable value, otherwise mobile `package.json.version`.
+3. Remove the separate `sync-ios-version.mjs` loader/tests and the direct `dotenv` and `dotenv-expand` dependencies. Remove `sync:ios-version` and every `bun run sync:ios-version &&` prefix from `dev:ios`/`build:ios`/`build:ios:ide`/`build:ios:assets`. Do not introduce a replacement command or a new env manager.
+4. Replace Vite-specific env regression tests with fake-`config.define` plugin tests covering valid/missing/explicit empty keys, malformed URL, mode behavior, string/boolean decoded literals, absent/empty version fallback, semver metadata, and unchanged-pbxproj no-op. **Then** exercise a real Quasar production build using synthetic `.env.production` with `VITE_APP_VERSION=$BASE` and conflicting `BASE` in process/file to establish Quasar v3 interpolation, and an explicit empty `VITE_APP_VERSION` override. Check *actual generated app version* against project.pbxproj, not a second parser.
+5. Update `CLAUDE.md` (mobile env build order and plugin source of truth), mobile README and existing diagnostics that referenced `sync:ios-version`. Keep `inject-env.ts` producing both `.env.production` files as before.
 
-## Task 4 — Automated integration, E2E, and visual acceptance
+**Gate:** mobile bundle and MARKETING_VERSION agree in real build scenarios; explicit empty required API/OAuth keys fail validation; no independent dotenv parsing/dependency remains. Record that PR #75 was intentionally closed and its direct dependency is **removed** rather than upgraded to v1000.
 
-Run the following on the implementation commit (not merely the docs commit). Capture command, commit SHA, exit status, and pertinent logs in this PR.
+## Task 4 — Durable CI env gate and E2E evidence
 
-### Build/unit gates
+### Continuous CI gates
 
-- [ ] `bun install --frozen-lockfile`; verify Quasar CLI/plugin/Vite/Vitest/coverage versions and no unsupported peer mix.
-- [ ] `bun --cwd packages/common run build` before dependent app typecheck/test builds.
-- [ ] `bun --cwd apps/vela run test:unit --coverage` and `bun --cwd apps/vela-mobile run test:unit --coverage`; existing coverage thresholds remain enforced.
-- [ ] `bun --cwd apps/vela-ext run test:unit --coverage` (and extension compile) to catch lockfile regressions.
-- [ ] App lint/typechecks and production web/mobile builds succeed with synthetic **valid** configuration, not a permanent `MOBILE_SKIP_ENV_VALIDATION` bypass.
-- [ ] `bun --cwd apps/vela-mobile run sync:ios-version` plus mobile `build:ios:assets` succeed with a valid mode/version; compare `project.pbxproj` and generated client version.
-- [ ] Focused version/env test matrix passes, including empty override and variable interpolation; no `parseSync` config-load error.
+- [ ] Update `.github/workflows/build-lint.yml` to write **synthetic `apps/vela/.env.production` and `apps/vela-mobile/.env.production`** files before `bun run build`; these must contain the same types of `VITE_*` keys generated by `inject-env.ts`. Do **not** rely only on process-env placeholders or bypass mobile production validation. Use a *web* Cognito client sentinel and a *mobile* API sentinel (`https://example.invalid/api/`) plus pool sentinel (`us-east-1_ciPlaceholder`).
+- [ ] Immediately after build, fail CI unless the generated **web** `apps/vela/dist/spa` contains the web client/pool sentinel and **mobile** `apps/vela-mobile/dist/spa` contains the mobile URL/pool sentinel. Assert the expected markers in each corresponding bundle; don't look for the mobile URL in the web bundle. Use an uncomplicated `grep -R` or equivalent check with clear failure messages.
+- [ ] Pin Node via `actions/setup-node` in relevant workflows including deployment. Keep `bun install --frozen-lockfile` and existing API Lambda build gates.
+- [ ] Run web/mobile/extension unit + coverage, app lint/typecheck, both SPA builds, and mobile iOS assets build on implementation HEAD. Keep the extension's Vitest/coverage peer versions paired.
+- [ ] Verify mobile production guard rejects absent/empty build config and that a release build consumes the injected `.env.production` rather than only terminal env.
+- [ ] The existing mocked Playwright suite (the `mocked-settings` job in `e2e.yml`) runs on **draft PRs**. Also run `unit-test.yml` and `build-lint.yml` by their existing `workflow_dispatch` triggers on the draft branch; both skip draft PR events. Record commit SHA, workflow run link, exit code, and key outputs. A skipped job is **not** acceptance.
 
-### MCP-only E2E acceptance
+### MCP E2E and visual acceptance (single platform per non-platform-specific behavior)
 
-- [ ] From an **MCP-controlled browser**, launch the built/mocked web application and exercise a representative authenticated route (e.g. Home and Learn navigation). Confirm loaded content and browser-back navigation, no console/runtime errors.
-- [ ] From an **MCP-controlled browser** in a 390 × 844 viewport, exercise the mobile web shell with mocked auth: Home -> Learn -> back, tab navigation, no clipping of key navigation controls.
-- [ ] Store baseline and post-upgrade screenshots at 1440 × 900 (web) and 390 × 844 (mobile). Perform an automated/agent visual comparison; there is **no Linear UI mockup** for this maintenance task. Any meaningful unexplained difference fails acceptance.
-- [ ] Where an iOS Simulator with MCP automation is available, launch the Capacitor build, navigate the mobile shell, verify displayed version and capture an iOS screenshot. If unavailable, explicitly mark this gate unverified rather than requesting manual acceptance.
-- [ ] Exercise the existing mocked browser E2E suite as an additional regression gate; the **acceptance evidence must come from MCP execution**, not just a standalone CLI exit code.
+- [ ] Use an **MCP-controlled browser** to open built/mocked web SPA, exercise a representative authenticated route and navigation/back behavior, verify Cognito/API config is present and there are no runtime errors.
+- [ ] Use an **MCP-controlled browser** to run the mobile shell at **390 × 844**, navigate Home → Learn → back, check tab/nav visibility, and confirm runtime config and version display.
+- [ ] Capture **one screenshot per app** from those MCP browser runs and visually inspect the resulting UI (there is no Linear mockup). Do **not** build a pre/post pixel-diff system for a tooling-only migration. Record screenshot links or paths from the test session.
+- [ ] Where supported, launch iOS Capacitor in an **MCP-controlled Simulator**, verify the Home version equals the build's MARKETING_VERSION, and capture a screenshot. If unavailable, mark only that gate **unverified**, never passed and never require human acceptance.
 
-This task changes frontend build tooling but no backend behavior, so no new backend API E2E flow is introduced. Each changed platform's build and representative UI must nevertheless be checked.
+Backend endpoints are unchanged in this ticket; no new backend API E2E flow is required.
 
-## Task 5 — Review and traceability
+## Task 5 — Single PR review and traceability
 
-1. Add an evidence table to this same PR: tested commit, resolved versions, web/mobile builds, extension tests, env matrix, MCP/browser screenshots, and iOS Simulator status.
-2. Fix actual review findings on the same branch and rerun affected checks. The existing unit-test CI skips **draft** PRs; never interpret skipped checks as green. Trigger a branch workflow if supported or provide direct MCP/runner evidence before marking ready.
-3. Link this PR to Linear HPA-918 and the closed upstream PRs:
-   - [#76](https://github.com/cwchanap/Vela/pull/76): superseded only after coordinated v3/Vite 8 success.
-   - [#75](https://github.com/cwchanap/Vela/pull/75): retained v11 hold unless a separately validated remove/replace decision is documented on this PR.
-4. Leave other Dependabot ignore rules and unrelated upgrades untouched. Only mark HPA-918 complete after the upgrade and the explicit env decision satisfy this acceptance checklist.
+1. Add a concise evidence table to **this same PR**: commit SHA, resolved dependency versions, CI workflow_dispatch results, env markers in each dist, unit/coverage/build gates, Quasar-resolved version cases, MCP E2E screenshots, iOS Simulator result/unverified reason.
+2. Apply valid review comments and re-run affected checks without creating a second PR.
+3. Link results to Linear HPA-918: #76 is superseded by a validated coordinated upgrade; #75 remains rejected as v1000, with the **direct env dependencies removed**. Do not bulk-unignore or dismiss security alerts.
+4. Mark ready only when the implemented PR's acceptance checklist has actual evidence. Keep the PR draft until then.
 
 ## End-to-end definition of done
 
-HPA-918 is done when the **same PR** implements a coherent Vite 8 / Quasar v3 toolchain for both apps; unit+coverage, typecheck, build, and extension regression checks pass; the production API/env guard and native version parity pass; the MCP browser paths and screenshot comparisons pass; any iOS-only verification limitations are clearly identified; and Linear records the validated #76 supersession plus the #75 retain/remove rationale.
-
-**No manual/human acceptance criterion. No second implementation PR. No mass dependency unignore.**
+**One PR per HPA-918 ticket.** The migration replaces v2/Vite 7 with a supported Quasar v3/Vite 8 toolchain for both apps, preserves working WXT tests, pins frontend Node, makes Quasar the **only** client-env loading engine, enforces a persistent CI check for both production bundles, and proves native version parity. CI remains the reproducible regression gate; MCP-driven browser E2E and screenshot visual inspection satisfy UI acceptance. A native Simulator check is performed where available, otherwise disclosed as unverified. No manual/human acceptance, compatibility framework, or separate PR.
