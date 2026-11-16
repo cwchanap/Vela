@@ -120,7 +120,11 @@ describe('GeminiProvider', () => {
   });
 
   test('wraps non-RIFF PCM16LE with accepted PCM/L16 MIME metadata', async () => {
-    for (const mimeType of ['audio/pcm', 'audio/pcm; rate=24000', 'AUDIO/L16']) {
+    for (const [mimeType, expectedData] of [
+      ['audio/pcm', [1, 2, 3, 4]],
+      ['audio/pcm; rate=24000', [1, 2, 3, 4]],
+      ['AUDIO/L16', [2, 1, 4, 3]],
+    ] as const) {
       const pcm = Buffer.from([1, 2, 3, 4]);
       mockFetch.mockResolvedValueOnce(makeInteractionsResponse([audioPart(pcm, mimeType)]));
 
@@ -131,8 +135,19 @@ describe('GeminiProvider', () => {
       expect(result.audioBuffer.length).toBe(pcm.length + 44);
       expect(result.audioBuffer.readUInt32LE(24)).toBe(24_000);
       expect(result.audioBuffer.readUInt32LE(28)).toBe(48_000);
-      expect(result.audioBuffer.subarray(44).equals(pcm)).toBe(true);
+      expect(result.audioBuffer.subarray(44).equals(Buffer.from(expectedData))).toBe(true);
     }
+  });
+
+  test('swaps RFC 2586 big-endian L16 samples before wrapping as PCM16LE', async () => {
+    // The non-symmetric sample 0x1234 fails any unchanged-byte wrapping.
+    mockFetch.mockResolvedValueOnce(
+      makeInteractionsResponse([audioPart(Buffer.from([0x12, 0x34]), 'audio/L16;rate=24000')]),
+    );
+
+    const result = await provider.generate(request);
+
+    expect(result.audioBuffer.readInt16LE(44)).toBe(0x1234);
   });
 
   test('uses the declared rate parameter when wrapping raw PCM/L16 audio', async () => {

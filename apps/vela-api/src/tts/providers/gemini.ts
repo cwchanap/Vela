@@ -167,7 +167,9 @@ export class GeminiProvider implements TTSProvider {
       throw new Error('Gemini TTS: invalid PCM16LE audio data');
     }
 
-    const { sampleRate } = parsePcmMime(part.mime_type);
+    const { mimeType, sampleRate } = parsePcmMime(part.mime_type);
+    // RFC 2586 audio/L16 is big-endian; the WAV container declares PCM16LE.
+    if (mimeType === 'audio/l16') audio.swap16();
 
     return { audioBuffer: pcm16ToWav(audio, sampleRate), contentType: 'audio/wav' };
   }
