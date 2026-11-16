@@ -29,9 +29,11 @@ export class ElevenLabsProvider implements TTSProvider {
       throw new Error(`ElevenLabs API error ${response.status}`);
     }
 
-    return {
-      audioBuffer: await readBoundedBody(response, MAX_TTS_AUDIO_BYTES),
-      contentType: 'audio/mpeg',
-    };
+    const audioBuffer = await readBoundedBody(response, MAX_TTS_AUDIO_BYTES);
+    if (audioBuffer.length === 0) {
+      throw new Error('ElevenLabs TTS: empty audio response');
+    }
+
+    return { audioBuffer, contentType: 'audio/mpeg' };
   }
 }

@@ -96,6 +96,12 @@ describe('ElevenLabsProvider', () => {
     expect(result.audioBuffer).toBeInstanceOf(Buffer);
   });
 
+  test('rejects an empty successful audio body', async () => {
+    mockFetch.mockResolvedValueOnce(new Response(null, { status: 200 }));
+
+    await expect(provider.generate(request)).rejects.toThrow('empty audio');
+  });
+
   test('stops an oversized streamed audio body before full allocation', async () => {
     let cancelled = false;
     const stream = new ReadableStream({
