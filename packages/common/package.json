@@ -37,7 +37,7 @@
     "test:unit": "vitest run"
   },
   "dependencies": {
-    "@tanstack/vue-query": "^5.106.1",
+    "@tanstack/vue-query": "^5.107.1",
     "kuromoji": "^0.1.2",
     "vue": "^3.5.45"
   },
@@ -48,7 +48,7 @@
     "vitest": "^3.0.0"
   },
   "peerDependencies": {
-    "@tanstack/vue-query": "^5.106.1",
+    "@tanstack/vue-query": "^5.107.1",
     "vue": "^3.5.45"
   }
 }
