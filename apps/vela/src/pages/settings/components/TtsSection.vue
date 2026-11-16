@@ -229,6 +229,9 @@ watch(
 // Sync local form state with query data when it loads/changes. The form refs
 // are tracked too: hydration skipped over unsaved edits runs again once the
 // edits are reverted, and the live query data is the deferred selection.
+// Hydrate from lastSavedSelection, not the query snapshot: onSuccess sets it
+// to the submitted selection, while ttsSettingsData still holds the pre-save
+// snapshot until the invalidation refetch lands.
 watch(
   () => [
     ttsSettingsData.value,
@@ -238,7 +241,7 @@ watch(
     ttsModel.value,
   ],
   () => {
-    const selection = resolveSavedSelection(ttsSettingsData.value);
+    const selection = lastSavedSelection;
     if (!selection) return;
     const matchesApplied =
       appliedSettings.provider === ttsProvider.value &&
