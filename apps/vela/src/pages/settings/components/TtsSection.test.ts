@@ -177,6 +177,40 @@ describe('TtsSection', () => {
       await wrapper.vm.$nextTick();
       expect(wrapper.vm.ttsApiKeyInput).toBe('');
     });
+
+    it('restores the saved voice and model when switching away from the saved provider and back', async () => {
+      settingsData.value = {
+        provider: 'openai',
+        voiceId: 'marin',
+        model: 'gpt-realtime-2.1-mini',
+        hasApiKey: true,
+      };
+      await flushPromises();
+
+      expect(wrapper.vm.ttsProvider).toBe('openai');
+      expect(wrapper.vm.ttsVoiceId).toBe('marin');
+      expect(wrapper.vm.ttsModel).toBe('gpt-realtime-2.1-mini');
+
+      wrapper.vm.ttsProvider = 'gemini';
+      await wrapper.vm.$nextTick();
+      expect(wrapper.vm.ttsVoiceId).toBe('Kore');
+      expect(wrapper.vm.ttsModel).toBe('gemini-3.8-flash-tts');
+
+      wrapper.vm.ttsProvider = 'openai';
+      await wrapper.vm.$nextTick();
+      expect(wrapper.vm.ttsVoiceId).toBe('marin');
+      expect(wrapper.vm.ttsModel).toBe('gpt-realtime-2.1-mini');
+
+      // Because the form is back to the saved state, a subsequent refetch applies cleanly.
+      settingsData.value = {
+        provider: 'openai',
+        voiceId: 'cedar',
+        model: 'gpt-realtime-2.1-mini',
+        hasApiKey: true,
+      };
+      await flushPromises();
+      expect(wrapper.vm.ttsVoiceId).toBe('cedar');
+    });
   });
 
   describe('registry-backed options', () => {

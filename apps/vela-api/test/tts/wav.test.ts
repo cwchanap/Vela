@@ -97,12 +97,25 @@ describe('isValidWav', () => {
     expect(isValidWav(truncated)).toBe(false);
   });
 
-  test('rejects an odd-sized final chunk missing its pad byte', () => {
+  test('accepts an odd-sized final chunk when its pad byte is not counted in RIFF size', () => {
     const wav = pcm16ToWav(Buffer.from([1, 2]), 24_000);
     const junk = Buffer.alloc(11);
     junk.write('JUNK', 0, 'ascii');
     junk.writeUInt32LE(3, 4);
     const buf = Buffer.concat([wav, junk]);
+    buf.writeUInt32LE(buf.length - 8, 4);
+    expect(isValidWav(buf)).toBe(true);
+  });
+
+  test('rejects a non-final odd-sized chunk missing its pad byte', () => {
+    const wav = pcm16ToWav(Buffer.from([1, 2]), 24_000);
+    const junk = Buffer.alloc(11);
+    junk.write('JUNK', 0, 'ascii');
+    junk.writeUInt32LE(3, 4);
+    const tail = Buffer.alloc(12);
+    tail.write('LIST', 0, 'ascii');
+    tail.writeUInt32LE(4, 4);
+    const buf = Buffer.concat([wav, junk, tail]);
     buf.writeUInt32LE(buf.length - 8, 4);
     expect(isValidWav(buf)).toBe(false);
   });

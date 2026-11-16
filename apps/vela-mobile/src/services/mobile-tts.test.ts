@@ -146,6 +146,7 @@ describe('MobileTtsService', () => {
   it.each<[TtsApiErrorCode, MobileTtsErrorCode]>([
     ['tts_not_configured', 'not_configured'],
     ['tts_invalid_provider_configuration', 'generation_failed'],
+    ['tts_settings_conflict', 'generation_failed'],
     ['tts_audio_service_unavailable', 'service_unavailable'],
     ['tts_generation_timeout', 'generation_timeout'],
     ['tts_generation_failed', 'generation_failed'],

@@ -156,8 +156,9 @@ const createTTSRoute = (env: Env) => {
       }
 
       const settings = await ttsSettingsDB.get(userId);
+      const apiKey = typeof settings?.api_key === 'string' ? settings.api_key.trim() : '';
 
-      if (!settings || !settings.api_key) {
+      if (!settings || !apiKey) {
         return c.json(
           ttsError(
             'TTS API key not configured. Please configure in Settings.',
@@ -236,7 +237,7 @@ const createTTSRoute = (env: Env) => {
       try {
         result = await ttsProvider.generate({
           text,
-          apiKey: settings.api_key,
+          apiKey,
           voiceId: selection.voiceId,
           model: selection.model,
         });
@@ -396,68 +397,87 @@ const createTTSRoute = (env: Env) => {
    * POST /api/tts/settings
    * Save TTS settings (provider, API key, voice, model).
    */
-  tts.post('/settings', requireAuth, zValidator('json', SaveTTSSettingsSchema), async (c) => {
-    try {
-      const { provider, apiKey, voiceId, model } = c.req.valid('json');
-      const userId = c.get('userId');
-
-      if (!userId) {
-        return c.json({ error: 'Unauthorized: User ID not found' }, 401);
+  tts.post(
+    '/settings',
+    requireAuth,
+    zValidator('json', SaveTTSSettingsSchema, (result, c) => {
+      if (!result.success) {
+        const message = result.error.issues.map((issue) => issue.message).join(', ');
+        return c.json(ttsError(message, 'tts_invalid_provider_configuration'), 400);
       }
+    }),
+    async (c) => {
+      try {
+        const { provider, apiKey, voiceId, model } = c.req.valid('json');
+        const userId = c.get('userId');
 
-      // A blank/omitted key means "keep the stored key", but only for the same
-      // saved provider. Never reuse a credential across providers, and never
-      // treat a whitespace or non-string stored value as a key.
-      const providedKey = typeof apiKey === 'string' && apiKey.trim() ? apiKey : null;
-
-      if (providedKey) {
-        // A supplied key replaces the stored credential unconditionally.
-        await ttsSettingsDB.put({
-          user_id: userId,
-          provider,
-          api_key: providedKey,
-          voice_id: voiceId || null,
-          model: model || null,
-        });
-      } else {
-        const existing = await ttsSettingsDB.get(userId);
-        const retainedKey =
-          existing?.provider === provider && typeof existing.api_key === 'string'
-            ? existing.api_key
-            : '';
-
-        if (!retainedKey.trim()) {
-          return c.json(
-            ttsError('TTS API key required. Enter a key for this provider.', 'tts_not_configured'),
-            400,
-          );
+        if (!userId) {
+          return c.json({ error: 'Unauthorized: User ID not found' }, 401);
         }
 
-        // Settings-only conditional write: the stored credential is never
-        // rewritten, and the write fails if the row no longer carries the
-        // provider and key this request observed (a concurrent replacement or
-        // provider switch, or a stale read).
-        const retention = await ttsSettingsDB.putRetainingKey({
-          user_id: userId,
-          provider,
-          expected_api_key: retainedKey,
-          voice_id: voiceId || null,
-          model: model || null,
-        });
-        if (retention === 'stale') {
-          return c.json(
-            { error: 'TTS settings changed while saving. Please reload and try again.' },
-            409,
-          );
-        }
-      }
+        // A blank/omitted key means "keep the stored key", but only for the same
+        // saved provider. Never reuse a credential across providers, and never
+        // treat a whitespace or non-string stored value as a key.
+        const providedKey = typeof apiKey === 'string' ? apiKey.trim() : '';
 
-      return c.json({ success: true, message: 'TTS settings saved successfully' });
-    } catch (error) {
-      console.error('Save TTS settings error', sanitizeError(error, 'unexpected'));
-      return c.json(ttsError('Failed to save TTS settings', 'tts_unexpected_error'), 500);
-    }
-  });
+        if (providedKey) {
+          // A supplied key replaces the stored credential unconditionally.
+          await ttsSettingsDB.put({
+            user_id: userId,
+            provider,
+            api_key: providedKey,
+            voice_id: voiceId || null,
+            model: model || null,
+          });
+        } else {
+          const existing = await ttsSettingsDB.get(userId);
+          // Rows saved before multi-provider support have no `provider` attribute
+          // and are shown as ElevenLabs on read.
+          const existingProvider = existing ? existing.provider || 'elevenlabs' : null;
+          const retainedKey =
+            existingProvider === provider && typeof existing?.api_key === 'string'
+              ? existing.api_key
+              : '';
+
+          if (!retainedKey.trim()) {
+            return c.json(
+              ttsError(
+                'TTS API key required. Enter a key for this provider.',
+                'tts_not_configured',
+              ),
+              400,
+            );
+          }
+
+          // Settings-only conditional write: the stored credential is never
+          // rewritten, and the write fails if the row no longer carries the
+          // provider and key this request observed (a concurrent replacement or
+          // provider switch, or a stale read).
+          const retention = await ttsSettingsDB.putRetainingKey({
+            user_id: userId,
+            provider,
+            expected_api_key: retainedKey,
+            voice_id: voiceId || null,
+            model: model || null,
+          });
+          if (retention === 'stale') {
+            return c.json(
+              ttsError(
+                'TTS settings changed while saving. Please reload and try again.',
+                'tts_settings_conflict',
+              ),
+              409,
+            );
+          }
+        }
+
+        return c.json({ success: true, message: 'TTS settings saved successfully' });
+      } catch (error) {
+        console.error('Save TTS settings error', sanitizeError(error, 'unexpected'));
+        return c.json(ttsError('Failed to save TTS settings', 'tts_unexpected_error'), 500);
+      }
+    },
+  );
 
   /**
    * GET /api/tts/settings
@@ -485,12 +505,12 @@ const createTTSRoute = (env: Env) => {
       const provider = providerParse.success ? providerParse.data : 'elevenlabs';
 
       return c.json({
-        hasApiKey: !!settings?.api_key,
+        hasApiKey: typeof settings?.api_key === 'string' && Boolean(settings.api_key.trim()),
         ...resolveTtsSelection(provider, settings?.model ?? null, settings?.voice_id ?? null),
       });
     } catch (error) {
       console.error('Get TTS settings error', sanitizeError(error, 'unexpected'));
-      return c.json({ error: 'Failed to get TTS settings' }, 500);
+      return c.json(ttsError('Failed to get TTS settings', 'tts_unexpected_error'), 500);
     }
   });
 
