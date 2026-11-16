@@ -1260,6 +1260,7 @@ describe('DynamoDB Operations', () => {
         expect.objectContaining({
           TableName: 'vela-tts-settings',
           Key: { user_id: mockUserId },
+          ConsistentRead: true,
         }),
       );
       expect(result).toEqual(mockTtsSettings);

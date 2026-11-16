@@ -905,6 +905,10 @@ export const ttsSettings = {
       const command = new GetCommand({
         TableName: TABLE_NAMES.TTS_SETTINGS,
         Key: { user_id: userId },
+        // Strongly consistent: POST /settings readers (the client's post-save
+        // refetch and the blank-key retention check) must observe the write
+        // they just confirmed, not a pre-write replica.
+        ConsistentRead: true,
       });
       const response = await docClient.send(command);
       return response.Item;
