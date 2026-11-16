@@ -12,6 +12,10 @@ export interface TtsModelInfo {
 export interface TtsProviderInfo {
   /** Single display label for the provider — UI selects, API error messages. */
   label: string;
+  /** Label for the provider's API key input. */
+  apiKeyLabel: string;
+  /** Hint for the provider's API key input when no key is saved for it. */
+  apiKeyHint: string;
   /** Model used when a stored value is null, legacy or unsupported. */
   defaultModel: string;
   /** Models a new save may select. */
@@ -36,6 +40,8 @@ export type TtsSelection = {
 export const TTS_PROVIDER_REGISTRY: Readonly<Record<TtsProvider, TtsProviderInfo>> = {
   elevenlabs: {
     label: 'ElevenLabs',
+    apiKeyLabel: 'ElevenLabs API Key',
+    apiKeyHint: 'Your ElevenLabs API key',
     defaultModel: 'eleven_v4',
     models: [
       { id: 'eleven_v4', label: 'Eleven v4' },
@@ -46,6 +52,8 @@ export const TTS_PROVIDER_REGISTRY: Readonly<Record<TtsProvider, TtsProviderInfo
   },
   openai: {
     label: 'OpenAI',
+    apiKeyLabel: 'OpenAI API Key',
+    apiKeyHint: 'Your OpenAI API key (sk-...)',
     defaultModel: 'gpt-realtime-2.1-mini',
     models: [{ id: 'gpt-realtime-2.1-mini', label: 'GPT Realtime 2.1 Mini' }],
     defaultVoice: 'alloy',
@@ -64,6 +72,8 @@ export const TTS_PROVIDER_REGISTRY: Readonly<Record<TtsProvider, TtsProviderInfo
   },
   gemini: {
     label: 'Google Gemini',
+    apiKeyLabel: 'Google AI API Key',
+    apiKeyHint: 'Your Google AI Studio API key',
     defaultModel: 'gemini-3.8-flash-tts',
     models: [
       { id: 'gemini-3.8-flash-tts', label: 'Gemini 3.8 Flash TTS' },
@@ -132,10 +142,7 @@ export function resolveTtsSelection(
   };
 }
 
-export type TtsSettings = {
-  provider: TtsProvider;
-  voiceId: string | null;
-  model: string | null;
+export type TtsSettings = TtsSelection & {
   hasApiKey: boolean;
 };
 
@@ -151,11 +158,7 @@ export type GeneratePronunciationRequest = {
  * via `GET /tts/settings` if settings changed between the two requests.
  * Clients use this to avoid caching audio under a stale settings identity.
  */
-export type TtsEffectiveSettings = {
-  provider: TtsProvider;
-  voiceId: string | null;
-  model: string | null;
-};
+export type TtsEffectiveSettings = TtsSelection;
 
 export type GeneratePronunciationResponse = {
   audioUrl: string;
@@ -204,6 +207,7 @@ export function effectiveSettingsMatch(
 const TTS_API_ERROR_CODES = [
   'tts_not_configured',
   'tts_invalid_provider_configuration',
+  'tts_settings_conflict',
   'tts_audio_service_unavailable',
   'tts_generation_timeout',
   'tts_generation_failed',
@@ -252,13 +256,6 @@ function requireBoolean(value: unknown, field: string): boolean {
   return value;
 }
 
-function requireNullableString(value: unknown, field: string): string | null {
-  if (value !== null && typeof value !== 'string') {
-    throw new TypeError(`invalid_tts_${field}`);
-  }
-  return value;
-}
-
 function requireHttpsAudioUrl(value: unknown, field: string): string {
   const audioUrl = requireString(value, field);
   let parsed: URL;
@@ -280,8 +277,8 @@ export function parseTtsSettings(value: unknown): TtsSettings {
 
   return {
     provider,
-    voiceId: requireNullableString(root.voiceId, 'settings:voiceId'),
-    model: requireNullableString(root.model, 'settings:model'),
+    voiceId: requireString(root.voiceId, 'settings:voiceId'),
+    model: requireString(root.model, 'settings:model'),
     hasApiKey: requireBoolean(root.hasApiKey, 'settings:hasApiKey'),
   };
 }
@@ -322,11 +319,8 @@ function parseEffectiveSettings(
   }
   return {
     provider,
-    voiceId: requireNullableString(
-      settingsRecord.voiceId,
-      `${fieldPrefix}:effectiveSettings:voiceId`,
-    ),
-    model: requireNullableString(settingsRecord.model, `${fieldPrefix}:effectiveSettings:model`),
+    voiceId: requireString(settingsRecord.voiceId, `${fieldPrefix}:effectiveSettings:voiceId`),
+    model: requireString(settingsRecord.model, `${fieldPrefix}:effectiveSettings:model`),
   };
 }
 

@@ -98,7 +98,8 @@ function installConditionalRetention(state: { current: Record<string, any> }) {
       model: string | null;
     }) => {
       const current = state.current;
-      if (current.provider !== settings.provider || current.api_key !== settings.expected_api_key) {
+      const currentProvider = current.provider || 'elevenlabs';
+      if (currentProvider !== settings.provider || current.api_key !== settings.expected_api_key) {
         return 'stale';
       }
       state.current = {
@@ -306,6 +307,25 @@ describe('TTS Route', () => {
         voiceId: 'Kore',
         model: 'gemini-3.8-flash-tts',
       });
+    });
+
+    test('reports hasApiKey as false when the stored key is whitespace-only or non-string', async () => {
+      for (const api_key of ['   ', '\t\n', 42]) {
+        mockTtsSettingsDB.get.mockResolvedValueOnce({
+          user_id: 'test-user-id',
+          provider: 'elevenlabs',
+          api_key,
+          voice_id: null,
+          model: null,
+        });
+
+        const app = createTestApp();
+        const res = await app.request('/settings');
+
+        expect(res.status).toBe(200);
+        const body = (await res.json()) as { hasApiKey: boolean };
+        expect(body.hasApiKey).toBe(false);
+      }
     });
 
     test('returns 500 on database error', async () => {
@@ -675,6 +695,7 @@ describe('TTS Route', () => {
       expect(blankRes.status).toBe(409);
       expect(await blankRes.json()).toEqual({
         error: 'TTS settings changed while saving. Please reload and try again.',
+        code: 'tts_settings_conflict',
       });
       expect(state.current.api_key).toBe('new-key');
       expect(mockTtsSettingsDB.put).toHaveBeenCalledTimes(1);
@@ -817,7 +838,7 @@ describe('TTS Route', () => {
       );
     });
 
-    test('rejects an unsupported model for the provider', async () => {
+    test('rejects an unsupported model for the provider with a string error and code', async () => {
       const app = createTestApp();
       const res = await app.request('/settings', {
         method: 'POST',
@@ -831,10 +852,14 @@ describe('TTS Route', () => {
       });
 
       expect(res.status).toBe(400);
+      expect(await res.json()).toEqual({
+        error: 'Unsupported TTS model',
+        code: 'tts_invalid_provider_configuration',
+      });
       expect(mockTtsSettingsDB.put).not.toHaveBeenCalled();
     });
 
-    test('rejects an unsupported voice for the provider', async () => {
+    test('rejects an unsupported voice for the provider with a string error and code', async () => {
       const app = createTestApp();
       const res = await app.request('/settings', {
         method: 'POST',
@@ -848,7 +873,72 @@ describe('TTS Route', () => {
       });
 
       expect(res.status).toBe(400);
+      expect(await res.json()).toEqual({
+        error: 'Unsupported TTS voice',
+        code: 'tts_invalid_provider_configuration',
+      });
       expect(mockTtsSettingsDB.put).not.toHaveBeenCalled();
+    });
+
+    test('trims surrounding whitespace from a supplied API key before storing', async () => {
+      mockTtsSettingsDB.put.mockResolvedValueOnce(undefined);
+
+      const app = createTestApp();
+      const res = await app.request('/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          provider: 'elevenlabs',
+          apiKey: '  trimmed-secret-key  \n',
+          voiceId: 'ErXwobaYiN019PkySvjV',
+          model: 'eleven_v4',
+        }),
+      });
+
+      expect(res.status).toBe(200);
+      expect(mockTtsSettingsDB.put).toHaveBeenCalledWith(
+        expect.objectContaining({ api_key: 'trimmed-secret-key' }),
+      );
+    });
+
+    test('retains the stored key on a blank-key save for a legacy row without provider', async () => {
+      const state = {
+        current: {
+          user_id: 'test-user-id',
+          api_key: 'legacy-eleven-key',
+          voice_id: null,
+          model: null,
+        } as Record<string, any>,
+      };
+      installConditionalRetention(state);
+      mockTtsSettingsDB.get.mockResolvedValueOnce({ ...state.current });
+
+      const app = createTestApp();
+      const res = await app.request('/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          provider: 'elevenlabs',
+          voiceId: 'ErXwobaYiN019PkySvjV',
+          model: 'eleven_multilingual_v2',
+        }),
+      });
+
+      expect(res.status).toBe(200);
+      expect(mockTtsSettingsDB.put).not.toHaveBeenCalled();
+      expect(mockTtsSettingsDB.putRetainingKey).toHaveBeenCalledWith({
+        user_id: 'test-user-id',
+        provider: 'elevenlabs',
+        expected_api_key: 'legacy-eleven-key',
+        voice_id: 'ErXwobaYiN019PkySvjV',
+        model: 'eleven_multilingual_v2',
+      });
+      expect(state.current).toMatchObject({
+        provider: 'elevenlabs',
+        api_key: 'legacy-eleven-key',
+        voice_id: 'ErXwobaYiN019PkySvjV',
+        model: 'eleven_multilingual_v2',
+      });
     });
 
     test('rejects a model that belongs to another provider', async () => {

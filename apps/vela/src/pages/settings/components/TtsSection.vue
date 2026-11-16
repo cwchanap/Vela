@@ -107,6 +107,7 @@ import {
   TTS_PROVIDER_REGISTRY,
   TTS_PROVIDERS,
   type TtsProvider,
+  type TtsSelection,
 } from '@vela/common';
 import {
   useTTSSettingsQuery,
@@ -166,19 +167,13 @@ const canSubmitTTS = computed(
   () => Boolean(enteredApiKey.value) || hasSavedKeyForSelectedProvider.value,
 );
 
-const ttsApiKeyLabel = computed(() => {
-  if (ttsProvider.value === 'openai') return 'OpenAI API Key';
-  if (ttsProvider.value === 'gemini') return 'Google AI API Key';
-  return 'ElevenLabs API Key';
-});
+const ttsApiKeyLabel = computed(() => selectedProviderInfo.value.apiKeyLabel);
 
 const ttsApiKeyHint = computed(() => {
   if (hasSavedKeyForSelectedProvider.value) {
     return `Leave blank to keep the saved ${selectedProviderInfo.value.label} key`;
   }
-  if (ttsProvider.value === 'openai') return 'Your OpenAI API key (sk-...)';
-  if (ttsProvider.value === 'gemini') return 'Your Google AI Studio API key';
-  return 'Your ElevenLabs API key';
+  return selectedProviderInfo.value.apiKeyHint;
 });
 
 const ttsStatusLabel = computed(() => {
@@ -188,16 +183,41 @@ const ttsStatusLabel = computed(() => {
     : `No TTS API key saved for ${selectedProviderInfo.value.label}`;
 });
 
+function resolveSavedSelection(
+  data: { provider?: unknown; model?: unknown; voiceId?: unknown } | null | undefined,
+): TtsSelection | null {
+  if (!data) return null;
+  // The saved provider is authoritative; unknown values fall back to defaults.
+  const provider = TTS_PROVIDERS.find((candidate) => candidate === data.provider) ?? 'elevenlabs';
+  return resolveTtsSelection(provider, data.model, data.voiceId);
+}
+
 // Hydration assigns ttsProvider; a stored selection must not be replaced by defaults.
 let applyingStoredSettings = false;
 
-// A provider switch starts from that provider's registry defaults instead of
-// carrying a model/voice from another provider.
+// Snapshot of the settings last applied to the form, so a refetch does not
+// clobber edits the user has made since. Starts at the initial defaults.
+let appliedSettings: TtsSelection = initialSelection;
+let lastSavedSelection: TtsSelection | null = null;
+
+watch(
+  ttsSettingsData,
+  (data) => {
+    lastSavedSelection = resolveSavedSelection(data);
+  },
+  { immediate: true, flush: 'sync' },
+);
+
+// Switching back to the saved provider restores its saved model and voice;
+// switching to any other provider starts from that provider's registry defaults.
 watch(
   ttsProvider,
   (provider) => {
     if (applyingStoredSettings) return;
-    const selection = resolveTtsSelection(provider, null, null);
+    const selection =
+      lastSavedSelection?.provider === provider
+        ? lastSavedSelection
+        : resolveTtsSelection(provider, null, null);
     ttsVoiceId.value = selection.voiceId;
     ttsModel.value = selection.model;
     // A key typed for the previous provider must not be submitted for this one.
@@ -205,10 +225,6 @@ watch(
   },
   { flush: 'sync' },
 );
-
-// Snapshot of the settings last applied to the form, so a refetch does not
-// clobber edits the user has made since. Starts at the initial defaults.
-let appliedSettings: { provider: TtsProvider; voiceId: string; model: string } = initialSelection;
 
 // Sync local form state with query data when it loads/changes. The form refs
 // are tracked too: hydration skipped over unsaved edits runs again once the
@@ -222,18 +238,19 @@ watch(
     ttsModel.value,
   ],
   () => {
-    const data = ttsSettingsData.value;
-    if (!data) return;
-    // The saved provider is authoritative; unknown values fall back to defaults.
-    const provider = TTS_PROVIDERS.find((candidate) => candidate === data.provider) ?? 'elevenlabs';
-    const selection = resolveTtsSelection(provider, data.model, data.voiceId);
-    const hasUnsavedEdits =
-      // A nonblank key is unsaved and belongs to the provider it was typed in,
-      // so hydration must not switch providers underneath it.
-      Boolean(enteredApiKey.value) ||
-      appliedSettings.provider !== ttsProvider.value ||
-      appliedSettings.voiceId !== ttsVoiceId.value ||
-      appliedSettings.model !== ttsModel.value;
+    const selection = resolveSavedSelection(ttsSettingsData.value);
+    if (!selection) return;
+    const matchesApplied =
+      appliedSettings.provider === ttsProvider.value &&
+      appliedSettings.voiceId === ttsVoiceId.value &&
+      appliedSettings.model === ttsModel.value;
+    const matchesSaved =
+      selection.provider === ttsProvider.value &&
+      selection.voiceId === ttsVoiceId.value &&
+      selection.model === ttsModel.value;
+    // A nonblank key is unsaved and belongs to the provider it was typed in,
+    // so hydration must not switch providers underneath it.
+    const hasUnsavedEdits = Boolean(enteredApiKey.value) || (!matchesApplied && !matchesSaved);
     if (hasUnsavedEdits) return;
 
     applyingStoredSettings = true;
@@ -289,11 +306,13 @@ const saveSettingsHandler = async () => {
     },
     {
       onSuccess: () => {
-        appliedSettings = {
-          provider: submitted.provider,
-          voiceId: submitted.voiceId,
-          model: submitted.model,
-        };
+        const savedSelection = resolveTtsSelection(
+          submitted.provider,
+          submitted.model,
+          submitted.voiceId,
+        );
+        appliedSettings = savedSelection;
+        lastSavedSelection = savedSelection;
         // Clear the key only while it is still the submitted one; a newer key
         // typed during the request is unsaved and must survive.
         if (enteredApiKey.value === submitted.apiKey) {

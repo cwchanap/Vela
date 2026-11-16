@@ -968,13 +968,19 @@ export const ttsSettings = {
       }
 
       const now = Date.now();
+      // Rows saved before multi-provider support have no `provider` attribute
+      // (or a null/empty value) and are surfaced as ElevenLabs on read.
+      const providerCondition =
+        settings.provider === 'elevenlabs'
+          ? '(#provider = :provider OR attribute_not_exists(#provider) OR attribute_type(#provider, :nullType) OR #provider = :emptyProvider)'
+          : '#provider = :provider';
 
       const command = new UpdateCommand({
         TableName: TABLE_NAMES.TTS_SETTINGS,
         Key: { user_id: settings.user_id },
         UpdateExpression:
           'SET #provider = :provider, voice_id = :voice_id, #model = :model, updated_at = :updated_at, created_at = if_not_exists(created_at, :created_at)',
-        ConditionExpression: '#provider = :provider AND api_key = :expected_api_key',
+        ConditionExpression: `${providerCondition} AND api_key = :expected_api_key`,
         ExpressionAttributeNames: {
           '#provider': 'provider',
           '#model': 'model',
@@ -986,6 +992,9 @@ export const ttsSettings = {
           ':model': settings.model,
           ':updated_at': now,
           ':created_at': now,
+          ...(settings.provider === 'elevenlabs'
+            ? { ':nullType': 'NULL', ':emptyProvider': '' }
+            : {}),
         },
       });
       await docClient.send(command);

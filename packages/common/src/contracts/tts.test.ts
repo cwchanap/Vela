@@ -28,6 +28,8 @@ describe('TTS provider registry', () => {
       const info = TTS_PROVIDER_REGISTRY[provider];
       expect(info.models.map((model) => model.id)).toContain(info.defaultModel);
       if (info.voices) expect(info.voices).toContain(info.defaultVoice);
+      expect(info.apiKeyLabel.length).toBeGreaterThan(0);
+      expect(info.apiKeyHint.length).toBeGreaterThan(0);
     }
   });
 
@@ -174,18 +176,24 @@ describe('TTS contracts', () => {
   it.each([
     [
       'unsupported provider',
-      { provider: 'other', voiceId: null, model: null, hasApiKey: true },
+      { provider: 'other', voiceId: 'alloy', model: 'tts-1', hasApiKey: true },
       'provider',
     ],
-    ['missing hasApiKey', { provider: 'openai', voiceId: null, model: null }, 'hasApiKey'],
+    ['missing hasApiKey', { provider: 'openai', voiceId: 'alloy', model: 'tts-1' }, 'hasApiKey'],
     [
-      'non-string voiceId',
-      { provider: 'openai', voiceId: 1, model: null, hasApiKey: true },
+      'null voiceId',
+      { provider: 'openai', voiceId: null, model: 'tts-1', hasApiKey: true },
       'voiceId',
     ],
     [
+      'non-string voiceId',
+      { provider: 'openai', voiceId: 1, model: 'tts-1', hasApiKey: true },
+      'voiceId',
+    ],
+    ['null model', { provider: 'openai', voiceId: 'alloy', model: null, hasApiKey: true }, 'model'],
+    [
       'non-string model',
-      { provider: 'openai', voiceId: null, model: false, hasApiKey: true },
+      { provider: 'openai', voiceId: 'alloy', model: false, hasApiKey: true },
       'model',
     ],
   ])('rejects settings with %s', (_caseName, value, field) => {
@@ -213,31 +221,27 @@ describe('TTS contracts', () => {
     });
   });
 
-  it('parses effective settings with null voice/model', () => {
-    expect(
-      parseGeneratePronunciationResponse({
-        audioUrl: HTTPS_AUDIO,
-        cached: true,
-        effectiveSettings: { provider: 'elevenlabs', voiceId: null, model: null },
-      }),
-    ).toEqual({
-      audioUrl: HTTPS_AUDIO,
-      cached: true,
-      effectiveSettings: { provider: 'elevenlabs', voiceId: null, model: null },
-    });
-  });
-
   it.each([
     [
       'unsupported provider',
-      { provider: 'other', voiceId: null, model: null },
+      { provider: 'other', voiceId: 'alloy', model: 'tts-1' },
       'effectiveSettings:provider',
     ],
     ['non-record effectiveSettings', 'openai', 'effectiveSettings'],
     [
-      'non-string voiceId',
-      { provider: 'openai', voiceId: 1, model: null },
+      'null voiceId',
+      { provider: 'openai', voiceId: null, model: 'tts-1' },
       'effectiveSettings:voiceId',
+    ],
+    [
+      'non-string voiceId',
+      { provider: 'openai', voiceId: 1, model: 'tts-1' },
+      'effectiveSettings:voiceId',
+    ],
+    [
+      'null model',
+      { provider: 'openai', voiceId: 'alloy', model: null },
+      'effectiveSettings:model',
     ],
   ])('rejects effective settings with %s', (_caseName, effectiveSettings, field) => {
     expect(() =>
@@ -282,29 +286,27 @@ describe('TTS contracts', () => {
     });
   });
 
-  it('parses effective settings with null voice/model in a GET audio URL response', () => {
-    expect(
-      parseTtsAudioUrlResponse({
-        audioUrl: HTTPS_AUDIO,
-        effectiveSettings: { provider: 'elevenlabs', voiceId: null, model: null },
-      }),
-    ).toEqual({
-      audioUrl: HTTPS_AUDIO,
-      effectiveSettings: { provider: 'elevenlabs', voiceId: null, model: null },
-    });
-  });
-
   it.each([
     [
       'unsupported provider',
-      { provider: 'other', voiceId: null, model: null },
+      { provider: 'other', voiceId: 'alloy', model: 'tts-1' },
       'effectiveSettings:provider',
     ],
     ['non-record effectiveSettings', 'openai', 'effectiveSettings'],
     [
-      'non-string voiceId',
-      { provider: 'openai', voiceId: 1, model: null },
+      'null voiceId',
+      { provider: 'openai', voiceId: null, model: 'tts-1' },
       'effectiveSettings:voiceId',
+    ],
+    [
+      'non-string voiceId',
+      { provider: 'openai', voiceId: 1, model: 'tts-1' },
+      'effectiveSettings:voiceId',
+    ],
+    [
+      'null model',
+      { provider: 'openai', voiceId: 'alloy', model: null },
+      'effectiveSettings:model',
     ],
   ])(
     'rejects a GET audio response effectiveSettings with %s',
@@ -349,6 +351,7 @@ describe('TTS contracts', () => {
   it.each([
     'tts_not_configured',
     'tts_invalid_provider_configuration',
+    'tts_settings_conflict',
     'tts_audio_service_unavailable',
     'tts_generation_timeout',
     'tts_generation_failed',

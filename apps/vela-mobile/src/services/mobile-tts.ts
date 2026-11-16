@@ -118,6 +118,7 @@ type PendingEntry = {
 const STABLE_ERROR_CODE_MAP: Record<TtsApiErrorCode, MobileTtsErrorCode> = {
   tts_not_configured: 'not_configured',
   tts_invalid_provider_configuration: 'generation_failed',
+  tts_settings_conflict: 'generation_failed',
   tts_audio_service_unavailable: 'service_unavailable',
   tts_generation_timeout: 'generation_timeout',
   tts_generation_failed: 'generation_failed',
@@ -257,13 +258,7 @@ function cacheKey(input: NormalizedInput, settings: TtsSettings): string {
   // `vocabularyId` and `text` are an immutable canonical pair in the backend.
   // This service validates non-empty text but deliberately does not include it
   // in the client cache identity or attempt to enforce that backend invariant.
-  return [
-    input.userId,
-    input.vocabularyId,
-    settings.provider,
-    settings.voiceId ?? '',
-    settings.model ?? '',
-  ]
+  return [input.userId, input.vocabularyId, settings.provider, settings.voiceId, settings.model]
     .map(encodeURIComponent)
     .join('|');
 }

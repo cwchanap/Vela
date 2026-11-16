@@ -93,16 +93,16 @@ function setCachedAudioUrl(cacheKey: string, url: string): void {
 function generateCacheKey(
   userId: string,
   vocabularyId: string,
-  provider?: string,
-  voiceId?: string,
-  model?: string,
+  provider: string,
+  voiceId: string,
+  model: string,
 ): string {
   return [
     `u=${encodeCachePart(userId)}`,
     `vocab=${encodeCachePart(vocabularyId)}`,
-    `p=${encodeCachePart(provider || '')}`,
-    `voice=${encodeCachePart(voiceId || '')}`,
-    `m=${encodeCachePart(model || '')}`,
+    `p=${encodeCachePart(provider)}`,
+    `voice=${encodeCachePart(voiceId)}`,
+    `m=${encodeCachePart(model)}`,
   ].join('|');
 }
 
@@ -144,8 +144,8 @@ export async function generatePronunciation(
     userId,
     vocabularyId,
     settings.provider,
-    settings.voiceId ?? undefined,
-    settings.model ?? undefined,
+    settings.voiceId,
+    settings.model,
   );
   const cachedAudioUrl = getCachedAudioUrl(cacheKey);
   if (cachedAudioUrl) {
@@ -177,8 +177,11 @@ export async function generatePronunciation(
         const responseText = await response.text();
         if (responseText) {
           try {
-            const parsedError = JSON.parse(responseText) as { error?: string };
-            errorMessage = parsedError.error || responseText;
+            const parsedError = JSON.parse(responseText) as { error?: unknown };
+            errorMessage =
+              typeof parsedError?.error === 'string' && parsedError.error
+                ? parsedError.error
+                : responseText;
           } catch {
             errorMessage = responseText;
           }
@@ -227,8 +230,8 @@ export async function getAudioUrl(vocabularyId: string, userId: string): Promise
     userId,
     vocabularyId,
     settings.provider,
-    settings.voiceId ?? undefined,
-    settings.model ?? undefined,
+    settings.voiceId,
+    settings.model,
   );
   const cachedAudioUrl = getCachedAudioUrl(cacheKey);
   if (cachedAudioUrl) {
@@ -295,7 +298,9 @@ export async function saveTTSSettings(
     const responseClone = typeof response.clone === 'function' ? response.clone() : null;
     try {
       const error = await response.json();
-      errorMessage = error.error || errorMessage;
+      if (typeof error?.error === 'string' && error.error) {
+        errorMessage = error.error;
+      }
     } catch {
       try {
         const errorText = responseClone ? await responseClone.text() : await response.text();
@@ -325,7 +330,9 @@ export async function getTTSSettings(_userId?: string): Promise<TTSSettings> {
     let errorMessage = 'Failed to fetch TTS settings';
     try {
       const error = await response.json();
-      errorMessage = error.error || errorMessage;
+      if (typeof error?.error === 'string' && error.error) {
+        errorMessage = error.error;
+      }
     } catch {
       const errorText = await response.text();
       errorMessage = errorText || response.statusText || errorMessage;

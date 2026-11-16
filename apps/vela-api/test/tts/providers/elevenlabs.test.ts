@@ -54,6 +54,23 @@ describe('ElevenLabsProvider', () => {
     });
   });
 
+  test('URL-encodes reserved and path-traversal characters in voiceId', async () => {
+    for (const [voiceId, encoded] of [
+      ['../../v1/voices', '..%2F..%2Fv1%2Fvoices'],
+      ['voice?output_format=pcm_16000#frag', 'voice%3Foutput_format%3Dpcm_16000%23frag'],
+    ] as const) {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        arrayBuffer: async () => new Uint8Array([1]).buffer,
+      });
+
+      await provider.generate({ ...request, voiceId });
+
+      const [url] = mockFetch.mock.calls.at(-1) as [string];
+      expect(url).toBe(`https://api.elevenlabs.io/v1/text-to-speech/${encoded}`);
+    }
+  });
+
   test('sends the alternate resolved model without adapter defaults', async () => {
     mockFetch.mockResolvedValueOnce({
       ok: true,

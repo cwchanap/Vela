@@ -1309,12 +1309,27 @@ describe('DynamoDB Operations', () => {
       const state = { item: { ...initial } };
       mockSend.mockImplementation(async (command: { input: any }) => {
         const { input } = command;
-        const holds = input.ConditionExpression.split(' AND ').every((term: string) => {
-          const [rawAttribute, placeholder] = term.trim().split(/\s*=\s*/);
-          const attribute = rawAttribute.startsWith('#')
-            ? input.ExpressionAttributeNames[rawAttribute]
-            : rawAttribute;
+        const resolveAttr = (raw: string) =>
+          raw.startsWith('#') ? input.ExpressionAttributeNames[raw] : raw;
+        const evalAtom = (atom: string): boolean => {
+          const trimmed = atom.trim();
+          const notExists = trimmed.match(/^attribute_not_exists\(([^)]+)\)$/);
+          if (notExists) {
+            return !(resolveAttr(notExists[1].trim()) in state.item);
+          }
+          const attrType = trimmed.match(/^attribute_type\(([^,]+),\s*([^)]+)\)$/);
+          if (attrType) {
+            const attr = resolveAttr(attrType[1].trim());
+            const expectedType = input.ExpressionAttributeValues[attrType[2].trim()];
+            return expectedType === 'NULL' && state.item[attr] === null;
+          }
+          const [rawAttribute, placeholder] = trimmed.split(/\s*=\s*/);
+          const attribute = resolveAttr(rawAttribute);
           return state.item[attribute] === input.ExpressionAttributeValues[placeholder];
+        };
+        const holds = input.ConditionExpression.split(' AND ').every((term: string) => {
+          const stripped = term.trim().replace(/^\((.*)\)$/, '$1');
+          return stripped.split(' OR ').some(evalAtom);
         });
         if (!holds) throw conditionalCheckFailed();
 
@@ -1382,6 +1397,52 @@ describe('DynamoDB Operations', () => {
 
       expect(result).toBe('retained');
       expect(state.item.api_key).toBe(' padded-key ');
+    });
+
+    test('putRetainingKey retains the key for a legacy row missing the provider attribute', async () => {
+      const state = useStatefulTtsItem({
+        user_id: mockUserId,
+        api_key: 'legacy-elevenlabs-key',
+        voice_id: null,
+        model: null,
+      });
+
+      const result = await ttsSettings.putRetainingKey({
+        user_id: mockUserId,
+        provider: 'elevenlabs',
+        expected_api_key: 'legacy-elevenlabs-key',
+        voice_id: 'voice-2',
+        model: 'eleven_multilingual_v2',
+      });
+
+      expect(result).toBe('retained');
+      expect(state.item).toMatchObject({
+        user_id: mockUserId,
+        provider: 'elevenlabs',
+        api_key: 'legacy-elevenlabs-key',
+        voice_id: 'voice-2',
+        model: 'eleven_multilingual_v2',
+      });
+    });
+
+    test('putRetainingKey rejects a legacy row without provider when saving a non-elevenlabs provider', async () => {
+      const state = useStatefulTtsItem({
+        user_id: mockUserId,
+        api_key: 'legacy-elevenlabs-key',
+        voice_id: null,
+        model: null,
+      });
+
+      const result = await ttsSettings.putRetainingKey({
+        user_id: mockUserId,
+        provider: 'openai',
+        expected_api_key: 'legacy-elevenlabs-key',
+        voice_id: 'alloy',
+        model: 'gpt-realtime-2.1-mini',
+      });
+
+      expect(result).toBe('stale');
+      expect(state.item.provider).toBeUndefined();
     });
 
     test('putRetainingKey returns stale and leaves a key replaced after the read', async () => {

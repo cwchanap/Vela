@@ -7,7 +7,8 @@ export class ElevenLabsProvider implements TTSProvider {
   readonly name = 'elevenlabs' as const;
 
   async generate(request: TTSGenerateRequest): Promise<TTSGenerateResult> {
-    const response = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${request.voiceId}`, {
+    const encodedVoiceId = encodeURIComponent(request.voiceId);
+    const response = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${encodedVoiceId}`, {
       method: 'POST',
       headers: {
         Accept: 'audio/mpeg',

@@ -129,7 +129,41 @@ describe('GeminiProvider', () => {
       expect(result.contentType).toBe('audio/wav');
       expect(result.audioBuffer.subarray(0, 4).toString('ascii')).toBe('RIFF');
       expect(result.audioBuffer.length).toBe(pcm.length + 44);
+      expect(result.audioBuffer.readUInt32LE(24)).toBe(24_000);
+      expect(result.audioBuffer.readUInt32LE(28)).toBe(48_000);
       expect(result.audioBuffer.subarray(44).equals(pcm)).toBe(true);
+    }
+  });
+
+  test('uses the declared rate parameter when wrapping raw PCM/L16 audio', async () => {
+    for (const [mimeType, expectedRate] of [
+      ['audio/L16;rate=16000', 16_000],
+      ['audio/pcm; rate=48000', 48_000],
+      ['audio/L16; codec=pcm; RATE="44100"', 44_100],
+    ] as const) {
+      const pcm = Buffer.from([1, 2, 3, 4]);
+      mockFetch.mockResolvedValueOnce(makeInteractionsResponse([audioPart(pcm, mimeType)]));
+
+      const result = await provider.generate(request);
+
+      expect(result.audioBuffer.readUInt32LE(24)).toBe(expectedRate);
+      expect(result.audioBuffer.readUInt32LE(28)).toBe(expectedRate * 2);
+    }
+  });
+
+  test('rejects invalid rate parameters in PCM/L16 MIME metadata', async () => {
+    for (const mimeType of [
+      'audio/L16;rate=0',
+      'audio/L16;rate=-16000',
+      'audio/L16;rate=abc',
+      'audio/L16;rate=',
+      'audio/pcm;rate=9999999',
+    ]) {
+      mockFetch.mockResolvedValueOnce(
+        makeInteractionsResponse([audioPart(Buffer.alloc(4), mimeType)]),
+      );
+
+      await expect(provider.generate(request)).rejects.toThrow('invalid audio sample rate');
     }
   });
 

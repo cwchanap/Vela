@@ -824,15 +824,17 @@ describe('ttsService', () => {
       await expect(saveTTSSettings('elevenlabs', 'invalid-key')).rejects.toThrow('Invalid API key');
     });
 
-    it('should throw generic error when API error message is missing', async () => {
-      mockFetch.mockResolvedValue({
-        ok: false,
-        json: vi.fn().mockResolvedValue({}),
-      });
+    it('should throw generic error when API error message is missing or not a string', async () => {
+      for (const body of [{}, { error: { issues: [{ message: 'Unsupported TTS model' }] } }]) {
+        mockFetch.mockResolvedValueOnce({
+          ok: false,
+          json: vi.fn().mockResolvedValue(body),
+        });
 
-      await expect(saveTTSSettings('elevenlabs', 'sk-test-api-key')).rejects.toThrow(
-        'Failed to save TTS settings',
-      );
+        await expect(saveTTSSettings('elevenlabs', 'sk-test-api-key')).rejects.toThrow(
+          'Failed to save TTS settings',
+        );
+      }
     });
 
     it('should use POST method', async () => {
@@ -1038,24 +1040,38 @@ describe('ttsService', () => {
       expect(mockFetch).toHaveBeenCalledWith('/api/tts/settings', expect.any(Object));
     });
 
-    it('should return settings with null values when not configured', async () => {
-      const emptySettings: TTSSettings = {
+    it('should return resolved default settings when not configured', async () => {
+      const unconfiguredSettings: TTSSettings = {
         provider: 'openai',
-        voiceId: null,
-        model: null,
+        voiceId: 'alloy',
+        model: 'gpt-realtime-2.1-mini',
         hasApiKey: false,
       };
 
       mockFetch.mockResolvedValue({
         ok: true,
-        json: vi.fn().mockResolvedValue(emptySettings),
+        json: vi.fn().mockResolvedValue(unconfiguredSettings),
       });
 
       const result = await getTTSSettings();
 
-      expect(result.voiceId).toBeNull();
-      expect(result.model).toBeNull();
+      expect(result.voiceId).toBe('alloy');
+      expect(result.model).toBe('gpt-realtime-2.1-mini');
       expect(result.hasApiKey).toBe(false);
+    });
+
+    it('rejects null voiceId or model in settings response', async () => {
+      mockFetch.mockResolvedValue({
+        ok: true,
+        json: vi.fn().mockResolvedValue({
+          provider: 'openai',
+          voiceId: null,
+          model: null,
+          hasApiKey: false,
+        }),
+      });
+
+      await expect(getTTSSettings()).rejects.toThrow('invalid_tts_settings:voiceId');
     });
 
     it('should throw error when API returns error status', async () => {

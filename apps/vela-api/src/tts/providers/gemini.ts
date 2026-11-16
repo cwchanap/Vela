@@ -6,6 +6,8 @@ import { isValidWav, pcm16ToWav } from '../wav';
 
 const GEMINI_INTERACTIONS_URL = 'https://generativelanguage.googleapis.com/v1beta/interactions';
 const PCM_MIME_TYPES = new Set(['audio/pcm', 'audio/l16']);
+const DEFAULT_PCM_SAMPLE_RATE = 24_000;
+const MAX_PCM_SAMPLE_RATE = 384_000;
 /** Base64 audio plus the small interaction envelope (id, status, usage, MIME). */
 const MAX_GEMINI_RESPONSE_BYTES = MAX_TTS_AUDIO_BASE64_CHARS + 64 * 1024;
 
@@ -57,9 +59,44 @@ function findSingleAudioPart(payload: unknown): InteractionAudioPart & { data: s
   return part as InteractionAudioPart & { data: string };
 }
 
-function mimeEssence(value: unknown): string | null {
-  if (typeof value !== 'string') return null;
-  return value.split(';')[0]?.trim().toLowerCase() || null;
+function parsePcmMime(value: unknown): { mimeType: string; sampleRate: number } {
+  if (typeof value !== 'string') {
+    throw new Error('Gemini TTS: missing MIME type for non-WAV audio');
+  }
+  const [rawEssence, ...rawParams] = value.split(';');
+  const mimeType = rawEssence?.trim().toLowerCase() || '';
+  if (!mimeType) {
+    throw new Error('Gemini TTS: missing MIME type for non-WAV audio');
+  }
+  if (!PCM_MIME_TYPES.has(mimeType)) {
+    throw new Error('Gemini TTS: unsupported audio format');
+  }
+
+  let sampleRate = DEFAULT_PCM_SAMPLE_RATE;
+  for (const rawParam of rawParams) {
+    const param = rawParam.trim();
+    if (!param) continue;
+    const eqIndex = param.indexOf('=');
+    const key = (eqIndex === -1 ? param : param.slice(0, eqIndex)).trim().toLowerCase();
+    if (key !== 'rate') continue;
+    const rawRate =
+      eqIndex === -1
+        ? ''
+        : param
+            .slice(eqIndex + 1)
+            .trim()
+            .replace(/^"(.*)"$/, '$1');
+    if (!/^\d+$/.test(rawRate)) {
+      throw new Error('Gemini TTS: invalid audio sample rate');
+    }
+    const parsedRate = Number(rawRate);
+    if (!Number.isSafeInteger(parsedRate) || parsedRate <= 0 || parsedRate > MAX_PCM_SAMPLE_RATE) {
+      throw new Error('Gemini TTS: invalid audio sample rate');
+    }
+    sampleRate = parsedRate;
+  }
+
+  return { mimeType, sampleRate };
 }
 
 /**
@@ -130,14 +167,8 @@ export class GeminiProvider implements TTSProvider {
       throw new Error('Gemini TTS: invalid PCM16LE audio data');
     }
 
-    const mimeType = mimeEssence(part.mime_type);
-    if (!mimeType) {
-      throw new Error('Gemini TTS: missing MIME type for non-WAV audio');
-    }
-    if (!PCM_MIME_TYPES.has(mimeType)) {
-      throw new Error('Gemini TTS: unsupported audio format');
-    }
+    const { sampleRate } = parsePcmMime(part.mime_type);
 
-    return { audioBuffer: pcm16ToWav(audio, 24_000), contentType: 'audio/wav' };
+    return { audioBuffer: pcm16ToWav(audio, sampleRate), contentType: 'audio/wav' };
   }
 }

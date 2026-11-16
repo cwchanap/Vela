@@ -5,12 +5,15 @@ const BITS_PER_SAMPLE = 16;
 
 /**
  * Wrap headerless PCM16LE mono audio in a 44-byte RIFF/WAVE container.
- * `sampleRate` is the only rate we accept from providers (24 kHz); the byte
- * rate and block alignment are derived so the declared sizes always match.
+ * The byte rate and block alignment are derived from `sampleRate` so the
+ * declared sizes always match.
  */
 export function pcm16ToWav(pcm: Buffer, sampleRate: number): Buffer {
   if (pcm.length === 0 || pcm.length % 2 !== 0) {
     throw new Error('Invalid PCM16LE audio data');
+  }
+  if (!Number.isInteger(sampleRate) || sampleRate <= 0) {
+    throw new Error('Invalid WAV sample rate');
   }
 
   const header = Buffer.alloc(WAV_HEADER_BYTES);
@@ -58,9 +61,7 @@ export function isValidWav(audio: Buffer): boolean {
     const chunkId = audio.subarray(offset, offset + 4).toString('ascii');
     const chunkSize = audio.readUInt32LE(offset + 4);
     const chunkDataStart = offset + 8;
-    // RIFF chunks are word-aligned: odd sizes carry one pad byte inside the
-    // declared RIFF bounds, so the padded size is what must fit.
-    if (chunkSize + (chunkSize & 1) > riffEnd - chunkDataStart) return false;
+    if (chunkSize > riffEnd - chunkDataStart) return false;
     if (chunkId === 'fmt ') {
       if (chunkSize < 16) return false;
       sawFmt = true;
@@ -68,7 +69,10 @@ export function isValidWav(audio: Buffer): boolean {
       if (chunkSize === 0) return false;
       sawData = true;
     }
-    offset = chunkDataStart + chunkSize + (chunkSize & 1);
+    const chunkEnd = chunkDataStart + chunkSize;
+    // RIFF chunks are word-aligned with a pad byte after odd-sized chunks,
+    // though some writers omit the final chunk's pad byte from the RIFF size.
+    offset = chunkEnd === riffEnd ? riffEnd : chunkEnd + (chunkSize & 1);
   }
   // Chunks must tile the declared bounds exactly; leftover bytes are a
   // truncated chunk header, not trailing metadata (that lives beyond riffEnd).
