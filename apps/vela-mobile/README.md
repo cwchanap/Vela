@@ -116,13 +116,33 @@ To open **Xcode** instead of a terminal-only build:
 
 ```bash
 cd apps/vela-mobile
-bun run build:ios:ide   # syncs version, builds web assets, syncs Capacitor, opens Xcode
+bun run build:ios:ide   # builds web assets, syncs Capacitor, opens Xcode
 # or
 cd apps/vela-mobile/src-capacitor && bunx cap open ios
 ```
 
-`build:ios:ide` runs `sync:ios-version` first so `MARKETING_VERSION` stays
-aligned with the Home page version before Xcode archives the bundle.
+`build:ios:ide` builds the Capacitor web assets and syncs Capacitor before
+opening Xcode. During that build, the `validate-mobile-api-url` plugin writes
+`MARKETING_VERSION` in `project.pbxproj` from the Quasar-resolved
+`VITE_APP_VERSION` (falling back to `apps/vela-mobile/package.json`'s
+`version`), reduced to `major.minor.patch`. It never touches native metadata
+for SPA builds.
+
+### Build-time env and native version
+
+Quasar v3 resolves client env values (`.env`, `.env.local` outside CI, and
+`.env.production` for production builds) into Vite's `config.define`. The
+`validate-mobile-api-url` plugin reads exactly those resolved values in
+`configResolved`: it enforces the production OAuth/API contract for SPA and
+Capacitor production builds and syncs `MARKETING_VERSION` for Capacitor builds
+(development and production). The mobile app has no separate dotenv parser.
+
+Standalone diagnostics (`verify:deployed-config`, `verify:m1-foundation`) do
+not run inside Quasar, so they use a minimal `node:util.parseEnv` reader over
+the generated plain `KEY=VALUE` files (`.env`, `.env.local` outside CI,
+`.env.production`), with direct process overrides winning. That reader is
+intentionally not authoritative for compiled values and does not implement
+`$VAR` interpolation.
 
 ## M1 Foundation Verification
 
@@ -308,7 +328,7 @@ src/                  # Vue application source
   pages/              # Route page components
   css/                # Global styles
   test/               # Test setup and mocks
-scripts/              # Build/dev helper scripts (sync-ios-version.mjs)
+scripts/              # Build/dev helper scripts (secret scan, diagnostics)
 src-capacitor/        # Capacitor native project
   capacitor.config.json
   ios/                # Xcode project (committed)

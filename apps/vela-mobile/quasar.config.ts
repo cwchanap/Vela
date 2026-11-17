@@ -41,9 +41,14 @@ export default defineConfig((ctx) => {
 
       extendViteConf(viteConf) {
         viteConf.plugins = viteConf.plugins || [];
-        // rootDir must be the quasar.config.ts directory so Vite's loadEnv
-        // resolves .env / .env.production from the project root.
-        viteConf.plugins.push(validateMobileApiUrlPlugin(resolve(__dirname)));
+        // The plugin reads Quasar's resolved client define values, so it needs
+        // no .env file parsing of its own, and knows which mode is building.
+        viteConf.plugins.push(
+          validateMobileApiUrlPlugin({
+            rootDir: resolve(__dirname),
+            isCapacitor: ctx.modeName === 'capacitor',
+          }),
+        );
       },
     },
 

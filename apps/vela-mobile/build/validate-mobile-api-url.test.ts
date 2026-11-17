@@ -1,17 +1,31 @@
 // @vitest-environment node
 //
-// The plugin's configResolved hook invokes loadMobileBuildEnv, which reads .env files
-// from disk via node:fs and reads process.env directly. The tests also
-// reassign process.env wholesale in afterEach to isolate env state between
-// cases. No DOM globals are needed, so the node environment is the natural
-// fit for these filesystem-and-env-driven tests.
+// Quasar v3 resolves client env values into Vite's `config.define` as
+// JavaScript literals (`"..."` JSON strings, or raw `true`/`false`/numbers).
+// `configResolved` receives exactly what the client bundle receives, so the
+// production validator and the Capacitor MARKETING_VERSION sync read those
+// resolved values instead of re-parsing `.env` files.
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  utimesSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { validateMobileApiUrl, validateMobileApiUrlPlugin } from './validate-mobile-api-url';
+import {
+  mobileEnvFromDefine,
+  validateMobileApiUrl,
+  validateMobileApiUrlPlugin,
+} from './validate-mobile-api-url';
 
 const originalEnv = { ...process.env };
+const DEFINE_PREFIX = 'import.meta.env.';
+const tempRoots: string[] = [];
 
 const validBuildEnv = {
   VITE_MOBILE_API_URL: 'https://vela.cwchanap.dev/api/',
@@ -21,9 +35,81 @@ const validBuildEnv = {
   VITE_AWS_REGION: 'us-east-1',
 };
 
+// Mirrors @quasar/app-vite's parseEnvDefineList/getStrDefineValue encoding.
+function quasarDefine(values: Record<string, string | number | boolean>): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(values).map(([key, value]) => {
+      const encoded =
+        value === 'true' || value === 'false' || value === 'null'
+          ? value
+          : typeof value === 'string'
+            ? JSON.stringify(value)
+            : String(value);
+      return [`${DEFINE_PREFIX}${key}`, encoded];
+    }),
+  );
+}
+
+const validDefine = (extra: Record<string, string | number | boolean> = {}) => ({
+  ...quasarDefine(validBuildEnv),
+  ...quasarDefine(extra),
+});
+
+const PBXPROJ_FIXTURE = `/* Begin XCBuildConfiguration section */
+		504EC3171FED79650016851F /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CURRENT_PROJECT_VERSION = 1;
+				MARKETING_VERSION = 0.0.1;
+			};
+			name = Debug;
+		};
+		504EC3181FED79650016851F /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CURRENT_PROJECT_VERSION = 1;
+				MARKETING_VERSION = 0.0.1;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+`;
+
+function capacitorRoot(options: { packageVersion?: string; pbxproj?: string } = {}): {
+  rootDir: string;
+  pbxprojPath: string;
+} {
+  const rootDir = mkdtempSync(join(tmpdir(), 'vela-capacitor-'));
+  tempRoots.push(rootDir);
+  mkdirSync(join(rootDir, 'src-capacitor/ios/App/App.xcodeproj'), { recursive: true });
+  writeFileSync(
+    join(rootDir, 'package.json'),
+    JSON.stringify({ version: options.packageVersion ?? '0.0.1' }),
+  );
+  const pbxprojPath = join(rootDir, 'src-capacitor/ios/App/App.xcodeproj/project.pbxproj');
+  writeFileSync(pbxprojPath, options.pbxproj ?? PBXPROJ_FIXTURE);
+  return { rootDir, pbxprojPath };
+}
+
+function invokeConfigResolvedHook(input: {
+  mode: string;
+  define?: Record<string, unknown>;
+  isCapacitor?: boolean;
+  rootDir?: string;
+}) {
+  const plugin = validateMobileApiUrlPlugin({
+    rootDir: input.rootDir ?? '/nonexistent-root',
+    isCapacitor: input.isCapacitor ?? false,
+  });
+  const hook = plugin.configResolved;
+  if (typeof hook !== 'function') throw new Error('plugin.configResolved is not a function');
+  return hook({ mode: input.mode, define: input.define ?? {} });
+}
+
 afterEach(() => {
   process.env = { ...originalEnv };
   vi.restoreAllMocks();
+  while (tempRoots.length > 0) rmSync(tempRoots.pop()!, { recursive: true, force: true });
 });
 
 describe('validateMobileApiUrl', () => {
@@ -104,83 +190,82 @@ describe('validateMobileApiUrl', () => {
   });
 });
 
+describe('mobileEnvFromDefine', () => {
+  it('decodes Quasar JSON-encoded string literals', () => {
+    expect(mobileEnvFromDefine(quasarDefine(validBuildEnv))).toEqual(validBuildEnv);
+  });
+
+  it('decodes raw boolean and numeric literals', () => {
+    expect(
+      mobileEnvFromDefine({
+        [`${DEFINE_PREFIX}VITE_AWS_REGION`]: 'true',
+        [`${DEFINE_PREFIX}VITE_COGNITO_USER_POOL_ID`]: '123',
+      }),
+    ).toMatchObject({ VITE_AWS_REGION: 'true', VITE_COGNITO_USER_POOL_ID: '123' });
+  });
+
+  it('returns undefined for absent and null define entries', () => {
+    const env = mobileEnvFromDefine({
+      [`${DEFINE_PREFIX}VITE_AWS_REGION`]: 'null',
+      [`${DEFINE_PREFIX}VITE_COGNITO_USER_POOL_ID`]: undefined,
+    });
+    expect(env.VITE_AWS_REGION).toBeUndefined();
+    expect(env.VITE_COGNITO_USER_POOL_ID).toBeUndefined();
+  });
+
+  it('returns undefined when the define map is absent', () => {
+    expect(mobileEnvFromDefine(undefined).VITE_MOBILE_API_URL).toBeUndefined();
+  });
+});
+
 describe('validateMobileApiUrlPlugin', () => {
-  // Vite invokes configResolved after it resolves the final build mode.
-  // Driving that hook directly avoids a full build while exercising the
-  // mode/skip/validate branches used in production.
-  function invokeConfigResolvedHook(
-    mode: string,
-    options: { skipValidation?: boolean; envDir?: string } = {},
-  ) {
-    const plugin = validateMobileApiUrlPlugin(options.envDir ?? '/nonexistent-root');
-    const configResolvedHook = plugin.configResolved;
-    if (typeof configResolvedHook !== 'function') {
-      throw new Error('plugin.configResolved is not a function');
-    }
-    return configResolvedHook({ mode });
-  }
-
-  function setValidProductionEnv(): void {
-    Object.assign(process.env, validBuildEnv);
-  }
-
   it('is a Vite plugin named validate-mobile-api-url', () => {
-    const plugin = validateMobileApiUrlPlugin('/root');
+    const plugin = validateMobileApiUrlPlugin({ rootDir: '/root', isCapacitor: false });
     expect(plugin.name).toBe('validate-mobile-api-url');
   });
 
-  it('is a no-op in development mode (no throw even with no env)', () => {
-    expect(() => invokeConfigResolvedHook('development')).not.toThrow();
+  it('is a no-op in development mode (validation skipped)', () => {
+    expect(() =>
+      invokeConfigResolvedHook({ mode: 'development', define: {} }),
+    ).not.toThrow();
   });
 
   it('is a no-op in non-production modes (e.g. test)', () => {
-    expect(() => invokeConfigResolvedHook('test')).not.toThrow();
+    expect(() => invokeConfigResolvedHook({ mode: 'test', define: {} })).not.toThrow();
+  });
+
+  it('accepts a valid resolved production define', () => {
+    expect(() =>
+      invokeConfigResolvedHook({ mode: 'production', define: validDefine() }),
+    ).not.toThrow();
   });
 
   it('bypasses validation when MOBILE_SKIP_ENV_VALIDATION=true in production', () => {
     process.env.MOBILE_SKIP_ENV_VALIDATION = 'true';
-    // No .env files at /nonexistent-root, so without the bypass this would
-    // throw "VITE_MOBILE_API_URL is missing".
-    expect(() => invokeConfigResolvedHook('production')).not.toThrow();
+    expect(() => invokeConfigResolvedHook({ mode: 'production', define: {} })).not.toThrow();
   });
 
   it('does not bypass when MOBILE_SKIP_ENV_VALIDATION is set but not "true"', () => {
     process.env.MOBILE_SKIP_ENV_VALIDATION = 'false';
-    expect(() => invokeConfigResolvedHook('production')).toThrow('VITE_MOBILE_API_URL is missing');
-  });
-
-  it('throws in production when .env.production is absent (no env files at root)', () => {
-    delete process.env.MOBILE_SKIP_ENV_VALIDATION;
-    expect(() => invokeConfigResolvedHook('production')).toThrow('VITE_MOBILE_API_URL is missing');
-  });
-
-  it('accepts a VITE_MOBILE_API_URL from process.env in production', () => {
-    // loadEnv gives existing process.env values final priority, so exporting
-    // VITE_MOBILE_API_URL should satisfy the guard even without .env.production.
-    // This is the exact path the PR CI workflow now exercises.
-    delete process.env.MOBILE_SKIP_ENV_VALIDATION;
-    setValidProductionEnv();
-    process.env.VITE_MOBILE_API_URL = 'https://example.invalid/api/';
-    expect(() => invokeConfigResolvedHook('production')).not.toThrow();
-  });
-
-  it('rejects a malformed VITE_MOBILE_API_URL from process.env in production', () => {
-    delete process.env.MOBILE_SKIP_ENV_VALIDATION;
-    setValidProductionEnv();
-    process.env.VITE_MOBILE_API_URL = '/api/';
-    expect(() => invokeConfigResolvedHook('production')).toThrow(
-      /must be a valid absolute http\(s\) URL with a hostname/,
+    expect(() => invokeConfigResolvedHook({ mode: 'production', define: {} })).toThrow(
+      'VITE_MOBILE_API_URL is missing',
     );
   });
 
-  it('rejects an http: VITE_MOBILE_API_URL in production (requireHttps contract)', () => {
-    // The plugin only runs in production mode, so it must require HTTPS to
-    // match the runtime validateConfig() contract. Otherwise a misconfigured
-    // release passes the build guard and crashes at app boot.
+  it('throws in production when the define is absent', () => {
     delete process.env.MOBILE_SKIP_ENV_VALIDATION;
-    setValidProductionEnv();
-    process.env.VITE_MOBILE_API_URL = 'http://example.com/api/';
-    expect(() => invokeConfigResolvedHook('production')).toThrow(/must be https: in production/);
+    expect(() => invokeConfigResolvedHook({ mode: 'production', define: {} })).toThrow(
+      'VITE_MOBILE_API_URL is missing',
+    );
+  });
+
+  it('rejects an explicitly empty VITE_MOBILE_API_URL define', () => {
+    expect(() =>
+      invokeConfigResolvedHook({
+        mode: 'production',
+        define: { ...validDefine(), [`${DEFINE_PREFIX}VITE_MOBILE_API_URL`]: '""' },
+      }),
+    ).toThrow('VITE_MOBILE_API_URL is missing');
   });
 
   it.each([
@@ -189,10 +274,44 @@ describe('validateMobileApiUrlPlugin', () => {
     'VITE_COGNITO_OAUTH_DOMAIN',
     'VITE_AWS_REGION',
   ])('rejects production builds when %s is missing', (missingKey) => {
-    delete process.env.MOBILE_SKIP_ENV_VALIDATION;
-    setValidProductionEnv();
-    delete process.env[missingKey];
-    expect(() => invokeConfigResolvedHook('production')).toThrow(missingKey);
+    const define = quasarDefine(validBuildEnv);
+    delete define[`${DEFINE_PREFIX}${missingKey}`];
+    expect(() => invokeConfigResolvedHook({ mode: 'production', define })).toThrow(missingKey);
+  });
+
+  it.each([
+    'VITE_COGNITO_USER_POOL_ID',
+    'VITE_COGNITO_MOBILE_USER_POOL_CLIENT_ID',
+    'VITE_COGNITO_OAUTH_DOMAIN',
+    'VITE_AWS_REGION',
+  ])('rejects production builds when %s is explicitly empty', (emptyKey) => {
+    expect(() =>
+      invokeConfigResolvedHook({
+        mode: 'production',
+        define: { ...validDefine(), [`${DEFINE_PREFIX}${emptyKey}`]: '""' },
+      }),
+    ).toThrow(emptyKey);
+  });
+
+  it('rejects a malformed VITE_MOBILE_API_URL define', () => {
+    expect(() =>
+      invokeConfigResolvedHook({
+        mode: 'production',
+        define: { ...validDefine(), [`${DEFINE_PREFIX}VITE_MOBILE_API_URL`]: '"/api/"' },
+      }),
+    ).toThrow(/must be a valid absolute http\(s\) URL with a hostname/);
+  });
+
+  it('rejects an http: VITE_MOBILE_API_URL define (requireHttps contract)', () => {
+    expect(() =>
+      invokeConfigResolvedHook({
+        mode: 'production',
+        define: {
+          ...validDefine(),
+          [`${DEFINE_PREFIX}VITE_MOBILE_API_URL`]: '"http://example.com/api/"',
+        },
+      }),
+    ).toThrow(/must be https: in production/);
   });
 
   it.each([
@@ -200,79 +319,166 @@ describe('validateMobileApiUrlPlugin', () => {
     'vela.auth.us-east-1.amazoncognito.com/oauth2/authorize',
     'vela.auth.us-east-1.amazoncognito.com?query=value',
     'vela.auth.us-east-1.amazoncognito.com#fragment',
-    // The user:password@host form is split across an array join so the joined
-    // userinfo URL never appears in source. Keeping it split prevents the
-    // repository secret scanner from classifying the input as an account_email
-    // finding while still exercising the userinfo rejection path.
+    // Joined so the userinfo URL never appears as a source literal for the
+    // repository secret scanner while still exercising the rejection path.
     ['user:password', 'vela.auth.us-east-1.amazoncognito.com'].join('@'),
     'vela.auth.us-east-1.amazoncognito.com:443',
   ])('rejects a non-host-only OAuth domain in production: %s', (oauthDomain) => {
-    delete process.env.MOBILE_SKIP_ENV_VALIDATION;
-    setValidProductionEnv();
-    process.env.VITE_COGNITO_OAUTH_DOMAIN = oauthDomain;
-    expect(() => invokeConfigResolvedHook('production')).toThrow(
-      /VITE_COGNITO_OAUTH_DOMAIN must be a valid host-only domain/,
-    );
+    expect(() =>
+      invokeConfigResolvedHook({
+        mode: 'production',
+        define: { ...validDefine(), [`${DEFINE_PREFIX}VITE_COGNITO_OAUTH_DOMAIN`]: JSON.stringify(oauthDomain) },
+      }),
+    ).toThrow(/VITE_COGNITO_OAUTH_DOMAIN must be a valid host-only domain/);
   });
 
   it.each([
     ['VITE_COGNITO_USER_POOL_ID', ' us-east-1_example'],
     ['VITE_COGNITO_MOBILE_USER_POOL_CLIENT_ID', 'mobile client'],
   ])('rejects whitespace in %s in production', (key, value) => {
-    delete process.env.MOBILE_SKIP_ENV_VALIDATION;
-    setValidProductionEnv();
-    process.env[key] = value;
-    expect(() => invokeConfigResolvedHook('production')).toThrow(
-      new RegExp(`${key} must not contain whitespace`),
-    );
+    expect(() =>
+      invokeConfigResolvedHook({
+        mode: 'production',
+        define: { ...validDefine(), [`${DEFINE_PREFIX}${key}`]: JSON.stringify(value) },
+      }),
+    ).toThrow(new RegExp(`${key} must not contain whitespace`));
   });
 
   it('rejects a user pool whose region prefix differs from the configured region', () => {
-    delete process.env.MOBILE_SKIP_ENV_VALIDATION;
-    setValidProductionEnv();
-    process.env.VITE_COGNITO_USER_POOL_ID = 'us-west-2_example';
-    expect(() => invokeConfigResolvedHook('production')).toThrow(
-      /VITE_COGNITO_USER_POOL_ID must start with the configured VITE_AWS_REGION/,
-    );
+    expect(() =>
+      invokeConfigResolvedHook({
+        mode: 'production',
+        define: {
+          ...validDefine(),
+          [`${DEFINE_PREFIX}VITE_COGNITO_USER_POOL_ID`]: '"us-west-2_example"',
+        },
+      }),
+    ).toThrow(/VITE_COGNITO_USER_POOL_ID must start with the configured VITE_AWS_REGION/);
+  });
+});
+
+describe('validateMobileApiUrlPlugin (Capacitor MARKETING_VERSION sync)', () => {
+  it('does not touch native project metadata in SPA mode', () => {
+    const { rootDir, pbxprojPath } = capacitorRoot();
+    const before = readFileSync(pbxprojPath, 'utf8');
+
+    invokeConfigResolvedHook({
+      mode: 'production',
+      define: validDefine({ VITE_APP_VERSION: '1.2.3' }),
+      isCapacitor: false,
+      rootDir,
+    });
+
+    expect(readFileSync(pbxprojPath, 'utf8')).toBe(before);
   });
 
-  it('loads all mobile OAuth values from the mode-specific env file', () => {
-    const envDir = mkdtempSync(join(tmpdir(), 'vela-mobile-build-env-'));
-    try {
-      writeFileSync(
-        join(envDir, '.env.production'),
-        `${Object.entries(validBuildEnv)
-          .map(([key, value]) => `${key}=${value}`)
-          .join('\n')}\n`,
-      );
-      for (const key of Object.keys(validBuildEnv)) delete process.env[key];
-      delete process.env.MOBILE_SKIP_ENV_VALIDATION;
-      expect(() => invokeConfigResolvedHook('production', { envDir })).not.toThrow();
-    } finally {
-      rmSync(envDir, { recursive: true, force: true });
-    }
+  it('syncs the resolved VITE_APP_VERSION during a Capacitor development build', () => {
+    const { rootDir, pbxprojPath } = capacitorRoot();
+
+    invokeConfigResolvedHook({
+      mode: 'development',
+      define: quasarDefine({ VITE_APP_VERSION: '1.2.3' }),
+      isCapacitor: true,
+      rootDir,
+    });
+
+    expect(readFileSync(pbxprojPath, 'utf8')).toContain('MARKETING_VERSION = 1.2.3;');
+    expect(readFileSync(pbxprojPath, 'utf8')).not.toContain('MARKETING_VERSION = 0.0.1;');
   });
 
-  it.each([
-    ['VITE_COGNITO_USER_POOL_ID', ' us-east-1_example'],
-    ['VITE_COGNITO_MOBILE_USER_POOL_CLIENT_ID', 'mobile client'],
-    ['VITE_COGNITO_OAUTH_DOMAIN', 'https://vela.auth.us-east-1.amazoncognito.com'],
-    ['VITE_AWS_REGION', 'us west 1'],
-  ])('gives explicit process.env %s precedence over a mode-specific env file', (key, override) => {
-    const envDir = mkdtempSync(join(tmpdir(), 'vela-mobile-build-env-'));
-    try {
-      writeFileSync(
-        join(envDir, '.env.production'),
-        `${Object.entries(validBuildEnv)
-          .map(([envKey, value]) => `${envKey}=${value}`)
-          .join('\n')}\n`,
-      );
-      for (const envKey of Object.keys(validBuildEnv)) delete process.env[envKey];
-      delete process.env.MOBILE_SKIP_ENV_VALIDATION;
-      process.env[key] = override;
-      expect(() => invokeConfigResolvedHook('production', { envDir })).toThrow(key);
-    } finally {
-      rmSync(envDir, { recursive: true, force: true });
-    }
+  it('strips semver prerelease and build metadata before writing MARKETING_VERSION', () => {
+    const { rootDir, pbxprojPath } = capacitorRoot();
+
+    invokeConfigResolvedHook({
+      mode: 'production',
+      define: validDefine({ VITE_APP_VERSION: '1.0.0-beta.1+007' }),
+      isCapacitor: true,
+      rootDir,
+    });
+
+    const pbxproj = readFileSync(pbxprojPath, 'utf8');
+    expect(pbxproj).toContain('MARKETING_VERSION = 1.0.0;');
+    expect(pbxproj.match(/MARKETING_VERSION = 1\.0\.0;/g)).toHaveLength(2);
+  });
+
+  it('falls back to package.json version when the define version is absent', () => {
+    const { rootDir, pbxprojPath } = capacitorRoot({ packageVersion: '2.3.4' });
+
+    invokeConfigResolvedHook({
+      mode: 'production',
+      define: validDefine(),
+      isCapacitor: true,
+      rootDir,
+    });
+
+    expect(readFileSync(pbxprojPath, 'utf8')).toContain('MARKETING_VERSION = 2.3.4;');
+  });
+
+  it('falls back to package.json version when the define version is explicitly empty', () => {
+    const { rootDir, pbxprojPath } = capacitorRoot({ packageVersion: '2.3.4' });
+
+    invokeConfigResolvedHook({
+      mode: 'production',
+      define: validDefine({ VITE_APP_VERSION: '' }),
+      isCapacitor: true,
+      rootDir,
+    });
+
+    expect(readFileSync(pbxprojPath, 'utf8')).toContain('MARKETING_VERSION = 2.3.4;');
+  });
+
+  it('rejects a resolved version that is not three numeric segments', () => {
+    const { rootDir } = capacitorRoot();
+
+    expect(() =>
+      invokeConfigResolvedHook({
+        mode: 'production',
+        define: validDefine({ VITE_APP_VERSION: 'v1.2.3' }),
+        isCapacitor: true,
+        rootDir,
+      }),
+    ).toThrow(/missing or not semver-like/);
+  });
+
+  it('does not rewrite an unchanged project.pbxproj', () => {
+    const { rootDir, pbxprojPath } = capacitorRoot({ pbxproj: PBXPROJ_FIXTURE.replaceAll('0.0.1', '1.2.3') });
+    utimesSync(pbxprojPath, new Date(0), new Date(0));
+    const beforeMtime = statSync(pbxprojPath).mtimeMs;
+
+    invokeConfigResolvedHook({
+      mode: 'production',
+      define: validDefine({ VITE_APP_VERSION: '1.2.3' }),
+      isCapacitor: true,
+      rootDir,
+    });
+
+    expect(statSync(pbxprojPath).mtimeMs).toBe(beforeMtime);
+  });
+
+  it('throws when the native project has no MARKETING_VERSION entries', () => {
+    const { rootDir } = capacitorRoot({ pbxproj: '/* no version here */\n' });
+
+    expect(() =>
+      invokeConfigResolvedHook({
+        mode: 'production',
+        define: validDefine({ VITE_APP_VERSION: '1.2.3' }),
+        isCapacitor: true,
+        rootDir,
+      }),
+    ).toThrow(/No MARKETING_VERSION entries/);
+  });
+
+  it('syncs the native version even when production env validation is bypassed', () => {
+    process.env.MOBILE_SKIP_ENV_VALIDATION = 'true';
+    const { rootDir, pbxprojPath } = capacitorRoot();
+
+    invokeConfigResolvedHook({
+      mode: 'production',
+      define: quasarDefine({ VITE_APP_VERSION: '4.5.6' }),
+      isCapacitor: true,
+      rootDir,
+    });
+
+    expect(readFileSync(pbxprojPath, 'utf8')).toContain('MARKETING_VERSION = 4.5.6;');
   });
 });
