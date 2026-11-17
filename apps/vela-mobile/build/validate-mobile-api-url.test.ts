@@ -22,6 +22,7 @@ import {
   validateMobileApiUrl,
   validateMobileApiUrlPlugin,
 } from './validate-mobile-api-url';
+import { validateConfig } from '../src/config';
 
 const originalEnv = { ...process.env };
 const DEFINE_PREFIX = 'import.meta.env.';
@@ -195,22 +196,38 @@ describe('mobileEnvFromDefine', () => {
     expect(mobileEnvFromDefine(quasarDefine(validBuildEnv))).toEqual(validBuildEnv);
   });
 
-  it('decodes raw boolean and numeric literals', () => {
+  it('keeps quoted strings that look like booleans or numbers as strings', () => {
     expect(
       mobileEnvFromDefine({
-        [`${DEFINE_PREFIX}VITE_AWS_REGION`]: 'true',
-        [`${DEFINE_PREFIX}VITE_COGNITO_USER_POOL_ID`]: '123',
+        [`${DEFINE_PREFIX}VITE_AWS_REGION`]: '"true"',
+        [`${DEFINE_PREFIX}VITE_COGNITO_USER_POOL_ID`]: '"123"',
       }),
     ).toMatchObject({ VITE_AWS_REGION: 'true', VITE_COGNITO_USER_POOL_ID: '123' });
   });
 
-  it('returns undefined for absent and null define entries', () => {
+  it.each([
+    ['VITE_MOBILE_API_URL', 'true'],
+    ['VITE_COGNITO_OAUTH_DOMAIN', 'false'],
+    ['VITE_COGNITO_USER_POOL_ID', '123'],
+    ['VITE_AWS_REGION', 'null'],
+  ])('rejects a non-string resolved literal for %s (%s)', (key, literal) => {
+    expect(() =>
+      mobileEnvFromDefine({ [`${DEFINE_PREFIX}${key}`]: literal }),
+    ).toThrow(new RegExp(`${key} must resolve to a string`));
+  });
+
+  it('keeps an explicitly empty string literal empty', () => {
+    expect(
+      mobileEnvFromDefine({ [`${DEFINE_PREFIX}VITE_MOBILE_API_URL`]: '""' })
+        .VITE_MOBILE_API_URL,
+    ).toBe('');
+  });
+
+  it('returns undefined for absent define entries', () => {
     const env = mobileEnvFromDefine({
-      [`${DEFINE_PREFIX}VITE_AWS_REGION`]: 'null',
-      [`${DEFINE_PREFIX}VITE_COGNITO_USER_POOL_ID`]: undefined,
+      [`${DEFINE_PREFIX}VITE_AWS_REGION`]: undefined,
     });
     expect(env.VITE_AWS_REGION).toBeUndefined();
-    expect(env.VITE_COGNITO_USER_POOL_ID).toBeUndefined();
   });
 
   it('returns undefined when the define map is absent', () => {
@@ -266,6 +283,43 @@ describe('validateMobileApiUrlPlugin', () => {
         define: { ...validDefine(), [`${DEFINE_PREFIX}VITE_MOBILE_API_URL`]: '""' },
       }),
     ).toThrow('VITE_MOBILE_API_URL is missing');
+  });
+
+  it.each([
+    ['VITE_MOBILE_API_URL', 'true'],
+    ['VITE_COGNITO_OAUTH_DOMAIN', 'false'],
+    ['VITE_COGNITO_USER_POOL_ID', '123'],
+    ['VITE_AWS_REGION', 'null'],
+  ])('rejects a non-string resolved literal for %s (%s)', (key, literal) => {
+    expect(() =>
+      invokeConfigResolvedHook({
+        mode: 'production',
+        define: { ...validDefine(), [`${DEFINE_PREFIX}${key}`]: literal },
+      }),
+    ).toThrow(new RegExp(`${key} must resolve to a string`));
+  });
+
+  // Parity regression: Quasar emits a boolean for VITE_COGNITO_OAUTH_DOMAIN=false.
+  // The build guard must reject the same configuration the runtime validator
+  // rejects rather than coercing it into the hostname "false".
+  it('rejects the same non-string OAuth domain as the runtime validator', () => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+
+    expect(() =>
+      validateConfig({
+        PROD: true,
+        ...validBuildEnv,
+        VITE_COGNITO_OAUTH_DOMAIN: false,
+      }),
+    ).toThrow(/VITE_COGNITO_OAUTH_DOMAIN must be a valid host-only domain/);
+    expect(error).toHaveBeenCalled();
+
+    expect(() =>
+      invokeConfigResolvedHook({
+        mode: 'production',
+        define: { ...validDefine(), [`${DEFINE_PREFIX}VITE_COGNITO_OAUTH_DOMAIN`]: 'false' },
+      }),
+    ).toThrow(/VITE_COGNITO_OAUTH_DOMAIN must resolve to a string/);
   });
 
   it.each([
@@ -438,6 +492,35 @@ describe('validateMobileApiUrlPlugin (Capacitor MARKETING_VERSION sync)', () => 
         rootDir,
       }),
     ).toThrow(/missing or not semver-like/);
+  });
+
+  it.each(['true', 'false', '123'])(
+    'rejects a non-string resolved version literal (%s) instead of falling back',
+    (literal) => {
+      const { rootDir } = capacitorRoot();
+
+      expect(() =>
+        invokeConfigResolvedHook({
+          mode: 'production',
+          define: { ...validDefine(), [`${DEFINE_PREFIX}VITE_APP_VERSION`]: literal },
+          isCapacitor: true,
+          rootDir,
+        }),
+      ).toThrow(/missing or not semver-like/);
+    },
+  );
+
+  it('falls back to package.json version when the resolved version literal is null', () => {
+    const { rootDir, pbxprojPath } = capacitorRoot({ packageVersion: '2.3.4' });
+
+    invokeConfigResolvedHook({
+      mode: 'production',
+      define: { ...validDefine(), [`${DEFINE_PREFIX}VITE_APP_VERSION`]: 'null' },
+      isCapacitor: true,
+      rootDir,
+    });
+
+    expect(readFileSync(pbxprojPath, 'utf8')).toContain('MARKETING_VERSION = 2.3.4;');
   });
 
   it('does not rewrite an unchanged project.pbxproj', () => {

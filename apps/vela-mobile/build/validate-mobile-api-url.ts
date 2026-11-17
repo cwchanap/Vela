@@ -40,12 +40,48 @@ const requiredCognitoKeys = [
   'VITE_AWS_REGION',
 ] as const satisfies readonly MobileBuildEnvKey[];
 
+type DecodedDefineEntry =
+  | { kind: 'string'; value: string }
+  | { kind: 'non-string'; literal: string }
+  | { kind: 'missing' };
+
 /**
- * Decode one `config.define` value into the string the client bundle receives.
- * Quasar v3 stores JSON-encoded strings (`"https://…"`), raw `true`/`false`,
- * and raw numeric literals. A `null` or absent entry has no usable value.
+ * Decode one required mobile client value from `config.define`. Quasar v3
+ * stores JSON-encoded strings (`"https://…"`), raw `true`/`false`, raw
+ * numeric literals, and raw `null`. Only a resolved string is valid for these
+ * required string settings: coercing a boolean/number would let the build
+ * guard pass a configuration the client bundle stores with a non-string type.
  */
-function decodeDefineValue(value: unknown): string | undefined {
+function decodeRequiredStringDefine(value: unknown): DecodedDefineEntry {
+  if (value === undefined) return { kind: 'missing' };
+  if (value === null || typeof value === 'boolean' || typeof value === 'number') {
+    return { kind: 'non-string', literal: String(value) };
+  }
+  if (typeof value !== 'string') return { kind: 'missing' };
+
+  const trimmed = value.trim();
+  if (trimmed === '') return { kind: 'string', value: '' };
+  // Quasar only emits raw literals for booleans/numbers/null; ordinary
+  // strings are JSON-encoded. Any unquoted value is therefore not a string.
+  if (!trimmed.startsWith('"')) return { kind: 'non-string', literal: trimmed };
+
+  try {
+    const parsed: unknown = JSON.parse(trimmed);
+    return typeof parsed === 'string'
+      ? { kind: 'string', value: parsed }
+      : { kind: 'non-string', literal: trimmed };
+  } catch {
+    return { kind: 'missing' };
+  }
+}
+
+/**
+ * Decode the resolved app version. This preserves the existing version
+ * contract: string literals are used, raw boolean/number literals are
+ * stringified for the semver check, and `null`/absent falls through to
+ * `package.json.version`.
+ */
+function decodeVersionDefine(value: unknown): string | undefined {
   if (typeof value === 'boolean' || typeof value === 'number') return String(value);
   if (typeof value !== 'string') return undefined;
   const trimmed = value.trim();
@@ -63,16 +99,23 @@ function decodeDefineValue(value: unknown): string | undefined {
 /**
  * Read the mobile client values from the Quasar-resolved Vite `define` map.
  * This is exactly what the client bundle receives, so build-time validation
- * and native version sync cannot drift from the compiled app.
+ * and native version sync cannot drift from the compiled app. Non-string
+ * resolved literals are rejected here, at the adapter boundary, before the
+ * pure string-only validator runs.
  */
 export function mobileEnvFromDefine(
   define: Record<string, unknown> | undefined,
 ): MobileBuildEnv {
   return Object.fromEntries(
-    mobileBuildEnvKeys.map((key) => [
-      key,
-      decodeDefineValue(define?.[`${IMPORT_META_ENV_PREFIX}${key}`]),
-    ]),
+    mobileBuildEnvKeys.map((key) => {
+      const decoded = decodeRequiredStringDefine(define?.[`${IMPORT_META_ENV_PREFIX}${key}`]);
+      if (decoded.kind === 'non-string') {
+        throw new Error(
+          `${key} must resolve to a string in the client bundle, but Quasar resolved ${decoded.literal}. Set it to a plain string value in the build environment.`,
+        );
+      }
+      return [key, decoded.kind === 'string' ? decoded.value : undefined];
+    }),
   ) as MobileBuildEnv;
 }
 
@@ -197,7 +240,7 @@ function resolveMarketingVersion(
   rootDir: string,
   define: Record<string, unknown> | undefined,
 ): string {
-  const defineVersion = decodeDefineValue(define?.[APP_VERSION_DEFINE_KEY]);
+  const defineVersion = decodeVersionDefine(define?.[APP_VERSION_DEFINE_KEY]);
   const packageVersion = JSON.parse(
     readFileSync(resolve(rootDir, 'package.json'), 'utf8'),
   ).version as string | undefined;

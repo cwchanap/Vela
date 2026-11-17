@@ -30,6 +30,13 @@ const productionFile = [
   'VITE_AWS_REGION=us-east-1',
 ].join('\n');
 
+const productionWithoutClientId = [
+  'VITE_MOBILE_API_URL=https://vela.example/api/',
+  'VITE_COGNITO_USER_POOL_ID=us-east-1_POOL',
+  'VITE_COGNITO_OAUTH_DOMAIN=auth.example',
+  'VITE_AWS_REGION=us-east-1',
+].join('\n');
+
 afterEach(() => {
   while (roots.length > 0) rmSync(roots.pop()!, { recursive: true, force: true });
 });
@@ -61,13 +68,17 @@ describe('loadMobileCliEnv', () => {
 
   it('skips .env.local when CI is set', () => {
     const root = makeRoot({
-      '.env': 'VITE_COGNITO_OAUTH_DOMAIN=env.example\n',
-      '.env.local': 'VITE_MOBILE_API_URL=https://local.example/api/\n',
-      '.env.production': `${productionFile}\n`,
+      '.env.local': 'VITE_COGNITO_MOBILE_USER_POOL_CLIENT_ID=localclient\n',
+      '.env.production': `${productionWithoutClientId}\n`,
     });
 
-    expect(loadMobileCliEnv(root, { CI: 'true' }).VITE_MOBILE_API_URL).toBe(
-      'https://vela.example/api/',
+    // The key exists only in .env.local, so the assertion fails if CI
+    // currently loads that file (rather than being masked by .env.production).
+    expect(
+      loadMobileCliEnv(root, { CI: 'true' }).VITE_COGNITO_MOBILE_USER_POOL_CLIENT_ID,
+    ).toBeUndefined();
+    expect(loadMobileCliEnv(root, {}).VITE_COGNITO_MOBILE_USER_POOL_CLIENT_ID).toBe(
+      'localclient',
     );
   });
 
@@ -112,12 +123,10 @@ describe('loadMobileCliEnv', () => {
 
   it('does not interpolate $VAR references (generated files are literal)', () => {
     const root = makeRoot({
-      '.env.production': 'BASE=one\nVITE_APP_VERSION=$BASE\nVITE_AWS_REGION=us-east-1\n',
+      '.env.production': 'BASE=one\nVITE_AWS_REGION=$BASE\n',
     });
 
-    const env = loadMobileCliEnv(root, {});
-    expect(env.VITE_AWS_REGION).toBe('us-east-1');
-    expect((env as Record<string, string | undefined>).VITE_APP_VERSION).toBeUndefined();
+    expect(loadMobileCliEnv(root, {}).VITE_AWS_REGION).toBe('$BASE');
   });
 
   it('ignores non-mobile keys', () => {
