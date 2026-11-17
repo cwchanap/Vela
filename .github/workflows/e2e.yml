@@ -31,10 +31,10 @@ jobs:
         with:
           bun-version: ${{ env.BUN_VERSION }}
       - run: bun install --frozen-lockfile
-      - run: bun --cwd packages/common run build
+      - run: bun --cwd=packages/common run build
       - run: bunx playwright install --with-deps chromium
         working-directory: ./apps/vela
-      - run: bun --cwd apps/vela run test:e2e:mocked
+      - run: bun --cwd=apps/vela run test:e2e:mocked
       - uses: actions/upload-artifact@v7
         if: always()
         with:
@@ -61,17 +61,17 @@ jobs:
         run: bun install --frozen-lockfile
 
       - name: Build shared common package
-        run: bun --cwd packages/common run build
+        run: bun --cwd=packages/common run build
 
       - name: Install Playwright Browsers
         run: bunx playwright install --with-deps
         working-directory: ./apps/vela
 
       - name: Build application
-        run: bun --cwd apps/vela run build
+        run: bun --cwd=apps/vela run build
 
       - name: Run Playwright tests
-        run: bun --cwd apps/vela run test:e2e
+        run: bun --cwd=apps/vela run test:e2e
 
       - uses: actions/upload-artifact@v7
         if: always()
