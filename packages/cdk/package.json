@@ -13,7 +13,7 @@
     "cdk:destroy": "ALLOW_LOCAL_OAUTH_PLACEHOLDERS=true bunx aws-cdk destroy",
     "cdk:diff": "ALLOW_LOCAL_OAUTH_PLACEHOLDERS=true bunx aws-cdk diff",
     "get-outputs": "aws cloudformation describe-stacks --stack-name VelaStack --query 'Stacks[0].Outputs' --output json > cdk-outputs.json",
-    "build:frontend": "bun run get-outputs && bun scripts/inject-env.ts && bun --cwd ../../ run --filter @vela/app build",
+    "build:frontend": "bun run get-outputs && bun scripts/inject-env.ts && bun --cwd=../../ run --filter @vela/app build",
     "lint": "eslint \"**/*.{ts,js}\"",
     "lint:fix": "eslint \"**/*.{ts,js}\" --fix",
     "format": "prettier --write \"**/*.{js,ts,json,md}\" --ignore-path ../../.gitignore"
