@@ -330,6 +330,6 @@ src/                  # Vue application source
   test/               # Test setup and mocks
 scripts/              # Build/dev helper scripts (secret scan, diagnostics)
 src-capacitor/        # Capacitor native project
-  capacitor.config.json
+  capacitor.config.ts
   ios/                # Xcode project (committed)
 ```
