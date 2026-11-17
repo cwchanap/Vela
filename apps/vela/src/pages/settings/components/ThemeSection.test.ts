@@ -3,8 +3,8 @@ import { mount, VueWrapper } from '@vue/test-utils';
 import { createPinia, setActivePinia } from 'pinia';
 import { Quasar, Notify } from 'quasar';
 import ThemeSection from './ThemeSection.vue';
-import { useThemeStore } from 'src/stores/theme';
-import { useAuthStore } from 'src/stores/auth';
+import { useThemeStore } from '@/stores/theme';
+import { useAuthStore } from '@/stores/auth';
 
 const stubs = {
   'q-card': { template: '<div><slot /></div>' },

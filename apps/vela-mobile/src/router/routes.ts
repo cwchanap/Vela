@@ -4,12 +4,12 @@ import { buildMobileChildRoutes } from './diagnostic-routes';
 const routes: RouteRecordRaw[] = [
   {
     path: '/',
-    component: () => import('layouts/MobileLayout.vue'),
+    component: () => import('@/layouts/MobileLayout.vue'),
     children: buildMobileChildRoutes(),
   },
   {
     path: '/:catchAll(.*)*',
-    component: () => import('pages/ErrorNotFound.vue'),
+    component: () => import('@/pages/ErrorNotFound.vue'),
   },
 ];
 

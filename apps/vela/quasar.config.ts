@@ -38,10 +38,20 @@ export default defineConfig((/* ctx */) => {
         node: 'node20',
       },
 
+      alias: {
+        '@': resolve(__dirname, 'src'),
+      },
+
       typescript: {
         strict: true,
         vueShim: true,
-        // extendTsConfig (tsConfig) {}
+        extendTsConfig(tsConfig) {
+          // Temporary v2-only mapping: Quasar v3 generates `@/*` itself.
+          tsConfig.compilerOptions ??= {};
+          tsConfig.compilerOptions.paths ??= {};
+          tsConfig.compilerOptions.paths['@'] = ['./../src'];
+          tsConfig.compilerOptions.paths['@/*'] = ['./../src/*'];
+        },
       },
 
       vueRouterMode: 'history', // Use history mode for better SEO and UX

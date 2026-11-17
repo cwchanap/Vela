@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query';
-import { progressService } from 'src/services/progressService';
+import { progressService } from '@/services/progressService';
 import { progressKeys } from '@vela/common';
 
 export { progressKeys };

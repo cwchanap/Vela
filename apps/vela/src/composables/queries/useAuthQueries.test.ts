@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, beforeAll } from 'vitest';
 import { flushPromises } from '@vue/test-utils';
-import { withQueryClient } from 'src/test-utils/withQueryClient';
+import { withQueryClient } from '@/test-utils/withQueryClient';
 import { authKeys as sharedAuthKeys } from '@vela/common';
 
 const mockAuthService = {
@@ -11,7 +11,7 @@ const mockAuthService = {
   signOut: vi.fn(),
 };
 
-vi.mock('src/services/authService', () => ({ authService: mockAuthService }));
+vi.mock('@/services/authService', () => ({ authService: mockAuthService }));
 
 describe('useAuthQueries', () => {
   let authKeys: typeof import('./useAuthQueries').authKeys;

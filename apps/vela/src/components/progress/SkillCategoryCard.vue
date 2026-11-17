@@ -48,7 +48,7 @@
 
 <script setup lang="ts">
 import { computed } from 'vue';
-import type { SkillCategory } from 'src/services/progressService';
+import type { SkillCategory } from '@/services/progressService';
 
 interface Props {
   skill: SkillCategory;

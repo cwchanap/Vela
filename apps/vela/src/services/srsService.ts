@@ -1,7 +1,7 @@
 import type { SRSStats } from '@vela/common';
-import type { UserVocabularyProgress, Vocabulary, JLPTLevel } from 'src/types/database';
-import { getApiUrl } from 'src/utils/api';
-import { httpJsonAuth as httpJson } from 'src/utils/httpClient';
+import type { UserVocabularyProgress, Vocabulary, JLPTLevel } from '@/types/database';
+import { getApiUrl } from '@/utils/api';
+import { httpJsonAuth as httpJson } from '@/utils/httpClient';
 
 export type { SRSStats } from '@vela/common';
 

@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { mount } from '@vue/test-utils';
 import { Quasar } from 'quasar';
 import VocabularyCard from './VocabularyCard.vue';
-import type { Question } from 'src/stores/games';
+import type { Question } from '@/stores/games';
 
 describe('VocabularyCard', () => {
   const mockQuestion: Question = {

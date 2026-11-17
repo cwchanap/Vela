@@ -1,6 +1,6 @@
-import { useAuthStore } from 'src/stores/auth';
-import { getApiUrl } from 'src/utils/api';
-import { httpJsonAuth } from 'src/utils/httpClient';
+import { useAuthStore } from '@/stores/auth';
+import { getApiUrl } from '@/utils/api';
+import { httpJsonAuth } from '@/utils/httpClient';
 
 export interface Achievement {
   id: string;

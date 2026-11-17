@@ -1,11 +1,11 @@
-import type { Vocabulary, JLPTLevel } from 'src/types/database';
+import type { Vocabulary, JLPTLevel } from '@/types/database';
 import {
   srsService,
   type DueItemsResponse,
   type ReviewInput,
   type BatchReviewResponse,
 } from './srsService';
-import { getApiUrl } from 'src/utils/api';
+import { getApiUrl } from '@/utils/api';
 
 /**
  * Response from vocabulary API

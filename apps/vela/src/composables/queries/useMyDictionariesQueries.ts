@@ -3,7 +3,7 @@ import {
   getMyDictionaries,
   deleteDictionaryEntry,
   type MyDictionaryEntry,
-} from 'src/services/myDictionariesService';
+} from '@/services/myDictionariesService';
 
 /**
  * Query key factory for my dictionaries queries

@@ -1,10 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-vi.mock('src/utils/httpClient', () => ({
+vi.mock('@/utils/httpClient', () => ({
   httpJsonAuth: vi.fn(),
 }));
 
-vi.mock('src/config', () => ({
+vi.mock('@/config', () => ({
   config: { api: { url: 'http://localhost:9005/api/' } },
 }));
 
@@ -14,7 +14,7 @@ vi.mock('aws-amplify/auth', () => ({
   }),
 }));
 
-import { httpJsonAuth } from 'src/utils/httpClient';
+import { httpJsonAuth } from '@/utils/httpClient';
 import {
   lookupWord,
   addFlashcard,

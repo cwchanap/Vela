@@ -2,11 +2,11 @@ import { describe, it, expect } from 'vitest';
 import {
   IOS_DIAGNOSTIC_DETAIL_PATH,
   IOS_DIAGNOSTIC_ROOT_PATH,
-} from 'src/diagnostics/ios-interaction-contract';
+} from '@/diagnostics/ios-interaction-contract';
 import { buildMobileChildRoutes } from './diagnostic-routes';
 import routes from './routes';
 
-// Route components are lazy: `() => import('pages/HomePage.vue')`. Asserting
+// Route components are lazy: `() => import('@/pages/HomePage.vue')`. Asserting
 // `component` is `toBeDefined` only checks the wrapper function exists — it
 // passes even if the target file is deleted, because the import never runs.
 // Awaiting each lazy component forces the module to load, so a missing or

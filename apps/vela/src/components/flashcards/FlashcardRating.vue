@@ -47,7 +47,7 @@
 </template>
 
 <script setup lang="ts">
-import { QUALITY_RATINGS, type QualityRating } from 'src/stores/flashcards';
+import { QUALITY_RATINGS, type QualityRating } from '@/stores/flashcards';
 
 defineEmits<{
   (_e: 'rate', _rating: QualityRating): void;

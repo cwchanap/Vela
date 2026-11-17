@@ -42,6 +42,7 @@ export default defineConfig({
   },
   resolve: {
     alias: {
+      '@': resolve(__dirname, './src'),
       src: resolve(__dirname, './src'),
       components: resolve(__dirname, './src/components'),
       layouts: resolve(__dirname, './src/layouts'),

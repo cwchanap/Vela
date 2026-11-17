@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { buildDistractors, normalizeVocabulary, toVocabularyOption } from './vocabulary';
-import type { Vocabulary } from 'src/types/database';
+import type { Vocabulary } from '@/types/database';
 
 describe('toVocabularyOption', () => {
   const mockVocabularyWithHiragana: Vocabulary = {

@@ -4,15 +4,15 @@ import { createPinia, setActivePinia } from 'pinia';
 import { Quasar } from 'quasar';
 import { createRouter, createMemoryHistory } from 'vue-router';
 import IndexPage from './IndexPage.vue';
-import { useAuthStore } from 'src/stores/auth';
-import { httpJsonAuth } from 'src/utils/httpClient';
+import { useAuthStore } from '@/stores/auth';
+import { httpJsonAuth } from '@/utils/httpClient';
 
 // Mock httpClient to avoid real API calls
-vi.mock('src/utils/httpClient', () => ({
+vi.mock('@/utils/httpClient', () => ({
   httpJsonAuth: vi.fn().mockResolvedValue({ achievements: [] }),
 }));
 
-vi.mock('src/utils/api', () => ({
+vi.mock('@/utils/api', () => ({
   getApiUrl: (path: string) => `http://localhost:9005/api/${path}`,
 }));
 

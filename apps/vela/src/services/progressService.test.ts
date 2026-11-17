@@ -15,12 +15,12 @@ const mockAuthStore = {
   session: { user: { id: 'user-123' } },
 };
 
-vi.mock('src/stores/auth', () => ({
+vi.mock('@/stores/auth', () => ({
   useAuthStore: vi.fn(() => mockAuthStore),
 }));
 
 // Mock API utility
-vi.mock('src/utils/api', () => ({
+vi.mock('@/utils/api', () => ({
   getApiUrl: vi.fn((endpoint: string) => `/api/${endpoint}`),
 }));
 

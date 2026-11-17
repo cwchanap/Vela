@@ -21,8 +21,8 @@ import {
   TTS_PRONUNCIATION_DIAGNOSTIC_LABEL,
   TTS_PRONUNCIATION_DIAGNOSTIC_PATH,
   TTS_PRONUNCIATION_ENTRY_TEST_ID,
-} from 'src/diagnostics/tts-pronunciation-contract';
-import { pushMobileRoute } from 'src/router/mobile-navigation';
+} from '@/diagnostics/tts-pronunciation-contract';
+import { pushMobileRoute } from '@/router/mobile-navigation';
 
 const router = useRouter();
 

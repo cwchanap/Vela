@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/vue-query';
-import { llmClient } from 'src/services/llm';
-import { useAuthStore } from 'src/stores/auth';
+import { llmClient } from '@/services/llm';
+import { useAuthStore } from '@/stores/auth';
 import { storeToRefs } from 'pinia';
 import { computed } from 'vue';
 

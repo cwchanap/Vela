@@ -1,5 +1,5 @@
-import { getApiUrl } from 'src/utils/api';
-import { httpJsonAuth } from 'src/utils/httpClient';
+import { getApiUrl } from '@/utils/api';
+import { httpJsonAuth } from '@/utils/httpClient';
 import type { LlmModelPair } from '@vela/common';
 
 export type ChatThreadModelDTO = LlmModelPair;

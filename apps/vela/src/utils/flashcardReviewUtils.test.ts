@@ -6,7 +6,7 @@ import {
   parsePendingReviews,
   extractFailedReviews,
 } from './flashcardReviewUtils';
-import type { ReviewInput, BatchReviewResponse } from 'src/services/srsService';
+import type { ReviewInput, BatchReviewResponse } from '@/services/srsService';
 
 afterEach(() => {
   vi.restoreAllMocks();

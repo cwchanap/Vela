@@ -1,5 +1,5 @@
-import { config } from 'src/config';
-import { httpJsonAuth } from 'src/utils/httpClient';
+import { config } from '@/config';
+import { httpJsonAuth } from '@/utils/httpClient';
 
 export interface MyDictionaryEntry {
   user_id: string;

@@ -47,6 +47,7 @@ export default defineConfig({
   },
   resolve: {
     alias: {
+      '@': resolve(__dirname, './src'),
       '@vela/common': resolve(__dirname, '../../packages/common/src/index.ts'),
       src: resolve(__dirname, './src'),
       layouts: resolve(__dirname, './src/layouts'),

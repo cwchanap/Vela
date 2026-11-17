@@ -48,7 +48,7 @@ describe('AudioPlayer', () => {
   beforeEach(async () => {
     vi.clearAllMocks();
     vi.resetModules();
-    vi.doMock('src/services/ttsService', () => ({
+    vi.doMock('@/services/ttsService', () => ({
       playAudio: mockPlayAudio,
     }));
     AudioPlayer = (await import('./AudioPlayer.vue')).default;

@@ -1,6 +1,6 @@
 import { defineBoot } from '#q-app/wrappers';
 import { isNavigationFailure } from 'vue-router';
-import { consumeDiagnosticColdEntry } from 'src/diagnostics/cold-entry';
+import { consumeDiagnosticColdEntry } from '@/diagnostics/cold-entry';
 
 export default defineBoot(async ({ router }) => {
   try {

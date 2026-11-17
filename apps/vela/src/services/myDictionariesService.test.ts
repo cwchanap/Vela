@@ -8,7 +8,7 @@ vi.mock('aws-amplify/auth', () => ({
 }));
 
 // Mock config
-vi.mock('src/config', () => ({
+vi.mock('@/config', () => ({
   config: {
     api: {
       url: '/api/',

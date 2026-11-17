@@ -264,23 +264,23 @@ import { storeToRefs } from 'pinia';
 import { useQueryClient } from '@tanstack/vue-query';
 import { marked } from 'marked';
 import DOMPurify from 'dompurify';
-import { llmClient, describeLlmError } from 'src/services/llm';
+import { llmClient, describeLlmError } from '@/services/llm';
 import {
   getMyDictionaries,
   deleteDictionaryEntry,
   type MyDictionaryEntry,
   type SentenceAnalysis,
-} from 'src/services/myDictionariesService';
+} from '@/services/myDictionariesService';
 import { tokenize, type Token } from '@vela/common/tokenizer';
-import { computeDifficulty, isContentWord, katakanaToHiragana } from 'src/utils/japanese';
-import type { JishoResult } from 'src/services/vocabularyService';
+import { computeDifficulty, isContentWord, katakanaToHiragana } from '@/utils/japanese';
+import type { JishoResult } from '@/services/vocabularyService';
 import {
   dictionaryLookupQueryOptions,
   useAddFlashcardMutation,
-} from 'src/composables/queries/useVocabularyQueries';
-import { useLLMSettingsStore } from 'src/stores/llmSettings';
-import { useAuthStore } from 'src/stores/auth';
-import { generatePronunciation, playAudio } from 'src/services/ttsService';
+} from '@/composables/queries/useVocabularyQueries';
+import { useLLMSettingsStore } from '@/stores/llmSettings';
+import { useAuthStore } from '@/stores/auth';
+import { generatePronunciation, playAudio } from '@/services/ttsService';
 
 const $q = useQuasar();
 const queryClient = useQueryClient();

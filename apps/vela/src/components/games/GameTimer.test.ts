@@ -4,7 +4,7 @@ import type { VueWrapper } from '@vue/test-utils';
 import { nextTick } from 'vue';
 import { createPinia, setActivePinia } from 'pinia';
 import GameTimer from './GameTimer.vue';
-import { useGameStore } from 'src/stores/games';
+import { useGameStore } from '@/stores/games';
 
 const getTimeLeft = (wrapper: VueWrapper) => {
   const vm = wrapper.vm as unknown as { timeLeft?: number };

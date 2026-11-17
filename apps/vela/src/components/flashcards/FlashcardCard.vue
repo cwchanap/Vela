@@ -120,8 +120,8 @@
 </template>
 
 <script setup lang="ts">
-import type { Vocabulary } from 'src/types/database';
-import type { CardDirection } from 'src/stores/flashcards';
+import type { Vocabulary } from '@/types/database';
+import type { CardDirection } from '@/stores/flashcards';
 
 const props = defineProps<{
   vocabulary: Vocabulary;

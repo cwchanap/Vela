@@ -5,7 +5,7 @@ import { Quasar } from 'quasar';
 import { reactive, nextTick } from 'vue';
 import { createRouter, createMemoryHistory } from 'vue-router';
 import MainLayout from './MainLayout.vue';
-import { useAuthStore } from 'src/stores/auth';
+import { useAuthStore } from '@/stores/auth';
 
 // Shared reactive screen state – mutate per-test to control $q.screen
 const mockScreen = reactive({ gt: { sm: false }, lt: { md: false } });

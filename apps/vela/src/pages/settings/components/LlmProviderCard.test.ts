@@ -3,10 +3,10 @@ import { mount, VueWrapper, flushPromises } from '@vue/test-utils';
 import { createPinia, setActivePinia } from 'pinia';
 import { Quasar, Notify } from 'quasar';
 import LlmProviderCard from './LlmProviderCard.vue';
-import { useLLMSettingsStore } from 'src/stores/llmSettings';
-import { useAuthStore } from 'src/stores/auth';
+import { useLLMSettingsStore } from '@/stores/llmSettings';
+import { useAuthStore } from '@/stores/auth';
 import { LLM_PROVIDER_REGISTRY, type LlmProvider } from '@vela/common';
-import type { LlmPreferences, UserPreferences } from 'src/types/shared';
+import type { LlmPreferences, UserPreferences } from '@/types/shared';
 
 const stubs = {
   'q-card': { template: '<div><slot /></div>' },

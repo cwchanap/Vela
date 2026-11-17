@@ -55,7 +55,7 @@
 
 <script setup lang="ts">
 import { computed, watch } from 'vue';
-import type { Achievement } from 'src/services/progressService';
+import type { Achievement } from '@/services/progressService';
 
 interface Props {
   modelValue: boolean;

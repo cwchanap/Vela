@@ -3,9 +3,9 @@ import { mount, flushPromises } from '@vue/test-utils';
 import { createPinia, setActivePinia } from 'pinia';
 import { Quasar } from 'quasar';
 import FlashcardSetup from './FlashcardSetup.vue';
-import { useAuthStore } from 'src/stores/auth';
-import { useFlashcardStore } from 'src/stores/flashcards';
-import { flashcardService } from 'src/services/flashcardService';
+import { useAuthStore } from '@/stores/auth';
+import { useFlashcardStore } from '@/stores/flashcards';
+import { flashcardService } from '@/services/flashcardService';
 
 describe('FlashcardSetup.vue - Race Condition Fix', () => {
   let getStatsSpy: ReturnType<typeof vi.spyOn>;
@@ -112,7 +112,7 @@ describe('FlashcardSetup.vue - Race Condition Fix', () => {
 
   it('should use requestId to prevent race conditions (logic verification)', async () => {
     // Get auth store directly
-    const { useAuthStore } = await import('src/stores/auth');
+    const { useAuthStore } = await import('@/stores/auth');
     const _authStore = useAuthStore();
 
     // Verify the component has requestId mechanism

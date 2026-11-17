@@ -41,10 +41,10 @@ async function handleSignOut(): Promise<void> {
 }
 
 const DevelopmentDiagnosticsEntry = import.meta.env.DEV
-  ? defineAsyncComponent(() => import('src/components/mobile/IosInteractionDiagnosticsEntry.vue'))
+  ? defineAsyncComponent(() => import('@/components/mobile/IosInteractionDiagnosticsEntry.vue'))
   : null;
 
 const TtsPronunciationDiagnosticsEntry = import.meta.env.DEV
-  ? defineAsyncComponent(() => import('src/components/mobile/TtsPronunciationDiagnosticsEntry.vue'))
+  ? defineAsyncComponent(() => import('@/components/mobile/TtsPronunciationDiagnosticsEntry.vue'))
   : null;
 </script>

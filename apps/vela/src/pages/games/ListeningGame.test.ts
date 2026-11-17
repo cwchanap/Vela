@@ -286,19 +286,19 @@ describe('ListeningGame', () => {
     vi.clearAllMocks();
     vi.resetModules();
     resetStores();
-    vi.doMock('src/services/listeningGameService', () => ({
+    vi.doMock('@/services/listeningGameService', () => ({
       listeningGameService: mockListeningGameService,
     }));
-    vi.doMock('src/services/ttsService', () => ({
+    vi.doMock('@/services/ttsService', () => ({
       generatePronunciation: mockGeneratePronunciation,
     }));
-    vi.doMock('src/stores/listeningGame', () => ({
+    vi.doMock('@/stores/listeningGame', () => ({
       useListeningGameStore: () => listeningStore,
     }));
-    vi.doMock('src/stores/progress', () => ({
+    vi.doMock('@/stores/progress', () => ({
       useProgressStore: () => progressStore,
     }));
-    vi.doMock('src/stores/auth', () => ({
+    vi.doMock('@/stores/auth', () => ({
       useAuthStore: () => authStore,
     }));
     vi.doMock('quasar', async (importOriginal) => {

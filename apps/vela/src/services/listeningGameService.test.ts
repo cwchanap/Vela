@@ -4,7 +4,7 @@ import type { ListeningConfig } from '../types/listening';
 import type { LegacyVocabularyPayload } from '../utils/vocabulary';
 import type { Sentence } from '../types/database';
 
-vi.mock('src/utils/api', () => ({
+vi.mock('@/utils/api', () => ({
   getApiUrl: vi.fn((endpoint: string) => `/api/${endpoint}`),
 }));
 

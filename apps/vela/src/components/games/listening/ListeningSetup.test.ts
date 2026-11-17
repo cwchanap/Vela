@@ -29,7 +29,7 @@ describe('ListeningSetup', () => {
   beforeEach(async () => {
     vi.clearAllMocks();
     vi.resetModules();
-    vi.doMock('src/services/ttsService', () => ({
+    vi.doMock('@/services/ttsService', () => ({
       getTTSSettings: mockGetTTSSettings,
     }));
     ListeningSetup = (await import('./ListeningSetup.vue')).default;

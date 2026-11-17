@@ -2,9 +2,9 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { ref } from 'vue';
 import { QueryClient } from '@tanstack/vue-query';
 import { chatKeys } from '@vela/common';
-import { withQueryClient } from 'src/test-utils/withQueryClient';
+import { withQueryClient } from '@/test-utils/withQueryClient';
 import { useChatThreads, useDeleteThread, useUpdateThread } from './useChatThreads';
-import type { ChatThreadSummaryDTO } from 'src/services/chatHistoryService';
+import type { ChatThreadSummaryDTO } from '@/services/chatHistoryService';
 
 vi.mock('aws-amplify/auth', () => ({
   fetchAuthSession: vi.fn(),
@@ -18,7 +18,7 @@ const fetchMock = vi.fn();
 const mockUser = ref<{ id: string } | null>(null);
 const mockSession = ref<{ user: { id: string } | null } | null>(null);
 
-vi.mock('src/stores/auth', () => ({
+vi.mock('@/stores/auth', () => ({
   useAuthStore: () => ({
     user: mockUser,
     session: mockSession,

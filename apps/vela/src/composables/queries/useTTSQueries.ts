@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query';
-import { getTTSSettings, saveTTSSettings } from 'src/services/ttsService';
+import { getTTSSettings, saveTTSSettings } from '@/services/ttsService';
 import { ttsKeys } from '@vela/common';
-import { useAuthStore } from 'src/stores/auth';
+import { useAuthStore } from '@/stores/auth';
 import { storeToRefs } from 'pinia';
 import { computed } from 'vue';
 

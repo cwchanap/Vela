@@ -81,15 +81,15 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue';
-import { useProgressStore } from 'src/stores/progress';
-import { useAuthStore } from 'src/stores/auth';
+import { useProgressStore } from '@/stores/progress';
+import { useAuthStore } from '@/stores/auth';
 import { storeToRefs } from 'pinia';
-import ProgressDashboard from 'src/components/progress/ProgressDashboard.vue';
-import ProgressChart from 'src/components/progress/ProgressChart.vue';
-import SkillCategoryCard from 'src/components/progress/SkillCategoryCard.vue';
-import AchievementItem from 'src/components/progress/AchievementItem.vue';
-import AchievementDialog from 'src/components/progress/AchievementDialog.vue';
-import type { Achievement } from 'src/services/progressService';
+import ProgressDashboard from '@/components/progress/ProgressDashboard.vue';
+import ProgressChart from '@/components/progress/ProgressChart.vue';
+import SkillCategoryCard from '@/components/progress/SkillCategoryCard.vue';
+import AchievementItem from '@/components/progress/AchievementItem.vue';
+import AchievementDialog from '@/components/progress/AchievementDialog.vue';
+import type { Achievement } from '@/services/progressService';
 
 const progressStore = useProgressStore();
 const authStore = useAuthStore();

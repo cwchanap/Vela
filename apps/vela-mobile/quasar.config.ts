@@ -16,6 +16,7 @@ export default defineConfig((ctx) => {
 
     build: {
       alias: {
+        '@': resolve(__dirname, 'src'),
         '@vela/common': resolve(__dirname, '../../packages/common/src/index.ts'),
         '@capacitor/app': resolve(__dirname, 'src-capacitor/node_modules/@capacitor/app'),
         '@capacitor/browser': resolve(__dirname, 'src-capacitor/node_modules/@capacitor/browser'),
@@ -39,6 +40,13 @@ export default defineConfig((ctx) => {
       typescript: {
         strict: true,
         vueShim: true,
+        extendTsConfig(tsConfig) {
+          // Temporary v2-only mapping: Quasar v3 generates `@/*` itself.
+          tsConfig.compilerOptions ??= {};
+          tsConfig.compilerOptions.paths ??= {};
+          tsConfig.compilerOptions.paths['@'] = ['./../src'];
+          tsConfig.compilerOptions.paths['@/*'] = ['./../src/*'];
+        },
       },
 
       vueRouterMode: 'history',

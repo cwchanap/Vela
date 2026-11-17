@@ -37,7 +37,7 @@
 
 <script setup lang="ts">
 import { computed } from 'vue';
-import type { JLPTLevel } from 'src/types/database';
+import type { JLPTLevel } from '@/types/database';
 
 interface JlptOption {
   value: JLPTLevel;
