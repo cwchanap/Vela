@@ -1,10 +1,10 @@
-import { boot } from 'quasar/wrappers';
+import { defineBoot } from '#q-app';
 import { configureDicPath } from '@vela/common/tokenizer';
 import { useThemeStore } from '@/stores/theme';
 import { useAuthStore } from '@/stores/auth';
 import { validateConfig } from '@/config';
 
-export default boot(async ({ store }) => {
+export default defineBoot(async ({ store }) => {
   // Fail fast on missing Cognito env vars in production
   validateConfig();
 

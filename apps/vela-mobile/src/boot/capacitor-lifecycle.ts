@@ -1,7 +1,7 @@
 import { App } from '@capacitor/app';
 import type { PluginListenerHandle } from '@capacitor/core';
 import { focusManager } from '@tanstack/vue-query';
-import { defineBoot } from '#q-app/wrappers';
+import { defineBoot } from '#q-app';
 import { recordAppResume, recordAppStateChange } from '@/services/mobile-lifecycle';
 
 export type ResumeAppAdapter = {

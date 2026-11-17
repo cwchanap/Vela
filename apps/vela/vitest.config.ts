@@ -21,7 +21,6 @@ export default defineConfig({
     coverage: {
       provider: 'v8',
       reporter: ['text', 'json', 'html'],
-      all: true,
       include: ['src/**/*.{ts,vue}'],
       exclude: [
         'src/**/*.test.ts',
@@ -52,8 +51,7 @@ export default defineConfig({
       stores: resolve(__dirname, './src/stores'),
       '@vela/common/tokenizer': resolve(__dirname, '../../packages/common/src/tokenizer.ts'),
       '@vela/common': resolve(__dirname, '../../packages/common/src/index.ts'),
-      '#q-app/wrappers': resolve(__dirname, './src/test/mocks/q-app-wrappers.ts'),
-      'quasar/wrappers': resolve(__dirname, './src/test/mocks/quasar-wrappers.ts'),
+      '#q-app': resolve(__dirname, './src/test/mocks/q-app-wrappers.ts'),
     },
   },
 });

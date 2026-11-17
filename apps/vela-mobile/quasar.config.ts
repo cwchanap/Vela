@@ -1,4 +1,4 @@
-import { defineConfig } from '#q-app/wrappers';
+import { defineConfig } from '#q-app';
 import { resolve } from 'node:path';
 import { getMobileBootFiles } from './src/boot/boot-files';
 import { validateMobileApiUrlPlugin } from './build/validate-mobile-api-url';
@@ -40,13 +40,11 @@ export default defineConfig((ctx) => {
       typescript: {
         strict: true,
         vueShim: true,
-        extendTsConfig(tsConfig) {
-          // Temporary v2-only mapping: Quasar v3 generates `@/*` itself.
-          tsConfig.compilerOptions ??= {};
-          tsConfig.compilerOptions.paths ??= {};
-          tsConfig.compilerOptions.paths['@'] = ['./../src'];
-          tsConfig.compilerOptions.paths['@/*'] = ['./../src/*'];
-        },
+      },
+
+      env: {
+        clientPrefix: 'VITE_',
+        file: ctx.prod ? '.env.production' : [],
       },
 
       vueRouterMode: 'history',

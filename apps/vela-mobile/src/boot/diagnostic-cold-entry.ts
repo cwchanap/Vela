@@ -1,4 +1,4 @@
-import { defineBoot } from '#q-app/wrappers';
+import { defineBoot } from '#q-app';
 import { isNavigationFailure } from 'vue-router';
 import { consumeDiagnosticColdEntry } from '@/diagnostics/cold-entry';
 

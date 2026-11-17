@@ -25,7 +25,6 @@ export default defineConfig({
     coverage: {
       provider: 'v8',
       reporter: ['text', 'json', 'html'],
-      all: true,
       include: ['src/**/*.{ts,vue}'],
       exclude: [
         'src/**/*.test.ts',
@@ -53,7 +52,7 @@ export default defineConfig({
       layouts: resolve(__dirname, './src/layouts'),
       pages: resolve(__dirname, './src/pages'),
       boot: resolve(__dirname, './src/boot'),
-      '#q-app/wrappers': resolve(__dirname, './src/test/mocks/q-app-wrappers.ts'),
+      '#q-app': resolve(__dirname, './src/test/mocks/q-app-wrappers.ts'),
       '@capacitor/app': resolve(__dirname, './src-capacitor/node_modules/@capacitor/app'),
       '@capacitor/browser': resolve(__dirname, './src-capacitor/node_modules/@capacitor/browser'),
       '@capacitor/core': resolve(__dirname, './src-capacitor/node_modules/@capacitor/core'),

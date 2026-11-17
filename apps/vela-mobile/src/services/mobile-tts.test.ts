@@ -208,6 +208,9 @@ describe('MobileTtsService', () => {
   });
 
   it.each([
+    [401, 'unauthorized'],
+    [403, 'forbidden'],
+    [418, 'invalid_input'],
     [503, 'service_unavailable'],
     [504, 'generation_timeout'],
     [500, 'generation_failed'],
@@ -225,6 +228,7 @@ describe('MobileTtsService', () => {
     ['unauthorized', 'unauthorized'],
     ['forbidden', 'forbidden'],
     ['network', 'network'],
+    ['client', 'invalid_input'],
   ] as const)('preserves API classification %s as %s', async (apiCode, code) => {
     api.postJson.mockRejectedValue(new MobileApiError(apiCode));
     const service = createMobileTtsService(api);

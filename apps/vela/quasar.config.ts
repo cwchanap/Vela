@@ -1,10 +1,10 @@
 // Configuration for your app
 // https://v2.quasar.dev/quasar-cli-vite/quasar-config-file
 
-import { defineConfig } from '#q-app/wrappers';
+import { defineConfig } from '#q-app';
 import { resolve } from 'node:path';
 
-export default defineConfig((/* ctx */) => {
+export default defineConfig((ctx) => {
   return {
     // https://v2.quasar.dev/quasar-cli-vite/prefetch-feature
     // preFetch: true,
@@ -45,13 +45,6 @@ export default defineConfig((/* ctx */) => {
       typescript: {
         strict: true,
         vueShim: true,
-        extendTsConfig(tsConfig) {
-          // Temporary v2-only mapping: Quasar v3 generates `@/*` itself.
-          tsConfig.compilerOptions ??= {};
-          tsConfig.compilerOptions.paths ??= {};
-          tsConfig.compilerOptions.paths['@'] = ['./../src'];
-          tsConfig.compilerOptions.paths['@/*'] = ['./../src/*'];
-        },
       },
 
       vueRouterMode: 'history', // Use history mode for better SEO and UX
@@ -64,17 +57,9 @@ export default defineConfig((/* ctx */) => {
       publicPath: '/',
       // analyze: true, // Enable bundle analyzer when needed
       env: {
-        // Make environment variables available to the app
-        VITE_COGNITO_USER_POOL_ID: process.env.VITE_COGNITO_USER_POOL_ID,
-        VITE_COGNITO_USER_POOL_CLIENT_ID: process.env.VITE_COGNITO_USER_POOL_CLIENT_ID,
-        VITE_COGNITO_OAUTH_DOMAIN: process.env.VITE_COGNITO_OAUTH_DOMAIN,
-        VITE_COGNITO_REDIRECT_SIGN_IN: process.env.VITE_COGNITO_REDIRECT_SIGN_IN,
-        VITE_COGNITO_REDIRECT_SIGN_OUT: process.env.VITE_COGNITO_REDIRECT_SIGN_OUT,
-        VITE_AWS_REGION: process.env.VITE_AWS_REGION,
-        VITE_API_URL: process.env.VITE_API_URL,
-        VITE_APP_NAME: process.env.VITE_APP_NAME,
-        VITE_APP_VERSION: process.env.VITE_APP_VERSION,
-        VITE_DEV_MODE: process.env.VITE_DEV_MODE,
+        // Expose VITE_* vars from .env files and process.env to the client.
+        clientPrefix: 'VITE_',
+        file: ctx.prod ? '.env.production' : [],
       },
       // rawDefine: {}
       // ignorePublicFolder: true,
@@ -132,9 +117,9 @@ export default defineConfig((/* ctx */) => {
           viteConf.build.rollupOptions.output &&
           !Array.isArray(viteConf.build.rollupOptions.output)
         ) {
-          viteConf.build.rollupOptions.output.manualChunks = {
-            vendor: ['vue', 'vue-router', 'pinia'],
-            quasar: ['quasar'],
+          viteConf.build.rollupOptions.output.manualChunks = (id) => {
+            if (/node_modules[\\/]quasar[\\/]/.test(id)) return 'quasar';
+            if (/node_modules[\\/](@vue|vue|vue-router|pinia)[\\/]/.test(id)) return 'vendor';
           };
         }
 

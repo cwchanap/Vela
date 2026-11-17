@@ -102,6 +102,7 @@ import {
   captureConsoleCalls,
   createSecretLeakAssertions,
   searchable,
+  sessionStorageEmptySnapshot,
   storageSnapshot,
 } from '../test/secret-leak-helpers';
 import boot from './mobile-auth';
@@ -327,7 +328,7 @@ describe('mobile auth boot', () => {
       expect(searchable(consoleCapture.calls())).not.toContain('SECRET-');
       expect(mocks.preferencesPlugin.set).not.toHaveBeenCalled();
       expect(storageSnapshot(window.localStorage)).toBe('');
-      expect(storageSnapshot(window.sessionStorage)).toBe('');
+      expect(sessionStorageEmptySnapshot()).toBe('');
     } finally {
       if (originalFetch === undefined) {
         Reflect.deleteProperty(window, 'fetch');

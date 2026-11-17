@@ -48,6 +48,10 @@ describe('progressService', () => {
   });
 
   afterEach(() => {
+    // Vitest 5 restoreAllMocks no longer resets vi.fn() implementations.
+
+    vi.resetAllMocks();
+
     vi.restoreAllMocks();
   });
 
