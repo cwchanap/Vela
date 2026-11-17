@@ -42,13 +42,6 @@ export default defineConfig({
   resolve: {
     alias: {
       '@': resolve(__dirname, './src'),
-      src: resolve(__dirname, './src'),
-      components: resolve(__dirname, './src/components'),
-      layouts: resolve(__dirname, './src/layouts'),
-      pages: resolve(__dirname, './src/pages'),
-      assets: resolve(__dirname, './src/assets'),
-      boot: resolve(__dirname, './src/boot'),
-      stores: resolve(__dirname, './src/stores'),
       '@vela/common/tokenizer': resolve(__dirname, '../../packages/common/src/tokenizer.ts'),
       '@vela/common': resolve(__dirname, '../../packages/common/src/index.ts'),
       '#q-app': resolve(__dirname, './src/test/mocks/q-app-wrappers.ts'),

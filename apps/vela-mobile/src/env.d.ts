@@ -3,8 +3,6 @@
 declare namespace NodeJS {
   interface ProcessEnv {
     NODE_ENV: string;
-    VUE_ROUTER_MODE: 'hash' | 'history' | 'abstract' | undefined;
-    VUE_ROUTER_BASE: string | undefined;
   }
 }
 
@@ -16,6 +14,7 @@ interface ImportMetaEnv {
   readonly VITE_COGNITO_MOBILE_USER_POOL_CLIENT_ID: string;
   readonly VITE_COGNITO_OAUTH_DOMAIN: string;
   readonly VITE_AWS_REGION: string;
+  readonly QUASAR_VUE_ROUTER_BASE: string;
   readonly DEV: boolean;
   readonly PROD: boolean;
   readonly [key: string]: string | boolean | undefined;

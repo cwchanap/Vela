@@ -18,18 +18,6 @@ export default defineConfig((ctx) => {
       alias: {
         '@': resolve(__dirname, 'src'),
         '@vela/common': resolve(__dirname, '../../packages/common/src/index.ts'),
-        '@capacitor/app': resolve(__dirname, 'src-capacitor/node_modules/@capacitor/app'),
-        '@capacitor/browser': resolve(__dirname, 'src-capacitor/node_modules/@capacitor/browser'),
-        '@capacitor/core': resolve(__dirname, 'src-capacitor/node_modules/@capacitor/core'),
-        '@capacitor/keyboard': resolve(__dirname, 'src-capacitor/node_modules/@capacitor/keyboard'),
-        '@capacitor/preferences': resolve(
-          __dirname,
-          'src-capacitor/node_modules/@capacitor/preferences',
-        ),
-        '@aparajita/capacitor-secure-storage': resolve(
-          __dirname,
-          'src-capacitor/node_modules/@aparajita/capacitor-secure-storage',
-        ),
       },
 
       target: {

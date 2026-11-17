@@ -131,6 +131,34 @@ describe('config', () => {
       expect(typeof config.dev.devMode).toBe('boolean');
     });
 
+    it.each([
+      [true, true],
+      ['true', true],
+      [false, false],
+      ['false', false],
+    ] as const)('interprets VITE_DEV_MODE %o as %s', async (rawValue, expected) => {
+      // Quasar v3's env loader emits booleans for bare true/false values in env
+      // files, while process-provided values stay strings.
+      const { isEnvFlagEnabled } = await import('./index');
+      expect(isEnvFlagEnabled(rawValue)).toBe(expected);
+    });
+
+    it.each([
+      ['true', true],
+      ['false', false],
+    ] as const)(
+      'reads a string VITE_DEV_MODE of %o from the env loader',
+      async (rawValue, expected) => {
+        const { config } = await importConfigWithEnv({ VITE_DEV_MODE: rawValue });
+        expect(config.dev.devMode).toBe(expected);
+      },
+    );
+
+    it('treats an absent VITE_DEV_MODE as disabled', async () => {
+      const { config } = await importConfigWithEnv({ VITE_DEV_MODE: undefined });
+      expect(config.dev.devMode).toBe(false);
+    });
+
     it('uses configured api url or defaults to /api/', async () => {
       const { config } = await import('./index');
       expect(config.api.url).toBe(import.meta.env.VITE_API_URL || '/api/');

@@ -5,48 +5,39 @@ import type { RouteLocationNormalized } from 'vue-router';
 // ===========================================================================
 // Hoisted mocks — must run before vi.mock() factory functions are evaluated.
 // ===========================================================================
-const {
-  mockBeforeEachCbs,
-  mockCreateWebHistory,
-  mockCreateWebHashHistory,
-  mockCreateMemoryHistory,
-  mockCreateRouter,
-  mockAuthStore,
-} = vi.hoisted(() => {
-  const mockBeforeEachCbs: ((..._args: unknown[]) => unknown)[] = [];
+const { mockBeforeEachCbs, mockCreateWebHistory, mockCreateRouter, mockAuthStore } = vi.hoisted(
+  () => {
+    const mockBeforeEachCbs: ((..._args: unknown[]) => unknown)[] = [];
 
-  const mockRouterInstance = {
-    beforeEach: (fn: (..._args: unknown[]) => unknown) => {
-      mockBeforeEachCbs.push(fn);
-    },
-    options: {} as { history?: unknown },
-  };
+    const mockRouterInstance = {
+      beforeEach: (fn: (..._args: unknown[]) => unknown) => {
+        mockBeforeEachCbs.push(fn);
+      },
+      options: {} as { history?: unknown },
+    };
 
-  const mockCreateRouter = vi.fn((options: { history?: unknown }) => {
-    mockRouterInstance.options = options;
-    return mockRouterInstance;
-  });
+    const mockCreateRouter = vi.fn((options: { history?: unknown }) => {
+      mockRouterInstance.options = options;
+      return mockRouterInstance;
+    });
 
-  const mockCreateWebHistory = vi.fn(() => ({ _type: 'web' }));
-  const mockCreateWebHashHistory = vi.fn(() => ({ _type: 'hash' }));
-  const mockCreateMemoryHistory = vi.fn(() => ({ _type: 'memory' }));
+    const mockCreateWebHistory = vi.fn(() => ({ _type: 'web' }));
 
-  const mockAuthStore = {
-    isInitialized: false,
-    isAuthenticated: false,
-    session: null as unknown,
-    initialize: vi.fn(),
-  };
+    const mockAuthStore = {
+      isInitialized: false,
+      isAuthenticated: false,
+      session: null as unknown,
+      initialize: vi.fn(),
+    };
 
-  return {
-    mockBeforeEachCbs,
-    mockCreateWebHistory,
-    mockCreateWebHashHistory,
-    mockCreateMemoryHistory,
-    mockCreateRouter,
-    mockAuthStore,
-  };
-});
+    return {
+      mockBeforeEachCbs,
+      mockCreateWebHistory,
+      mockCreateRouter,
+      mockAuthStore,
+    };
+  },
+);
 
 // ===========================================================================
 // Module mocks
@@ -54,8 +45,6 @@ const {
 vi.mock('vue-router', () => ({
   createRouter: mockCreateRouter,
   createWebHistory: mockCreateWebHistory,
-  createWebHashHistory: mockCreateWebHashHistory,
-  createMemoryHistory: mockCreateMemoryHistory,
 }));
 
 vi.mock('../stores/auth', () => ({
@@ -98,8 +87,6 @@ describe('router/index', () => {
     // Reset captured callbacks and mock call counters
     mockBeforeEachCbs.length = 0;
     mockCreateWebHistory.mockClear();
-    mockCreateWebHashHistory.mockClear();
-    mockCreateMemoryHistory.mockClear();
     mockCreateRouter.mockClear();
     mockAuthStore.initialize.mockReset();
 
@@ -117,30 +104,15 @@ describe('router/index', () => {
   });
 
   // =========================================================================
-  // History factory selection
+  // History setup
   // =========================================================================
-  describe('history factory selection', () => {
-    it('uses createMemoryHistory when SERVER env is set', () => {
-      vi.stubEnv('SERVER', 'true');
-      routerFactory({});
-      expect(mockCreateMemoryHistory).toHaveBeenCalledTimes(1);
-      expect(mockCreateWebHistory).not.toHaveBeenCalled();
-      expect(mockCreateWebHashHistory).not.toHaveBeenCalled();
-    });
-
-    it('uses createWebHistory when VUE_ROUTER_MODE is "history"', () => {
-      vi.stubEnv('VUE_ROUTER_MODE', 'history');
+  describe('history', () => {
+    it('uses a single web history factory with the Quasar router base', () => {
+      vi.stubEnv('QUASAR_VUE_ROUTER_BASE', '/app/');
       routerFactory({});
       expect(mockCreateWebHistory).toHaveBeenCalledTimes(1);
-      expect(mockCreateMemoryHistory).not.toHaveBeenCalled();
-      expect(mockCreateWebHashHistory).not.toHaveBeenCalled();
-    });
-
-    it('uses createWebHashHistory as default (no SERVER, VUE_ROUTER_MODE not "history")', () => {
-      routerFactory({});
-      expect(mockCreateWebHashHistory).toHaveBeenCalledTimes(1);
-      expect(mockCreateMemoryHistory).not.toHaveBeenCalled();
-      expect(mockCreateWebHistory).not.toHaveBeenCalled();
+      expect(mockCreateWebHistory).toHaveBeenCalledWith('/app/');
+      expect(mockCreateRouter).toHaveBeenCalledTimes(1);
     });
   });
 
@@ -215,42 +187,8 @@ describe('router/index', () => {
       expect(next).toHaveBeenCalledWith();
     });
 
-    // --- requiresAuth: unauthenticated in production (non-dev) ---
-    it('redirects unauthenticated user to login when not in dev mode', async () => {
-      mockAuthStore.isInitialized = true;
-      mockAuthStore.isAuthenticated = false;
-
-      // Temporarily disable dev mode so the login-redirect branch is exercised.
-      // Direct mutation of import.meta.env is used here because:
-      // - Vitest exposes import.meta.env as a mutable plain object
-      // - vi.stubEnv() only affects process.env, not import.meta.env
-      // - The router production code reads import.meta.env.DEV directly
-      const origDEV = import.meta.env.DEV;
-      const origVITE_DEV_MODE = import.meta.env.VITE_DEV_MODE;
-      try {
-        (import.meta.env as Record<string, unknown>).DEV = false;
-        (import.meta.env as Record<string, unknown>).VITE_DEV_MODE = '';
-
-        const next = vi.fn();
-        await guard(
-          makeRoute({
-            path: '/protected',
-            fullPath: '/protected',
-            matched: [{ meta: { requiresAuth: true } }],
-          }),
-          makeRoute({}),
-          next,
-        );
-        expect(next).toHaveBeenCalledWith({ name: 'login', query: { redirect: '/protected' } });
-        expect(next).toHaveBeenCalledTimes(1);
-      } finally {
-        (import.meta.env as Record<string, unknown>).DEV = origDEV;
-        (import.meta.env as Record<string, unknown>).VITE_DEV_MODE = origVITE_DEV_MODE;
-      }
-    });
-
-    // --- requiresAuth: unauthenticated in dev mode ---
-    it('redirects unauthenticated user to login in dev mode', async () => {
+    // --- requiresAuth: unauthenticated ---
+    it('redirects unauthenticated user from a requiresAuth route to login', async () => {
       mockAuthStore.isInitialized = true;
       mockAuthStore.isAuthenticated = false;
 

@@ -48,10 +48,6 @@ export default defineConfig({
     alias: {
       '@': resolve(__dirname, './src'),
       '@vela/common': resolve(__dirname, '../../packages/common/src/index.ts'),
-      src: resolve(__dirname, './src'),
-      layouts: resolve(__dirname, './src/layouts'),
-      pages: resolve(__dirname, './src/pages'),
-      boot: resolve(__dirname, './src/boot'),
       '#q-app': resolve(__dirname, './src/test/mocks/q-app-wrappers.ts'),
       '@capacitor/app': resolve(__dirname, './src-capacitor/node_modules/@capacitor/app'),
       '@capacitor/browser': resolve(__dirname, './src-capacitor/node_modules/@capacitor/browser'),
