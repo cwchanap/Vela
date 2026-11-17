@@ -81,4 +81,4 @@ Remove standalone `sync-ios-version.mjs`, its tests, `sync:ios-version`, and scr
 
 Source notes: [Quasar CLI v3 upgrade](https://quasar.dev/quasar-cli-vite/upgrade-guide/); [Quasar env configuration](https://quasar.dev/quasar-cli-vite/handling-import-meta-env/); [GitHub review](https://github.com/cwchanap/Vela/pull/93#pullrequestreview-5925171471).
 
-Review follow-up: [Second review (revision `9668d826`)](https://github.com/cwchanap/Vela/pull/93#pullrequestreview-5926128291) — five actionable integration/test corrections accounted for above.
+Review follow-up: [Second review (revision `9668d826`)](https://github.com/cwchanap/Vela/pull/93#pullrequestreview-5931228564) — five actionable integration/test corrections accounted for above.
