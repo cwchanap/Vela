@@ -3,6 +3,23 @@
 
 import { defineConfig } from '#q-app';
 import { resolve } from 'node:path';
+import type { Plugin } from 'vite';
+
+/*
+ * Rolldown treats zlibjs's UMD gunzip as ESM because it never references
+ * `module`/`exports`, so the UMD's top-level `this` becomes undefined and
+ * kuromoji initialization dies with `'Zlib' in undefined`. Binding the UMD
+ * factory to CommonJS `exports` also marks the file as CJS for Rolldown.
+ */
+const zlibjsCjsThisPlugin: Plugin = {
+  name: 'vela:zlibjs-cjs-this',
+  enforce: 'pre',
+  transform(code, id) {
+    if (id.endsWith('zlibjs/bin/gunzip.min.js')) {
+      return code.replace('}).call(this);', '}).call(exports);');
+    }
+  },
+};
 
 export default defineConfig((ctx) => {
   return {
@@ -114,6 +131,17 @@ export default defineConfig((ctx) => {
 
         // Optimize chunk size
         viteConf.build.chunkSizeWarningLimit = 1000;
+
+        // Dev dependency optimization and the production build are separate
+        // Rolldown pipelines, so the zlibjs CJS fix is registered in both.
+        viteConf.plugins = viteConf.plugins || [];
+        viteConf.plugins.push(zlibjsCjsThisPlugin);
+        viteConf.optimizeDeps = viteConf.optimizeDeps || {};
+        viteConf.optimizeDeps.rolldownOptions = viteConf.optimizeDeps.rolldownOptions || {};
+        viteConf.optimizeDeps.rolldownOptions.plugins = [
+          viteConf.optimizeDeps.rolldownOptions.plugins,
+          zlibjsCjsThisPlugin,
+        ];
       },
       // viteVuePluginOptions: {},
 
