@@ -3,18 +3,18 @@ import {
   CognitoIdentityProviderClient,
   AdminInitiateAuthCommand,
 } from '@aws-sdk/client-cognito-identity-provider';
+import {
+  formatMissingCognitoTestEnvMessage,
+  getCognitoTestEnv,
+  hasCognitoTestEnv,
+} from './fixtures/auth';
 
 const API_BASE_URL = process.env.VITE_API_URL || 'http://localhost:9005';
-
-const COGNITO_TEST_ENV = {
-  email: process.env.TEST_EMAIL,
-  password: process.env.TEST_PASSWORD,
-  userPoolId: process.env.VITE_COGNITO_USER_POOL_ID,
-  clientId: process.env.VITE_COGNITO_TEST_CLIENT_ID,
-  region: process.env.VITE_AWS_REGION,
-};
-
-const hasCognitoTestEnv = Object.values(COGNITO_TEST_ENV).every(Boolean);
+const ALLOWED_ORIGIN =
+  process.env.CORS_ALLOWED_ORIGINS?.split(',')
+    .map((origin) => origin.trim())
+    .find(Boolean) || 'http://localhost:9000';
+const DISALLOWED_ORIGIN = 'https://evil.example';
 
 let cachedIdToken: string | undefined;
 
@@ -22,17 +22,18 @@ let cachedIdToken: string | undefined;
 async function getIdToken(): Promise<string> {
   if (cachedIdToken) return cachedIdToken;
 
+  const config = getCognitoTestEnv();
   const client = new CognitoIdentityProviderClient({
-    region: COGNITO_TEST_ENV.region,
+    region: config.region,
   });
   const response = await client.send(
     new AdminInitiateAuthCommand({
-      UserPoolId: COGNITO_TEST_ENV.userPoolId,
-      ClientId: COGNITO_TEST_ENV.clientId,
+      UserPoolId: config.userPoolId,
+      ClientId: config.clientId,
       AuthFlow: 'ADMIN_USER_PASSWORD_AUTH',
       AuthParameters: {
-        USERNAME: COGNITO_TEST_ENV.email!,
-        PASSWORD: COGNITO_TEST_ENV.password!,
+        USERNAME: config.email,
+        PASSWORD: config.password,
       },
     }),
   );
@@ -44,6 +45,15 @@ async function getIdToken(): Promise<string> {
   cachedIdToken = idToken;
   return idToken;
 }
+
+const configureCognitoAuthSuite = () => {
+  test.skip(!process.env.CI && !hasCognitoTestEnv(), 'Cognito test credentials not configured');
+  test.beforeAll(() => {
+    if (!hasCognitoTestEnv()) {
+      throw new Error(formatMissingCognitoTestEnvMessage());
+    }
+  });
+};
 
 const authHeaders = async (): Promise<Record<string, string>> => ({
   'Content-Type': 'application/json',
@@ -121,7 +131,7 @@ test.describe('Vela API E2E Tests', () => {
     });
 
     test.describe.serial('authenticated', () => {
-      test.skip(!hasCognitoTestEnv, 'Cognito test credentials not configured');
+      configureCognitoAuthSuite();
 
       const threadId = `e2e-thread-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 
@@ -304,7 +314,7 @@ test.describe('Vela API E2E Tests', () => {
     });
 
     test.describe('authenticated', () => {
-      test.skip(!hasCognitoTestEnv, 'Cognito test credentials not configured');
+      configureCognitoAuthSuite();
 
       test('should reject invalid provider', async () => {
         const requestBody = {
@@ -404,27 +414,46 @@ test.describe('Vela API E2E Tests', () => {
   });
 
   test.describe('CORS handling', () => {
-    test('should handle OPTIONS requests for chat-history', async () => {
-      const response = await fetch(`${API_BASE_URL}/api/chat-history/save`, {
-        method: 'OPTIONS',
+    const corsEndpoints = [
+      { name: 'chat-history', path: '/api/chat-history/save', expectedMethod: 'GET' },
+      { name: 'llm-chat', path: '/api/llm-chat/', expectedMethod: 'POST' },
+    ] as const;
+
+    for (const { name, path, expectedMethod } of corsEndpoints) {
+      test(`echoes allowed Origin on OPTIONS for ${name}`, async () => {
+        const response = await fetch(`${API_BASE_URL}${path}`, {
+          method: 'OPTIONS',
+          headers: { Origin: ALLOWED_ORIGIN },
+        });
+
+        expect(response.status).toBe(204);
+        expect(response.headers.get('Access-Control-Allow-Origin')).toBe(ALLOWED_ORIGIN);
+        expect(response.headers.get('Access-Control-Allow-Methods')).toContain(expectedMethod);
       });
 
-      // corsMiddleware answers preflight with 204 and only echoes an allowed
-      // Origin — never a wildcard.
-      expect(response.status).toBe(204);
-      expect(response.headers.get('Access-Control-Allow-Origin')).toBeNull();
-      expect(response.headers.get('Access-Control-Allow-Methods')).toContain('GET');
-      expect(response.headers.get('Access-Control-Allow-Methods')).toContain('POST');
-    });
+      test(`omits ACAO on OPTIONS with foreign Origin for ${name}`, async () => {
+        const response = await fetch(`${API_BASE_URL}${path}`, {
+          method: 'OPTIONS',
+          headers: { Origin: DISALLOWED_ORIGIN },
+        });
 
-    test('should handle OPTIONS requests for llm-chat', async () => {
-      const response = await fetch(`${API_BASE_URL}/api/llm-chat/`, {
-        method: 'OPTIONS',
+        expect(response.status).toBe(204);
+        expect(response.headers.get('Access-Control-Allow-Origin')).toBeNull();
       });
 
-      expect(response.status).toBe(204);
-      expect(response.headers.get('Access-Control-Allow-Origin')).toBeNull();
-      expect(response.headers.get('Access-Control-Allow-Methods')).toContain('POST');
-    });
+      test(`rejects foreign Origin with 403 and no ACAO on POST for ${name}`, async () => {
+        const response = await fetch(`${API_BASE_URL}${path}`, {
+          method: 'POST',
+          headers: {
+            Origin: DISALLOWED_ORIGIN,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({}),
+        });
+
+        expect(response.status).toBe(403);
+        expect(response.headers.get('Access-Control-Allow-Origin')).toBeNull();
+      });
+    }
   });
 });

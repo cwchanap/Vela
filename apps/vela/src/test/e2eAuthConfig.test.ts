@@ -24,8 +24,10 @@ describe('Playwright e2e Cognito client config', () => {
     ).toEqual({});
 
     const authFixture = readFileSync(resolve(__dirname, '../../e2e/fixtures/auth.ts'), 'utf8');
-    expect(authFixture).toContain("clientId: requireTestEnv('VITE_COGNITO_TEST_CLIENT_ID')");
+    expect(authFixture).toContain("clientId: 'VITE_COGNITO_TEST_CLIENT_ID'");
+    expect(authFixture).toContain('clientId: requireTestEnv(COGNITO_TEST_ENV_KEYS.clientId)');
     expect(authFixture).not.toContain('process.env.VITE_COGNITO_TEST_CLIENT_ID ||');
+    expect(authFixture).not.toContain('VITE_COGNITO_USER_POOL_CLIENT_ID');
   });
 
   it('uses ADMIN_USER_PASSWORD_AUTH flow in the auth fixture', () => {

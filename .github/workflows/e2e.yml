@@ -5,7 +5,8 @@ on:
     branches: [main]
   pull_request:
     # Stacked PRs target earlier branches, not `main`, so there is no base
-    # filter here.
+    # filter here. Job `if:` filters `edited` to base-branch changes only so
+    # PR title/body edits do not re-trigger E2E suites.
     types: [opened, synchronize, reopened, edited, ready_for_review]
 
 # Only the latest e2e run per ref matters; superseded runs are safe to cancel
@@ -19,6 +20,7 @@ env:
 
 jobs:
   mocked-settings:
+    if: ${{ github.event_name != 'pull_request' || github.event.action != 'edited' || github.event.changes.base != null }}
     timeout-minutes: 15
     runs-on: ubuntu-latest
     steps:
@@ -43,8 +45,10 @@ jobs:
           path: .artifacts/pw-mocked-*/
           retention-days: 7
 
-  test:
-    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
+  unauthenticated-e2e:
+    # CI has no Cognito secrets; only unauthenticated and CORS specs run here.
+    # Authenticated specs fail in CI if invoked without credentials.
+    if: ${{ github.event_name != 'pull_request' || (github.event.pull_request.draft == false && (github.event.action != 'edited' || github.event.changes.base != null)) }}
     timeout-minutes: 60
     runs-on: ubuntu-latest
     steps:
@@ -73,8 +77,8 @@ jobs:
       - name: Build application
         run: bun --cwd=apps/vela run build
 
-      - name: Run Playwright tests
-        run: bun --cwd=apps/vela run test:e2e
+      - name: Run unauthenticated Playwright tests
+        run: bun --cwd=apps/vela run test:e2e:unauthenticated
 
       - uses: actions/upload-artifact@v7
         if: always()
