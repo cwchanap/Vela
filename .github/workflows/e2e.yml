@@ -10,9 +10,12 @@ on:
     types: [opened, synchronize, reopened, edited, ready_for_review]
 
 # Only the latest e2e run per ref matters; superseded runs are safe to cancel
-# (no infrastructure state involved).
+# (no infrastructure state involved). An `edited` event that did not retarget
+# the PR base skips every job below, so it gets a per-run group — sharing the
+# ref group would let a no-op title/body edit cancel an in-progress e2e run or
+# displace a queued one.
 concurrency:
-  group: e2e-${{ github.ref }}
+  group: ${{ (github.event.action == 'edited' && github.event.changes.base == null) && format('e2e-skip-{0}', github.run_id) || format('e2e-{0}', github.ref) }}
   cancel-in-progress: true
 
 env:
