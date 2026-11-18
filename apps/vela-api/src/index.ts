@@ -73,11 +73,10 @@ if (process.env.NODE_ENV === 'development') {
     DDB_TABLE: appEnv.DDB_TABLE ? appEnv.DDB_TABLE : 'not set',
   });
 
-  // Add middleware to inject environment for development
+  // Add middleware to inject environment for development. Bun.serve hands
+  // app.fetch a truthy (empty) env object, so this must override, not fill in.
   app.use('*', async (c: Context, next: Next) => {
-    if (!c.env) {
-      (c as Context<{ Bindings: Env }>).env = appEnv;
-    }
+    (c as Context<{ Bindings: Env }>).env = appEnv;
     await next();
   });
 
