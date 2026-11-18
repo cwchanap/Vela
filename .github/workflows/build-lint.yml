@@ -4,9 +4,8 @@ on:
   push:
     branches: [main]
   pull_request:
-    branches: [main]
-    # Retargeting an existing PR changes its base via the `edited` activity.
-    # Include it so a PR moved to main reports the required checks.
+    # Stacked PRs target earlier branches, not `main`, so there is no base
+    # filter here. `edited` also covers a PR retargeted after the stack lands.
     types: [opened, synchronize, reopened, edited, ready_for_review]
   workflow_dispatch:
 
