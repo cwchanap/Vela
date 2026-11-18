@@ -409,8 +409,10 @@ test.describe('Vela API E2E Tests', () => {
         method: 'OPTIONS',
       });
 
-      expect(response.status).toBe(200);
-      expect(response.headers.get('Access-Control-Allow-Origin')).toBe('*');
+      // corsMiddleware answers preflight with 204 and only echoes an allowed
+      // Origin — never a wildcard.
+      expect(response.status).toBe(204);
+      expect(response.headers.get('Access-Control-Allow-Origin')).toBeNull();
       expect(response.headers.get('Access-Control-Allow-Methods')).toContain('GET');
       expect(response.headers.get('Access-Control-Allow-Methods')).toContain('POST');
     });
@@ -420,8 +422,8 @@ test.describe('Vela API E2E Tests', () => {
         method: 'OPTIONS',
       });
 
-      expect(response.status).toBe(200);
-      expect(response.headers.get('Access-Control-Allow-Origin')).toBe('*');
+      expect(response.status).toBe(204);
+      expect(response.headers.get('Access-Control-Allow-Origin')).toBeNull();
       expect(response.headers.get('Access-Control-Allow-Methods')).toContain('POST');
     });
   });

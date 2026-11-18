@@ -390,8 +390,16 @@ test.describe('Chat model picker and cache reminder - desktop (1280px)', () => {
     );
     expect(assistantSave.status()).toBe(200);
     // Awaiting the body is the completion barrier: the save response must be
-    // fully received before reloading.
-    await expect(assistantSave.json()).resolves.toEqual({ ok: true });
+    // fully received before reloading. Assistant saves always echo the stored
+    // cache evidence (`lastLlmAt`, null when none), per the API contract.
+    const assistantSaveBody = (await assistantSave.json()) as {
+      ok: boolean;
+      lastLlmAt: number | null;
+    };
+    expect(assistantSaveBody.ok).toBe(true);
+    expect(
+      assistantSaveBody.lastLlmAt === null || typeof assistantSaveBody.lastLlmAt === 'number',
+    ).toBe(true);
 
     // The persisted choice survives a reload and is restored on selection.
     await page.reload();
