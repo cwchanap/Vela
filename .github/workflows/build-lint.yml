@@ -88,6 +88,7 @@ jobs:
           require_marker apps/vela/dist/spa 'us-east-1_ciPlaceholder' 'Web'
           require_marker apps/vela-mobile/dist/spa 'https://example.invalid/api/' 'Mobile'
           require_marker apps/vela-mobile/dist/spa 'us-east-1_ciPlaceholder' 'Mobile'
+          require_marker apps/vela-mobile/dist/spa 'ci-mobile-client-sentinel' 'Mobile'
 
       - name: Install Playwright Browsers
         run: bunx playwright install --with-deps chromium
