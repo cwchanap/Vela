@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { spawnSync } from 'node:child_process';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -175,6 +176,124 @@ describe('runM1FoundationVerification (automated)', () => {
     } finally {
       await rm(evidenceDir, { recursive: true, force: true });
     }
+  });
+});
+
+const PRODUCTION_ENV_FILE = [
+  'VITE_MOBILE_API_URL=https://file.example/api/',
+  'VITE_COGNITO_USER_POOL_ID=us-east-1_pool',
+  'VITE_COGNITO_MOBILE_USER_POOL_CLIENT_ID=clientid',
+  'VITE_COGNITO_OAUTH_DOMAIN=auth.example',
+  'VITE_AWS_REGION=us-east-1',
+].join('\n');
+
+describe('runM1FoundationVerification (standalone CLI env reader)', () => {
+  it('fills the gate environment from .env.production when process env omits the keys', async () => {
+    const repoRoot = await mkdtemp(join(tmpdir(), 'vela-repo-'));
+    const evidenceDir = await mkdtemp(join(tmpdir(), 'vela-ev-'));
+    await mkdir(join(repoRoot, 'apps/vela-mobile'), { recursive: true });
+    await writeFile(join(repoRoot, 'apps/vela-mobile/.env.production'), `${PRODUCTION_ENV_FILE}\n`);
+    const gateEnv: Array<Record<string, string>> = [];
+    const deps = fakeDeps({
+      repoRoot,
+      env: {},
+      runCommand: async (spec) => {
+        gateEnv.push(spec.env!);
+        return { exitCode: 0, stdout: '', stderr: '' };
+      },
+    });
+    try {
+      const manifest = onlyManifest(
+        await runM1FoundationVerification(parseM1Arguments(['--evidence-dir', evidenceDir]), deps),
+      );
+      expect(manifest.outcome).toBe('passed');
+      expect(gateEnv[0]!.VITE_MOBILE_API_URL).toBe('https://file.example/api/');
+      expect(gateEnv[0]!.VITE_COGNITO_USER_POOL_ID).toBe('us-east-1_pool');
+    } finally {
+      await rm(repoRoot, { recursive: true, force: true });
+      await rm(evidenceDir, { recursive: true, force: true });
+    }
+  });
+
+  it('ignores .env.local when CI is set (generated .env.production wins)', async () => {
+    const repoRoot = await mkdtemp(join(tmpdir(), 'vela-repo-'));
+    const evidenceDir = await mkdtemp(join(tmpdir(), 'vela-ev-'));
+    await mkdir(join(repoRoot, 'apps/vela-mobile'), { recursive: true });
+    await writeFile(join(repoRoot, 'apps/vela-mobile/.env.production'), `${PRODUCTION_ENV_FILE}\n`);
+    await writeFile(
+      join(repoRoot, 'apps/vela-mobile/.env.local'),
+      'VITE_MOBILE_API_URL=https://local.example/api/\n',
+    );
+    const gateEnv: Array<Record<string, string>> = [];
+    const deps = fakeDeps({
+      repoRoot,
+      env: { CI: 'true' },
+      runCommand: async (spec) => {
+        gateEnv.push(spec.env!);
+        return { exitCode: 0, stdout: '', stderr: '' };
+      },
+    });
+    try {
+      await runM1FoundationVerification(parseM1Arguments(['--evidence-dir', evidenceDir]), deps);
+      expect(gateEnv[0]!.VITE_MOBILE_API_URL).toBe('https://file.example/api/');
+    } finally {
+      await rm(repoRoot, { recursive: true, force: true });
+      await rm(evidenceDir, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects when no source provides the complete mobile configuration', async () => {
+    const repoRoot = await mkdtemp(join(tmpdir(), 'vela-repo-'));
+    const evidenceDir = await mkdtemp(join(tmpdir(), 'vela-ev-'));
+    const deps = fakeDeps({
+      repoRoot,
+      env: {},
+      runCommand: async () => {
+        throw new Error('no gate should run with incomplete configuration');
+      },
+    });
+    try {
+      await expect(
+        runM1FoundationVerification(parseM1Arguments(['--evidence-dir', evidenceDir]), deps),
+      ).rejects.toThrow('Mobile build configuration incomplete');
+    } finally {
+      await rm(repoRoot, { recursive: true, force: true });
+      await rm(evidenceDir, { recursive: true, force: true });
+    }
+  });
+
+  it('keeps an explicitly empty process override empty (does not fall back to the file)', async () => {
+    const repoRoot = await mkdtemp(join(tmpdir(), 'vela-repo-'));
+    const evidenceDir = await mkdtemp(join(tmpdir(), 'vela-ev-'));
+    await mkdir(join(repoRoot, 'apps/vela-mobile'), { recursive: true });
+    await writeFile(join(repoRoot, 'apps/vela-mobile/.env.production'), `${PRODUCTION_ENV_FILE}\n`);
+    const gateEnv: Array<Record<string, string>> = [];
+    const deps = fakeDeps({
+      repoRoot,
+      env: { VITE_MOBILE_API_URL: '' },
+      runCommand: async (spec) => {
+        gateEnv.push(spec.env!);
+        return { exitCode: 0, stdout: '', stderr: '' };
+      },
+    });
+    try {
+      await runM1FoundationVerification(parseM1Arguments(['--evidence-dir', evidenceDir]), deps);
+      expect(gateEnv[0]!.VITE_MOBILE_API_URL).toBe('');
+    } finally {
+      await rm(repoRoot, { recursive: true, force: true });
+      await rm(evidenceDir, { recursive: true, force: true });
+    }
+  });
+
+  it('starts standalone under the Bun runtime', () => {
+    const mobileRoot = process.cwd();
+    const result = spawnSync('bun', ['scripts/verify-m1-foundation.mjs', '--bogus'], {
+      cwd: mobileRoot,
+      encoding: 'utf8',
+      timeout: 30_000,
+    });
+    expect(result.status).toBe(2);
+    expect(result.stderr).toContain('Invalid M1 foundation verification arguments');
   });
 });
 

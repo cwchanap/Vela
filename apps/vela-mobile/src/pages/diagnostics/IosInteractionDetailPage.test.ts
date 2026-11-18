@@ -3,7 +3,7 @@ import { QLayout, QPageContainer, Quasar } from 'quasar';
 import { defineComponent } from 'vue';
 import { createMemoryHistory, createRouter } from 'vue-router';
 import { describe, expect, it } from 'vitest';
-import { mobileLifecycleState, resetMobileLifecycleForTests } from 'src/services/mobile-lifecycle';
+import { mobileLifecycleState, resetMobileLifecycleForTests } from '@/services/mobile-lifecycle';
 import IosInteractionDetailPage from './IosInteractionDetailPage.vue';
 
 describe('IosInteractionDetailPage', () => {

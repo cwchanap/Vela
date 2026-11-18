@@ -1,6 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
-import { loadMobileBuildEnv, validateMobileBuildEnv } from './validate-mobile-api-url';
+import { loadMobileCliEnv } from './mobile-cli-env';
+import { validateMobileBuildEnv } from './validate-mobile-api-url';
 
 const CDK_OUTPUT_KEYS = {
   mobileApiUrl: 'MobileApiURL',
@@ -110,11 +111,12 @@ function normalizeMobileApiUrl(value: unknown): string | undefined {
  */
 export async function verifyDeployedConfig(options: VerifyOptions): Promise<DeployedConfig> {
   // Use process.env when no explicit override is given so the verifier sees
-  // the same Vite precedence the actual build uses: existing process.env
-  // values win over .env files. Passing {} would ignore shell/CI overrides,
-  // letting the verifier pass against .env.production while the build uses
-  // different VITE_* values from the environment.
-  const loaded = loadMobileBuildEnv('production', options.mobileRoot, options.env ?? process.env);
+  // direct shell/CI overrides ahead of generated .env files. Passing {} would
+  // ignore those overrides, letting the verifier pass against .env.production
+  // while the build uses different VITE_* values from the environment. This
+  // standalone reader is not authoritative for compiled values — Quasar's
+  // resolved define is.
+  const loaded = loadMobileCliEnv(options.mobileRoot, options.env ?? process.env);
 
   // Enforce the full build-time contract (valid URL, host-only OAuth domain,
   // matching pool region, no whitespace) before comparing against deployed

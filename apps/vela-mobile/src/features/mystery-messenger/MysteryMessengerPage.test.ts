@@ -2,12 +2,12 @@ import { mount, type VueWrapper } from '@vue/test-utils';
 import { QLayout, QPageContainer, Quasar } from 'quasar';
 import { defineComponent, nextTick, reactive, ref, type Ref } from 'vue';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { HtmlAudioPlayer } from 'src/audio/html-audio-player';
-import type { MobileAuthCoordinator } from 'src/auth/mobile-auth-contract';
-import type { MobileFeatureSessionStatus } from 'src/auth/mobile-feature-session-status';
-import { MOBILE_AUTH_KEY } from 'src/services/mobile-auth';
-import { MOBILE_TTS_SERVICE_KEY } from 'src/services/mobile-services';
-import type { MobileTtsService } from 'src/services/mobile-tts';
+import { HtmlAudioPlayer } from '@/audio/html-audio-player';
+import type { MobileAuthCoordinator } from '@/auth/mobile-auth-contract';
+import type { MobileFeatureSessionStatus } from '@/auth/mobile-feature-session-status';
+import { MOBILE_AUTH_KEY } from '@/services/mobile-auth';
+import { MOBILE_TTS_SERVICE_KEY } from '@/services/mobile-services';
+import type { MobileTtsService } from '@/services/mobile-tts';
 import { MESSAGE_THAT_ARRIVED_TOMORROW_CHAPTER as chapter } from './content';
 import type {
   MysteryMissedPhraseRecapItem,

@@ -1,11 +1,6 @@
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import capacitorConfig from '../../src-capacitor/capacitor.config.ts';
 import { safeAreaPolicy } from './safe-area-policy';
-
-const capacitorConfig = JSON.parse(
-  readFileSync(resolve(__dirname, '../../src-capacitor/capacitor.config.json'), 'utf8'),
-) as { ios?: { contentInset?: string } };
 
 describe('safeAreaPolicy', () => {
   it('matches the native content-inset configuration', () => {

@@ -1,7 +1,7 @@
 import type { PluginListenerHandle } from '@capacitor/core';
 import { focusManager } from '@tanstack/vue-query';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { mobileLifecycleState, resetMobileLifecycleForTests } from 'src/services/mobile-lifecycle';
+import { mobileLifecycleState, resetMobileLifecycleForTests } from '@/services/mobile-lifecycle';
 import { registerCapacitorLifecycle, resetCapacitorLifecycleForTests } from './capacitor-lifecycle';
 
 describe('Capacitor lifecycle', () => {

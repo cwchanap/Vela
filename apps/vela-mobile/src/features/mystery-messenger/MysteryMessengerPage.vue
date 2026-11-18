@@ -80,9 +80,9 @@
 
 <script setup lang="ts">
 import { computed, inject, onBeforeUnmount, ref } from 'vue';
-import { HtmlAudioPlayer } from 'src/audio/html-audio-player';
-import { MOBILE_AUTH_KEY } from 'src/services/mobile-auth';
-import { MOBILE_TTS_SERVICE_KEY } from 'src/services/mobile-services';
+import { HtmlAudioPlayer } from '@/audio/html-audio-player';
+import { MOBILE_AUTH_KEY } from '@/services/mobile-auth';
+import { MOBILE_TTS_SERVICE_KEY } from '@/services/mobile-services';
 import MysteryChoiceComposer from './components/MysteryChoiceComposer.vue';
 import MysteryMissedPhraseRecap from './components/MysteryMissedPhraseRecap.vue';
 import MysteryResponseBuildComposer from './components/MysteryResponseBuildComposer.vue';

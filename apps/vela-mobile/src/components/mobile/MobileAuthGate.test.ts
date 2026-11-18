@@ -14,6 +14,7 @@ import {
   captureConsoleCalls,
   createSecretLeakAssertions,
   searchable,
+  sessionStorageEmptySnapshot,
   storageSnapshot,
 } from '../../test/secret-leak-helpers';
 import MobileAuthGate, { shouldBypassMobileAuth } from './MobileAuthGate.vue';
@@ -373,7 +374,7 @@ describe('MobileAuthGate', () => {
       expect(searchable(consoleCapture.calls())).not.toContain('SECRET-');
       expect(wrapper.text()).not.toContain('SECRET-');
       expect(storageSnapshot(window.localStorage)).toBe('');
-      expect(storageSnapshot(window.sessionStorage)).toBe('');
+      expect(sessionStorageEmptySnapshot()).toBe('');
     } finally {
       wrapper?.unmount();
       consoleCapture.restore();

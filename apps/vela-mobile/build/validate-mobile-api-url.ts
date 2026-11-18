@@ -1,19 +1,25 @@
-import { existsSync, readFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { parse } from 'dotenv';
-import { expand } from 'dotenv-expand';
 import {
   containsWhitespace,
   hasMatchingUserPoolRegion,
   isValidHostOnlyDomain,
 } from '../src/auth/config-validators';
 
-type VitePluginLike = {
-  name: string;
-  configResolved: (config: { mode: string }) => void;
+const IMPORT_META_ENV_PREFIX = 'import.meta.env.';
+const APP_VERSION_DEFINE_KEY = `${IMPORT_META_ENV_PREFIX}VITE_APP_VERSION`;
+
+type ResolvedMobileConfigLike = {
+  mode: string;
+  define: Record<string, unknown>;
 };
 
-const mobileBuildEnvKeys = [
+type VitePluginLike = {
+  name: string;
+  configResolved: (config: ResolvedMobileConfigLike) => void;
+};
+
+export const mobileBuildEnvKeys = [
   'VITE_MOBILE_API_URL',
   'VITE_COGNITO_USER_POOL_ID',
   'VITE_COGNITO_MOBILE_USER_POOL_CLIENT_ID',
@@ -22,7 +28,7 @@ const mobileBuildEnvKeys = [
 ] as const;
 
 type MobileBuildEnvKey = (typeof mobileBuildEnvKeys)[number];
-type MobileBuildEnv = Partial<Record<MobileBuildEnvKey, string>>;
+export type MobileBuildEnv = Partial<Record<MobileBuildEnvKey, string>>;
 
 // Explicit presence-checked Cognito keys. Decoupled from `mobileBuildEnvKeys`
 // ordering so reordering the build-env list cannot silently change which keys
@@ -34,34 +40,82 @@ const requiredCognitoKeys = [
   'VITE_AWS_REGION',
 ] as const satisfies readonly MobileBuildEnvKey[];
 
-export function loadMobileBuildEnv(
-  mode: string,
-  rootDir: string,
-  processEnv: Record<string, string | undefined> = process.env,
-): MobileBuildEnv {
-  const parsed: Record<string, string> = {};
-  const envFiles = ['.env', '.env.local', `.env.${mode}`, `.env.${mode}.local`];
+type DecodedDefineEntry =
+  | { kind: 'string'; value: string }
+  | { kind: 'non-string'; literal: string }
+  | { kind: 'missing' };
 
-  for (const envFile of envFiles) {
-    const envPath = resolve(rootDir, envFile);
-    if (existsSync(envPath)) {
-      Object.assign(parsed, parse(readFileSync(envPath)));
-    }
+/**
+ * Decode one required mobile client value from `config.define`. Quasar v3
+ * stores JSON-encoded strings (`"https://…"`), raw `true`/`false`, raw
+ * numeric literals, and raw `null`. Only a resolved string is valid for these
+ * required string settings: coercing a boolean/number would let the build
+ * guard pass a configuration the client bundle stores with a non-string type.
+ */
+function decodeRequiredStringDefine(value: unknown): DecodedDefineEntry {
+  if (value === undefined) return { kind: 'missing' };
+  if (value === null || typeof value === 'boolean' || typeof value === 'number') {
+    return { kind: 'non-string', literal: String(value) };
   }
+  if (typeof value !== 'string') return { kind: 'missing' };
 
-  const expandedProcessEnv = Object.fromEntries(
-    Object.entries(processEnv).filter((entry): entry is [string, string] => entry[1] !== undefined),
-  );
-  const expanded = expand({ parsed, processEnv: expandedProcessEnv }).parsed ?? {};
+  const trimmed = value.trim();
+  if (trimmed === '') return { kind: 'string', value: '' };
+  // Quasar only emits raw literals for booleans/numbers/null; ordinary
+  // strings are JSON-encoded. Any unquoted value is therefore not a string.
+  if (!trimmed.startsWith('"')) return { kind: 'non-string', literal: trimmed };
 
-  // Match Vite's precedence exactly: an existing process.env key wins even
-  // when its value is empty, so validation reports it as missing instead of
-  // silently falling back to a lower-precedence .env file.
+  try {
+    const parsed: unknown = JSON.parse(trimmed);
+    return typeof parsed === 'string'
+      ? { kind: 'string', value: parsed }
+      : { kind: 'non-string', literal: trimmed };
+  } catch {
+    return { kind: 'missing' };
+  }
+}
+
+/**
+ * Decode the resolved app version. This preserves the existing version
+ * contract: string literals are used, raw boolean/number literals are
+ * stringified for the semver check, and `null`/absent falls through to
+ * `package.json.version`.
+ */
+function decodeVersionDefine(value: unknown): string | undefined {
+  if (typeof value === 'boolean' || typeof value === 'number') return String(value);
+  if (typeof value !== 'string') return undefined;
+  const trimmed = value.trim();
+  if (trimmed === '') return '';
+  if (trimmed === 'null') return undefined;
+  if (!trimmed.startsWith('"')) return trimmed;
+  try {
+    const parsed: unknown = JSON.parse(trimmed);
+    return typeof parsed === 'string' ? parsed : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Read the mobile client values from the Quasar-resolved Vite `define` map.
+ * This is exactly what the client bundle receives, so build-time validation
+ * and native version sync cannot drift from the compiled app. Non-string
+ * resolved literals are rejected here, at the adapter boundary, before the
+ * pure string-only validator runs.
+ */
+export function mobileEnvFromDefine(
+  define: Record<string, unknown> | undefined,
+): MobileBuildEnv {
   return Object.fromEntries(
-    mobileBuildEnvKeys.map((key) => [
-      key,
-      Object.prototype.hasOwnProperty.call(processEnv, key) ? processEnv[key] : expanded[key],
-    ]),
+    mobileBuildEnvKeys.map((key) => {
+      const decoded = decodeRequiredStringDefine(define?.[`${IMPORT_META_ENV_PREFIX}${key}`]);
+      if (decoded.kind === 'non-string') {
+        throw new Error(
+          `${key} must resolve to a string in the client bundle, but Quasar resolved ${decoded.literal}. Set it to a plain string value in the build environment.`,
+        );
+      }
+      return [key, decoded.kind === 'string' ? decoded.value : undefined];
+    }),
   ) as MobileBuildEnv;
 }
 
@@ -73,9 +127,7 @@ function isMissingEnvValue(value: string | undefined): boolean {
  * Validate that `VITE_MOBILE_API_URL` is a present, valid absolute http(s) URL
  * with a hostname. Throws with a descriptive message otherwise.
  *
- * Extracted from the inline plugin that lived in `quasar.config.ts` so the
- * validation logic is unit-testable without shelling out to a Vite build. The
- * runtime mirror (`src/config/index.ts` `validateConfig`) covers the same
+ * The runtime mirror (`src/config/index.ts` `validateConfig`) covers the same
  * contract at app boot; this function covers it at build time, catching a
  * missing/malformed `.env.production` before the app ships rather than at
  * first launch in a native WebView.
@@ -83,11 +135,11 @@ function isMissingEnvValue(value: string | undefined): boolean {
  * The build-time and runtime contracts must agree in production. The runtime
  * `validateConfig` rejects `http:` when `PROD` is true (ATS enforcement
  * depends on this — a Release build must not load over HTTP). This function
- * therefore takes a `requireHttps` flag that the production-only Vite plugin
- * sets to `true`; dev-mode callers leave it unset so local/simulator HTTP
- * URLs continue to pass.
+ * therefore takes a `requireHttps` flag that the production-only plugin sets
+ * to `true`; dev-mode callers leave it unset so local/simulator HTTP URLs
+ * continue to pass.
  *
- * @param url The merged `VITE_MOBILE_API_URL` value Vite would inject.
+ * @param url The Quasar-resolved `VITE_MOBILE_API_URL` value.
  * @param options.requireHttps When true, reject `http:` URLs. Set by the
  *   production build plugin so a misconfigured HTTP release fails at build
  *   time instead of producing a distributable that crashes at boot.
@@ -98,10 +150,8 @@ export function validateMobileApiUrl(
 ): void {
   if (!url || (typeof url === 'string' && url.trim() === '')) {
     throw new Error(
-      'VITE_MOBILE_API_URL is missing. Vite loads .env, .env.local, ' +
-        '.env.production, and .env.production.local (in that order, ' +
-        'with existing process.env values winning). Set it in one of ' +
-        'those, or export VITE_MOBILE_API_URL. Run ' +
+      'VITE_MOBILE_API_URL is missing. Set it in apps/vela-mobile/.env.production ' +
+        'or export VITE_MOBILE_API_URL before building. Run ' +
         'packages/cdk/scripts/inject-env.ts after cdk:deploy to ' +
         'generate .env.production.',
     );
@@ -168,32 +218,104 @@ export function validateMobileBuildEnv(env: MobileBuildEnv): void {
 }
 
 /**
- * Vite-compatible plugin that validates `VITE_MOBILE_API_URL` at production
- * build time without importing Vite during Quasar's postinstall preparation.
- *
- * - Dev mode: no-op (the runtime `validateConfig` warns instead).
- * - `MOBILE_SKIP_ENV_VALIDATION=true`: bypass. Intended for CI pipelines that
- *   run `inject-env.ts` (or otherwise guarantee `.env.production`) before the
- *   build and therefore already exercise the validation path. Default:
- *   enforce, so a clean checkout without `.env.production` fails at build time
- *   rather than at app launch.
- *
- * The loader mirrors Vite's `.env` file order and process.env precedence using
- * dependencies already declared by `@vela/mobile`. Keeping this module free of
- * direct Vite imports is required because Quasar evaluates it from the mobile
- * workspace's postinstall hook before the monorepo install has completed.
- *
- * @param rootDir The project root containing `.env*` files. Pass the
- *   `quasar.config.ts` directory (Vite resolves `.env` relative to this).
+ * Strips semver prerelease (`-x.y.z…`) and build metadata (`+x.y.z…`) from a
+ * version string, returning the `major.minor.patch` prefix. iOS
+ * `MARKETING_VERSION` (CFBundleShortVersionString) only accepts three numeric
+ * dot segments — Apple rejects prerelease/build suffixes — so any resolved
+ * version carrying them must be reduced before being written to the pbxproj.
  */
-export function validateMobileApiUrlPlugin(rootDir: string): VitePluginLike {
+function stripSemverMetadata(version: string): string {
+  const buildIdx = version.indexOf('+');
+  const withoutBuild = buildIdx === -1 ? version : version.slice(0, buildIdx);
+  const preIdx = withoutBuild.indexOf('-');
+  return preIdx === -1 ? withoutBuild : withoutBuild.slice(0, preIdx);
+}
+
+/**
+ * Resolve the native marketing version from the Quasar-resolved client
+ * `VITE_APP_VERSION` when it is nonempty, otherwise the mobile package
+ * version. Returns three numeric segments or throws.
+ */
+function resolveMarketingVersion(
+  rootDir: string,
+  define: Record<string, unknown> | undefined,
+): string {
+  const defineVersion = decodeVersionDefine(define?.[APP_VERSION_DEFINE_KEY]);
+  const packageVersion = JSON.parse(
+    readFileSync(resolve(rootDir, 'package.json'), 'utf8'),
+  ).version as string | undefined;
+  const version =
+    defineVersion !== undefined && defineVersion.trim() !== ''
+      ? defineVersion
+      : (packageVersion ?? '');
+
+  const marketingVersion = stripSemverMetadata(version);
+  if (!marketingVersion || !/^\d+\.\d+\.\d+$/.test(marketingVersion)) {
+    throw new Error(
+      `Resolved version is missing or not semver-like: "${version}"` +
+        ` (resolved define=${defineVersion ?? '<unset>'}` +
+        `, package.json.version=${packageVersion ?? '<unset>'})`,
+    );
+  }
+  return marketingVersion;
+}
+
+/**
+ * Sync `MARKETING_VERSION` in the committed Xcode project from the resolved
+ * build define. Only Capacitor builds call this; SPA builds never touch native
+ * metadata. The write is skipped when the file already carries the value.
+ */
+function syncCapacitorMarketingVersion(
+  rootDir: string,
+  define: Record<string, unknown> | undefined,
+): void {
+  const marketingVersion = resolveMarketingVersion(rootDir, define);
+  const pbxprojPath = resolve(rootDir, 'src-capacitor/ios/App/App.xcodeproj/project.pbxproj');
+  const original = readFileSync(pbxprojPath, 'utf8');
+  const pattern = /MARKETING_VERSION = [^;]+;/g;
+  const matches = original.match(pattern);
+  if (!matches) {
+    throw new Error(`No MARKETING_VERSION entries found in ${pbxprojPath}`);
+  }
+
+  const updated = original.replace(pattern, `MARKETING_VERSION = ${marketingVersion};`);
+  if (updated === original) {
+    console.info(`iOS MARKETING_VERSION already at ${marketingVersion}; no change.`);
+    return;
+  }
+
+  writeFileSync(pbxprojPath, updated);
+  console.info(
+    `Synced iOS MARKETING_VERSION -> ${marketingVersion} (${matches.length} entries in project.pbxproj).`,
+  );
+}
+
+/**
+ * Quasar/Vite plugin that enforces the production mobile env contract and,
+ * for Capacitor builds, keeps the native MARKETING_VERSION in sync. It reads
+ * the resolved `config.define` values in `configResolved` — the same literals
+ * the client bundle receives — so validation cannot drift from the app and
+ * no separate dotenv parser is needed.
+ *
+ * - Validation: production mode only. `MOBILE_SKIP_ENV_VALIDATION=true`
+ *   bypasses it for pipelines that already guarantee the configuration.
+ * - Native version sync: Capacitor mode only, in development and production,
+ *   independent of the validation bypass.
+ */
+export function validateMobileApiUrlPlugin(options: {
+  rootDir: string;
+  isCapacitor: boolean;
+}): VitePluginLike {
   return {
     name: 'validate-mobile-api-url',
-    configResolved({ mode }) {
-      if (mode !== 'production') return;
+    configResolved(config) {
+      if (options.isCapacitor) {
+        syncCapacitorMarketingVersion(options.rootDir, config.define);
+      }
+      if (config.mode !== 'production') return;
       if (process.env.MOBILE_SKIP_ENV_VALIDATION === 'true') return;
 
-      validateMobileBuildEnv(loadMobileBuildEnv(mode, rootDir));
+      validateMobileBuildEnv(mobileEnvFromDefine(config.define));
     },
   };
 }

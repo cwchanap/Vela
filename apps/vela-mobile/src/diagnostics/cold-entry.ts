@@ -3,10 +3,10 @@ import {
   DIAGNOSTIC_COLD_ENTRY_KEY,
   IOS_DIAGNOSTIC_DETAIL_PATH,
   IOS_DIAGNOSTIC_ROOT_PATH,
-} from 'src/diagnostics/ios-interaction-contract';
-import { replaceColdMobileRoute, type MobileNavigationResult } from 'src/router/mobile-navigation';
+} from '@/diagnostics/ios-interaction-contract';
+import { replaceColdMobileRoute, type MobileNavigationResult } from '@/router/mobile-navigation';
 
-export { DIAGNOSTIC_COLD_ENTRY_KEY } from 'src/diagnostics/ios-interaction-contract';
+export { DIAGNOSTIC_COLD_ENTRY_KEY } from '@/diagnostics/ios-interaction-contract';
 
 const allowedDiagnosticEntries = new Set([IOS_DIAGNOSTIC_ROOT_PATH, IOS_DIAGNOSTIC_DETAIL_PATH]);
 

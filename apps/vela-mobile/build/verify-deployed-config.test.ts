@@ -1,8 +1,17 @@
 import { describe, expect, it, vi } from 'vitest';
+import { spawnSync } from 'node:child_process';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { runCli, verifyDeployedConfig } from './verify-deployed-config';
+
+const validProductionEnvFile = [
+  'VITE_MOBILE_API_URL=https://vela.example/api/',
+  'VITE_COGNITO_USER_POOL_ID=us-east-1_POOL',
+  'VITE_COGNITO_MOBILE_USER_POOL_CLIENT_ID=abc',
+  'VITE_COGNITO_OAUTH_DOMAIN=auth.example',
+  'VITE_AWS_REGION=us-east-1',
+].join('\n');
 
 describe('verifyDeployedConfig', () => {
   it('passes when .env.production identifiers match cdk-outputs.json', async () => {
@@ -142,6 +151,63 @@ describe('verifyDeployedConfig', () => {
       await rm(dir, { recursive: true, force: true });
     }
   });
+
+  // The standalone reader must not adopt `.env.local` in CI: a developer's
+  // local file is absent on CI runners, and a stale local override must not
+  // mask the generated .env.production configuration.
+  it('ignores .env.local when CI is set', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'vela-cfg-'));
+    try {
+      await writeFile(join(dir, '.env.production'), validProductionEnvFile);
+      await writeFile(join(dir, '.env.local'), 'VITE_COGNITO_USER_POOL_ID=us-east-1_LOCAL\n');
+      const result = await verifyDeployedConfig({
+        mobileRoot: dir,
+        env: {
+          CI: 'true',
+          VITE_MOBILE_API_URL: 'https://vela.example/api/',
+          VITE_COGNITO_USER_POOL_ID: 'us-east-1_POOL',
+          VITE_COGNITO_MOBILE_USER_POOL_CLIENT_ID: 'abc',
+          VITE_COGNITO_OAUTH_DOMAIN: 'auth.example',
+          VITE_AWS_REGION: 'us-east-1',
+        },
+      });
+      expect(result.cognitoUserPoolId).toBe('us-east-1_POOL');
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('fails when no env source provides the required configuration', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'vela-cfg-'));
+    try {
+      await expect(verifyDeployedConfig({ mobileRoot: dir, env: {} })).rejects.toThrow(
+        /VITE_MOBILE_API_URL is missing/u,
+      );
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('fails on an explicitly empty process override even when .env.production is valid', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'vela-cfg-'));
+    try {
+      await writeFile(join(dir, '.env.production'), validProductionEnvFile);
+      await expect(
+        verifyDeployedConfig({
+          mobileRoot: dir,
+          env: {
+            VITE_MOBILE_API_URL: '',
+            VITE_COGNITO_USER_POOL_ID: 'us-east-1_POOL',
+            VITE_COGNITO_MOBILE_USER_POOL_CLIENT_ID: 'abc',
+            VITE_COGNITO_OAUTH_DOMAIN: 'auth.example',
+            VITE_AWS_REGION: 'us-east-1',
+          },
+        }),
+      ).rejects.toThrow(/VITE_MOBILE_API_URL is missing/u);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
 });
 
 describe('runCli', () => {
@@ -200,5 +266,18 @@ describe('runCli', () => {
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
+  });
+
+  // The CLI must still start standalone (no Vite/Quasar/dotenv import graph):
+  // argument validation exits 2 before any env/file access.
+  it('runs standalone under the Bun runtime', () => {
+    const mobileRoot = process.cwd();
+    const result = spawnSync('bun', ['build/verify-deployed-config.ts', '--bogus'], {
+      cwd: mobileRoot,
+      encoding: 'utf8',
+      timeout: 30_000,
+    });
+    expect(result.status).toBe(2);
+    expect(result.stderr).toContain('Unknown argument: --bogus');
   });
 });

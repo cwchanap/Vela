@@ -1,6 +1,6 @@
 import { createQueryClient } from '@vela/common';
 import { VueQueryPlugin } from '@tanstack/vue-query';
-import { defineBoot } from '#q-app/wrappers';
+import { defineBoot } from '#q-app';
 
 export const mobileQueryClient = createQueryClient();
 

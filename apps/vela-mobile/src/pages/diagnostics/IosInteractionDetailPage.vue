@@ -36,13 +36,13 @@ import { useRoute, useRouter } from 'vue-router';
 import {
   IOS_DIAGNOSTIC_DETAIL_PATH,
   IOS_DIAGNOSTIC_ROOT_PATH,
-} from 'src/diagnostics/ios-interaction-contract';
+} from '@/diagnostics/ios-interaction-contract';
 import {
   enterMobileRoute,
   pushMobileRoute,
   type MobileNavigationResult,
-} from 'src/router/mobile-navigation';
-import { recordAppResume } from 'src/services/mobile-lifecycle';
+} from '@/router/mobile-navigation';
+import { recordAppResume } from '@/services/mobile-lifecycle';
 
 const route = useRoute();
 const router = useRouter();

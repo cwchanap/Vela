@@ -36,24 +36,23 @@ jobs:
       - name: Run linter
         run: bun run lint
 
+      - name: Write synthetic production env files
+        # These files mirror the VITE_* key sets that inject-env.ts generates
+        # after a CDK deploy. CI has no cdk-outputs.json, so the same shape is
+        # written with reserved sentinels. The mobile build reads
+        # .env.production rather than process-env placeholders, so a regression
+        # in Quasar's production env-file loading fails here instead of in
+        # deploy.yml.
+        run: |
+          cat > apps/vela-mobile/.env.production <<'EOF'
+          VITE_MOBILE_API_URL=https://example.invalid/api/
+          VITE_COGNITO_USER_POOL_ID=us-east-1_ciPlaceholder
+          VITE_COGNITO_MOBILE_USER_POOL_CLIENT_ID=ci-mobile-client-sentinel
+          VITE_COGNITO_OAUTH_DOMAIN=ci-placeholder.auth.us-east-1.amazoncognito.com
+          VITE_AWS_REGION=us-east-1
+          EOF
+
       - name: Build frontend
-        # This workflow is a lint+build smoke test from a clean checkout, not
-        # a deployment: there is no cdk-outputs.json to feed inject-env.ts, so
-        # apps/vela-mobile/.env.production (gitignored) is absent. Rather than
-        # bypassing the build-time mobile env guard (MOBILE_SKIP_ENV_VALIDATION),
-        # set five harmless placeholders that satisfy the complete mobile build
-        # contract (API URL, pool, client, OAuth domain, and region) while the
-        # reserved example.invalid API hostname remains unreachable.
-        # This exercises the normal validation path so a regression in env-file
-        # loading or plugin registration fails PR CI instead of slipping through
-        # to the release build. The guard still fires for real release builds
-        # that run inject-env.ts (which writes a reachable URL).
-        env:
-          VITE_MOBILE_API_URL: 'https://example.invalid/api/'
-          VITE_COGNITO_USER_POOL_ID: us-east-1_ciPlaceholder
-          VITE_COGNITO_MOBILE_USER_POOL_CLIENT_ID: ci-mobile-client-id
-          VITE_COGNITO_OAUTH_DOMAIN: ci-placeholder.auth.us-east-1.amazoncognito.com
-          VITE_AWS_REGION: us-east-1
         run: bun run build
 
       - name: Build Lambda function
