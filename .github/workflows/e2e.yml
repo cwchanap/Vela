@@ -4,8 +4,9 @@ on:
   push:
     branches: [main]
   pull_request:
-    branches: [main]
-    types: [opened, synchronize, reopened, ready_for_review]
+    # Stacked PRs target earlier branches, not `main`, so there is no base
+    # filter here.
+    types: [opened, synchronize, reopened, edited, ready_for_review]
 
 # Only the latest e2e run per ref matters; superseded runs are safe to cancel
 # (no infrastructure state involved).
