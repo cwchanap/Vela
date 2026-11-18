@@ -1,11 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { flushPromises } from '@vue/test-utils';
-import { withQueryClient } from 'src/test-utils/withQueryClient';
+import { withQueryClient } from '@/test-utils/withQueryClient';
 
 const mockGetMyDictionaries = vi.fn();
 const mockDeleteDictionaryEntry = vi.fn();
 
-vi.mock('src/services/myDictionariesService', () => ({
+vi.mock('@/services/myDictionariesService', () => ({
   getMyDictionaries: mockGetMyDictionaries,
   deleteDictionaryEntry: mockDeleteDictionaryEntry,
 }));

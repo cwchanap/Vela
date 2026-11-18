@@ -1,7 +1,7 @@
 import { computed } from 'vue';
 import type { LlmProvider } from '@vela/common';
-import { useAuthStore } from 'src/stores/auth';
-import { confirmedServerKeyProviders } from 'src/utils/llmModelOptions';
+import { useAuthStore } from '@/stores/auth';
+import { confirmedServerKeyProviders } from '@/utils/llmModelOptions';
 import { useLlmCapabilitiesQuery } from './useLlmCapabilitiesQuery';
 
 export function useServerKeyProviders() {

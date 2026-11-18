@@ -162,4 +162,19 @@ describe('routes', () => {
       expect(['function', 'object']).toContain(componentType);
     });
   });
+
+  it('resolves every lazy route component import', { timeout: 30000 }, async () => {
+    const flattenRoutes = (routeRecords: any[]): any[] =>
+      routeRecords.flatMap((r) => [r, ...flattenRoutes((r.children as any[]) ?? [])]);
+
+    const lazyComponents = flattenRoutes(routes as any[])
+      .map((r) => r.component)
+      .filter((c): c is () => Promise<{ default: unknown }> => typeof c === 'function');
+
+    expect(lazyComponents.length).toBeGreaterThan(0);
+    const modules = await Promise.all(lazyComponents.map((loadComponent) => loadComponent()));
+    for (const module of modules) {
+      expect(module).toHaveProperty('default');
+    }
+  });
 });

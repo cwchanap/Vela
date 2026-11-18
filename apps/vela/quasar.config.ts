@@ -1,10 +1,27 @@
 // Configuration for your app
 // https://v2.quasar.dev/quasar-cli-vite/quasar-config-file
 
-import { defineConfig } from '#q-app/wrappers';
+import { defineConfig } from '#q-app';
 import { resolve } from 'node:path';
+import type { Plugin } from 'vite';
 
-export default defineConfig((/* ctx */) => {
+/*
+ * Rolldown treats zlibjs's UMD gunzip as ESM because it never references
+ * `module`/`exports`, so the UMD's top-level `this` becomes undefined and
+ * kuromoji initialization dies with `'Zlib' in undefined`. Binding the UMD
+ * factory to CommonJS `exports` also marks the file as CJS for Rolldown.
+ */
+const zlibjsCjsThisPlugin: Plugin = {
+  name: 'vela:zlibjs-cjs-this',
+  enforce: 'pre',
+  transform(code, id) {
+    if (id.endsWith('zlibjs/bin/gunzip.min.js')) {
+      return code.replace('}).call(this);', '}).call(exports);');
+    }
+  },
+};
+
+export default defineConfig((ctx) => {
   return {
     // https://v2.quasar.dev/quasar-cli-vite/prefetch-feature
     // preFetch: true,
@@ -38,10 +55,26 @@ export default defineConfig((/* ctx */) => {
         node: 'node20',
       },
 
+      alias: {
+        '@': resolve(__dirname, 'src'),
+        // Transitional: `src/components`, `src/pages` and `src/layouts` keep
+        // their `src/...` imports until the UI slice switches them to `@/`.
+        src: resolve(__dirname, 'src'),
+      },
+
       typescript: {
         strict: true,
         vueShim: true,
-        // extendTsConfig (tsConfig) {}
+        // Transitional: emit the `src/*` path mapping above so `vue-tsc`
+        // resolves the not-yet-migrated UI imports. Removed with the alias.
+        extendTsConfig(tsConfig) {
+          tsConfig.compilerOptions = tsConfig.compilerOptions || {};
+          tsConfig.compilerOptions.paths = {
+            ...tsConfig.compilerOptions.paths,
+            src: ['./../src'],
+            'src/*': ['./../src/*'],
+          };
+        },
       },
 
       vueRouterMode: 'history', // Use history mode for better SEO and UX
@@ -54,17 +87,9 @@ export default defineConfig((/* ctx */) => {
       publicPath: '/',
       // analyze: true, // Enable bundle analyzer when needed
       env: {
-        // Make environment variables available to the app
-        VITE_COGNITO_USER_POOL_ID: process.env.VITE_COGNITO_USER_POOL_ID,
-        VITE_COGNITO_USER_POOL_CLIENT_ID: process.env.VITE_COGNITO_USER_POOL_CLIENT_ID,
-        VITE_COGNITO_OAUTH_DOMAIN: process.env.VITE_COGNITO_OAUTH_DOMAIN,
-        VITE_COGNITO_REDIRECT_SIGN_IN: process.env.VITE_COGNITO_REDIRECT_SIGN_IN,
-        VITE_COGNITO_REDIRECT_SIGN_OUT: process.env.VITE_COGNITO_REDIRECT_SIGN_OUT,
-        VITE_AWS_REGION: process.env.VITE_AWS_REGION,
-        VITE_API_URL: process.env.VITE_API_URL,
-        VITE_APP_NAME: process.env.VITE_APP_NAME,
-        VITE_APP_VERSION: process.env.VITE_APP_VERSION,
-        VITE_DEV_MODE: process.env.VITE_DEV_MODE,
+        // Expose VITE_* vars from .env files and process.env to the client.
+        clientPrefix: 'VITE_',
+        file: ctx.prod ? '.env.production' : [],
       },
       // rawDefine: {}
       // ignorePublicFolder: true,
@@ -117,19 +142,19 @@ export default defineConfig((/* ctx */) => {
           };
         }
 
-        // Configure chunk splitting for better caching
-        if (
-          viteConf.build.rollupOptions.output &&
-          !Array.isArray(viteConf.build.rollupOptions.output)
-        ) {
-          viteConf.build.rollupOptions.output.manualChunks = {
-            vendor: ['vue', 'vue-router', 'pinia'],
-            quasar: ['quasar'],
-          };
-        }
-
         // Optimize chunk size
         viteConf.build.chunkSizeWarningLimit = 1000;
+
+        // Dev dependency optimization and the production build are separate
+        // Rolldown pipelines, so the zlibjs CJS fix is registered in both.
+        viteConf.plugins = viteConf.plugins || [];
+        viteConf.plugins.push(zlibjsCjsThisPlugin);
+        viteConf.optimizeDeps = viteConf.optimizeDeps || {};
+        viteConf.optimizeDeps.rolldownOptions = viteConf.optimizeDeps.rolldownOptions || {};
+        viteConf.optimizeDeps.rolldownOptions.plugins = [
+          viteConf.optimizeDeps.rolldownOptions.plugins,
+          zlibjsCjsThisPlugin,
+        ];
       },
       // viteVuePluginOptions: {},
 
@@ -187,14 +212,6 @@ export default defineConfig((/* ctx */) => {
       ],
     },
 
-    // https://v2.quasar.dev/quasar-cli-vite/quasar-config-file#test
-    test: {
-      vitest: {
-        globals: true,
-        environment: 'jsdom',
-      },
-    },
-
     // animations: 'all', // --- includes all animations
     // https://v2.quasar.dev/options/animations
     animations: [
@@ -209,114 +226,5 @@ export default defineConfig((/* ctx */) => {
       'zoomIn',
       'zoomOut',
     ],
-
-    // https://v2.quasar.dev/quasar-cli-vite/quasar-config-file#sourcefiles
-    // sourceFiles: {
-    //   rootComponent: 'src/App.vue',
-    //   router: 'src/router/index',
-    //   store: 'src/store/index',
-    //   pwaRegisterServiceWorker: 'src-pwa/register-service-worker',
-    //   pwaServiceWorker: 'src-pwa/custom-service-worker',
-    //   pwaManifestFile: 'src-pwa/manifest.json',
-    //   electronMain: 'src-electron/electron-main',
-    //   electronPreload: 'src-electron/electron-preload'
-    //   bexManifestFile: 'src-bex/manifest.json
-    // },
-
-    // https://v2.quasar.dev/quasar-cli-vite/developing-ssr/configuring-ssr
-    ssr: {
-      prodPort: 3000, // The default port that the production server should use
-      // (gets superseded if process.env.PORT is specified at runtime)
-
-      middlewares: [
-        'render', // keep this as last one
-      ],
-
-      // extendPackageJson (json) {},
-      // extendSSRWebserverConf (esbuildConf) {},
-
-      // manualStoreSerialization: true,
-      // manualStoreSsrContextInjection: true,
-      // manualStoreHydration: true,
-      // manualPostHydrationTrigger: true,
-
-      pwa: false,
-      // pwaOfflineHtmlFilename: 'offline.html', // do NOT use index.html as name!
-
-      // pwaExtendGenerateSWOptions (cfg) {},
-      // pwaExtendInjectManifestOptions (cfg) {}
-    },
-
-    // https://v2.quasar.dev/quasar-cli-vite/developing-pwa/configuring-pwa
-    pwa: {
-      workboxMode: 'GenerateSW', // 'GenerateSW' or 'InjectManifest'
-      // swFilename: 'sw.js',
-      // manifestFilename: 'manifest.json',
-      // extendManifestJson (json) {},
-      // useCredentialsForManifestTag: true,
-      // injectPwaMetaTags: false,
-      // extendPWACustomSWConf (esbuildConf) {},
-      // extendGenerateSWOptions (cfg) {},
-      // extendInjectManifestOptions (cfg) {}
-    },
-
-    // Full list of options: https://v2.quasar.dev/quasar-cli-vite/developing-cordova-apps/configuring-cordova
-    cordova: {
-      // noIosLegacyBuildFlag: true, // uncomment only if you know what you are doing
-    },
-
-    // Full list of options: https://v2.quasar.dev/quasar-cli-vite/developing-capacitor-apps/configuring-capacitor
-    capacitor: {
-      hideSplashscreen: true,
-    },
-
-    // Full list of options: https://v2.quasar.dev/quasar-cli-vite/developing-electron-apps/configuring-electron
-    electron: {
-      // extendElectronMainConf (esbuildConf) {},
-      // extendElectronPreloadConf (esbuildConf) {},
-
-      // extendPackageJson (json) {},
-
-      // Electron preload scripts (if any) from /src-electron, WITHOUT file extension
-      preloadScripts: ['electron-preload'],
-
-      // specify the debugging port to use for the Electron app when running in development mode
-      inspectPort: 5858,
-
-      bundler: 'packager', // 'packager' or 'builder'
-
-      packager: {
-        // https://github.com/electron-userland/electron-packager/blob/master/docs/api.md#options
-        // OS X / Mac App Store
-        // appBundleId: '',
-        // appCategoryType: '',
-        // osxSign: '',
-        // protocol: 'myapp://path',
-        // Windows only
-        // win32metadata: { ... }
-      },
-
-      builder: {
-        // https://www.electron.build/configuration/configuration
-
-        appId: 'vela',
-      },
-    },
-
-    // Full list of options: https://v2.quasar.dev/quasar-cli-vite/developing-browser-extensions/configuring-bex
-    bex: {
-      // extendBexScriptsConf (esbuildConf) {},
-      // extendBexManifestJson (json) {},
-
-      /**
-       * The list of extra scripts (js/ts) not in your bex manifest that you want to
-       * compile and use in your browser extension. Maybe dynamic use them?
-       *
-       * Each entry in the list should be a relative filename to /src-bex/
-       *
-       * @example [ 'my-script.ts', 'sub-folder/my-other-script.js' ]
-       */
-      extraScripts: [],
-    },
   };
 });

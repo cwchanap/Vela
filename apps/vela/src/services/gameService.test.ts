@@ -2,11 +2,11 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { gameService, InsufficientVocabularyError } from './gameService';
-import type { Vocabulary, Sentence } from 'src/types/database';
-import type { LegacyVocabularyPayload } from 'src/utils/vocabulary';
+import type { Vocabulary, Sentence } from '@/types/database';
+import type { LegacyVocabularyPayload } from '@/utils/vocabulary';
 
 // Mock the API utility
-vi.mock('src/utils/api', () => ({
+vi.mock('@/utils/api', () => ({
   getApiUrl: vi.fn((endpoint: string) => `/api/${endpoint}`),
 }));
 
@@ -39,9 +39,14 @@ describe('gameService', () => {
       const appRoot = resolve(__dirname, '..');
       const files = ['services/gameService.ts', 'utils/vocabulary.ts'];
 
+      // Both specifiers are live until the bare `src` alias is removed.
+      const prohibitedImports = ['src/stores/games', '@/stores/games'];
+
       for (const file of files) {
         const source = readFileSync(resolve(appRoot, file), 'utf8');
-        expect(source).not.toContain('src/stores/games');
+        for (const prohibited of prohibitedImports) {
+          expect(source).not.toContain(prohibited);
+        }
       }
     });
   });

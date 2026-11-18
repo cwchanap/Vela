@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { setActivePinia, createPinia } from 'pinia';
 import { useFlashcardStore, QUALITY_RATINGS } from './flashcards';
-import type { Vocabulary } from 'src/types/database';
+import type { Vocabulary } from '@/types/database';
 
 describe('flashcards store', () => {
   beforeEach(() => {

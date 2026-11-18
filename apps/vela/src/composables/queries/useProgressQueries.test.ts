@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { flushPromises } from '@vue/test-utils';
 import { isRef } from 'vue';
-import { withQueryClient } from 'src/test-utils/withQueryClient';
+import { withQueryClient } from '@/test-utils/withQueryClient';
 import { progressKeys as sharedProgressKeys } from '@vela/common';
 
 const mockProgressService = {
@@ -9,7 +9,7 @@ const mockProgressService = {
   recordGameSession: vi.fn(),
 };
 
-vi.mock('src/services/progressService', () => ({ progressService: mockProgressService }));
+vi.mock('@/services/progressService', () => ({ progressService: mockProgressService }));
 
 describe('useProgressQueries', () => {
   beforeEach(() => {

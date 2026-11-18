@@ -3,42 +3,42 @@ import type { RouteRecordRaw } from 'vue-router';
 const routes: RouteRecordRaw[] = [
   {
     path: '/',
-    component: () => import('layouts/MainLayout.vue'),
+    component: () => import('@/layouts/MainLayout.vue'),
     children: [
       {
         path: '',
         name: 'home',
-        component: () => import('pages/IndexPage.vue'),
+        component: () => import('@/pages/IndexPage.vue'),
         meta: { requiresAuth: true },
       },
       {
         path: 'chat',
         name: 'ai-chat',
-        component: () => import('pages/chat/AIChatPage.vue'),
+        component: () => import('@/pages/chat/AIChatPage.vue'),
         meta: { requiresAuth: true },
       },
       {
         path: 'settings',
         name: 'settings',
-        component: () => import('pages/settings/SettingsPage.vue'),
+        component: () => import('@/pages/settings/SettingsPage.vue'),
         meta: { requiresAuth: true },
       },
       {
         path: 'progress',
         name: 'progress',
-        component: () => import('pages/progress/ProgressPage.vue'),
+        component: () => import('@/pages/progress/ProgressPage.vue'),
         meta: { requiresAuth: true },
       },
       {
         path: 'my-dictionaries',
         name: 'my-dictionaries',
-        component: () => import('pages/dictionary/MyDictionariesPage.vue'),
+        component: () => import('@/pages/dictionary/MyDictionariesPage.vue'),
         meta: { requiresAuth: true },
       },
       {
         path: 'profile',
         name: 'profile',
-        component: () => import('pages/auth/ProfilePage.vue'),
+        component: () => import('@/pages/auth/ProfilePage.vue'),
         meta: { requiresAuth: true },
       },
       // Legacy child redirect: '/dashboard' -> '/'
@@ -52,29 +52,29 @@ const routes: RouteRecordRaw[] = [
   // Authentication routes
   {
     path: '/auth',
-    component: () => import('layouts/AuthLayout.vue'),
+    component: () => import('@/layouts/AuthLayout.vue'),
     children: [
       {
         path: 'login',
         name: 'login',
-        component: () => import('pages/auth/LoginPage.vue'),
+        component: () => import('@/pages/auth/LoginPage.vue'),
         meta: { requiresGuest: true },
       },
       {
         path: 'signup',
         name: 'signup',
-        component: () => import('pages/auth/LoginPage.vue'),
+        component: () => import('@/pages/auth/LoginPage.vue'),
         meta: { requiresGuest: true },
       },
       {
         path: 'callback',
         name: 'auth-callback',
-        component: () => import('pages/auth/LoginPage.vue'),
+        component: () => import('@/pages/auth/LoginPage.vue'),
       },
       {
         path: 'reset-password',
         name: 'reset-password',
-        component: () => import('pages/auth/LoginPage.vue'),
+        component: () => import('@/pages/auth/LoginPage.vue'),
       },
     ],
   },
@@ -82,13 +82,13 @@ const routes: RouteRecordRaw[] = [
   // Flashcard Review route
   {
     path: '/flashcards',
-    component: () => import('layouts/MainLayout.vue'),
+    component: () => import('@/layouts/MainLayout.vue'),
     meta: { requiresAuth: true },
     children: [
       {
         path: '',
         name: 'flashcards',
-        component: () => import('pages/FlashcardReview.vue'),
+        component: () => import('@/pages/FlashcardReview.vue'),
         meta: { requiresAuth: true },
       },
     ],
@@ -97,28 +97,28 @@ const routes: RouteRecordRaw[] = [
   // Game routes
   {
     path: '/games',
-    component: () => import('layouts/MainLayout.vue'),
+    component: () => import('@/layouts/MainLayout.vue'),
     meta: { requiresAuth: true },
     children: [
       {
         path: '',
         name: 'games',
-        component: () => import('pages/games/GamesIndex.vue'),
+        component: () => import('@/pages/games/GamesIndex.vue'),
       },
       {
         path: 'vocabulary',
         name: 'vocabulary-game',
-        component: () => import('pages/games/VocabularyGame.vue'),
+        component: () => import('@/pages/games/VocabularyGame.vue'),
       },
       {
         path: 'sentence',
         name: 'sentence-game',
-        component: () => import('pages/games/SentenceGame.vue'),
+        component: () => import('@/pages/games/SentenceGame.vue'),
       },
       {
         path: 'listening',
         name: 'listening-game',
-        component: () => import('pages/games/ListeningGame.vue'),
+        component: () => import('@/pages/games/ListeningGame.vue'),
       },
     ],
   },
@@ -127,7 +127,7 @@ const routes: RouteRecordRaw[] = [
   // but you can also remove it
   {
     path: '/:catchAll(.*)*',
-    component: () => import('pages/ErrorNotFound.vue'),
+    component: () => import('@/pages/ErrorNotFound.vue'),
   },
 ];
 

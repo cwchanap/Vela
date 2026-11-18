@@ -1,10 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { withQueryClient } from 'src/test-utils/withQueryClient';
+import { withQueryClient } from '@/test-utils/withQueryClient';
 
 const mockLookupWord = vi.fn();
 const mockAddFlashcard = vi.fn();
 
-vi.mock('src/services/vocabularyService', () => ({
+vi.mock('@/services/vocabularyService', () => ({
   lookupWord: mockLookupWord,
   addFlashcard: mockAddFlashcard,
 }));

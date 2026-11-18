@@ -1,19 +1,19 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { flushPromises } from '@vue/test-utils';
 import { ref } from 'vue';
-import { withQueryClient } from 'src/test-utils/withQueryClient';
+import { withQueryClient } from '@/test-utils/withQueryClient';
 
 const mockGetTTSSettings = vi.fn();
 const mockSaveTTSSettings = vi.fn();
 
-vi.mock('src/services/ttsService', () => ({
+vi.mock('@/services/ttsService', () => ({
   getTTSSettings: mockGetTTSSettings,
   saveTTSSettings: mockSaveTTSSettings,
 }));
 
 const mockUser = ref<{ id: string } | null>(null);
 
-vi.mock('src/stores/auth', () => ({
+vi.mock('@/stores/auth', () => ({
   useAuthStore: () => ({
     user: mockUser,
   }),

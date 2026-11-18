@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query';
 import { computed } from 'vue';
 import { storeToRefs } from 'pinia';
 import { chatKeys } from '@vela/common';
-import { useAuthStore } from 'src/stores/auth';
+import { useAuthStore } from '@/stores/auth';
 import {
   deleteChatThread,
   getChatMessages,
@@ -13,7 +13,7 @@ import {
   type ChatThreadModelDTO,
   type ChatThreadSummaryDTO,
   type PatchChatThreadDTO,
-} from 'src/services/chatHistoryService';
+} from '@/services/chatHistoryService';
 
 export { chatKeys };
 export type { ChatHistoryItemDTO, ChatThreadSummaryDTO, PatchChatThreadDTO };

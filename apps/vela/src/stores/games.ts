@@ -1,8 +1,8 @@
 import { defineStore } from 'pinia';
-import type { JLPTLevel } from 'src/types/database';
-import type { Question, SentenceQuestion } from 'src/types/games';
+import type { JLPTLevel } from '@/types/database';
+import type { Question, SentenceQuestion } from '@/types/games';
 
-export type { Question, SentenceQuestion, VocabularyOption } from 'src/types/games';
+export type { Question, SentenceQuestion, VocabularyOption } from '@/types/games';
 
 export interface GameState {
   score: number;

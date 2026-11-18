@@ -1,11 +1,11 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { flushPromises } from '@vue/test-utils';
 import { ref } from 'vue';
-import { withQueryClient } from 'src/test-utils/withQueryClient';
+import { withQueryClient } from '@/test-utils/withQueryClient';
 
 const mockCapabilities = vi.fn();
 
-vi.mock('src/services/llm', () => ({
+vi.mock('@/services/llm', () => ({
   llmClient: {
     capabilities: mockCapabilities,
   },
@@ -13,7 +13,7 @@ vi.mock('src/services/llm', () => ({
 
 const mockUser = ref<{ id: string } | null>(null);
 
-vi.mock('src/stores/auth', () => ({
+vi.mock('@/stores/auth', () => ({
   useAuthStore: () => ({
     user: mockUser,
   }),

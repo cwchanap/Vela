@@ -37,7 +37,7 @@ vi.mock('../config', () => ({
 }));
 
 const mockHttpJsonAuth = vi.fn();
-vi.mock('src/utils/httpClient', () => ({
+vi.mock('@/utils/httpClient', () => ({
   httpJsonAuth: mockHttpJsonAuth,
   getAuthHeaders: vi.fn(async () => ({
     'Content-Type': 'application/json',

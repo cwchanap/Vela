@@ -15,12 +15,12 @@ const mockAuthStore = {
   session: { user: { id: 'user-123' } },
 };
 
-vi.mock('src/stores/auth', () => ({
+vi.mock('@/stores/auth', () => ({
   useAuthStore: vi.fn(() => mockAuthStore),
 }));
 
 // Mock API utility
-vi.mock('src/utils/api', () => ({
+vi.mock('@/utils/api', () => ({
   getApiUrl: vi.fn((endpoint: string) => `/api/${endpoint}`),
 }));
 
@@ -48,6 +48,10 @@ describe('progressService', () => {
   });
 
   afterEach(() => {
+    // Vitest 5 restoreAllMocks no longer resets vi.fn() implementations.
+
+    vi.resetAllMocks();
+
     vi.restoreAllMocks();
   });
 

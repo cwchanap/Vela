@@ -6,8 +6,19 @@ import quasarConfig from '../../quasar.config';
 const commonPath = resolve(__dirname, '../../../../packages/common/src/index.ts');
 
 describe('quasar config', () => {
+  it('loads only .env.production for production builds with the VITE_ client prefix', () => {
+    expect(quasarConfig({ prod: false } as never).build.env).toEqual({
+      clientPrefix: 'VITE_',
+      file: [],
+    });
+    expect(quasarConfig({ prod: true } as never).build.env).toEqual({
+      clientPrefix: 'VITE_',
+      file: '.env.production',
+    });
+  });
+
   it('aliases @vela/common to the workspace source entry (object alias)', () => {
-    const config = quasarConfig(undefined as never);
+    const config = quasarConfig({ prod: false } as never);
     const viteConf: UserConfig = {};
 
     config.build.extendViteConf(viteConf);
@@ -18,7 +29,7 @@ describe('quasar config', () => {
   });
 
   it('aliases @vela/common when resolve.alias is an array', () => {
-    const config = quasarConfig(undefined as never);
+    const config = quasarConfig({ prod: false } as never);
     const viteConf: UserConfig = { resolve: { alias: [] } };
 
     config.build.extendViteConf(viteConf);
@@ -30,7 +41,7 @@ describe('quasar config', () => {
   });
 
   it('replaces existing @vela/common entry when alias is an array', () => {
-    const config = quasarConfig(undefined as never);
+    const config = quasarConfig({ prod: false } as never);
     const viteConf: UserConfig = {
       resolve: {
         alias: [{ find: '@vela/common', replacement: '/old/path' }],

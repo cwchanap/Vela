@@ -1,6 +1,6 @@
 import { useMutation, useQuery } from '@tanstack/vue-query';
 import { dictionaryKeys } from '@vela/common';
-import { addFlashcard, lookupWord, type AddFlashcardPayload } from 'src/services/vocabularyService';
+import { addFlashcard, lookupWord, type AddFlashcardPayload } from '@/services/vocabularyService';
 
 export function dictionaryLookupQueryOptions(dictionaryForm: string, reading?: string) {
   const baseKey: string[] = [...dictionaryKeys.lookup(dictionaryForm)];

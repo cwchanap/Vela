@@ -1,5 +1,5 @@
-import type { VocabularyOption } from 'src/types/games';
-import type { Vocabulary } from 'src/types/database';
+import type { VocabularyOption } from '@/types/games';
+import type { Vocabulary } from '@/types/database';
 import { shuffleArray } from './array';
 
 export type LegacyVocabularyPayload = Omit<Vocabulary, 'japanese_word'> & {
