@@ -86,8 +86,8 @@ import {
   type LlmModelPair,
   type LlmProvider,
 } from '@vela/common';
-import { useLLMSettingsStore } from 'src/stores/llmSettings';
-import { useAuthStore } from 'src/stores/auth';
+import { useLLMSettingsStore } from '@/stores/llmSettings';
+import { useAuthStore } from '@/stores/auth';
 import {
   OPENROUTER_CUSTOM_VALUE,
   buildLlmModelOptions,

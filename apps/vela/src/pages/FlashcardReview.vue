@@ -91,24 +91,24 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue';
 import { Notify } from 'quasar';
-import { useFlashcardStore, type StudyMode, type CardDirection } from 'src/stores/flashcards';
-import { useAuthStore } from 'src/stores/auth';
-import { flashcardService } from 'src/services/flashcardService';
-import { pronounceWord } from 'src/services/ttsService';
-import type { ReviewInput } from 'src/services/srsService';
+import { useFlashcardStore, type StudyMode, type CardDirection } from '@/stores/flashcards';
+import { useAuthStore } from '@/stores/auth';
+import { flashcardService } from '@/services/flashcardService';
+import { pronounceWord } from '@/services/ttsService';
+import type { ReviewInput } from '@/services/srsService';
 import {
   chunkArray,
   mergeReviews,
   parsePendingReviews,
   extractFailedReviews,
-} from 'src/utils/flashcardReviewUtils';
-import FlashcardSetup from 'src/components/flashcards/FlashcardSetup.vue';
-import FlashcardCard from 'src/components/flashcards/FlashcardCard.vue';
-import FlashcardRating from 'src/components/flashcards/FlashcardRating.vue';
-import FlashcardInput from 'src/components/flashcards/FlashcardInput.vue';
-import FlashcardSummary from 'src/components/flashcards/FlashcardSummary.vue';
-import type { Vocabulary, JLPTLevel } from 'src/types/database';
-import type { QualityRating } from 'src/stores/flashcards';
+} from '@/utils/flashcardReviewUtils';
+import FlashcardSetup from '@/components/flashcards/FlashcardSetup.vue';
+import FlashcardCard from '@/components/flashcards/FlashcardCard.vue';
+import FlashcardRating from '@/components/flashcards/FlashcardRating.vue';
+import FlashcardInput from '@/components/flashcards/FlashcardInput.vue';
+import FlashcardSummary from '@/components/flashcards/FlashcardSummary.vue';
+import type { Vocabulary, JLPTLevel } from '@/types/database';
+import type { QualityRating } from '@/stores/flashcards';
 
 const flashcardStore = useFlashcardStore();
 const authStore = useAuthStore();

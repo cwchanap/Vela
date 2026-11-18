@@ -42,8 +42,6 @@ export default defineConfig({
   resolve: {
     alias: {
       '@': resolve(__dirname, './src'),
-      // Transitional: the UI slice still imports `src/...`. Removed with it.
-      src: resolve(__dirname, './src'),
       '@vela/common/tokenizer': resolve(__dirname, '../../packages/common/src/tokenizer.ts'),
       '@vela/common': resolve(__dirname, '../../packages/common/src/index.ts'),
       '#q-app': resolve(__dirname, './src/test/mocks/q-app-wrappers.ts'),

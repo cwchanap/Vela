@@ -4,14 +4,14 @@ import { createPinia, setActivePinia } from 'pinia';
 import { Quasar, Notify } from 'quasar';
 import { VueQueryPlugin, QueryClient } from '@tanstack/vue-query';
 import LlmProvidersSection from './LlmProvidersSection.vue';
-import { useLLMSettingsStore } from 'src/stores/llmSettings';
-import { useAuthStore } from 'src/stores/auth';
+import { useLLMSettingsStore } from '@/stores/llmSettings';
+import { useAuthStore } from '@/stores/auth';
 import { LLM_PROVIDER_REGISTRY } from '@vela/common';
-import type { LlmPreferences, UserPreferences } from 'src/types/shared';
+import type { LlmPreferences, UserPreferences } from '@/types/shared';
 
 const mockCapabilities = vi.hoisted(() => vi.fn());
 
-vi.mock('src/services/llm', () => ({
+vi.mock('@/services/llm', () => ({
   llmClient: {
     capabilities: mockCapabilities,
   },

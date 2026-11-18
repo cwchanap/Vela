@@ -4,7 +4,7 @@ import { createPinia, setActivePinia } from 'pinia';
 import { Quasar } from 'quasar';
 import SentenceGame from './SentenceGame.vue';
 
-vi.mock('src/components/games/SentenceBuilder.vue', () => ({
+vi.mock('@/components/games/SentenceBuilder.vue', () => ({
   default: {
     template: '<div data-testid="sentence-builder">SentenceBuilder</div>',
     name: 'SentenceBuilder',

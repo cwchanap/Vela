@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { mount } from '@vue/test-utils';
 import { Quasar } from 'quasar';
 import FlashcardRating from './FlashcardRating.vue';
-import { QUALITY_RATINGS } from 'src/stores/flashcards';
+import { QUALITY_RATINGS } from '@/stores/flashcards';
 
 describe('FlashcardRating', () => {
   const mountComponent = () => {

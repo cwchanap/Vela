@@ -97,24 +97,11 @@ export default defineConfig((ctx) => {
 
       alias: {
         '@': resolve(__dirname, 'src'),
-        // Transitional: `src/components`, `src/pages` and `src/layouts` keep
-        // their `src/...` imports until the UI slice switches them to `@/`.
-        src: resolve(__dirname, 'src'),
       },
 
       typescript: {
         strict: true,
         vueShim: true,
-        // Transitional: emit the `src/*` path mapping above so `vue-tsc`
-        // resolves the not-yet-migrated UI imports. Removed with the alias.
-        extendTsConfig(tsConfig) {
-          tsConfig.compilerOptions = tsConfig.compilerOptions || {};
-          tsConfig.compilerOptions.paths = {
-            ...tsConfig.compilerOptions.paths,
-            src: ['./../src'],
-            'src/*': ['./../src/*'],
-          };
-        },
       },
 
       vueRouterMode: 'history', // Use history mode for better SEO and UX

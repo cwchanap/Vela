@@ -3,10 +3,10 @@ import { mount, flushPromises } from '@vue/test-utils';
 import { createPinia, setActivePinia } from 'pinia';
 import { Quasar, Notify } from 'quasar';
 import SentenceBuilder from './SentenceBuilder.vue';
-import { useGameStore } from 'src/stores/games';
-import { useProgressStore } from 'src/stores/progress';
-import { gameService } from 'src/services/gameService';
-import type { SentenceQuestion } from 'src/stores/games';
+import { useGameStore } from '@/stores/games';
+import { useProgressStore } from '@/stores/progress';
+import { gameService } from '@/services/gameService';
+import type { SentenceQuestion } from '@/stores/games';
 
 let notifySpy: ReturnType<typeof vi.fn>;
 let dialogSpy: ReturnType<typeof vi.fn>;
@@ -23,7 +23,7 @@ vi.mock('quasar', async (importOriginal) => {
 });
 
 // Mock game service
-vi.mock('src/services/gameService', () => ({
+vi.mock('@/services/gameService', () => ({
   gameService: {
     getSentenceQuestions: vi.fn(),
   },

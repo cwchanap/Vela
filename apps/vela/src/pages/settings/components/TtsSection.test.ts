@@ -4,7 +4,7 @@ import { createPinia, setActivePinia } from 'pinia';
 import { Quasar, Notify } from 'quasar';
 import { ref, type Ref } from 'vue';
 import TtsSection from './TtsSection.vue';
-import { useAuthStore } from 'src/stores/auth';
+import { useAuthStore } from '@/stores/auth';
 import {
   useTTSSettingsQuery,
   useUpdateTTSSettingsMutation,

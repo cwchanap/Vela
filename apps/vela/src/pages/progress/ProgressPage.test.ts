@@ -4,35 +4,35 @@ import { createPinia, setActivePinia } from 'pinia';
 import { Quasar } from 'quasar';
 import { createRouter, createMemoryHistory } from 'vue-router';
 import ProgressPage from './ProgressPage.vue';
-import { useProgressStore } from 'src/stores/progress';
-import type { Achievement } from 'src/services/progressService';
+import { useProgressStore } from '@/stores/progress';
+import type { Achievement } from '@/services/progressService';
 
 // Stub child components to avoid their own dependencies
-vi.mock('src/components/progress/ProgressDashboard.vue', () => ({
+vi.mock('@/components/progress/ProgressDashboard.vue', () => ({
   default: { name: 'ProgressDashboard', template: '<div data-testid="progress-dashboard" />' },
 }));
-vi.mock('src/components/progress/ProgressChart.vue', () => ({
+vi.mock('@/components/progress/ProgressChart.vue', () => ({
   default: {
     name: 'ProgressChart',
     template: '<div data-testid="progress-chart" />',
     props: ['data', 'type', 'height', 'dataKey', 'color'],
   },
 }));
-vi.mock('src/components/progress/SkillCategoryCard.vue', () => ({
+vi.mock('@/components/progress/SkillCategoryCard.vue', () => ({
   default: {
     name: 'SkillCategoryCard',
     template: '<div data-testid="skill-card" />',
     props: ['skill', 'showActions'],
   },
 }));
-vi.mock('src/components/progress/AchievementItem.vue', () => ({
+vi.mock('@/components/progress/AchievementItem.vue', () => ({
   default: {
     name: 'AchievementItem',
     template: '<div data-testid="achievement-item" />',
     props: ['achievement'],
   },
 }));
-vi.mock('src/components/progress/AchievementDialog.vue', () => ({
+vi.mock('@/components/progress/AchievementDialog.vue', () => ({
   default: {
     name: 'AchievementDialog',
     template: '<div data-testid="achievement-dialog" />',

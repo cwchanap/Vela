@@ -36,7 +36,7 @@
 
 <script setup lang="ts">
 import { onUnmounted, ref, shallowRef, watch } from 'vue';
-import { playAudio, type AudioPlaybackHandle } from 'src/services/ttsService';
+import { playAudio, type AudioPlaybackHandle } from '@/services/ttsService';
 
 type AudioPlayerErrorReason = 'autoplay-blocked' | 'playback-failed';
 

@@ -8,7 +8,7 @@ import SrsStatsCard from './SrsStatsCard.vue';
 const { mockGetStats } = vi.hoisted(() => ({
   mockGetStats: vi.fn(),
 }));
-vi.mock('src/services/srsService', () => ({
+vi.mock('@/services/srsService', () => ({
   srsService: {
     getStats: mockGetStats,
   },
@@ -20,7 +20,7 @@ const mockAuthStore = reactive({
   user: null,
 });
 
-vi.mock('src/stores/auth', () => ({
+vi.mock('@/stores/auth', () => ({
   useAuthStore: () => mockAuthStore,
 }));
 

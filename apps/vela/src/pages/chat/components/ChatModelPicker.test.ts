@@ -8,7 +8,7 @@ import {
   buildLlmModelOptions,
   llmPairOption,
   type LlmModelOption,
-} from 'src/utils/llmModelOptions';
+} from '@/utils/llmModelOptions';
 
 const stubs = {
   'q-select': {

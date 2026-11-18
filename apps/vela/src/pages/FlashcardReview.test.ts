@@ -18,7 +18,7 @@ import type { ReviewInput } from '../services/srsService';
 
 const mockPronounceWord = vi.fn();
 
-vi.mock('src/services/ttsService', () => ({
+vi.mock('@/services/ttsService', () => ({
   pronounceWord: (...args: any[]) => mockPronounceWord(...args),
 }));
 

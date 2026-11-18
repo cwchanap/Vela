@@ -116,7 +116,7 @@
 
 <script setup lang="ts">
 import { computed } from 'vue';
-import type { SessionStats } from 'src/stores/flashcards';
+import type { SessionStats } from '@/stores/flashcards';
 
 const props = defineProps<{
   stats: SessionStats;

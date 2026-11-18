@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { mount, VueWrapper } from '@vue/test-utils';
 import { Quasar } from 'quasar';
 import AchievementItem from './AchievementItem.vue';
-import type { Achievement } from 'src/services/progressService';
+import type { Achievement } from '@/services/progressService';
 
 describe('AchievementItem', () => {
   let wrapper: VueWrapper;

@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { mount, VueWrapper, flushPromises } from '@vue/test-utils';
 import { Quasar } from 'quasar';
 import AchievementDialog from './AchievementDialog.vue';
-import type { Achievement } from 'src/services/progressService';
+import type { Achievement } from '@/services/progressService';
 
 describe('AchievementDialog', () => {
   let wrapper: VueWrapper;

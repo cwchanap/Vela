@@ -4,14 +4,14 @@ import { createPinia, setActivePinia } from 'pinia';
 import { Quasar } from 'quasar';
 import { nextTick } from 'vue';
 import ProgressDashboard from './ProgressDashboard.vue';
-import { useProgressStore } from 'src/stores/progress';
-import { useAuthStore } from 'src/stores/auth';
+import { useProgressStore } from '@/stores/progress';
+import { useAuthStore } from '@/stores/auth';
 import type {
   ProgressAnalytics,
   Achievement,
   SkillCategory,
   DailyProgress,
-} from 'src/services/progressService';
+} from '@/services/progressService';
 
 // Mock child components to simplify testing
 vi.mock('./ProgressChart.vue', () => ({
