@@ -8,7 +8,7 @@ import { signInWithRedirect, signOut, getCurrentUser, fetchAuthSession } from 'a
 import { Hub } from 'aws-amplify/utils';
 import type { Profile, ProfileInsert } from '../types/shared';
 import { config } from '../config';
-import { httpJsonAuth } from 'src/utils/httpClient';
+import { httpJsonAuth } from '@/utils/httpClient';
 
 // Configure Amplify with Cognito
 const configureAmplify = () => {

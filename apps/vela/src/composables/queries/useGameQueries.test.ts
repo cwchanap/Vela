@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { flushPromises } from '@vue/test-utils';
-import { withQueryClient } from 'src/test-utils/withQueryClient';
+import { withQueryClient } from '@/test-utils/withQueryClient';
 import { gameKeys as sharedGameKeys } from '@vela/common';
 
 const mockGameService = {
@@ -8,7 +8,7 @@ const mockGameService = {
   getSentenceQuestions: vi.fn(),
 };
 
-vi.mock('src/services/gameService', () => ({ gameService: mockGameService }));
+vi.mock('@/services/gameService', () => ({ gameService: mockGameService }));
 
 describe('useGameQueries', () => {
   beforeEach(() => {

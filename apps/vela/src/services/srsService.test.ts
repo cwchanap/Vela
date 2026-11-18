@@ -1,9 +1,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { srsService, type SRSStats } from './srsService';
-import type { UserVocabularyProgress, Vocabulary } from 'src/types/database';
+import type { UserVocabularyProgress, Vocabulary } from '@/types/database';
 
 // Mock API utility
-vi.mock('src/utils/api', () => ({
+vi.mock('@/utils/api', () => ({
   getApiUrl: vi.fn((endpoint: string) => `/api/${endpoint}`),
 }));
 

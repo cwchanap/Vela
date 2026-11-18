@@ -3,8 +3,8 @@ import { flushPromises } from '@vue/test-utils';
 import { ref } from 'vue';
 import { QueryClient } from '@tanstack/vue-query';
 import { chatKeys } from '@vela/common';
-import { withQueryClient } from 'src/test-utils/withQueryClient';
-import type { ChatThreadModelDTO, ChatThreadSummaryDTO } from 'src/services/chatHistoryService';
+import { withQueryClient } from '@/test-utils/withQueryClient';
+import type { ChatThreadModelDTO, ChatThreadSummaryDTO } from '@/services/chatHistoryService';
 
 const mockListChatThreads = vi.fn();
 const mockGetChatMessages = vi.fn();
@@ -12,7 +12,7 @@ const mockSaveChatMessage = vi.fn();
 const mockUpdateChatThread = vi.fn();
 const mockDeleteChatThread = vi.fn();
 
-vi.mock('src/services/chatHistoryService', () => ({
+vi.mock('@/services/chatHistoryService', () => ({
   listChatThreads: mockListChatThreads,
   getChatMessages: mockGetChatMessages,
   saveChatMessage: mockSaveChatMessage,
@@ -24,7 +24,7 @@ const mockUser = ref<{ id: string } | null>(null);
 const mockSession = ref<{ user: { id: string } | null } | null>(null);
 let mockSessionGeneration = 0;
 
-vi.mock('src/stores/auth', () => ({
+vi.mock('@/stores/auth', () => ({
   useAuthStore: () => ({
     user: mockUser,
     session: mockSession,

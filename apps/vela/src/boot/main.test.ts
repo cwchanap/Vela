@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeAll, beforeEach, afterAll } from 'vitest';
 import { setActivePinia, createPinia } from 'pinia';
-import { useThemeStore } from 'src/stores/theme';
-import { useAuthStore } from 'src/stores/auth';
+import { useThemeStore } from '@/stores/theme';
+import { useAuthStore } from '@/stores/auth';
 
 // Mock Quasar Dark module
 vi.mock('quasar', () => ({

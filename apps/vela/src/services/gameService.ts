@@ -1,14 +1,14 @@
-import type { Question, SentenceQuestion, VocabularyOption } from 'src/types/games';
-import type { Vocabulary, Sentence } from 'src/types/database';
-import { getApiUrl } from 'src/utils/api';
-import { shuffleArray } from 'src/utils/array';
-import { httpJson } from 'src/utils/httpClient';
+import type { Question, SentenceQuestion, VocabularyOption } from '@/types/games';
+import type { Vocabulary, Sentence } from '@/types/database';
+import { getApiUrl } from '@/utils/api';
+import { shuffleArray } from '@/utils/array';
+import { httpJson } from '@/utils/httpClient';
 import {
   buildDistractors,
   normalizeVocabulary,
   toVocabularyOption,
   type LegacyVocabularyPayload,
-} from 'src/utils/vocabulary';
+} from '@/utils/vocabulary';
 
 export class InsufficientVocabularyError extends Error {
   constructor() {

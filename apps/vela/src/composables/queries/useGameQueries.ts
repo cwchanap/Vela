@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/vue-query';
-import { gameService } from 'src/services/gameService';
+import { gameService } from '@/services/gameService';
 import { gameKeys } from '@vela/common';
 
 export { gameKeys };

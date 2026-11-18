@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia';
-import type { Vocabulary, JLPTLevel } from 'src/types/database';
+import type { Vocabulary, JLPTLevel } from '@/types/database';
 
 /**
  * Quality ratings for SRS review (custom 4-point scale)

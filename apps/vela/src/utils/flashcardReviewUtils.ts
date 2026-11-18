@@ -2,7 +2,7 @@
  * Utility functions for flashcard review operations
  */
 
-import type { ReviewInput, BatchReviewResponse } from 'src/services/srsService';
+import type { ReviewInput, BatchReviewResponse } from '@/services/srsService';
 
 /**
  * Chunk an array into smaller arrays of specified size

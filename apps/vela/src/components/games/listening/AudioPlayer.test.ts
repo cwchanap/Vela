@@ -48,13 +48,17 @@ describe('AudioPlayer', () => {
   beforeEach(async () => {
     vi.clearAllMocks();
     vi.resetModules();
-    vi.doMock('src/services/ttsService', () => ({
+    vi.doMock('@/services/ttsService', () => ({
       playAudio: mockPlayAudio,
     }));
     AudioPlayer = (await import('./AudioPlayer.vue')).default;
   });
 
   afterEach(() => {
+    // Vitest 5 restoreAllMocks no longer resets vi.fn() implementations.
+
+    vi.resetAllMocks();
+
     vi.restoreAllMocks();
   });
 

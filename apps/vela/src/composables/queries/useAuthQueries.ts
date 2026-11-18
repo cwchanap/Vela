@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query';
-import { authService } from 'src/services/authService';
+import { authService } from '@/services/authService';
 import { authKeys } from '@vela/common';
 
 export { authKeys };

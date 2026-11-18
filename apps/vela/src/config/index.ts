@@ -31,6 +31,10 @@ const isMissingEnvValue = (value: unknown): boolean => {
   );
 };
 
+// Quasar v3's env loader emits booleans for bare true/false env values, while
+// process-provided values stay strings.
+export const isEnvFlagEnabled = (value: unknown): boolean => value === true || value === 'true';
+
 export const config = {
   // Cognito configuration
   cognito: {
@@ -76,7 +80,7 @@ export const config = {
 
   // Development configuration
   dev: {
-    devMode: import.meta.env.VITE_DEV_MODE === 'true',
+    devMode: isEnvFlagEnabled(import.meta.env.VITE_DEV_MODE),
   },
 } as const;
 

@@ -39,11 +39,20 @@ jobs:
       - name: Write synthetic production env files
         # These files mirror the VITE_* key sets that inject-env.ts generates
         # after a CDK deploy. CI has no cdk-outputs.json, so the same shape is
-        # written with reserved sentinels. The mobile build reads
-        # .env.production rather than process-env placeholders, so a regression
-        # in Quasar's production env-file loading fails here instead of in
-        # deploy.yml.
+        # written with reserved sentinels. The builds read .env.production
+        # rather than process-env placeholders, so a regression in Quasar's
+        # production env-file loading fails here instead of in deploy.yml.
         run: |
+          cat > apps/vela/.env.production <<'EOF'
+          VITE_COGNITO_USER_POOL_ID=us-east-1_ciPlaceholder
+          VITE_COGNITO_USER_POOL_CLIENT_ID=ci-web-client-sentinel
+          VITE_COGNITO_OAUTH_DOMAIN=ci-placeholder.auth.us-east-1.amazoncognito.com
+          VITE_COGNITO_REDIRECT_SIGN_IN=https://example.invalid/auth/callback
+          VITE_COGNITO_REDIRECT_SIGN_OUT=https://example.invalid/auth/login
+          VITE_AWS_REGION=us-east-1
+          VITE_API_URL=/api/
+          EOF
+
           cat > apps/vela-mobile/.env.production <<'EOF'
           VITE_MOBILE_API_URL=https://example.invalid/api/
           VITE_COGNITO_USER_POOL_ID=us-east-1_ciPlaceholder
