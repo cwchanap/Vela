@@ -37,7 +37,7 @@ describe('checkSession', () => {
     const result = await checkSession('valid-id-token');
 
     expect(result).toBe(true);
-    const [url, options] = mockFetch.mock.calls[0];
+    const [url, options] = mockFetch.mock.calls[0]!;
     expect(url).toContain('/auth/session');
     expect(options.headers['Authorization']).toBe('Bearer valid-id-token');
   });
@@ -75,7 +75,7 @@ describe('refreshToken', () => {
     const result = await refreshToken('old-refresh-token');
 
     expect(result).toEqual(newTokens);
-    const [url, options] = mockFetch.mock.calls[0];
+    const [url, options] = mockFetch.mock.calls[0]!;
     expect(url).toContain('/auth/refresh');
     expect(options.method).toBe('POST');
     expect(JSON.parse(options.body)).toEqual({ refreshToken: 'old-refresh-token' });
@@ -105,7 +105,7 @@ describe('saveDictionaryEntry', () => {
     });
 
     expect(mockFetch).toHaveBeenCalledOnce();
-    const [url, options] = mockFetch.mock.calls[0];
+    const [url, options] = mockFetch.mock.calls[0]!;
     expect(url).toContain('/my-dictionaries');
     expect(options.method).toBe('POST');
     expect(options.headers['Authorization']).toBe('Bearer my-id-token');
@@ -156,7 +156,7 @@ describe('getMyDictionaries', () => {
     const result = await getMyDictionaries('my-id-token');
 
     expect(result).toEqual(mockEntries);
-    const [url, options] = mockFetch.mock.calls[0];
+    const [url, options] = mockFetch.mock.calls[0]!;
     expect(url).toContain('/my-dictionaries');
     expect(options.headers['Authorization']).toBe('Bearer my-id-token');
   });
@@ -166,7 +166,7 @@ describe('getMyDictionaries', () => {
 
     await getMyDictionaries('token');
 
-    const [url] = mockFetch.mock.calls[0];
+    const [url] = mockFetch.mock.calls[0]!;
     expect(url).toContain('limit=50');
   });
 
@@ -175,7 +175,7 @@ describe('getMyDictionaries', () => {
 
     await getMyDictionaries('token', 20);
 
-    const [url] = mockFetch.mock.calls[0];
+    const [url] = mockFetch.mock.calls[0]!;
     expect(url).toContain('limit=20');
   });
 
