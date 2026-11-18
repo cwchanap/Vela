@@ -1,0 +1,5 @@
+# Quasar v3 + Vue Router 5 typechecking needs one hoisted vue-router instance.
+# Bun 1.3's default isolated linker creates peer-variant copies that TypeScript
+# treats as distinct nominal types.
+[install]
+linker = "hoisted"
