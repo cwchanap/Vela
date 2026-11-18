@@ -5,7 +5,7 @@ const STORAGE_KEYS = {
   AUTH_TOKENS: 'vela_auth_tokens',
   USER_EMAIL: 'vela_user_email',
   EXPLICIT_SIGNOUT: 'vela_explicit_signout',
-};
+} as const;
 
 export async function saveAuthTokens(tokens: AuthTokens, email?: string): Promise<void> {
   const data: Record<string, any> = {

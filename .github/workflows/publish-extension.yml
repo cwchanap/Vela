@@ -4,12 +4,12 @@ on:
   push:
     branches: [main]
     paths:
-      - "apps/vela-ext/**"
-      - "packages/common/**"
+      - 'apps/vela-ext/**'
+      - 'packages/common/**'
   workflow_dispatch:
 
 env:
-  BUN_VERSION: "1.3.1"
+  BUN_VERSION: '1.3.1'
 
 jobs:
   release:
@@ -19,6 +19,11 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v7
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version-file: .node-version
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
@@ -50,5 +55,5 @@ jobs:
         with:
           tag_name: ext-v${{ steps.meta.outputs.version }}-${{ github.run_number }}
           name: Extension v${{ steps.meta.outputs.version }} (#${{ github.run_number }})
-          body: "Built from commit ${{ github.sha }}"
+          body: 'Built from commit ${{ github.sha }}'
           files: apps/vela-ext/.output/*.zip

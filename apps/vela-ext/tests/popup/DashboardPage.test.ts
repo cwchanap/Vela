@@ -478,8 +478,7 @@ describe('DashboardPage', () => {
       expect(wrapper.find('.pending-badge').text()).toContain('1');
 
       const listener = vi.mocked(browser.runtime.onMessage.addListener).mock.calls[0]?.[0] as
-        | ((_message: unknown) => void)
-        | undefined;
+        ((_message: unknown) => void) | undefined;
       if (!listener) {
         throw new Error('Expected DashboardPage to register a runtime message listener');
       }
@@ -590,7 +589,7 @@ describe('DashboardPage', () => {
       await viewAllButton.trigger('click');
 
       expect(browser.tabs.create).toHaveBeenCalled();
-      const callArg = vi.mocked(browser.tabs.create).mock.calls[0][0];
+      const callArg = vi.mocked(browser.tabs.create).mock.calls[0]![0];
       expect(callArg.url).toContain('/my-dictionaries');
     });
   });

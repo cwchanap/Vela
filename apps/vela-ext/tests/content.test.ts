@@ -349,14 +349,14 @@ describe('content script message listener', () => {
 
     expect(saveBtn.textContent).toContain('2');
 
-    checkboxes[0].checked = false;
-    checkboxes[0].dispatchEvent(new Event('change'));
+    checkboxes[0]!.checked = false;
+    checkboxes[0]!.dispatchEvent(new Event('change'));
 
     expect(saveBtn.textContent).toContain('1');
     expect(saveBtn.disabled).toBe(false);
 
-    checkboxes[1].checked = false;
-    checkboxes[1].dispatchEvent(new Event('change'));
+    checkboxes[1]!.checked = false;
+    checkboxes[1]!.dispatchEvent(new Event('change'));
 
     expect(saveBtn.textContent).toContain('0');
     expect(saveBtn.disabled).toBe(true);
