@@ -2,25 +2,25 @@ import { mount, type VueWrapper } from '@vue/test-utils';
 import { QLayout, QPageContainer, Quasar } from 'quasar';
 import { defineComponent, nextTick, reactive, ref, type Ref } from 'vue';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { MobileAuthCoordinator } from 'src/auth/mobile-auth-contract';
-import type { MobileFeatureSessionStatus } from 'src/auth/mobile-feature-session-status';
+import type { MobileAuthCoordinator } from '@/auth/mobile-auth-contract';
+import type { MobileFeatureSessionStatus } from '@/auth/mobile-feature-session-status';
 import type {
   PronunciationDiagnosticController,
   PronunciationDiagnosticCounters,
   PronunciationDiagnosticState,
-} from 'src/composables/usePronunciationDiagnostic';
-import { DIAGNOSTIC_WORD } from 'src/diagnostics/tts-pronunciation-contract';
-import { MOBILE_AUTH_KEY } from 'src/services/mobile-auth';
-import { MOBILE_TTS_SERVICE_KEY } from 'src/services/mobile-services';
-import type { MobileTtsService, PreparedPronunciation } from 'src/services/mobile-tts';
+} from '@/composables/usePronunciationDiagnostic';
+import { DIAGNOSTIC_WORD } from '@/diagnostics/tts-pronunciation-contract';
+import { MOBILE_AUTH_KEY } from '@/services/mobile-auth';
+import { MOBILE_TTS_SERVICE_KEY } from '@/services/mobile-services';
+import type { MobileTtsService, PreparedPronunciation } from '@/services/mobile-tts';
 import TtsPronunciationDiagnosticsPage from './TtsPronunciationDiagnosticsPage.vue';
 
 const composableMocks = vi.hoisted(() => ({
   usePronunciationDiagnostic: vi.fn(),
 }));
 
-vi.mock('src/composables/usePronunciationDiagnostic', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('src/composables/usePronunciationDiagnostic')>()),
+vi.mock('@/composables/usePronunciationDiagnostic', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/composables/usePronunciationDiagnostic')>()),
   usePronunciationDiagnostic: composableMocks.usePronunciationDiagnostic,
 }));
 

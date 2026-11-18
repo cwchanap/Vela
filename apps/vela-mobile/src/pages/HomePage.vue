@@ -52,8 +52,8 @@
 
 <script setup lang="ts">
 import { computed } from 'vue';
-import { selectDueReviewView } from 'src/components/home/due-review-view';
-import { useDueReviewCount } from 'src/composables/useDueReviewCount';
+import { selectDueReviewView } from '@/components/home/due-review-view';
+import { useDueReviewCount } from '@/composables/useDueReviewCount';
 
 const dueReview = useDueReviewCount();
 const view = computed(() =>

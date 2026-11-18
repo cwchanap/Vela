@@ -101,7 +101,7 @@ physical matrix row.
 - Signing: team/identity correlation, profile expiry, `get-task-allow`,
   certificate availability (confirm via Xcode).
 - Bundle id (`com.vela.app`) matches the Capacitor/Xcode signing config
-  (`src-capacitor/capacitor.config.json` `appId`), not `.env.production` —
+  (`src-capacitor/capacitor.config.ts` `appId`), not `.env.production` —
   `.env.production` carries no bundle identifier.
 - Device eligibility: safe availability, generic non-identifying alias —
   **no UDID/email persistence**.

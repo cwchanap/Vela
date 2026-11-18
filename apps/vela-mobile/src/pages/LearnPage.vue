@@ -21,7 +21,7 @@
 
 <script setup lang="ts">
 import { useRouter } from 'vue-router';
-import { pushMobileRoute } from 'src/router/mobile-navigation';
+import { pushMobileRoute } from '@/router/mobile-navigation';
 
 const router = useRouter();
 

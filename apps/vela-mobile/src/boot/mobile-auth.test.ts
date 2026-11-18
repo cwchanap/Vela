@@ -102,6 +102,7 @@ import {
   captureConsoleCalls,
   createSecretLeakAssertions,
   searchable,
+  sessionStorageEmptySnapshot,
   storageSnapshot,
 } from '../test/secret-leak-helpers';
 import boot from './mobile-auth';
@@ -155,8 +156,7 @@ describe('mobile auth boot', () => {
     expect(mocks.createUnsupportedStore).toHaveBeenCalledOnce();
     expect(mocks.createIosStore).not.toHaveBeenCalled();
     const dependencies = mocks.createCoordinator.mock.calls[0]?.[0] as
-      | MobileAuthCoordinatorDependencies
-      | undefined;
+      MobileAuthCoordinatorDependencies | undefined;
     expect(dependencies).toMatchObject({
       sessionStore: mocks.unsupportedSessionStore,
       installationStore: mocks.installationStore,
@@ -204,8 +204,7 @@ describe('mobile auth boot', () => {
       });
 
       const dependencies = mocks.createCoordinator.mock.calls[0]?.[0] as
-        | MobileAuthCoordinatorDependencies
-        | undefined;
+        MobileAuthCoordinatorDependencies | undefined;
       expect(dependencies).toMatchObject({
         app: mocks.appPlugin,
         browser: mocks.browserPlugin,
@@ -301,8 +300,7 @@ describe('mobile auth boot', () => {
     try {
       runBoot({ app });
       const dependencies = mocks.createCoordinator.mock.calls[0]?.[0] as
-        | MobileAuthCoordinatorDependencies
-        | undefined;
+        MobileAuthCoordinatorDependencies | undefined;
       const request = {
         url: 'https://example.invalid/SECRET-authorization-url',
         method: 'POST',
@@ -327,7 +325,7 @@ describe('mobile auth boot', () => {
       expect(searchable(consoleCapture.calls())).not.toContain('SECRET-');
       expect(mocks.preferencesPlugin.set).not.toHaveBeenCalled();
       expect(storageSnapshot(window.localStorage)).toBe('');
-      expect(storageSnapshot(window.sessionStorage)).toBe('');
+      expect(sessionStorageEmptySnapshot()).toBe('');
     } finally {
       if (originalFetch === undefined) {
         Reflect.deleteProperty(window, 'fetch');

@@ -3,20 +3,20 @@ import {
   IOS_DIAGNOSTIC_DETAIL_PATH,
   IOS_DIAGNOSTIC_ROOT_PATH,
   IOS_INTERACTION_DIAGNOSTICS_LABEL,
-} from 'src/diagnostics/ios-interaction-contract';
+} from '@/diagnostics/ios-interaction-contract';
 import {
   TTS_PRONUNCIATION_DIAGNOSTIC_LABEL,
   TTS_PRONUNCIATION_DIAGNOSTIC_PATH,
-} from 'src/diagnostics/tts-pronunciation-contract';
+} from '@/diagnostics/tts-pronunciation-contract';
 
 const coreRoutes: RouteRecordRaw[] = [
-  { path: '', name: 'home', component: () => import('pages/HomePage.vue') },
-  { path: 'review', name: 'review', component: () => import('pages/ReviewPage.vue') },
-  { path: 'learn', name: 'learn', component: () => import('pages/LearnPage.vue') },
+  { path: '', name: 'home', component: () => import('@/pages/HomePage.vue') },
+  { path: 'review', name: 'review', component: () => import('@/pages/ReviewPage.vue') },
+  { path: 'learn', name: 'learn', component: () => import('@/pages/LearnPage.vue') },
   {
     path: 'learn/mystery-messenger',
     name: 'mysteryMessenger',
-    component: () => import('src/features/mystery-messenger/MysteryMessengerPage.vue'),
+    component: () => import('@/features/mystery-messenger/MysteryMessengerPage.vue'),
     meta: {
       mobileHeader: {
         title: 'Mystery Messenger',
@@ -24,8 +24,8 @@ const coreRoutes: RouteRecordRaw[] = [
       },
     },
   },
-  { path: 'words', name: 'words', component: () => import('pages/WordsPage.vue') },
-  { path: 'more', name: 'more', component: () => import('pages/MorePage.vue') },
+  { path: 'words', name: 'words', component: () => import('@/pages/WordsPage.vue') },
+  { path: 'more', name: 'more', component: () => import('@/pages/MorePage.vue') },
 ];
 
 export const bypassDevelopmentDiagnosticRoutes: RouteRecordRaw[] = import.meta.env.DEV
@@ -33,7 +33,7 @@ export const bypassDevelopmentDiagnosticRoutes: RouteRecordRaw[] = import.meta.e
       {
         path: IOS_DIAGNOSTIC_ROOT_PATH.slice(1),
         name: 'iosInteractionDiagnostics',
-        component: () => import('pages/diagnostics/IosInteractionDiagnosticsPage.vue'),
+        component: () => import('@/pages/diagnostics/IosInteractionDiagnosticsPage.vue'),
         meta: {
           bypassMobileAuth: true,
           mobileHeader: {
@@ -45,7 +45,7 @@ export const bypassDevelopmentDiagnosticRoutes: RouteRecordRaw[] = import.meta.e
       {
         path: IOS_DIAGNOSTIC_DETAIL_PATH.slice(1),
         name: 'ios-interaction-detail',
-        component: () => import('pages/diagnostics/IosInteractionDetailPage.vue'),
+        component: () => import('@/pages/diagnostics/IosInteractionDetailPage.vue'),
         meta: {
           bypassMobileAuth: true,
           mobileHeader: {
@@ -62,7 +62,7 @@ export const authenticatedDevelopmentDiagnosticRoutes: RouteRecordRaw[] = import
       {
         path: TTS_PRONUNCIATION_DIAGNOSTIC_PATH.slice(1),
         name: 'ttsPronunciationDiagnostics',
-        component: () => import('pages/diagnostics/TtsPronunciationDiagnosticsPage.vue'),
+        component: () => import('@/pages/diagnostics/TtsPronunciationDiagnosticsPage.vue'),
         meta: {
           mobileHeader: {
             title: TTS_PRONUNCIATION_DIAGNOSTIC_LABEL,

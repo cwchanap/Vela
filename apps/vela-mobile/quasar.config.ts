@@ -1,4 +1,4 @@
-import { defineConfig } from '#q-app/wrappers';
+import { defineConfig } from '#q-app';
 import { resolve } from 'node:path';
 import { getMobileBootFiles } from './src/boot/boot-files';
 import { validateMobileApiUrlPlugin } from './build/validate-mobile-api-url';
@@ -16,19 +16,8 @@ export default defineConfig((ctx) => {
 
     build: {
       alias: {
+        '@': resolve(__dirname, 'src'),
         '@vela/common': resolve(__dirname, '../../packages/common/src/index.ts'),
-        '@capacitor/app': resolve(__dirname, 'src-capacitor/node_modules/@capacitor/app'),
-        '@capacitor/browser': resolve(__dirname, 'src-capacitor/node_modules/@capacitor/browser'),
-        '@capacitor/core': resolve(__dirname, 'src-capacitor/node_modules/@capacitor/core'),
-        '@capacitor/keyboard': resolve(__dirname, 'src-capacitor/node_modules/@capacitor/keyboard'),
-        '@capacitor/preferences': resolve(
-          __dirname,
-          'src-capacitor/node_modules/@capacitor/preferences',
-        ),
-        '@aparajita/capacitor-secure-storage': resolve(
-          __dirname,
-          'src-capacitor/node_modules/@aparajita/capacitor-secure-storage',
-        ),
       },
 
       target: {
@@ -41,15 +30,25 @@ export default defineConfig((ctx) => {
         vueShim: true,
       },
 
+      env: {
+        clientPrefix: 'VITE_',
+        file: ctx.prod ? '.env.production' : [],
+      },
+
       vueRouterMode: 'history',
 
       publicPath: '/',
 
       extendViteConf(viteConf) {
         viteConf.plugins = viteConf.plugins || [];
-        // rootDir must be the quasar.config.ts directory so Vite's loadEnv
-        // resolves .env / .env.production from the project root.
-        viteConf.plugins.push(validateMobileApiUrlPlugin(resolve(__dirname)));
+        // The plugin reads Quasar's resolved client define values, so it needs
+        // no .env file parsing of its own, and knows which mode is building.
+        viteConf.plugins.push(
+          validateMobileApiUrlPlugin({
+            rootDir: resolve(__dirname),
+            isCapacitor: ctx.modeName === 'capacitor',
+          }),
+        );
       },
     },
 

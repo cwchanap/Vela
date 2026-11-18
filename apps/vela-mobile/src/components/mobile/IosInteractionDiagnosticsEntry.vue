@@ -21,8 +21,8 @@ import {
   IOS_DIAGNOSTIC_ROOT_PATH,
   IOS_INTERACTION_DIAGNOSTICS_LABEL,
   IOS_INTERACTION_ENTRY_TEST_ID,
-} from 'src/diagnostics/ios-interaction-contract';
-import { pushMobileRoute } from 'src/router/mobile-navigation';
+} from '@/diagnostics/ios-interaction-contract';
+import { pushMobileRoute } from '@/router/mobile-navigation';
 
 const router = useRouter();
 

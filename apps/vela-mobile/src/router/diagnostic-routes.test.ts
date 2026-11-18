@@ -3,7 +3,7 @@ import {
   IOS_DIAGNOSTIC_DETAIL_PATH,
   IOS_DIAGNOSTIC_ROOT_PATH,
   IOS_INTERACTION_DIAGNOSTICS_LABEL,
-} from 'src/diagnostics/ios-interaction-contract';
+} from '@/diagnostics/ios-interaction-contract';
 import {
   authenticatedDevelopmentDiagnosticRoutes,
   buildMobileChildRoutes,

@@ -1,7 +1,7 @@
 import { createMemoryHistory, createRouter } from 'vue-router';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import boot from './diagnostic-cold-entry';
-import { DIAGNOSTIC_COLD_ENTRY_KEY, stageDiagnosticColdEntry } from 'src/diagnostics/cold-entry';
+import { DIAGNOSTIC_COLD_ENTRY_KEY, stageDiagnosticColdEntry } from '@/diagnostics/cold-entry';
 
 describe('diagnostic-cold-entry boot hook', () => {
   afterEach(() => {

@@ -3,9 +3,9 @@ import { mount } from '@vue/test-utils';
 import { defineComponent, ref } from 'vue';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Quasar, QLayout, QPageContainer } from 'quasar';
-import { MobileApiError } from 'src/services/mobile-api-client';
-import { NETWORK_MESSAGE, STALE_MESSAGE } from 'src/components/home/due-review-view';
-import { dueReviewStats as stats } from 'src/components/home/stats-fixture';
+import { MobileApiError } from '@/services/mobile-api-client';
+import { NETWORK_MESSAGE, STALE_MESSAGE } from '@/components/home/due-review-view';
+import { dueReviewStats as stats } from '@/components/home/stats-fixture';
 import HomePage from './HomePage.vue';
 
 const dueReview = {
@@ -18,7 +18,7 @@ const dueReview = {
   retry: vi.fn<() => Promise<void>>().mockResolvedValue(),
 };
 
-vi.mock('src/composables/useDueReviewCount', () => ({
+vi.mock('@/composables/useDueReviewCount', () => ({
   useDueReviewCount: () => dueReview,
 }));
 

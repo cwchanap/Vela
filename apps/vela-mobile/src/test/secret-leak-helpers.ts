@@ -20,11 +20,31 @@ export function searchable(value: unknown): string {
   }
 }
 
+// vue-router keeps its own scroll-position bookkeeping in sessionStorage when
+// scrollBehavior is enabled; it carries no application data. It is allowed only
+// in the session-storage emptiness check below, never in secret scans.
+const ROUTER_OWNED_SESSION_STORAGE_KEYS = new Set(['vue-router:scroll']);
+
 export function storageSnapshot(storage: Storage): string {
-  return Array.from({ length: storage.length }, (_, index) => {
+  return Array.from({ length: storage.length }, (_, index) => storage.key(index) ?? '')
+    .map((key) => `${key}=${storage.getItem(key) ?? ''}`)
+    .join('\n');
+}
+
+/**
+ * Session-storage emptiness check. Skips only vue-router's scroll bookkeeping;
+ * every other key/value must be absent. Secret scans must use storageSnapshot,
+ * which includes the bookkeeping key and its value.
+ */
+export function sessionStorageEmptySnapshot(): string {
+  const storage = window.sessionStorage;
+  const entries: string[] = [];
+  for (let index = 0; index < storage.length; index += 1) {
     const key = storage.key(index) ?? '';
-    return `${key}=${storage.getItem(key) ?? ''}`;
-  }).join('\n');
+    if (ROUTER_OWNED_SESSION_STORAGE_KEYS.has(key)) continue;
+    entries.push(`${key}=${storage.getItem(key) ?? ''}`);
+  }
+  return entries.join('\n');
 }
 
 export function captureConsoleCalls(): {
@@ -128,11 +148,13 @@ export function createSecretLeakAssertions(options: { installationKey: string })
       ...(input.jsonSnapshots ?? []),
       input.renderedText ?? document.body.textContent ?? '',
     ].join('\n');
-    const browserAndPreferenceStorage = [
-      searchable(input.preferenceCalls),
+    const browserStorage = [
       storageSnapshot(window.localStorage),
       storageSnapshot(window.sessionStorage),
     ].join('\n');
+    const browserAndPreferenceStorage = [searchable(input.preferenceCalls), browserStorage].join(
+      '\n',
+    );
 
     for (const secret of LOG_AND_DOM_SENTINELS) {
       expect(logsAndDom).not.toContain(secret);
@@ -144,9 +166,14 @@ export function createSecretLeakAssertions(options: { installationKey: string })
     for (const secret of NON_SCHEMA_STORAGE_SENTINELS) {
       expect(browserAndPreferenceStorage).not.toContain(secret);
     }
+    // Browser storage must never contain any policy sentinel, including ones
+    // that are only listed for logs/DOM (code verifier, nonce). The approved
+    // Preferences transaction exception keeps its verifier/nonce values out of
+    // this scan.
+    expect(browserStorage).not.toContain('SECRET-');
     expectApprovedPreferenceWrites(input.preferenceCalls);
     expect(storageSnapshot(window.localStorage)).toBe('');
-    expect(storageSnapshot(window.sessionStorage)).toBe('');
+    expect(sessionStorageEmptySnapshot()).toBe('');
   }
 
   return { expectNoSecretLeak, expectApprovedPreferenceWrites };

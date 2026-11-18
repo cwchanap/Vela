@@ -3,9 +3,9 @@ import { Quasar } from 'quasar';
 import { createMemoryHistory, createRouter } from 'vue-router';
 import { describe, expect, it, vi } from 'vitest';
 import TtsPronunciationDiagnosticsEntry from './TtsPronunciationDiagnosticsEntry.vue';
-import { pushMobileRoute } from 'src/router/mobile-navigation';
+import { pushMobileRoute } from '@/router/mobile-navigation';
 
-vi.mock('src/router/mobile-navigation', () => ({
+vi.mock('@/router/mobile-navigation', () => ({
   pushMobileRoute: vi.fn().mockResolvedValue({ kind: 'pushed' }),
 }));
 

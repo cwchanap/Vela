@@ -2,20 +2,14 @@ import { spawn } from 'node:child_process';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { loadMobileBuildEnv } from './validate-mobile-api-url';
+import { loadMobileCliEnv } from './mobile-cli-env';
+import { mobileBuildEnvKeys, type MobileBuildEnv } from './validate-mobile-api-url';
 
 const FULL_COMMIT_PATTERN = /^[a-f0-9]{40}$/u;
 const MAX_CAPTURED_OUTPUT_BYTES = 64 * 1024;
 const EXECUTION_WORKSPACE_PREFIX = 'vela-m1-foundation-';
 const MAX_RUN_DIRECTORY_ATTEMPTS = 1_000;
 
-const MOBILE_CONFIG_KEYS = [
-  'VITE_MOBILE_API_URL',
-  'VITE_COGNITO_USER_POOL_ID',
-  'VITE_COGNITO_MOBILE_USER_POOL_CLIENT_ID',
-  'VITE_COGNITO_OAUTH_DOMAIN',
-  'VITE_AWS_REGION',
-] as const;
 const SAFE_EXECUTION_ENVIRONMENT_KEYS = [
   'APPDATA',
   'BUN_INSTALL',
@@ -214,7 +208,7 @@ export const spawnCommand: CommandRunner = async (spec) =>
  * run without them could silently scan the wrong configuration.
  */
 function commandEnvironment(
-  loaded: ReturnType<typeof loadMobileBuildEnv>,
+  loaded: MobileBuildEnv,
   procEnv: Record<string, string | undefined>,
 ): Record<string, string> {
   const result: Record<string, string> = {};
@@ -222,7 +216,7 @@ function commandEnvironment(
     const value = procEnv[key];
     if (typeof value === 'string') result[key] = value;
   }
-  for (const key of MOBILE_CONFIG_KEYS) {
+  for (const key of mobileBuildEnvKeys) {
     const value = loaded[key];
     if (typeof value !== 'string') {
       throw new M1HarnessError('Mobile build configuration incomplete');
@@ -234,7 +228,7 @@ function commandEnvironment(
 
 function automatedCommands(
   executionRoot: string,
-  loaded: ReturnType<typeof loadMobileBuildEnv>,
+  loaded: MobileBuildEnv,
   procEnv: Record<string, string | undefined>,
 ): CommandSpec[] {
   const env = commandEnvironment(loaded, procEnv);
@@ -483,11 +477,7 @@ export async function runM1FoundationVerification(
     throw new M1HarnessError('HEAD must be a full 40-char SHA');
   }
 
-  const loaded = loadMobileBuildEnv(
-    'production',
-    join(deps.repoRoot, 'apps/vela-mobile'),
-    deps.env,
-  );
+  const loaded = loadMobileCliEnv(join(deps.repoRoot, 'apps/vela-mobile'), deps.env);
   const runId = createRunId(startedAt);
 
   const commands: M1Manifest['commands'] = [];

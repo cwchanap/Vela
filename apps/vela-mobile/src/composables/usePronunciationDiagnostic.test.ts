@@ -686,4 +686,137 @@ describe('usePronunciationDiagnostic', () => {
     expect(controller.counters.lastError.value).toBeNull();
     expect(controller.state.value.kind).toBe('ready');
   });
+
+  it('surfaces a synchronous playback start failure', async () => {
+    tts.preparePronunciation.mockResolvedValue(PREPARED);
+    audio.play.mockImplementation(() => {
+      throw new MobileAudioError('playback_failed');
+    });
+    const controller = createController();
+
+    await controller.playOrRetry();
+
+    expect(controller.state.value).toEqual({
+      kind: 'error',
+      error: 'playback_failed',
+      pronunciation: PREPARED,
+    });
+    expect(controller.counters.lastError.value).toBe('playback_failed');
+  });
+
+  it('returns to ready when playback is stopped externally', async () => {
+    tts.preparePronunciation.mockResolvedValue(PREPARED);
+    audio.play.mockReturnValue(resolvedPlaybackHandle({ kind: 'stopped', reason: 'user' }));
+    const controller = createController();
+
+    await controller.playOrRetry();
+
+    expect(controller.state.value).toEqual({
+      kind: 'ready',
+      pronunciation: PREPARED,
+      notice: null,
+    });
+    expect(controller.counters.completedPlays.value).toBe(0);
+  });
+
+  it('stops a playback handle returned after disposal during play start', async () => {
+    tts.preparePronunciation.mockResolvedValue(PREPARED);
+    const handle: MobileAudioPlaybackHandle = {
+      finished: new Promise(() => {}),
+      stop: vi.fn(),
+    };
+    const controller = createController();
+    audio.play.mockImplementation(() => {
+      controller.dispose();
+      return handle;
+    });
+
+    await controller.playOrRetry();
+
+    expect(handle.stop).toHaveBeenCalledWith('dispose');
+    expect(controller.state.value).toEqual({ kind: 'idle' });
+  });
+
+  it('keeps prepared audio idle when the session becomes unusable while preparing', async () => {
+    const preparation = deferred<PreparedPronunciation>();
+    tts.preparePronunciation.mockReturnValue(preparation.promise);
+    const controller = createController();
+
+    const action = controller.playOrRetry();
+    setRecovering(authState);
+    preparation.resolve(PREPARED);
+    await action;
+
+    expect(audio.play).not.toHaveBeenCalled();
+    expect(controller.state.value).toEqual({
+      kind: 'ready',
+      pronunciation: PREPARED,
+      notice: null,
+    });
+  });
+
+  it('keeps refreshed audio idle when the session becomes unusable while refreshing', async () => {
+    tts.preparePronunciation.mockResolvedValueOnce(PREPARED);
+    audio.play.mockReturnValue(resolvedPlaybackHandle());
+    const controller = createController();
+    await controller.playOrRetry();
+
+    const refresh = deferred<PreparedPronunciation>();
+    tts.preparePronunciation.mockReturnValueOnce(refresh.promise);
+    now = PREPARED.expiresAt;
+    const action = controller.playOrRetry();
+    setRecovering(authState);
+    refresh.resolve(REFRESHED);
+    await action;
+
+    expect(audio.play).toHaveBeenCalledTimes(1);
+    expect(controller.state.value).toEqual({
+      kind: 'ready',
+      pronunciation: REFRESHED,
+      notice: null,
+    });
+  });
+
+  it('cancels a pending preparation when the app leaves the foreground', async () => {
+    const preparation = deferred<PreparedPronunciation>();
+    tts.preparePronunciation.mockReturnValue(preparation.promise);
+    const controller = createController();
+    const action = controller.playOrRetry();
+
+    isActive.value = false;
+    await nextTick();
+
+    expect(audio.interruptActive).toHaveBeenCalledWith('background');
+    expect(controller.state.value).toEqual({ kind: 'idle' });
+
+    preparation.resolve(PREPARED);
+    await action;
+    expect(audio.play).not.toHaveBeenCalled();
+  });
+
+  it('does not prepare anything while the session is not usable', async () => {
+    setSignedOut(authState);
+    const controller = createController();
+
+    await controller.playOrRetry();
+
+    expect(tts.preparePronunciation).not.toHaveBeenCalled();
+    expect(controller.state.value).toEqual({ kind: 'idle' });
+  });
+
+  it('leaves a playing pronunciation untouched when simulating invalid media', async () => {
+    tts.preparePronunciation.mockResolvedValue(PREPARED);
+    const handle = controllablePlaybackHandle();
+    audio.play.mockReturnValue(handle.publicHandle);
+    const controller = createController();
+    const action = controller.playOrRetry();
+    await flushPromises();
+
+    controller.simulateInvalidUrl();
+
+    expect(controller.state.value).toEqual({ kind: 'playing', pronunciation: PREPARED });
+
+    handle.resolve({ kind: 'ended' });
+    await action;
+  });
 });

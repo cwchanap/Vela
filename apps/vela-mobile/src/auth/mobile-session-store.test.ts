@@ -2,6 +2,7 @@ import {
   KeychainAccess,
   StorageError,
   StorageErrorType,
+  type SecureStoragePlugin,
 } from '@aparajita/capacitor-secure-storage';
 import { describe, expect, it, vi } from 'vitest';
 import {
@@ -22,7 +23,9 @@ function createNativeStore(secureStorage: {
   remove: ReturnType<typeof vi.fn>;
 }) {
   return createIosKeychainSessionStore({
-    secureStorage,
+    // Vitest 5 types vi.fn() as Mock<Procedure | Constructable>, which TS cannot
+    // narrow to the SecureStoragePlugin method signatures.
+    secureStorage: secureStorage as unknown as Pick<SecureStoragePlugin, 'get' | 'set' | 'remove'>,
     runtime: {
       isNativePlatform: () => true,
       getPlatform: () => 'ios',

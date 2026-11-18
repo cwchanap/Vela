@@ -120,19 +120,19 @@
 
 <script setup lang="ts">
 import { computed, inject, onBeforeUnmount } from 'vue';
-import { HtmlAudioPlayer } from 'src/audio/html-audio-player';
+import { HtmlAudioPlayer } from '@/audio/html-audio-player';
 import {
   usePronunciationDiagnostic,
   type PronunciationDiagnosticError,
   type PronunciationDiagnosticState,
-} from 'src/composables/usePronunciationDiagnostic';
+} from '@/composables/usePronunciationDiagnostic';
 import {
   DIAGNOSTIC_WORD,
   TTS_PRONUNCIATION_DIAGNOSTICS_MARKER,
-} from 'src/diagnostics/tts-pronunciation-contract';
-import { MOBILE_AUTH_KEY } from 'src/services/mobile-auth';
-import { MOBILE_TTS_SERVICE_KEY } from 'src/services/mobile-services';
-import type { PreparedPronunciation } from 'src/services/mobile-tts';
+} from '@/diagnostics/tts-pronunciation-contract';
+import { MOBILE_AUTH_KEY } from '@/services/mobile-auth';
+import { MOBILE_TTS_SERVICE_KEY } from '@/services/mobile-services';
+import type { PreparedPronunciation } from '@/services/mobile-tts';
 
 const providedCoordinator = inject(MOBILE_AUTH_KEY);
 if (!providedCoordinator) {

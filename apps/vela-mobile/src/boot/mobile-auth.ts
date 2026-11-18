@@ -3,7 +3,7 @@ import { App as CapacitorApp } from '@capacitor/app';
 import { Browser } from '@capacitor/browser';
 import { Capacitor, CapacitorHttp } from '@capacitor/core';
 import { Preferences } from '@capacitor/preferences';
-import { defineBoot } from '#q-app/wrappers';
+import { defineBoot } from '#q-app';
 import { createMobileInstallationStore } from '../auth/mobile-installation-store';
 import {
   createIosKeychainSessionStore,

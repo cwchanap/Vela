@@ -1,31 +1,36 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import capacitorConfig from '../../src-capacitor/capacitor.config.ts';
 
 const capacitorRoot = resolve(__dirname, '../../src-capacitor');
 const packageJson = JSON.parse(readFileSync(resolve(capacitorRoot, 'package.json'), 'utf8')) as {
   dependencies: Record<string, string>;
 };
-const capacitorConfig = JSON.parse(
-  readFileSync(resolve(capacitorRoot, 'capacitor.config.json'), 'utf8'),
-) as {
-  plugins?: {
-    Keyboard?: { resize?: string };
-    CapacitorHttp?: { enabled?: boolean };
-  };
-};
+const capacitorPlugins = capacitorConfig.plugins as
+  | {
+      Keyboard?: { resize?: string };
+      CapacitorHttp?: { enabled?: boolean };
+    }
+  | undefined;
 
 function dependencyMajor(name: string): string | undefined {
   return packageJson.dependencies[name]?.match(/\d+/u)?.[0];
 }
 
 describe('Capacitor plugin contracts', () => {
+  it('preserves the native app identity and web output directory', () => {
+    expect(capacitorConfig.appId).toBe('com.vela.app');
+    expect(capacitorConfig.appName).toBe('Vela');
+    expect(capacitorConfig.webDir).toBe('www');
+  });
+
   it('pins Keyboard to Capacitor major 7', () => {
     expect(packageJson.dependencies['@capacitor/keyboard']).toMatch(/^\^7\./);
   });
 
   it('uses native WebView keyboard resize', () => {
-    expect(capacitorConfig.plugins?.Keyboard?.resize).toBe('native');
+    expect(capacitorPlugins?.Keyboard?.resize).toBe('native');
   });
 
   it('keeps Browser and Preferences on the same major as Capacitor core', () => {
@@ -35,7 +40,7 @@ describe('Capacitor plugin contracts', () => {
   });
 
   it('does not enable the global Capacitor HTTP fetch/XMLHttpRequest patch', () => {
-    expect(capacitorConfig.plugins?.CapacitorHttp?.enabled).not.toBe(true);
+    expect(capacitorPlugins?.CapacitorHttp?.enabled).not.toBe(true);
     expect(packageJson.dependencies['@capacitor-community/http']).toBeUndefined();
   });
 

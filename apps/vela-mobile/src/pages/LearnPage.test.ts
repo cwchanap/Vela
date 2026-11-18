@@ -4,9 +4,9 @@ import { createMemoryHistory, createRouter } from 'vue-router';
 import { defineComponent } from 'vue';
 import { describe, expect, it, vi } from 'vitest';
 import LearnPage from './LearnPage.vue';
-import { pushMobileRoute } from 'src/router/mobile-navigation';
+import { pushMobileRoute } from '@/router/mobile-navigation';
 
-vi.mock('src/router/mobile-navigation', () => ({
+vi.mock('@/router/mobile-navigation', () => ({
   pushMobileRoute: vi.fn().mockResolvedValue({ kind: 'pushed' }),
 }));
 

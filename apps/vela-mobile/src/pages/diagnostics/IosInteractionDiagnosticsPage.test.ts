@@ -3,8 +3,8 @@ import { QLayout, QPageContainer, Quasar } from 'quasar';
 import { defineComponent } from 'vue';
 import { createMemoryHistory, createRouter } from 'vue-router';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { IOS_INTERACTION_DIAGNOSTICS_MARKER } from 'src/diagnostics/ios-interaction-contract';
-import { resetMobileLifecycleForTests, mobileLifecycleState } from 'src/services/mobile-lifecycle';
+import { IOS_INTERACTION_DIAGNOSTICS_MARKER } from '@/diagnostics/ios-interaction-contract';
+import { resetMobileLifecycleForTests, mobileLifecycleState } from '@/services/mobile-lifecycle';
 import IosInteractionDetailPage from './IosInteractionDetailPage.vue';
 import IosInteractionDiagnosticsPage from './IosInteractionDiagnosticsPage.vue';
 

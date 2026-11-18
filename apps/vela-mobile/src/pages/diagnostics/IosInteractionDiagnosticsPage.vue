@@ -93,25 +93,25 @@
 import { computed, inject, ref } from 'vue';
 import { useQuasar } from 'quasar';
 import { useRoute, useRouter } from 'vue-router';
-import { stageDiagnosticColdEntry } from 'src/diagnostics/cold-entry';
-import JapaneseInputProbe from 'src/components/mobile/JapaneseInputProbe.vue';
+import { stageDiagnosticColdEntry } from '@/diagnostics/cold-entry';
+import JapaneseInputProbe from '@/components/mobile/JapaneseInputProbe.vue';
 import {
   KEYBOARD_VIEWPORT_INJECTION_KEY,
   useKeyboardViewport,
-} from 'src/composables/useKeyboardViewport';
+} from '@/composables/useKeyboardViewport';
 import {
   IOS_DIAGNOSTIC_DETAIL_PATH,
   IOS_DIAGNOSTIC_ROOT_PATH,
   IOS_INTERACTION_DIAGNOSTICS_LABEL,
   IOS_INTERACTION_DIAGNOSTICS_MARKER,
-} from 'src/diagnostics/ios-interaction-contract';
+} from '@/diagnostics/ios-interaction-contract';
 import {
   enterMobileRoute,
   pushMobileRoute,
   readMobileDepth,
   type MobileNavigationResult,
-} from 'src/router/mobile-navigation';
-import { mobileLifecycleState } from 'src/services/mobile-lifecycle';
+} from '@/router/mobile-navigation';
+import { mobileLifecycleState } from '@/services/mobile-lifecycle';
 
 const quasar = useQuasar();
 const route = useRoute();
