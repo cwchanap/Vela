@@ -65,7 +65,9 @@ jobs:
         run: bun --cwd=packages/common run build
 
       - name: Install Playwright Browsers
-        run: bunx playwright install --with-deps
+        # playwright.config.ts only defines a chromium project.
+        timeout-minutes: 10
+        run: bunx playwright install --with-deps chromium
         working-directory: ./apps/vela
 
       - name: Build application
