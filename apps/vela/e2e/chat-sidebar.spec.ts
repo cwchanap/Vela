@@ -396,10 +396,7 @@ test.describe('Chat model picker and cache reminder - desktop (1280px)', () => {
       ok: boolean;
       lastLlmAt: number | null;
     };
-    expect(assistantSaveBody.ok).toBe(true);
-    expect(
-      assistantSaveBody.lastLlmAt === null || typeof assistantSaveBody.lastLlmAt === 'number',
-    ).toBe(true);
+    expect(assistantSaveBody).toEqual({ ok: true, lastLlmAt: null });
 
     // The persisted choice survives a reload and is restored on selection.
     await page.reload();
