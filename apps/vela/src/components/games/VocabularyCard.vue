@@ -45,7 +45,7 @@
 </template>
 
 <script setup lang="ts">
-import type { Question } from 'src/stores/games';
+import type { Question } from '@/stores/games';
 import FuriKana from './FuriKana.vue';
 
 defineProps<{

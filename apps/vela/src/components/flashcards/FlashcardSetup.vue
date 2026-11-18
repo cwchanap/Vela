@@ -108,12 +108,12 @@
 
 <script setup lang="ts">
 import { ref, computed, watch, onMounted } from 'vue';
-import { useAuthStore } from 'src/stores/auth';
-import { useFlashcardStore } from 'src/stores/flashcards';
-import { flashcardService } from 'src/services/flashcardService';
-import JlptLevelSelector from 'src/components/games/JlptLevelSelector.vue';
-import type { JLPTLevel } from 'src/types/database';
-import type { StudyMode, CardDirection } from 'src/stores/flashcards';
+import { useAuthStore } from '@/stores/auth';
+import { useFlashcardStore } from '@/stores/flashcards';
+import { flashcardService } from '@/services/flashcardService';
+import JlptLevelSelector from '@/components/games/JlptLevelSelector.vue';
+import type { JLPTLevel } from '@/types/database';
+import type { StudyMode, CardDirection } from '@/stores/flashcards';
 
 const emit = defineEmits<{
   (

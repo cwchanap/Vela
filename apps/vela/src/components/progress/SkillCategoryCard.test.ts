@@ -2,7 +2,7 @@ import { describe, it, expect, afterEach, vi } from 'vitest';
 import { mount, VueWrapper } from '@vue/test-utils';
 import { Quasar } from 'quasar';
 import SkillCategoryCard from './SkillCategoryCard.vue';
-import type { SkillCategory } from 'src/services/progressService';
+import type { SkillCategory } from '@/services/progressService';
 
 const mockSkill: SkillCategory = {
   id: 'vocabulary',

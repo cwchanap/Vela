@@ -6,5 +6,5 @@
 </template>
 
 <script setup lang="ts">
-import SentenceBuilder from 'src/components/games/SentenceBuilder.vue';
+import SentenceBuilder from '@/components/games/SentenceBuilder.vue';
 </script>

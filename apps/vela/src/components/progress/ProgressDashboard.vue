@@ -195,8 +195,8 @@
 
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue';
-import { useProgressStore } from 'src/stores/progress';
-import { useAuthStore } from 'src/stores/auth';
+import { useProgressStore } from '@/stores/progress';
+import { useAuthStore } from '@/stores/auth';
 import ProgressChart from './ProgressChart.vue';
 import SkillCategoryCard from './SkillCategoryCard.vue';
 import AchievementItem from './AchievementItem.vue';

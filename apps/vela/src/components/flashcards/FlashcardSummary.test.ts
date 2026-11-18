@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { mount } from '@vue/test-utils';
 import { Quasar } from 'quasar';
 import FlashcardSummary from './FlashcardSummary.vue';
-import type { SessionStats } from 'src/stores/flashcards';
+import type { SessionStats } from '@/stores/flashcards';
 
 describe('FlashcardSummary', () => {
   const mockStats: SessionStats = {

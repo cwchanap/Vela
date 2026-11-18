@@ -83,8 +83,8 @@ import {
   type LlmProvider,
 } from '@vela/common';
 import { effortOptions, registryModels } from '../../../utils/llmModelOptions';
-import { useLLMSettingsStore, type LlmThinkingPatch } from 'src/stores/llmSettings';
-import { useAuthStore } from 'src/stores/auth';
+import { useLLMSettingsStore, type LlmThinkingPatch } from '@/stores/llmSettings';
+import { useAuthStore } from '@/stores/auth';
 
 const props = defineProps<{ provider: LlmProvider }>();
 

@@ -96,10 +96,10 @@
 
 <script setup lang="ts">
 import { ref, onMounted } from 'vue';
-import type { ListeningMode, ListeningSource, ListeningConfig } from 'src/types/listening';
-import type { JLPTLevel } from 'src/types/database';
-import { getTTSSettings } from 'src/services/ttsService';
-import JlptLevelSelector from 'src/components/games/JlptLevelSelector.vue';
+import type { ListeningMode, ListeningSource, ListeningConfig } from '@/types/listening';
+import type { JLPTLevel } from '@/types/database';
+import { getTTSSettings } from '@/services/ttsService';
+import JlptLevelSelector from '@/components/games/JlptLevelSelector.vue';
 
 defineProps<{
   isStarting: boolean;

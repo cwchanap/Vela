@@ -7,7 +7,7 @@
 
 <script setup lang="ts">
 import { computed } from 'vue';
-import { isKanji } from 'src/utils/japanese';
+import { isKanji } from '@/utils/japanese';
 
 const props = defineProps<{
   text: string;

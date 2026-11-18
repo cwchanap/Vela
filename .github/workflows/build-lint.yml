@@ -64,6 +64,31 @@ jobs:
       - name: Build frontend
         run: bun run build
 
+      - name: Verify built bundles contain their injected Cognito config
+        # Assert each app's own sentinel in its own bundle: a web value leaking
+        # into the mobile build (or the reverse) is exactly the copy-paste
+        # mistake this gate exists to catch. Keep the mobile API URL out of the
+        # web assertion.
+        shell: bash
+        run: |
+          require_marker() {
+            local dir="$1" marker="$2" label="$3"
+            if [ ! -d "$dir" ]; then
+              echo "::error::$label bundle directory $dir is missing"
+              exit 1
+            fi
+            if ! grep -R -q -F --binary-files=text "$marker" "$dir"; then
+              echo "::error::$label bundle does not contain the injected marker: $marker"
+              exit 1
+            fi
+            echo "$label bundle contains $marker"
+          }
+
+          require_marker apps/vela/dist/spa 'ci-web-client-sentinel' 'Web'
+          require_marker apps/vela/dist/spa 'us-east-1_ciPlaceholder' 'Web'
+          require_marker apps/vela-mobile/dist/spa 'https://example.invalid/api/' 'Mobile'
+          require_marker apps/vela-mobile/dist/spa 'us-east-1_ciPlaceholder' 'Mobile'
+
       - name: Install Playwright Browsers
         run: bunx playwright install --with-deps chromium
         working-directory: ./apps/vela

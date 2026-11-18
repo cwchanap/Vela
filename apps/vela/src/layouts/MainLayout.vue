@@ -176,10 +176,10 @@
 
 <script setup lang="ts">
 import { ref, onMounted, watch, computed } from 'vue';
-import { useAuthStore } from 'src/stores/auth';
-import { useThemeStore } from 'src/stores/theme';
+import { useAuthStore } from '@/stores/auth';
+import { useThemeStore } from '@/stores/theme';
 import { storeToRefs } from 'pinia';
-import { mainNavigation, userNavigation } from 'src/config/navigation';
+import { mainNavigation, userNavigation } from '@/config/navigation';
 import { useRouter, useRoute } from 'vue-router';
 import { useQuasar } from 'quasar';
 

@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { mount } from '@vue/test-utils';
 import { Quasar } from 'quasar';
 import FlashcardCard from './FlashcardCard.vue';
-import type { Vocabulary } from 'src/types/database';
+import type { Vocabulary } from '@/types/database';
 
 describe('FlashcardCard', () => {
   const mockVocabulary: Vocabulary = {

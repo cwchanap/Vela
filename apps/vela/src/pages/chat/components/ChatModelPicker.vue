@@ -91,7 +91,7 @@ import {
   pairToOptionValue,
   registryModel,
   type LlmModelOption,
-} from 'src/utils/llmModelOptions';
+} from '@/utils/llmModelOptions';
 
 const props = defineProps<{
   pair: LlmModelPair | null;

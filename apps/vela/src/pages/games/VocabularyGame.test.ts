@@ -4,12 +4,12 @@ import { createPinia, setActivePinia } from 'pinia';
 import { Quasar, Notify } from 'quasar';
 import { createRouter, createMemoryHistory } from 'vue-router';
 import VocabularyGame from './VocabularyGame.vue';
-import { useGameStore } from 'src/stores/games';
-import { useAuthStore } from 'src/stores/auth';
-import { useProgressStore } from 'src/stores/progress';
+import { useGameStore } from '@/stores/games';
+import { useAuthStore } from '@/stores/auth';
+import { useProgressStore } from '@/stores/progress';
 
 // Mock child components
-vi.mock('src/components/games/VocabularyCard.vue', () => ({
+vi.mock('@/components/games/VocabularyCard.vue', () => ({
   default: {
     template: '<div data-testid="vocabulary-card"><slot /></div>',
     name: 'VocabularyCard',
@@ -18,7 +18,7 @@ vi.mock('src/components/games/VocabularyCard.vue', () => ({
   },
 }));
 
-vi.mock('src/components/games/ScoreDisplay.vue', () => ({
+vi.mock('@/components/games/ScoreDisplay.vue', () => ({
   default: {
     template: '<div data-testid="score-display" />',
     name: 'ScoreDisplay',
@@ -26,14 +26,14 @@ vi.mock('src/components/games/ScoreDisplay.vue', () => ({
   },
 }));
 
-vi.mock('src/components/games/GameTimer.vue', () => ({
+vi.mock('@/components/games/GameTimer.vue', () => ({
   default: {
     template: '<div data-testid="game-timer" />',
     name: 'GameTimer',
   },
 }));
 
-vi.mock('src/components/games/JlptLevelSelector.vue', () => ({
+vi.mock('@/components/games/JlptLevelSelector.vue', () => ({
   default: {
     template: '<div data-testid="jlpt-level-selector" />',
     name: 'JlptLevelSelector',
@@ -89,13 +89,13 @@ vi.mock('../../services/ttsService', () => ({
   pronounceWord: (...args: any[]) => mockPronounceWord(...args),
 }));
 
-vi.mock('src/utils/vocabulary', () => ({
+vi.mock('@/utils/vocabulary', () => ({
   buildDistractors: (...args: any[]) => mockBuildDistractors(...args),
   normalizeVocabulary: (...args: any[]) => mockNormalizeVocabulary(...args),
   toVocabularyOption: (...args: any[]) => mockToVocabularyOption(...args),
 }));
 
-vi.mock('src/utils/array', () => ({
+vi.mock('@/utils/array', () => ({
   shuffleArray: (...args: any[]) => mockShuffleArray(...args),
 }));
 

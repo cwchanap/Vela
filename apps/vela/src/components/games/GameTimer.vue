@@ -4,7 +4,7 @@
 
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted } from 'vue';
-import { useGameStore } from 'src/stores/games.ts';
+import { useGameStore } from '@/stores/games.ts';
 
 const props = defineProps<{
   /** Override the timeout handler. Defaults to ending the vocabulary game. */

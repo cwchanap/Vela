@@ -104,8 +104,8 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, watch } from 'vue';
-import { useAuthStore } from 'src/stores/auth';
-import { srsService, type SRSStats } from 'src/services/srsService';
+import { useAuthStore } from '@/stores/auth';
+import { srsService, type SRSStats } from '@/services/srsService';
 
 const authStore = useAuthStore();
 

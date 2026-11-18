@@ -23,7 +23,7 @@
 
 <script setup lang="ts">
 import { ref } from 'vue';
-import { shuffleArray } from 'src/utils/array';
+import { shuffleArray } from '@/utils/array';
 
 const props = defineProps<{
   correctAnswer: string;

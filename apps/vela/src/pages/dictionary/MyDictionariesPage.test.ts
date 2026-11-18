@@ -6,11 +6,11 @@ import { createRouter, createMemoryHistory } from 'vue-router';
 import { QueryClient, VueQueryPlugin } from '@tanstack/vue-query';
 import { fetchAuthSession } from 'aws-amplify/auth';
 import MyDictionariesPage from './MyDictionariesPage.vue';
-import * as myDictionariesService from 'src/services/myDictionariesService';
-import * as ttsService from 'src/services/ttsService';
-import * as vocabularyService from 'src/services/vocabularyService';
-import type { MyDictionaryEntry } from 'src/services/myDictionariesService';
-import { useAuthStore } from 'src/stores/auth';
+import * as myDictionariesService from '@/services/myDictionariesService';
+import * as ttsService from '@/services/ttsService';
+import * as vocabularyService from '@/services/vocabularyService';
+import type { MyDictionaryEntry } from '@/services/myDictionariesService';
+import { useAuthStore } from '@/stores/auth';
 import type { Token } from '@vela/common/tokenizer';
 import { tokenize } from '@vela/common/tokenizer';
 
@@ -76,7 +76,7 @@ vi.mock('aws-amplify/auth', () => ({
 }));
 
 // Mock authService to avoid Cognito configuration issues
-vi.mock('src/services/authService', () => ({
+vi.mock('@/services/authService', () => ({
   authService: {
     initialize: vi.fn().mockResolvedValue(undefined),
     signIn: vi.fn(),
@@ -86,19 +86,19 @@ vi.mock('src/services/authService', () => ({
 }));
 
 // Mock services
-vi.mock('src/services/myDictionariesService', () => ({
+vi.mock('@/services/myDictionariesService', () => ({
   getMyDictionaries: vi.fn().mockResolvedValue([]),
   deleteDictionaryEntry: vi.fn().mockResolvedValue(undefined),
 }));
 
 // The SSE decoding contract is covered by services/llm/index.test.ts; here the
 // client is mocked so the page tests assert page behavior per frame/outcome.
-vi.mock('src/services/llm', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('src/services/llm')>();
+vi.mock('@/services/llm', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/services/llm')>();
   return { ...actual, llmClient: { analyzeSentenceStream: vi.fn() } };
 });
 
-vi.mock('src/services/ttsService', () => ({
+vi.mock('@/services/ttsService', () => ({
   generatePronunciation: vi.fn().mockResolvedValue({ audioUrl: 'http://example.com/audio.mp3' }),
   playAudio: vi.fn().mockResolvedValue(undefined),
 }));
@@ -163,13 +163,13 @@ vi.mock('@vela/common/tokenizer', async (importOriginal) => {
   };
 });
 
-vi.mock('src/services/vocabularyService', () => ({
+vi.mock('@/services/vocabularyService', () => ({
   lookupWord: vi.fn().mockResolvedValue(null),
   addFlashcard: vi.fn(),
   clearLookupCache: vi.fn(),
 }));
 
-vi.mock('src/config', () => ({
+vi.mock('@/config', () => ({
   config: { api: { url: 'http://localhost:9005/api/' } },
 }));
 
@@ -600,7 +600,7 @@ describe('MyDictionariesPage', () => {
         | { type: 'chunk'; text: string }
       >,
     ) => {
-      const { llmClient } = await import('src/services/llm');
+      const { llmClient } = await import('@/services/llm');
       vi.mocked(llmClient.analyzeSentenceStream).mockImplementation(async (_input, onEvent) => {
         for (const frame of frames) onEvent(frame);
       });
@@ -617,8 +617,8 @@ describe('MyDictionariesPage', () => {
         { type: 'chunk', text: 'This sentence means ' },
         { type: 'chunk', text: 'studying Japanese.' },
       ]);
-      const { llmClient } = await import('src/services/llm');
-      const { useLLMSettingsStore } = await import('src/stores/llmSettings');
+      const { llmClient } = await import('@/services/llm');
+      const { useLLMSettingsStore } = await import('@/stores/llmSettings');
       useLLMSettingsStore().llm = {
         keys: { google: 'dict-key' },
         thinking: { 'gemini-3.8-flash': 'max' },
@@ -664,8 +664,8 @@ describe('MyDictionariesPage', () => {
         },
         { type: 'chunk', text: 'plain.' },
       ]);
-      const { llmClient } = await import('src/services/llm');
-      const { useLLMSettingsStore } = await import('src/stores/llmSettings');
+      const { llmClient } = await import('@/services/llm');
+      const { useLLMSettingsStore } = await import('@/stores/llmSettings');
       useLLMSettingsStore().llm = {
         keys: { google: 'dict-key' },
         thinking: {},
@@ -681,7 +681,7 @@ describe('MyDictionariesPage', () => {
     });
 
     it('keeps partial text visible but flags an error when the stream ends without done', async () => {
-      const { llmClient } = await import('src/services/llm');
+      const { llmClient } = await import('@/services/llm');
       vi.mocked(llmClient.analyzeSentenceStream).mockImplementation(async (_input, onEvent) => {
         onEvent({ type: 'chunk', text: 'Partial output' });
         throw new Error('Analysis stream ended without completion');
@@ -701,7 +701,7 @@ describe('MyDictionariesPage', () => {
     });
 
     it('shows the error frame message and clears loading', async () => {
-      const { llmClient } = await import('src/services/llm');
+      const { llmClient } = await import('@/services/llm');
       vi.mocked(llmClient.analyzeSentenceStream).mockRejectedValue(
         new Error('Google request failed (401)'),
       );
@@ -720,7 +720,7 @@ describe('MyDictionariesPage', () => {
     });
 
     it('shows an authentication error when no token is available', async () => {
-      const { llmClient } = await import('src/services/llm');
+      const { llmClient } = await import('@/services/llm');
       vi.mocked(llmClient.analyzeSentenceStream).mockRejectedValue(
         new Error('Authentication required. Please sign in.'),
       );
@@ -734,7 +734,7 @@ describe('MyDictionariesPage', () => {
     });
 
     it('maps a gateway timeout to a helpful message', async () => {
-      const { llmClient } = await import('src/services/llm');
+      const { llmClient } = await import('@/services/llm');
       vi.mocked(llmClient.analyzeSentenceStream).mockRejectedValue(
         Object.assign(new Error('Gateway Timeout'), { status: 504 }),
       );
@@ -750,7 +750,7 @@ describe('MyDictionariesPage', () => {
     });
 
     it('supersedes an in-flight ask: aborts the old stream, drops its frames, keeps loading', async () => {
-      const { llmClient } = await import('src/services/llm');
+      const { llmClient } = await import('@/services/llm');
       const calls: Array<{
         input: { signal: AbortSignal };
         onEvent: (_frame: unknown) => void;
@@ -800,7 +800,7 @@ describe('MyDictionariesPage', () => {
     });
 
     it('aborts the in-flight ask when the page unmounts', async () => {
-      const { llmClient } = await import('src/services/llm');
+      const { llmClient } = await import('@/services/llm');
       const signals: AbortSignal[] = [];
       vi.mocked(llmClient.analyzeSentenceStream).mockImplementation((input) => {
         signals.push(input.signal as AbortSignal);

@@ -5,17 +5,17 @@ import { Quasar, Notify } from 'quasar';
 import { ref } from 'vue';
 import LlmProvidersSection from './LlmProvidersSection.vue';
 import LlmProviderCard from './LlmProviderCard.vue';
-import { useLLMSettingsStore } from 'src/stores/llmSettings';
-import { useAuthStore } from 'src/stores/auth';
+import { useLLMSettingsStore } from '@/stores/llmSettings';
+import { useAuthStore } from '@/stores/auth';
 import { LLM_PROVIDER_REGISTRY, LLM_PROVIDERS, type LlmProvider } from '@vela/common';
-import type { LlmPreferences, UserPreferences } from 'src/types/shared';
+import type { LlmPreferences, UserPreferences } from '@/types/shared';
 
 const mockCapabilitiesData = ref<{ serverKeyProviders: LlmProvider[] } | undefined>(undefined);
 const mockCapabilitiesError = ref(false);
 const mockCapabilitiesPending = ref(false);
 const mockCapabilitiesRefetch = vi.fn();
 
-vi.mock('src/composables/queries/useLlmCapabilitiesQuery', () => ({
+vi.mock('@/composables/queries/useLlmCapabilitiesQuery', () => ({
   useLlmCapabilitiesQuery: () => ({
     data: mockCapabilitiesData,
     isError: mockCapabilitiesError,

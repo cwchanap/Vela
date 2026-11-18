@@ -80,21 +80,21 @@
 
 <script setup lang="ts">
 import { ref, watch, onBeforeUnmount } from 'vue';
-import { useListeningGameStore } from 'src/stores/listeningGame';
-import { useProgressStore } from 'src/stores/progress';
-import { useAuthStore } from 'src/stores/auth';
-import { listeningGameService } from 'src/services/listeningGameService';
-import { generatePronunciation } from 'src/services/ttsService';
-import { isDictationCorrect } from 'src/utils/listeningValidation';
+import { useListeningGameStore } from '@/stores/listeningGame';
+import { useProgressStore } from '@/stores/progress';
+import { useAuthStore } from '@/stores/auth';
+import { listeningGameService } from '@/services/listeningGameService';
+import { generatePronunciation } from '@/services/ttsService';
+import { isDictationCorrect } from '@/utils/listeningValidation';
 import { Notify } from 'quasar';
-import type { ListeningConfig, ListeningQuestion } from 'src/types/listening';
-import ListeningSetup from 'src/components/games/listening/ListeningSetup.vue';
-import AudioPlayer from 'src/components/games/listening/AudioPlayer.vue';
-import MultipleChoiceQuestion from 'src/components/games/listening/MultipleChoiceQuestion.vue';
-import DictationQuestion from 'src/components/games/listening/DictationQuestion.vue';
-import AnswerFeedback from 'src/components/games/listening/AnswerFeedback.vue';
-import GameTimer from 'src/components/games/GameTimer.vue';
-import ScoreDisplay from 'src/components/games/ScoreDisplay.vue';
+import type { ListeningConfig, ListeningQuestion } from '@/types/listening';
+import ListeningSetup from '@/components/games/listening/ListeningSetup.vue';
+import AudioPlayer from '@/components/games/listening/AudioPlayer.vue';
+import MultipleChoiceQuestion from '@/components/games/listening/MultipleChoiceQuestion.vue';
+import DictationQuestion from '@/components/games/listening/DictationQuestion.vue';
+import AnswerFeedback from '@/components/games/listening/AnswerFeedback.vue';
+import GameTimer from '@/components/games/GameTimer.vue';
+import ScoreDisplay from '@/components/games/ScoreDisplay.vue';
 
 const listeningStore = useListeningGameStore();
 const progressStore = useProgressStore();

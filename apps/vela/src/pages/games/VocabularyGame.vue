@@ -116,21 +116,21 @@
 <script setup lang="ts">
 import { computed, ref, watch, onMounted } from 'vue';
 import { useRoute } from 'vue-router';
-import { useGameStore } from 'src/stores/games';
-import { useProgressStore } from 'src/stores/progress';
-import { useAuthStore } from 'src/stores/auth';
+import { useGameStore } from '@/stores/games';
+import { useProgressStore } from '@/stores/progress';
+import { useAuthStore } from '@/stores/auth';
 import { gameService, InsufficientVocabularyError } from '../../services/gameService';
 import { srsService } from '../../services/srsService';
 import { pronounceWord } from '../../services/ttsService';
-import { buildDistractors, normalizeVocabulary, toVocabularyOption } from 'src/utils/vocabulary';
-import VocabularyCard from 'src/components/games/VocabularyCard.vue';
-import ScoreDisplay from 'src/components/games/ScoreDisplay.vue';
-import GameTimer from 'src/components/games/GameTimer.vue';
-import JlptLevelSelector from 'src/components/games/JlptLevelSelector.vue';
+import { buildDistractors, normalizeVocabulary, toVocabularyOption } from '@/utils/vocabulary';
+import VocabularyCard from '@/components/games/VocabularyCard.vue';
+import ScoreDisplay from '@/components/games/ScoreDisplay.vue';
+import GameTimer from '@/components/games/GameTimer.vue';
+import JlptLevelSelector from '@/components/games/JlptLevelSelector.vue';
 import { Notify } from 'quasar';
-import type { Vocabulary, JLPTLevel } from 'src/types/database';
-import { shuffleArray } from 'src/utils/array';
-import type { ReviewInput } from 'src/services/srsService';
+import type { Vocabulary, JLPTLevel } from '@/types/database';
+import { shuffleArray } from '@/utils/array';
+import type { ReviewInput } from '@/services/srsService';
 
 const gameStore = useGameStore();
 const progressStore = useProgressStore();
