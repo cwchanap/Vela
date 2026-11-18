@@ -14,19 +14,34 @@ const requireTestEnv = (name: string): string => {
   return value;
 };
 
+// Env is resolved lazily inside the fixture: loading this module without the
+// e2e credentials must not break test collection for specs that never
+// authenticate (CI has no Cognito secrets — see e2e.yml).
+const REQUIRED_ENV = [
+  'TEST_EMAIL',
+  'TEST_PASSWORD',
+  'VITE_COGNITO_USER_POOL_ID',
+  'VITE_COGNITO_TEST_CLIENT_ID',
+  'VITE_AWS_REGION',
+] as const;
+
 // Test user credentials and Cognito config: required via environment for flexibility
 export const TEST_USER = {
-  email: requireTestEnv('TEST_EMAIL'),
-  password: requireTestEnv('TEST_PASSWORD'),
+  get email(): string {
+    return requireTestEnv('TEST_EMAIL');
+  },
+  get password(): string {
+    return requireTestEnv('TEST_PASSWORD');
+  },
 };
 
-const COGNITO_CONFIG = {
+const cognitoConfig = () => ({
   userPoolId: requireTestEnv('VITE_COGNITO_USER_POOL_ID'),
   // Must match the client injected into the Playwright app/API web servers.
   // The production web client intentionally does not allow ADMIN_USER_PASSWORD_AUTH.
   clientId: requireTestEnv('VITE_COGNITO_TEST_CLIENT_ID'),
   region: requireTestEnv('VITE_AWS_REGION'),
-};
+});
 
 // Amplify v6 token storage key format: CognitoIdentityServiceProvider.{clientId}.{username}.{key}
 const AUTH_KEY_PREFIX = 'CognitoIdentityServiceProvider';
@@ -37,15 +52,17 @@ const AUTH_KEY_PREFIX = 'CognitoIdentityServiceProvider';
  * and seed them into the browser's localStorage so Amplify recognises the session.
  */
 async function seedAuthSession(page: Page, email: string, password: string): Promise<void> {
+  const config = cognitoConfig();
+
   // 1. Get tokens via AWS SDK from the Node.js test runner context
   const cognitoClient = new CognitoIdentityProviderClient({
-    region: COGNITO_CONFIG.region,
+    region: config.region,
   });
 
   const response = await cognitoClient.send(
     new AdminInitiateAuthCommand({
-      UserPoolId: COGNITO_CONFIG.userPoolId,
-      ClientId: COGNITO_CONFIG.clientId,
+      UserPoolId: config.userPoolId,
+      ClientId: config.clientId,
       AuthFlow: 'ADMIN_USER_PASSWORD_AUTH',
       AuthParameters: {
         USERNAME: email,
@@ -77,7 +94,7 @@ async function seedAuthSession(page: Page, email: string, password: string): Pro
   const username: string = tokenPayload['cognito:username'] || tokenPayload['sub'];
 
   // 4. Inject tokens into localStorage using Amplify v6's key format
-  const clientId = COGNITO_CONFIG.clientId;
+  const clientId = config.clientId;
   const keyPrefix = `${AUTH_KEY_PREFIX}.${clientId}`;
   const userPrefix = `${keyPrefix}.${username}`;
 
@@ -106,6 +123,12 @@ export const test = base.extend<{
   authenticatedPage: Page;
 }>({
   authenticatedPage: async ({ page }, use) => {
+    const missing = REQUIRED_ENV.filter((name) => !process.env[name]);
+    test.skip(
+      missing.length > 0,
+      `Missing e2e credentials: ${missing.join(', ')}. Set them in your environment or .env file.`,
+    );
+
     // Seed a valid Cognito session via AdminInitiateAuth + localStorage injection.
     // Uses ADMIN_USER_PASSWORD_AUTH which is enabled on the dedicated test client,
     // bypassing the Google-only OAuth UI while authenticating against the real user pool.
