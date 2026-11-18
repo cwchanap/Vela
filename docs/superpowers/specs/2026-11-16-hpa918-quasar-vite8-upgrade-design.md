@@ -2,8 +2,8 @@
 
 **Status:** Proposed; documentation-only draft. No dependency change is implemented by this document.  
 **Linear:** https://linear.app/cwchanap/issue/HPA-918/maintenance-coordinate-ignored-quasar-and-env-dependency-majors  
-**Plan:** [Single-PR implementation plan](../plans/2026-11-16-hpa918-quasar-vite8-upgrade.md)  
-**Delivery rule:** One PR for HPA-918. Add implementation, tests, verification receipts, and review changes to this same draft PR; do not open a follow-up implementation PR.
+**Plan:** [Stacked-PR implementation plan](../plans/2026-11-16-hpa918-quasar-vite8-upgrade.md)  
+**Delivery rule:** Four stacked PRs for HPA-918, merged bottom-up (toolchain/docs/CI groundwork → `apps/vela-mobile` → web core → web UI + CI bundle-env gate); the original single PR reached 195 changed files. Keep implementation, tests, verification receipts, and review changes inside the stack; do not open PRs beyond the agreed four.
 
 ## Problem and repository baseline (main, 2026-11-16)
 
@@ -31,7 +31,7 @@ Pin frontend Node **22.22.0** in a root `.node-version` file, tighten app engine
 
 The first runnable migration step is **atomic**: dependency bump, `#q-app` config entrypoint, v3 env configuration and Node pin must land together, before `bun install` invokes `quasar prepare` postinstalls. Update `apps/vela/src/test/quasar.config.test.ts` (the factory currently receives `undefined`, but will require `ctx.prod`) and the web's `#q-app` Vitest mock to export `defineBoot` for both web boot files. An isolated dependency bump cannot pass its own install gate. Prove frozen install, Quasar-config tests and web boot tests, and Vitest config load *after* this atomic step.
 
-For reviewable history, make the old-alias-to-`@/` rewrite a **purely mechanical first commit on this same PR**, while still on v2; add temporary `@` aliases to existing v2 Quasar/Vitest configs **and `@`/`@/*` to Quasar-generated TypeScript paths via `build.typescript.extendTsConfig`**. Run `quasar prepare`, `vue-tsc`, Vitest, and builds before the v3 commit. Remove the temporary v2 TypeScript hook after v3 generates the alias itself. **Do not open a separate PR**, even though the migration touches many source files.
+For reviewable history, make the old-alias-to-`@/` rewrite **purely mechanical commits inside the stack, each landing on its app's migration PR while still on v2**; add temporary `@` aliases to existing v2 Quasar/Vitest configs **and `@`/`@/*` to Quasar-generated TypeScript paths via `build.typescript.extendTsConfig`**. Run `quasar prepare`, `vue-tsc`, Vitest, and builds before the v3 commit. Remove the temporary v2 TypeScript hook after v3 generates the alias itself. **Do not open a separate alias PR**, even though the migration touches many source files.
 
 ### Decision B — Minimal v3 config and alias migration
 
@@ -59,7 +59,7 @@ Remove standalone `sync-ios-version.mjs`, its tests, `sync:ios-version`, and scr
 - Updating `dotenv-expand` to v1000; adding command substitution/decryption; mass-unignoring dependencies or changing other Dependabot PRs.
 - API/Lambda/database changes or new app features, visuals, user journeys, or authentication contracts.
 - Building compatibility adapters for removed Quasar APIs, old aliases, multi-mode scaffolds, or a new shared env abstraction.
-- A separate alias/refactor PR or a second implementation PR. Alias migration is the first self-contained commit on this PR.
+- PRs beyond the agreed four-PR stack — for example a separate alias/refactor PR. Alias migration lands as self-contained commits inside the stack PRs.
 
 ## Risks and stop conditions
 
@@ -67,17 +67,17 @@ Remove standalone `sync-ios-version.mjs`, its tests, `sync:ios-version`, and scr
 2. **Version drift and detached CLI users:** the native version must derive from Quasar's actual resolved bundled values, not a replica of the old Vite env loader. Test real interpolation and explicit empty process values. Both standalone `verify:deployed-config` and `verify:m1-foundation` must continue to work via a minimal plain-env CLI reader, without turning that reader into a second bundle source.
 3. **Install and v2 alias gates:** v2's generated TypeScript paths lack `@/*`; add the temporary `extendTsConfig` mapping before the alias-only commit gate. For v3, replace `#q-app/wrappers`, update `quasar.config.test.ts` factory contexts and `defineBoot` mocks, and apply env settings and Node pin before the first install/postinstall gate.
 4. **Toolchain drift:** tests and the Quasar CLI must resolve compatible Vite versions; reject `parseSync`/peer errors and keep extension tests green.
-5. **Migration scope:** old aliases need a large mechanical rewrite, kept in a separate commit **within this PR**. Delete unsupported unused config, do not refactor functional features.
+5. **Migration scope:** old aliases need a large mechanical rewrite, kept in separate commits **within the stack**. Delete unsupported unused config, do not refactor functional features.
 6. **Unreachable UI acceptance:** browser-hosted mobile uses an unsupported session store and the auth gate hides normal Home/Learn pages; no mobile Home page displays a version. Browser acceptance must explicitly inspect the unsupported gate or the existing dev-only iOS diagnostic bypass route (with back navigation) at 390 × 844, not require unmocked Home → Learn. A native simulator checks its version via build metadata (`CFBundleShortVersionString`), not a made-up label. Update deployment and mobile scripts; record real runs, not skipped draft checks.
 
 ## Acceptance contract
 
-- [ ] The same PR contains a mechanical alias commit that is verified against v2, then an atomic v3 migration; frozen install, supported Node 22.22.0 and peer graph, two Quasar builds, web/mobile Vitest+coverage, extension regression, typechecks/lint and native asset build all pass on their tested commits.
+- [ ] Across the stacked PRs: each app's mechanical alias commit is verified against v2 before its atomic v3 migration; frozen install, supported Node 22.22.0 and peer graph, two Quasar builds, web/mobile Vitest+coverage, extension regression, typechecks/lint and native asset build all pass on their tested commits.
 - [ ] `build-lint.yml` writes **real placeholder `.env.production` files** for both apps, rather than relying solely on process env values; CI checks the *web* bundle contains its web Cognito sentinel and the *mobile* bundle contains mobile API/Cognito sentinels (e.g. `example.invalid` and `us-east-1_ciPlaceholder`). Missing sentinel fails CI.
 - [ ] Mobile production env validation and Capacitor-only native version sync read the actual Quasar-resolved defines. Both standalone diagnostic CLIs and their existing tests pass with a dependency-free plain-env reader. Unit tests use fake resolved configs; a **real Quasar build** checks file/interpolation/empty override parity between the resolved config and `project.pbxproj` (and generated Info.plist if available). Direct `dotenv`/`dotenv-expand` loaders are absent; no Home-version UI is added.
 - [ ] Existing mocked Playwright browser CI passes (including on draft PRs). An **MCP-driven** representative desktop/mobile end-to-end check additionally verifies navigation and visible UI on the tested commit. For mobile browser, inspect the actual unsupported-auth gate and/or navigate the dev-only `ios-interactions` diagnostic bypass route, including its detail/back action at 390 × 844; normal authenticated Home/Learn requires an explicitly mocked session store and is not a default browser assertion. Capture **one screenshot per app and inspect visually** (no mockup attached), rather than building a pre/post screenshot-diff framework. A native Simulator launch/screenshot and metadata version check is captured by MCP if available; label unavailable iOS evidence unverified.
 - [ ] Node setup is pinned in build, unit, e2e, and deploy paths; `workflow_dispatch` is used for draft-only build/unit checks because their PR jobs are skipped. CI checks are ongoing automated regression gates, not a replacement for MCP E2E acceptance.
-- [ ] GitHub PR and Linear record how #76 was superseded and why #75's direct dependency is removed; no new PR, no manual acceptance, no mass unignore. Tests and implementation are **not yet run** at design stage.
+- [ ] The stack's PRs and Linear record how #76 was superseded and why #75's direct dependency is removed; no PRs beyond the agreed stack, no manual acceptance, no mass unignore. Tests and implementation are **not yet run** at design stage.
 
 Source notes: [Quasar CLI v3 upgrade](https://quasar.dev/quasar-cli-vite/upgrade-guide/); [Quasar env configuration](https://quasar.dev/quasar-cli-vite/handling-import-meta-env/); [GitHub review](https://github.com/cwchanap/Vela/pull/93#pullrequestreview-5925171471).
 

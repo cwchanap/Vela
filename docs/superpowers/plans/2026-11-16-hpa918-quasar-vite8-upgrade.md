@@ -24,13 +24,13 @@ The tasks below still describe the work in order; they now land across that stac
 
 Reviews: [initial design review](https://github.com/cwchanap/Vela/pull/93#pullrequestreview-5925171471) and [follow-up review at `9668d826`](https://github.com/cwchanap/Vela/pull/93#pullrequestreview-5931228564). Vendor: [Quasar v3 upgrade guide](https://quasar.dev/quasar-cli-vite/upgrade-guide/) and [new env behavior](https://quasar.dev/quasar-cli-vite/handling-import-meta-env/).
 
-## Task 0 — Baseline and the mechanical alias commit (same PR)
+## Task 0 — Baseline and the mechanical alias commit (inside the stack)
 
 **Files:** active app imports and mocks, `apps/vela*/quasar.config.ts`, `apps/vela*/vitest.config.ts`.
 
 1. Record the current branch HEAD, existing Quasar/Vite/Router/Vitest graph, and the existing unit-test plus env/version regression results. Do not mark unexecuted commands passed.
 2. While dependencies are **still v2**, add a simple `'@' -> src` alias to both Quasar app configs and both Vitest alias maps. **Also add `@` and `@/*` mappings to Quasar's _generated_ `.quasar/tsconfig.json` using `build.typescript.extendTsConfig` in both v2 Quasar configs** (the generated config is extended by app tsconfigs and lacks these paths). Verify the mapping points from the generated `.quasar` directory to `src` (for example `@/*: ['./../src/*']`). **Do not write `compilerOptions.paths` into the app root tsconfig**, which would replace Quasar's generated aliases. Mechanically convert real `src/`, `pages/`, `layouts/`, `components/`, `boot/`, etc. imports and test mocks to `@/` equivalents. Preserve `@vela/common` and native dependency aliases still required by unit tests.
-3. Keep this rewrite as **commit 1 on this same HPA-918 PR**. Run `quasar prepare`, both app `vue-tsc` checks, web/mobile unit+coverage and builds on v2 before updating dependencies; explicitly catch `TS2307` for rewritten `@/` imports. The purpose is an independently diagnosable commit, **not a separate PR**. Remove temporary v2 `extendTsConfig` mappings in Task 1 when v3 generates `@/*`; do not rewrite archived docs.
+3. Keep this rewrite as a **self-contained mechanical commit on each affected app's stack PR, before its v3 bump**. Run `quasar prepare`, both app `vue-tsc` checks, web/mobile unit+coverage and builds on v2 before updating dependencies; explicitly catch `TS2307` for rewritten `@/` imports. The purpose is an independently diagnosable commit, **not a separate PR**. Remove temporary v2 `extendTsConfig` mappings in Task 1 when v3 generates `@/*`; do not rewrite archived docs.
 4. Confirm route and boot imports for both Quasar apps (especially `apps/vela/src/boot/{main,query}.ts`, which use `quasar/wrappers`) in the remaining migration inventory.
 
 **Gate:** alias-only commit passes v2 `quasar prepare`, `vue-tsc`, unit/coverage and both builds, including generated TypeScript resolution of `@/*`. Record failures and their exact causes if a gate cannot be executed.
@@ -46,7 +46,7 @@ Reviews: [initial design review](https://github.com/cwchanap/Vela/pull/93#pullre
    - Pin `22.22.0` in root `.node-version`, update app `engines.node` appropriately, and run frontend build tooling under that Node version. Add `actions/setup-node` with `node-version-file: .node-version` to `build-lint.yml`, `unit-test.yml`, `e2e.yml` and the deploy workflow(s) that build the SPA/mobile assets; do not alter the Node 20 Lambda runtime.
 2. Remove Task 0's temporary v2-only `build.typescript.extendTsConfig` alias hook once v3's generated tsconfig provides `@/*` (verify generation). Only after those changes, regenerate and commit `bun.lock`. Postinstall executes `quasar prepare`, so **a versions-only commit cannot pass install**; do not add a broken intermediate install gate.
 3. Verify both Quasar configs load, lockfile/peer resolution shows Vite 8 for Quasar/vite-plugin v2 and Vitest, no `parseSync` error, and `bun install --frozen-lockfile` succeeds on the patched commit.
-4. Keep WXT extension's Vitest 3 + coverage 3 untouched if tests and dependency graph remain supported; do not fold in the unrelated DOM dependency majors. Coordinate open Dependabot #89 through the same PR, not a separate feature PR.
+4. Keep WXT extension's Vitest 3 + coverage 3 untouched if tests and dependency graph remain supported; do not fold in the unrelated DOM dependency majors. Coordinate open Dependabot #89 through the stack, not a separate feature PR.
 
 **Gate:** frozen install, generated v3 `@/*` TypeScript mapping, both Vitest config loads, web/mobile + extension unit suites and matching coverage-provider checks, **web config tests in both prod/dev context, and existing web boot `main`/`query` tests** on migrated Node. A failed postinstall is a blocker, not a reason to skip tests.
 
@@ -94,13 +94,13 @@ Reviews: [initial design review](https://github.com/cwchanap/Vela/pull/93#pullre
 
 Backend endpoints are unchanged in this ticket; no new backend API E2E flow is required.
 
-## Task 5 — Single PR review and traceability
+## Task 5 — Stack review and traceability
 
-1. Add a concise evidence table to **this same PR**: commit SHA, resolved dependency versions, CI workflow_dispatch results, env markers in each dist, unit/coverage/build gates, **both standalone CLI checks**, Quasar-resolved version vs native metadata cases, MCP E2E diagnostic/unsupported-browser screenshots, iOS Simulator result/unverified reason.
-2. Apply valid review comments and re-run affected checks without creating a second PR.
+1. Add a concise evidence table to the stack — per-PR evidence on each PR, and the complete table on the final PR: commit SHA, resolved dependency versions, CI workflow_dispatch results, env markers in each dist, unit/coverage/build gates, **both standalone CLI checks**, Quasar-resolved version vs native metadata cases, MCP E2E diagnostic/unsupported-browser screenshots, iOS Simulator result/unverified reason.
+2. Apply valid review comments and re-run affected checks without creating PRs beyond the agreed stack.
 3. Link results to Linear HPA-918: #76 is superseded by a validated coordinated upgrade; #75 remains rejected as v1000, with the **direct env dependencies removed**. Do not bulk-unignore or dismiss security alerts.
-4. Mark ready only when the implemented PR's acceptance checklist has actual evidence. Keep the PR draft until then.
+4. Mark each PR ready only when its share of the acceptance checklist has actual evidence. Keep PRs draft until then.
 
 ## End-to-end definition of done
 
-**One PR per HPA-918 ticket.** The migration replaces v2/Vite 7 with a supported Quasar v3/Vite 8 toolchain for both apps, preserves working WXT tests, pins frontend Node, makes Quasar the **only** client-env loading engine, enforces a persistent CI check for both production bundles, and proves native version parity. CI remains the reproducible regression gate; MCP-driven browser E2E of **actual supported states/diagnostic routes** and screenshot visual inspection satisfy UI acceptance. Version parity is verified against resolved build values and native metadata rather than a nonexistent Home-page label. A native Simulator check is performed where available, otherwise disclosed as unverified. No manual/human acceptance, compatibility framework, or separate PR.
+**Four stacked PRs for HPA-918.** The migration replaces v2/Vite 7 with a supported Quasar v3/Vite 8 toolchain for both apps, preserves working WXT tests, pins frontend Node, makes Quasar the **only** client-env loading engine, enforces a persistent CI check for both production bundles, and proves native version parity. CI remains the reproducible regression gate; MCP-driven browser E2E of **actual supported states/diagnostic routes** and screenshot visual inspection satisfy UI acceptance. Version parity is verified against resolved build values and native metadata rather than a nonexistent Home-page label. A native Simulator check is performed where available, otherwise disclosed as unverified. No manual/human acceptance, compatibility framework, or PRs beyond the agreed stack.
