@@ -64,5 +64,14 @@ jobs:
       - name: Build frontend
         run: bun run build
 
+      - name: Install Playwright Browsers
+        run: bunx playwright install --with-deps chromium
+        working-directory: ./apps/vela
+
+      - name: Verify built tokenizer loads and tokenizes
+        # tokenizer-build.spec.ts serves dist/spa itself; it catches zlibjs
+        # interop regressions that only exist in the production bundle.
+        run: bun --cwd=apps/vela run test:e2e:built-tokenizer
+
       - name: Build Lambda function
         run: bun --cwd=packages/cdk run lambda:build

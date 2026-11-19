@@ -94,8 +94,16 @@ test('built tokenizer chunk loads and tokenizes in a browser', async ({ page }) 
   await page.goto(`${baseUrl}/`);
   const tokens = await page.evaluate(async (chunkName) => {
     const module = await import(`/assets/${chunkName}`);
-    module.t('/kuromoji-dict');
-    return (await module.n('猫が好きです。')).map(
+    // Rolldown mangles the chunk's export names, so identify the tokenizer's
+    // two exports by shape: tokenize is async, configureDicPath is not.
+    const fns = Object.values(module).filter((e) => e instanceof Function);
+    const tokenize = fns.find((f) => f.constructor.name === 'AsyncFunction');
+    const configureDicPath = fns.find((f) => f.constructor.name !== 'AsyncFunction');
+    if (!tokenize || !configureDicPath) {
+      throw new Error(`unexpected tokenizer chunk exports: ${Object.keys(module)}`);
+    }
+    configureDicPath('/kuromoji-dict');
+    return (await tokenize('猫が好きです。')).map(
       (token: { surface_form: string; reading: string }) =>
         `${token.surface_form}:${token.reading}`,
     );

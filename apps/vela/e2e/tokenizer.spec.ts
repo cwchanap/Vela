@@ -1,11 +1,8 @@
-import { readFile } from 'node:fs/promises';
-import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { test, expect } from './fixtures/syntheticAuth';
 import { SYNTHETIC_USER_A } from './fixtures/syntheticEnv';
 import { waitForPageLoad } from './utils/helpers';
 
-const appDir = fileURLToPath(new URL('..', import.meta.url));
 // Vite serves the aliased @vela/common/tokenizer source through /@fs in dev.
 const tokenizerSourcePath = fileURLToPath(
   new URL('../../../packages/common/src/tokenizer.ts', import.meta.url),
@@ -19,19 +16,6 @@ test.describe('Tokenizer - development bundle', () => {
     const zlibErrors: string[] = [];
     page.on('pageerror', (error) => {
       if (error.message.includes("'Zlib' in undefined")) zlibErrors.push(error.message);
-    });
-
-    // The dev server serves the pre-gzipped dictionary with `Content-Encoding:
-    // gzip` (also true on v2), so the browser hands kuromoji already-inflated
-    // bytes. Fulfil these requests without that header to exercise the real
-    // browser dictionary load.
-    await page.route('**/kuromoji-dict/*.dat.gz', async (route) => {
-      const pathname = new URL(route.request().url()).pathname;
-      await route.fulfill({
-        status: 200,
-        contentType: 'application/octet-stream',
-        body: await readFile(join(appDir, 'public', pathname)),
-      });
     });
 
     apiMock.dictionaryEntries = [

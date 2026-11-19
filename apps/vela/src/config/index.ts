@@ -31,8 +31,8 @@ const isMissingEnvValue = (value: unknown): boolean => {
   );
 };
 
-// Quasar v3's env loader emits booleans for bare true/false env values, while
-// process-provided values stay strings.
+// Quasar's env loader emits literals: 'true'/'false'/'null' stay bare and
+// numeric strings become numbers — for .env file and process.env values alike.
 export const isEnvFlagEnabled = (value: unknown): boolean => value === true || value === 'true';
 
 export const config = {
@@ -42,7 +42,7 @@ export const config = {
     userPoolClientId: import.meta.env.VITE_COGNITO_USER_POOL_CLIENT_ID || '',
     region: import.meta.env.VITE_AWS_REGION || '',
     oauth: {
-      domain: import.meta.env.VITE_COGNITO_OAUTH_DOMAIN?.trim() || '',
+      domain: String(import.meta.env.VITE_COGNITO_OAUTH_DOMAIN || '').trim(),
       redirectSignIn: parseCsvEnv(
         import.meta.env.VITE_COGNITO_REDIRECT_SIGN_IN,
         defaultRedirectSignIn,
@@ -68,7 +68,7 @@ export const config = {
   // App configuration
   app: {
     name: import.meta.env.VITE_APP_NAME || 'Japanese Learning App',
-    version: import.meta.env.VITE_APP_VERSION || '1.0.0',
+    version: String(import.meta.env.VITE_APP_VERSION || '1.0.0'),
     isDev: import.meta.env.DEV,
     isProd: import.meta.env.PROD,
   },
@@ -84,9 +84,20 @@ export const config = {
   },
 } as const;
 
+// import.meta.env is read only through literal keys: a bare `import.meta.env`
+// reference is inlined whole into the bundle, leaking every clientPrefix
+// variable from .env files and process.env.
+const clientEnv: ConfigEnv = {
+  VITE_COGNITO_USER_POOL_ID: import.meta.env.VITE_COGNITO_USER_POOL_ID,
+  VITE_COGNITO_USER_POOL_CLIENT_ID: import.meta.env.VITE_COGNITO_USER_POOL_CLIENT_ID,
+  VITE_AWS_REGION: import.meta.env.VITE_AWS_REGION,
+  VITE_COGNITO_OAUTH_DOMAIN: import.meta.env.VITE_COGNITO_OAUTH_DOMAIN,
+  PROD: import.meta.env.PROD,
+};
+
 // Validation function to check required environment variables
 export const validateConfig = (env?: ConfigEnv) => {
-  const resolvedEnv = env === undefined ? import.meta.env : env;
+  const resolvedEnv = env === undefined ? clientEnv : env;
 
   try {
     const requiredVars = [

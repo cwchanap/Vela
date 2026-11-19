@@ -320,10 +320,8 @@ describe('ListeningGame', () => {
         wrapper.unmount();
       }
     }
-    // Vitest 5 restoreAllMocks no longer resets vi.fn() implementations.
-
+    // restoreAllMocks doesn't reset vi.fn() implementations; reset them first.
     vi.resetAllMocks();
-
     vi.restoreAllMocks();
   });
 
