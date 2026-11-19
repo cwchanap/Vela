@@ -80,7 +80,9 @@ export default defineConfig((ctx) => {
       vueRouterMode: 'history', // Use history mode for better SEO and UX
       // vueRouterBase,
       vueDevtools: true, // Enable Vue devtools in development
-      // vueOptionsAPI: false,
+      // vuedraggable (SentenceBuilder) is an Options API component; app-vite
+      // v3 disables the Options API runtime by default.
+      vueOptionsAPI: true,
 
       // rebuildCache: true, // rebuilds Vite/linter/etc cache on startup
 

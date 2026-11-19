@@ -40,7 +40,7 @@ export default defineConfig({
   /* These specs run under playwright.mocked.config.ts, which injects synthetic
      Cognito env into the dev server. Without it the app cannot authenticate,
      so they cannot run under this config. */
-  testIgnore: ['**/llm-settings.spec.ts', '**/chat-sidebar.spec.ts'],
+  testIgnore: ['**/llm-settings.spec.ts', '**/chat-sidebar.spec.ts', '**/tokenizer.spec.ts'],
   /* Run tests in files in parallel */
   fullyParallel: true,
   /* Fail the build on CI if you accidentally left test.only in the source code. */
