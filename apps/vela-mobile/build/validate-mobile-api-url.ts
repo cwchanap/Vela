@@ -43,6 +43,7 @@ const requiredCognitoKeys = [
 type DecodedDefineEntry =
   | { kind: 'string'; value: string }
   | { kind: 'non-string'; literal: string }
+  | { kind: 'malformed'; literal: string }
   | { kind: 'missing' };
 
 /**
@@ -71,7 +72,7 @@ function decodeRequiredStringDefine(value: unknown): DecodedDefineEntry {
       ? { kind: 'string', value: parsed }
       : { kind: 'non-string', literal: trimmed };
   } catch {
-    return { kind: 'missing' };
+    return { kind: 'malformed', literal: trimmed };
   }
 }
 
@@ -112,6 +113,11 @@ export function mobileEnvFromDefine(
       if (decoded.kind === 'non-string') {
         throw new Error(
           `${key} must resolve to a string in the client bundle, but Quasar resolved ${decoded.literal}. Set it to a plain string value in the build environment.`,
+        );
+      }
+      if (decoded.kind === 'malformed') {
+        throw new Error(
+          `${key} resolved to a malformed quoted literal in the client bundle: ${decoded.literal}. Check the value for stray quotes or unescaped characters in the build environment.`,
         );
       }
       return [key, decoded.kind === 'string' ? decoded.value : undefined];
@@ -309,13 +315,14 @@ export function validateMobileApiUrlPlugin(options: {
   return {
     name: 'validate-mobile-api-url',
     configResolved(config) {
+      // Validate first: a misconfigured build must fail before it edits the
+      // committed Xcode project.
+      if (config.mode === 'production' && process.env.MOBILE_SKIP_ENV_VALIDATION !== 'true') {
+        validateMobileBuildEnv(mobileEnvFromDefine(config.define));
+      }
       if (options.isCapacitor) {
         syncCapacitorMarketingVersion(options.rootDir, config.define);
       }
-      if (config.mode !== 'production') return;
-      if (process.env.MOBILE_SKIP_ENV_VALIDATION === 'true') return;
-
-      validateMobileBuildEnv(mobileEnvFromDefine(config.define));
     },
   };
 }

@@ -9,7 +9,8 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { loadMobileCliEnv } from './mobile-cli-env';
+import { isCI } from 'ci-info';
+import { isCiEnvironment, loadMobileCliEnv } from './mobile-cli-env';
 
 const roots: string[] = [];
 
@@ -39,6 +40,42 @@ const productionWithoutClientId = [
 
 afterEach(() => {
   while (roots.length > 0) rmSync(roots.pop()!, { recursive: true, force: true });
+});
+
+describe('isCiEnvironment (must match Quasar getAppEnv / ci-info isCI)', () => {
+  it('uses ci-info isCI for the real process.env', () => {
+    expect(isCiEnvironment(process.env)).toBe(isCI);
+  });
+
+  it.each([
+    [{ CI: 'true' }, true],
+    [{ CI: '1' }, true],
+    // ci-info only opts out on the exact string 'false'; '0' is truthy.
+    [{ CI: '0' }, true],
+    [{ CI: 'false' }, false],
+    [{ CI: 'false', BUILD_ID: '1' }, false],
+    [{ BUILD_NUMBER: '42' }, true],
+    [{ BUILD_ID: 'abc' }, true],
+    [{ RUN_ID: '9' }, true],
+    [{ CI_NAME: 'codeship' }, true],
+    [{ CONTINUOUS_INTEGRATION: 'true' }, true],
+    // An empty CI falls through to the other variables.
+    [{ CI: '' }, false],
+    [{ CI: '', RUN_ID: '9' }, true],
+    [{}, false],
+  ])('classifies %j as CI=%s', (env, expected) => {
+    expect(isCiEnvironment(env)).toBe(expected);
+  });
+
+  it('skips .env.local for CI=0 and generic CI variables, like Quasar', () => {
+    const root = makeRoot({
+      '.env.local': 'VITE_COGNITO_MOBILE_USER_POOL_CLIENT_ID=localclient\n',
+    });
+
+    for (const env of [{ CI: '0' }, { BUILD_NUMBER: '7' }]) {
+      expect(loadMobileCliEnv(root, env).VITE_COGNITO_MOBILE_USER_POOL_CLIENT_ID).toBeUndefined();
+    }
+  });
 });
 
 describe('loadMobileCliEnv', () => {
@@ -91,6 +128,17 @@ describe('loadMobileCliEnv', () => {
       'https://local.example/api/',
     );
     expect(loadMobileCliEnv(root, {}).VITE_MOBILE_API_URL).toBe('https://local.example/api/');
+  });
+
+  it('applies .env.production.local after .env.production', () => {
+    const root = makeRoot({
+      '.env.production': `${productionFile}\n`,
+      '.env.production.local': 'VITE_AWS_REGION=local-region\n',
+    });
+
+    const env = loadMobileCliEnv(root, {});
+    expect(env.VITE_AWS_REGION).toBe('local-region');
+    expect(env.VITE_MOBILE_API_URL).toBe('https://vela.example/api/');
   });
 
   it('gives a direct process override precedence over every file', () => {
