@@ -32,7 +32,14 @@ export default defineConfig((ctx) => {
 
       env: {
         clientPrefix: 'VITE_',
-        file: ctx.prod ? '.env.production' : [],
+        // Quasar always loads `.env` and `.env.local` (the latter outside CI).
+        // Add the mode files and their `.local` overrides so the order stays
+        // the one Vite's loadEnv used: .env, .env.local, .env.<mode>,
+        // .env.<mode>.local. Keep the production list in sync with
+        // build/mobile-cli-env.ts and turbo.json inputs.
+        file: ctx.prod
+          ? ['.env.production', '.env.production.local']
+          : ['.env.development', '.env.development.local'],
       },
 
       vueRouterMode: 'history',

@@ -333,6 +333,15 @@ describe('validateMobileApiUrlPlugin', () => {
     expect(() => invokeConfigResolvedHook({ mode: 'production', define })).toThrow(missingKey);
   });
 
+  it('reports a malformed quoted literal as malformed, not missing', () => {
+    expect(() =>
+      invokeConfigResolvedHook({
+        mode: 'production',
+        define: { ...validDefine(), [`${DEFINE_PREFIX}VITE_AWS_REGION`]: '"us-east-1' },
+      }),
+    ).toThrow(/VITE_AWS_REGION resolved to a malformed quoted literal.*"us-east-1/);
+  });
+
   it.each([
     'VITE_COGNITO_USER_POOL_ID',
     'VITE_COGNITO_MOBILE_USER_POOL_CLIENT_ID',
@@ -563,5 +572,18 @@ describe('validateMobileApiUrlPlugin (Capacitor MARKETING_VERSION sync)', () => 
     });
 
     expect(readFileSync(pbxprojPath, 'utf8')).toContain('MARKETING_VERSION = 4.5.6;');
+  });
+
+  it('does not touch project.pbxproj when production env validation fails', () => {
+    const { rootDir, pbxprojPath } = capacitorRoot();
+    const before = readFileSync(pbxprojPath, 'utf8');
+    const define = validDefine({ VITE_APP_VERSION: '9.9.9' });
+    delete define[`${DEFINE_PREFIX}VITE_MOBILE_API_URL`];
+
+    expect(() =>
+      invokeConfigResolvedHook({ mode: 'production', define, isCapacitor: true, rootDir }),
+    ).toThrow('VITE_MOBILE_API_URL is missing');
+
+    expect(readFileSync(pbxprojPath, 'utf8')).toBe(before);
   });
 });
