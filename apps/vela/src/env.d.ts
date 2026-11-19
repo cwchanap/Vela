@@ -14,13 +14,15 @@ interface ImportMetaEnv {
   readonly VITE_COGNITO_REDIRECT_SIGN_OUT?: string;
   readonly VITE_AWS_REGION: string;
   readonly VITE_APP_NAME: string;
-  readonly VITE_APP_VERSION: string;
+  readonly VITE_APP_VERSION: string | number;
   readonly VITE_API_URL: string;
   readonly VITE_DEV_MODE?: boolean | string;
   readonly QUASAR_VUE_ROUTER_BASE: string;
+  readonly QUASAR_VUE_ROUTER_MODE: 'history' | 'hash';
+  readonly QUASAR_SERVER?: boolean;
   readonly DEV: boolean;
   readonly PROD: boolean;
-  readonly [key: string]: string | boolean | undefined;
+  readonly [key: string]: string | number | boolean | undefined;
 }
 
 interface ImportMeta {

@@ -5,39 +5,48 @@ import type { RouteLocationNormalized } from 'vue-router';
 // ===========================================================================
 // Hoisted mocks — must run before vi.mock() factory functions are evaluated.
 // ===========================================================================
-const { mockBeforeEachCbs, mockCreateWebHistory, mockCreateRouter, mockAuthStore } = vi.hoisted(
-  () => {
-    const mockBeforeEachCbs: ((..._args: unknown[]) => unknown)[] = [];
+const {
+  mockBeforeEachCbs,
+  mockCreateWebHistory,
+  mockCreateWebHashHistory,
+  mockCreateMemoryHistory,
+  mockCreateRouter,
+  mockAuthStore,
+} = vi.hoisted(() => {
+  const mockBeforeEachCbs: ((..._args: unknown[]) => unknown)[] = [];
 
-    const mockRouterInstance = {
-      beforeEach: (fn: (..._args: unknown[]) => unknown) => {
-        mockBeforeEachCbs.push(fn);
-      },
-      options: {} as { history?: unknown },
-    };
+  const mockRouterInstance = {
+    beforeEach: (fn: (..._args: unknown[]) => unknown) => {
+      mockBeforeEachCbs.push(fn);
+    },
+    options: {} as { history?: unknown },
+  };
 
-    const mockCreateRouter = vi.fn((options: { history?: unknown }) => {
-      mockRouterInstance.options = options;
-      return mockRouterInstance;
-    });
+  const mockCreateRouter = vi.fn((options: { history?: unknown }) => {
+    mockRouterInstance.options = options;
+    return mockRouterInstance;
+  });
 
-    const mockCreateWebHistory = vi.fn(() => ({ _type: 'web' }));
+  const mockCreateWebHistory = vi.fn(() => ({ _type: 'web' }));
+  const mockCreateWebHashHistory = vi.fn(() => ({ _type: 'hash' }));
+  const mockCreateMemoryHistory = vi.fn(() => ({ _type: 'memory' }));
 
-    const mockAuthStore = {
-      isInitialized: false,
-      isAuthenticated: false,
-      session: null as unknown,
-      initialize: vi.fn(),
-    };
+  const mockAuthStore = {
+    isInitialized: false,
+    isAuthenticated: false,
+    session: null as unknown,
+    initialize: vi.fn(),
+  };
 
-    return {
-      mockBeforeEachCbs,
-      mockCreateWebHistory,
-      mockCreateRouter,
-      mockAuthStore,
-    };
-  },
-);
+  return {
+    mockBeforeEachCbs,
+    mockCreateWebHistory,
+    mockCreateWebHashHistory,
+    mockCreateMemoryHistory,
+    mockCreateRouter,
+    mockAuthStore,
+  };
+});
 
 // ===========================================================================
 // Module mocks
@@ -45,6 +54,8 @@ const { mockBeforeEachCbs, mockCreateWebHistory, mockCreateRouter, mockAuthStore
 vi.mock('vue-router', () => ({
   createRouter: mockCreateRouter,
   createWebHistory: mockCreateWebHistory,
+  createWebHashHistory: mockCreateWebHashHistory,
+  createMemoryHistory: mockCreateMemoryHistory,
 }));
 
 vi.mock('../stores/auth', () => ({
@@ -87,6 +98,8 @@ describe('router/index', () => {
     // Reset captured callbacks and mock call counters
     mockBeforeEachCbs.length = 0;
     mockCreateWebHistory.mockClear();
+    mockCreateWebHashHistory.mockClear();
+    mockCreateMemoryHistory.mockClear();
     mockCreateRouter.mockClear();
     mockAuthStore.initialize.mockReset();
 
@@ -107,12 +120,33 @@ describe('router/index', () => {
   // History setup
   // =========================================================================
   describe('history', () => {
-    it('uses a single web history factory with the Quasar router base', () => {
+    it('uses web history with the Quasar router base when mode is history', () => {
+      vi.stubEnv('QUASAR_VUE_ROUTER_MODE', 'history');
       vi.stubEnv('QUASAR_VUE_ROUTER_BASE', '/app/');
       routerFactory({});
       expect(mockCreateWebHistory).toHaveBeenCalledTimes(1);
       expect(mockCreateWebHistory).toHaveBeenCalledWith('/app/');
+      expect(mockCreateWebHashHistory).not.toHaveBeenCalled();
+      expect(mockCreateMemoryHistory).not.toHaveBeenCalled();
       expect(mockCreateRouter).toHaveBeenCalledTimes(1);
+    });
+
+    it('uses hash history when QUASAR_VUE_ROUTER_MODE is hash', () => {
+      vi.stubEnv('QUASAR_VUE_ROUTER_MODE', 'hash');
+      vi.stubEnv('QUASAR_VUE_ROUTER_BASE', '/app/');
+      routerFactory({});
+      expect(mockCreateWebHashHistory).toHaveBeenCalledTimes(1);
+      expect(mockCreateWebHashHistory).toHaveBeenCalledWith('/app/');
+      expect(mockCreateWebHistory).not.toHaveBeenCalled();
+      expect(mockCreateMemoryHistory).not.toHaveBeenCalled();
+    });
+
+    it('uses memory history when QUASAR_SERVER is set', () => {
+      vi.stubEnv('QUASAR_SERVER', 'true');
+      routerFactory({});
+      expect(mockCreateMemoryHistory).toHaveBeenCalledTimes(1);
+      expect(mockCreateWebHistory).not.toHaveBeenCalled();
+      expect(mockCreateWebHashHistory).not.toHaveBeenCalled();
     });
   });
 

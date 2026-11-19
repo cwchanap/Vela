@@ -6,15 +6,28 @@ import quasarConfig from '../../quasar.config';
 const commonPath = resolve(__dirname, '../../../../packages/common/src/index.ts');
 
 describe('quasar config', () => {
-  it('loads only .env.production for production builds with the VITE_ client prefix', () => {
-    expect(quasarConfig({ prod: false } as never).build.env).toEqual({
-      clientPrefix: 'VITE_',
-      file: [],
+  it('loads mode env files and their .local overrides with the VITE_ client prefix', () => {
+    expect(quasarConfig({ prod: false } as never).build.env?.clientPrefix).toBe('VITE_');
+    expect(quasarConfig({ prod: false } as never).build.env?.file).toEqual([
+      '.env.development',
+      '.env.development.local',
+    ]);
+    expect(quasarConfig({ prod: true } as never).build.env?.file).toEqual([
+      '.env.production',
+      '.env.production.local',
+    ]);
+  });
+
+  it('exposes only allowlisted VITE_* vars to the client bundle', () => {
+    const { filter } = quasarConfig({ prod: true } as never).build.env ?? {};
+    const defineList = {
+      'import.meta.env.VITE_API_URL': '"/api/"',
+      'import.meta.env.VITE_UNLISTED_SECRET': '"leak"',
+    };
+    expect(filter?.(defineList, 'client')).toEqual({
+      'import.meta.env.VITE_API_URL': '"/api/"',
     });
-    expect(quasarConfig({ prod: true } as never).build.env).toEqual({
-      clientPrefix: 'VITE_',
-      file: '.env.production',
-    });
+    expect(filter?.(defineList, 'backend')).toEqual(defineList);
   });
 
   it('aliases @vela/common to the workspace source entry (object alias)', () => {

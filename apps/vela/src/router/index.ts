@@ -1,15 +1,26 @@
 import { defineRouter } from '#q-app';
-import { createRouter, createWebHistory } from 'vue-router';
+import {
+  createMemoryHistory,
+  createRouter,
+  createWebHashHistory,
+  createWebHistory,
+} from 'vue-router';
 import routes from './routes';
 import { useAuthStore } from '../stores/auth';
 
 export default defineRouter(function (/* { store, ssrContext } */) {
+  const createHistory = import.meta.env.QUASAR_SERVER
+    ? createMemoryHistory
+    : import.meta.env.QUASAR_VUE_ROUTER_MODE === 'history'
+      ? createWebHistory
+      : createWebHashHistory;
+
   const Router = createRouter({
     scrollBehavior: () => ({ left: 0, top: 0 }),
     routes,
 
     // Quasar injects build.vueRouterBase into the client bundle.
-    history: createWebHistory(import.meta.env.QUASAR_VUE_ROUTER_BASE),
+    history: createHistory(import.meta.env.QUASAR_VUE_ROUTER_BASE),
   });
 
   // Navigation guards for authentication
