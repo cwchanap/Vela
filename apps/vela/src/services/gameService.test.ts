@@ -39,14 +39,13 @@ describe('gameService', () => {
       const appRoot = resolve(__dirname, '..');
       const files = ['services/gameService.ts', 'utils/vocabulary.ts'];
 
-      // Both specifiers are live until the bare `src` alias is removed.
-      const prohibitedImports = ['src/stores/games', '@/stores/games'];
+      // Match the path shape, not a specifier: catches `@/stores/games`, a
+      // revived bare `src` alias, and relative `../stores/games` imports.
+      const gamesStoreImport = /stores\/games/;
 
       for (const file of files) {
         const source = readFileSync(resolve(appRoot, file), 'utf8');
-        for (const prohibited of prohibitedImports) {
-          expect(source).not.toContain(prohibited);
-        }
+        expect(source).not.toMatch(gamesStoreImport);
       }
     });
   });

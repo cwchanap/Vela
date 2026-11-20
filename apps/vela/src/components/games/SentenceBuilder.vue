@@ -89,7 +89,7 @@ import { ref, computed, onMounted, watch } from 'vue';
 import draggable from 'vuedraggable';
 import { useGameStore } from '@/stores/games';
 import { useProgressStore } from '@/stores/progress';
-import { gameService } from '../../services/gameService';
+import { gameService } from '@/services/gameService';
 import { useQuasar } from 'quasar';
 
 const gameStore = useGameStore();

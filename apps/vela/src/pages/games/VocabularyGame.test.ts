@@ -63,7 +63,7 @@ const mockToVocabularyOption = vi.fn().mockImplementation((v: any) => ({
   english_translation: v.english_translation,
 }));
 
-vi.mock('../../services/gameService', () => ({
+vi.mock('@/services/gameService', () => ({
   gameService: {
     getVocabularyQuestions: (...args: any[]) => mockGetVocabularyQuestions(...args),
     getVocabularyPool: (...args: any[]) => mockGetVocabularyPool(...args),
@@ -76,7 +76,7 @@ vi.mock('../../services/gameService', () => ({
   },
 }));
 
-vi.mock('../../services/srsService', () => ({
+vi.mock('@/services/srsService', () => ({
   srsService: {
     getStats: (...args: any[]) => mockGetStats(...args),
     getDueItems: (...args: any[]) => mockGetDueItems(...args),
@@ -85,7 +85,7 @@ vi.mock('../../services/srsService', () => ({
   },
 }));
 
-vi.mock('../../services/ttsService', () => ({
+vi.mock('@/services/ttsService', () => ({
   pronounceWord: (...args: any[]) => mockPronounceWord(...args),
 }));
 
