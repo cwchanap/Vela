@@ -30,8 +30,8 @@ preferences: {
     keys: { google: 'new-key' },
     thinking: {},
     defaultModel: { provider: 'google', model: 'gemini-3.8-flash' },
-    removedKeys?: ['openai'],
-    removedThinking?: ['gpt-6.1-sol']
+    removedKeys: ['openai'],
+    removedThinking: ['gpt-6.1-sol']
   }
 }
 ```
