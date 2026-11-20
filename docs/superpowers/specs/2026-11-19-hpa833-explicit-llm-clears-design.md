@@ -1,75 +1,53 @@
-# HPA-833 — Explicit LLM clears survive preference recovery (design)
+# HPA-833 — Preserve LLM settings and explicit clears with an invalid stored default provider (design)
 
-**Date:** 2026-11-19  
-**Linear:** https://linear.app/cwchanap/issue/HPA-833/carry-explicit-clear-tombstones-in-the-llm-preferences-write-contract  
-**Related:** HPA-755 (merged foundation); HPA-824 (separate cross-client reconciliation follow-up)  
-**Delivery:** Design, implementation, regressions, and review fixes on **one** draft PR. This first commit is documentation only.
+**Date:** 2026-11-19; revised 2026-11-20 after [design review](https://github.com/cwchanap/Vela/pull/102#pullrequestreview-5987968921)  
+**Linear:** https://linear.app/cwchanap/issue/HPA-833  
+**Related:** HPA-755 (merged settings foundation); HPA-824 (separate residual cross-client reconciliation)  
+**Delivery:** One [draft PR #102](https://github.com/cwchanap/Vela/pull/102) for design, implementation, tests, and review corrections. This revision is planning only.
 
-## Goal
+## Goal and review decision
 
-A user clearing a saved provider API key or choosing **Default** for a saved model thinking override must not see that value reappear after a successful Settings save—even when a stored `llm.defaultModel.provider` is unreadable and the API's recovery merge preserves recoverable entries.
+A user clearing a saved provider API key or choosing **Default** for a saved model thinking override must not see that value silently reappear after a successful Settings save. Untouched valid values must survive even if the stored `llm.defaultModel.provider` is no longer recognized.
 
-Preserve untouched recoverable values and the selected default model. Keep normal saves and existing 409 retries working. No new API endpoint, storage table, migration, broad profile rewrite, or change to the visible Settings layout.
+**Accepted reviewer simplification:** do not introduce `removedKeys`, `removedThinking`, or any new wire protocol. The root cause is the **read schema hiding the entire LLM subtree**, which forced a lossy recovery union on the next LLM write. Make reads tolerant of an unknown/missing default provider, so valid keys and thinking entries reach the existing client updater; remove the recovery union entirely. This is smaller, makes previously hidden values accessible, and automatically preserves normal deletion semantics.
 
-## Current behavior verified on `main`
+## Verified existing seams
 
-- `apps/vela-api/src/profile-preferences.ts` defines a canonical strict `LlmPreferencesSchema`, tolerant `LlmPreferencesReadSchema`, and `preserveStoredLlm(next, stored)`. When the stored default provider is invalid, it recovers otherwise-valid keys and thinking entries and unions them into the replacement. Absence of a key or override does not reveal whether the user intentionally removed it.
-- `apps/vela-api/src/routes/profiles.ts` handles authenticated `PUT /profiles/update`; it validates full preference replacements, reads the existing profile, invokes recovery, then persists via `profilesDB.update`.
-- `apps/vela-api/src/dynamodb.ts` **already** enforces `preferences_version` CAS on preference saves; `apps/vela/src/stores/auth.ts` serializes local writes and retries a 409 once by refetching and reevaluating the updater. Do not reimplement HPA-824 in this ticket.
-- `apps/vela/src/stores/llmSettings.ts` handles provider saves; empty key deletes `keys[provider]`, while a null/Default effort deletes `thinking[modelId]`. `LlmProviderCard.vue` submits the key and all of its provider's effort drafts. `auth.updatePreferences` sends the resulting `llm` replacement through the existing profile path.
-- `apps/vela/e2e/fixtures/syntheticAuth.ts` reuses the API's validators/recovery helper; `apps/vela/e2e/llm-settings.spec.ts` covers Settings UI, 409 retries, and key/thinking saves. `apps/vela-api/test/routes/profiles.test.ts` already tests invalid-default recovery without clears.
+- `apps/vela-api/src/profile-preferences.ts` first sanitizes valid `keys` and `thinking`. Today `LlmPreferencesReadSchema` returns `undefined` when `defaultModel.provider` is invalid. `preserveStoredLlm(next, stored)` later unions recoverable saved values into an LLM replacement, reintroducing entries the user intentionally omitted.
+- The same read schema already substitutes a registry default **model** when the provider is known but the stored model is invalid.
+- `apps/vela/src/stores/llmSettings.ts` defaults to Google when LLM preferences are absent, clones the current LLM snapshot on Save, deletes a blank provider key, and deletes thinking overrides submitted as Default. `LlmProviderCard.vue` submits the current provider's model rows. These behaviors need **no change** once reads expose the valid saved values.
+- `apps/vela-api/src/routes/profiles.ts` already validates writes with the strict schema and delegates to `preserveStoredLlm`; `apps/vela-api/src/dynamodb.ts` enforces the `preferences_version` CAS. `apps/vela/src/stores/auth.ts` retries a 409 exactly once after refetch and re-evaluates the updater. Keep these unchanged.
+- `apps/vela/e2e/fixtures/syntheticAuth.ts` already imports the API's `PreferencesReadSchema` and `preserveStoredLlm` rather than reimplementing them; retain this reuse.
 
-## Minimal contract
+## Read and write behavior
 
-Use **optional write-only fields inside** `preferences.llm`, not new persisted fields:
+1. In `LlmPreferencesReadSchema`, if `llm` itself is not a plain object, retain `undefined` (no recoverable object). For an object with a missing, malformed, or unknown `defaultModel.provider`, **return a sanitized LLM subtree** with the valid known-provider keys and valid bounded thinking overrides; set `defaultModel` to `{ provider: 'google', model: LLM_PROVIDER_REGISTRY.google.defaultModel }`. Warn with a field name but never credential contents.
+2. For a known default provider, retain the existing model validation and registry-default substitution when the stored model is invalid. Do not use an unrecognized provider's stored model string as the Google default—even if that string passes generic model-ID validation.
+3. Reduce `preserveStoredLlm` to the existing `next.llm === undefined` passthrough that keeps the raw stored `llm` on writes that **omit** the `llm` field. Remove the invalid-provider recovery union. A write that **explicitly supplies** valid `llm` is authoritative, with no server-side merging of omitted keys or model overrides.
+4. Keep `LlmPreferencesSchema`, `PreferencesSchema`, `PUT /profiles/update`, `GET /profiles`, shared `LlmPreferences`, and the strict validation rules unchanged. No tombstones, data migrations, new API fields, endpoints, database updates on GET, or extra client state.
+5. Keep the existing strict `PUT` provider validation. An already-open old-version tab whose `defaultModel.provider` is now unsupported may still receive HTTP 400 **until it reloads**. A fresh GET then supplies a usable Google fallback and its valid keys. Do not add a stale-client compatibility protocol.
 
-```ts
-// Existing required fields remain unchanged.
-preferences: {
-  llm: {
-    keys: { google: 'new-key' },
-    thinking: {},
-    defaultModel: { provider: 'google', model: 'gemini-3.8-flash' },
-    removedKeys: ['openai'],
-    removedThinking: ['gpt-6.1-sol']
-  }
-}
-```
+### Representative flow
 
-1. Keep `LlmPreferences` in `@vela/common` and canonical `LlmPreferencesSchema` **unchanged**. Introduce a small API-only `LlmPreferencesWriteSchema` extending the canonical shape with optional `removedKeys` (known `LLM_PROVIDERS`) and `removedThinking` (nonempty model IDs of at most 512 characters). Bound the arrays by the existing four-provider count and `MAX_LLM_THINKING_OVERRIDES`; invalid markers return 400. These are one-shot clear instructions, not state.
-2. Use a `PreferencesWriteSchema` for `PUT` so parsing does **not strip markers before recovery**. Extract the markers before converting the request back to canonical `PreferencesSchema`. After resolution, `GET`, `PUT` responses, DynamoDB and client Pinia state expose **only** `{ keys, thinking, defaultModel }`. No tombstone persistence.
-3. The canonical replacement remains authoritative. If a marker and a value for the same key/model conflict, **clear wins**: delete it from the replacement and the recovered result. If no marker is provided, preserve current recovery behavior.
-4. Extend `preserveStoredLlm` with an optional clear-intent argument. On an unreadable stored default provider, recover otherwise-valid entries except explicitly removed keys/model overrides, then apply the replacement and the clear intent. Apply clears even when recovery is skipped (stored record valid, absent, or not an object). Keep the existing 128-entry thinking cap; excluded entries must not consume recovery slots. Unrelated preference writes with `llm` omitted still preserve the raw unreadable subtree untouched.
-5. Keep `expected_preferences_version` validation, single-record conditional update, and existing 409 response unchanged. Never bypass CAS to make a clear succeed.
+- A profile contains `keys: { google: 'saved-google', openai: 'saved-openai' }`, thinking entries for two valid model IDs, and `defaultModel: { provider: 'retired-provider', model: 'retired-model' }`. Such a record can arise after a provider is removed in a newer release, rollback across differing provider sets, or a direct data edit; **the current API cannot write it**, because PUT rejects unknown providers.
+- A fresh **GET** returns both valid known-provider keys and both valid thinking entries, with the default pair substituted to the registry's Google default. GET does not rewrite DynamoDB.
+- Settings displays the saved key and applicable thinking choices. Clearing Google and resetting one model's effort to Default removes those entries from the client replacement. **PUT** persists that replacement as sent, preserving untouched OpenAI key/other thinking entry. A subsequent **GET/reload** shows the cleared entries absent and untouched entries still present.
+- If a version conflict occurs between otherwise valid clients, the existing 409/refetch/retry flow recomputes the update from the latest, now-complete LLM snapshot. No special marker protocol is necessary. Keep the existing two-tab retry E2E green; do not fabricate an unknown provider through another tab's currently-valid PUT.
 
-## Client ownership and retry semantics
+**Trade-off:** A future LLM preference write may replace a stored unknown default provider with Google. This matches what the client already displays in that state and does not discard valid recognized keys/overrides. A write omitting `llm` continues to preserve the raw stored subtree unchanged, including an unrecognized default.
 
-Capture removals **once, before** calling `auth.updatePreferences` from `llmSettings.saveProvider`:
+## Scope and implementation
 
-- If the submitted trimmed key is empty and the authenticated, rendered LLM snapshot has that provider key, set `removedKeys: [provider]`; otherwise omit it.
-- For the provider's allowed model IDs, mark a model in `removedThinking` only when the submitted patch says Default/null **and** the rendered snapshot contains a saved override. This matters because `LlmProviderCard` submits all effort rows on every Save; an already-Default row must not count as an explicit clear.
-- Hold that intent outside the updater closure and attach it to every generated write snapshot. The updater itself still starts from the latest `current.preferences.llm`, so a 409 refresh/retry can preserve other fields without losing the user's original deletion intent.
-- Keep the frontend's canonical `LlmPreferences` snapshot free of marker fields; use a small local write-payload type if needed. No change to `LlmProviderCard` controls or generic dirty-field tracker is required. `saveDefault`, Theme, TTS and unrelated profile saves emit no removal markers.
-
-**Critical retry case:** tab A loads a valid Google key/overridden thinking; tab B changes the stored default provider into an unreadable value and advances `preferences_version`; tab A clears the key and selects Default. First PUT returns 409; retry refetch loses the unreadable `llm` from the *read* view. The stored raw LLM data is still recovered on the server, but must exclude tab A's two explicit removals. Capture the removals before the retry, not by comparing against that refreshed, empty view.
-
-## Visible behavior and failure semantics
-
-- After Save, the cleared provider card displays **No key saved**, the changed model row displays **Default**, and a reload retains those states.
-- Valid untouched keys and thinking overrides from other providers/models survive recovery.
-- The current default provider/model remains unchanged when clearing an API key.
-- A 400 validation error or a final 409 leaves the normal save-failure UI/error path in place; do not show a false success. Existing session-generation cancellation still applies.
-- The UI cannot explicitly clear a value that is already invisible because the original GET hid an unreadable LLM subtree. This ticket covers clear actions against values the client actually displayed; do not introduce a recovery-management UI.
-
-## Out of scope
-
-HPA-824's residual cross-tab timestamp/cache reconciliation, an additional conflict-resolution dialog, changing global default selection on key removal, shared preferences redesign, API-key storage migration, mobile-specific UI, and backcompat/migration layers. The existing version CAS and one retry are sufficient for this change.
+The implementation requires changes to `apps/vela-api/src/profile-preferences.ts`, its route tests at `apps/vela-api/test/routes/profiles.test.ts`, and one targeted regression in `apps/vela/e2e/llm-settings.spec.ts`. Update the historical HPA-755 design note so its formerly correct unknown-provider read behavior no longer contradicts HPA-833. No client store, auth store, route, shared registry, fixture, or UI layout refactoring.
 
 ## Acceptance contract
 
-1. A user clearing a previously visible provider key saves successfully, retains unrelated keys, and sees the key absent after a fresh authenticated GET and page reload.
-2. Choosing Default for a previously saved override removes **only** that override; Default rows never edited and untouched overrides survive.
-3. The unreadable-stored-default recovery scenario, including one 409 refetch/retry, does not resurrect either explicit clear.
-4. `removedKeys` and `removedThinking` never appear in stored profiles, profile GET/PUT responses or the hydrated client store.
-5. No-intent saves retain current recovery semantics; malformed clear markers produce HTTP 400 with no update; stale versions still produce 409.
-6. Automated API/client unit coverage plus real browser E2E via MCP proves the save → API → reload flow. Since the ticket provides no UI mockup, use MCP screenshots to visually check provider-card key badge and thinking selection at standard desktop and narrow mobile-web widths, with no layout regression. No human acceptance gate.
+1. API GET of a plain-object LLM subtree with an unknown/missing default provider preserves known, valid provider keys and bounded thinking entries while substituting **Google plus its registry default model**. Invalid individual key/thinking entries are still sanitized. A non-object LLM still reads as absent. GET performs no DB update.
+2. Explicit LLM PUT after reading the sanitized profile does not merge back any intentionally omitted provider key or model override; untouched values survive, and the default remains Google when clearing a key.
+3. A preference PUT without `llm` continues to retain the raw stored LLM subtree; strict invalid-provider PUT validation and existing CAS 409 behavior stay intact. The separate existing 409 retry regression remains green.
+4. MCP-driven browser E2E using the existing mocked Playwright setup exercises **seed invalid default → fresh Settings load → clear one key and choose Default for a saved override → Save → reload** and checks both the cleared and preserved values. This is one E2E acceptance flow, not a duplicate standalone MCP test.
+5. The ticket has no UI mockup. Capture **one screenshot during that same MCP E2E** showing the expanded provider card, **No key saved**, and the **Default** thinking value at a narrow viewport (e.g. 375px); visually check readability and no clipping. No separate visual-testing suite or human approval gate.
+
+## Deliberate exclusions
+
+Tombstones/write-contract extension, changing `preferences_version` CAS or cross-client timestamp reconciliation (HPA-824), extra mocks or Playwright fixtures, generic recovery framework, new UI, migrations, mobile-only checks, artwork, and an additional PR.
