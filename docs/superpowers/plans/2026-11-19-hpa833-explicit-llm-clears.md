@@ -1,94 +1,85 @@
-# HPA-833 — Explicit LLM clear intent (single-PR implementation plan)
+# HPA-833 — Preserve LLM clears by fixing invalid-provider reads (single-PR plan)
 
-**Date:** 2026-11-19  
-**Linear:** https://linear.app/cwchanap/issue/HPA-833/carry-explicit-clear-tombstones-in-the-llm-preferences-write-contract  
-**Design:** [HPA-833 design spec](../specs/2026-11-19-hpa833-explicit-llm-clears-design.md)  
-**Base:** `main`, inspected at `a103cef92f454da999ad24a8f967100262922eea`  
-**Delivery:** This **same draft PR** holds the design now, and implementation/tests/review fixes later. No second PR or intermediate ticket for implementation. Do not mark HPA-833 Done for a docs-only submission.
+**Date:** 2026-11-19; revised 2026-11-20  
+**Linear:** https://linear.app/cwchanap/issue/HPA-833  
+**Design:** [Revised design](../specs/2026-11-19-hpa833-explicit-llm-clears-design.md)  
+**Review:** https://github.com/cwchanap/Vela/pull/102#pullrequestreview-5987968921  
+**Base inspected:** `main` at `a103cef92f454da999ad24a8f967100262922eea`  
+**Delivery rule:** Design, implementation, test evidence, and review fixes on **this one draft PR #102**. Do not open a second implementation PR or mark the ticket Done while docs-only.
 
-## Why this is next
+## Decision after review
 
-HPA-833 is an unblocked Vela backlog child of completed HPA-755. It is a narrow correctness bug in the existing recovery merge. HPA-824 is a separate, broader cross-client reconciliation backlog item; its original description predates the already-merged `preferences_version` DynamoDB CAS, so re-evaluate that item separately rather than rebuilding locking here.
+**Accept the review's root-cause simplification.** No `removedKeys` / `removedThinking` fields or write-contract change. A read of a plain-object `llm` with unknown default provider must still return the valid saved key and thinking maps. Substitute the existing Google default pair; delete the obsolete union-based recovery path. The existing `llmSettings.saveProvider` already deletes clear keys and Default overrides from a cloned snapshot; once GET exposes that snapshot, normal PUT replacement handles explicit removal.
 
-## Planned file map
+Keep the DynamoDB `preferences_version` CAS, current single 409 retry, strict PUT validation, untouched raw LLM passthrough on writes omitting `llm`, and shared synthetic-API helpers. HPA-824 stays separate.
 
-**Current documentation-only PR adds**
+**Realistic trigger:** A stored unknown provider can result from provider removal between releases, rollback across different provider sets, or direct DB edits. It **cannot** be written by a second tab through today's PUT schema. An old open tab may still receive 400 until it reloads; this is not solved by tombstones and remains out of scope. Seed an invalid stored provider **before a fresh GET** in tests, rather than manufacturing a mid-session 409 from a currently-valid PUT.
 
+## Minimal change map
+
+**Existing planning docs revised on this PR:**
 - `docs/superpowers/specs/2026-11-19-hpa833-explicit-llm-clears-design.md`
 - `docs/superpowers/plans/2026-11-19-hpa833-explicit-llm-clears.md`
 
-**Implementation changes on this same PR**
+**Implementation work in this same PR:**
+- `apps/vela-api/src/profile-preferences.ts`: known-valid entries survive a malformed/unknown default provider on GET; remove the recovery union
+- `apps/vela-api/test/routes/profiles.test.ts`: update old recovery expectations and add the clear/regression test
+- `apps/vela/e2e/llm-settings.spec.ts`: one fresh-load Settings save/reload regression, alongside existing two-tab retry case
+- `docs/superpowers/specs/2026-11-06-hpa755-llm-settings-redesign-design.md`: amend the previous read-policy statement to link to this later correction
 
-- `apps/vela-api/src/profile-preferences.ts` — optional write-only schema/clear intent and recovery filtering
-- `apps/vela-api/src/routes/profiles.ts` — accept markers, apply recovery, persist canonical preferences only
-- `apps/vela-api/test/routes/profiles.test.ts` — API integration regressions with existing mocked DynamoDB
-- `apps/vela/src/stores/llmSettings.ts` and `apps/vela/src/stores/llmSettings.test.ts` — capture/emit explicit intent once
-- `apps/vela/src/stores/auth.test.ts` — verify 409 retry preserves intent without contaminating saved profile state
-- `apps/vela/e2e/fixtures/syntheticAuth.ts` — mirror the API write contract and stripping rule
-- `apps/vela/e2e/llm-settings.spec.ts` — browser end-to-end and visual checks
+**Unchanged:** `apps/vela-api/src/routes/profiles.ts`, `apps/vela-api/src/dynamodb.ts`, `apps/vela/src/stores/llmSettings.ts`, `apps/vela/src/stores/auth.ts`, `apps/vela/e2e/fixtures/syntheticAuth.ts`, common contracts, Settings components, API/DB schema. Expand only if implementation reveals an actual blocker.
 
-Modify `LlmProviderCard.vue` or its tests **only if** current card submission proves insufficient for intent capture. Do not change `packages/common/src/contracts/llm.ts`, backend DynamoDB table/CDK, routing, mobile app, or unrelated settings.
+## Task 0 — Baseline and precise reproduction
 
-## Task 0 — Baseline and repro (no product changes)
+1. Confirm latest HPA-833 ticket and the active PR base; use `main` source to verify the read schema's invalid-default `return undefined`, the later recovery union, and the client's existing clone-and-delete behavior.
+2. Create a test fixture with stored `llm.keys` containing Google and OpenAI (both valid) and `llm.thinking` containing two valid model overrides, but `defaultModel.provider='retired-provider'`. This is a legacy/unknown stored record, **not** a successful PUT from a current client.
+3. Show that current GET hides the entire `llm` subtree. Record the existing test expectations at `apps/vela-api/test/routes/profiles.test.ts` around the unreadable-default and recovery cases. Run focused existing profile route and Settings E2E tests where feasible before changing runtime code.
 
-1. Recheck the current Linear description/status, the `main` head, and whether this ticket already has an implementation PR. HPA-833 is still Backlog and no dedicated branch/PR was found when preparing this plan.
-2. Read `preserveStoredLlm`, `UpdateProfileSchema`, `llmSettings.saveProvider`, `auth.updatePreferences` 409 retry, `LlmProviderCard.save`, and the synthetic E2E profile mock. Keep the existing CAS and session-generation fencing.
-3. Record a failing API regression: stored `defaultModel.provider='unknown'` with recoverable Google/OpenAI keys and two recoverable thinking overrides; client sends a valid replacement omitting one key and override plus matching explicit removal markers. The current merge would restore them.
-4. Run focused existing API, LLM store/auth, and Settings E2E tests and record baseline results. Do not treat a docs-only branch as implementation verification.
+**Gate:** Repro shows hidden valid keys on fresh GET; baseline tests and existing 409 behavior are documented. No implementation is implied by this design-only commit.
 
-**Gate:** Repro fails for the intended resurrection, while the existing no-marker recovery test still documents the desired preservation behavior.
+## Task 1 — Tolerant GET, no recovery merge
 
-## Task 1 — Strict transient write contract and recovery
+**Files:** `apps/vela-api/src/profile-preferences.ts`, `apps/vela-api/test/routes/profiles.test.ts`
 
-**Files:** `apps/vela-api/src/profile-preferences.ts`, `apps/vela-api/src/routes/profiles.ts`, `apps/vela-api/test/routes/profiles.test.ts`
+1. In `LlmPreferencesReadSchema`, keep non-object `llm` returning `undefined`. If `defaultModel` is missing/not an object, or its `provider` is unknown, warn without values and substitute the **whole** default pair `{provider:'google', model:LLM_PROVIDER_REGISTRY.google.defaultModel}`.
+2. For a known provider, leave the current fallback for a malformed `defaultModel.model` intact. Preserve the existing per-entry key/effort sanitization and 128-entry thinking cap; do not preserve an unknown provider's model string as Google's default.
+3. Reduce `preserveStoredLlm(next, stored)` to: if the stored preferences contains `llm` and the next replacement **omits** `llm`, carry the raw stored value forward. Otherwise, never union raw/recovered keys or thinking entries into an explicit replacement. Keep the function exported so the route and synthetic fixture continue using it unchanged.
+4. API tests:
+   - Flip the old invalid-provider GET case: instead of `llm===undefined`, assert sanitized keys/efforts remain and the default pair is Google. Also test a **missing defaultModel** object. GET must not write.
+   - Keep the existing **non-object** `llm` case reading absent; invalid entries still sanitize.
+   - Replace the old test asserting a recovered union with an explicit LLM PUT that stores the replacement **exactly as sent**; absent keys/overrides stay absent, untouched values remain.
+   - Add end-to-end route-level GET → replacement PUT regression using a stored unknown provider: confirm Google key and a model effort deliberately omitted after read stay deleted, OpenAI key and another override stay present, and the selected Google default pair remains stable.
+   - Preserve raw unreadable `llm` when `PUT` omits the entire `llm` field; current strict unknown-provider request still returns 400; stale `preferences_version` still returns 409.
 
-1. Keep persisted `LlmPreferencesSchema` and `@vela/common` `LlmPreferences` unchanged. Add `LlmPreferencesWriteSchema` and `PreferencesWriteSchema` to accept optional `removedKeys: LlmProvider[]` and `removedThinking: string[]`. Validate against known providers, model-ID bounds, and existing provider/override caps. Reject malformed markers with 400 before any database update.
-2. Update `PUT /profiles/update` to parse the *write* schema first. Extract the clear markers, convert to canonical `PreferencesSchema`, then call `preserveStoredLlm(next, stored, clearIntent)`. Do not run canonical `PreferencesSchema` first and silently strip clear intent. Keep `expected_preferences_version`, 428/409 behavior and the single DynamoDB conditional update unchanged.
-3. Apply requested clears to the replacement even with a valid/no stored LLM, and exclude those entries from recovery when stored default provider is unreadable. Clear wins over an accidentally simultaneous positive value. Retain untargeted recoverable keys/model overrides and the current 128-item cap; preserve raw unreadable `llm` for unrelated preference writes.
-4. Persist and return **only canonical LLM fields**; the request-only `removedKeys`/`removedThinking` must never reach DynamoDB or GET/PUT responses. Do not log key values.
-5. API tests: key removal; thinking reset; both together; untouched recoverable entries; contradictory marker/value clear-wins; omitted markers preserve existing behavior; unrelated preference update preserves raw unreadable LLM; ordinary stored-valid case; marker validation; CAS 409 remains enforced. Assert full saved object to prove no metadata persistence.
+**Gate:** `cd apps/vela-api && bun test test/routes/profiles.test.ts`, `bun --filter vela-api compile`, and relevant API CI checks pass.
 
-**Gate:** Focused `bun test test/routes/profiles.test.ts` from `apps/vela-api`, then `bun --filter vela-api compile` and `bun --filter vela-api test` are green.
+## Task 2 — One browser E2E plus one screenshot check
 
-## Task 2 — Capture client clear intent exactly once per Save
+**File:** `apps/vela/e2e/llm-settings.spec.ts`
 
-**Files:** `apps/vela/src/stores/llmSettings.ts`, `apps/vela/src/stores/llmSettings.test.ts`, `apps/vela/src/stores/auth.test.ts`
+1. Add **one** Playwright scenario to the existing mocked settings spec: seed a user profile with an unknown stored default provider, visible recoverable Google/OpenAI keys, and two valid thinking overrides. Stage the authenticated session and **freshly load** Settings. This must show the Google key (not an empty card) and the model's saved effort.
+2. Clear the Google key, choose Default for one saved model override, press Save, and assert a successful `PUT /profiles/update` with a canonical `llm` replacement **without** those entries and **without tombstones**. Confirm the mock profile uses the API's imported read/recovery helper, not a copy. Do not modify the mock to generate a 409 by injecting an invalid provider during a live tab's save.
+3. Reload Settings and check **No key saved**, the affected thinking row **Default**, the untouched OpenAI key, an untouched thinking override, and the chosen Google fallback default. The existing two-tab 409/refetch/retry E2E must remain green; no new special retry test is needed.
+4. **MCP acceptance:** use a Playwright/browser MCP run of this actual UI E2E as the single end-to-end gate (seed → Settings GET → clear → PUT → reload/GET), with API payload/status and persisted mock state asserted. No second, duplicate manual browser walkthrough or native/mobile acceptance.
+5. No UI mockup exists and no UI component changes are planned. During this **same MCP run**, capture **one screenshot** of the expanded card at ~375px showing **No key saved** and **Default**. Visually check legibility, no clipped selector, and no horizontal overflow. Record the screenshot result in the PR; no separate visual regression suite or human sign-off.
 
-1. In `saveProvider`, snapshot the current rendered `llm.value` and submitted trimmed key/allowed-model thinking patch **before** invoking `auth.updatePreferences`. Mark a key cleared only when an existing visible key becomes blank; mark an override removed only when a present saved override is submitted as Default/null. Do not mark every already-empty key or Default row.
-2. Compute immutable `removedKeys`/`removedThinking` once outside the updater closure. In each updater invocation, continue to rebuild the canonical replacement from the latest profile to keep unrelated changes, then attach the same transient intent to the write payload. Do not put markers into Pinia `llm.value` or shared `LlmPreferences`.
-3. Keep `saveDefault` and other preference saves free of removal markers. Leave the UI draft editing, save buttons/toasts, and default model selection unchanged.
-4. Test: clearing one provider key has exactly one marker; resetting one override to Default has exactly that model ID; saving another provider/untouched Default rows has no markers; a 409 refetch where the newly fetched `llm` is omitted still resends original markers on the retry. Test successful acknowledgment, account/session switch, and failure do not leak marker fields into the client state.
+**Gate:** The new Playwright E2E plus the existing two-tab case pass through MCP, and the same run's screenshot visual check passes. Do not claim this gate on the current docs-only PR.
 
-**Gate:** Focused `llmSettings.test.ts` and `auth.test.ts` pass; `bun --filter @vela/app test` and `bun --filter @vela/app build` pass.
+## Task 3 — Final quality gates and review
 
-## Task 3 — Browser E2E through MCP and regression screenshots
-
-**Files:** `apps/vela/e2e/fixtures/syntheticAuth.ts`, `apps/vela/e2e/llm-settings.spec.ts`
-
-1. Make synthetic profile PUT use the **same** write-schema + recovery + marker-stripping helpers as the API; its captured `lastPut()` retains the raw *request* for assertions, but the profile map stores only canonical preferences. Preserve synthetic 400/409/428 behavior.
-2. Add a deterministic browser scenario: seed visible Google key plus a registered model's high thinking override and an unrelated Anthropic key/override; load Settings; mutate the mock stored default provider to `unknown` and advance its `preferences_version` before user Save. Clear Google key and choose Default thinking. Assert the first PUT gets 409, the retry is successful and still carries both markers, and the resulting mock stored profile excludes only the cleared values.
-3. Reload the Settings page, assert **No key saved** and **Default** for cleared entries, while unrelated key/override and default pair remain intact. Check a normal provider Save and a Default-only save emit no unintended markers. Assert profile GET/read and Pinia snapshot contain no tombstone fields.
-4. Run the existing Playwright mocked suite for this file. For **end-to-end acceptance**, use the connected browser/Playwright MCP against the runnable web app with synthetic auth to drive the actual click → PUT → retry → GET → reload flow; inspect network payload/status and saved state. The single web client is sufficient because this change has no platform-specific mobile UI.
-5. The ticket has **no UI mockup**. Capture MCP screenshots at **1280 × 800** and **375 × 812**, with the affected provider card expanded and cleared/Default state visible. Visually inspect screenshots alongside the prechange Settings layout: badge and effort state must be readable; no clipped controls, overlapping elements or horizontal page overflow. Record screenshot evidence on this PR. Tests assert the intended state; this is not a human sign-off criterion.
-
-**Gate:** Mocked Playwright `llm-settings.spec.ts` green, plus MCP browser end-to-end scenario and screenshot check green. Do not claim this gate during docs-only planning.
-
-## Task 4 — Complete all checks and review in this PR
-
-1. Run `bun --filter vela-api test`, `bun --filter vela-api compile`, `bun --filter @vela/app test`, `bun --filter @vela/app lint`, `bun --filter @vela/app build`, and targeted `cd apps/vela && bunx playwright test --config playwright.mocked.config.ts e2e/llm-settings.spec.ts`. Re-run affected CI gates as needed.
-2. Review actual changed files for accidental marker persistence, 409 retry loss, overwrite of unrelated provider settings, and extra infrastructure. Check that the implementation still matches the latest HPA-833 description and these docs.
-3. Address valid review findings **in the same PR**, keep draft until code/tests/screenshots are actually complete, then report completed gates with evidence. No implementation split PR, manual acceptance requirement, or speculative compatibility layer.
+1. Execute `bun --filter vela-api test`, `bun --filter vela-api compile`, `bun --filter @vela/app test`, `bun --filter @vela/app lint`, and `bun --filter @vela/app build` (or the repository's affected CI gates). Run targeted Settings E2E with `cd apps/vela && bunx playwright test --config playwright.mocked.config.ts e2e/llm-settings.spec.ts` via MCP if the MCP adapter executes the test runner.
+2. Check that no runtime write-schema, storage, UI, fixture or auth changes crept in; confirm the read warning contains only field names, the explicit PUT no longer recovers deleted entries, and no old HPA-755 documentation claim conflicts with the corrected behavior.
+3. Address any new valid GitHub comments in **this same PR**. Keep it draft until implementation, all automated/MCP gates and screenshot evidence are actually complete.
 
 ## End-to-end acceptance checklist
 
-- [ ] **User behavior:** Clearing a saved key and resetting a saved effort to Default succeeds and survives reload; unrelated settings survive, the default model pair does not change, and the correct Settings labels are displayed.
-- [ ] **API integration:** `PUT /profiles/update` honors explicit markers during unreadable-default recovery, persists no markers, and `GET /profiles` returns the canonical cleared state.
-- [ ] **Concurrency:** 409 → refetch → retry preserves the original clear intent; stale-version writes never bypass the existing CAS, and terminal failures do not toast success.
-- [ ] **Validation:** Missing markers retain existing behavior; malformed markers get 400 without writes; no-intent saves do not erase hidden entries.
-- [ ] **Automated tests:** API unit/integration, store/auth tests, mocked Playwright E2E, app build/lint, and API compile pass.
-- [ ] **MCP E2E:** A browser MCP run verifies the full Settings → profile PUT/409 retry → subsequent GET → reload journey. No stubbed-only unit test substitutes for this gate.
-- [ ] **Visual check:** MCP screenshots at desktop and 375px verify the unchanged Settings layout, the **No key saved** badge, the **Default** selection, and no clipping/overflow, with PR evidence linked. No human approval is an acceptance criterion.
+- [ ] **API GET:** An unknown/missing stored default provider on a plain-object `llm` produces the Google registry default **without losing recognized valid keys or thinking entries**; a non-object LLM remains absent and GET has no DB writes.
+- [ ] **API PUT:** After a fresh GET, clearing one visible key and resetting one override persists their absence without resurrecting either; untouched keys/efforts remain; explicit `llm` replacement is authoritative.
+- [ ] **Other preference behavior:** A PUT omitting `llm` retains the raw stored subtree, strict invalid-provider PUT validation remains 400, and existing `preferences_version` CAS/409 retry continues working.
+- [ ] **MCP E2E:** An authenticated Playwright MCP flow drives Settings load → edits → PUT → reload/GET, asserting the cleared and retained fields and the UI labels, plus the existing two-tab 409 regression.
+- [ ] **Visual check:** A narrow-viewport screenshot captured within that E2E is checked against the current Settings layout for readable **No key saved**/**Default** state and absence of clipping/overflow; no ticket mockup and no human acceptance.
+- [ ] **Automated gates:** Profile route tests, API compile/tests, app test/lint/build and the targeted mocked Settings E2E pass. Record exact commands/results on PR #102.
 
-## Deliberate exclusions
+## Deliberate deferrals
 
-No change to DynamoDB versioning, extra endpoint, migration, new state-management layer, generic field tombstone framework, recovery-management UI, new artwork, or mobile platform changes. HPA-824 remains a separate backlog decision.
+No tombstones, write-schema changes, migration, generic recovery framework, new API endpoint, extra client state, cross-client optimistic-lock redesign (HPA-824), duplicate browser tests, new UI, or art/SFX work. All changes in one PR.
