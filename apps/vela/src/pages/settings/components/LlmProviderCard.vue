@@ -82,7 +82,7 @@ import {
   type LlmModelInfo,
   type LlmProvider,
 } from '@vela/common';
-import { effortOptions, registryModels } from '../../../utils/llmModelOptions';
+import { effortOptions, registryModels } from '@/utils/llmModelOptions';
 import { useLLMSettingsStore, type LlmThinkingPatch } from '@/stores/llmSettings';
 import { useAuthStore } from '@/stores/auth';
 

@@ -94,8 +94,8 @@ import {
   decodeModelValue,
   llmPairOption,
   pairToOptionValue,
-} from '../../../utils/llmModelOptions';
-import { useServerKeyProviders } from '../../../composables/queries/useServerKeyProviders';
+} from '@/utils/llmModelOptions';
+import { useServerKeyProviders } from '@/composables/queries/useServerKeyProviders';
 import LlmProviderCard from './LlmProviderCard.vue';
 
 const store = useLLMSettingsStore();

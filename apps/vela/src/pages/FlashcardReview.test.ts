@@ -4,17 +4,17 @@ import { nextTick } from 'vue';
 import { createPinia, setActivePinia } from 'pinia';
 import { Quasar, Notify } from 'quasar';
 import FlashcardReview from './FlashcardReview.vue';
-import { useFlashcardStore } from '../stores/flashcards';
-import { useAuthStore } from '../stores/auth';
-import * as flashcardServiceModule from '../services/flashcardService';
+import { useFlashcardStore } from '@/stores/flashcards';
+import { useAuthStore } from '@/stores/auth';
+import * as flashcardServiceModule from '@/services/flashcardService';
 import {
   chunkArray,
   mergeReviews,
   parsePendingReviews,
   isReviewInput,
-} from '../utils/flashcardReviewUtils';
-import type { Vocabulary } from '../types/database';
-import type { ReviewInput } from '../services/srsService';
+} from '@/utils/flashcardReviewUtils';
+import type { Vocabulary } from '@/types/database';
+import type { ReviewInput } from '@/services/srsService';
 
 const mockPronounceWord = vi.fn();
 

@@ -8,10 +8,10 @@ import { useAuthStore } from '@/stores/auth';
 import {
   useTTSSettingsQuery,
   useUpdateTTSSettingsMutation,
-} from '../../../composables/queries/useTTSQueries';
+} from '@/composables/queries/useTTSQueries';
 
 // Mock TTS queries composable
-vi.mock('../../../composables/queries/useTTSQueries', () => ({
+vi.mock('@/composables/queries/useTTSQueries', () => ({
   useTTSSettingsQuery: vi.fn(() => ({
     data: { value: null },
   })),
