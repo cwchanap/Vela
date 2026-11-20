@@ -1,6 +1,6 @@
 # HPA-833 — Preserve LLM settings and explicit clears with an invalid stored default provider (design)
 
-**Date:** 2026-11-19; revised 2026-11-20 after [design review](https://github.com/cwchanap/Vela/pull/102#pullrequestreview-5987968921)  
+**Date:** 2026-11-19; revised 2026-11-20 after [root-cause review](https://github.com/cwchanap/Vela/pull/102#pullrequestreview-5987968921) and [verification review](https://github.com/cwchanap/Vela/pull/102#pullrequestreview-5988613398)  
 **Linear:** https://linear.app/cwchanap/issue/HPA-833  
 **Related:** HPA-755 (merged settings foundation); HPA-824 (separate residual cross-client reconciliation)  
 **Delivery:** One [draft PR #102](https://github.com/cwchanap/Vela/pull/102) for design, implementation, tests, and review corrections. This revision is planning only.
@@ -45,8 +45,8 @@ The implementation requires changes to `apps/vela-api/src/profile-preferences.ts
 1. API GET of a plain-object LLM subtree with an unknown/missing default provider preserves known, valid provider keys and bounded thinking entries while substituting **Google plus its registry default model**. Invalid individual key/thinking entries are still sanitized. A non-object LLM still reads as absent. GET performs no DB update.
 2. Explicit LLM PUT after reading the sanitized profile does not merge back any intentionally omitted provider key or model override; untouched values survive, and the default remains Google when clearing a key.
 3. A preference PUT without `llm` continues to retain the raw stored LLM subtree; strict invalid-provider PUT validation and existing CAS 409 behavior stay intact. The separate existing 409 retry regression remains green.
-4. MCP-driven browser E2E using the existing mocked Playwright setup exercises **seed invalid default → fresh Settings load → clear one key and choose Default for a saved override → Save → reload** and checks both the cleared and preserved values. This is one E2E acceptance flow, not a duplicate standalone MCP test.
-5. The ticket has no UI mockup. Capture **one screenshot during that same MCP E2E** showing the expanded provider card, **No key saved**, and the **Default** thinking value at a narrow viewport (e.g. 375px); visually check readability and no clipping. No separate visual-testing suite or human approval gate.
+4. Run **one existing-fixture Playwright Test E2E**: seed invalid stored provider → fresh Settings load → clear one key and choose Default for a saved override → Save → reload; assert both cleared and preserved values. The executable runner is `cd apps/vela && bun run test:e2e:mocked -- e2e/llm-settings.spec.ts`, **not an interactive browser MCP server**, which cannot invoke Playwright Test's in-process `apiMock` fixture. For MCP-based acceptance, inspect the PR's GitHub Actions **mocked-settings** job and its Playwright JSON/report artifacts through GitHub MCP after the branch push. CI runs `bun --cwd=apps/vela run test:e2e:mocked` on draft PR updates. Do not add a duplicate browser-MCP walkthrough.
+5. The ticket has no UI mockup. Capture **one narrow-viewport screenshot (about 375px)** of the expanded card showing **No key saved** and **Default** during a Playwright evidence run, and save it under the runner's already-uploaded `.artifacts/pw-mocked-*/results/` directory (e.g. via one-time `testInfo.outputPath` screenshot capture). Inspect that image via MCP for readability/no clipping. Do not add permanent screenshot-only fixtures, a second test suite, or a separate browser-MCP run; human approval is not an acceptance gate.
 
 ## Deliberate exclusions
 
