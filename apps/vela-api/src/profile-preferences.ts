@@ -68,8 +68,12 @@ const LlmPreferencesReadSchema = z.preprocess((val) => {
   }
 
   if (!isPlainObject(val.defaultModel) || !isKnownProvider(val.defaultModel.provider)) {
-    console.warn('Ignoring llm with invalid defaultModel.provider');
-    return undefined;
+    console.warn('Replacing invalid llm.defaultModel with the Google default');
+    return {
+      keys: cleanedKeys,
+      thinking: cleanedThinking,
+      defaultModel: { provider: 'google', model: LLM_PROVIDER_REGISTRY.google.defaultModel },
+    };
   }
   const provider = val.defaultModel.provider;
   const validModel = LlmModelSchema.safeParse(val.defaultModel.model);
@@ -86,26 +90,11 @@ const LlmPreferencesReadSchema = z.preprocess((val) => {
   };
 }, LlmPreferencesSchema.optional().catch(undefined));
 
+// Writes that omit llm keep the raw stored subtree; an explicit llm replacement is
+// authoritative, so deleted keys and overrides stay deleted.
 export const preserveStoredLlm = (next: Record<string, unknown>, stored: unknown) => {
   if (!isPlainObject(stored) || !('llm' in stored)) return;
-  const raw = stored.llm;
-  if (next.llm === undefined) {
-    next.llm = raw;
-    return;
-  }
-  if (!isPlainObject(raw) || LlmPreferencesReadSchema.parse(raw) !== undefined) return;
-  const replacement = LlmPreferencesSchema.parse(next.llm);
-  const recovered = LlmPreferencesReadSchema.parse({
-    ...raw,
-    defaultModel: replacement.defaultModel,
-  });
-  if (!recovered) return;
-  const thinking = { ...replacement.thinking };
-  for (const [model, effort] of Object.entries(recovered.thinking)) {
-    if (Object.keys(thinking).length >= MAX_THINKING_OVERRIDES) break;
-    if (!Object.hasOwn(thinking, model)) thinking[model] = effort;
-  }
-  next.llm = { ...replacement, keys: { ...recovered.keys, ...replacement.keys }, thinking };
+  if (next.llm === undefined) next.llm = stored.llm;
 };
 
 // Optimistic-lock token carried on preference writes. Kept here so the route
