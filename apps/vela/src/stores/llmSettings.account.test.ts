@@ -1620,7 +1620,6 @@ describe('acknowledged writes reconcile at preference path granularity', () => {
       } as UserPreferences,
       updated_at: '2030-06-01T00:00:00.000Z',
     };
-    mockAuthService.getUserProfile.mockResolvedValue(newerRead);
     // The accepted read reflects the stored record: another writer already
     // merged its provider key into the committed subtree.
     serverProfiles.set('user-a', newerRead);
@@ -1687,7 +1686,6 @@ describe('acknowledged writes reconcile at preference path granularity', () => {
       } as UserPreferences,
       updated_at: '2030-06-01T00:00:00.000Z',
     };
-    mockAuthService.getUserProfile.mockResolvedValue(newerRead);
     // The accepted read reflects the stored record: another writer already
     // merged its provider key into the committed subtree.
     serverProfiles.set('user-a', newerRead);
@@ -1744,7 +1742,6 @@ describe('acknowledged writes reconcile at preference path granularity', () => {
       } as UserPreferences,
       updated_at: '2030-06-01T00:00:00.000Z',
     };
-    mockAuthService.getUserProfile.mockResolvedValue(newerRead);
     // The accepted read reflects the stored record: another writer already
     // rotated the key on the committed subtree.
     serverProfiles.set('user-a', newerRead);
@@ -1803,7 +1800,6 @@ describe('acknowledged writes reconcile at preference path granularity', () => {
       } as UserPreferences,
       updated_at: '2030-06-01T00:00:00.000Z',
     };
-    mockAuthService.getUserProfile.mockResolvedValue(newerRead);
     // The accepted read reflects the stored record: another writer already
     // deleted the untouched provider on the committed subtree.
     serverProfiles.set('user-a', newerRead);
@@ -1860,7 +1856,6 @@ describe('acknowledged writes reconcile at preference path granularity', () => {
       } as UserPreferences,
       updated_at: '2030-06-01T00:00:00.000Z',
     };
-    mockAuthService.getUserProfile.mockResolvedValue(newerRead);
     // The accepted read reflects the stored record: another writer already
     // re-added the key on the committed subtree.
     serverProfiles.set('user-a', newerRead);
@@ -2058,7 +2053,6 @@ describe('acknowledged writes reconcile at preference path granularity', () => {
       } as UserPreferences,
       updated_at: '2030-06-01T00:00:00.000Z',
     };
-    mockAuthService.getUserProfile.mockResolvedValue(newerRead);
     // The accepted read reflects the stored record: another writer already
     // deleted the key on the committed subtree.
     serverProfiles.set('user-a', newerRead);
