@@ -362,6 +362,16 @@ test.describe('LLM Settings - Provider cards', () => {
     await conflict;
     await retried;
 
+    // The conflicted PUT is built from the local fallback profile before the
+    // refetch, so its llm is what the fallback preserved — the replay alone
+    // would restore untouched keys and thinking from the server snapshot.
+    const conflictedLlm = llmOf(apiMock.profilePuts.at(-2));
+    expect(conflictedLlm.keys).toEqual({
+      google: 'e2e-updated-google-key',
+      openai: OPENAI_KEY,
+    });
+    expect(conflictedLlm.thinking).toEqual({ 'gpt-6.1-sol': 'high' });
+
     const storedLlm = apiMock.profiles.get(SYNTHETIC_USER_A.userId)?.preferences.llm as {
       keys?: Record<string, string>;
       thinking?: Record<string, string>;
