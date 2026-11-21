@@ -336,16 +336,31 @@ test.describe('LLM Settings - Provider cards', () => {
     );
     await page.getByTestId('dark-mode-toggle').click();
     const omittedPut = waitForProfilePut(page);
+    const failedRefresh = page.waitForResponse(
+      (r) =>
+        r.url().includes('/api/profiles?') && r.request().method() === 'GET' && r.status() === 500,
+    );
     await page.getByRole('button', { name: 'Save to profile' }).click();
     expect((await omittedPut).status()).toBe(200);
+    // Unroute only after the refresh is observed failing: a successful refresh
+    // would restore the server profile and mask a broken fallback.
+    await failedRefresh;
 
     await page.unroute('**/api/profiles?*');
     apiMock.omitPutProfile = false;
     await openCard(page, 'google');
     await keyInput(page, 'google').fill('e2e-updated-google-key');
-    const llmPut = waitForProfilePut(page);
+    // The failed refresh leaves a stale preferences_version, so this save
+    // conflicts and the client refetches and replays it.
+    const conflict = page.waitForResponse(
+      (r) => r.url().includes('/api/profiles/update') && r.status() === 409,
+    );
+    const retried = page.waitForResponse(
+      (r) => r.url().includes('/api/profiles/update') && r.status() === 200,
+    );
     await page.getByTestId('llm-save-google').click();
-    expect((await llmPut).status()).toBe(200);
+    await conflict;
+    await retried;
 
     const storedLlm = apiMock.profiles.get(SYNTHETIC_USER_A.userId)?.preferences.llm as {
       keys?: Record<string, string>;

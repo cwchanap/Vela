@@ -12,22 +12,6 @@
       updates, or try again later.
       <q-btn flat dense label="Reload" data-testid="llm-reload" @click="reloadPage" />
     </div>
-    <div
-      v-else-if="llmFormState === 'error'"
-      class="text-body2 text-negative"
-      data-testid="llm-settings-error"
-      role="alert"
-    >
-      {{ authStore.error || 'Failed to load LLM settings.' }}
-      <q-btn flat dense label="Retry" data-testid="llm-profile-retry" @click="retryLoadProfile" />
-    </div>
-    <div
-      v-else-if="llmFormState === 'loading'"
-      class="text-body2 text-grey"
-      data-testid="llm-settings-loading"
-    >
-      Loading LLM settings…
-    </div>
 
     <template v-else>
       <div class="row q-col-gutter-md items-end">
@@ -133,21 +117,15 @@ const isAuthenticated = computed(() => authStore.isAuthenticated);
 
 // Editable forms mount only after a complete sanitized profile read. A missing
 // marker means this page code cannot safely describe or replace saved LLM
-// values, so it offers a reload instead of blank drafts.
-const llmFormState = computed<'signed-out' | 'loading' | 'error' | 'blocked' | 'ready'>(() => {
-  if (!authStore.session?.user) return 'signed-out';
-  if (!authStore.user) {
-    return authStore.isLoading ? 'loading' : 'error';
-  }
+// values, so it offers a reload instead of blank drafts. A null user with a
+// live session is handled by MainLayout's loading/retry page and never mounts
+// this section.
+const llmFormState = computed<'signed-out' | 'blocked' | 'ready'>(() => {
+  if (!authStore.session?.user || !authStore.user) return 'signed-out';
   return authStore.hasCompleteLlmSnapshot ? 'ready' : 'blocked';
 });
 
 const reloadPage = () => window.location.reload();
-const retryLoadProfile = async () => {
-  const userId = authStore.session?.user?.id;
-  if (!userId) return;
-  await authStore.loadUserProfile(userId);
-};
 const { capabilitiesQuery, serverKeyProviders } = useServerKeyProviders();
 const serverKeyProviderLabels = computed(() =>
   serverKeyProviders.value.map((provider) => LLM_PROVIDER_REGISTRY[provider].label),
