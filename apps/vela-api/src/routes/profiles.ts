@@ -149,31 +149,37 @@ const createProfilesRoute = (env: Env) => {
         ? await profilesDB.update(user_id, timestampedUpdates, expected_preferences_version)
         : await profilesDB.update(user_id, timestampedUpdates);
 
-      if (updatedProfile?.preferences) {
-        // The update already committed, so a malformed stored preference must
-        // not turn this success response into an error. Sanitize when possible
-        // and fall back to the committed record otherwise. Only a sanitized
-        // response advertises the read contract.
-        try {
-          const parsedPreferences = PreferencesReadSchema.safeParse(
-            normalizePreferences(updatedProfile.preferences),
-          );
-          if (parsedPreferences.success) {
-            updatedProfile.preferences = parsedPreferences.data;
-            updatedProfile.preferences_read_contract = PREFERENCES_READ_CONTRACT;
-          } else {
+      if (updatedProfile) {
+        // Response metadata read from storage is never trusted. Strip it
+        // before handling the committed record and add it back only after
+        // sanitization succeeds.
+        delete updatedProfile.preferences_read_contract;
+        if (updatedProfile.preferences) {
+          // The update already committed, so a malformed stored preference must
+          // not turn this success response into an error. Sanitize when possible
+          // and fall back to the committed record otherwise. Only a sanitized
+          // response advertises the read contract.
+          try {
+            const parsedPreferences = PreferencesReadSchema.safeParse(
+              normalizePreferences(updatedProfile.preferences),
+            );
+            if (parsedPreferences.success) {
+              updatedProfile.preferences = parsedPreferences.data;
+              updatedProfile.preferences_read_contract = PREFERENCES_READ_CONTRACT;
+            } else {
+              console.error(
+                'Committed preferences failed sanitization for user_id:',
+                user_id,
+                parsedPreferences.error,
+              );
+            }
+          } catch (sanitizeError) {
             console.error(
-              'Committed preferences failed sanitization for user_id:',
+              'Preferences sanitization threw for committed profile, user_id:',
               user_id,
-              parsedPreferences.error,
+              sanitizeError,
             );
           }
-        } catch (sanitizeError) {
-          console.error(
-            'Preferences sanitization threw for committed profile, user_id:',
-            user_id,
-            sanitizeError,
-          );
         }
       }
       return c.json({ success: true, profile: updatedProfile });

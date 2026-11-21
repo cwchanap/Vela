@@ -546,11 +546,12 @@ export const useAuthStore = defineStore('auth', () => {
           recordCoversFingerprint(tracked.profile, fingerprint)))
     ) {
       const reconciled = reconcileAcknowledgedProfile(tracked.profile, fingerprint, baseline);
-      // The acknowledged response is the only proof of a complete read; a
-      // missing marker must not be inherited from a previously safe snapshot.
+      // These preferences are retained from the tracked snapshot, so its read
+      // contract must travel with them: a marked acknowledgment of different
+      // preferences cannot mark this snapshot complete.
       const reconciledProfile = {
         ...reconciled.profile,
-        preferences_read_contract: acknowledged.preferences_read_contract ?? null,
+        preferences_read_contract: tracked.profile.preferences_read_contract ?? null,
       };
       lastAcknowledgedProfile = {
         profile: reconciledProfile,

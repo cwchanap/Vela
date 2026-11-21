@@ -414,9 +414,9 @@ const handleApiRoute = async (state: MockApi, route: Route): Promise<void> => {
     if (userId !== authUser.userId) {
       return jsonResponse(route, { error: "Forbidden: Cannot update another user's profile" }, 403);
     }
-    const profile = getOrCreateProfile(userId);
-    // Mirror UpdateProfileSchema: an invalid version is rejected before the
-    // handler logic, regardless of whether preferences are being updated.
+    // Mirror UpdateProfileSchema: an invalid version or marker is rejected
+    // before the handler touches storage, regardless of whether preferences
+    // are being updated.
     if (!ExpectedPreferencesVersionSchema.safeParse(body.expected_preferences_version).success) {
       return jsonResponse(route, { error: 'Invalid preferences data' }, 400);
     }
@@ -427,6 +427,7 @@ const handleApiRoute = async (state: MockApi, route: Route): Promise<void> => {
     ) {
       return jsonResponse(route, { error: 'Invalid preferences data' }, 400);
     }
+    let parsedPreferences: Record<string, unknown> | undefined;
     if (body.preferences !== undefined) {
       const parsed = PreferencesSchema.safeParse(body.preferences);
       if (!parsed.success) return jsonResponse(route, { error: 'Invalid preferences' }, 400);
@@ -434,11 +435,16 @@ const handleApiRoute = async (state: MockApi, route: Route): Promise<void> => {
       // complete; refuse before touching storage regardless of version.
       if (replacesLlm(parsed.data) && body.llm_write_contract === undefined)
         return jsonResponse(route, { error: 'Reload the app before saving LLM settings' }, 428);
+      parsedPreferences = parsed.data as Record<string, unknown>;
+    }
+    // Storage access happens only after the request contract is satisfied.
+    const profile = getOrCreateProfile(userId);
+    if (parsedPreferences !== undefined) {
       if (body.expected_preferences_version === undefined)
         return jsonResponse(route, { error: 'Reload your profile' }, 428);
       if (body.expected_preferences_version !== (profile.preferences_version ?? null))
         return jsonResponse(route, { error: 'Preferences changed elsewhere' }, 409);
-      const next: Record<string, unknown> = normalizePreferences(parsed.data);
+      const next: Record<string, unknown> = normalizePreferences(parsedPreferences);
       preserveStoredLlm(next, profile.preferences);
       profile.preferences = next;
       profile.preferences_version = randomUUID();
