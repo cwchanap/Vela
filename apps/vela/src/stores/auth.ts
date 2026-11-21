@@ -824,9 +824,11 @@ export const useAuthStore = defineStore('auth', () => {
             resolvedPreferences === undefined
               ? undefined
               : { ...current.preferences, ...resolvedPreferences };
-          if (mergedPreferences && !replacesLlm && !snapshotComplete) {
-            // An unrelated save must not ship a possibly incomplete llm view;
-            // omitting it makes the API keep the raw stored subtree.
+          if (mergedPreferences && !replacesLlm) {
+            // An unrelated save must never ship the stored llm view — even a
+            // complete one, which is a sanitized copy whose fallback defaults
+            // would overwrite the raw stored subtree. Omitting it makes the
+            // API keep the raw stored subtree.
             delete mergedPreferences.llm;
           }
           mergedProfileData =
