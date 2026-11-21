@@ -525,6 +525,37 @@ describe('useAuthStore', () => {
       expect(body.expected_preferences_version).toBe('v0');
     });
 
+    it('omits llm from an unrelated preference save on a complete snapshot', async () => {
+      const { useAuthStore } = await import('./auth');
+      const store = useAuthStore();
+      store.setSession(mockSession);
+      // A marked profile whose llm view carries a sanitized fallback: sending it
+      // with the write marker would make the API replace the raw stored subtree.
+      const llm = {
+        keys: { 'retired-provider': 'saved-key' },
+        thinking: {},
+        defaultModel: { provider: 'google', model: 'gemini-3.8-flash' },
+      };
+      store.setUser(
+        makeUser({
+          preferences: { darkMode: false, llm },
+          preferences_version: 'v0',
+        }),
+      );
+      mockAuthService.updateUserProfile.mockResolvedValueOnce({ success: true });
+      mockAuthService.getUserProfile.mockResolvedValueOnce({
+        ...mockProfile,
+        preferences: { darkMode: true, llm },
+        preferences_version: 'v1',
+      });
+
+      expect(await store.updatePreferences({ darkMode: true })).toBe(true);
+      const body = mockAuthService.updateUserProfile.mock.calls[0][1];
+      expect(body.preferences).toEqual({ darkMode: true });
+      expect(body).not.toHaveProperty('llm_write_contract');
+      expect(body.expected_preferences_version).toBe('v0');
+    });
+
     it('refuses to replay a conflicted LLM save when the refetched snapshot is incomplete', async () => {
       const { useAuthStore } = await import('./auth');
       const store = useAuthStore();
