@@ -91,6 +91,7 @@ const routeProfile = () => ({
   total_experience: 0,
   learning_streak: 0,
   preferences: { ...serverPreferences },
+  preferences_read_contract: 'complete-llm-v1',
   created_at: '2026-01-01T00:00:00.000Z',
   updated_at: '2026-01-01T00:00:00.000Z',
 });
@@ -151,6 +152,8 @@ describe('route-shaped profile hydration (real authService)', () => {
     expect(authStore.user?.id).toBe(USER_ID);
     expect(authStore.user?.email).toBe(USER_EMAIL);
     expect(authStore.user?.preferences?.dailyGoal).toBe(30);
+    expect(authStore.user?.preferences_read_contract).toBe('complete-llm-v1');
+    expect(authStore.hasCompleteLlmSnapshot).toBe(true);
   });
 
   it('saves LLM settings against the hydrated user after a route-shaped profile load', async () => {
@@ -172,9 +175,11 @@ describe('route-shaped profile hydration (real authService)', () => {
     expect(putCalls).toHaveLength(1);
     const body = JSON.parse(String(putCalls[0]![1]?.body)) as {
       user_id: string;
+      llm_write_contract?: string;
       preferences: { dailyGoal: number; llm: { keys: Record<string, string> } };
     };
     expect(body.user_id).toBe(USER_ID);
+    expect(body.llm_write_contract).toBe('complete-llm-v1');
     expect(body.preferences.llm.keys.google).toBe('route-google-key');
     expect(body.preferences.dailyGoal).toBe(30);
     expect(llmStore.llm.keys.google).toBe('route-google-key');

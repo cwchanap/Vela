@@ -91,6 +91,7 @@ const makeUser = (id: string, llm?: LlmPreferences): User => ({
   learning_streak: 0,
   native_language: 'en',
   preferences: (llm ? { llm } : {}) as UserPreferences,
+  preferences_read_contract: 'complete-llm-v1',
   created_at: '2024-01-01T00:00:00.000Z',
   updated_at: '2024-01-01T00:00:00.000Z',
 });
@@ -111,6 +112,7 @@ const makeProfile = (user: User): Profile => ({
   learning_streak: user.learning_streak,
   last_activity: null,
   preferences: user.preferences,
+  preferences_read_contract: user.preferences_read_contract ?? null,
   created_at: user.created_at,
   updated_at: user.updated_at,
 });
@@ -259,6 +261,54 @@ describe('llmSettings + auth account transitions (real stores)', () => {
     for (const write of pendingWrites.slice(1)) {
       expect(write.userId).not.toBe('user-b');
     }
+  });
+
+  it('sends the write-contract marker with a save from a complete snapshot', async () => {
+    const { authStore, llmStore } = await stores();
+    await signIn(authStore, 'user-a');
+
+    const pending = llmStore.saveProvider('google', 'google-key');
+    await flushPromises();
+    expect(pendingWrites).toHaveLength(1);
+    expect(pendingWrites[0]!.data.llm_write_contract).toBe('complete-llm-v1');
+
+    applyWrite(0);
+    pendingWrites.length = 0;
+    expect(await pending).toBe(true);
+  });
+
+  it('refuses an LLM save captured from an unsafe snapshot before a queued unrelated save completes', async () => {
+    const { authStore, llmStore } = await stores();
+    const unsafeUser: User = { ...makeUser('user-a', makeLlm()), preferences_read_contract: null };
+    serverProfiles.set('user-a', {
+      ...makeProfile(unsafeUser),
+      // The API advertises the contract on its response, never in storage.
+      preferences_read_contract: 'complete-llm-v1',
+    });
+    authStore.setSession(makeSession('user-a'));
+    authStore.setUser(unsafeUser);
+    await flushPromises();
+
+    const unrelated = authStore.updatePreferences({ dailyGoal: 45 });
+    await flushPromises();
+    expect(pendingWrites).toHaveLength(1);
+    expect(writeHas(pendingWrites[0]!, 'llm')).toBe(false);
+    expect(pendingWrites[0]!.data).not.toHaveProperty('llm_write_contract');
+
+    // The stale form's save must not join the queue even though the in-flight
+    // unrelated save will install a complete snapshot when it lands.
+    const staleFormSave = llmStore.saveProvider('google', 'stale-key');
+    await flushPromises();
+    expect(await staleFormSave).toBe(false);
+    expect(pendingWrites).toHaveLength(1);
+    expect(writeHas(pendingWrites[0]!, 'llm')).toBe(false);
+
+    applyWrite(0);
+    pendingWrites.length = 0;
+    await flushPromises();
+    expect(await unrelated).toBe(true);
+    expect(authStore.user?.preferences_read_contract).toBe('complete-llm-v1');
+    expect(llmStore.llm.keys.google).toBeUndefined();
   });
 
   it('merges overlapping provider saves so neither key is lost', async () => {

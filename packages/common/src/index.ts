@@ -35,6 +35,7 @@ export {
   LLM_PROVIDER_REGISTRY,
   LLM_PROVIDERS,
   MAX_LLM_THINKING_OVERRIDES,
+  PREFERENCES_READ_CONTRACT,
   type LlmEffort,
   type LlmEvent,
   type LlmMessage,

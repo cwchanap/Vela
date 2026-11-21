@@ -93,6 +93,143 @@ test.describe('LLM Settings - Provider cards', () => {
     await conflict;
     await retried;
     expect(llmOf(apiMock.lastPut()).keys).toEqual({ google: GOOGLE_KEY, openai: OPENAI_KEY });
+    // The replay carries its complete-snapshot write marker.
+    expect(apiMock.lastPut()?.llm_write_contract).toBe('complete-llm-v1');
+    await secondTab.close();
+  });
+
+  test('should refuse editable LLM forms when the profile read has no contract', async ({
+    authedPage: page,
+    apiMock,
+  }) => {
+    // An API deployed before the contract (or any response that was not
+    // verified as complete) must not become a blank editable form.
+    apiMock.readContract = null;
+    apiMock.seedProfile(SYNTHETIC_USER_A, {
+      llm: {
+        keys: { google: GOOGLE_KEY },
+        thinking: {},
+        defaultModel: { provider: 'google', model: 'gemini-3.8-flash' },
+      },
+    });
+    await page.goto('/settings');
+    await waitForPageLoad(page);
+
+    await expect(page.getByTestId('settings-page')).toBeVisible();
+    await expect(page.getByTestId('llm-reload-required')).toBeVisible();
+    await expect(page.getByTestId('llm-card-google')).toHaveCount(0);
+    await expect(page.getByTestId('llm-key-input-google')).toHaveCount(0);
+    await expect(page.getByTestId('llm-default-model-select')).toHaveCount(0);
+    expect(apiMock.profilePuts).toHaveLength(0);
+  });
+
+  test('should reject an old-client LLM write without the marker even after a newer save', async ({
+    authedPage: page,
+    apiMock,
+  }) => {
+    const seeded = apiMock.seedProfile(SYNTHETIC_USER_A, {
+      llm: {
+        keys: { google: GOOGLE_KEY },
+        thinking: {},
+        defaultModel: { provider: 'google', model: 'gemini-3.8-flash' },
+      },
+    });
+    seeded.preferences_version = crypto.randomUUID();
+    await gotoSettings(page);
+
+    // The old tab captured the profile (and its non-null version) before deployment.
+    const capturedVersion = await page.evaluate(
+      async ([auth, userId]) => {
+        const response = await fetch(`/api/profiles?user_id=${encodeURIComponent(userId ?? '')}`, {
+          headers: { Authorization: auth ?? '' },
+        });
+        const body = (await response.json()) as {
+          profile?: { preferences_version?: string | null };
+        };
+        return body.profile?.preferences_version ?? null;
+      },
+      [apiMock.expectedAuthorization, SYNTHETIC_USER_A.userId] as const,
+    );
+
+    // A newer marked save advances the stored version.
+    await openCard(page, 'google');
+    await keyInput(page, 'google').fill('e2e-newer-google-key');
+    const putResponse = waitForProfilePut(page);
+    await page.getByTestId('llm-save-google').click();
+    expect((await putResponse).status()).toBe(200);
+
+    const oldClientStatus = await page.evaluate(
+      async ([auth, userId, version, currentKey]) => {
+        const response = await fetch('/api/profiles/update', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json', Authorization: auth ?? '' },
+          body: JSON.stringify({
+            user_id: userId,
+            expected_preferences_version: version,
+            preferences: {
+              llm: {
+                keys: { google: currentKey },
+                thinking: {},
+                defaultModel: { provider: 'google', model: 'gemini-3.8-flash' },
+              },
+            },
+          }),
+        });
+        return response.status;
+      },
+      [
+        apiMock.expectedAuthorization,
+        SYNTHETIC_USER_A.userId,
+        capturedVersion,
+        GOOGLE_KEY,
+      ] as const,
+    );
+    // The read-contract fence runs before the version CAS: the stale captured
+    // version is never consulted, so this is 428 rather than 409.
+    expect(oldClientStatus).toBe(428);
+
+    const storedLlm = apiMock.profiles.get(SYNTHETIC_USER_A.userId)?.preferences.llm as
+      { keys?: Record<string, string> } | undefined;
+    expect(storedLlm?.keys?.google).toBe('e2e-newer-google-key');
+  });
+
+  test('should refuse a conflicted LLM replay when the refetch has no read contract', async ({
+    authedPage: page,
+    apiMock,
+  }) => {
+    apiMock.seedProfile(SYNTHETIC_USER_A, {
+      llm: {
+        keys: { google: GOOGLE_KEY },
+        thinking: {},
+        defaultModel: { provider: 'google', model: 'gemini-3.8-flash' },
+      },
+    });
+    const secondTab = await page.context().newPage();
+    await gotoSettings(page);
+    await gotoSettings(secondTab);
+
+    await openCard(page, 'google');
+    await keyInput(page, 'google').fill('e2e-first-tab-key');
+    const firstSave = waitForProfilePut(page);
+    await page.getByTestId('llm-save-google').click();
+    expect((await firstSave).status()).toBe(200);
+
+    // The refetch after the conflict is served without the contract.
+    apiMock.readContract = null;
+    await openCard(secondTab, 'openai');
+    await keyInput(secondTab, 'openai').fill(OPENAI_KEY);
+    const conflict = secondTab.waitForResponse(
+      (response) => response.url().includes('/api/profiles/update') && response.status() === 409,
+    );
+    await secondTab.getByTestId('llm-save-openai').click();
+    expect((await conflict).status()).toBe(409);
+
+    await expect(secondTab.getByTestId('llm-reload-required')).toBeVisible();
+    // Only the first tab's save and the second tab's conflicted attempt were sent.
+    expect(apiMock.profilePuts).toHaveLength(2);
+    const storedLlm = apiMock.profiles.get(SYNTHETIC_USER_A.userId)?.preferences.llm as
+      { keys?: Record<string, string> } | undefined;
+    expect(storedLlm?.keys?.openai).toBeUndefined();
     await secondTab.close();
   });
 

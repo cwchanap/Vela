@@ -385,10 +385,33 @@ describe('AuthService', () => {
         last_activity: null,
         preferences: { dailyGoal: 30 },
         preferences_version: null,
+        preferences_read_contract: null,
         created_at: '2024-01-01T00:00:00Z',
         updated_at: '2024-01-02T00:00:00Z',
       });
       expect(result).not.toHaveProperty('user_id');
+    });
+
+    it('carries the read-contract marker from a sanitized profile response', async () => {
+      vi.mocked(fetchAuthSession).mockResolvedValue({
+        tokens: {
+          idToken: { toString: () => 'id-token' } as any,
+          accessToken: { toString: () => 'token' } as any,
+        },
+      } as any);
+      mockFetch.mockResolvedValue({
+        ok: true,
+        json: vi.fn().mockResolvedValue({
+          profile: {
+            user_id: 'user-123',
+            preferences: { llm: { keys: {}, thinking: {} } },
+            preferences_read_contract: 'complete-llm-v1',
+          },
+        }),
+      });
+
+      const result = await authService.getUserProfile('user-123');
+      expect(result?.preferences_read_contract).toBe('complete-llm-v1');
     });
 
     it('propagates a failed profile fetch so the session can offer a retry', async () => {

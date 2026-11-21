@@ -22,6 +22,8 @@ export interface Profile {
   learning_streak?: number;
   preferences?: Record<string, unknown>;
   preferences_version?: string;
+  // Response-only rollout metadata. Never written to DynamoDB.
+  preferences_read_contract?: string;
   last_activity?: string;
   created_at?: string;
   updated_at?: string;

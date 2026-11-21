@@ -17,6 +17,14 @@ export type LlmEffort = (typeof LLM_EFFORT_LEVELS)[number];
 /** Maximum per-model thinking overrides stored in a profile (API write cap). */
 export const MAX_LLM_THINKING_OVERRIDES = 128;
 
+/**
+ * Rollout fence for LLM preference writes. A profile response carrying this
+ * top-level marker is a complete, sanitized LLM view; an explicit
+ * `preferences.llm` replacement must echo it in the outer
+ * `llm_write_contract` field. Neither field is stored.
+ */
+export const PREFERENCES_READ_CONTRACT = 'complete-llm-v1';
+
 /** Closed list of supported providers; the single source for provider unions. */
 export const LLM_PROVIDERS = ['google', 'openai', 'anthropic', 'openrouter'] as const;
 

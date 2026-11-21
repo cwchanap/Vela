@@ -77,6 +77,7 @@ const setUser = (
   authStore: ReturnType<typeof useAuthStore>,
   llm: LlmPreferences | undefined,
   id = 'user-1',
+  readContract: string | null = 'complete-llm-v1',
 ) => {
   authStore.user = {
     id,
@@ -87,6 +88,7 @@ const setUser = (
     learning_streak: 0,
     native_language: 'en',
     preferences: (llm ? { llm } : {}) as UserPreferences,
+    preferences_read_contract: readContract,
     created_at: '2024-01-01T00:00:00.000Z',
     updated_at: '2024-01-01T00:00:00.000Z',
   };
@@ -149,6 +151,39 @@ describe('LlmProvidersSection', () => {
       wrapper = mountSection();
       expect(defaultSelect().exists()).toBe(true);
       expect(wrapper.find('[data-testid="llm-default-save"]').exists()).toBe(true);
+    });
+  });
+
+  describe('read-contract gating', () => {
+    it('shows reload-required instead of editable forms on an unsafe snapshot', () => {
+      setUser(authStore, llmFor({ keys: { google: 'saved-google' } }), 'user-1', null);
+      wrapper = mountSection();
+
+      expect(wrapper.find('[data-testid="llm-reload-required"]').exists()).toBe(true);
+      expect(wrapper.find('[data-testid="llm-card-google"]').exists()).toBe(false);
+      expect(wrapper.find('[data-testid="llm-key-input-google"]').exists()).toBe(false);
+      expect(defaultSelect().exists()).toBe(false);
+    });
+
+    it('does not mount blank drafts while an authenticated profile is still hydrating', () => {
+      authStore.setSession({ user: { id: 'user-1', email: 'test@example.com' } });
+      wrapper = mountSection();
+
+      expect(wrapper.find('[data-testid="llm-settings-loading"]').exists()).toBe(true);
+      expect(wrapper.find('[data-testid="llm-card-google"]').exists()).toBe(false);
+      expect(wrapper.find('[data-testid="llm-key-input-google"]').exists()).toBe(false);
+    });
+
+    it('mounts editable forms once the snapshot carries the read contract', async () => {
+      setUser(authStore, llmFor({ keys: { google: 'saved-google' } }));
+      wrapper = mountSection();
+      await flushPromises();
+
+      expect(wrapper.find('[data-testid="llm-reload-required"]').exists()).toBe(false);
+      expect(wrapper.find('[data-testid="llm-card-google"]').exists()).toBe(true);
+      expect(
+        (wrapper.find('[data-testid="llm-key-input-google"]').element as HTMLInputElement).value,
+      ).toBe('saved-google');
     });
   });
 
