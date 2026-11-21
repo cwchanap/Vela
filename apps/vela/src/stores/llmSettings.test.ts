@@ -9,6 +9,7 @@ const GOOGLE_DEFAULT = LLM_PROVIDER_REGISTRY.google.defaultModel;
 interface MockUser {
   id: string;
   preferences?: Record<string, unknown>;
+  preferences_read_contract?: string | null;
 }
 
 const mockAuthStore = reactive({
@@ -23,6 +24,7 @@ vi.mock('./auth', () => ({
 const makeUser = (id: string, llm?: LlmPreferences): MockUser => ({
   id,
   preferences: llm ? { llm } : {},
+  preferences_read_contract: 'complete-llm-v1',
 });
 
 const makeLlm = (overrides: Partial<LlmPreferences> = {}): LlmPreferences => ({
@@ -102,6 +104,28 @@ describe('useLLMSettingsStore', () => {
         apiKey: undefined,
         thinking: undefined,
       });
+    });
+  });
+
+  describe('write contract', () => {
+    it('refuses provider and default saves before enqueueing on an unsafe snapshot', async () => {
+      mockAuthStore.user = makeUser('user-1', makeLlm());
+      mockAuthStore.user.preferences_read_contract = null;
+      const { useLLMSettingsStore } = await import('./llmSettings');
+      const store = useLLMSettingsStore();
+
+      expect(await store.saveProvider('google', 'new-key')).toBe(false);
+      expect(await store.saveDefault({ provider: 'openai', model: 'gpt-6.1-sol' })).toBe(false);
+      expect(mockAuthStore.updatePreferences).not.toHaveBeenCalled();
+    });
+
+    it('saves normally once the snapshot carries the read contract', async () => {
+      mockAuthStore.user = makeUser('user-1', makeLlm());
+      const { useLLMSettingsStore } = await import('./llmSettings');
+      const store = useLLMSettingsStore();
+
+      expect(await store.saveProvider('google', 'new-key')).toBe(true);
+      expect(mockAuthStore.updatePreferences).toHaveBeenCalledTimes(1);
     });
   });
 

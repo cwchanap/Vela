@@ -3,9 +3,11 @@ import { randomUUID } from 'node:crypto';
 import {
   ExpectedPreferencesVersionSchema,
   normalizePreferences,
+  PREFERENCES_READ_CONTRACT,
   PreferencesReadSchema,
   PreferencesSchema,
   preserveStoredLlm,
+  replacesLlm,
 } from '../../../vela-api/src/profile-preferences';
 import type { BrowserContext, Page, Route } from '@playwright/test';
 import {
@@ -110,6 +112,8 @@ export interface MockProfile {
   learning_streak: number;
   preferences: Record<string, unknown>;
   preferences_version?: string;
+  // Response-only metadata. Mock storage never holds it.
+  preferences_read_contract?: string;
   created_at: string;
   updated_at: string;
 }
@@ -176,6 +180,11 @@ export interface MockApi {
     model: string | null;
     hasApiKey: boolean;
   };
+  /**
+   * Read contract advertised on profile responses. Set to null to simulate an
+   * API deployed before the contract or an unsafe refetch.
+   */
+  readContract: string | null;
   seedProfile(_user: SyntheticUser, _preferences?: Record<string, unknown>): MockProfile;
   seedThread(
     _user: SyntheticUser,
@@ -231,6 +240,7 @@ const createMockApi = (): MockApi => {
     chatReply: 'Mock AI reply (synthetic)',
     chatUsage: { inputTokens: 5, outputTokens: 7, cachedInputTokens: 0, cacheWriteTokens: 0 },
     ttsSettings: { provider: 'elevenlabs', voiceId: null, model: null, hasApiKey: false },
+    readContract: PREFERENCES_READ_CONTRACT,
     seedProfile(user, preferences) {
       const profile = makeProfile(user, preferences);
       state.profiles.set(user.userId, profile);
@@ -284,6 +294,17 @@ const createMockApi = (): MockApi => {
 
 const normalizePreferencesForRead = (preferences: Record<string, unknown>) =>
   PreferencesReadSchema.parse(normalizePreferences(preferences));
+
+const profileResponse = (state: MockApi, profile: MockProfile) => {
+  const { preferences_read_contract: _stored, ...stored } = profile;
+  const sanitized = {
+    ...stored,
+    preferences: normalizePreferencesForRead(profile.preferences),
+  };
+  return state.readContract
+    ? { ...sanitized, preferences_read_contract: state.readContract }
+    : sanitized;
+};
 
 const jsonResponse = (route: Route, body: unknown, status = 200) =>
   route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
@@ -382,9 +403,7 @@ const handleApiRoute = async (state: MockApi, route: Route): Promise<void> => {
       return jsonResponse(route, { error: "Forbidden: Cannot access another user's profile" }, 403);
     }
     const profile = getOrCreateProfile(userId);
-    return jsonResponse(route, {
-      profile: { ...profile, preferences: normalizePreferencesForRead(profile.preferences) },
-    });
+    return jsonResponse(route, { profile: profileResponse(state, profile) });
   }
 
   if (path === '/api/profiles/update' && method === 'PUT') {
@@ -401,9 +420,20 @@ const handleApiRoute = async (state: MockApi, route: Route): Promise<void> => {
     if (!ExpectedPreferencesVersionSchema.safeParse(body.expected_preferences_version).success) {
       return jsonResponse(route, { error: 'Invalid preferences data' }, 400);
     }
+    // Mirror LlmWriteContractSchema: only the exact marker is accepted.
+    if (
+      body.llm_write_contract !== undefined &&
+      body.llm_write_contract !== PREFERENCES_READ_CONTRACT
+    ) {
+      return jsonResponse(route, { error: 'Invalid preferences data' }, 400);
+    }
     if (body.preferences !== undefined) {
       const parsed = PreferencesSchema.safeParse(body.preferences);
       if (!parsed.success) return jsonResponse(route, { error: 'Invalid preferences' }, 400);
+      // A tab that read an older API cannot prove its LLM snapshot is
+      // complete; refuse before touching storage regardless of version.
+      if (replacesLlm(parsed.data) && body.llm_write_contract === undefined)
+        return jsonResponse(route, { error: 'Reload the app before saving LLM settings' }, 428);
       if (body.expected_preferences_version === undefined)
         return jsonResponse(route, { error: 'Reload your profile' }, 428);
       if (body.expected_preferences_version !== (profile.preferences_version ?? null))
@@ -417,10 +447,7 @@ const handleApiRoute = async (state: MockApi, route: Route): Promise<void> => {
     if (body.avatar_url !== undefined) profile.avatar_url = body.avatar_url as string | null;
     if (body.native_language !== undefined) profile.native_language = String(body.native_language);
     profile.updated_at = new Date().toISOString();
-    return jsonResponse(route, {
-      success: true,
-      profile: { ...profile, preferences: normalizePreferencesForRead(profile.preferences) },
-    });
+    return jsonResponse(route, { success: true, profile: profileResponse(state, profile) });
   }
 
   if (path === '/api/llm-chat/capabilities' && method === 'GET') {

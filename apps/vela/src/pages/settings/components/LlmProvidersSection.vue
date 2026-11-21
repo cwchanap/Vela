@@ -2,78 +2,98 @@
   <q-card flat bordered class="q-pa-md q-mb-lg">
     <div class="text-subtitle1 q-mb-sm">LLM Providers</div>
 
-    <div class="row q-col-gutter-md items-end">
-      <div class="col-12 col-md-6">
-        <q-select
-          v-model="draftPairValue"
-          :options="defaultOptions"
-          label="Default model"
-          dense
-          emit-value
-          map-options
-          data-testid="llm-default-model-select"
-        />
-      </div>
-      <div v-if="isCustomSelected" class="col-12 col-md-6">
-        <q-input
-          v-model="customModelId"
-          label="Custom model ID"
-          dense
-          outlined
-          data-testid="llm-default-model-input"
-          hint="OpenRouter model ID, e.g. vendor/model"
-        />
-      </div>
-      <div class="col-12 col-md-4">
-        <q-btn
-          color="primary"
-          label="Save default"
-          :loading="savingDefault"
-          :disable="!isAuthenticated"
-          data-testid="llm-default-save"
-          @click="saveDefault"
-        />
-      </div>
-    </div>
-
-    <div class="text-caption q-mt-sm" :class="hasSelectionKey ? 'text-grey' : 'text-warning'">
-      Active: {{ selectionLabel }}
-      <template v-if="!hasSelectionKey && hasSelectionServerKey">
-        — Chat uses the server key; My Dictionaries requires your own
-        {{ selectionProviderLabel }} API key</template
-      >
-      <template
-        v-else-if="!hasSelectionKey && isAuthenticated && capabilitiesQuery.isPending?.value"
-      >
-        — Checking server key availability…</template
-      >
-      <template v-else-if="!hasSelectionKey && !capabilitiesQuery.isError.value">
-        — No API key saved for {{ selectionProviderLabel }}</template
-      >
-    </div>
     <div
-      v-if="isAuthenticated && capabilitiesQuery.isError.value"
-      class="text-caption text-warning"
+      v-if="llmFormState === 'blocked'"
+      class="text-body2 text-warning"
+      data-testid="llm-reload-required"
       role="alert"
     >
-      Server key availability could not be checked.
-      <q-btn
-        flat
-        dense
-        label="Retry"
-        data-testid="retry-capabilities"
-        @click="capabilitiesQuery.refetch()"
-      />
+      Reload the page to update LLM settings. This page loaded saved settings that were not verified
+      as complete.
+      <q-btn flat dense label="Reload" data-testid="llm-reload" @click="reloadPage" />
     </div>
-    <div v-if="serverKeyProviderLabels.length" class="text-caption text-grey">
-      Server key available for chat: {{ serverKeyProviderLabels.join(', ') }}. My Dictionaries uses
-      only your saved API keys.
+    <div
+      v-else-if="llmFormState === 'loading'"
+      class="text-body2 text-grey"
+      data-testid="llm-settings-loading"
+    >
+      Loading LLM settings…
     </div>
-    <div v-if="!isAuthenticated" class="text-caption text-grey">Sign in to save LLM settings</div>
 
-    <q-separator class="q-my-md" />
+    <template v-else>
+      <div class="row q-col-gutter-md items-end">
+        <div class="col-12 col-md-6">
+          <q-select
+            v-model="draftPairValue"
+            :options="defaultOptions"
+            label="Default model"
+            dense
+            emit-value
+            map-options
+            data-testid="llm-default-model-select"
+          />
+        </div>
+        <div v-if="isCustomSelected" class="col-12 col-md-6">
+          <q-input
+            v-model="customModelId"
+            label="Custom model ID"
+            dense
+            outlined
+            data-testid="llm-default-model-input"
+            hint="OpenRouter model ID, e.g. vendor/model"
+          />
+        </div>
+        <div class="col-12 col-md-4">
+          <q-btn
+            color="primary"
+            label="Save default"
+            :loading="savingDefault"
+            :disable="!isAuthenticated"
+            data-testid="llm-default-save"
+            @click="saveDefault"
+          />
+        </div>
+      </div>
 
-    <LlmProviderCard v-for="provider in LLM_PROVIDERS" :key="provider" :provider="provider" />
+      <div class="text-caption q-mt-sm" :class="hasSelectionKey ? 'text-grey' : 'text-warning'">
+        Active: {{ selectionLabel }}
+        <template v-if="!hasSelectionKey && hasSelectionServerKey">
+          — Chat uses the server key; My Dictionaries requires your own
+          {{ selectionProviderLabel }} API key</template
+        >
+        <template
+          v-else-if="!hasSelectionKey && isAuthenticated && capabilitiesQuery.isPending?.value"
+        >
+          — Checking server key availability…</template
+        >
+        <template v-else-if="!hasSelectionKey && !capabilitiesQuery.isError.value">
+          — No API key saved for {{ selectionProviderLabel }}</template
+        >
+      </div>
+      <div
+        v-if="isAuthenticated && capabilitiesQuery.isError.value"
+        class="text-caption text-warning"
+        role="alert"
+      >
+        Server key availability could not be checked.
+        <q-btn
+          flat
+          dense
+          label="Retry"
+          data-testid="retry-capabilities"
+          @click="capabilitiesQuery.refetch()"
+        />
+      </div>
+      <div v-if="serverKeyProviderLabels.length" class="text-caption text-grey">
+        Server key available for chat: {{ serverKeyProviderLabels.join(', ') }}. My Dictionaries
+        uses only your saved API keys.
+      </div>
+      <div v-if="!isAuthenticated" class="text-caption text-grey">Sign in to save LLM settings</div>
+
+      <q-separator class="q-my-md" />
+
+      <LlmProviderCard v-for="provider in LLM_PROVIDERS" :key="provider" :provider="provider" />
+    </template>
   </q-card>
 </template>
 
@@ -101,6 +121,17 @@ import LlmProviderCard from './LlmProviderCard.vue';
 const store = useLLMSettingsStore();
 const authStore = useAuthStore();
 const isAuthenticated = computed(() => authStore.isAuthenticated);
+
+// Editable forms mount only after a complete sanitized profile read. A missing
+// marker means this page code cannot safely describe or replace saved LLM
+// values, so it offers a reload instead of blank drafts.
+const llmFormState = computed<'signed-out' | 'loading' | 'blocked' | 'ready'>(() => {
+  if (!authStore.session) return 'signed-out';
+  if (!authStore.user) return 'loading';
+  return authStore.hasCompleteLlmSnapshot ? 'ready' : 'blocked';
+});
+
+const reloadPage = () => window.location.reload();
 const { capabilitiesQuery, serverKeyProviders } = useServerKeyProviders();
 const serverKeyProviderLabels = computed(() =>
   serverKeyProviders.value.map((provider) => LLM_PROVIDER_REGISTRY[provider].label),

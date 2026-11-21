@@ -4,10 +4,13 @@ import {
   LLM_PROVIDER_REGISTRY,
   LLM_PROVIDERS,
   MAX_LLM_THINKING_OVERRIDES,
+  PREFERENCES_READ_CONTRACT,
   type LlmEffort,
   type LlmPreferences,
   type LlmProvider,
 } from '@vela/common/contracts/llm';
+
+export { PREFERENCES_READ_CONTRACT };
 
 const DEFAULT_DAILY_LESSON_GOAL = 5;
 const DEFAULT_LESSON_DURATION_MINUTES = 6;
@@ -100,6 +103,14 @@ export const preserveStoredLlm = (next: Record<string, unknown>, stored: unknown
 // Optimistic-lock token carried on preference writes. Kept here so the route
 // schema and the e2e mock apply the identical validation rule.
 export const ExpectedPreferencesVersionSchema = z.string().uuid().nullable().optional();
+
+// Explicit llm replacement marker. A null/absent marker means the client read
+// an older API; any other string is unsupported. Kept here so the route and the
+// e2e mock validate identically.
+export const LlmWriteContractSchema = z.literal(PREFERENCES_READ_CONTRACT).optional();
+
+export const replacesLlm = (preferences: unknown): boolean =>
+  isPlainObject(preferences) && Object.hasOwn(preferences, 'llm');
 
 const PreferencesShape = {
   dailyGoal: z.coerce.number().int().min(1).max(1440).optional(),

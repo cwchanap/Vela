@@ -28,6 +28,7 @@ vi.mock('../boot/query', () => ({
 }));
 
 vi.mock('@vela/common', () => ({
+  PREFERENCES_READ_CONTRACT: 'complete-llm-v1',
   authKeys: {
     session: () => ['auth', 'session'],
     user: () => ['auth', 'user'],
@@ -51,6 +52,7 @@ const mockProfile = {
   learning_streak: 0,
   native_language: 'en',
   preferences: {},
+  preferences_read_contract: 'complete-llm-v1',
   last_activity: null,
   created_at: '2024-01-01T00:00:00Z',
   updated_at: '2024-01-01T00:00:00Z',
@@ -64,6 +66,7 @@ const makeUser = (overrides = {}) => ({
   learning_streak: 0,
   native_language: 'en',
   preferences: {},
+  preferences_read_contract: 'complete-llm-v1',
   created_at: '',
   updated_at: '',
   ...overrides,
@@ -431,6 +434,160 @@ describe('useAuthStore', () => {
       });
       expect(store.user?.preferences).toMatchObject({ darkMode: true, dailyGoal: 90 });
     });
+    it('sends the write-contract marker on an LLM save from a complete snapshot', async () => {
+      const { useAuthStore } = await import('./auth');
+      const store = useAuthStore();
+      store.setSession(mockSession);
+      store.setUser(
+        makeUser({
+          preferences: { llm: { keys: { google: 'old-key' } } },
+          preferences_version: 'v0',
+        }),
+      );
+      const llm = {
+        keys: { google: 'new-key' },
+        thinking: {},
+        defaultModel: { provider: 'google', model: 'gemini-3.8-flash' },
+      };
+      mockAuthService.updateUserProfile.mockResolvedValueOnce({
+        success: true,
+        profile: {
+          ...mockProfile,
+          preferences: { llm },
+          preferences_version: 'v1',
+        },
+      });
+      mockAuthService.getUserProfile.mockResolvedValueOnce({
+        ...mockProfile,
+        preferences: { llm },
+        preferences_version: 'v1',
+      });
+
+      expect(await store.updatePreferences({ llm })).toBe(true);
+      expect(mockAuthService.updateUserProfile.mock.calls[0][1]).toMatchObject({
+        llm_write_contract: 'complete-llm-v1',
+        preferences: { llm },
+        expected_preferences_version: 'v0',
+      });
+    });
+
+    it('refuses an LLM save without sending when the snapshot lacks the read contract', async () => {
+      const { useAuthStore } = await import('./auth');
+      const store = useAuthStore();
+      store.setSession(mockSession);
+      store.setUser(
+        makeUser({
+          preferences: { llm: { keys: { google: 'old-key' } } },
+          preferences_read_contract: null,
+        }),
+      );
+
+      expect(
+        await store.updatePreferences({
+          llm: {
+            keys: { google: 'new-key' },
+            thinking: {},
+            defaultModel: { provider: 'google', model: 'gemini-3.8-flash' },
+          },
+        }),
+      ).toBe(false);
+      expect(mockAuthService.updateUserProfile).not.toHaveBeenCalled();
+      expect(store.error).toContain('Reload');
+    });
+
+    it('omits llm from an unrelated preference save on an unsafe snapshot', async () => {
+      const { useAuthStore } = await import('./auth');
+      const store = useAuthStore();
+      store.setSession(mockSession);
+      const llm = {
+        keys: { google: 'old-key' },
+        thinking: {},
+        defaultModel: { provider: 'google', model: 'gemini-3.8-flash' },
+      };
+      store.setUser(
+        makeUser({
+          preferences: { darkMode: false, llm },
+          preferences_read_contract: null,
+          preferences_version: 'v0',
+        }),
+      );
+      mockAuthService.updateUserProfile.mockResolvedValueOnce({ success: true });
+      mockAuthService.getUserProfile.mockResolvedValueOnce({
+        ...mockProfile,
+        preferences: { darkMode: true, llm },
+        preferences_version: 'v1',
+      });
+
+      expect(await store.updatePreferences({ darkMode: true })).toBe(true);
+      const body = mockAuthService.updateUserProfile.mock.calls[0][1];
+      expect(body.preferences).toEqual({ darkMode: true });
+      expect(body).not.toHaveProperty('llm_write_contract');
+      expect(body.expected_preferences_version).toBe('v0');
+    });
+
+    it('refuses to replay a conflicted LLM save when the refetched snapshot is incomplete', async () => {
+      const { useAuthStore } = await import('./auth');
+      const store = useAuthStore();
+      store.setSession(mockSession);
+      const llm = {
+        keys: { google: 'old-key' },
+        thinking: {},
+        defaultModel: { provider: 'google', model: 'gemini-3.8-flash' },
+      };
+      store.setUser(makeUser({ preferences: { llm }, preferences_version: 'old' }));
+      mockAuthService.updateUserProfile.mockResolvedValueOnce({ success: false, status: 409 });
+      mockAuthService.getUserProfile.mockResolvedValueOnce({
+        ...mockProfile,
+        preferences: { llm },
+        preferences_version: 'new',
+        preferences_read_contract: null,
+      });
+
+      expect(await store.updatePreferences({ llm })).toBe(false);
+      expect(mockAuthService.updateUserProfile).toHaveBeenCalledTimes(1);
+      expect(store.error).toContain('Reload');
+      expect(store.user?.preferences_read_contract).toBeNull();
+    });
+
+    it('replays a conflicted LLM save with the marker when the refetched snapshot is complete', async () => {
+      const { useAuthStore } = await import('./auth');
+      const store = useAuthStore();
+      store.setSession(mockSession);
+      const llm = {
+        keys: { google: 'old-key' },
+        thinking: {},
+        defaultModel: { provider: 'google', model: 'gemini-3.8-flash' },
+      };
+      store.setUser(makeUser({ preferences: { llm }, preferences_version: 'old' }));
+      mockAuthService.updateUserProfile
+        .mockResolvedValueOnce({ success: false, status: 409 })
+        .mockResolvedValueOnce({
+          success: true,
+          profile: {
+            ...mockProfile,
+            preferences: { llm },
+            preferences_version: 'next',
+          },
+        });
+      mockAuthService.getUserProfile
+        .mockResolvedValueOnce({
+          ...mockProfile,
+          preferences: { llm },
+          preferences_version: 'new',
+        })
+        .mockResolvedValueOnce({
+          ...mockProfile,
+          preferences: { llm },
+          preferences_version: 'next',
+        });
+
+      expect(await store.updatePreferences({ llm })).toBe(true);
+      expect(mockAuthService.updateUserProfile.mock.calls[1][1]).toMatchObject({
+        llm_write_contract: 'complete-llm-v1',
+        expected_preferences_version: 'new',
+      });
+    });
+
     it('keeps a committed preference save when a newer-timestamped read advanced the tracked profile', async () => {
       const { useAuthStore } = await import('./auth');
       const store = useAuthStore();

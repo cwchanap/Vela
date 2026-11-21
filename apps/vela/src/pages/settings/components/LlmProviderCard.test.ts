@@ -79,6 +79,7 @@ const setUser = (
     learning_streak: 0,
     native_language: 'en',
     preferences: (llm ? { llm } : {}) as UserPreferences,
+    preferences_read_contract: 'complete-llm-v1',
     created_at: '2024-01-01T00:00:00.000Z',
     updated_at: '2024-01-01T00:00:00.000Z',
   };

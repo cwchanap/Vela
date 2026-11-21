@@ -42,6 +42,9 @@ export interface Profile {
   last_activity: string | null;
   preferences: UserPreferences;
   preferences_version?: string | null;
+  // Response-only rollout marker: this snapshot is a complete sanitized LLM
+  // view. Never sent as a stored preference.
+  preferences_read_contract?: string | null;
   created_at: string;
   updated_at: string;
 }
