@@ -18,10 +18,12 @@ Keep the DynamoDB `preferences_version` CAS, current single 409 retry, strict PU
 ## Minimal change map
 
 **Existing planning docs revised on this PR:**
+
 - `docs/superpowers/specs/2026-11-19-hpa833-explicit-llm-clears-design.md`
 - `docs/superpowers/plans/2026-11-19-hpa833-explicit-llm-clears.md`
 
 **Implementation work in this same PR:**
+
 - `apps/vela-api/src/profile-preferences.ts`: known-valid entries survive a malformed/unknown default provider on GET; remove the recovery union
 - `apps/vela-api/test/routes/profiles.test.ts`: update old recovery expectations and add the clear/regression test
 - `apps/vela/e2e/llm-settings.spec.ts`: one fresh-load Settings save/reload regression, alongside existing two-tab retry case
@@ -83,3 +85,14 @@ Keep the DynamoDB `preferences_version` CAS, current single 409 retry, strict PU
 ## Deliberate deferrals
 
 No tombstones, write-schema changes, migration, generic recovery framework, new API endpoint, extra client state, cross-client optimistic-lock redesign (HPA-824), duplicate browser tests, new UI, or art/SFX work. All changes in one PR.
+
+## Task 4 — Rollout-safe LLM write fence
+
+The spec's rollout safety amendment supersedes the no-contract/client-change exclusions above. The user approved expanding scope after final review found stale old-tab data loss. Use the smallest implementation that satisfies these requirements:
+
+1. API responses include top-level profile metadata `preferences_read_contract: "complete-llm-v1"` only with successfully sanitized profile preferences; never trust or persist this response metadata. On a post-commit sanitization failure, do not advertise the marker or report the committed write as failed.
+2. An explicit `preferences.llm` replacement requires the separate outer request field `llm_write_contract: "complete-llm-v1"`. Missing marker returns HTTP 428 with a reload-required error, before any write; unsupported or malformed markers return 400. The marker is not persisted. Omitted LLM writes need no marker and preserve raw stored LLM. Keep strict provider validation, raw version CAS, and ordinary 409 behavior.
+3. Carry read-contract metadata through profile/service/auth state and the cached snapshot. Updated LLM saves may send the write marker only when their current snapshot is marked complete. Do not enqueue an LLM save using an unsafe snapshot; on 409 refetch, refuse to replay if the refreshed snapshot lacks the marker.
+4. Gate actual mounting of editable LLM Settings forms on complete snapshot hydration. Missing-contract responses must not produce editable blank/default drafts; show a reload-required state. An old tab cannot send the write marker, including after another save or refetch, and must reload its app code.
+5. Update the existing synthetic API fixture to enforce the same request contract and emit the same response metadata without storing markers. Add route, store/component and browser regressions for missing marker with existing and absent versions; queued unrelated-save then old-form save; old API bootstrap; fresh marked clear; marked 409 retry with safe/unsafe refetch; invalid markers; no database writes on GET and no persisted metadata. Use TDD and retain the existing two-tab E2E.
+6. Run affected API and app test suites, compile/lint/build, and mocked Settings E2E. Review the full changed branch and CI/artifacts after push. Do not add migrations or change CAS. Complete API rollout before acceptance; ordinary same-provider conflict reconciliation remains HPA-824.
