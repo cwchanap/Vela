@@ -51,3 +51,13 @@ The implementation requires changes to `apps/vela-api/src/profile-preferences.ts
 ## Deliberate exclusions
 
 Tombstones/write-contract extension, changing `preferences_version` CAS or cross-client timestamp reconciliation (HPA-824), extra mocks or Playwright fixtures, generic recovery framework, new UI, migrations, mobile-only checks, artwork, and an additional PR.
+
+## Rollout safety amendment
+
+This amendment supersedes the earlier exclusions of a write-contract change, route, fixture, client-store and UI changes. Review found that a tab loaded before deployment can submit an incomplete snapshot after deployment without a version conflict. Automatically retrying a conflict is not sufficient: the old form submits blank/default values for fields it never saw. The user approved expanding scope to prevent this data loss.
+
+The API advertises `preferences_read_contract: "complete-llm-v1"` only alongside a successfully sanitized profile. An explicit LLM preference replacement must include the separate top-level request field `llm_write_contract: "complete-llm-v1"`; a missing marker receives HTTP 428 with a reload-required message, without writing. A malformed or unsupported marker is rejected with 400. The request marker is never stored. Preference writes that omit `llm` retain the raw subtree and need no marker; the existing version CAS, strict LLM schema, and normal 409 behavior remain in place.
+
+Updated client code carries the response contract with its profile snapshot and sends the write marker only when that snapshot is known complete. The Settings provider forms must not mount with editable empty drafts until the complete snapshot is installed, and LLM saves must refuse an unsafe snapshot before enqueueing and on a 409 refetch. If the API response lacks the contract, show a reload-required state instead of accepting a save. An old tab cannot send the marker even if an unrelated save or refetch updates its version, so it must reload its application code. No GET-side database writes or data migration are added.
+
+An old API instance cannot enforce the new marker; finish the API rollout before declaring acceptance. This fence addresses rollout-induced loss, not the separate existing same-provider concurrent-edit limitation tracked by HPA-824.
