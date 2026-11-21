@@ -9,11 +9,11 @@
 
 ## Decision after review
 
-**Accept the review's root-cause simplification.** No `removedKeys` / `removedThinking` fields or write-contract change. A read of a plain-object `llm` with unknown default provider must still return the valid saved key and thinking maps. Substitute the existing Google default pair; delete the obsolete union-based recovery path. The existing `llmSettings.saveProvider` already deletes clear keys and Default overrides from a cloned snapshot; once GET exposes that snapshot, normal PUT replacement handles explicit removal.
+**Accept the review's root-cause simplification plus the rollout write-fence amendment.** No `removedKeys` / `removedThinking` tombstones. A read of a plain-object `llm` with unknown default provider must still return the valid saved key and thinking maps, substitute the existing Google default pair, and delete the obsolete union-based recovery path. The existing `llmSettings.saveProvider` already deletes clear keys and Default overrides from a cloned snapshot; once GET exposes that snapshot (marked with `preferences_read_contract: "complete-llm-v1"` when complete), normal PUT replacement (carrying `llm_write_contract: "complete-llm-v1"`) handles explicit removal while fencing stale pre-deploy tabs.
 
-Keep the DynamoDB `preferences_version` CAS, current single 409 retry, strict PUT validation, untouched raw LLM passthrough on writes omitting `llm`, and shared synthetic-API helpers. HPA-824 stays separate.
+Keep the DynamoDB `preferences_version` CAS, current single 409 retry (when the refetched snapshot remains complete), strict PUT validation, untouched raw LLM passthrough on writes omitting `llm` (or markerless writes whose `llm` matches GET of the stored profile), and shared synthetic-API helpers. HPA-824 stays separate.
 
-**Realistic trigger:** A stored unknown provider can result from provider removal between releases, rollback across different provider sets, or direct DB edits. It **cannot** be written by a second tab through today's PUT schema. An old open tab may still receive 400 until it reloads; this is not solved by tombstones and remains out of scope. Seed an invalid stored provider **before a fresh GET** in tests, rather than manufacturing a mid-session 409 from a currently-valid PUT.
+**Realistic trigger:** A stored unknown provider can result from provider removal between releases, rollback across different provider sets, or direct DB edits. It **cannot** be written by a second tab through today's PUT schema. An old open tab may still receive 400 until it reloads. Seed an invalid stored provider **before a fresh GET** in tests, rather than manufacturing a mid-session 409 from a currently-valid PUT.
 
 ## Minimal change map
 
@@ -21,15 +21,18 @@ Keep the DynamoDB `preferences_version` CAS, current single 409 retry, strict PU
 
 - `docs/superpowers/specs/2026-11-19-hpa833-explicit-llm-clears-design.md`
 - `docs/superpowers/plans/2026-11-19-hpa833-explicit-llm-clears.md`
+- `docs/superpowers/specs/2026-11-06-hpa755-llm-settings-redesign-design.md`
 
 **Implementation work in this same PR:**
 
-- `apps/vela-api/src/profile-preferences.ts`: known-valid entries survive a malformed/unknown default provider on GET; remove the recovery union
-- `apps/vela-api/test/routes/profiles.test.ts`: update old recovery expectations and add the clear/regression test
-- `apps/vela/e2e/llm-settings.spec.ts`: one fresh-load Settings save/reload regression, alongside existing two-tab retry case
-- `docs/superpowers/specs/2026-11-06-hpa755-llm-settings-redesign-design.md`: amend the previous read-policy statement to link to this later correction
+- `packages/common/src/contracts/llm.ts`: `PREFERENCES_READ_CONTRACT` (`"complete-llm-v1"`) write-fence constant
+- `apps/vela-api/src/profile-preferences.ts`: known-valid entries survive a malformed/unknown default provider on GET; remove the recovery union; add write-fence schema, completeness check for unrecognized provider keys, and unchanged-`llm` comparison helper
+- `apps/vela-api/src/routes/profiles.ts` and `apps/vela-api/src/dynamodb.ts`: emit `preferences_read_contract` on sanitized complete responses (never stored), enforce `llm_write_contract` on changed `llm` writes, and tolerate unchanged cached `llm` from pre-deploy tabs
+- `apps/vela/src/types/shared.ts`, `apps/vela/src/services/authService.ts`, `apps/vela/src/stores/auth.ts`, `apps/vela/src/stores/llmSettings.ts`, `apps/vela/src/pages/settings/components/LlmProvidersSection.vue`: propagate `preferences_read_contract` / `llm_write_contract`, omit `llm` on unrelated saves (while preserving `current.preferences.llm` in no-profile fallback), gate editable LLM forms on complete snapshot hydration (with load-error retry), and refuse unsafe saves/replays
+- `apps/vela/e2e/fixtures/syntheticAuth.ts`: mirror read/write contract rules, unchanged-`llm` tolerance, and configurable unmarked/omitted PUT responses
+- `apps/vela-api/test/routes/profiles.test.ts`, app store/component unit tests, and `apps/vela/e2e/llm-settings.spec.ts`: clear/regression, write-fence, and rollout tests
 
-**Unchanged:** `apps/vela-api/src/routes/profiles.ts`, `apps/vela-api/src/dynamodb.ts`, `apps/vela/src/stores/llmSettings.ts`, `apps/vela/src/stores/auth.ts`, `apps/vela/e2e/fixtures/syntheticAuth.ts`, common contracts, Settings components, API/DB schema. Expand only if implementation reveals an actual blocker.
+**Unchanged:** `LlmProviderCard.vue`, `ThemeSection.vue`, `TtsSection.vue`, provider adapters, DynamoDB table schema/CAS version logic.
 
 ## Task 0 — Reuse the existing baseline
 
@@ -70,21 +73,21 @@ Keep the DynamoDB `preferences_version` CAS, current single 409 retry, strict PU
 ## Task 3 — Final quality gates and review
 
 1. Execute `bun --filter vela-api test`, `bun --filter vela-api compile`, `bun --filter @vela/app test`, `bun --filter @vela/app lint`, and `bun --filter @vela/app build` (or the repository's affected CI gates). Run targeted Settings E2E directly with `cd apps/vela && bun run test:e2e:mocked -- e2e/llm-settings.spec.ts`; on PR push, also inspect the GitHub Actions `mocked-settings` job, Playwright result JSON, and uploaded artifact using GitHub MCP. Do **not** try to run `bunx playwright test` inside an interactive browser MCP session.
-2. Check that no runtime write-schema, storage, UI, fixture or auth changes crept in; confirm the read warning contains only field names, the explicit PUT no longer recovers deleted entries, and no old HPA-755 documentation claim conflicts with the corrected behavior.
+2. Check that the write-fence contract (`preferences_read_contract` / `llm_write_contract`) is enforced only on changed `llm` replacements, metadata is never persisted, the read warning contains only field names, the explicit PUT no longer recovers deleted entries, and no old HPA-755 documentation claim conflicts with the corrected behavior.
 3. Address any new valid GitHub comments in **this same PR**. Keep it draft until implementation, all automated/MCP gates and screenshot evidence are actually complete.
 
 ## End-to-end acceptance checklist
 
-- [ ] **API GET:** An unknown/missing stored default provider on a plain-object `llm` produces the Google registry default **without losing recognized valid keys or thinking entries**; a non-object LLM remains absent and GET has no DB writes.
-- [ ] **API PUT:** After a fresh GET, clearing one visible key and resetting one override persists their absence without resurrecting either; untouched keys/efforts remain; explicit `llm` replacement is authoritative.
-- [ ] **Other preference behavior:** A PUT omitting `llm` retains the raw stored subtree, strict invalid-provider PUT validation remains 400, and existing `preferences_version` CAS/409 retry continues working.
-- [ ] **MCP-verified E2E:** The `E2E Tests / mocked-settings` GitHub Actions job runs the real Playwright Test flow (Settings GET → edits → PUT → reload/GET), plus the existing 409 regression. Use GitHub MCP to verify the completed job, test outcomes and artifacts; no substitute browser-MCP script.
+- [ ] **API GET:** An unknown/missing stored default provider on a plain-object `llm` produces the Google registry default **without losing recognized valid keys or thinking entries** and emits `preferences_read_contract: "complete-llm-v1"` (unless an unrecognized provider key was dropped); a non-object LLM remains absent and GET has no DB writes.
+- [ ] **API PUT:** After a fresh GET, clearing one visible key and resetting one override (with `llm_write_contract: "complete-llm-v1"`) persists their absence without resurrecting either; untouched keys/efforts remain; explicit `llm` replacement is authoritative.
+- [ ] **Other preference behavior:** A PUT omitting `llm` (or a markerless PUT whose `llm` matches GET of the stored profile) retains the raw stored subtree, markerless changed-`llm` writes return 428, strict invalid-provider PUT validation remains 400, and existing `preferences_version` CAS/409 retry continues working.
+- [ ] **MCP-verified E2E:** The `E2E Tests / mocked-settings` GitHub Actions job runs the real Playwright Test flow (Settings GET → edits → PUT → reload/GET), plus the existing 409 and write-fence regressions. Use GitHub MCP to verify the completed job, test outcomes and artifacts; no substitute browser-MCP script.
 - [ ] **Visual check:** Inspect via MCP **one** ~375px screenshot saved under `.artifacts/pw-mocked-*/results/` from a Playwright evidence run, confirming readable **No key saved**/**Default** state and no clipping/overflow. No mockup or human acceptance.
 - [ ] **Automated gates:** Profile route tests, API compile/tests, app test/lint/build and the targeted mocked Settings E2E pass, with GitHub MCP-verified CI evidence. Record exact commands/results on PR #102.
 
 ## Deliberate deferrals
 
-No tombstones, write-schema changes, migration, generic recovery framework, new API endpoint, extra client state, cross-client optimistic-lock redesign (HPA-824), duplicate browser tests, new UI, or art/SFX work. All changes in one PR.
+No tombstones, migration, generic recovery framework, new API endpoint, cross-client optimistic-lock redesign (HPA-824), duplicate browser tests, layout refactoring, or art/SFX work. All changes in one PR.
 
 ## Task 4 — Rollout-safe LLM write fence
 

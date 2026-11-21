@@ -2,12 +2,13 @@ import { test as base, expect } from '@playwright/test';
 import { randomUUID } from 'node:crypto';
 import {
   ExpectedPreferencesVersionSchema,
+  llmMatchesReadSnapshot,
   normalizePreferences,
   PREFERENCES_READ_CONTRACT,
-  PreferencesReadSchema,
   PreferencesSchema,
   preserveStoredLlm,
   replacesLlm,
+  sanitizePreferencesForRead,
 } from '../../../vela-api/src/profile-preferences';
 import type { BrowserContext, Page, Route } from '@playwright/test';
 import {
@@ -185,6 +186,13 @@ export interface MockApi {
    * API deployed before the contract or an unsafe refetch.
    */
   readContract: string | null;
+  /**
+   * Contract advertised on PUT /profiles/update responses. Defaults to 'inherit'
+   * (uses readContract); set to null to simulate an unmarked PUT response.
+   */
+  putReadContract: string | null | 'inherit';
+  /** When true, PUT /profiles/update omits `profile` from the response body. */
+  omitPutProfile: boolean;
   seedProfile(_user: SyntheticUser, _preferences?: Record<string, unknown>): MockProfile;
   seedThread(
     _user: SyntheticUser,
@@ -241,6 +249,8 @@ const createMockApi = (): MockApi => {
     chatUsage: { inputTokens: 5, outputTokens: 7, cachedInputTokens: 0, cacheWriteTokens: 0 },
     ttsSettings: { provider: 'elevenlabs', voiceId: null, model: null, hasApiKey: false },
     readContract: PREFERENCES_READ_CONTRACT,
+    putReadContract: 'inherit',
+    omitPutProfile: false,
     seedProfile(user, preferences) {
       const profile = makeProfile(user, preferences);
       state.profiles.set(user.userId, profile);
@@ -292,18 +302,22 @@ const createMockApi = (): MockApi => {
   return state;
 };
 
-const normalizePreferencesForRead = (preferences: Record<string, unknown>) =>
-  PreferencesReadSchema.parse(normalizePreferences(preferences));
-
-const profileResponse = (state: MockApi, profile: MockProfile) => {
+const profileResponse = (
+  state: MockApi,
+  profile: MockProfile,
+  contractOverride?: string | null,
+) => {
   const { preferences_read_contract: _stored, ...stored } = profile;
-  const sanitized = {
+  const contract = contractOverride !== undefined ? contractOverride : state.readContract;
+  const sanitized = sanitizePreferencesForRead(profile.preferences);
+  if (!sanitized) return stored;
+  const payload = {
     ...stored,
-    preferences: normalizePreferencesForRead(profile.preferences),
+    preferences: sanitized.preferences,
   };
-  return state.readContract
-    ? { ...sanitized, preferences_read_contract: state.readContract }
-    : sanitized;
+  return contract && sanitized.isCompleteLlmSnapshot
+    ? { ...payload, preferences_read_contract: contract }
+    : payload;
 };
 
 const jsonResponse = (route: Route, body: unknown, status = 200) =>
@@ -429,19 +443,28 @@ const handleApiRoute = async (state: MockApi, route: Route): Promise<void> => {
     }
     let parsedPreferences: Record<string, unknown> | undefined;
     if (body.preferences !== undefined) {
+      if (body.expected_preferences_version === undefined)
+        return jsonResponse(route, { error: 'Reload your profile' }, 428);
       const parsed = PreferencesSchema.safeParse(body.preferences);
       if (!parsed.success) return jsonResponse(route, { error: 'Invalid preferences' }, 400);
-      // A tab that read an older API cannot prove its LLM snapshot is
-      // complete; refuse before touching storage regardless of version.
-      if (replacesLlm(parsed.data) && body.llm_write_contract === undefined)
-        return jsonResponse(route, { error: 'Reload the app before saving LLM settings' }, 428);
       parsedPreferences = parsed.data as Record<string, unknown>;
+      // A tab that read an older API cannot prove its LLM snapshot is
+      // complete; refuse changed llm before touching storage, while letting
+      // old tabs sending unchanged cached llm save unrelated preferences.
+      if (replacesLlm(parsedPreferences) && body.llm_write_contract === undefined) {
+        const existing = state.profiles.get(userId);
+        if (
+          parsedPreferences.llm !== undefined &&
+          !llmMatchesReadSnapshot(parsedPreferences.llm, existing?.preferences)
+        ) {
+          return jsonResponse(route, { error: 'Reload the app before saving LLM settings' }, 428);
+        }
+        delete parsedPreferences.llm;
+      }
     }
     // Storage access happens only after the request contract is satisfied.
     const profile = getOrCreateProfile(userId);
     if (parsedPreferences !== undefined) {
-      if (body.expected_preferences_version === undefined)
-        return jsonResponse(route, { error: 'Reload your profile' }, 428);
       if (body.expected_preferences_version !== (profile.preferences_version ?? null))
         return jsonResponse(route, { error: 'Preferences changed elsewhere' }, 409);
       const next: Record<string, unknown> = normalizePreferences(parsedPreferences);
@@ -453,7 +476,15 @@ const handleApiRoute = async (state: MockApi, route: Route): Promise<void> => {
     if (body.avatar_url !== undefined) profile.avatar_url = body.avatar_url as string | null;
     if (body.native_language !== undefined) profile.native_language = String(body.native_language);
     profile.updated_at = new Date().toISOString();
-    return jsonResponse(route, { success: true, profile: profileResponse(state, profile) });
+    if (state.omitPutProfile) {
+      return jsonResponse(route, { success: true });
+    }
+    const putContract =
+      state.putReadContract === 'inherit' ? state.readContract : state.putReadContract;
+    return jsonResponse(route, {
+      success: true,
+      profile: profileResponse(state, profile, putContract),
+    });
   }
 
   if (path === '/api/llm-chat/capabilities' && method === 'GET') {

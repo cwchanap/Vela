@@ -556,6 +556,53 @@ describe('useAuthStore', () => {
       expect(body.expected_preferences_version).toBe('v0');
     });
 
+    it('preserves stored llm when an unrelated save lacks response.profile and refresh fails', async () => {
+      const { useAuthStore } = await import('./auth');
+      const store = useAuthStore();
+      store.setSession(mockSession);
+      const llm = {
+        keys: { google: 'google-key', openai: 'openai-key' },
+        thinking: { 'gpt-6.1-sol': 'high' },
+        defaultModel: { provider: 'google', model: 'gemini-3.8-flash' },
+      };
+      store.setUser(
+        makeUser({
+          preferences: { darkMode: false, llm },
+          preferences_version: 'v0',
+        }),
+      );
+      mockAuthService.updateUserProfile.mockResolvedValueOnce({ success: true });
+      mockAuthService.getUserProfile.mockRejectedValueOnce(new Error('Refresh failed'));
+
+      expect(await store.updatePreferences({ darkMode: true })).toBe(true);
+      expect(store.user?.preferences.darkMode).toBe(true);
+      expect(store.user?.preferences.llm).toEqual(llm);
+      expect(store.hasCompleteLlmSnapshot).toBe(true);
+    });
+
+    it('uses the preference reload message on 428 for non-LLM saves and the LLM message for LLM saves', async () => {
+      const { useAuthStore } = await import('./auth');
+      const store = useAuthStore();
+      store.setSession(mockSession);
+      store.setUser(makeUser({ preferences: { darkMode: false }, preferences_version: 'v0' }));
+
+      mockAuthService.updateUserProfile.mockResolvedValueOnce({ success: false, status: 428 });
+      expect(await store.updatePreferences({ darkMode: true })).toBe(false);
+      expect(store.error).toBe('Reload the page before saving preferences.');
+
+      mockAuthService.updateUserProfile.mockResolvedValueOnce({ success: false, status: 428 });
+      expect(
+        await store.updatePreferences({
+          llm: {
+            keys: { google: 'k' },
+            thinking: {},
+            defaultModel: { provider: 'google', model: 'gemini-3.8-flash' },
+          },
+        }),
+      ).toBe(false);
+      expect(store.error).toBe('Reload the page before saving LLM settings.');
+    });
+
     it('refuses to replay a conflicted LLM save when the refetched snapshot is incomplete', async () => {
       const { useAuthStore } = await import('./auth');
       const store = useAuthStore();

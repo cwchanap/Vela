@@ -8,9 +8,18 @@
       data-testid="llm-reload-required"
       role="alert"
     >
-      Reload the page to update LLM settings. This page loaded saved settings that were not verified
-      as complete.
+      Unable to verify that your saved LLM settings are complete. Reload the page to check for
+      updates, or try again later.
       <q-btn flat dense label="Reload" data-testid="llm-reload" @click="reloadPage" />
+    </div>
+    <div
+      v-else-if="llmFormState === 'error'"
+      class="text-body2 text-negative"
+      data-testid="llm-settings-error"
+      role="alert"
+    >
+      {{ authStore.error || 'Failed to load LLM settings.' }}
+      <q-btn flat dense label="Retry" data-testid="llm-profile-retry" @click="retryLoadProfile" />
     </div>
     <div
       v-else-if="llmFormState === 'loading'"
@@ -125,13 +134,20 @@ const isAuthenticated = computed(() => authStore.isAuthenticated);
 // Editable forms mount only after a complete sanitized profile read. A missing
 // marker means this page code cannot safely describe or replace saved LLM
 // values, so it offers a reload instead of blank drafts.
-const llmFormState = computed<'signed-out' | 'loading' | 'blocked' | 'ready'>(() => {
-  if (!authStore.session) return 'signed-out';
-  if (!authStore.user) return 'loading';
+const llmFormState = computed<'signed-out' | 'loading' | 'error' | 'blocked' | 'ready'>(() => {
+  if (!authStore.session?.user) return 'signed-out';
+  if (!authStore.user) {
+    return authStore.isLoading ? 'loading' : 'error';
+  }
   return authStore.hasCompleteLlmSnapshot ? 'ready' : 'blocked';
 });
 
 const reloadPage = () => window.location.reload();
+const retryLoadProfile = async () => {
+  const userId = authStore.session?.user?.id;
+  if (!userId) return;
+  await authStore.loadUserProfile(userId);
+};
 const { capabilitiesQuery, serverKeyProviders } = useServerKeyProviders();
 const serverKeyProviderLabels = computed(() =>
   serverKeyProviders.value.map((provider) => LLM_PROVIDER_REGISTRY[provider].label),

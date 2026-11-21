@@ -26,6 +26,7 @@ export interface User {
 
 const AUTH_REDIRECT_STORAGE_KEY = 'vela.auth.redirectTo';
 const LLM_RELOAD_REQUIRED_MESSAGE = 'Reload the page before saving LLM settings.';
+const PREFERENCES_RELOAD_REQUIRED_MESSAGE = 'Reload the page before saving preferences.';
 
 const getSafeAuthRedirect = (redirectTo: unknown): string => {
   if (typeof redirectTo !== 'string') {
@@ -801,6 +802,7 @@ export const useAuthStore = defineStore('auth', () => {
         const { preferences: preferencesPatch, ...profileFields } = profileData;
         let resolvedProfileData: ProfileData = profileFields;
         let mergedProfileData: ProfileData = profileFields;
+        let lastReplacesLlm = false;
         let response;
         for (let attempt = 0; attempt < 2; attempt++) {
           const resolvedPreferences: Record<string, unknown> | undefined =
@@ -814,6 +816,7 @@ export const useAuthStore = defineStore('auth', () => {
           const snapshotComplete = current.preferences_read_contract === PREFERENCES_READ_CONTRACT;
           const replacesLlm =
             resolvedPreferences !== undefined && Object.hasOwn(resolvedPreferences, 'llm');
+          lastReplacesLlm = replacesLlm;
           if (replacesLlm && !snapshotComplete) {
             // Never send an LLM replacement derived from a possibly incomplete
             // read, including a 409 replay after an unsafe refetch.
@@ -871,7 +874,9 @@ export const useAuthStore = defineStore('auth', () => {
                 : response?.status === 400
                   ? 'Some settings are invalid. Check your entries and try again.'
                   : response?.status === 428
-                    ? LLM_RELOAD_REQUIRED_MESSAGE
+                    ? lastReplacesLlm
+                      ? LLM_RELOAD_REQUIRED_MESSAGE
+                      : PREFERENCES_RELOAD_REQUIRED_MESSAGE
                     : response?.status === 401 || response?.status === 403
                       ? 'Your session cannot save settings. Please sign in again.'
                       : response?.status
@@ -884,8 +889,24 @@ export const useAuthStore = defineStore('auth', () => {
 
         try {
           if (sessionGeneration.value === generation && user.value?.id === userId) {
+            // Unrelated preference saves delete llm from mergedProfileData before
+            // sending; restore current.preferences.llm in the fallback profile so
+            // a missing response.profile plus failed refresh cannot leave a
+            // marked profile without its stored llm keys and overrides.
+            const fallbackProfileData: ProfileData =
+              mergedProfileData.preferences &&
+              !Object.hasOwn(mergedProfileData.preferences, 'llm') &&
+              current.preferences?.llm !== undefined
+                ? {
+                    ...mergedProfileData,
+                    preferences: {
+                      ...mergedProfileData.preferences,
+                      llm: current.preferences.llm,
+                    },
+                  }
+                : mergedProfileData;
             const acknowledged: Profile =
-              response.profile ?? applyProfileData(profileFromUser(current), mergedProfileData);
+              response.profile ?? applyProfileData(profileFromUser(current), fallbackProfileData);
             registerAcknowledgedProfile(
               acknowledged,
               resolvedProfileData,
