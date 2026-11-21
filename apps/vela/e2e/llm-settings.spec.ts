@@ -598,6 +598,55 @@ test.describe('LLM Settings - Session and profile integrity', () => {
     await expect(keyInput(page, 'google')).toHaveValue('');
   });
 
+  test('should recover an unknown stored provider and keep explicit clears on save', async ({
+    authedPage: page,
+    apiMock,
+  }) => {
+    apiMock.seedProfile(SYNTHETIC_USER_A, {
+      llm: {
+        keys: { google: GOOGLE_KEY, openai: OPENAI_KEY },
+        thinking: { 'gemini-4-argon': 'high', 'gpt-6.1-sol': 'medium' },
+        defaultModel: { provider: 'retired-provider', model: 'retired-model' },
+      },
+    });
+    await gotoSettings(page);
+
+    // An unknown stored provider reads back as the Google default without
+    // dropping the recoverable keys or thinking overrides.
+    await expect(page.getByText('Active: Google • gemini-3.8-flash')).toBeVisible();
+    await openCard(page, 'google');
+    await expect(keyInput(page, 'google')).toHaveValue(GOOGLE_KEY);
+    await expect(page.getByTestId('llm-effort-gemini-4-argon')).toHaveValue('high');
+
+    await keyInput(page, 'google').fill('');
+    await page.getByTestId('llm-effort-gemini-4-argon').click();
+    await page.getByRole('option', { name: 'Default', exact: true }).click();
+    const putResponse = waitForProfilePut(page);
+    await page.getByTestId('llm-save-google').click();
+    expect((await putResponse).status()).toBe(200);
+
+    // An explicit llm replacement is authoritative: the cleared key and effort
+    // are gone and no tombstone entries are written.
+    expect(llmOf(apiMock.lastPut())).toEqual({
+      keys: { openai: OPENAI_KEY },
+      thinking: { 'gpt-6.1-sol': 'medium' },
+      defaultModel: { provider: 'google', model: 'gemini-3.8-flash' },
+    });
+
+    await page.reload();
+    await waitForPageLoad(page);
+    await expect(page.getByText('Active: Google • gemini-3.8-flash')).toBeVisible();
+
+    await openCard(page, 'google');
+    await expect(keyInput(page, 'google')).toHaveValue('');
+    await expect(page.getByTestId('llm-card-google').getByText('No key saved')).toBeVisible();
+    await expect(page.getByTestId('llm-effort-gemini-4-argon')).toHaveValue('Default');
+
+    await openCard(page, 'openai');
+    await expect(keyInput(page, 'openai')).toHaveValue(OPENAI_KEY);
+    await expect(page.getByTestId('llm-effort-gpt-6.1-sol')).toHaveValue('medium');
+  });
+
   test('should reset LLM state for a new user after sign-out', async ({
     authedPage: page,
     apiMock,
