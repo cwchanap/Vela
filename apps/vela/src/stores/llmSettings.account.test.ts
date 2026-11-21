@@ -91,6 +91,7 @@ const makeUser = (id: string, llm?: LlmPreferences): User => ({
   learning_streak: 0,
   native_language: 'en',
   preferences: (llm ? { llm } : {}) as UserPreferences,
+  preferences_read_contract: 'complete-llm-v1',
   created_at: '2024-01-01T00:00:00.000Z',
   updated_at: '2024-01-01T00:00:00.000Z',
 });
@@ -111,6 +112,7 @@ const makeProfile = (user: User): Profile => ({
   learning_streak: user.learning_streak,
   last_activity: null,
   preferences: user.preferences,
+  preferences_read_contract: user.preferences_read_contract ?? null,
   created_at: user.created_at,
   updated_at: user.updated_at,
 });
@@ -122,17 +124,25 @@ const nextWriteStamp = () => {
   return new Date(Date.UTC(2030, 0, 1, 0, 0, writeStamp)).toISOString();
 };
 
-const applyWrite = (index: number) => {
+const applyWrite = (index: number, response?: AuthResponse) => {
   const write = pendingWrites[index]!;
   const existing = serverProfiles.get(write.userId);
   if (existing) {
+    const nextPrefs = write.data.preferences as Record<string, unknown> | undefined;
+    const storedLlm = (existing.preferences as Record<string, unknown> | undefined)?.llm;
     Object.assign(existing, write.data);
+    // preserveStoredLlm: a write that omits llm keeps the raw stored subtree.
+    if (nextPrefs && nextPrefs.llm === undefined && storedLlm !== undefined) {
+      (existing.preferences as Record<string, unknown>).llm = storedLlm;
+    }
     existing.updated_at = nextWriteStamp();
   }
-  write.resolve({
-    success: true,
-    profile: serverProfiles.get(write.userId),
-  } as AuthResponse);
+  write.resolve(
+    (response ?? {
+      success: true,
+      profile: serverProfiles.get(write.userId),
+    }) as AuthResponse,
+  );
 };
 
 const resolveWrite = (index: number, response: AuthResponse) => {
@@ -259,6 +269,54 @@ describe('llmSettings + auth account transitions (real stores)', () => {
     for (const write of pendingWrites.slice(1)) {
       expect(write.userId).not.toBe('user-b');
     }
+  });
+
+  it('sends the write-contract marker with a save from a complete snapshot', async () => {
+    const { authStore, llmStore } = await stores();
+    await signIn(authStore, 'user-a');
+
+    const pending = llmStore.saveProvider('google', 'google-key');
+    await flushPromises();
+    expect(pendingWrites).toHaveLength(1);
+    expect(pendingWrites[0]!.data.llm_write_contract).toBe('complete-llm-v1');
+
+    applyWrite(0);
+    pendingWrites.length = 0;
+    expect(await pending).toBe(true);
+  });
+
+  it('refuses an LLM save captured from an unsafe snapshot before a queued unrelated save completes', async () => {
+    const { authStore, llmStore } = await stores();
+    const unsafeUser: User = { ...makeUser('user-a', makeLlm()), preferences_read_contract: null };
+    serverProfiles.set('user-a', {
+      ...makeProfile(unsafeUser),
+      // The API advertises the contract on its response, never in storage.
+      preferences_read_contract: 'complete-llm-v1',
+    });
+    authStore.setSession(makeSession('user-a'));
+    authStore.setUser(unsafeUser);
+    await flushPromises();
+
+    const unrelated = authStore.updatePreferences({ dailyGoal: 45 });
+    await flushPromises();
+    expect(pendingWrites).toHaveLength(1);
+    expect(writeHas(pendingWrites[0]!, 'llm')).toBe(false);
+    expect(pendingWrites[0]!.data).not.toHaveProperty('llm_write_contract');
+
+    // The stale form's save must not join the queue even though the in-flight
+    // unrelated save will install a complete snapshot when it lands.
+    const staleFormSave = llmStore.saveProvider('google', 'stale-key');
+    await flushPromises();
+    expect(await staleFormSave).toBe(false);
+    expect(pendingWrites).toHaveLength(1);
+    expect(writeHas(pendingWrites[0]!, 'llm')).toBe(false);
+
+    applyWrite(0);
+    pendingWrites.length = 0;
+    await flushPromises();
+    expect(await unrelated).toBe(true);
+    expect(authStore.user?.preferences_read_contract).toBe('complete-llm-v1');
+    expect(llmStore.llm.keys.google).toBeUndefined();
   });
 
   it('merges overlapping provider saves so neither key is lost', async () => {
@@ -545,7 +603,7 @@ describe('overlapping theme and llm preference writes (real stores)', () => {
     expect(pendingWrites).toHaveLength(1);
     const themePrefs = pendingWrites[0]!.data.preferences as Record<string, unknown>;
     expect(themePrefs.darkMode).toBe(true);
-    expect((themePrefs.llm as LlmPreferences).keys.google).toBe('g-key');
+    expect(themePrefs.llm).toBeUndefined();
     applyWrite(0);
     pendingWrites.splice(0, 1);
     await flushPromises();
@@ -567,7 +625,7 @@ describe('overlapping theme and llm preference writes (real stores)', () => {
     expect(pendingWrites).toHaveLength(1);
     const themePrefs = pendingWrites[0]!.data.preferences as Record<string, unknown>;
     expect(themePrefs.darkMode).toBe(true);
-    expect((themePrefs.llm as LlmPreferences).keys.google).toBeUndefined();
+    expect(themePrefs.llm).toBeUndefined();
 
     const llmSave = llmStore.saveProvider('google', 'g-key');
     await flushPromises();
@@ -1275,7 +1333,7 @@ describe('acknowledged writes reconcile against equal and newer reads', () => {
     expect(pendingWrites).toHaveLength(1);
     const firstBody = pendingWrites[0]!.data.preferences as Record<string, unknown>;
     expect(firstBody.darkMode).toBe(true);
-    expect((firstBody.llm as LlmPreferences).keys.google).toBeUndefined();
+    expect(firstBody.llm).toBeUndefined();
 
     const llmSave = llmStore.saveProvider('google', 'g-key');
     await flushPromises();
@@ -1355,6 +1413,9 @@ describe('acknowledged writes reconcile against equal and newer reads', () => {
     mockAuthService.getUserProfile
       .mockImplementationOnce(() => Promise.resolve(newerRead))
       .mockImplementation(() => Promise.resolve(staleRead('user-a')));
+    // The accepted read reflects the stored record: the llm commit and the
+    // unrelated newer write are both already on the server.
+    serverProfiles.set('user-a', newerRead);
 
     await authStore.loadUserProfile('user-a');
     await flushPromises();
@@ -1368,7 +1429,7 @@ describe('acknowledged writes reconcile against equal and newer reads', () => {
     const secondBody = pendingWrites[0]!.data.preferences as Record<string, unknown>;
     expect(secondBody.dailyGoal).toBe(60);
     expect(secondBody.darkMode).toBe(true);
-    expect((secondBody.llm as LlmPreferences).keys.google).toBe('g-key');
+    expect(secondBody.llm).toBeUndefined();
     applyWrite(0);
     pendingWrites.splice(0, 1);
     await flushPromises();
@@ -1560,6 +1621,9 @@ describe('acknowledged writes reconcile at preference path granularity', () => {
       updated_at: '2030-06-01T00:00:00.000Z',
     };
     mockAuthService.getUserProfile.mockResolvedValue(newerRead);
+    // The accepted read reflects the stored record: another writer already
+    // merged its provider key into the committed subtree.
+    serverProfiles.set('user-a', newerRead);
 
     await authStore.loadUserProfile('user-a');
     await flushPromises();
@@ -1578,9 +1642,7 @@ describe('acknowledged writes reconcile at preference path granularity', () => {
 
     expect(pendingWrites).toHaveLength(1);
     const themeBody = pendingWrites[0]!.data.preferences as Record<string, unknown>;
-    const themeLlm = themeBody.llm as LlmPreferences;
-    expect(themeLlm.keys.google).toBe('g-key');
-    expect(themeLlm.keys.openai).toBe('o-key');
+    expect(themeBody.llm).toBeUndefined();
     applyWrite(0);
     pendingWrites.splice(0, 1);
     await flushPromises();
@@ -1626,6 +1688,9 @@ describe('acknowledged writes reconcile at preference path granularity', () => {
       updated_at: '2030-06-01T00:00:00.000Z',
     };
     mockAuthService.getUserProfile.mockResolvedValue(newerRead);
+    // The accepted read reflects the stored record: another writer already
+    // merged its provider key into the committed subtree.
+    serverProfiles.set('user-a', newerRead);
 
     await authStore.loadUserProfile('user-a');
     await flushPromises();
@@ -1644,9 +1709,7 @@ describe('acknowledged writes reconcile at preference path granularity', () => {
 
     expect(pendingWrites).toHaveLength(1);
     const themeBody = pendingWrites[0]!.data.preferences as Record<string, unknown>;
-    const themeLlm = themeBody.llm as LlmPreferences;
-    expect(themeLlm.keys.google).toBe('g-key');
-    expect(themeLlm.keys.openai).toBe('o-key');
+    expect(themeBody.llm).toBeUndefined();
     applyWrite(0);
     pendingWrites.splice(0, 1);
     await flushPromises();
@@ -1682,6 +1745,9 @@ describe('acknowledged writes reconcile at preference path granularity', () => {
       updated_at: '2030-06-01T00:00:00.000Z',
     };
     mockAuthService.getUserProfile.mockResolvedValue(newerRead);
+    // The accepted read reflects the stored record: another writer already
+    // rotated the key on the committed subtree.
+    serverProfiles.set('user-a', newerRead);
 
     await authStore.loadUserProfile('user-a');
     await flushPromises();
@@ -1700,8 +1766,7 @@ describe('acknowledged writes reconcile at preference path granularity', () => {
 
     expect(pendingWrites).toHaveLength(1);
     const themeBody = pendingWrites[0]!.data.preferences as Record<string, unknown>;
-    const themeLlm = themeBody.llm as LlmPreferences;
-    expect(themeLlm.keys.google).toBe('rotated-key');
+    expect(themeBody.llm).toBeUndefined();
     applyWrite(0);
     pendingWrites.splice(0, 1);
     await flushPromises();
@@ -1739,6 +1804,9 @@ describe('acknowledged writes reconcile at preference path granularity', () => {
       updated_at: '2030-06-01T00:00:00.000Z',
     };
     mockAuthService.getUserProfile.mockResolvedValue(newerRead);
+    // The accepted read reflects the stored record: another writer already
+    // deleted the untouched provider on the committed subtree.
+    serverProfiles.set('user-a', newerRead);
 
     await authStore.loadUserProfile('user-a');
     await flushPromises();
@@ -1757,9 +1825,7 @@ describe('acknowledged writes reconcile at preference path granularity', () => {
 
     expect(pendingWrites).toHaveLength(1);
     const themeBody = pendingWrites[0]!.data.preferences as Record<string, unknown>;
-    const themeLlm = themeBody.llm as LlmPreferences;
-    expect(themeLlm.keys.google).toBe('g-key');
-    expect(themeLlm.keys.anthropic).toBeUndefined();
+    expect(themeBody.llm).toBeUndefined();
     applyWrite(0);
     pendingWrites.splice(0, 1);
     await flushPromises();
@@ -1795,6 +1861,9 @@ describe('acknowledged writes reconcile at preference path granularity', () => {
       updated_at: '2030-06-01T00:00:00.000Z',
     };
     mockAuthService.getUserProfile.mockResolvedValue(newerRead);
+    // The accepted read reflects the stored record: another writer already
+    // re-added the key on the committed subtree.
+    serverProfiles.set('user-a', newerRead);
 
     await authStore.loadUserProfile('user-a');
     await flushPromises();
@@ -1813,8 +1882,7 @@ describe('acknowledged writes reconcile at preference path granularity', () => {
 
     expect(pendingWrites).toHaveLength(1);
     const themeBody = pendingWrites[0]!.data.preferences as Record<string, unknown>;
-    const themeLlm = themeBody.llm as LlmPreferences;
-    expect(themeLlm.keys.google).toBe('readded-key');
+    expect(themeBody.llm).toBeUndefined();
     applyWrite(0);
     pendingWrites.splice(0, 1);
     await flushPromises();
@@ -1844,7 +1912,7 @@ describe('acknowledged writes reconcile at preference path granularity', () => {
       } as UserPreferences,
       updated_at: '2030-01-01T00:00:00.000Z',
     };
-    resolveWrite(0, { success: true, profile: firstAck });
+    applyWrite(0, { success: true, profile: firstAck });
     pendingWrites.splice(0, 1);
     await flushPromises();
     await llmSave;
@@ -1991,6 +2059,10 @@ describe('acknowledged writes reconcile at preference path granularity', () => {
       updated_at: '2030-06-01T00:00:00.000Z',
     };
     mockAuthService.getUserProfile.mockResolvedValue(newerRead);
+    // The accepted read reflects the stored record: another writer already
+    // deleted the key on the committed subtree.
+    serverProfiles.set('user-a', newerRead);
+
     await authStore.loadUserProfile('user-a');
     await flushPromises();
 
@@ -2008,7 +2080,7 @@ describe('acknowledged writes reconcile at preference path granularity', () => {
 
     expect(pendingWrites).toHaveLength(1);
     const themeBody = pendingWrites[0]!.data.preferences as Record<string, unknown>;
-    expect((themeBody.llm as LlmPreferences).keys.google).toBeUndefined();
+    expect(themeBody.llm).toBeUndefined();
     applyWrite(0);
     pendingWrites.splice(0, 1);
     await flushPromises();

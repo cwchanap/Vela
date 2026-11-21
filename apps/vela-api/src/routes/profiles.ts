@@ -3,11 +3,14 @@ import { zValidator } from '@hono/zod-validator';
 import { z } from 'zod';
 import {
   ExpectedPreferencesVersionSchema,
+  LlmWriteContractSchema,
   normalizePreferences,
   preserveStoredLlm,
   PreferencesReadSchema,
   PreferencesSchema,
+  replacesLlm,
 } from '../profile-preferences';
+import { PREFERENCES_READ_CONTRACT } from '@vela/common/contracts/llm';
 import type { Env } from '../types';
 import { profiles as profilesDB, type Profile } from '../dynamodb';
 import { requireAuth, type AuthContext } from '../middleware/auth';
@@ -17,6 +20,9 @@ import { UserIdQuerySchema } from '../validation';
 const UpdateProfileSchema = z.object({
   user_id: z.string().min(1, 'user_id is required'),
   expected_preferences_version: ExpectedPreferencesVersionSchema,
+  // Request metadata only: never written. Validated here so a malformed
+  // marker is a 400 before the handler runs.
+  llm_write_contract: LlmWriteContractSchema,
   username: z.string().optional(),
   avatar_url: z.string().optional(),
   native_language: z.string().optional(),
@@ -84,10 +90,13 @@ const createProfilesRoute = (env: Env) => {
         return c.json({ error: 'Invalid preferences data' }, 500);
       }
 
-      // Return normalized preferences without persisting them on GET.
+      // Return normalized preferences without persisting them on GET. The
+      // read-contract marker is response metadata only and is never stored.
       profile.preferences = parsedPreferences.data;
 
-      return c.json({ profile });
+      return c.json({
+        profile: { ...profile, preferences_read_contract: PREFERENCES_READ_CONTRACT },
+      });
     } catch (e) {
       console.error('profiles get error', e);
       const msg = e instanceof Error ? e.message : 'Unknown error';
@@ -100,7 +109,8 @@ const createProfilesRoute = (env: Env) => {
       // Use authenticated user's ID from context instead of trusting client-supplied user_id
       const authenticatedUserId = c.get('userId');
       const profileData = c.req.valid('json');
-      const { user_id, expected_preferences_version, ...updates } = profileData;
+      // llm_write_contract is request metadata: destructured out, never stored.
+      const { user_id, expected_preferences_version, llm_write_contract, ...updates } = profileData;
 
       // Authorization check: ensure client can only update their own profile
       if (user_id !== authenticatedUserId) {
@@ -109,6 +119,12 @@ const createProfilesRoute = (env: Env) => {
 
       // Normalize preferences if they are being updated
       if (updates.preferences) {
+        // A tab that read an older API cannot prove its LLM snapshot is
+        // complete, so it must reload before replacing llm. This runs before
+        // any storage access or write, so a stale version never authorizes it.
+        if (replacesLlm(updates.preferences) && llm_write_contract === undefined) {
+          return c.json({ error: 'Reload the app before saving LLM settings' }, 428);
+        }
         if (expected_preferences_version === undefined) {
           return c.json({ error: 'Reload your profile before saving preferences' }, 428);
         }
@@ -133,29 +149,37 @@ const createProfilesRoute = (env: Env) => {
         ? await profilesDB.update(user_id, timestampedUpdates, expected_preferences_version)
         : await profilesDB.update(user_id, timestampedUpdates);
 
-      if (updatedProfile?.preferences) {
-        // The update already committed, so a malformed stored preference must
-        // not turn this success response into an error. Sanitize when possible
-        // and fall back to the committed record otherwise.
-        try {
-          const parsedPreferences = PreferencesReadSchema.safeParse(
-            normalizePreferences(updatedProfile.preferences),
-          );
-          if (parsedPreferences.success) {
-            updatedProfile.preferences = parsedPreferences.data;
-          } else {
+      if (updatedProfile) {
+        // Response metadata read from storage is never trusted. Strip it
+        // before handling the committed record and add it back only after
+        // sanitization succeeds.
+        delete updatedProfile.preferences_read_contract;
+        if (updatedProfile.preferences) {
+          // The update already committed, so a malformed stored preference must
+          // not turn this success response into an error. Sanitize when possible
+          // and fall back to the committed record otherwise. Only a sanitized
+          // response advertises the read contract.
+          try {
+            const parsedPreferences = PreferencesReadSchema.safeParse(
+              normalizePreferences(updatedProfile.preferences),
+            );
+            if (parsedPreferences.success) {
+              updatedProfile.preferences = parsedPreferences.data;
+              updatedProfile.preferences_read_contract = PREFERENCES_READ_CONTRACT;
+            } else {
+              console.error(
+                'Committed preferences failed sanitization for user_id:',
+                user_id,
+                parsedPreferences.error,
+              );
+            }
+          } catch (sanitizeError) {
             console.error(
-              'Committed preferences failed sanitization for user_id:',
+              'Preferences sanitization threw for committed profile, user_id:',
               user_id,
-              parsedPreferences.error,
+              sanitizeError,
             );
           }
-        } catch (sanitizeError) {
-          console.error(
-            'Preferences sanitization threw for committed profile, user_id:',
-            user_id,
-            sanitizeError,
-          );
         }
       }
       return c.json({ success: true, profile: updatedProfile });

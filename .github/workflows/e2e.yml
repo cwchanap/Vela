@@ -45,7 +45,12 @@ jobs:
         if: always()
         with:
           name: mocked-settings-results
+          # `.artifacts` is hidden, so upload-artifact's default hidden-file
+          # exclusion matched nothing (run 44859605775 uploaded zero files).
+          # The glob stays scoped to this suite's synthetic output.
           path: .artifacts/pw-mocked-*/
+          include-hidden-files: true
+          if-no-files-found: error
           retention-days: 7
 
   unauthenticated-e2e:

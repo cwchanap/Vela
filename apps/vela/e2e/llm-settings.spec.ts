@@ -93,6 +93,179 @@ test.describe('LLM Settings - Provider cards', () => {
     await conflict;
     await retried;
     expect(llmOf(apiMock.lastPut()).keys).toEqual({ google: GOOGLE_KEY, openai: OPENAI_KEY });
+    // The replay carries its complete-snapshot write marker.
+    expect(apiMock.lastPut()?.llm_write_contract).toBe('complete-llm-v1');
+    await secondTab.close();
+  });
+
+  test('should refuse editable LLM forms when the profile read has no contract', async ({
+    authedPage: page,
+    apiMock,
+  }) => {
+    // An API deployed before the contract (or any response that was not
+    // verified as complete) must not become a blank editable form.
+    apiMock.readContract = null;
+    apiMock.seedProfile(SYNTHETIC_USER_A, {
+      llm: {
+        keys: { google: GOOGLE_KEY },
+        thinking: {},
+        defaultModel: { provider: 'google', model: 'gemini-3.8-flash' },
+      },
+    });
+    await page.goto('/settings');
+    await waitForPageLoad(page);
+
+    await expect(page.getByTestId('settings-page')).toBeVisible();
+    await expect(page.getByTestId('llm-reload-required')).toBeVisible();
+    await expect(page.getByTestId('llm-card-google')).toHaveCount(0);
+    await expect(page.getByTestId('llm-key-input-google')).toHaveCount(0);
+    await expect(page.getByTestId('llm-default-model-select')).toHaveCount(0);
+    expect(apiMock.profilePuts).toHaveLength(0);
+  });
+
+  test('should reject an old-client LLM write without the marker even after a newer save', async ({
+    authedPage: page,
+    apiMock,
+  }) => {
+    const seeded = apiMock.seedProfile(SYNTHETIC_USER_A, {
+      llm: {
+        keys: { google: GOOGLE_KEY },
+        thinking: {},
+        defaultModel: { provider: 'google', model: 'gemini-3.8-flash' },
+      },
+    });
+    seeded.preferences_version = crypto.randomUUID();
+    await gotoSettings(page);
+
+    // The old tab captured the profile (and its non-null version) before deployment.
+    const capturedVersion = await page.evaluate(
+      async ([auth, userId]) => {
+        const response = await fetch(`/api/profiles?user_id=${encodeURIComponent(userId ?? '')}`, {
+          headers: { Authorization: auth ?? '' },
+        });
+        const body = (await response.json()) as {
+          profile?: { preferences_version?: string | null };
+        };
+        return body.profile?.preferences_version ?? null;
+      },
+      [apiMock.expectedAuthorization, SYNTHETIC_USER_A.userId] as const,
+    );
+
+    // A newer marked save advances the stored version.
+    await openCard(page, 'google');
+    await keyInput(page, 'google').fill('e2e-newer-google-key');
+    const putResponse = waitForProfilePut(page);
+    await page.getByTestId('llm-save-google').click();
+    expect((await putResponse).status()).toBe(200);
+
+    const oldClientStatus = await page.evaluate(
+      async ([auth, userId, version, currentKey]) => {
+        const response = await fetch('/api/profiles/update', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json', Authorization: auth ?? '' },
+          body: JSON.stringify({
+            user_id: userId,
+            expected_preferences_version: version,
+            preferences: {
+              llm: {
+                keys: { google: currentKey },
+                thinking: {},
+                defaultModel: { provider: 'google', model: 'gemini-3.8-flash' },
+              },
+            },
+          }),
+        });
+        return response.status;
+      },
+      [
+        apiMock.expectedAuthorization,
+        SYNTHETIC_USER_A.userId,
+        capturedVersion,
+        GOOGLE_KEY,
+      ] as const,
+    );
+    // The read-contract fence runs before the version CAS: the stale captured
+    // version is never consulted, so this is 428 rather than 409.
+    expect(oldClientStatus).toBe(428);
+
+    const storedLlm = apiMock.profiles.get(SYNTHETIC_USER_A.userId)?.preferences.llm as
+      { keys?: Record<string, string> } | undefined;
+    expect(storedLlm?.keys?.google).toBe('e2e-newer-google-key');
+  });
+
+  test('should reject a markerless LLM write without creating mock profile storage', async ({
+    authedPage: page,
+    apiMock,
+  }) => {
+    await page.goto('/settings');
+    await waitForPageLoad(page);
+    // Simulate a user with no stored profile yet at the rejected request.
+    apiMock.profiles.delete(SYNTHETIC_USER_A.userId);
+
+    const status = await page.evaluate(
+      async ([auth, userId]) => {
+        const response = await fetch('/api/profiles/update', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json', Authorization: auth ?? '' },
+          body: JSON.stringify({
+            user_id: userId,
+            expected_preferences_version: null,
+            preferences: {
+              llm: {
+                keys: { google: 'stale-key' },
+                thinking: {},
+                defaultModel: { provider: 'google', model: 'gemini-3.8-flash' },
+              },
+            },
+          }),
+        });
+        return response.status;
+      },
+      [apiMock.expectedAuthorization, SYNTHETIC_USER_A.userId] as const,
+    );
+
+    expect(status).toBe(428);
+    // The real route performs no storage access before the contract check.
+    expect(apiMock.profiles.has(SYNTHETIC_USER_A.userId)).toBe(false);
+  });
+
+  test('should refuse a conflicted LLM replay when the refetch has no read contract', async ({
+    authedPage: page,
+    apiMock,
+  }) => {
+    apiMock.seedProfile(SYNTHETIC_USER_A, {
+      llm: {
+        keys: { google: GOOGLE_KEY },
+        thinking: {},
+        defaultModel: { provider: 'google', model: 'gemini-3.8-flash' },
+      },
+    });
+    const secondTab = await page.context().newPage();
+    await gotoSettings(page);
+    await gotoSettings(secondTab);
+
+    await openCard(page, 'google');
+    await keyInput(page, 'google').fill('e2e-first-tab-key');
+    const firstSave = waitForProfilePut(page);
+    await page.getByTestId('llm-save-google').click();
+    expect((await firstSave).status()).toBe(200);
+
+    // The refetch after the conflict is served without the contract.
+    apiMock.readContract = null;
+    await openCard(secondTab, 'openai');
+    await keyInput(secondTab, 'openai').fill(OPENAI_KEY);
+    const conflict = secondTab.waitForResponse(
+      (response) => response.url().includes('/api/profiles/update') && response.status() === 409,
+    );
+    await secondTab.getByTestId('llm-save-openai').click();
+    expect((await conflict).status()).toBe(409);
+
+    await expect(secondTab.getByTestId('llm-reload-required')).toBeVisible();
+    // Only the first tab's save and the second tab's conflicted attempt were sent.
+    expect(apiMock.profilePuts).toHaveLength(2);
+    const storedLlm = apiMock.profiles.get(SYNTHETIC_USER_A.userId)?.preferences.llm as
+      { keys?: Record<string, string> } | undefined;
+    expect(storedLlm?.keys?.openai).toBeUndefined();
     await secondTab.close();
   });
 
@@ -598,6 +771,55 @@ test.describe('LLM Settings - Session and profile integrity', () => {
     await expect(keyInput(page, 'google')).toHaveValue('');
   });
 
+  test('should recover an unknown stored provider and keep explicit clears on save', async ({
+    authedPage: page,
+    apiMock,
+  }) => {
+    apiMock.seedProfile(SYNTHETIC_USER_A, {
+      llm: {
+        keys: { google: GOOGLE_KEY, openai: OPENAI_KEY },
+        thinking: { 'gemini-4-argon': 'high', 'gpt-6.1-sol': 'medium' },
+        defaultModel: { provider: 'retired-provider', model: 'retired-model' },
+      },
+    });
+    await gotoSettings(page);
+
+    // An unknown stored provider reads back as the Google default without
+    // dropping the recoverable keys or thinking overrides.
+    await expect(page.getByText('Active: Google • gemini-3.8-flash')).toBeVisible();
+    await openCard(page, 'google');
+    await expect(keyInput(page, 'google')).toHaveValue(GOOGLE_KEY);
+    await expect(page.getByTestId('llm-effort-gemini-4-argon')).toHaveValue('high');
+
+    await keyInput(page, 'google').fill('');
+    await page.getByTestId('llm-effort-gemini-4-argon').click();
+    await page.getByRole('option', { name: 'Default', exact: true }).click();
+    const putResponse = waitForProfilePut(page);
+    await page.getByTestId('llm-save-google').click();
+    expect((await putResponse).status()).toBe(200);
+
+    // An explicit llm replacement is authoritative: the cleared key and effort
+    // are gone and no tombstone entries are written.
+    expect(llmOf(apiMock.lastPut())).toEqual({
+      keys: { openai: OPENAI_KEY },
+      thinking: { 'gpt-6.1-sol': 'medium' },
+      defaultModel: { provider: 'google', model: 'gemini-3.8-flash' },
+    });
+
+    await page.reload();
+    await waitForPageLoad(page);
+    await expect(page.getByText('Active: Google • gemini-3.8-flash')).toBeVisible();
+
+    await openCard(page, 'google');
+    await expect(keyInput(page, 'google')).toHaveValue('');
+    await expect(page.getByTestId('llm-card-google').getByText('No key saved')).toBeVisible();
+    await expect(page.getByTestId('llm-effort-gemini-4-argon')).toHaveValue('Default');
+
+    await openCard(page, 'openai');
+    await expect(keyInput(page, 'openai')).toHaveValue(OPENAI_KEY);
+    await expect(page.getByTestId('llm-effort-gpt-6.1-sol')).toHaveValue('medium');
+  });
+
   test('should reset LLM state for a new user after sign-out', async ({
     authedPage: page,
     apiMock,
@@ -815,7 +1037,11 @@ test.describe('LLM Settings - Theme and TTS regression', () => {
 
     const prefs = apiMock.lastPut()?.preferences as Record<string, unknown>;
     expect(prefs.darkMode).toBe(true);
-    expect(llmOf(apiMock.lastPut()).keys?.google).toBe(GOOGLE_KEY);
+    // Unrelated saves omit llm entirely so the API keeps the raw stored subtree.
+    expect(prefs.llm).toBeUndefined();
+    const storedLlm = apiMock.profiles.get(SYNTHETIC_USER_A.userId)?.preferences.llm as
+      { keys?: Record<string, string> } | undefined;
+    expect(storedLlm?.keys?.google).toBe(GOOGLE_KEY);
   });
 
   test('should keep TTS save disabled without a key and accept a saved key', async ({

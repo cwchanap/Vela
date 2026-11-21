@@ -91,6 +91,8 @@ export interface ProfileData {
   native_language?: string | undefined;
   preferences?: Record<string, unknown> | undefined;
   expected_preferences_version?: string | null | undefined;
+  // Explicit llm replacement proof from a complete read contract snapshot.
+  llm_write_contract?: string | undefined;
 }
 
 export interface AppUser {
@@ -121,6 +123,7 @@ interface ProfileApiRecord {
   last_activity?: string | null;
   preferences?: Record<string, unknown>;
   preferences_version?: string | null;
+  preferences_read_contract?: string | null;
   created_at?: string;
   updated_at?: string;
 }
@@ -137,6 +140,7 @@ const normalizeProfileRecord = (record: ProfileApiRecord): Profile => ({
   last_activity: record.last_activity ?? null,
   preferences: (record.preferences ?? {}) as unknown as Profile['preferences'],
   preferences_version: record.preferences_version ?? null,
+  preferences_read_contract: record.preferences_read_contract ?? null,
   created_at: record.created_at ?? '',
   updated_at: record.updated_at ?? '',
 });

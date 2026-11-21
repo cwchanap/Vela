@@ -1,8 +1,9 @@
 import { describe, test, expect, beforeEach, vi } from 'bun:test';
 import { Hono } from 'hono';
-import { LLM_PROVIDER_REGISTRY } from '@vela/common/contracts/llm';
+import { LLM_PROVIDER_REGISTRY, PREFERENCES_READ_CONTRACT } from '@vela/common/contracts/llm';
 import type { Env } from '../../src/types';
 import { profiles } from '../../src/routes/profiles';
+import { PreferencesReadSchema } from '../../src/profile-preferences';
 
 const mockProfilesDb = {
   get: vi.fn(),
@@ -449,6 +450,7 @@ describe('Profiles Route', () => {
       body: JSON.stringify({
         user_id: 'test-user',
         expected_preferences_version: null,
+        llm_write_contract: PREFERENCES_READ_CONTRACT,
         preferences: { dailyGoal: 45, darkMode: true, llm },
       }),
     });
@@ -497,6 +499,7 @@ describe('Profiles Route', () => {
       body: JSON.stringify({
         user_id: 'test-user',
         expected_preferences_version: null,
+        llm_write_contract: PREFERENCES_READ_CONTRACT,
         preferences: { llm },
       }),
     });
@@ -618,6 +621,7 @@ describe('Profiles Route', () => {
         body: JSON.stringify({
           user_id: 'test-user',
           expected_preferences_version: null,
+          llm_write_contract: PREFERENCES_READ_CONTRACT,
           preferences: { llm },
         }),
       });
@@ -643,25 +647,39 @@ describe('Profiles Route', () => {
       body: JSON.stringify({
         user_id: 'test-user',
         expected_preferences_version: null,
+        llm_write_contract: PREFERENCES_READ_CONTRACT,
         preferences: { llm: cleaned },
       }),
     });
     expect(write.status).toBe(200);
   });
 
-  test('preserves an unreadable llm subtree during an unrelated preference save', async () => {
+  test('GET / sanitizes an unknown stored provider and an unrelated save keeps raw llm', async () => {
     const llm = {
-      keys: { openai: 'keep-me' },
-      thinking: {},
-      defaultModel: { provider: 'unknown', model: 'x' },
+      keys: { google: 'google-key', openai: 'keep-me' },
+      thinking: { 'gemini-3.8-flash': 'high' },
+      defaultModel: { provider: 'unknown', model: 'retired-model' },
     };
     mockProfilesDb.get.mockImplementation(() =>
       Promise.resolve(structuredClone({ user_id: 'test-user', preferences: { llm } })),
     );
     mockProfilesDb.update.mockResolvedValueOnce({ user_id: 'test-user' });
     const app = createTestApp();
-    const read = await app.request('/?user_id=test-user');
-    expect((await read.json()).profile.preferences.llm).toBeUndefined();
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const read = await app.request('/?user_id=test-user');
+      expect((await read.json()).profile.preferences.llm).toEqual({
+        ...llm,
+        defaultModel: { provider: 'google', model: LLM_PROVIDER_REGISTRY.google.defaultModel },
+      });
+      expect(mockProfilesDb.update).not.toHaveBeenCalled();
+      const warned = warn.mock.calls.flat().join(' ');
+      expect(warned).toContain('defaultModel');
+      expect(warned).not.toContain('retired-model');
+      expect(warned).not.toContain('google-key');
+    } finally {
+      warn.mockRestore();
+    }
     const write = await app.request('/update', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
@@ -675,18 +693,43 @@ describe('Profiles Route', () => {
     expect(mockProfilesDb.update.mock.calls[0][1].preferences.llm).toEqual(llm);
   });
 
-  test('retains valid saved keys when a new default repairs an unreadable llm subtree', async () => {
-    const llm = {
-      keys: { openai: 'keep-me' },
-      thinking: { 'gpt-6.1-sol': 'high' },
-      defaultModel: { provider: 'unknown', model: 'x' },
+  test('GET / substitutes the Google default pair when stored defaultModel is missing', async () => {
+    mockProfilesDb.get.mockResolvedValueOnce({
+      user_id: 'test-user',
+      preferences: {
+        llm: {
+          keys: { openai: 'openai-key' },
+          thinking: { 'gpt-6.1-sol': 'low' },
+        },
+      },
+    });
+    const res = await createTestApp().request('/?user_id=test-user');
+    expect(res.status).toBe(200);
+    const llm = (await res.json()).profile.preferences.llm;
+    expect(llm.keys).toEqual({ openai: 'openai-key' });
+    expect(llm.thinking).toEqual({ 'gpt-6.1-sol': 'low' });
+    expect(llm.defaultModel).toEqual({
+      provider: 'google',
+      model: LLM_PROVIDER_REGISTRY.google.defaultModel,
+    });
+    expect(mockProfilesDb.update).not.toHaveBeenCalled();
+  });
+
+  test('explicit llm PUT stores the replacement exactly as sent', async () => {
+    const stored = {
+      keys: { google: 'google-key', openai: 'openai-key' },
+      thinking: { 'gemini-3.8-flash': 'high', 'gpt-6.1-sol': 'low' },
+      defaultModel: { provider: 'google', model: 'gemini-3.8-flash' },
     };
-    mockProfilesDb.get.mockResolvedValueOnce({ user_id: 'test-user', preferences: { llm } });
+    mockProfilesDb.get.mockResolvedValueOnce({
+      user_id: 'test-user',
+      preferences: { llm: stored },
+    });
     mockProfilesDb.update.mockResolvedValueOnce({ user_id: 'test-user' });
     const replacement = {
-      keys: {},
-      thinking: {},
-      defaultModel: { provider: 'google', model: 'gemini-3.8-flash' },
+      keys: { openai: 'openai-key' },
+      thinking: { 'gpt-6.1-sol': 'low' },
+      defaultModel: stored.defaultModel,
     };
     const response = await createTestApp().request('/update', {
       method: 'PUT',
@@ -694,15 +737,282 @@ describe('Profiles Route', () => {
       body: JSON.stringify({
         user_id: 'test-user',
         expected_preferences_version: null,
+        llm_write_contract: PREFERENCES_READ_CONTRACT,
         preferences: { llm: replacement },
       }),
     });
     expect(response.status).toBe(200);
-    expect(mockProfilesDb.update.mock.calls[0][1].preferences.llm).toEqual({
-      ...replacement,
-      keys: { openai: 'keep-me' },
-      thinking: { 'gpt-6.1-sol': 'high' },
+    expect(mockProfilesDb.update.mock.calls[0][1].preferences.llm).toEqual(replacement);
+  });
+
+  test('GET then explicit llm PUT deletes cleared entries without resurrecting stored values', async () => {
+    const stored = {
+      keys: { google: 'google-key', openai: 'openai-key' },
+      thinking: { 'gemini-3.8-flash': 'high', 'gpt-6.1-sol': 'low' },
+      defaultModel: { provider: 'retired-provider', model: 'retired-model' },
+    };
+    mockProfilesDb.get.mockImplementation(() =>
+      Promise.resolve(structuredClone({ user_id: 'test-user', preferences: { llm: stored } })),
+    );
+    mockProfilesDb.update.mockResolvedValueOnce({ user_id: 'test-user' });
+    const app = createTestApp();
+    const readLlm = (await (await app.request('/?user_id=test-user')).json()).profile.preferences
+      .llm;
+    const replacement = {
+      keys: { openai: readLlm.keys.openai },
+      thinking: { 'gpt-6.1-sol': readLlm.thinking['gpt-6.1-sol'] },
+      defaultModel: readLlm.defaultModel,
+    };
+    const write = await app.request('/update', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        user_id: 'test-user',
+        expected_preferences_version: null,
+        llm_write_contract: PREFERENCES_READ_CONTRACT,
+        preferences: { llm: replacement },
+      }),
     });
+    expect(write.status).toBe(200);
+    const persisted = mockProfilesDb.update.mock.calls[0][1].preferences.llm;
+    expect(persisted).toEqual(replacement);
+    expect(persisted.keys).toEqual({ openai: 'openai-key' });
+    expect(persisted.thinking).toEqual({ 'gpt-6.1-sol': 'low' });
+    expect(persisted.defaultModel).toEqual({
+      provider: 'google',
+      model: LLM_PROVIDER_REGISTRY.google.defaultModel,
+    });
+  });
+
+  test('GET / advertises the read contract without persisting it', async () => {
+    const stored = { dailyGoal: 45, llm: { keys: { google: 'saved' }, thinking: {} } };
+    mockProfilesDb.get.mockResolvedValueOnce({
+      user_id: 'test-user',
+      preferences: structuredClone(stored),
+    });
+    const res = await createTestApp().request('/?user_id=test-user');
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.profile.preferences_read_contract).toBe(PREFERENCES_READ_CONTRACT);
+    expect(json.profile.preferences).not.toHaveProperty('preferences_read_contract');
+    expect(json.profile.preferences.llm.keys).toEqual({ google: 'saved' });
+    expect(mockProfilesDb.update).not.toHaveBeenCalled();
+  });
+
+  test('PUT /update advertises the read contract on the sanitized response only', async () => {
+    mockProfilesDb.get.mockResolvedValueOnce({ user_id: 'test-user', preferences: {} });
+    mockProfilesDb.update.mockResolvedValueOnce({
+      user_id: 'test-user',
+      preferences: { dailyGoal: 30, llm: { keys: { openai: 'k' }, thinking: {} } },
+      // A stored response marker must be replaced, never echoed on trust.
+      preferences_read_contract: 'stale-stored-marker',
+    });
+    const res = await createTestApp().request('/update', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        user_id: 'test-user',
+        expected_preferences_version: null,
+        llm_write_contract: PREFERENCES_READ_CONTRACT,
+        // A client echoing response metadata must not get it stored.
+        preferences_read_contract: PREFERENCES_READ_CONTRACT,
+        preferences: {
+          preferences_read_contract: PREFERENCES_READ_CONTRACT,
+          llm: {
+            keys: { openai: 'k' },
+            thinking: {},
+            defaultModel: {
+              provider: 'openai',
+              model: 'gpt-6.1-sol',
+            },
+          },
+        },
+      }),
+    });
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.profile.preferences_read_contract).toBe(PREFERENCES_READ_CONTRACT);
+    // Neither marker is stored: the update payload only carries preferences.
+    expect(mockProfilesDb.update.mock.calls[0][1]).not.toHaveProperty('llm_write_contract');
+    expect(mockProfilesDb.update.mock.calls[0][1].preferences).not.toHaveProperty(
+      'preferences_read_contract',
+    );
+    expect(mockProfilesDb.update.mock.calls[0][1].preferences).not.toHaveProperty(
+      'llm_write_contract',
+    );
+  });
+
+  test('PUT /update strips a stored read marker when sanitization fails', async () => {
+    mockProfilesDb.get.mockResolvedValueOnce({ user_id: 'test-user', preferences: {} });
+    mockProfilesDb.update.mockResolvedValueOnce({
+      user_id: 'test-user',
+      preferences: { darkMode: true },
+      preferences_read_contract: PREFERENCES_READ_CONTRACT,
+    });
+    const parseSpy = vi.spyOn(PreferencesReadSchema, 'safeParse').mockReturnValueOnce({
+      success: false,
+      error: new Error('sanitization failed'),
+    } as never);
+    try {
+      const res = await createTestApp().request('/update', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          user_id: 'test-user',
+          expected_preferences_version: null,
+          llm_write_contract: PREFERENCES_READ_CONTRACT,
+          preferences: {
+            llm: {
+              keys: { google: 'k' },
+              thinking: {},
+              defaultModel: { provider: 'google', model: 'gemini-3.8-flash' },
+            },
+          },
+        }),
+      });
+      expect(res.status).toBe(200);
+      const json = await res.json();
+      expect(json.success).toBe(true);
+      expect(json.profile).not.toHaveProperty('preferences_read_contract');
+    } finally {
+      parseSpy.mockRestore();
+    }
+  });
+
+  test('PUT /update strips a stored read marker when sanitization is skipped', async () => {
+    mockProfilesDb.update.mockResolvedValueOnce({
+      user_id: 'test-user',
+      username: 'stored-name',
+      preferences_read_contract: PREFERENCES_READ_CONTRACT,
+    });
+    const res = await createTestApp().request('/update', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ user_id: 'test-user', username: 'new-name' }),
+    });
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.profile.username).toBe('stored-name');
+    expect(json.profile).not.toHaveProperty('preferences_read_contract');
+  });
+
+  test('PUT /update omits the read contract when committed preferences cannot be sanitized', async () => {
+    mockProfilesDb.get.mockResolvedValueOnce({ user_id: 'test-user', preferences: {} });
+    mockProfilesDb.update.mockResolvedValueOnce({
+      user_id: 'test-user',
+      preferences: { llm: { keys: { google: 'k' }, thinking: {} } },
+      preferences_read_contract: PREFERENCES_READ_CONTRACT,
+    });
+    const parseSpy = vi.spyOn(PreferencesReadSchema, 'safeParse').mockImplementationOnce(() => {
+      throw new Error('sanitization failed');
+    });
+    try {
+      const res = await createTestApp().request('/update', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          user_id: 'test-user',
+          expected_preferences_version: null,
+          llm_write_contract: PREFERENCES_READ_CONTRACT,
+          preferences: {
+            llm: {
+              keys: { google: 'k' },
+              thinking: {},
+              defaultModel: {
+                provider: 'google',
+                model: 'gemini-3.8-flash',
+              },
+            },
+          },
+        }),
+      });
+      expect(res.status).toBe(200);
+      const json = await res.json();
+      expect(json.success).toBe(true);
+      expect(json.profile).not.toHaveProperty('preferences_read_contract');
+    } finally {
+      parseSpy.mockRestore();
+    }
+  });
+
+  test('PUT /update refuses an explicit llm replacement without the write marker', async () => {
+    const app = createTestApp();
+    const llm = {
+      keys: { google: 'k' },
+      thinking: {},
+      defaultModel: { provider: 'google', model: 'gemini-3.8-flash' },
+    };
+    for (const body of [
+      // existing version: must not rely on the version CAS
+      {
+        user_id: 'test-user',
+        expected_preferences_version: crypto.randomUUID(),
+        preferences: { llm },
+      },
+      // absent version: still a reload requirement, not a version error
+      { user_id: 'test-user', preferences: { llm } },
+    ]) {
+      const res = await app.request('/update', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      expect(res.status).toBe(428);
+      expect(((await res.json()) as { error: string }).error).toContain('Reload');
+    }
+    expect(mockProfilesDb.get).not.toHaveBeenCalled();
+    expect(mockProfilesDb.update).not.toHaveBeenCalled();
+  });
+
+  test('PUT /update rejects a malformed or unsupported write marker with 400', async () => {
+    const app = createTestApp();
+    const llm = {
+      keys: {},
+      thinking: {},
+      defaultModel: { provider: 'google', model: 'gemini-3.8-flash' },
+    };
+    for (const marker of ['complete-llm-v2', '', 1, null, true]) {
+      const res = await app.request('/update', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          user_id: 'test-user',
+          expected_preferences_version: null,
+          llm_write_contract: marker,
+          preferences: { llm },
+        }),
+      });
+      expect(res.status).toBe(400);
+    }
+    expect(mockProfilesDb.update).not.toHaveBeenCalled();
+  });
+
+  test('PUT /update without llm needs no write marker and keeps the raw stored subtree', async () => {
+    const rawLlm = {
+      keys: { google: 'kept' },
+      thinking: { 'gemini-4-argon': 'high' },
+      defaultModel: { provider: 'retired-provider', model: 'retired-model' },
+    };
+    mockProfilesDb.get.mockResolvedValueOnce({
+      user_id: 'test-user',
+      preferences: { llm: structuredClone(rawLlm) },
+    });
+    mockProfilesDb.update.mockResolvedValueOnce({
+      user_id: 'test-user',
+      preferences: { darkMode: true, llm: structuredClone(rawLlm) },
+    });
+    const res = await createTestApp().request('/update', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        user_id: 'test-user',
+        expected_preferences_version: null,
+        preferences: { darkMode: true },
+      }),
+    });
+    expect(res.status).toBe(200);
+    expect(mockProfilesDb.update.mock.calls[0][1].preferences.llm).toEqual(rawLlm);
+    expect(mockProfilesDb.update.mock.calls[0][1]).not.toHaveProperty('llm_write_contract');
   });
 
   test('GET / drops invalid darkMode values from stored profiles without 500', async () => {

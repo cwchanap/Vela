@@ -4,6 +4,7 @@ import {
   LLM_PROVIDER_REGISTRY,
   LLM_PROVIDERS,
   MAX_LLM_THINKING_OVERRIDES,
+  PREFERENCES_READ_CONTRACT,
   type LlmModelPair,
   type LlmProvider,
   type LlmEffort,
@@ -95,12 +96,16 @@ export const useLLMSettingsStore = defineStore('llmSettings', () => {
     immediate: true,
   });
 
+  // Refuse before enqueueing: a form captured from an unsafe snapshot must not
+  // gain authorization from a later unrelated save's refreshed version.
+  const canReplaceLlm = () => auth.user?.preferences_read_contract === PREFERENCES_READ_CONTRACT;
+
   const saveProvider = async (
     provider: LlmProvider,
     key: string | null | undefined,
     thinkingPatch: LlmThinkingPatch = {},
   ): Promise<boolean> => {
-    if (!auth.user) return false;
+    if (!auth.user || !canReplaceLlm()) return false;
     const trimmed = (key ?? '').trim();
     const allowedModelIds = new Set(
       LLM_PROVIDER_REGISTRY[provider].models?.map((model) => model.id) ?? [],
@@ -135,7 +140,7 @@ export const useLLMSettingsStore = defineStore('llmSettings', () => {
   };
 
   const saveDefault = async (pair: LlmModelPair): Promise<boolean> => {
-    if (!auth.user) return false;
+    if (!auth.user || !canReplaceLlm()) return false;
     return await auth.updatePreferences((current) => {
       const next = isLlmPreferences(current.llm) ? cloneLlm(current.llm) : emptyLlm();
       next.defaultModel = { provider: pair.provider, model: pair.model };

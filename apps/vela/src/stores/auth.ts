@@ -4,7 +4,7 @@ import { authService, type ProfileData } from '../services/authService';
 import type { UserPreferences, Profile } from '../types/shared';
 import type { AppSession } from '../services/authService';
 import { queryClient, QUERY_STALE_TIME } from '../boot/query';
-import { authKeys } from '@vela/common';
+import { authKeys, PREFERENCES_READ_CONTRACT } from '@vela/common';
 import { clearAudioUrlCache } from '../services/ttsService';
 
 export interface User {
@@ -18,12 +18,14 @@ export interface User {
   native_language: string;
   preferences: UserPreferences;
   preferences_version?: string | null;
+  preferences_read_contract?: string | null;
   last_activity?: string | undefined;
   created_at: string;
   updated_at: string;
 }
 
 const AUTH_REDIRECT_STORAGE_KEY = 'vela.auth.redirectTo';
+const LLM_RELOAD_REQUIRED_MESSAGE = 'Reload the page before saving LLM settings.';
 
 const getSafeAuthRedirect = (redirectTo: unknown): string => {
   if (typeof redirectTo !== 'string') {
@@ -404,6 +406,10 @@ export const useAuthStore = defineStore('auth', () => {
   const userName = computed(
     () => user.value?.username || user.value?.email?.split('@')[0] || 'User',
   );
+  // Only a sanitized API read may authorise an LLM preference replacement.
+  const hasCompleteLlmSnapshot = computed(
+    () => user.value?.preferences_read_contract === PREFERENCES_READ_CONTRACT,
+  );
 
   // Actions
   const setUser = (userData: User | null) => {
@@ -471,6 +477,7 @@ export const useAuthStore = defineStore('auth', () => {
     native_language: profile.native_language,
     preferences: profile.preferences as unknown as UserPreferences,
     preferences_version: profile.preferences_version ?? null,
+    preferences_read_contract: profile.preferences_read_contract ?? null,
     last_activity: profile.last_activity || undefined,
     created_at: profile.created_at,
     updated_at: profile.updated_at,
@@ -488,6 +495,7 @@ export const useAuthStore = defineStore('auth', () => {
     last_activity: source.last_activity ?? null,
     preferences: source.preferences,
     preferences_version: source.preferences_version ?? null,
+    preferences_read_contract: source.preferences_read_contract ?? null,
     created_at: source.created_at,
     updated_at: source.updated_at,
   });
@@ -538,13 +546,20 @@ export const useAuthStore = defineStore('auth', () => {
           recordCoversFingerprint(tracked.profile, fingerprint)))
     ) {
       const reconciled = reconcileAcknowledgedProfile(tracked.profile, fingerprint, baseline);
+      // These preferences are retained from the tracked snapshot, so its read
+      // contract must travel with them: a marked acknowledgment of different
+      // preferences cannot mark this snapshot complete.
+      const reconciledProfile = {
+        ...reconciled.profile,
+        preferences_read_contract: tracked.profile.preferences_read_contract ?? null,
+      };
       lastAcknowledgedProfile = {
-        profile: reconciled.profile,
+        profile: reconciledProfile,
         fingerprint: mergeFingerprints(tracked.fingerprint, reconciled.fingerprint),
         generation,
         supersededPreferencesVersions,
       };
-      setUser(userFromProfile(reconciled.profile));
+      setUser(userFromProfile(reconciledProfile));
       return;
     }
     lastAcknowledgedProfile = {
@@ -796,13 +811,36 @@ export const useAuthStore = defineStore('auth', () => {
             resolvedPreferences === undefined
               ? profileFields
               : { ...profileFields, preferences: resolvedPreferences };
-          mergedProfileData =
+          const snapshotComplete = current.preferences_read_contract === PREFERENCES_READ_CONTRACT;
+          const replacesLlm =
+            resolvedPreferences !== undefined && Object.hasOwn(resolvedPreferences, 'llm');
+          if (replacesLlm && !snapshotComplete) {
+            // Never send an LLM replacement derived from a possibly incomplete
+            // read, including a 409 replay after an unsafe refetch.
+            setError(LLM_RELOAD_REQUIRED_MESSAGE);
+            return false;
+          }
+          const mergedPreferences: Record<string, unknown> | undefined =
             resolvedPreferences === undefined
+              ? undefined
+              : { ...current.preferences, ...resolvedPreferences };
+          if (mergedPreferences && !replacesLlm) {
+            // An unrelated save must never ship the stored llm view — even a
+            // complete one, which is a sanitized copy whose fallback defaults
+            // would overwrite the raw stored subtree. Omitting it makes the
+            // API keep the raw stored subtree.
+            delete mergedPreferences.llm;
+          }
+          mergedProfileData =
+            mergedPreferences === undefined
               ? resolvedProfileData
               : {
                   ...resolvedProfileData,
-                  preferences: { ...current.preferences, ...resolvedPreferences },
+                  preferences: mergedPreferences,
                   expected_preferences_version: current.preferences_version ?? null,
+                  ...(snapshotComplete && Object.hasOwn(mergedPreferences, 'llm')
+                    ? { llm_write_contract: PREFERENCES_READ_CONTRACT }
+                    : {}),
                 };
           response = await authService.updateUserProfile(userId, mergedProfileData);
           if (response.status !== 409 || attempt !== 0 || resolvedPreferences === undefined) break;
@@ -832,11 +870,13 @@ export const useAuthStore = defineStore('auth', () => {
                 ? 'Settings changed elsewhere. Please try saving again.'
                 : response?.status === 400
                   ? 'Some settings are invalid. Check your entries and try again.'
-                  : response?.status === 401 || response?.status === 403
-                    ? 'Your session cannot save settings. Please sign in again.'
-                    : response?.status
-                      ? `Save failed (HTTP ${response.status}). Please try again.`
-                      : response?.error || 'Profile update failed',
+                  : response?.status === 428
+                    ? LLM_RELOAD_REQUIRED_MESSAGE
+                    : response?.status === 401 || response?.status === 403
+                      ? 'Your session cannot save settings. Please sign in again.'
+                      : response?.status
+                        ? `Save failed (HTTP ${response.status}). Please try again.`
+                        : response?.error || 'Profile update failed',
             );
           }
           return false;
@@ -978,6 +1018,7 @@ export const useAuthStore = defineStore('auth', () => {
     userExperience,
     userStreak,
     userName,
+    hasCompleteLlmSnapshot,
     // Actions
     setUser,
     setSession,
