@@ -3,12 +3,13 @@ import { zValidator } from '@hono/zod-validator';
 import { z } from 'zod';
 import {
   ExpectedPreferencesVersionSchema,
+  llmMatchesReadSnapshot,
   LlmWriteContractSchema,
   normalizePreferences,
   preserveStoredLlm,
-  PreferencesReadSchema,
   PreferencesSchema,
   replacesLlm,
+  sanitizePreferencesForRead,
 } from '../profile-preferences';
 import { PREFERENCES_READ_CONTRACT } from '@vela/common/contracts/llm';
 import type { Env } from '../types';
@@ -82,20 +83,21 @@ const createProfilesRoute = (env: Env) => {
         }
       }
       const rawPreferences = profile.preferences;
-      const normalizedPreferences = normalizePreferences(rawPreferences);
-      const parsedPreferences = PreferencesReadSchema.safeParse(normalizedPreferences);
+      const sanitized = sanitizePreferencesForRead(rawPreferences);
 
-      if (!parsedPreferences.success) {
+      if (!sanitized) {
         console.error('Invalid preferences data for user_id:', user_id);
         return c.json({ error: 'Invalid preferences data' }, 500);
       }
 
       // Return normalized preferences without persisting them on GET. The
       // read-contract marker is response metadata only and is never stored.
-      profile.preferences = parsedPreferences.data;
+      profile.preferences = sanitized.preferences;
 
       return c.json({
-        profile: { ...profile, preferences_read_contract: PREFERENCES_READ_CONTRACT },
+        profile: sanitized.isCompleteLlmSnapshot
+          ? { ...profile, preferences_read_contract: PREFERENCES_READ_CONTRACT }
+          : profile,
       });
     } catch (e) {
       console.error('profiles get error', e);
@@ -119,12 +121,6 @@ const createProfilesRoute = (env: Env) => {
 
       // Normalize preferences if they are being updated
       if (updates.preferences) {
-        // A tab that read an older API cannot prove its LLM snapshot is
-        // complete, so it must reload before replacing llm. This runs before
-        // any storage access or write, so a stale version never authorizes it.
-        if (replacesLlm(updates.preferences) && llm_write_contract === undefined) {
-          return c.json({ error: 'Reload the app before saving LLM settings' }, 428);
-        }
         if (expected_preferences_version === undefined) {
           return c.json({ error: 'Reload your profile before saving preferences' }, 428);
         }
@@ -140,6 +136,20 @@ const createProfilesRoute = (env: Env) => {
 
         updates.preferences = parsedPreferences.data;
         const existing = await profilesDB.get(user_id);
+        // A tab that read an older API cannot prove its LLM snapshot is
+        // complete, so refuse LLM changes without the write marker. Old tabs
+        // still send their full cached preferences on unrelated saves, so if
+        // llm matches what GET would return for the stored profile, ignore it
+        // and let preserveStoredLlm retain the raw stored subtree.
+        if (replacesLlm(updates.preferences) && llm_write_contract === undefined) {
+          if (
+            updates.preferences.llm !== undefined &&
+            !llmMatchesReadSnapshot(updates.preferences.llm, existing?.preferences)
+          ) {
+            return c.json({ error: 'Reload the app before saving LLM settings' }, 428);
+          }
+          delete (updates.preferences as Record<string, unknown>).llm;
+        }
         preserveStoredLlm(updates.preferences as Record<string, unknown>, existing?.preferences);
       }
 
@@ -154,32 +164,27 @@ const createProfilesRoute = (env: Env) => {
         // before handling the committed record and add it back only after
         // sanitization succeeds.
         delete updatedProfile.preferences_read_contract;
-        if (updatedProfile.preferences) {
-          // The update already committed, so a malformed stored preference must
-          // not turn this success response into an error. Sanitize when possible
-          // and fall back to the committed record otherwise. Only a sanitized
-          // response advertises the read contract.
-          try {
-            const parsedPreferences = PreferencesReadSchema.safeParse(
-              normalizePreferences(updatedProfile.preferences),
-            );
-            if (parsedPreferences.success) {
-              updatedProfile.preferences = parsedPreferences.data;
+        // The update already committed, so a malformed stored preference must
+        // not turn this success response into an error. Sanitize when possible
+        // (including profiles with no stored preferences yet) and fall back to
+        // the committed record otherwise. Only a complete, sanitized response
+        // advertises the read contract.
+        try {
+          const sanitized = sanitizePreferencesForRead(updatedProfile.preferences);
+          if (sanitized) {
+            updatedProfile.preferences = sanitized.preferences;
+            if (sanitized.isCompleteLlmSnapshot) {
               updatedProfile.preferences_read_contract = PREFERENCES_READ_CONTRACT;
-            } else {
-              console.error(
-                'Committed preferences failed sanitization for user_id:',
-                user_id,
-                parsedPreferences.error,
-              );
             }
-          } catch (sanitizeError) {
-            console.error(
-              'Preferences sanitization threw for committed profile, user_id:',
-              user_id,
-              sanitizeError,
-            );
+          } else {
+            console.error('Committed preferences failed sanitization for user_id:', user_id);
           }
+        } catch (sanitizeError) {
+          console.error(
+            'Preferences sanitization threw for committed profile, user_id:',
+            user_id,
+            sanitizeError,
+          );
         }
       }
       return c.json({ success: true, profile: updatedProfile });

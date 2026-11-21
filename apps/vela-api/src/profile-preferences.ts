@@ -100,13 +100,72 @@ export const preserveStoredLlm = (next: Record<string, unknown>, stored: unknown
   if (next.llm === undefined) next.llm = stored.llm;
 };
 
+const isSameJsonValue = (a: unknown, b: unknown): boolean => {
+  if (a === b) return true;
+  if (typeof a !== 'object' || a === null || typeof b !== 'object' || b === null) {
+    return false;
+  }
+  if (Array.isArray(a) || Array.isArray(b)) {
+    return (
+      Array.isArray(a) &&
+      Array.isArray(b) &&
+      a.length === b.length &&
+      a.every((item, index) => isSameJsonValue(item, b[index]))
+    );
+  }
+  const aRecord = a as Record<string, unknown>;
+  const bRecord = b as Record<string, unknown>;
+  const aKeys = Object.keys(aRecord).filter((key) => aRecord[key] !== undefined);
+  const bKeys = Object.keys(bRecord).filter((key) => bRecord[key] !== undefined);
+  return (
+    aKeys.length === bKeys.length &&
+    aKeys.every((key) => Object.hasOwn(bRecord, key) && isSameJsonValue(aRecord[key], bRecord[key]))
+  );
+};
+
+// Returns true when stored llm.keys contains a valid key for a provider this
+// build does not recognize (e.g. after a rollback across a provider change),
+// meaning the GET view dropped that key and is not complete.
+export const hasUnrecognizedLlmKey = (preferences: unknown): boolean => {
+  if (!isPlainObject(preferences) || !isPlainObject(preferences.llm)) return false;
+  const rawKeys = preferences.llm.keys;
+  if (!isPlainObject(rawKeys)) return false;
+  return Object.entries(rawKeys).some(
+    ([provider, key]) => !isKnownProvider(provider) && typeof key === 'string' && key.length > 0,
+  );
+};
+
+// Returns true when a markerless PUT's `llm` matches what GET would return for
+// the stored profile's `llm` subtree (old tabs send their full cached preferences
+// on unrelated saves such as darkMode or dailyGoal).
+export const llmMatchesReadSnapshot = (sentLlm: unknown, storedPreferences: unknown): boolean => {
+  const rawStoredLlm = isPlainObject(storedPreferences) ? storedPreferences.llm : undefined;
+  const parsed = LlmPreferencesReadSchema.safeParse(rawStoredLlm);
+  const readLlm = parsed.success ? parsed.data : undefined;
+  if (sentLlm === undefined) return readLlm === undefined;
+  if (readLlm === undefined) return false;
+  return isSameJsonValue(sentLlm, readLlm);
+};
+
+// Sanitizes raw preferences for a read/response and reports whether the
+// resulting LLM view is complete (no unrecognized provider keys were dropped).
+export const sanitizePreferencesForRead = (rawPreferences: unknown) => {
+  const parsed = PreferencesReadSchema.safeParse(normalizePreferences(rawPreferences));
+  if (!parsed.success) return null;
+  return {
+    preferences: parsed.data,
+    isCompleteLlmSnapshot: !hasUnrecognizedLlmKey(rawPreferences),
+  };
+};
+
 // Optimistic-lock token carried on preference writes. Kept here so the route
 // schema and the e2e mock apply the identical validation rule.
 export const ExpectedPreferencesVersionSchema = z.string().uuid().nullable().optional();
 
-// Explicit llm replacement marker. A null/absent marker means the client read
-// an older API; any other string is unsupported. Kept here so the route and the
-// e2e mock validate identically.
+// Explicit llm replacement marker. An absent (undefined) marker indicates an
+// older client or unverified snapshot (rejected with 428 when llm changes);
+// null or any other non-matching value is rejected with 400. Kept here so the
+// route and the e2e mock validate identically.
 export const LlmWriteContractSchema = z.literal(PREFERENCES_READ_CONTRACT).optional();
 
 export const replacesLlm = (preferences: unknown): boolean =>

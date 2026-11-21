@@ -879,10 +879,34 @@ describe('Profiles Route', () => {
     }
   });
 
-  test('PUT /update strips a stored read marker when sanitization is skipped', async () => {
+  test('PUT /update normalizes an uninitialized preferences profile and replaces stale read metadata', async () => {
     mockProfilesDb.update.mockResolvedValueOnce({
       user_id: 'test-user',
       username: 'stored-name',
+      preferences_read_contract: 'stale-stored-marker',
+    });
+    const res = await createTestApp().request('/update', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ user_id: 'test-user', username: 'new-name' }),
+    });
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.profile.username).toBe('stored-name');
+    expect(json.profile.preferences_read_contract).toBe(PREFERENCES_READ_CONTRACT);
+    expect(json.profile.preferences).toEqual({
+      dailyGoal: 30,
+      dailyLessonGoal: 5,
+      lessonDurationMinutes: 6,
+      todayStudyTime: 0,
+    });
+  });
+
+  test('PUT /update strips a stored read marker when sanitization fails', async () => {
+    mockProfilesDb.update.mockResolvedValueOnce({
+      user_id: 'test-user',
+      username: 'stored-name',
+      preferences: { difficulty: 123 },
       preferences_read_contract: PREFERENCES_READ_CONTRACT,
     });
     const res = await createTestApp().request('/update', {
@@ -935,21 +959,31 @@ describe('Profiles Route', () => {
     }
   });
 
-  test('PUT /update refuses an explicit llm replacement without the write marker', async () => {
+  test('PUT /update refuses a changed llm replacement without the write marker', async () => {
     const app = createTestApp();
     const llm = {
       keys: { google: 'k' },
       thinking: {},
       defaultModel: { provider: 'google', model: 'gemini-3.8-flash' },
     };
+    mockProfilesDb.get.mockResolvedValueOnce({
+      user_id: 'test-user',
+      preferences: {
+        llm: {
+          keys: { google: 'old-k' },
+          thinking: {},
+          defaultModel: { provider: 'google', model: 'gemini-3.8-flash' },
+        },
+      },
+    });
     for (const body of [
-      // existing version: must not rely on the version CAS
+      // existing version: must not rely on the version CAS when llm changed
       {
         user_id: 'test-user',
         expected_preferences_version: crypto.randomUUID(),
         preferences: { llm },
       },
-      // absent version: still a reload requirement, not a version error
+      // absent version: rejected before any storage read
       { user_id: 'test-user', preferences: { llm } },
     ]) {
       const res = await app.request('/update', {
@@ -960,8 +994,87 @@ describe('Profiles Route', () => {
       expect(res.status).toBe(428);
       expect(((await res.json()) as { error: string }).error).toContain('Reload');
     }
-    expect(mockProfilesDb.get).not.toHaveBeenCalled();
+    expect(mockProfilesDb.get).toHaveBeenCalledTimes(1);
     expect(mockProfilesDb.update).not.toHaveBeenCalled();
+  });
+
+  test('PUT /update ignores unchanged llm without the write marker so pre-deploy tabs can save other preferences', async () => {
+    const rawLlm = {
+      keys: { google: 'kept', openai: 'also-kept' },
+      thinking: { 'gemini-4-argon': 'high' },
+      defaultModel: { provider: 'retired-provider', model: 'retired-model' },
+    };
+    mockProfilesDb.get.mockImplementation(() =>
+      Promise.resolve(
+        structuredClone({
+          user_id: 'test-user',
+          preferences: { dailyGoal: 30, llm: rawLlm },
+        }),
+      ),
+    );
+    const app = createTestApp();
+    const getRes = await app.request('/?user_id=test-user');
+    const getLlm = (await getRes.json()).profile.preferences.llm;
+
+    mockProfilesDb.update.mockResolvedValueOnce({
+      user_id: 'test-user',
+      preferences: { dailyGoal: 45, darkMode: true, llm: structuredClone(rawLlm) },
+    });
+    const res = await app.request('/update', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        user_id: 'test-user',
+        expected_preferences_version: null,
+        preferences: { dailyGoal: 45, darkMode: true, llm: getLlm },
+      }),
+    });
+    expect(res.status).toBe(200);
+    expect(mockProfilesDb.update.mock.calls[0][1].preferences.darkMode).toBe(true);
+    expect(mockProfilesDb.update.mock.calls[0][1].preferences.dailyGoal).toBe(45);
+    expect(mockProfilesDb.update.mock.calls[0][1].preferences.llm).toEqual(rawLlm);
+  });
+
+  test('GET / and PUT /update omit the read contract when an unrecognized provider key was dropped', async () => {
+    const stored = {
+      llm: {
+        keys: { google: 'g-key', 'future-provider': 'f-key' },
+        thinking: {},
+        defaultModel: { provider: 'google', model: 'gemini-3.8-flash' },
+      },
+    };
+    mockProfilesDb.get.mockResolvedValueOnce({
+      user_id: 'test-user',
+      preferences: structuredClone(stored),
+    });
+    const app = createTestApp();
+    const getRes = await app.request('/?user_id=test-user');
+    expect(getRes.status).toBe(200);
+    const getJson = await getRes.json();
+    expect(getJson.profile.preferences.llm.keys).toEqual({ google: 'g-key' });
+    expect(getJson.profile).not.toHaveProperty('preferences_read_contract');
+
+    mockProfilesDb.get.mockResolvedValueOnce({
+      user_id: 'test-user',
+      preferences: structuredClone(stored),
+    });
+    mockProfilesDb.update.mockResolvedValueOnce({
+      user_id: 'test-user',
+      preferences: { darkMode: true, ...structuredClone(stored) },
+    });
+    const putRes = await app.request('/update', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        user_id: 'test-user',
+        expected_preferences_version: null,
+        preferences: { darkMode: true },
+      }),
+    });
+    expect(putRes.status).toBe(200);
+    const putJson = await putRes.json();
+    expect(putJson.profile).not.toHaveProperty('preferences_read_contract');
+    expect(mockProfilesDb.update.mock.calls[0][1].preferences.llm).toEqual(stored.llm);
   });
 
   test('PUT /update rejects a malformed or unsupported write marker with 400', async () => {

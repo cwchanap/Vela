@@ -229,6 +229,135 @@ test.describe('LLM Settings - Provider cards', () => {
     expect(apiMock.profiles.has(SYNTHETIC_USER_A.userId)).toBe(false);
   });
 
+  test('should allow pre-deploy markerless unrelated save with unchanged llm while blocking changed llm', async ({
+    authedPage: page,
+    apiMock,
+  }) => {
+    const seeded = apiMock.seedProfile(SYNTHETIC_USER_A, {
+      darkMode: false,
+      llm: {
+        keys: { google: GOOGLE_KEY, openai: OPENAI_KEY },
+        thinking: { 'gpt-6.1-sol': 'high' },
+        defaultModel: { provider: 'retired-provider', model: 'retired-model' },
+      },
+    });
+    seeded.preferences_version = crypto.randomUUID();
+    await gotoSettings(page);
+
+    const results = await page.evaluate(
+      async ([auth, userId]) => {
+        const getRes = await fetch(`/api/profiles?user_id=${encodeURIComponent(userId ?? '')}`, {
+          headers: { Authorization: auth ?? '' },
+        });
+        const profile = (
+          (await getRes.json()) as {
+            profile: {
+              preferences_version: string;
+              preferences: { llm: Record<string, unknown> };
+            };
+          }
+        ).profile;
+        const unrelated = await fetch('/api/profiles/update', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json', Authorization: auth ?? '' },
+          body: JSON.stringify({
+            user_id: userId,
+            expected_preferences_version: profile.preferences_version,
+            preferences: { darkMode: true, llm: profile.preferences.llm },
+          }),
+        });
+        const changedLlm = await fetch('/api/profiles/update', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json', Authorization: auth ?? '' },
+          body: JSON.stringify({
+            user_id: userId,
+            expected_preferences_version: profile.preferences_version,
+            preferences: {
+              llm: {
+                keys: { google: 'changed-key' },
+                thinking: {},
+                defaultModel: { provider: 'google', model: 'gemini-3.8-flash' },
+              },
+            },
+          }),
+        });
+        return { unrelatedStatus: unrelated.status, changedStatus: changedLlm.status };
+      },
+      [apiMock.expectedAuthorization, SYNTHETIC_USER_A.userId] as const,
+    );
+
+    expect(results).toEqual({ unrelatedStatus: 200, changedStatus: 428 });
+    const stored = apiMock.profiles.get(SYNTHETIC_USER_A.userId)?.preferences as {
+      darkMode?: boolean;
+      llm?: { defaultModel?: { provider?: string }; keys?: Record<string, string> };
+    };
+    expect(stored.darkMode).toBe(true);
+    expect(stored.llm?.defaultModel?.provider).toBe('retired-provider');
+    expect(stored.llm?.keys).toEqual({ google: GOOGLE_KEY, openai: OPENAI_KEY });
+  });
+
+  test('should preserve stored keys when PUT omits profile or returns an unmarked profile', async ({
+    authedPage: page,
+    apiMock,
+  }) => {
+    apiMock.seedProfile(SYNTHETIC_USER_A, {
+      darkMode: false,
+      llm: {
+        keys: { google: GOOGLE_KEY, openai: OPENAI_KEY },
+        thinking: { 'gpt-6.1-sol': 'high' },
+        defaultModel: { provider: 'google', model: 'gemini-3.8-flash' },
+      },
+    });
+    await gotoSettings(page);
+
+    // 1. PUT returns an unmarked profile while GET still returns the contract:
+    // the post-save GET refresh restores complete-snapshot editing.
+    apiMock.putReadContract = null;
+    await page.getByTestId('dark-mode-toggle').click();
+    const unmarkedPut = waitForProfilePut(page);
+    const getAfterUnmarkedPut = page.waitForResponse(
+      (r) => r.url().includes('/api/profiles?') && r.request().method() === 'GET',
+    );
+    await page.getByRole('button', { name: 'Save to profile' }).click();
+    expect((await unmarkedPut).status()).toBe(200);
+    await getAfterUnmarkedPut;
+    await expect(page.getByTestId('llm-card-google')).toBeVisible();
+
+    // 2. PUT omits profile altogether and the subsequent GET refresh fails:
+    // the fallback profile must keep stored llm keys intact.
+    apiMock.putReadContract = 'inherit';
+    apiMock.omitPutProfile = true;
+    await page.route('**/api/profiles?*', (route) =>
+      route.fulfill({
+        status: 500,
+        contentType: 'application/json',
+        body: JSON.stringify({ error: 'Refresh failed' }),
+      }),
+    );
+    await page.getByTestId('dark-mode-toggle').click();
+    const omittedPut = waitForProfilePut(page);
+    await page.getByRole('button', { name: 'Save to profile' }).click();
+    expect((await omittedPut).status()).toBe(200);
+
+    await page.unroute('**/api/profiles?*');
+    apiMock.omitPutProfile = false;
+    await openCard(page, 'google');
+    await keyInput(page, 'google').fill('e2e-updated-google-key');
+    const llmPut = waitForProfilePut(page);
+    await page.getByTestId('llm-save-google').click();
+    expect((await llmPut).status()).toBe(200);
+
+    const storedLlm = apiMock.profiles.get(SYNTHETIC_USER_A.userId)?.preferences.llm as {
+      keys?: Record<string, string>;
+      thinking?: Record<string, string>;
+    };
+    expect(storedLlm.keys).toEqual({
+      google: 'e2e-updated-google-key',
+      openai: OPENAI_KEY,
+    });
+    expect(storedLlm.thinking).toEqual({ 'gpt-6.1-sol': 'high' });
+  });
+
   test('should refuse a conflicted LLM replay when the refetch has no read contract', async ({
     authedPage: page,
     apiMock,

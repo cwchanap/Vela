@@ -174,6 +174,23 @@ describe('LlmProvidersSection', () => {
       expect(wrapper.find('[data-testid="llm-key-input-google"]').exists()).toBe(false);
     });
 
+    it('shows an error state with retry when profile loading fails', async () => {
+      authStore.setSession({ user: { id: 'user-1', email: 'test@example.com' } });
+      authStore.setLoading(false);
+      authStore.setError('Failed to load user profile');
+      const loadSpy = vi.spyOn(authStore, 'loadUserProfile').mockResolvedValue();
+      wrapper = mountSection();
+
+      expect(wrapper.find('[data-testid="llm-settings-loading"]').exists()).toBe(false);
+      const errorAlert = wrapper.find('[data-testid="llm-settings-error"]');
+      expect(errorAlert.exists()).toBe(true);
+      expect(errorAlert.text()).toContain('Failed to load user profile');
+      expect(wrapper.find('[data-testid="llm-card-google"]').exists()).toBe(false);
+
+      await wrapper.get('[data-testid="llm-profile-retry"]').trigger('click');
+      expect(loadSpy).toHaveBeenCalledWith('user-1');
+    });
+
     it('mounts editable forms once the snapshot carries the read contract', async () => {
       setUser(authStore, llmFor({ keys: { google: 'saved-google' } }));
       wrapper = mountSection();
