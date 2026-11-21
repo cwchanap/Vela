@@ -804,6 +804,8 @@ describe('Profiles Route', () => {
     mockProfilesDb.update.mockResolvedValueOnce({
       user_id: 'test-user',
       preferences: { dailyGoal: 30, llm: { keys: { openai: 'k' }, thinking: {} } },
+      // A stored response marker must be replaced, never echoed on trust.
+      preferences_read_contract: 'stale-stored-marker',
     });
     const res = await createTestApp().request('/update', {
       method: 'PUT',
@@ -840,11 +842,66 @@ describe('Profiles Route', () => {
     );
   });
 
+  test('PUT /update strips a stored read marker when sanitization fails', async () => {
+    mockProfilesDb.get.mockResolvedValueOnce({ user_id: 'test-user', preferences: {} });
+    mockProfilesDb.update.mockResolvedValueOnce({
+      user_id: 'test-user',
+      preferences: { darkMode: true },
+      preferences_read_contract: PREFERENCES_READ_CONTRACT,
+    });
+    const parseSpy = vi.spyOn(PreferencesReadSchema, 'safeParse').mockReturnValueOnce({
+      success: false,
+      error: new Error('sanitization failed'),
+    } as never);
+    try {
+      const res = await createTestApp().request('/update', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          user_id: 'test-user',
+          expected_preferences_version: null,
+          llm_write_contract: PREFERENCES_READ_CONTRACT,
+          preferences: {
+            llm: {
+              keys: { google: 'k' },
+              thinking: {},
+              defaultModel: { provider: 'google', model: 'gemini-3.8-flash' },
+            },
+          },
+        }),
+      });
+      expect(res.status).toBe(200);
+      const json = await res.json();
+      expect(json.success).toBe(true);
+      expect(json.profile).not.toHaveProperty('preferences_read_contract');
+    } finally {
+      parseSpy.mockRestore();
+    }
+  });
+
+  test('PUT /update strips a stored read marker when sanitization is skipped', async () => {
+    mockProfilesDb.update.mockResolvedValueOnce({
+      user_id: 'test-user',
+      username: 'stored-name',
+      preferences_read_contract: PREFERENCES_READ_CONTRACT,
+    });
+    const res = await createTestApp().request('/update', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ user_id: 'test-user', username: 'new-name' }),
+    });
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.profile.username).toBe('stored-name');
+    expect(json.profile).not.toHaveProperty('preferences_read_contract');
+  });
+
   test('PUT /update omits the read contract when committed preferences cannot be sanitized', async () => {
     mockProfilesDb.get.mockResolvedValueOnce({ user_id: 'test-user', preferences: {} });
     mockProfilesDb.update.mockResolvedValueOnce({
       user_id: 'test-user',
       preferences: { llm: { keys: { google: 'k' }, thinking: {} } },
+      preferences_read_contract: PREFERENCES_READ_CONTRACT,
     });
     const parseSpy = vi.spyOn(PreferencesReadSchema, 'safeParse').mockImplementationOnce(() => {
       throw new Error('sanitization failed');

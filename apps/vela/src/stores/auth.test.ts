@@ -588,6 +588,86 @@ describe('useAuthStore', () => {
       });
     });
 
+    it('keeps an unmarked tracked snapshot unmarked when an older acknowledgment is marked', async () => {
+      const { useAuthStore } = await import('./auth');
+      const store = useAuthStore();
+      store.setSession(mockSession);
+
+      // An old-API read with a newer timestamp: its preferences are the ones
+      // the reconciliation retains, so its missing contract must be retained.
+      const oldApiRead = {
+        ...mockProfile,
+        username: 'old-name',
+        preferences: {
+          llm: {
+            keys: { openai: 'saved-openai' },
+            thinking: { 'gpt-6.1-sol': 'high' },
+            defaultModel: { provider: 'google', model: 'gemini-3.8-flash' },
+          },
+        },
+        preferences_version: 'v0',
+        preferences_read_contract: null,
+        updated_at: '2024-01-01T00:00:20Z',
+      };
+      mockAuthService.getUserProfile.mockResolvedValueOnce(oldApiRead);
+      await store.loadUserProfile('user-123');
+      expect(store.user?.preferences_read_contract).toBeNull();
+
+      // An unrelated profile save acknowledges an older, marked response with
+      // different preferences. It must not upgrade the retained snapshot.
+      const acknowledged = {
+        ...mockProfile,
+        username: 'new-name',
+        preferences: { llm: { keys: {}, thinking: {}, defaultModel: {} } },
+        preferences_version: 'v0',
+        preferences_read_contract: 'complete-llm-v1',
+        updated_at: '2024-01-01T00:00:15Z',
+      };
+      mockAuthService.updateUserProfile.mockResolvedValueOnce({
+        success: true,
+        profile: acknowledged,
+      });
+      // The post-save read observes the same older committed record, so the
+      // reconciled snapshot is retained rather than replaced.
+      mockAuthService.getUserProfile.mockResolvedValueOnce(acknowledged);
+
+      const unrelated = store.updateProfile({ username: 'new-name' });
+      // A stale form queued a blank replacement; it must not be authorized by
+      // the unrelated acknowledgment.
+      const staleDraft = store.updatePreferences({
+        llm: {
+          keys: {},
+          thinking: {},
+          defaultModel: { provider: 'google', model: 'gemini-3.8-flash' },
+        },
+      });
+      const [unrelatedOk, draftOk] = await Promise.all([unrelated, staleDraft]);
+
+      expect(unrelatedOk).toBe(true);
+      expect(draftOk).toBe(false);
+      expect(mockAuthService.updateUserProfile).toHaveBeenCalledTimes(1);
+      expect(store.user?.preferences_read_contract).toBeNull();
+      expect(store.hasCompleteLlmSnapshot).toBe(false);
+      expect(
+        (store.user?.preferences.llm as { keys?: Record<string, string> } | undefined)?.keys
+          ?.openai,
+      ).toBe('saved-openai');
+      expect(
+        (store.user?.preferences.llm as { thinking?: Record<string, string> } | undefined)
+          ?.thinking?.['gpt-6.1-sol'],
+      ).toBe('high');
+      expect(store.error).toContain('Reload');
+
+      const cached = mockQueryClient.setQueryData.mock.calls.at(-1)?.[1] as
+        | {
+            preferences_read_contract?: string | null;
+            preferences: { llm?: { keys?: Record<string, string> } };
+          }
+        | undefined;
+      expect(cached?.preferences_read_contract).toBeNull();
+      expect(cached?.preferences.llm?.keys?.openai).toBe('saved-openai');
+    });
+
     it('keeps a committed preference save when a newer-timestamped read advanced the tracked profile', async () => {
       const { useAuthStore } = await import('./auth');
       const store = useAuthStore();

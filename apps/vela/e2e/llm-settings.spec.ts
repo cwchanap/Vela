@@ -193,6 +193,42 @@ test.describe('LLM Settings - Provider cards', () => {
     expect(storedLlm?.keys?.google).toBe('e2e-newer-google-key');
   });
 
+  test('should reject a markerless LLM write without creating mock profile storage', async ({
+    authedPage: page,
+    apiMock,
+  }) => {
+    await page.goto('/settings');
+    await waitForPageLoad(page);
+    // Simulate a user with no stored profile yet at the rejected request.
+    apiMock.profiles.delete(SYNTHETIC_USER_A.userId);
+
+    const status = await page.evaluate(
+      async ([auth, userId]) => {
+        const response = await fetch('/api/profiles/update', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json', Authorization: auth ?? '' },
+          body: JSON.stringify({
+            user_id: userId,
+            expected_preferences_version: null,
+            preferences: {
+              llm: {
+                keys: { google: 'stale-key' },
+                thinking: {},
+                defaultModel: { provider: 'google', model: 'gemini-3.8-flash' },
+              },
+            },
+          }),
+        });
+        return response.status;
+      },
+      [apiMock.expectedAuthorization, SYNTHETIC_USER_A.userId] as const,
+    );
+
+    expect(status).toBe(428);
+    // The real route performs no storage access before the contract check.
+    expect(apiMock.profiles.has(SYNTHETIC_USER_A.userId)).toBe(false);
+  });
+
   test('should refuse a conflicted LLM replay when the refetch has no read contract', async ({
     authedPage: page,
     apiMock,
