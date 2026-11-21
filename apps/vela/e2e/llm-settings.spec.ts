@@ -1037,7 +1037,11 @@ test.describe('LLM Settings - Theme and TTS regression', () => {
 
     const prefs = apiMock.lastPut()?.preferences as Record<string, unknown>;
     expect(prefs.darkMode).toBe(true);
-    expect(llmOf(apiMock.lastPut()).keys?.google).toBe(GOOGLE_KEY);
+    // Unrelated saves omit llm entirely so the API keeps the raw stored subtree.
+    expect(prefs.llm).toBeUndefined();
+    const storedLlm = apiMock.profiles.get(SYNTHETIC_USER_A.userId)?.preferences.llm as
+      { keys?: Record<string, string> } | undefined;
+    expect(storedLlm?.keys?.google).toBe(GOOGLE_KEY);
   });
 
   test('should keep TTS save disabled without a key and accept a saved key', async ({
