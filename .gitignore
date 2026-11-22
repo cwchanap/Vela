@@ -70,10 +70,14 @@ apps/vela-mobile/docs/evidence/local-raw/
 apps/vela-mobile/docs/evidence/hpa-210/
 /.artifacts/
 
-# Generated HPA-209 simulator captures; keep selected review evidence.
-/apps/vela-mobile/docs/evidence/hpa-209/safe-area-*.png
-/apps/vela-mobile/docs/evidence/hpa-209/safe-area-*.jpg
-/apps/vela-mobile/docs/evidence/hpa-209/safe-area-*.jpeg
-/apps/vela-mobile/docs/evidence/hpa-209/safe-area-*.webp
+# Keep raw output under verification-output/, .artifacts/, or a ticket's local-raw/ directory.
+/verification-output/
+/apps/vela-mobile/docs/evidence/hpa-*/local-raw/
+# Also cover legacy safe-area captures across mobile verification tickets.
+/apps/vela-mobile/docs/evidence/hpa-*/**/safe-area-*.png
+/apps/vela-mobile/docs/evidence/hpa-*/**/safe-area-*.jpg
+/apps/vela-mobile/docs/evidence/hpa-*/**/safe-area-*.jpeg
+/apps/vela-mobile/docs/evidence/hpa-*/**/safe-area-*.webp
+!/apps/vela-mobile/docs/evidence/hpa-*/retained/**
 !/apps/vela-mobile/docs/evidence/hpa-209/safe-area-always-headerless-portrait.png
 !/apps/vela-mobile/docs/evidence/hpa-209/safe-area-never-headerless-portrait.png
