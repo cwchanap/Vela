@@ -98,18 +98,7 @@ headerless top edge under the task contract.
 
 ## Evidence
 
-- `apps/vela-mobile/docs/evidence/hpa-209/safe-area-always-headerless-portrait.png`
-- `apps/vela-mobile/docs/evidence/hpa-209/safe-area-always-header-portrait.png`
-- `apps/vela-mobile/docs/evidence/hpa-209/safe-area-always-headerless-landscape-left.png`
-- `apps/vela-mobile/docs/evidence/hpa-209/safe-area-always-header-landscape-left.png`
-- `apps/vela-mobile/docs/evidence/hpa-209/safe-area-always-headerless-landscape-right.png`
-- `apps/vela-mobile/docs/evidence/hpa-209/safe-area-always-header-landscape-right.png`
-- `apps/vela-mobile/docs/evidence/hpa-209/safe-area-never-headerless-portrait.png`
-- `apps/vela-mobile/docs/evidence/hpa-209/safe-area-never-header-portrait.png`
-- `apps/vela-mobile/docs/evidence/hpa-209/safe-area-never-headerless-landscape-left.png`
-- `apps/vela-mobile/docs/evidence/hpa-209/safe-area-never-header-landscape-left.png`
-- `apps/vela-mobile/docs/evidence/hpa-209/safe-area-never-headerless-landscape-right.png`
-- `apps/vela-mobile/docs/evidence/hpa-209/safe-area-never-header-landscape-right.png`
+The headerless portrait comparison remains tracked: [native always](evidence/hpa-209/safe-area-always-headerless-portrait.png) and [page-owned never](evidence/hpa-209/safe-area-never-headerless-portrait.png). The full twelve-image simulator matrix remains in the [pinned historical evidence directory](https://github.com/cwchanap/Vela/tree/c700ea40f5806658976881c1c8f9aabae20ddb31/apps/vela-mobile/docs/evidence/hpa-209). HPA-209 was closed after the owner waived the outstanding physical-device checks; the waiver is not a pass.
 
 Selected-mode replacement hashes after the page-control fix:
 
