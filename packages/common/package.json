@@ -37,18 +37,18 @@
     "test:unit": "vitest run"
   },
   "dependencies": {
-    "@tanstack/vue-query": "^5.106.1",
+    "@tanstack/vue-query": "^5.108.2",
     "kuromoji": "^0.1.2",
-    "vue": "^3.5.45"
+    "vue": "^3.5.46"
   },
   "devDependencies": {
     "@types/kuromoji": "^0.1.0",
     "@types/node": "^26.6.6",
     "typescript": "~5.6.3",
-    "vitest": "^3.0.0"
+    "vitest": "^5.1.1"
   },
   "peerDependencies": {
-    "@tanstack/vue-query": "^5.106.1",
-    "vue": "^3.5.45"
+    "@tanstack/vue-query": "^5.108.2",
+    "vue": "^3.5.46"
   }
 }
