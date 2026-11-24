@@ -696,7 +696,11 @@ describe('MobileAuthGate', () => {
   });
 
   it('keeps gate copy at enhanced contrast against the gate surface', async () => {
-    const { wrapper } = await mountGate({ phase: 'signedOut' });
+    // jsdom ≥31 returns empty computed styles for detached elements, so the
+    // gate must be attached to the document before reading contrast colors.
+    const host = document.createElement('div');
+    document.body.append(host);
+    const { wrapper } = await mountGate({ phase: 'signedOut' }, { attachTo: host });
     const styles = getComputedStyle(wrapper.get('.mobile-auth-gate').element);
     const ratio = contrastRatio(parseRgb(styles.color), parseRgb(styles.backgroundColor));
 
