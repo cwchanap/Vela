@@ -108,6 +108,20 @@ import {
 } from '../entrypoints/background';
 import { getValidIdToken, refreshIdToken, getUserEmail } from '../entrypoints/utils/storage';
 
+// The background module registers its onMessage handler when it is first imported
+// (defineBackground runs immediately). Vitest ≥4 enables clearMocks by default,
+// wiping mock call history before every test, so the registration is captured
+// synchronously here — reading mock.calls inside a test or hook sees no calls.
+const registeredBrowser = (globalThis as any).browser;
+const registeredOnMessageHandler = registeredBrowser.runtime.onMessage.addListener.mock
+  .calls[0]?.[0] as ((_message: unknown) => Promise<void> | undefined) | undefined;
+const registeredOnClickedListener = registeredBrowser.contextMenus.onClicked.addListener.mock
+  .calls[0]?.[0] as ((_info: any, _tab: any) => Promise<void>) | undefined;
+const registeredOnStartupListener = registeredBrowser.runtime.onStartup.addListener.mock
+  .calls[0]?.[0] as (() => void) | undefined;
+const registeredOnFocusChangedListener = registeredBrowser.windows.onFocusChanged.addListener.mock
+  .calls[0]?.[0] as ((_windowId: number) => void) | undefined;
+
 describe('registerContextMenus', () => {
   beforeEach(() => {
     mockContextMenusCreate.mockClear();
@@ -646,12 +660,9 @@ describe('flushQueue', () => {
 });
 
 describe('SAVE_SENTENCES message handler', () => {
-  // The handler is registered when the module is first imported (defineBackground runs immediately).
-  // Capture it from the first call to onMessage.addListener.
   function getSaveSentencesHandler(): (_message: unknown) => Promise<void> | undefined {
-    const calls = vi.mocked(browser.runtime.onMessage.addListener).mock.calls;
-    if (calls.length === 0) throw new Error('No onMessage listener was registered');
-    return calls[0]![0] as (_message: unknown) => Promise<void> | undefined;
+    if (!registeredOnMessageHandler) throw new Error('No onMessage listener was registered');
+    return registeredOnMessageHandler;
   }
 
   beforeEach(() => {
@@ -722,9 +733,8 @@ describe('SAVE_SENTENCES message handler', () => {
 
 describe('NO_JAPANESE_FOUND message handler', () => {
   function getOnMessageHandler(): (_message: unknown) => Promise<void> | undefined {
-    const calls = vi.mocked(browser.runtime.onMessage.addListener).mock.calls;
-    if (calls.length === 0) throw new Error('No onMessage listener was registered');
-    return calls[0]![0] as (_message: unknown) => Promise<void> | undefined;
+    if (!registeredOnMessageHandler) throw new Error('No onMessage listener was registered');
+    return registeredOnMessageHandler;
   }
 
   beforeEach(() => {
@@ -754,9 +764,8 @@ describe('NO_JAPANESE_FOUND message handler', () => {
 
 describe('LOGIN_SUCCESS message handler', () => {
   function getOnMessageHandler(): (_message: unknown) => Promise<void> | undefined {
-    const calls = vi.mocked(browser.runtime.onMessage.addListener).mock.calls;
-    if (calls.length === 0) throw new Error('No onMessage listener was registered');
-    return calls[0]![0] as (_message: unknown) => Promise<void> | undefined;
+    if (!registeredOnMessageHandler) throw new Error('No onMessage listener was registered');
+    return registeredOnMessageHandler;
   }
 
   beforeEach(() => {
@@ -838,9 +847,8 @@ describe('LOGIN_SUCCESS message handler', () => {
 
 describe('context menu onClicked handler', () => {
   function getOnClickedListener(): (_info: any, _tab: any) => Promise<void> {
-    const calls = vi.mocked(browser.contextMenus.onClicked.addListener).mock.calls;
-    if (calls.length === 0) throw new Error('No onClicked listener registered');
-    return calls[0]![0] as (_info: any, _tab: any) => Promise<void>;
+    if (!registeredOnClickedListener) throw new Error('No onClicked listener registered');
+    return registeredOnClickedListener;
   }
 
   beforeEach(() => {
@@ -990,32 +998,24 @@ describe('startup and focus listeners', () => {
   });
 
   it('registers onStartup listener that calls flushQueue', () => {
-    const calls = vi.mocked(browser.runtime.onStartup.addListener).mock.calls;
-    expect(calls.length).toBeGreaterThan(0);
-    expect(typeof calls[0]![0]).toBe('function');
+    expect(registeredOnStartupListener).toBeTypeOf('function');
   });
 
   it('onStartup listener invokes flushQueue', async () => {
     idbState.getAllResult = [];
-    const calls = vi.mocked(browser.runtime.onStartup.addListener).mock.calls;
-    const onStartup = calls[0]![0] as () => void;
-    onStartup();
+    registeredOnStartupListener!();
     await new Promise((r) => setTimeout(r, 10));
     expect(global.fetch).not.toHaveBeenCalled();
   });
 
   it('onFocusChanged listener invokes flushQueue when windowId is not WINDOW_ID_NONE', async () => {
     idbState.getAllResult = [];
-    const calls = vi.mocked(browser.windows.onFocusChanged.addListener).mock.calls;
-    const onFocusChanged = calls[0]![0] as (_windowId: number) => void;
-    onFocusChanged(1);
+    registeredOnFocusChangedListener!(1);
     await new Promise((r) => setTimeout(r, 10));
   });
 
   it('onFocusChanged listener skips flushQueue when windowId is WINDOW_ID_NONE', async () => {
-    const calls = vi.mocked(browser.windows.onFocusChanged.addListener).mock.calls;
-    const onFocusChanged = calls[0]![0] as (_windowId: number) => void;
-    onFocusChanged(-1);
+    registeredOnFocusChangedListener!(-1);
     await new Promise((r) => setTimeout(r, 10));
   });
 
