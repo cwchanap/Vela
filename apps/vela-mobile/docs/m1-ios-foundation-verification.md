@@ -136,8 +136,10 @@ observations.
 ## Source-Issue Closure Mapping
 
 No source issue is marked closed by this verification. HPA-202 and HPA-205
-through HPA-209 remain pending their own closure evidence; HPA-538 was closed
-in Linear during the operator-amended closeout.
+through HPA-208 remain pending their own closure evidence; HPA-209 was closed
+in Linear by owner waiver of the outstanding physical-device checks (the
+waiver is not a pass); HPA-538 was closed in Linear during the
+operator-amended closeout.
 
 ## Milestone 2 Recommendation
 

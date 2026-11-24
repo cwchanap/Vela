@@ -151,8 +151,9 @@ The paired physical inventory contained an available iPhone 15
 (`iPhone15,4`, CoreDevice identifier redacted — raw identifier removed
 from source per the mobile secret policy). This XcodeBuildMCP session
 exposed simulator workflows only, with no physical-device build or UI
-interaction tools. The physical scenarios were therefore not run, no
-physical environment row was added, and HPA-209 remains release-blocked.
+interaction tools. The physical scenarios were therefore not run and no
+physical environment row was added. HPA-209 was subsequently closed by
+owner waiver of those physical-device checks; the waiver is not a pass.
 
 ## Japanese IME evidence
 
